@@ -168,10 +168,11 @@ end
 
 local function UsingNexusHud()
     EnsureDefaultMode()
-    -- The emergency community-off build keeps Project Ebonhold's stock HUD
-    -- authoritative. Do not rewrite the saved preference: removing this
-    -- release flag in a later full build restores the user's chosen mode.
-    if Nexus.Release and Nexus.Release.emergencyCommunityOff == true then
+    -- Beta 3 restored Project Ebonhold's stock HUD. Keep that independent fix
+    -- when Community returns; do not rewrite the user's saved preference so a
+    -- later release can re-enable the Nexus mirror without a migration.
+    if Nexus.Release and (Nexus.Release.emergencyCommunityOff == true
+        or Nexus.Release.preferStockServerHud == true) then
         return false
     end
     return NexusDB.soulAshHudMode == "nexus"

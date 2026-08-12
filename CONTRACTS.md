@@ -1,4 +1,4 @@
-# Nexus — internal module contracts (v1.20.0-beta.1)
+# Nexus — internal module contracts (v1.20.0-beta.4)
 
 Binding interface spec for all modules. Authored from `WISHLIST_REALIZER_BUILD_PROMPT.md`
 + `WISHLIST_REALIZER_SPEC_ADDENDUM.md` + `WISHLIST_REALIZER_DESIGN.md` (the addendum wins
@@ -7,8 +7,8 @@ SavedVariables, NO `ProjectEbonhold.*` — loadable under bare LuaJIT. All cross
 data is plain tables produced by `core/GameAdapter.lua` (the only IO module).
 
 Global namespace: `Nexus` (each file: `Nexus = Nexus or {};
-local M = {}; Nexus.<Name> = M`). Version: `Nexus.VERSION = "1.20.0-beta.1"`
-comes from `data/Release.lua`; .toc `## Version: 1.20.0-beta.1` stays in lockstep.
+local M = {}; Nexus.<Name> = M`). Version: `Nexus.VERSION = "1.20.0-beta.4"`
+comes from `data/Release.lua`; .toc `## Version: 1.20.0-beta.4` stays in lockstep.
 
 Lua 5.1 rules: no `goto`, no `#` on non-sequences, `unpack` global, sort pairs for
 deterministic output, forward-declare every closure-captured local BEFORE the closure,
@@ -399,8 +399,9 @@ erasing the candidate. No module performs an update network request or install.
 
 `BuildCatalog.Init(db, bundled)`, `Get(id)`, `All()`, `Summaries()`,
 `DeltaSummaries()`, `IsAuthor(name)`, `ForEach(visitor)`, `Count()`,
-`Put(build)`, `RemoveOverlay(id)`, `SetTombstone(id, tombstone)`,
-`ClearTombstone(id)`, `OverlaySnapshot()`, `DeltaSnapshot()`, and
+`Put(build)`, `RemoveOverlay(id)`, `RemoveOverlayBatch(ids)`,
+`SetTombstone(id, tombstone)`, `ClearTombstone(id)`,
+`RemoveTombstonesBatch(ids)`, `HasBaseline(id)`, `OverlaySnapshot()`, `DeltaSnapshot()`, and
 `TombstoneSnapshot()`. Returned records/tables are defensive copies; summary
 surfaces deliberately omit Echo arrays. Rebinding the same database and immutable
 bundle is an idempotent allocation-bounded fast path. Read precedence is
@@ -414,6 +415,24 @@ hydrate a missing inline array from `LoadoutEvidence` without mutating
 SavedVariables. A newer `buildCatalog.schemaVersion` binds the catalog read-only:
 metadata, overlay rows, and tombstones are preserved without migration, and all
 catalog mutation APIs reject writes until a supported database is rebound.
+
+## core/DataRetention.lua — bounded durable mesh state
+
+`DataRetention.Init(db)` performs an idempotent startup pass and `Request(reason)`
+coalesces later noncritical passes through `Scheduler`. It never automatically
+removes `isMine`, `importedSavedBuild`, or current-character-owned builds. Remote
+overlay rows are capped globally and per author after current DPS-page references
+are protected; superseded unreferenced `autoDps` rows are removed locally without
+broadcasting a delete for another author. Personal/build-best fingerprint maps and
+each public character-best encounter bucket have fixed limits.
+
+Local eviction markers prevent the same stale rows from churning back through
+Sync. Markers themselves compact to a monotonic build-revision floor. Exact
+tombstones remain for pending deletes and bundled IDs; eligible old tombstones
+compact to a monotonic delete floor so stale peers cannot resurrect removed IDs.
+`AllowsRemoteRevision(author, stamp, db, id)` is the Sync admission boundary.
+Future retention schemas are read-only. Evidence garbage collection runs only
+after represented durable rows are removed.
 
 ## core/Sync.lua — release-aware build reconciliation
 

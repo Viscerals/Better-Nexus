@@ -11,7 +11,7 @@ compatibility with existing installations and user data.
 
 - Repository visibility: public.
 - Current stable release: Nexus 1.19.5.
-- Current test release: Nexus 1.20 Beta (`1.20.0-beta.1`).
+- Current test release: Nexus 1.20 Beta (`1.20.0-beta.4`).
 - Client target: World of Warcraft 3.3.5a / Project Ebonhold.
 - Language target: Lua 5.1.
 - Upstream author attribution is preserved in `Nexus.toc` and

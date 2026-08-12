@@ -1,25 +1,13 @@
--- The exact emergency TOC boots the normal wishlist/automation shell while
--- all community backends remain absent and inert.
+-- The exact restored TOC boots both wishlist automation and the bounded
+-- Community/Sync/DPS feature set.
 local H = dofile("tests/harness.lua")
 
-for _, name in ipairs({
-    "BundledBuilds", "LoadoutEvidence", "DataCompaction", "BuildCatalog",
-    "BuildHashCache", "Sync", "DpsCapture", "ViewProjections",
-    "CommunityBuilds", "Leaderboard", "Nameplate",
-}) do
-    Nexus[name] = nil
+local tocText = type(NEXUS_TEST_TOC) == "string" and NEXUS_TEST_TOC or nil
+if not tocText then
+    local tocFile = assert(io.open("Nexus.toc", "r"))
+    tocText = tocFile:read("*a")
+    tocFile:close()
 end
-
-local joined, sent, messages = 0, 0, 0
-JoinChannelByName = function() joined = joined + 1; return 1 end
-SendChatMessage = function() sent = sent + 1 end
-DEFAULT_CHAT_FRAME = {
-    AddMessage=function() messages = messages + 1 end,
-}
-
-local tocFile = assert(io.open("Nexus.toc", "r"))
-local tocText = tocFile:read("*a")
-tocFile:close()
 for line in (tocText .. "\n"):gmatch("(.-)\n") do
     local path = line:match("^%s*(.-)%s*$")
     if path ~= "" and not path:find("^##") then
@@ -28,12 +16,15 @@ for line in (tocText .. "\n"):gmatch("(.-)\n") do
 end
 
 NexusDB = {
-    communityBuilds={keep={id="keep"}},
-    dpsCapture={characterBest={dummy={keep={dps=1}}}},
+    communityBuilds={keep={
+        id="keep", title="Keep", author="Boganic", isMine=true,
+        ownerKey="boganic@ebonhold", class="MAGE", lastModified=1,
+        echoes={{spellId=200100,quality=3,stacks=1}},
+    }},
+    dpsCapture={personalBest={},buildBest={},characterBest={dummy={},lk={}}},
 }
-local buildsRef, dpsRef = NexusDB.communityBuilds, NexusDB.dpsCapture
 H.playerLevel = 5
-H.wishlist = {name="Emergency Wishlist",class="MAGE",echoes={
+H.wishlist = {name="Restored Wishlist",class="MAGE",echoes={
     {spellId=200100,quality=3,stacks=1},
 }}
 
@@ -41,28 +32,21 @@ H.FireEvent("ADDON_LOADED", "Nexus")
 H.FireEvent("PLAYER_ENTERING_WORLD")
 H.Advance(3)
 
-assert(Nexus.Emergency and Nexus.Emergency.syncDisabled)
-assert(Nexus.BundledBuilds == nil and Nexus.BuildCatalog == nil
-    and Nexus.DataCompaction == nil and Nexus.ViewProjections == nil,
-    "disabled catalog modules survived the exact TOC boot")
-assert(joined == 0 and sent == 0 and not Nexus.Sync.IsConnected(),
-    "exact TOC boot activated Sync transport")
-assert(NexusDB.communityBuilds == buildsRef and NexusDB.dpsCapture == dpsRef
-    and buildsRef.keep.id == "keep"
-    and dpsRef.characterBest.dummy.keep.dps == 1,
-    "exact TOC boot mutated disabled SavedVariables")
+assert(Nexus.BuildCatalog and Nexus.DataRetention and Nexus.Sync
+    and Nexus.DpsCapture and Nexus.CommunityBuilds and Nexus.Leaderboard,
+    "restored TOC did not load the Community runtime")
+assert(NexusDB.communityBuilds.keep and NexusDB.communityBuilds.keep.isMine,
+    "bounded startup migration removed an owned build")
 
-SlashCmdList.NEXUS("sync")
 SlashCmdList.NEXUS("builds")
+assert(_G.NexusCommunityBuildsFrame
+    and _G.NexusCommunityBuildsFrame:IsShown(),
+    "restored builds command did not open Community")
 SlashCmdList.NEXUS("leaderboard")
-assert(joined == 0 and sent == 0
-    and _G.NexusCommunityBuildsFrame == nil
-    and _G.NexusLeaderboardFrame == nil,
-    "disabled commands activated community work")
-
+assert(_G.NexusLeaderboardFrame and _G.NexusLeaderboardFrame:IsShown(),
+    "restored leaderboard command did not open")
 SlashCmdList.NEXUS("editor")
 assert(_G.NexusEditorFrame and _G.NexusEditorFrame:IsShown(),
-    "emergency shutdown broke the wishlist editor")
-assert(messages >= 4, "emergency boot did not report status to the user")
+    "Community restoration broke the wishlist editor")
 
-print("exact emergency TOC boot preserves wishlist UI with zero community work -- OK")
+print("exact restored TOC boots wishlist and bounded Community features -- OK")

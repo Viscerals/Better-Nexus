@@ -37,7 +37,10 @@ for index = 1, 1000 do
         echoes={{spellId=710000+index,quality=3,stacks=1}},
     }
 end
+local Retention = Nexus.DataRetention
+Nexus.DataRetention = nil
 Store.Init()
+Nexus.DataRetention = Retention
 Nexus.DpsCapture = {
     GetLeaderboard=function() return {} end,
     GetLeaderboardForEchoes=function() return {} end,

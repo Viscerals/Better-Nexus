@@ -116,6 +116,21 @@ local function RequestDataViewRefresh()
     end
 end
 
+local function RequestRetention(reason)
+    local retention = Nexus and Nexus.DataRetention
+    if retention and type(retention.Request) == "function" then
+        pcall(retention.Request, reason)
+    end
+end
+
+local function ReleaseSupersededAutoBuild(buildId)
+    local retention = Nexus and Nexus.DataRetention
+    if buildId and retention
+        and type(retention.ReleaseSupersededAutoBuild) == "function" then
+        pcall(retention.ReleaseSupersededAutoBuild, buildId, NexusDB)
+    end
+end
+
 local function Catalog()
     return Nexus and Nexus.BuildCatalog
 end
@@ -1698,6 +1713,7 @@ local function CommitSession(category)
         BumpDps("personal best committed", becameCharacterBest and {
             scope="record", category=category, player=player,
         } or {scope="local"})
+        RequestRetention("personal DPS best committed")
         local catLabel = category == "lk" and "Lich King" or "Training Dummy"
         local setLabel = build and build.title or "current Echo set"
         print(string.format(
@@ -1917,7 +1933,12 @@ function DPS.ReceiveRecord(record, transportSender)
             if safeOk and safeId then row.buildId = safeId end
         end
     end
+    local supersededBuildId = existing and existing.buildId
     bucket[PlayerKey(player)] = row
+    if supersededBuildId and supersededBuildId ~= row.buildId then
+        ReleaseSupersededAutoBuild(supersededBuildId)
+    end
+    RequestRetention("public DPS record received")
     BumpDps("public record received", {
         scope="record", category=category, player=player,
     })
@@ -1939,7 +1960,12 @@ function DPS.ReceiveSubmission(buildId, player, dps, level, category, ts)
     }
     ReferenceEvidence(row)
     if not IsBetterPublicRecord(row, existing) then return end
+    local supersededBuildId = existing and existing.buildId
     bucket[PlayerKey(player)] = row
+    if supersededBuildId and supersededBuildId ~= row.buildId then
+        ReleaseSupersededAutoBuild(supersededBuildId)
+    end
+    RequestRetention("legacy DPS record received")
     BumpDps("legacy submission received", {
         scope="record", category=category, player=player,
     })
@@ -1984,6 +2010,7 @@ function DPS.Init(adapter, sync)
     if RepairCurrentCharacterClass() then
         BumpDps("local class repaired", {scope="metadata"})
     end
+    RequestRetention("DPS initialized")
     Debug("initialized; current tracked key=" .. tostring(DPS.GetCurrentEchoKey()))
 end
 

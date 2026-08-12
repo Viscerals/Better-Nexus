@@ -4,8 +4,8 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.Changelog = M
 
-local VERSION = "1.20.0-beta.1"
-local RELEASE_KEY = "1.20.0-beta.1"
+local VERSION = "1.20.0-beta.4"
+local RELEASE_KEY = "1.20.0-beta.4"
 local frame
 local shownThisSession = false
 
@@ -43,22 +43,23 @@ local function Create()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
-    title:SetText("Nexus 1.20 Beta")
+    title:SetText("Nexus 1.20 Beta 4")
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     body:SetPoint("TOPLEFT", 28, -52)
     body:SetPoint("RIGHT", -28, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
-    body:SetText([[|cffffd200Faster large libraries|r
+    body:SetText([[|cffffd200Community is back, with bounded storage|r
 
-- Community Builds and Leaderboard now render and refresh in bounded batches.
-- Sync exchanges smaller catalog changes instead of repeatedly sending the full baseline.
+- Owned/imported builds are never auto-removed; remote builds are capped globally and per author.
+- DPS history is capped and superseded automatic record pages are reclaimed.
 
-|cffffd200Safer testing|r
+|cffffd200Long-session safety|r
 
-- Existing personal data migrates additively; ambiguous records remain untouched.
-- New error and performance diagnostics make long-session reports easier.
+- Sync request/broadcast caches and repeated popup/log refreshes now reuse bounded state.
+- Old delete records compact behind a stale-revision floor instead of allowing resurrection.
+- Beta 3 wishlist and stock server-HUD fixes remain active.
 
 Back up Nexus SavedVariables before beta testing.]])
 

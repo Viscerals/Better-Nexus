@@ -10,6 +10,7 @@ local Catalog = Nexus.BuildCatalog
 local Evidence = Nexus.LoadoutEvidence
 local Compaction = Nexus.DataCompaction
 local Sync = Nexus.Sync
+local Retention = Nexus.DataRetention
 local clock = 1000
 GetTime = function() return clock end
 time = function() return 50000 end
@@ -140,6 +141,9 @@ NexusDB = {
 local expectedBuild = DeepCopy(builds["scale-0001"].echoes)
 local _, samplePersonal = next(personalBest)
 local expectedDps = DeepCopy(samplePersonal.dummy.echoes)
+-- This suite proves the lossless compaction contract in isolation. Retention
+-- has its own scale suite and intentionally changes historical record counts.
+Nexus.DataRetention = nil
 Store.Init()
 local stats = Compaction.Stats()
 print(string.format(
@@ -190,6 +194,7 @@ local beforeRepeat = DeepCopy(NexusDB)
 Store.Init()
 assert(DeepEqual(beforeRepeat, NexusDB),
     "repeat Store.Init changed an already compacted database")
+Nexus.DataRetention = Retention
 
 -- New canonical writes compact immediately after the migration is enabled.
 local newEchoes = {{spellId=499001,quality=3,stacks=2}}

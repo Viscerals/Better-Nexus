@@ -2814,17 +2814,29 @@ local function MakeDropdownMenu(parent, width)
         insets={left=3,right=3,top=3,bottom=3},
     })
     menu:SetBackdropColor(0.03,0.03,0.03,0.98)
+    menu._buttons = {}
     menu:Hide()
     return menu
 end
 
 local function AddMenuButton(menu, text, onClick, index)
-    local b = CreateFrame("Button", nil, menu)
-    b:SetHeight(22); b:SetPoint("TOPLEFT",6,-6-(index-1)*22); b:SetPoint("TOPRIGHT",-6,0-(index-1)*22)
-    b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-    local fs = b:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    fs:SetPoint("LEFT",6,0); fs:SetPoint("RIGHT",-6,0); fs:SetJustifyH("LEFT"); fs:SetText(text)
+    menu._buttons = menu._buttons or {}
+    local b = menu._buttons[index]
+    if not b then
+        b = CreateFrame("Button", nil, menu)
+        b:SetHeight(22)
+        b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        local fs = b:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+        fs:SetPoint("LEFT",6,0); fs:SetPoint("RIGHT",-6,0); fs:SetJustifyH("LEFT")
+        b._label = fs
+        menu._buttons[index] = b
+    end
+    b:ClearAllPoints()
+    b:SetPoint("TOPLEFT",6,-6-(index-1)*22)
+    b:SetPoint("TOPRIGHT",-6,0-(index-1)*22)
+    b._label:SetText(text)
     b:SetScript("OnClick", function() menu:Hide(); onClick() end)
+    b:Show()
     return b
 end
 
@@ -2872,7 +2884,9 @@ end
 
 local function RefreshPostWishlistMenu()
     if not postWishlistMenu then return end
-    for _, child in ipairs({postWishlistMenu:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+    for _, child in ipairs(postWishlistMenu._buttons or {}) do
+        child:Hide(); child:SetScript("OnClick", nil)
+    end
     local candidates = BuildWishlistCandidates()
     local h = math.min(300, 12 + #candidates * 24)
     postWishlistMenu:SetHeight(h)
@@ -2891,7 +2905,9 @@ end
 
 local function RefreshPostClassMenu()
     if not postClassMenu then return end
-    for _, child in ipairs({postClassMenu:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+    for _, child in ipairs(postClassMenu._buttons or {}) do
+        child:Hide(); child:SetScript("OnClick", nil)
+    end
     postClassMenu:SetHeight(12 + #CLASS_PICK_ORDER * 24)
     for i, token in ipairs(CLASS_PICK_ORDER) do
         AddMenuButton(postClassMenu, CLASS_LABEL[token], function()
@@ -2931,10 +2947,12 @@ local function EnsurePostPopup()
     local chooseLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); chooseLabel:SetPoint("TOPLEFT",16,-302); chooseLabel:SetText("1. Choose the exact server loadout or wishlist to share:")
     postWishlistBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postWishlistBtn:SetSize(334,26); postWishlistBtn:SetPoint("TOPLEFT",16,-320); postWishlistBtn:SetText("Source: Select a saved build or wishlist")
     postWishlistMenu = MakeDropdownMenu(p,334); postWishlistMenu:SetPoint("TOPLEFT",16,-348)
+    p._postWishlistBtn, p._postWishlistMenu = postWishlistBtn, postWishlistMenu
     postWishlistBtn:SetScript("OnClick",function() HidePostMenus(); RefreshPostWishlistMenu(); postWishlistMenu:Show() end)
 
     postClassBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate"); postClassBtn:SetSize(334,26); postClassBtn:SetPoint("TOPLEFT",16,-360); postClassBtn:SetText("Class: Select a class")
     postClassMenu = MakeDropdownMenu(p,334); postClassMenu:SetPoint("TOPLEFT",16,-388)
+    p._postClassBtn, p._postClassMenu = postClassBtn, postClassMenu
     postClassBtn:SetScript("OnClick",function() HidePostMenus(); RefreshPostClassMenu(); postClassMenu:Show() end)
 
     local previewLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); previewLabel:SetPoint("TOPLEFT",380,-38); previewLabel:SetText("Exact Echo Loadout Preview:")

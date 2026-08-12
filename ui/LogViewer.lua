@@ -24,10 +24,53 @@ local TABS = {
 
 local frame, editBox, scroll, tabButtons, statusFS, exportButton
 local exportRunner, exportJob, exportGeneration = nil, nil, 0
+local delayFrame, delayed = nil, {}
 local provider, clearProvider
 local activeTab = "state"
 local repaintPending = false
 local MAX_TEXT_CHARS = 60000
+
+-- Prefer the addon's keyed scheduler. Focused UI tests can load this module
+-- before Scheduler.Init, so retain one shared fallback frame instead of
+-- allocating a permanent one-shot frame for every refresh/export/clear click.
+local function RunAfter(key, delay, callback)
+    local scheduler = Nexus and Nexus.Scheduler
+    if scheduler and scheduler.IsInitialized and scheduler.IsInitialized()
+        and type(scheduler.After) == "function" then
+        local ok, scheduled = pcall(scheduler.After, key, delay, callback)
+        if ok and scheduled == true then return true end
+    end
+    delayed[key] = { remaining=tonumber(delay) or 0, callback=callback }
+    if not delayFrame then
+        delayFrame = CreateFrame("Frame")
+        delayFrame:SetScript("OnUpdate", function(self, elapsed)
+            local ready = {}
+            for taskKey, task in pairs(delayed) do
+                task.remaining = task.remaining - (tonumber(elapsed) or 0)
+                if task.remaining <= 0 then ready[#ready + 1] = taskKey end
+            end
+            table.sort(ready)
+            for _, taskKey in ipairs(ready) do
+                local task = delayed[taskKey]
+                delayed[taskKey] = nil
+                if task and type(task.callback) == "function" then
+                    pcall(task.callback)
+                end
+            end
+            if not next(delayed) and delayFrame then delayFrame:Hide() end
+        end)
+    end
+    delayFrame:Show()
+    return true
+end
+
+local function CancelAfter(key)
+    delayed[key] = nil
+    local scheduler = Nexus and Nexus.Scheduler
+    if scheduler and type(scheduler.Cancel) == "function" then
+        pcall(scheduler.Cancel, key)
+    end
+end
 
 local function Repaint()
     repaintPending = false
@@ -66,19 +109,13 @@ end
 local function ScheduleRepaint()
     if repaintPending then return end
     repaintPending = true
-    local waiter = CreateFrame("Frame")
-    local elapsed = 0
-    waiter:SetScript("OnUpdate", function(self, dt)
-        elapsed = elapsed + (tonumber(dt) or 0)
-        if elapsed < 0.05 then return end
-        self:SetScript("OnUpdate", nil)
-        Repaint()
-    end)
+    RunAfter("log-viewer.repaint", 0.05, Repaint)
 end
 
 local function StopExport()
     exportGeneration = exportGeneration + 1
     exportJob = nil
+    CancelAfter("log-viewer.export-finish")
     if exportRunner then
         exportRunner:SetScript("OnUpdate", nil)
         exportRunner:Hide()
@@ -139,12 +176,8 @@ local function StartExport()
                 self:SetScript("OnUpdate", nil)
                 self:Hide()
                 local finalText = value
-                local finisher = CreateFrame("Frame")
-                local waited = false
-                finisher:SetScript("OnUpdate", function(f)
-                    if not waited then waited = true; return end
-                    f:SetScript("OnUpdate", nil)
-                    FinishExport(finalText)
+                RunAfter("log-viewer.export-finish", 0.01, function()
+                    if myGeneration == exportGeneration then FinishExport(finalText) end
                     finalText = nil
                 end)
                 return
@@ -266,12 +299,7 @@ local function EnsureFrame()
             if statusFS then statusFS:SetText("Could not clear diagnostic history") end
         end
         ScheduleRepaint()
-        local resetter = CreateFrame("Frame")
-        local elapsed = 0
-        resetter:SetScript("OnUpdate", function(f, dt)
-            elapsed = elapsed + (tonumber(dt) or 0)
-            if elapsed < 1.2 then return end
-            f:SetScript("OnUpdate", nil)
+        RunAfter("log-viewer.clear-label", 1.2, function()
             if self then self:SetText("Clear Log") end
         end)
     end)

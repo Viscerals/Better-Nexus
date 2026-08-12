@@ -1,13 +1,14 @@
 ## Interface: 30300
 ## Title: Nexus
-## Notes: Nexus — emergency automation hotfix with Community, Sync, Leaderboard, and DPS features temporarily disabled.
+## Notes: Nexus — Echo build automation, bounded community builds, DPS leaderboards, and auto-snapshot convergence.
 ## Author: Boganic
-## Version: 1.20.0-beta.3.community-off
+## Version: 1.20.0-beta.4
 ## OptionalDeps: ProjectEbonhold
 ## SavedVariables: NexusDB WishlistRealizerDB
 
 data\Release.lua
 data\DefaultProfile.lua
+data\BundledBuilds.lua
 logic\Version.lua
 core\Performance.lua
 core\EchoCatalogSource.lua
@@ -16,6 +17,11 @@ logic\Strategy.lua
 logic\Ratchet.lua
 logic\Policy.lua
 core\Revisions.lua
+core\LoadoutEvidence.lua
+core\DataCompaction.lua
+core\BuildCatalog.lua
+core\DataRetention.lua
+core\BuildHashCache.lua
 core\Store.lua
 core\Errors.lua
 core\Scheduler.lua
@@ -24,7 +30,9 @@ core\DiagnosticLogs.lua
 core\ViewRefresh.lua
 core\Updates.lua
 core\Codec.lua
-core\EmergencyCommunity.lua
+core\Sync.lua
+core\DpsCapture.lua
+core\ViewProjections.lua
 core\GameAdapter.lua
 ui\VirtualList.lua
 ui\Theme.lua
@@ -36,5 +44,8 @@ ui\LogViewer.lua
 ui\WishlistEditor.lua
 ui\WishlistOverlay.lua
 ui\QuickStart.lua
+ui\CommunityBuilds.lua
+ui\Leaderboard.lua
+ui\Nameplate.lua
 ui\Changelog.lua
 core\Main.lua

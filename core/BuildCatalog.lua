@@ -580,6 +580,28 @@ function Catalog.RemoveOverlay(id)
     return existed
 end
 
+-- Retention removes only SavedVariables overlay rows; it never creates a
+-- network-visible delete or touches the immutable release catalog.  Batch the
+-- revision notification so pruning hundreds of stale rows does not rebuild
+-- hash/view projections once per row during login.
+function Catalog.RemoveOverlayBatch(ids)
+    EnsureBound()
+    if catalogReadOnly then
+        return 0, "future build catalog schema is read-only"
+    end
+    if type(ids) ~= "table" then return 0, "build id list required" end
+    local overlay = Overlay()
+    local removed = 0
+    for _, id in ipairs(ids) do
+        if overlay[id] ~= nil then
+            overlay[id] = nil
+            removed = removed + 1
+        end
+    end
+    if removed > 0 then BumpBuild("overlay retention", nil) end
+    return removed
+end
+
 function Catalog.SetTombstone(id, tombstone)
     EnsureBound()
     if catalogReadOnly then
@@ -603,6 +625,32 @@ function Catalog.ClearTombstone(id)
     Tombstones()[id] = nil
     BumpIfChanged(before, RevisionRecord(id), "tombstone cleared", id)
     return existed
+end
+
+-- A tombstone that masks an immutable bundled row cannot be compacted without
+-- making that row visible again.  DataRetention uses this query to keep those
+-- exact tombstones indefinitely.
+function Catalog.HasBaseline(id)
+    EnsureBound()
+    return type(baseline[id]) == "table"
+end
+
+function Catalog.RemoveTombstonesBatch(ids)
+    EnsureBound()
+    if catalogReadOnly then
+        return 0, "future build catalog schema is read-only"
+    end
+    if type(ids) ~= "table" then return 0, "tombstone id list required" end
+    local source = Tombstones()
+    local removed = 0
+    for _, id in ipairs(ids) do
+        if source[id] ~= nil and type(baseline[id]) ~= "table" then
+            source[id] = nil
+            removed = removed + 1
+        end
+    end
+    if removed > 0 then BumpBuild("tombstone retention", nil) end
+    return removed
 end
 
 function Catalog.OverlaySnapshot()

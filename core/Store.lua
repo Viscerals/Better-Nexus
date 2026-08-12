@@ -161,6 +161,10 @@ function Store.Init()
         and not (catalogSummary and catalogSummary.readOnly) then
         Nexus.DataCompaction.Init(db)
     end
+    if Nexus.DataRetention and Nexus.DataRetention.Init
+        and not (catalogSummary and catalogSummary.readOnly) then
+        Nexus.DataRetention.Init(db)
+    end
 end
 
 function Store.SettingsVersion()

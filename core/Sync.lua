@@ -198,6 +198,23 @@ local function CatalogClearTombstone(id)
         and catalog.ClearTombstone(id) or false
 end
 
+function Sync._RequestRetention(reason)
+    local retention = Nexus and Nexus.DataRetention
+    if retention and type(retention.Request) == "function" then
+        pcall(retention.Request, reason)
+    end
+end
+
+function Sync._AllowsRemoteRevision(author, stamp, buildId)
+    local retention = Nexus and Nexus.DataRetention
+    if not (retention and type(retention.AllowsRemoteRevision) == "function") then
+        return true
+    end
+    local ok, allowed = pcall(retention.AllowsRemoteRevision,
+        author, stamp, NexusDB, buildId)
+    return not ok or allowed ~= false
+end
+
 local function NormalizePeerName(name)
     name = tostring(name or ""):gsub("%s+", "")
     name = name:match("^([^%-]+)") or name
@@ -1142,6 +1159,11 @@ local function StoreSummary(data, transportSender)
     if old and old.ownerVerified ~= false
         and not SamePeer(old.author, data.a) then return false, false end
     local stamp = tonumber(data.m) or 0
+    if not Sync._AllowsRemoteRevision(data.a, stamp, id) then
+        LogEvent("RX", "skip summary '%s': older than compacted deletion floor",
+            tostring(data.t))
+        return true, false
+    end
     local tomb = tombstones[id]
     if tomb and stamp <= TombStamp(tomb) then
         LogEvent("RX","skip summary '%s': tombstoned", tostring(data.t))
@@ -1204,6 +1226,7 @@ local function StoreSummary(data, transportSender)
             tostring(data.t), tostring(data.a or "Unknown"), tonumber(data.n) or 0)
     end
     if not keepEchoes or linkChanged then QueueLegacyRecovery(id) end
+    Sync._RequestRetention("build summary received")
     return true, true
 end
 
@@ -1901,6 +1924,9 @@ local function ValidatePayload(data)
 end
 
 local function ShouldStore(id, lastMod, author)
+    if not Sync._AllowsRemoteRevision(author, lastMod, id) then
+        return false, "retention floor"
+    end
     local tomb = tombstones[id]
     if tomb and (tonumber(lastMod) or 0) <= TombStamp(tomb) then return false, "deleted" end
     if tomb and (TombAuthor(tomb) == ""
@@ -1950,6 +1976,7 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender)
     requestedLoadouts[payload.id] = nil
     stats.received = stats.received + 1
     lastSyncNewCount = lastSyncNewCount + 1
+    Sync._RequestRetention("full build received")
 end
 
 local function HandleComplete(buildId, lastMod, fullData, transportSender)
@@ -1988,7 +2015,10 @@ local function HandleComplete(buildId, lastMod, fullData, transportSender)
     local replacingUnverified = existing and existing.ownerVerified == false
         and directOwner
     local allowed, why
-    if replacingUnverified then
+    if not Sync._AllowsRemoteRevision(payload.author,
+        payload.lastModified, payload.id) then
+        allowed, why = false, "retention floor"
+    elseif replacingUnverified then
         allowed, why = true, "owner-verified"
     else
         allowed, why = ShouldStore(payload.id, payload.lastModified,
@@ -2000,6 +2030,9 @@ local function HandleComplete(buildId, lastMod, fullData, transportSender)
         elseif why == "tombstone owner" then
             LogEvent("RX", "REJECT resurrection of '%s': tombstone belongs to %s",
                 tostring(payload.id), tostring(TombAuthor(tombstones[payload.id])))
+        elseif why == "retention floor" then
+            LogEvent("RX", "skip '%s': older than compacted deletion floor",
+                tostring(payload.title))
         else
             stats.duplicatesSkipped = stats.duplicatesSkipped + 1
             if existingSource == "bundled" then
@@ -2392,7 +2425,14 @@ local function HandleDelete(sender, buildId, stamp, originAuthor)
             tostring(buildId), tostring(sender))
         return false
     end
-    local tomb = { stamp=tonumber(stamp) or 0, author=author }
+    local deleteStamp = tonumber(stamp) or 0
+    local wallNow = (time and tonumber(time())) or 0
+    if wallNow > 1000000000 and deleteStamp > wallNow + 300 then
+        LogEvent("RX", "REJECT future delete stamp for '%s' from %s",
+            tostring(buildId), tostring(sender))
+        return false
+    end
+    local tomb = { stamp=deleteStamp, author=author }
     local prior = tombstones[buildId]
     if prior and TombStamp(prior) >= tomb.stamp then return true end
     if not existing then
@@ -2416,6 +2456,7 @@ local function HandleDelete(sender, buildId, stamp, originAuthor)
     LogEvent("RX","DELETED '%s' from origin %s (relay %s)",
         tostring(existing.title), author, tostring(sender))
     Sync.RequestDataViewRefresh()
+    Sync._RequestRetention("remote delete received")
     return true
 end
 
@@ -2813,11 +2854,42 @@ end
 -- Lifecycle
 ------------------------------------------------------------------------
 
+function Sync.PruneTransientState(now)
+    now = tonumber(now) or Now()
+    local removed = { requestedLoadouts=0, recentBroadcasts=0, hotBuilds=0 }
+    for id, requestedAt in pairs(requestedLoadouts) do
+        if now - (tonumber(requestedAt) or now) > 240 then
+            requestedLoadouts[id] = nil
+            removed.requestedLoadouts = removed.requestedLoadouts + 1
+        end
+    end
+    for key, broadcastAt in pairs(recentBuildBroadcast) do
+        if now - (tonumber(broadcastAt) or now) > BUILD_BROADCAST_DEDUPE then
+            recentBuildBroadcast[key] = nil
+            removed.recentBroadcasts = removed.recentBroadcasts + 1
+        end
+    end
+    for id, hot in pairs(hotBuilds) do
+        local postedAt = type(hot) == "table" and tonumber(hot.t) or nil
+        if postedAt == nil or now - postedAt > HOT_WINDOW then
+            hotBuilds[id] = nil
+            removed.hotBuilds = removed.hotBuilds + 1
+        end
+    end
+    return removed
+end
+
 function Sync.TombstoneCount()
     local n = 0; for _ in pairs(tombstones) do n=n+1 end; return n
 end
 
 function Sync.OnUpdate(elapsed)
+    Sync._transientPruneTicker = (Sync._transientPruneTicker or 0)
+        + (tonumber(elapsed) or 0)
+    if Sync._transientPruneTicker >= 30 then
+        Sync._transientPruneTicker = 0
+        Sync.PruneTransientState()
+    end
     CleanExpiredInflight()
     ProcessPendingResponses(elapsed)
     PumpLegacyRecovery(elapsed)
@@ -2945,6 +3017,8 @@ function Sync.Init(codec, adapter)
         dpsSerializations=0, chunkMessagesBuilt=0, compatRequests=0,
     }
     hotBuilds    = {}  -- clear on init
+    recentBuildBroadcast = {}
+    Sync._transientPruneTicker = 0
     local evidence = Nexus and Nexus.LoadoutEvidence
     if evidence and type(evidence.RegisterReferenceProvider) == "function" then
         evidence.RegisterReferenceProvider("sync.hot-builds", function()
