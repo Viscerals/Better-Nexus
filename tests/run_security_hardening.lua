@@ -6,7 +6,7 @@ dofile("core/DpsCapture.lua")
 dofile("ui/CommunityBuilds.lua")
 
 local Codec, Sync, DPS = Nexus.Codec, Nexus.Sync, Nexus.DpsCapture
-time = function() return 50000 end
+time = function() return 2000000000 end
 NexusDB = { communityBuilds={}, syncTombstones={}, dpsCapture={} }
 
 local function ResetSync()
@@ -124,11 +124,36 @@ local forged = {
 Sync.HandleIncoming(BuildPacket("Mallory", forged, 99), "Mallory")
 assert(NexusDB.communityBuilds[alice.id].title == "Alice Build",
     "relayed overwrite changed owner-controlled state")
+
+local futureStamp = 2000000301
+local futureBuild = {
+    id="future-build", title="Future Build", author="Alice",
+    ownerKey="alice@ebonhold", class="MAGE", description="poison",
+    lastModified=futureStamp,
+    echoes={{spellId=200102, quality=3, stacks=1}},
+}
+assert(not Sync.HandleIncoming(
+        BuildPacket("Alice", futureBuild, futureStamp), "Alice")
+    and NexusDB.communityBuilds[futureBuild.id] == nil,
+    "far-future full build revision entered the durable catalog")
+local futureSummary = Codec.Base64Encode(Codec.JSONEncode({
+    id="future-summary", t="Future Summary", a="Alice",
+    o="alice@ebonhold", c="MAGE", m=futureStamp,
+    h="deadbeef", n=1,
+}))
+assert(not Sync.HandleIncoming("WLBI|Alice|" .. futureSummary, "Alice")
+    and NexusDB.communityBuilds["future-summary"] == nil,
+    "far-future build summary entered the durable catalog")
+
 Sync.HandleIncoming("WLRD|Mallory|alice-build|100|Alice", "Mallory")
 assert(NexusDB.communityBuilds[alice.id], "spoofed tombstone deleted a build")
 Sync.HandleIncoming("WLRD|Mallory|unknown|100|Mallory", "Mallory")
 assert(NexusDB.syncTombstones.unknown == nil,
     "unknown tombstone gained persistent authority")
+Sync.HandleIncoming("WLRD|Alice|alice-build|0|Alice", "Alice")
+assert(NexusDB.communityBuilds[alice.id]
+    and NexusDB.syncTombstones[alice.id] == nil,
+    "zero-stamped tombstone bypassed delete validation")
 Sync.HandleIncoming("WLRD|Alice|alice-build|101|Alice", "Alice")
 assert(NexusDB.communityBuilds[alice.id] == nil,
     "actual owner could not delete the build")

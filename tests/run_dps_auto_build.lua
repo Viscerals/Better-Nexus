@@ -39,7 +39,7 @@ assert(build.evidenceKey and NexusDB.loadoutEvidence
     and NexusDB.loadoutEvidence.entries[build.evidenceKey],
     "automatic page did not dual-write exact evidence")
 assert(NexusDB.dpsCapture.personalBest[fp].dummy.evidenceKey
-    and NexusDB.dpsCapture.characterBest.dummy.recordmage.evidenceKey,
+    and NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"].evidenceKey,
     "personal/public DPS rows did not dual-write exact evidence")
 local lb=DPS.GetLeaderboard(buildId,"dummy")
 assert(#lb==1 and lb[1].dps==24000000 and lb[1].player=="Recordmage", "captured personal best should become the public build record")

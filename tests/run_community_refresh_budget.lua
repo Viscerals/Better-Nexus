@@ -32,7 +32,7 @@ Nexus.Store.Init()
 dofile("core/DpsCapture.lua")
 Nexus.DpsCapture.Init({}, {})
 
-local receiving, receiveCount = false, 0
+local receiving, receiveCount = true, 1
 Nexus.Sync = {
     IsReceiving=function() return receiving end,
     LastSyncNewCount=function() return receiveCount end,
@@ -52,7 +52,7 @@ local initialVirtual = C.VirtualStats()
 local initialProjection = P.Stats().builds
 local initialIdentity = Nexus.DpsCapture.IdentityLookupStats()
 assert(initialVirtual.results == 20,
-    "emergency Community projection did not enforce its row limit")
+    "first open during Sync did not render the bounded cached projection")
 assert(initialIdentity.rebuilds == 0 and initialIdentity.rowsScanned == 0
     and initialIdentity.lookups == 0
     and initialIdentity.candidateChecks == 0
@@ -71,7 +71,6 @@ assert(unchangedVirtual.dataBinds == initialVirtual.dataBinds
         == initialIdentity.rowsScanned,
     "unchanged eight-second tick performed Community projection work")
 
-receiving, receiveCount = true, 1
 assert(C.MarkDataDirty())
 Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED, {scope="record"})
 assert(C.Refresh())

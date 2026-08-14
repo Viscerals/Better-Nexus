@@ -172,6 +172,7 @@ _G.ChatFrame1 = NewRegion()
 H.joinedChannels = {}
 function JoinTemporaryChannel(name) H.joinedChannels[name:lower()] = (H.nextChannelIndex or 1) end
 function JoinChannelByName(name) H.joinedChannels[name:lower()] = (H.nextChannelIndex or 1) end
+function LeaveChannelByName(name) H.joinedChannels[name:lower()] = nil end
 function GetChannelList()
     local out = {}
     for name, idx in pairs(H.joinedChannels) do
@@ -219,6 +220,14 @@ function UnitLevel() return H.playerLevel end
 function UnitClass() return "Boganic", "MAGE" end
 function UnitName() return "Boganic" end
 function GetNormalizedRealmName() return "Ebonhold" end
+H.resting = true
+H.inCombat = false
+H.inInstance = false
+H.instanceType = "none"
+function IsResting() return H.resting end
+function InCombatLockdown() return H.inCombat end
+function UnitAffectingCombat() return H.inCombat end
+function IsInInstance() return H.inInstance, H.instanceType end
 H.projectVersion = nil
 function GetAddOnMetadata(addon, field)
     if addon == "ProjectEbonhold" and field == "Version" then
@@ -565,6 +574,7 @@ dofile("ui/VirtualList.lua")
 dofile("core/LoadoutEvidence.lua")
 dofile("core/DataCompaction.lua")
 dofile("core/BuildCatalog.lua")
+dofile("core/DataRetention.lua")
 dofile("data/Release.lua")
 dofile("logic/Version.lua")
 dofile("core/Performance.lua")

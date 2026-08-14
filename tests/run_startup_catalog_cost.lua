@@ -71,6 +71,26 @@ local realAll = Catalog.All
 Catalog.All = function()
     error("full catalog copy reached startup hash/projection path")
 end
+
+-- HUD progress performs exact-build matching. It may scan the lightweight
+-- identity summaries once per library revision, but repeated renders must not
+-- materialize the full 36k-Echo catalog.
+local matchingId, matchingBuild
+for id, build in pairs(Nexus.BundledBuilds.builds) do
+    matchingId, matchingBuild = id, build
+    break
+end
+assert(matchingId and matchingBuild, "bundled matching fixture is empty")
+local summariesBefore = Catalog.DebugStats().summarySnapshots
+for _ = 1, 100 do
+    assert(Nexus.DpsCapture.FindMatchingBuildPublic({echoes=matchingBuild.echoes})
+        == matchingId, "indexed exact-build lookup returned the wrong build")
+end
+local matchStats = Nexus.DpsCapture.BuildMatchLookupStats()
+assert(Catalog.DebugStats().summarySnapshots == summariesBefore + 1
+    and matchStats.rebuilds == 1 and matchStats.lookups == 100
+    and matchStats.hydratedMissing == 0,
+    "repeated exact-build lookup rebuilt or hydrated the full catalog")
 local buildHash, dpsHash = Nexus.Sync.GetCompatibilityHashes()
 assert(type(buildHash) == "string" and buildHash ~= ""
     and type(dpsHash) == "string",
@@ -88,6 +108,24 @@ local originalTitle = rows[1].title
 rows[1].title = "caller mutation"
 assert(Nexus.ViewProjections.Builds({sortMode="recent"})[1].title == originalTitle,
     "lightweight projection stopped defending its cache from callers")
+
+-- A represented library change invalidates the index once. A user-authored
+-- exact duplicate is preferred over an automatic DPS record page, matching the
+-- historical scan's selection rule.
+local replacementId = "000-indexed-authored-match"
+local replacement = {
+    id=replacementId, title="Indexed authored match", author="Tester",
+    class=matchingBuild.class, echoes=matchingBuild.echoes,
+    fingerprint=matchingBuild.fingerprint,
+    fingerprintHash=matchingBuild.fingerprintHash,
+    postedAt=9999999999, lastModified=9999999999,
+}
+assert(Catalog.Put(replacement))
+assert(Nexus.DpsCapture.FindMatchingBuildPublic({echoes=matchingBuild.echoes})
+    == replacementId, "library revision did not refresh authored match preference")
+assert(Nexus.DpsCapture.BuildMatchLookupStats().rebuilds == 2,
+    "library revision did not rebuild the exact-build index once")
+assert(Catalog.RemoveOverlay(replacementId), "matching test overlay cleanup failed")
 Catalog.All = realAll
 
 print("real bundled startup, hashes, projections, and author lookup stay allocation-bounded -- OK")

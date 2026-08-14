@@ -4,9 +4,10 @@
 Nexus = Nexus or {}
 
 Nexus.Release = {
-    version = "1.20.0-beta.3.community-off",
+    version = "1.20.0-beta.5",
     baseVersion = "1.19.5",
     published = false,
-    emergencyCommunityOff = true,
+    emergencyCommunityOff = false,
+    preferStockServerHud = true,
     releasesUrl = "https://github.com/Viscerals/Better-Nexus/releases",
 }

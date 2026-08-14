@@ -4,8 +4,12 @@ local H = dofile("tests/harness.lua")
 local Performance = Nexus.Performance
 
 local definitions = Performance.Definitions()
-assert(#definitions == 8 and definitions[1] == "automation.step"
-    and definitions[8] == "overlay.refresh",
+assert(#definitions == 23 and definitions[1] == "automation.step"
+    and definitions[2] == "automation.catalog"
+    and definitions[10] == "automation.hud"
+    and definitions[14] == "community.open"
+    and definitions[15] == "community.frame"
+    and definitions[23] == "overlay.refresh",
     "performance path registry is not fixed and ordered")
 
 Performance.Reset()
@@ -145,9 +149,10 @@ dofile("ui/Panel.lua")
 dofile("ui/JournalTab.lua")
 dofile("ui/LogViewer.lua")
 
-local optionalCalls = {community=0, leaderboard=0, overlay=0}
+local optionalCalls = {community=0, communityOpen=0, leaderboard=0, overlay=0}
 Nexus.CommunityBuilds = {
     Init=function() end,
+    Show=function(value) optionalCalls.communityOpen = optionalCalls.communityOpen + 1; return value end,
     Refresh=function(value) optionalCalls.community = optionalCalls.community + 1; return value end,
 }
 Nexus.Leaderboard = {
@@ -184,14 +189,19 @@ local malformedDecision = Nexus.Policy.Decide(nil)
 assert(type(malformedDecision) == "table" and malformedDecision.type == "wait"
     and malformedDecision.reason == "no board",
     "decision instrumentation changed malformed-input failure behavior")
-assert(Nexus.CommunityBuilds.Refresh("community") == "community"
+assert(Nexus.CommunityBuilds.Show("open") == "open"
+    and Nexus.CommunityBuilds.Refresh("community") == "community"
     and Nexus.Leaderboard.RefreshData("leaderboard") == "leaderboard"
     and Nexus.WishlistOverlay.Refresh("overlay") == "overlay"
-    and optionalCalls.community == 1 and optionalCalls.leaderboard == 1
+    and optionalCalls.communityOpen == 1 and optionalCalls.community == 1
+    and optionalCalls.leaderboard == 1
     and optionalCalls.overlay == 1,
     "installed optional UI instrumentation changed callback behavior")
-for _, name in ipairs({"automation.step", "decision.policy", "sync.update",
-    "dps.update", "community.refresh", "leaderboard.refresh",
+for _, name in ipairs({"automation.step", "automation.catalog",
+    "automation.wishlist", "automation.compile", "automation.slots",
+    "automation.owned", "automation.levers", "automation.autolock",
+    "automation.hud", "decision.policy", "sync.update",
+    "dps.update", "community.open", "community.refresh", "leaderboard.refresh",
     "panel.render", "overlay.refresh"}) do
     assert(Performance.Stats(name).count > 0,
         "real instrumentation did not observe " .. name)

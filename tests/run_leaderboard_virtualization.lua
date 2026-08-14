@@ -26,11 +26,21 @@ Nexus.DpsCapture={
         return boards[category] or {}
     end,
 }
-local statusReads=0
+local statusReads, syncRequests=0,0
+local syncState="idle"
 Nexus.Sync={
     GetLeaderboardSyncStatus=function()
         statusReads=statusReads+1
-        return "idle",0,0,{}
+        return syncState,0,0,{}
+    end,
+    GetEffectiveState=function()
+        return {key=syncState,reason=syncState=="suspended" and "not resting" or nil}
+    end,
+    RequestSync=function()
+        syncRequests=syncRequests+1
+        if syncState=="off" then return false,"sync mode is Off" end
+        syncState="syncing"
+        return true
     end,
 }
 dofile("ui/Theme.lua")
@@ -44,6 +54,28 @@ local themeInitial=Nexus.Theme.Stats()
 assert(initial.results==150 and initial.active<=5
     and initial.created==initial.active and initial.first==1,
     "Leaderboard created or bound one row per record")
+
+-- Sync controls expose effective state and provide immediate click feedback.
+local syncBtn=NexusLeaderboardFrame._syncBtn
+local syncStatus=NexusLeaderboardFrame._syncStatusText
+syncState="off"
+L.RefreshStatus()
+assert(syncBtn:GetText()=="Sync Off"
+    and syncStatus:GetText():find("Sync Off",1,true),
+    "Leaderboard did not expose disabled Sync state")
+syncBtn:GetScript("OnClick")()
+assert(syncRequests==1 and syncBtn:GetText()=="Sync Off",
+    "disabled Leaderboard Sync click did not retain visible feedback")
+syncState="suspended"
+L.RefreshStatus()
+assert(syncBtn:GetText()=="Waiting..."
+    and syncStatus:GetText():find("not resting",1,true),
+    "Leaderboard did not explain suspended Sync state")
+syncState="idle"
+syncBtn:GetScript("OnClick")()
+assert(syncRequests==2 and syncBtn:GetText()=="Syncing...",
+    "Leaderboard Sync click did not show immediate progress")
+syncState="idle"
 
 -- Ten periodic ticks may repaint status text only.
 local projectionBefore=Nexus.ViewProjections.Stats().leaderboard
@@ -69,6 +101,30 @@ assert(tickAfter.statusRefreshes==tickBefore.statusRefreshes+10
     and statusReads>=11,
     "status ticks rebuilt Leaderboard data, detail, projection, or theme")
 
+-- Search input coalesces rapid keystrokes, then filters the cached category
+-- source without rematerializing the full DPS board.
+local searchRefreshes=L.VirtualStats().dataRefreshes
+local searchBoardReads=boardReads
+NexusLeaderboardSearch:SetText("Player 001")
+NexusLeaderboardSearch:GetScript("OnTextChanged")()
+assert(L.VirtualStats().dataRefreshes==searchRefreshes,
+    "Leaderboard search rebuilt synchronously on a keystroke")
+onUpdate(NexusLeaderboardFrame,0.10)
+assert(L.VirtualStats().dataRefreshes==searchRefreshes,
+    "Leaderboard search fired before its debounce window")
+onUpdate(NexusLeaderboardFrame,0.10)
+assert(L.VirtualStats().dataRefreshes==searchRefreshes+1
+    and L.VirtualStats().results==1 and boardReads==searchBoardReads,
+    string.format("debounced Leaderboard search mismatch refresh=%d/%d results=%d reads=%d/%d",
+        L.VirtualStats().dataRefreshes,searchRefreshes+1,
+        L.VirtualStats().results,boardReads,searchBoardReads))
+NexusLeaderboardSearch:SetText("")
+NexusLeaderboardSearch:GetScript("OnTextChanged")()
+onUpdate(NexusLeaderboardFrame,0.20)
+assert(L.VirtualStats().results==150 and boardReads==searchBoardReads,
+    "clearing Leaderboard search rematerialized its DPS board")
+local dataBinds=L.VirtualStats().dataBinds
+
 local virtualScroll=NexusLeaderboardFrame._virtualListScrollFrame
 local onSizeChanged=virtualScroll and virtualScroll:GetScript("OnSizeChanged")
 assert(type(onSizeChanged)=="function","Leaderboard viewport resize did not install a rebind")
@@ -76,7 +132,7 @@ virtualScroll:SetHeight(200)
 onSizeChanged(virtualScroll,590,200)
 local resized=L.VirtualStats()
 assert(resized.active==7 and resized.resizeBinds==1
-    and resized.dataBinds==tickAfter.dataBinds,
+    and resized.dataBinds==dataBinds,
     "Leaderboard viewport growth rebuilt data or escaped its bounded window")
 virtualScroll:SetHeight(100)
 onSizeChanged(virtualScroll,590,100)
@@ -84,7 +140,6 @@ assert(L.VirtualStats().active<=5 and L.VirtualStats().resizeBinds==2,
     "Leaderboard viewport shrink did not clamp the bounded window")
 
 -- Every exact rank is reachable with one bounded reusable row pool.
-local dataBinds=tickAfter.dataBinds
 for index=1,150 do
     assert(L.ScrollTo((index-1)*40))
     local window=L.VirtualStats()
@@ -152,9 +207,12 @@ assert(L.VirtualStats().active<=5
 -- Categories, search, class filters, and empty state each rebuild once.
 L.Show("lk")
 assert(L.VirtualStats().results==150 and L.VirtualStats().category=="lk")
-L.SetCategory("combined")
-assert(L.VirtualStats().results==150 and L.VirtualStats().category=="lk",
-    "emergency mode still allowed average-DPS leaderboard calculation")
+local averageTab=NexusLeaderboardFrame._averageTab
+assert(averageTab and type(averageTab:GetScript("OnClick"))=="function",
+    "Average leaderboard tab was not enabled")
+averageTab:GetScript("OnClick")()
+assert(L.VirtualStats().results==150 and L.VirtualStats().category=="combined",
+    "average-DPS leaderboard category did not activate")
 NexusLeaderboardSearch:SetText("Player 001")
 L.RefreshData()
 assert(L.VirtualStats().results==1 and L.VirtualStats().offset==0,

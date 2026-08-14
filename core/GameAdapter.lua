@@ -48,6 +48,7 @@ local tomeMutationPausedUntil = 0
 local latchSince, deadLatch = {}, {}
 local slotsRetryAt, slotsRetries = nil, 0
 local slotsRefreshAt = 0
+local SLOT_REFRESH_SECONDS = 300
 local lastAutoAcceptState, lastRivalState = nil, nil
 
 local CORRECTED_CLASS_MASKS = {
@@ -1989,7 +1990,11 @@ function A.Poll()
     -- wishlist. Refresh periodically; RequestSlots() itself is rate-limited.
     if pewDone and GetTime() >= (slotsRefreshAt or 0) then
         if A.RequestSlots() then
-            slotsRefreshAt = GetTime() + 5
+            -- EchoJournal's data-change hook invalidates immediately after a
+            -- real slot edit.  This request is only a slow recovery path for a
+            -- missed server event; a five-second request/reply loop forced the
+            -- complete automation pipeline to run while the player was idle.
+            slotsRefreshAt = GetTime() + SLOT_REFRESH_SECONDS
         else
             slotsRefreshAt = GetTime() + 1
         end

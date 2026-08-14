@@ -1,4 +1,4 @@
-# Nexus — internal module contracts (v1.20.0-beta.1)
+# Nexus — internal module contracts (v1.20.0-beta.5)
 
 Binding interface spec for all modules. Authored from `WISHLIST_REALIZER_BUILD_PROMPT.md`
 + `WISHLIST_REALIZER_SPEC_ADDENDUM.md` + `WISHLIST_REALIZER_DESIGN.md` (the addendum wins
@@ -7,8 +7,8 @@ SavedVariables, NO `ProjectEbonhold.*` — loadable under bare LuaJIT. All cross
 data is plain tables produced by `core/GameAdapter.lua` (the only IO module).
 
 Global namespace: `Nexus` (each file: `Nexus = Nexus or {};
-local M = {}; Nexus.<Name> = M`). Version: `Nexus.VERSION = "1.20.0-beta.1"`
-comes from `data/Release.lua`; .toc `## Version: 1.20.0-beta.1` stays in lockstep.
+local M = {}; Nexus.<Name> = M`). Version: `Nexus.VERSION = "1.20.0-beta.5"`
+comes from `data/Release.lua`; .toc `## Version: 1.20.0-beta.5` stays in lockstep.
 
 Lua 5.1 rules: no `goto`, no `#` on non-sequences, `unpack` global, sort pairs for
 deterministic output, forward-declare every closure-captured local BEFORE the closure,
@@ -399,8 +399,9 @@ erasing the candidate. No module performs an update network request or install.
 
 `BuildCatalog.Init(db, bundled)`, `Get(id)`, `All()`, `Summaries()`,
 `DeltaSummaries()`, `IsAuthor(name)`, `ForEach(visitor)`, `Count()`,
-`Put(build)`, `RemoveOverlay(id)`, `SetTombstone(id, tombstone)`,
-`ClearTombstone(id)`, `OverlaySnapshot()`, `DeltaSnapshot()`, and
+`Put(build)`, `RemoveOverlay(id)`, `RemoveOverlayBatch(ids)`,
+`SetTombstone(id, tombstone)`, `ClearTombstone(id)`,
+`RemoveTombstonesBatch(ids)`, `HasBaseline(id)`, `OverlaySnapshot()`, `DeltaSnapshot()`, and
 `TombstoneSnapshot()`. Returned records/tables are defensive copies; summary
 surfaces deliberately omit Echo arrays. Rebinding the same database and immutable
 bundle is an idempotent allocation-bounded fast path. Read precedence is
@@ -414,6 +415,39 @@ hydrate a missing inline array from `LoadoutEvidence` without mutating
 SavedVariables. A newer `buildCatalog.schemaVersion` binds the catalog read-only:
 metadata, overlay rows, and tombstones are preserved without migration, and all
 catalog mutation APIs reject writes until a supported database is rebound.
+
+## core/DataRetention.lua — bounded durable mesh state
+
+`DataRetention.Init(db)` performs an idempotent startup pass and `Request(reason)`
+coalesces later noncritical passes through `Scheduler`. It never automatically
+removes `isMine`, `importedSavedBuild`, or a build owned by any account character
+seen by Nexus. Dummy and Lich King each retain the top 100 overall plus the top
+15 per represented class. The derived Average board retains its top 50 overall
+plus top 10 per class by protecting both contributing raw rows. These clamped
+limits are saved/configurable and account-owned rows never consume them.
+Unrelated community posts have a separate 75-row recency budget and 12-per-author
+limit. Superseded unreferenced `autoDps` rows are removed locally without
+broadcasting a delete for another author. Personal/build-best fingerprint maps
+remain bounded while fingerprints selected by a retained rank are protected.
+
+Local eviction markers prevent the same stale rows from churning back through
+Sync. Markers themselves compact to a monotonic build-revision floor. Exact
+tombstones remain for pending deletes and bundled IDs; eligible old tombstones
+compact to a monotonic delete floor so stale peers cannot resurrect removed IDs.
+`AllowsRemoteRevision(author, stamp, db, id)` is the Sync admission boundary.
+Future retention schemas are read-only. Evidence garbage collection runs only
+after represented durable rows are removed.
+
+## core/SyncPolicy.lua — saved transport policy
+
+`SyncPolicy.Mode()` normalizes the additive saved `syncMode` setting to `off`,
+`manual`, or `automatic`. `ContextBlock()` suspends transport while configured
+combat, instance, or non-resting conditions apply. `Sync` owns session state and
+clears volatile queues/partial transfers when policy becomes blocked; durable
+tombstones and local DPS/build data remain available for a later safe session.
+Off never joins or accepts protocol traffic. Manual joins only after `Sync Now`
+and leaves when convergence finishes. Automatic reconnects and converges once a
+safe resting context resumes.
 
 ## core/Sync.lua — release-aware build reconciliation
 

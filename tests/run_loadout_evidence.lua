@@ -228,13 +228,24 @@ assert(DPS.ReceiveRecord({
     v=7, f=remoteFingerprint, h=DPS.GetEchoHash(remoteEchoes), e=remoteEchoes,
     c="dummy", d=25000000, u=65, t=49000, p="Peer", k="MAGE",
     o="peer@ebonhold", r="ebonhold", l=80, b="missing-page",
+    lk={{spellId=200201,stacks=1}},
 }, "Peer"))
 assert(Revisions.Get(Revisions.DPS_CHANGED) == beforeDpsRevision + 1,
     "one evidence-backed DPS winner did not retain one DPS revision")
-local storedRow = NexusDB.dpsCapture.characterBest.dummy.peer
+local storedRow = NexusDB.dpsCapture.characterBest.dummy["peer@ebonhold"]
 assert(storedRow.evidenceKey and not Catalog.Get("missing-page"),
     "missing-page DPS fixture unexpectedly gained a catalog row")
 storedRow.echoes = nil
+local indexedRow = DPS.GetBestRecordForIdentity(
+    "missing-page", remoteFingerprint, DPS.GetEchoHash(remoteEchoes), "dummy")
+assert(indexedRow and #indexedRow.echoes==2
+    and indexedRow.lockedEchoes and indexedRow.lockedEchoes[1].spellId==200201,
+    "indexed full-record lookup lost pooled exact or locked evidence")
+indexedRow.echoes[1].spellId = 1
+local indexedAgain = DPS.GetBestRecordForIdentity(
+    "missing-page", remoteFingerprint, DPS.GetEchoHash(remoteEchoes), "dummy")
+assert(indexedAgain.echoes[1].spellId==200200,
+    "indexed full-record lookup exposed mutable stored evidence")
 local collisionEchoes = {{spellId=200299,quality=3,stacks=1}}
 assert(Catalog.Put({
     id="missing-page", title="Colliding page", author="Other", class="MAGE",

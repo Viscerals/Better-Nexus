@@ -1,5 +1,10 @@
 # Nexus 1.20 Beta
 
+- Beta 5 ranks retained DPS builds independently for Dummy and Lich King (top 100 overall plus top 15 per class) and preserves the contributing rows for Average (top 50 overall plus top 10 per class). Account-owned builds are exempt and all limits are configurable.
+- Beta 5 adds a My Account reference view for saved loadouts and uploads from every character seen by Nexus. Offline-character records are read-only, and saved-loadout IDs now include realm identity.
+- A read-only simulation against an 11.18 MB real save reduced Community build pages from 1,149 to 325 while retaining every currently valid Average pair.
+- Adds persistent Off, Manual, and Automatic Sync modes; Automatic transport runs only while resting, out of combat, and outside configured instance types.
+- Caps unrelated remote Community posts separately from the DPS-ranked retention set while preserving account-owned builds.
 - Ships a versioned baseline of community builds and synchronizes smaller incremental changes instead of repeatedly exchanging the full catalog.
 - Makes Sync response preparation incremental and queue-aware so busy sessions avoid frame stalls and resume fairly as capacity becomes available.
 - Keeps personal builds, newer revisions, filters, DPS records, and deletions intact while migrating existing data additively.

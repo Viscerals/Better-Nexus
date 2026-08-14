@@ -37,12 +37,23 @@ for index = 1, 1000 do
         echoes={{spellId=710000+index,quality=3,stacks=1}},
     }
 end
+local Retention = Nexus.DataRetention
+Nexus.DataRetention = nil
 Store.Init()
+Nexus.DataRetention = Retention
+local detailBoardReads, detailIdentityReads = 0, 0
 Nexus.DpsCapture = {
     GetLeaderboard=function() return {} end,
     GetLeaderboardForEchoes=function() return {} end,
     GetPersonalBest=function() return nil end,
-    GetDpsBoard=function() return {} end,
+    GetDpsBoard=function() detailBoardReads=detailBoardReads+1; return {} end,
+    GetBestRecordForIdentity=function(buildId, _, _, category)
+        detailIdentityReads=detailIdentityReads+1
+        if buildId=="virtual-0010" and category=="dummy" then
+            return {lockedEchoes={{spellId=710010,stacks=1}}}
+        end
+        return nil
+    end,
     IsDetailsAvailable=function() return false end,
 }
 dofile("ui/CommunityBuilds.lua")
@@ -85,6 +96,8 @@ local offscreen = C.VirtualStats()
 assert(offscreen.selectedId == "virtual-0010" and not offscreen.selectedVisible
     and C.GetSelectedBuildForPanel().id == "virtual-0010",
     "offscreen selection lost exact detail identity")
+assert(detailBoardReads==0 and detailIdentityReads==1,
+    "selected build detail scanned a full DPS board instead of its indexed identity")
 C.ScrollTo((10-1)*92)
 assert(C.VirtualStats().selectedVisible,
     "returning selected card onscreen did not restore its highlight identity")

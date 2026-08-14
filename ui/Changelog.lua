@@ -4,8 +4,8 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.Changelog = M
 
-local VERSION = "1.20.0-beta.1"
-local RELEASE_KEY = "1.20.0-beta.1"
+local VERSION = "1.20.0-beta.5"
+local RELEASE_KEY = "1.20.0-beta.5"
 local frame
 local shownThisSession = false
 
@@ -43,22 +43,33 @@ local function Create()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
-    title:SetText("Nexus 1.20 Beta")
+    title:SetText("Nexus 1.20 Beta 5")
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     body:SetPoint("TOPLEFT", 28, -52)
     body:SetPoint("RIGHT", -28, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
-    body:SetText([[|cffffd200Faster large libraries|r
+    body:SetText([[|cffffd200Smaller, DPS-ranked Community storage|r
 
-- Community Builds and Leaderboard now render and refresh in bounded batches.
-- Sync exchanges smaller catalog changes instead of repeatedly sending the full baseline.
+- Dummy and Lich King keep top 100 overall plus top 15/class; Average keeps top 50 plus top 10/class.
+- Account-owned builds do not consume those limits; unrelated community posts use a separate small budget.
 
-|cffffd200Safer testing|r
+|cffffd200My Account references|r
 
-- Existing personal data migrates additively; ambiguous records remain untouched.
-- New error and performance diagnostics make long-session reports easier.
+- Saved loadouts and uploads remain visible across characters seen by Nexus.
+- Offline-character builds are read-only until you log into their owner; same names on different realms no longer collide.
+
+|cffffd200Sync only when it is safe|r
+
+- Choose Automatic, Manual, or Off from Community Builds.
+- Automatic waits until you are resting, out of combat, and outside configured instances.
+
+|cffffd200Long-session safety|r
+
+- Sync request/broadcast caches and repeated popup/log refreshes now reuse bounded state.
+- Old delete records compact behind a stale-revision floor instead of allowing resurrection.
+- Large-save compaction, virtualized lists, and bounded refresh work remain active.
 
 Back up Nexus SavedVariables before beta testing.]])
 

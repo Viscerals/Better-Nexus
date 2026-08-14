@@ -13,6 +13,7 @@ GetNormalizedRealmName=function() return "Ebonhold" end
 UnitName=function() return "Mageowner" end
 UnitClass=function() return "Mage", "MAGE" end
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+Nexus.Store.RegisterCurrentCharacter()
 DPS.Init(A,nil); C.Init(A,Nexus.Model)
 
 local mageEchoes={{spellId=200100,stacks=1},{spellId=200101,stacks=1}}
@@ -31,7 +32,10 @@ assert(C.IsOwnBuild(id), "capturing character must own its record page")
 -- Account-wide SavedVariables do not grant ownership to another character.
 UnitName=function() return "Shamanalt" end
 UnitClass=function() return "Shaman", "SHAMAN" end
+Nexus.Store.RegisterCurrentCharacter()
 assert(not C.IsOwnBuild(id), "another character on the same account must not own the Mage build")
+assert(C.IsAccountBuild(id),
+  "another character on the same account must retain a read-only Mage reference")
 local ok,err=C.EditBuild(id,"Fraud edit","no")
 assert(not ok and err=="not your build", "cross-character edit must be rejected")
 

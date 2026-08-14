@@ -16,6 +16,13 @@ local verified=D.GetBuildVerification(id)
 assert(verified and verified.duration==30,"verified build stamp missing")
 Nexus.CommunityBuilds.Init(Nexus.GameAdapter,Nexus.Model)
 Nexus.CommunityBuilds.Show()
-assert(_G.NexusCommunityBuildsFrame._sortToggle:GetText()=="Sort: Newest (safe mode)",
+assert(_G.NexusCommunityBuildsFrame._sortToggle:GetText()=="Sort: Newest",
     "emergency build browser did not disable average-DPS sorting")
+local sort = _G.NexusCommunityBuildsFrame._sortToggle
+local mode = _G.NexusCommunityBuildsFrame._syncModeBtn
+local point, relative, relativePoint, x = mode:GetPoint()
+assert(sort:GetWidth() == 120 and mode:GetWidth() == 94
+    and point == "RIGHT" and relative == _G.NexusCommunityBuildsFrame._syncBtn
+    and relativePoint == "LEFT" and x == -6,
+    "Build sort and Sync mode controls can overlap")
 print("release UI polish and Details verification -- OK")

@@ -138,12 +138,15 @@ for key, value in pairs(record) do enriched[key] = value end
 enriched.o, enriched.r = "peer@ebonhold", "ebonhold"
 enriched.lk = {{spellId=200999,stacks=1}}
 assert(DPS.ReceiveRecord(enriched, "Peer"))
-assert(DPS.GetSyncHash() == changedDps)
+local enrichedDps = DPS.GetSyncHash()
+assert(enrichedDps ~= changedDps and enrichedDps == DPS.GetSyncHashUncached(),
+    "realm identity enrichment did not update the canonical DPS hash")
 local afterMetadata = DPS.HashCacheStats()
-assert(afterMetadata.targetedInvalidations == afterDuplicate.targetedInvalidations
-    and afterMetadata.bucketRebuilds == afterDuplicate.bucketRebuilds
+assert(afterMetadata.targetedInvalidations == afterDuplicate.targetedInvalidations + 1
+    and afterMetadata.bucketRebuilds >= afterDuplicate.bucketRebuilds + 1
+    and afterMetadata.bucketRebuilds <= afterDuplicate.bucketRebuilds + 2
     and afterMetadata.collectionWalks == afterDuplicate.collectionWalks,
-    "metadata-only DPS enrichment invalidated a wire hash bucket")
+    "realm identity enrichment did not remain inside the affected hash buckets")
 local rejected = {}
 for key, value in pairs(record) do rejected[key] = value end
 rejected.u = 0

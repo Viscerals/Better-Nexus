@@ -23,4 +23,19 @@ assert(dummy[1].build and dummy[1].buildId and #dummy[1].echoes==2,"board row la
 local lk=DPS.GetDpsBoard("lk")
 assert(#lk==1 and lk[1].player=="Alpha" and lk[1].category=="lk","LK board not separate")
 assert(DPS.GetDpsBoard("bad")[1]==nil,"invalid category should be empty")
+
+-- Same-named characters on different realms are separate public identities.
+local twinA={{spellId=200020,stacks=1}}
+local twinB={{spellId=200021,stacks=1}}
+assert(DPS.ReceiveRecord({v=7,f=DPS.GetEchoKey(twinA),e=twinA,c="dummy",
+  d=26000000,u=65,t=104,p="Twin",k="MAGE",l=80,
+  o="twin@realma",r="realma"}),"Realm A Twin rejected")
+assert(DPS.ReceiveRecord({v=7,f=DPS.GetEchoKey(twinB),e=twinB,c="dummy",
+  d=25000000,u=65,t=105,p="Twin",k="MAGE",l=80,
+  o="twin@realmb",r="realmb"}),"Realm B Twin collided with Realm A")
+local twins=0
+for _,row in ipairs(DPS.GetDpsBoard("dummy")) do
+  if row.player=="Twin" then twins=twins+1 end
+end
+assert(twins==2,"same-name cross-realm DPS rows did not remain distinct")
 print("separate Dummy/Lich boards, one row per character, exact loadout, and stale rejection -- OK")

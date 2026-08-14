@@ -11,7 +11,7 @@ Nexus.Store = Store
 -- Versioned shape changes are additive and ordered. User preferences,
 -- per-character safety state, and unknown/future fields are never rebuilt
 -- merely because the shipped defaults or schema version changed.
-local SETTINGS_VERSION = 2
+local SETTINGS_VERSION = 5
 
 local function DeepCopy(t)
     if type(t) ~= "table" then return t end
@@ -87,9 +87,62 @@ local function MigratePendingToggleRecords(db)
     end
 end
 
+local function MigrateSyncAndRetentionSettings(db)
+    local settings = type(db.settings) == "table" and db.settings or {}
+    db.settings = settings
+    local mode = type(settings.syncMode) == "string"
+        and settings.syncMode:lower() or nil
+    if mode == "auto" then mode = "automatic" end
+    if mode ~= "off" and mode ~= "manual" and mode ~= "automatic" then
+        settings.syncMode = nil -- filled from the additive shipped default
+    else
+        settings.syncMode = mode
+    end
+    for _, key in ipairs({
+        "communityRetentionMaxTotal", "communityRetentionMaxPerClass",
+        "communityRetentionMaxPerAuthor", "communityRetentionCharacterBest",
+        "communityRetentionPersonalFingerprints",
+        "communityRetentionBuildFingerprints",
+        "communityRetentionTopPerCategory",
+        "communityRetentionMinPerClassPerCategory",
+        "communityRetentionTopAverage",
+        "communityRetentionMinAveragePerClass",
+        "communityRetentionOtherRemoteBuilds",
+    }) do
+        local value = tonumber(settings[key])
+        if value == nil or value ~= value or value < 0 or value >= math.huge then
+            settings[key] = nil
+        else
+            settings[key] = math.floor(value)
+        end
+    end
+end
+
+local function MigrateAccountCharacters(db)
+    -- Character identity is learned from live logins because legacy per-char
+    -- state contains only a name (no realm).  Keep the ledger additive here;
+    -- RegisterCurrentCharacter fills the authoritative realm/class later.
+    if type(db.accountCharacters) ~= "table" then db.accountCharacters = {} end
+end
+
+local function RemoveUnknownAccountCharacters(db)
+    local characters = type(db.accountCharacters) == "table"
+        and db.accountCharacters or {}
+    db.accountCharacters = characters
+    for ownerKey in pairs(characters) do
+        if type(ownerKey) == "string"
+            and ownerKey:lower():match("@unknown$") then
+            characters[ownerKey] = nil
+        end
+    end
+end
+
 local MIGRATIONS = {
     [1] = function() end, -- baseline for previously unversioned saves
     [2] = MigratePendingToggleRecords,
+    [3] = MigrateSyncAndRetentionSettings,
+    [4] = MigrateAccountCharacters,
+    [5] = RemoveUnknownAccountCharacters,
 }
 
 local function ApplyMigrations(db)
@@ -127,12 +180,14 @@ function Store.Init()
     local db = NexusDB
     if type(db.chars) ~= "table" then db.chars = {} end
     if type(db.settings) ~= "table" then db.settings = {} end
+    if type(db.accountCharacters) ~= "table" then db.accountCharacters = {} end
 
     local profile = Nexus.DefaultProfile
     local defaults = profile and profile.defaultSettings or {}
 
     ApplyMigrations(db)
     FillMissing(db.settings, defaults)
+    Store.RegisterCurrentCharacter()
 
     -- Per-character shape drift is filled recursively without replacing the
     -- state table, its safety latches, or fields owned by newer builds.
@@ -157,10 +212,80 @@ function Store.Init()
     if Nexus.BuildCatalog and Nexus.BuildCatalog.Init then
         catalogSummary = Nexus.BuildCatalog.Init(db, Nexus.BundledBuilds)
     end
+    -- Legacy DPS rows still own their generated build pages. Migrate those
+    -- references before compaction/retention can classify an autoDps page as
+    -- orphaned and delete it permanently during ADDON_LOADED.
+    if Nexus.DpsCapture
+        and type(Nexus.DpsCapture.MigrateLegacyLeaderboard) == "function"
+        and not (catalogSummary and catalogSummary.readOnly) then
+        Nexus.DpsCapture.MigrateLegacyLeaderboard()
+    end
     if Nexus.DataCompaction and Nexus.DataCompaction.Init
         and not (catalogSummary and catalogSummary.readOnly) then
         Nexus.DataCompaction.Init(db)
     end
+    if Nexus.DataRetention and Nexus.DataRetention.Init
+        and not (catalogSummary and catalogSummary.readOnly) then
+        Nexus.DataRetention.Init(db)
+    end
+end
+
+local function CurrentIdentity()
+    local name = UnitName and UnitName("player") or nil
+    if not name or name == "" or name == "Unknown" then return nil end
+    local realm = GetNormalizedRealmName and GetNormalizedRealmName()
+    if not realm or realm == "" then realm = GetRealmName and GetRealmName() end
+    realm = tostring(realm or ""):lower():gsub("%s+", "")
+    if realm == "" or realm == "unknown" then return nil end
+    local normalizedName = tostring(name):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if normalizedName == "" then return nil end
+    return normalizedName .. "@" .. realm, tostring(name), realm
+end
+
+function Store.CurrentOwnerKey()
+    return CurrentIdentity()
+end
+
+function Store.RegisterCurrentCharacter()
+    local ownerKey, name, realm = CurrentIdentity()
+    local db = NexusDB
+    if not ownerKey or type(db) ~= "table" then return nil end
+    if type(db.accountCharacters) ~= "table" then db.accountCharacters = {} end
+    local normalizedName = ownerKey:match("^([^@]+)@")
+    if normalizedName then
+        db.accountCharacters[normalizedName .. "@unknown"] = nil
+    end
+    local row = type(db.accountCharacters[ownerKey]) == "table"
+        and db.accountCharacters[ownerKey] or {}
+    row.name = name
+    row.realm = realm
+    local class = select(2, UnitClass and UnitClass("player"))
+    if class and class ~= "" then row.class = tostring(class):upper() end
+    local ok, stamp = pcall(function() return time and time() or 0 end)
+    if ok and tonumber(stamp) and tonumber(stamp) > 0 then row.lastSeen = tonumber(stamp) end
+    db.accountCharacters[ownerKey] = row
+    return ownerKey, row
+end
+
+function Store.IsAccountOwnerKey(ownerKey)
+    if type(ownerKey) ~= "string" or ownerKey == "" then return false end
+    if ownerKey:lower():match("@unknown$") then return false end
+    local db = NexusDB
+    local characters = type(db) == "table" and db.accountCharacters or nil
+    return type(characters) == "table"
+        and type(characters[ownerKey:lower()]) == "table"
+end
+
+function Store.IsAccountBuild(build)
+    if type(build) ~= "table" then return false end
+    if build.isMine == true or build.importedSavedBuild == true then return true end
+    return Store.IsAccountOwnerKey(build.ownerKey)
+end
+
+function Store.AccountCharacters()
+    local db = NexusDB
+    return type(db) == "table" and type(db.accountCharacters) == "table"
+        and db.accountCharacters or {}
 end
 
 function Store.SettingsVersion()
@@ -194,5 +319,6 @@ function Store.State()
     local state = db.chars[name]
     state = EnsureStateShape(state)
     db.chars[name] = state
+    Store.RegisterCurrentCharacter()
     return state
 end

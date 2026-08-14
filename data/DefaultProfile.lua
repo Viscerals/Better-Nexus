@@ -43,6 +43,28 @@ DefaultProfile.defaultSettings = {
     -- exactly as falsy as `false` -- no SETTINGS_VERSION bump needed.
     autoLockEchoes = false,
     updateNotifications = true, -- chat + persistent panel notice; manual install only
+    -- Community transport defaults to background convergence only while the
+    -- character is resting (cities/inns), out of combat, and outside gameplay
+    -- instances. Manual and Off remain persistent user choices.
+    syncMode = "automatic", -- "off", "manual", or "automatic"
+    syncOnlyWhileResting = true,
+    syncSuspendInCombat = true,
+    syncSuspendedInstanceTypes = {
+        party=true, raid=true, pvp=true, arena=true, scenario=true,
+    },
+    -- Ranked retention is opt-in. Off uses relaxed 1,000-record hard safety
+    -- ceilings rather than allowing hostile/unbounded SavedVariables growth.
+    -- When enabled, categories keep their overall leaders plus a class floor;
+    -- account-owned builds remain protected and never consume these caps.
+    communityRetentionEnabled = false,
+    communityRetentionTopPerCategory = 100,
+    communityRetentionMinPerClassPerCategory = 15,
+    communityRetentionTopAverage = 50,
+    communityRetentionMinAveragePerClass = 10,
+    communityRetentionOtherRemoteBuilds = 75,
+    communityRetentionMaxPerAuthor = 12,
+    communityRetentionPersonalFingerprints = 128,
+    communityRetentionBuildFingerprints = 128,
     anchorSpellId = nil, -- explicit override; honored only when on the wishlist
     -- Diversity-anchor auto-detection: if no explicit anchorSpellId, the
     -- anchor is the wishlist echo whose name matches one of these. Adaptive
