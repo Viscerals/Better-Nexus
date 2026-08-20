@@ -61,7 +61,8 @@ NexusDB.communityBuilds = nil  -- pretend this is Bob's fresh client
 -- Receiving is opt-in: Bob must request a sync first.
 Nexus.Sync.RequestSync()
 for _, msg in ipairs(H.sentChatMessages) do
-    H.FireEvent("CHAT_MSG_CHANNEL", msg.text, "Alice", "Common", Nexus.Sync.ChannelName())
+    H.FireEvent("CHAT_MSG_CHANNEL", msg.text, "Alice-Ebonhold", "Common",
+        Nexus.Sync.ChannelName())
 end
 assert(NexusDB.communityBuilds and NexusDB.communityBuilds[id],
     "a message on the real sync channel should have been processed and stored")

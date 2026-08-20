@@ -179,6 +179,19 @@ function Identity.OwnerKey(name, realm)
     return player and normalizedRealm and (player .. "@" .. normalizedRealm) or nil
 end
 
+-- Durable ownership may be derived from transport only when the actual sender
+-- carries its own realm. A short sender is valid presentation/envelope input,
+-- but it cannot borrow the local realm or become owner authority.
+function Identity.CanonicalOwnerFromTransport(sender)
+    if not ValidPlayer(sender) then return nil end
+    local name, realm = sender:match("^([^-]+)%-(.+)$")
+    if not name or not realm then return nil end
+    local player = Identity.PlayerKey(name, true)
+    local normalizedRealm = RealmKey(realm, false)
+    return player and normalizedRealm
+        and (player .. "@" .. normalizedRealm) or nil
+end
+
 function Identity.CanonicalOwnerKey(value)
     if type(value) ~= "string" or #value > 177 then return nil end
     local name, realm = value:match("^([^@]+)@([^@]+)$")
@@ -190,12 +203,147 @@ function Identity.CanonicalOwnerKey(value)
     return player and normalizedRealm and (player .. "@" .. normalizedRealm) or nil
 end
 
+function Identity.TransportOwns(ownerKey, actualSender)
+    local claimed = Identity.CanonicalOwnerKey(ownerKey)
+    local transport = Identity.CanonicalOwnerFromTransport(actualSender)
+    return claimed ~= nil and transport ~= nil and claimed == transport
+end
+
 function Identity.OwnerKeyMatchesAuthor(ownerKey, author)
     if ownerKey == nil then return true end
     local canonical = Identity.CanonicalOwnerKey(ownerKey)
     local name = canonical and canonical:match("^([^@]+)@") or nil
     local authorKey = Identity.PlayerKey(author)
     return name ~= nil and authorKey ~= nil and name == authorKey
+end
+
+local function ExactOwnerIdentity(ownerKey, value)
+    if value == nil then return true, false end
+    if not Identity.OwnerKeyMatchesAuthor(ownerKey, value) then
+        return false, true
+    end
+    if type(value) == "string" and value:find("-", 1, true)
+        and Identity.CanonicalOwnerFromTransport(value) ~= ownerKey then
+        return false, true
+    end
+    return true, true
+end
+
+local function ExactOwnerRealm(ownerKey, realm)
+    if realm == nil then return true end
+    if type(realm) ~= "string" then return false end
+    local name = ownerKey and ownerKey:match("^([^@]+)@") or nil
+    return name ~= nil and Identity.CanonicalOwnerKey(
+        Identity.OwnerKey(name, realm)) == ownerKey
+end
+
+-- Validate one durable record identity tuple without granting authority by
+-- itself. The only current non-verified consumer is immutable bundled-source
+-- admission, where provenance is supplied separately by BuildCatalog.
+function Identity.CoherentRecordOwnerKey(record)
+    if type(record) ~= "table" then return nil end
+    -- Compact DPS aliases are transport input, not durable Community fields.
+    -- Rejecting them here prevents a summary or mixed-shape record from hiding
+    -- a contradiction through alias precedence.
+    if record.a ~= nil or record.o ~= nil or record.p ~= nil or record.r ~= nil
+        or record.relaySender ~= nil or record.claimedOwnerKey ~= nil then
+        return nil
+    end
+    local ownerKey = Identity.CanonicalOwnerKey(record.ownerKey)
+    if not ownerKey or ownerKey:match("@unknown$") then return nil end
+    local authorOk, hasAuthor = ExactOwnerIdentity(ownerKey, record.author)
+    local playerOk, hasPlayer = ExactOwnerIdentity(ownerKey, record.player)
+    if not authorOk or not playerOk or not (hasAuthor or hasPlayer)
+        or not ExactOwnerRealm(ownerKey, record.realm) then return nil end
+    return ownerKey
+end
+
+-- Durable record ownership requires both an explicit verification decision and
+-- one coherent canonical name@realm tuple.  Presentation names, local-looking
+-- flags, and malformed/unknown realm metadata never satisfy this predicate.
+function Identity.VerifiedOwnerKey(record)
+    if type(record) ~= "table" or record.ownerVerified ~= true then return nil end
+    return Identity.CoherentRecordOwnerKey(record)
+end
+
+-- Keep Saved-mirror marker interpretation type-stable across mutation,
+-- projection, relation, and renderer boundaries. Explicit false retains
+-- ordinary-build compatibility; any other non-boolean value is malformed.
+function Identity.SavedMirrorKind(record)
+    if type(record) ~= "table" then return nil end
+    local marker = record.importedSavedBuild
+    if marker == true then return "saved" end
+    if marker == nil or marker == false then return "ordinary" end
+    return "invalid"
+end
+
+local function LocalOwnsLegacyEvidence(record, current)
+    if record.a ~= nil or record.o ~= nil or record.p ~= nil or record.r ~= nil
+        or record.relaySender ~= nil or record.claimedOwnerKey ~= nil then
+        return false
+    end
+    if record.ownerVerified ~= nil or record.autoDps == true
+        or record.isMine ~= true then return false end
+    local rawLegacyOwner = record.ownerKey
+    if rawLegacyOwner ~= nil then
+        local legacyOwner = Identity.CanonicalOwnerKey(rawLegacyOwner)
+        if not legacyOwner or legacyOwner:match("@unknown$")
+            or legacyOwner ~= current then return false end
+    end
+    local authorOk, hasAuthor = ExactOwnerIdentity(current, record.author)
+    local playerOk, hasPlayer = ExactOwnerIdentity(current, record.player)
+    if not authorOk or not playerOk or not (hasAuthor or hasPlayer)
+        or not ExactOwnerRealm(current, record.realm) then return false end
+    return true
+end
+
+-- Ordinary durable ownership is verified-only. Legacy rows remain readable,
+-- but local-looking flags or owner text cannot grant mutation, association,
+-- publication, relay, or delete authority without an explicit verification.
+function Identity.LocalOwnsRecord(record, currentOwnerKey)
+    if Identity.SavedMirrorKind(record) ~= "ordinary" then return false end
+    local current = Identity.CanonicalOwnerKey(currentOwnerKey)
+    if not current or current:match("@unknown$") then return false end
+    return Identity.VerifiedOwnerKey(record) == current
+end
+
+-- Saved-loadout mirrors may coexist for same-named characters on different
+-- realms. Public ownership is therefore verified-only; an unverified mirror
+-- may remain visible but cannot become editable or publishable.
+function Identity.LocalOwnsSavedMirror(record, currentOwnerKey)
+    if Identity.SavedMirrorKind(record) ~= "saved" then
+        return false
+    end
+    local current = Identity.CanonicalOwnerKey(currentOwnerKey)
+    if not current or current:match("@unknown$") then return false end
+    return Identity.VerifiedOwnerKey(record) == current
+end
+
+-- Public build ownership is type-dispatched before any compatibility branch.
+-- Saved and ordinary rows both require explicit verification; malformed marker
+-- values never fall through to a local-looking compatibility branch.
+function Identity.LocalOwnsBuild(record, currentOwnerKey)
+    local kind = Identity.SavedMirrorKind(record)
+    if kind == "saved" then
+        return Identity.LocalOwnsSavedMirror(record, currentOwnerKey)
+    end
+    if kind ~= "ordinary" then return false end
+    return Identity.LocalOwnsRecord(record, currentOwnerKey)
+end
+
+-- A live Saved-slot reconciliation may adopt a pre-verification mirror only
+-- when it already carries the exact explicit canonical owner tuple. This is a
+-- storage-compatibility bridge, not mutation or projection authority.
+function Identity.CanAdoptSavedMirror(record, currentOwnerKey)
+    if Identity.LocalOwnsSavedMirror(record, currentOwnerKey) then return true end
+    if Identity.SavedMirrorKind(record) ~= "saved" then
+        return false
+    end
+    local current = Identity.CanonicalOwnerKey(currentOwnerKey)
+    if not current or current:match("@unknown$") then return false end
+    return record.ownerVerified == nil
+        and Identity.CanonicalOwnerKey(record.ownerKey) == current
+        and LocalOwnsLegacyEvidence(record, current)
 end
 
 function Identity.SanitizeText(value, maxBytes)

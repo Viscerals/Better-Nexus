@@ -22,7 +22,8 @@ NexusDB = {
     communityBuilds={
         ["saved-owner-1"]={
             id="saved-owner-1", title="Server Mirror", serverTitle="Server Mirror",
-            author="Owner", class="MAGE", isMine=true, importedSavedBuild=true,
+            author="Owner",ownerKey="owner@ebonhold",realm="ebonhold",
+            ownerVerified=true,class="MAGE",isMine=true,importedSavedBuild=true,
             serverSlot=1, echoes={{spellId=200100, quality=3, stacks=1}},
             lockedEchoes={{spellId=200104, quality=2, stacks=1, locked=true}},
             postedAt=1, lastModified=1,
@@ -109,7 +110,16 @@ Nexus.Panel = {
 }
 
 local CB = Nexus.CommunityBuilds
+local boundSavedResolver
+local bindSavedResolver = Nexus.ViewProjections.BindSavedRelationResolver
+Nexus.ViewProjections.BindSavedRelationResolver = function(resolver)
+    boundSavedResolver = resolver
+    return bindSavedResolver(resolver)
+end
 CB.Init(Adapter, Nexus.Model)
+assert(type(boundSavedResolver) == "function",
+    "Community Init did not bind Saved relationship authority before rendering")
+Nexus.ViewProjections.BindSavedRelationResolver = bindSavedResolver
 for _, name in ipairs({
     "IsOwnBuild", "EnsureDpsBuildForEchoes", "PostCurrentWishlist",
     "ShareStatus", "CanRetryShare", "RetryShare",

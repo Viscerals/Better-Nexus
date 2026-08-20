@@ -73,20 +73,23 @@ local function Full(id, stamp, echoes, overrides)
 end
 
 local function DeliverSummary(sender, payload)
-    return Sync.HandleIncoming("WLBI|" .. sender .. "|" .. Encode(payload), sender)
+    local transportSender = sender .. "-Ebonhold"
+    return Sync.HandleIncoming("WLBI|" .. transportSender .. "|"
+        .. Encode(payload), transportSender)
 end
 
 local function DeliverBuild(sender, payload, onlyFirst)
+    local transportSender = sender .. "-Ebonhold"
     local encoded = Encode(payload)
     local chunkSize = 96
     local total = math.ceil(#encoded / chunkSize)
     local result = false
     for index = 1, total do
-        local wire = string.format("WLRB|%s|%s|%s|%d/%d|%s", sender,
+        local wire = string.format("WLRB|%s|%s|%s|%d/%d|%s", transportSender,
             tostring(payload.id),tostring(payload.m),index,total,
             encoded:sub((index - 1) * chunkSize + 1,index * chunkSize))
         assert(#wire <= 255, "fixture exceeded wire limit")
-        result = Sync.HandleIncoming(wire, sender) or result
+        result = Sync.HandleIncoming(wire, transportSender) or result
         if onlyFirst then break end
     end
     return result
@@ -267,7 +270,8 @@ AssertPublic("new-hidden", 40, echoesB,
 Reset()
 assert(Catalog.Put(CompleteRecord("deleted", 10, echoesA)))
 assert(DeliverSummary("Owner", Summary("deleted", 20, echoesB)))
-assert(Sync.HandleIncoming("WLRD|Owner|deleted|25|Owner", "Owner"))
+assert(Sync.HandleIncoming(
+    "WLRD|Owner-Ebonhold|deleted|25|Owner", "Owner-Ebonhold"))
 assert(Catalog.Get("deleted") == nil and Pending("deleted") == nil,
     "authorized tombstone did not defeat pending replacement")
 assert(DeliverBuild("Owner", Full("deleted", 20, echoesB)),

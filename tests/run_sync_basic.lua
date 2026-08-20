@@ -9,6 +9,7 @@ local Sync = Nexus.Sync
 
 NexusDB = {}
 UnitName = function() return "Alice" end
+GetNormalizedRealmName = function() return "Ebonhold" end
 GetTime = function() return 100 end
 
 -- channel not joined yet
@@ -19,7 +20,8 @@ print("channel discovery/join works -- OK")
 
 -- broadcast a small build (fits in a single chunk)
 local build = { id = "mine-1", title = "Fire Mage AoE", description = "Great farm build",
-    author = "Alice", class = "MAGE", echoes = {
+    author = "Alice", ownerKey = "alice@ebonhold", ownerVerified = true, isMine = true,
+    class = "MAGE", echoes = {
         { spellId = 200100, quality = 3, stacks = 1 },
     }, postedAt = 1000 }
 local ok = Sync.BroadcastBuild(build)
@@ -43,7 +45,7 @@ H.now = H.now + 1.1
 Sync.OnUpdate(1.1)
 assert(Sync.IsReceiving(), "receive window should be open after RequestSync")
 for _, msg in ipairs(H.sentChatMessages) do
-    Sync.HandleIncoming(msg.text, "Alice")
+    Sync.HandleIncoming(msg.text, "Alice-Ebonhold")
 end
 
 local stored = NexusDB.communityBuilds and NexusDB.communityBuilds["mine-1"]

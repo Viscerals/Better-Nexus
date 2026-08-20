@@ -15,6 +15,7 @@ local CB = Nexus.CommunityBuilds
 CB.Init(Nexus.GameAdapter, Nexus.Model)
 NexusDB.communityBuilds.mine = {
  id="mine", title="Recorded", description="old", author="Owner", isMine=true,
+ ownerKey="owner@ebonhold",realm="ebonhold",ownerVerified=true,
  echoes={{spellId=200050,stacks=1}}, class="MAGE"
 }
 Nexus.DpsCapture = {

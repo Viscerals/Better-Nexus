@@ -73,7 +73,9 @@ for i = 1, 24 do
     batchEchoes[i] = { spellId=200000 + i, quality=3, stacks=2 }
 end
 assert(not Sync.BroadcastBuild({ id="atomic-batch", title="Atomic Batch",
-    author="Alice", class="MAGE", lastModified=1, postedAt=1,
+    author="Alice", ownerKey="alice@ebonhold", ownerVerified=true,
+    realm="ebonhold", isMine=true,
+    class="MAGE", lastModified=1, postedAt=1,
     description=string.rep("bounded ", 20), echoes=batchEchoes }),
     "multi-chunk batch partially entered a nearly full queue")
 assert(Sync.WorkState().sending == limits.maxOutboundQueue - 1,
@@ -99,6 +101,7 @@ assert(H.sentChatMessages[1]
 Sync.Init(Nexus.Codec, {})
 NexusDB.communityBuilds["claim-build"] = {
     id="claim-build", title="Claim Build", author="Alice", class="MAGE",
+    ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
     lastModified=10, postedAt=10,
     echoes={{spellId=200100, quality=3, stacks=1}},
 }
@@ -166,11 +169,13 @@ assert(secondBucketId, "test setup could not find two ids in one build bucket")
 NexusDB.communityBuilds = {
     [firstBucketId] = {
         id=firstBucketId, title="Bucket Build A", author="Alice", class="MAGE",
+        ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
         lastModified=11, postedAt=11,
         echoes={{spellId=200101, quality=3, stacks=1}},
     },
     [secondBucketId] = {
         id=secondBucketId, title="Bucket Build B", author="Alice", class="MAGE",
+        ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
         lastModified=12, postedAt=12,
         echoes={{spellId=200102, quality=3, stacks=1}},
     },
@@ -226,11 +231,13 @@ assert(invalidKey, "test setup could not colocate an unsendable row")
 NexusDB = {communityBuilds={
     [validId] = {
         id=validId, title="Sendable", author="Alice", class="MAGE",
+        ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
         lastModified=21, postedAt=21,
         echoes={{spellId=200201, quality=3, stacks=1}},
     },
     [invalidKey] = {
         id="invalid|wire-id", title="Unsendable", author="Alice",
+        ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
         class="MAGE", lastModified=22, postedAt=22,
         fingerprintHash="1",
     },
@@ -272,6 +279,7 @@ for i = 1, limits.maxOutboundQueue do
 end
 local immediateDelete, deleteWhy = Sync.BroadcastDelete({
     id="delete-backpressure", title="Delete Backpressure", author="Alice",
+    ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
     lastModified=30, postedAt=30,
     echoes={{spellId=200301, quality=3, stacks=1}},
 })
@@ -298,16 +306,24 @@ assert(NexusDB.syncTombstones["delete-backpressure"].pending == nil,
 -- Keep the established bulk fixture continuously full by replacing every
 -- packet drained by Transport; elapsed wall time, not queue opportunity, must
 -- clear both transient and persisted retry ownership after 300 seconds.
+local saturationRefills = 0
 while Sync.WorkState().sending < limits.maxOutboundQueue do
+    saturationRefills = saturationRefills + 1
+    assert(saturationRefills <= limits.maxOutboundQueue + 1,
+        "continuous delete saturation refill made no bounded progress")
     local index = Sync.WorkState().sending + 1
-    assert(Sync.BroadcastDps("delete-expiry-fill-" .. index, "Alice",
-        6000 + index, 80, "dummy"),
-        "failed to restore continuous delete saturation")
+    local filled, fillWhy = Sync.BroadcastDps(
+        "delete-expiry-fill-" .. saturationRefills, "Alice",
+        6000 + index, 80, "dummy")
+    assert(filled, "failed to restore continuous delete saturation: "
+        .. tostring(fillWhy) .. " depth=" .. tostring(Sync.WorkState().sending))
 end
 local expiredBefore = Sync.Stats().operationExpired or 0
 local expiryOk, expiryWhy = Sync.BroadcastDelete({
     id="delete-continuous-saturation", title="Delete Continuous Saturation",
-    author="Alice", lastModified=31, postedAt=31,
+    author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,
+    realm="ebonhold",isMine=true,
+    lastModified=31, postedAt=31,
     echoes={{spellId=200302, quality=3, stacks=1}},
 })
 assert(not expiryOk and expiryWhy == "queued for retry",
@@ -317,11 +333,19 @@ local refillSequence = 0
 while clock - expiryStarted <= 301 do
     clock = clock + 1.2
     Sync.OnUpdate(1.2)
+    local refillGuard = 0
     while Sync.WorkState().sending < limits.maxOutboundQueue do
+        refillGuard = refillGuard + 1
+        assert(refillGuard <= limits.maxOutboundQueue + 1,
+            "continuous delete refill made no bounded progress")
         refillSequence = refillSequence + 1
-        assert(Sync.BroadcastDps("delete-expiry-refill-" .. refillSequence,
-            "Alice", 7000 + refillSequence, 80, "dummy"),
-            "continuous delete saturation could not refill a freed slot")
+        local refilled, refillWhy = Sync.BroadcastDps(
+            "delete-expiry-refill-" .. refillSequence,
+            "Alice", 7000 + refillSequence, 80, "dummy")
+        assert(refilled,
+            "continuous delete saturation could not refill a freed slot: "
+                .. tostring(refillWhy) .. " depth="
+                .. tostring(Sync.WorkState().sending))
     end
 end
 local expiredDelete = Sync.GetDeleteStatus("delete-continuous-saturation")
@@ -348,6 +372,7 @@ NexusDB = {communityBuilds={},syncTombstones={}}
 for index = 1, recoveryCap + persistedExtra do
     NexusDB.syncTombstones[string.format("persisted-delete-%04d", index)] = {
         stamp=80000 + index,author="Alice",pending=true,
+        ownerKey="alice@ebonhold",ownerVerified=true,
     }
 end
 local discoveryTable = NexusDB.syncTombstones

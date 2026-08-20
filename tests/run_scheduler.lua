@@ -190,7 +190,7 @@ local retryBuild = {
     id="scheduler-share-retry",title="Scheduler Share Retry",
     author="SchedulerOwner",ownerKey="schedulerowner@fixture",class="MAGE",
     echoes={{spellId=300501,quality=3,stacks=1}},
-    postedAt=60000,lastModified=60000,isMine=true,
+    postedAt=60000,lastModified=60000,isMine=true,ownerVerified=true,
 }
 local admitted, why, status = Nexus.Sync.BroadcastBuildSummary(
     retryBuild, {retryOnFull=true})

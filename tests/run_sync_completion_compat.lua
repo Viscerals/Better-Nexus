@@ -9,7 +9,8 @@ GetNormalizedRealmName=function() return 'Ebonhold' end
 local function Pump(seconds) for _=1,math.ceil(seconds/0.2) do clock=clock+0.2; Sync.OnUpdate(0.2) end end
 local echoes={{spellId=200101,stacks=1}}
 local build={id='compat-build',title='Compat',author='Valentine',ownerKey='valentine@ebonhold',
-    class='MAGE',echoes=echoes,lastModified=101,postedAt=101,isMine=true}
+    realm='ebonhold',ownerVerified=true,class='MAGE',echoes=echoes,
+    lastModified=101,postedAt=101,isMine=true}
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync)
 Pump(100); H.sentChatMessages={}

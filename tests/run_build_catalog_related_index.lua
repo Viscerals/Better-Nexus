@@ -25,17 +25,20 @@ for index = 1, 1000 do
 end
 NexusDB.communityBuilds["index-exact"] = {
     id="index-exact",title="Published Exact",author="IndexMage",
-    ownerKey="indexmage@ebonhold",class="MAGE",postedAt=2001,
+    ownerKey="indexmage@ebonhold",ownerVerified=true,realm="ebonhold",
+    class="MAGE",postedAt=2001,
     lastModified=2001,echoes=Echoes(810001, 6),
 }
 NexusDB.communityBuilds["index-title"] = {
     id="index-title",title="Saved Target",author="IndexMage",
-    ownerKey="indexmage@ebonhold",class="MAGE",postedAt=2002,
+    ownerKey="indexmage@ebonhold",ownerVerified=true,realm="ebonhold",
+    class="MAGE",postedAt=2002,
     lastModified=2002,echoes=Echoes(810001, 3),
 }
 NexusDB.communityBuilds["index-subset"] = {
     id="index-subset",title="Different Title",author="IndexMage",
-    ownerKey="indexmage@ebonhold",class="MAGE",postedAt=2003,
+    ownerKey="indexmage@ebonhold",ownerVerified=true,realm="ebonhold",
+    class="MAGE",postedAt=2003,
     lastModified=2003,echoes=Echoes(810001, 7),
 }
 NexusDB.communityBuilds["stale-fingerprint"] = {
@@ -115,6 +118,21 @@ assert(exactId == "index-exact" and exactRecord.id == exactId
 exactRecord.title = "mutated"
 assert(Catalog.Get(exactId).title ~= "mutated",
     "exact fingerprint index leaked a mutable represented row")
+assert(Catalog.Put({
+    id="000-saved-exact",title="Private Saved Exact",serverTitle="Private Saved Exact",
+    author="IndexMage",ownerKey="indexmage@ebonhold",ownerVerified=true,
+    realm="ebonhold",class="ROGUE",postedAt=1997,lastModified=1997,
+    importedSavedBuild=true,isMine=true,serverSlot=99,
+    echoes=Echoes(810001, 6),
+}))
+local savedRawResolution, savedRawReason =
+    Catalog.ResolveFingerprintIdentity("000-saved-exact", exactKey)
+assert(Catalog.FindExactFingerprintId(exactKey) == "index-exact"
+    and savedRawResolution == "index-exact"
+    and savedRawReason == "fingerprint",
+    "private Saved mirror hid or became the public exact-content winner")
+assert(Catalog.RemoveOverlay("000-saved-exact"),
+    "private Saved exact-index control could not be removed")
 assert(Catalog.Put({
     id="invalid-exact",title="Invalid Exact",author="Other",
     ownerKey="other@ebonhold",class="MAGE",postedAt=1998,
@@ -230,7 +248,8 @@ assert(narrowStats.relatedIndexRebuilds == beforeStats.relatedIndexRebuilds
 for index = 1, 80 do
     assert(Catalog.Put({
         id="wide-"..index,title="Wide Target",author="IndexMage",
-        ownerKey="indexmage@ebonhold",class="MAGE",postedAt=4000+index,
+        ownerKey="indexmage@ebonhold",ownerVerified=true,realm="ebonhold",
+        class="MAGE",postedAt=4000+index,
         lastModified=4000+index,echoes=Echoes(840000+index, 1),
     }))
 end

@@ -22,7 +22,8 @@ NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync); Pump(100); H.sentChatMessages={}
 local fp,hash=DPS.GetEchoKey(echoes),DPS.GetEchoHash(echoes)
 assert(DPS.ReceiveRecord({v=7,f=fp,h=hash,e=echoes,c="dummy",d=25000000,u=65,
-  t=49000,p="Owner",k="MAGE",o="owner@ebonhold",r="ebonhold",l=80},"Owner"))
+  t=49000,p="Owner",k="MAGE",o="owner@ebonhold",r="ebonhold",l=80},
+  "Owner-Ebonhold"))
 local _,dpsHash=Sync.GetCompatibilityHashes()
 local dpsBucket,dpsBucketHash=NonzeroBucket(dpsHash)
 assert(dpsBucket,"DPS row did not occupy a reconciliation bucket")
@@ -42,10 +43,11 @@ assert(not sawDpsClaim,"owner-only DPS bucket emitted a suppressible claim")
 -- cannot suppress Origin's later authoritative WLRD response.
 currentName="Relay"; clock=clock+100
 NexusDB={communityBuilds={gone={id="gone",title="Gone",author="Origin",
-  ownerKey="origin@ebonhold",class="MAGE",echoes=echoes,postedAt=10,lastModified=10}},
+  ownerKey="origin@ebonhold",ownerVerified=true,class="MAGE",
+  echoes=echoes,postedAt=10,lastModified=10}},
   syncTombstones={},dpsCapture={}}
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync); Pump(100); H.sentChatMessages={}
-Sync.HandleIncoming("WLRD|Origin|gone|20|Origin","Origin")
+Sync.HandleIncoming("WLRD|Origin|gone|20|Origin","Origin-Ebonhold")
 assert(not NexusDB.communityBuilds.gone,"authoritative delete fixture failed")
 local buildHash=select(1,Sync.GetCompatibilityHashes())
 local buildBucket,buildBucketHash=NonzeroBucket(buildHash)
@@ -70,19 +72,20 @@ NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync)
 assert(DPS.ReceiveRecord({v=7,f=fp,h=hash,e=echoes,c="dummy",d=26000000,u=65,
   t=49001,p=accented,k="MAGE",o=accented:lower().."@ebonhold",
-  r="ebonhold",l=80},accented),"exact UTF-8 DPS owner was rejected")
+  r="ebonhold",l=80},accented.."-Ebonhold"),
+  "exact UTF-8 DPS owner was rejected")
 local projected=Nexus.ViewProjections.Leaderboard("dummy",{classFilter="ALL"})
 assert(projected and projected[1] and projected[1].player==accented,
   "Leaderboard projection changed exact UTF-8 player bytes")
 
 NexusDB.communityBuilds["utf8-gone"]={id="utf8-gone",title="Gone",
   author=accented,ownerKey=accented:lower().."@ebonhold",class="MAGE",
-  echoes=echoes,postedAt=10,lastModified=10}
+  ownerVerified=true,echoes=echoes,postedAt=10,lastModified=10}
 assert(not Sync.HandleIncoming("WLRD|Valentine|utf8-gone|20|Valentine","Valentine")
   and NexusDB.communityBuilds["utf8-gone"],
   "ASCII lookalike gained UTF-8 tombstone authority")
 assert(Sync.HandleIncoming("WLRD|"..accented.."|utf8-gone|21|"..accented,
-  accented) and not NexusDB.communityBuilds["utf8-gone"]
+  accented.."-Ebonhold") and not NexusDB.communityBuilds["utf8-gone"]
   and NexusDB.syncTombstones["utf8-gone"].author==accented,
   "exact UTF-8 tombstone identity was changed or rejected")
 

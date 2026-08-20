@@ -14,12 +14,16 @@ for index=1,250 do
     local player=string.format("BudgetPlayer%03d",index)
     local buildId=string.format("ranked-%03d",index)
     local fingerprint=tostring(720000 + index) .. "x1"
-    local build={id=buildId,title="Ranked "..index,author=player,class="MAGE"}
+    local ownerKey=player:lower() .. "@ebonhold"
+    local build={id=buildId,title="Ranked "..index,author=player,class="MAGE",
+        ownerKey=ownerKey,ownerVerified=true,realm="ebonhold"}
     boards.dummy[index]={player=player,dps=30000000-index,duration=60,
         level=80,ts=index,category="dummy",class="MAGE",fingerprint=fingerprint,
+        ownerKey=ownerKey,ownerVerified=true,realm="ebonhold",
         buildId=buildId,build=build,echoes={{spellId=720000+index,stacks=1}}}
     boards.lk[index]={player=player,dps=28000000-index,duration=90,
         level=80,ts=index,category="lk",class="MAGE",fingerprint=fingerprint,
+        ownerKey=ownerKey,ownerVerified=true,realm="ebonhold",
         buildId=buildId,build=build,echoes={{spellId=720000+index,stacks=1}}}
 end
 local boardReads=0

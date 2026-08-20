@@ -22,10 +22,30 @@ local row={player="Explore",ownerKey="explore@ebonhold",ownerVerified=true,realm
 NexusDB.dpsCapture.characterBest.dummy["explore@ebonhold"]=row
 NexusDB.dpsCapture.personalBest[fp]={dummy={player="Explore",ownerKey="explore@ebonhold",ownerVerified=true,realm="ebonhold",class="SHAMAN",dps=24000000,buildId=id,fingerprint=fp}}
 
+local poisonFp=DPS.GetEchoKey({{spellId=200102,count=1}})
+local poisonId="dps-owner-poison"
+NexusDB.communityBuilds[poisonId]={id=poisonId,title="Poison Record Loadout",
+    author="Explore",ownerKey="explore@ebonhold",ownerVerified=true,
+    realm="ebonhold",claimedOwnerKey="other@ebonhold",class="ROGUE",
+    echoes={{spellId=200102,count=1}},autoDps=true,postedAt=1,lastModified=1}
+local poison={player="Explore",ownerKey="explore@ebonhold",
+    ownerVerified=true,realm="ebonhold",claimedOwnerKey="other@ebonhold",
+    class="ROGUE",dps=23000000,duration=60,ts=99,level=80,
+    buildId=poisonId,echoes={{spellId=200102,count=1}},fingerprint=poisonFp}
+NexusDB.dpsCapture.characterBest.dummy["explore@otherrealm"]=poison
+NexusDB.dpsCapture.personalBest[poisonFp]={dummy={player="Explore",
+    ownerKey="explore@ebonhold",ownerVerified=true,realm="ebonhold",
+    claimedOwnerKey="other@ebonhold",class="ROGUE",dps=23000000,
+    buildId=poisonId,fingerprint=poisonFp}}
+
 local board=DPS.GetDpsBoard("dummy")
 assert(#board==1 and board[1].class=="MAGE", "local historical row must repair to current character class")
 assert(NexusDB.communityBuilds[id].class=="MAGE", "linked automatic record page class must repair")
 assert(NexusDB.communityBuilds[id].title=="Mage Record Loadout", "untouched default title must repair")
+assert(poison.class=="ROGUE"
+        and NexusDB.dpsCapture.personalBest[poisonFp].dummy.class=="ROGUE"
+        and NexusDB.communityBuilds[poisonId].class=="ROGUE",
+    "EXPECTED RED: contradictory owner provenance gained local class repair")
 
 local twin={player="Explore",class="SHAMAN",dps=23000000,duration=60,
     ts=90,level=80,buildId=id,echoes=echoes,fingerprint=fp}

@@ -85,6 +85,12 @@ function Reconciler.New(options)
         and options.dpsBucketClaimInfo or function() return false end
     local samePeer = type(options.samePeer) == "function"
         and options.samePeer or function(left, right) return left == right end
+    local isLocalPeer = type(options.isLocalPeer) == "function"
+        and options.isLocalPeer or function(name) return name == myName() end
+    local isSelfRequest = type(options.isSelfRequest) == "function"
+        and options.isSelfRequest or isLocalPeer
+    local transportOwnsOwner = type(options.transportOwnsOwner) == "function"
+        and options.transportOwnsOwner or samePeer
     local responseClaimSupported = type(options.publishResponseClaim)
         == "function"
     local publishResponseClaim = responseClaimSupported
@@ -214,7 +220,7 @@ function Reconciler.New(options)
 
     function R.ScheduleRequest(description)
         local requester = tostring(description and description.requester or "")
-        if requester == myName() then
+        if isSelfRequest(requester) then
             log("RX", "ignoring own request (no echo loop)")
             return true
         end
@@ -290,7 +296,7 @@ function Reconciler.New(options)
     function R.ScheduleLoadout(description)
         local requester = tostring(description and description.requester or "")
         local buildId = tostring(description and description.buildId or "")
-        if requester == myName() then return true end
+        if isSelfRequest(requester) then return true end
         local key = requester .. ":" .. buildId
         local requestId = description and description.requestId
             or "loadout-" .. buildId
@@ -338,7 +344,7 @@ function Reconciler.New(options)
         local authorityTier = 1
         for _, bucket in pairs(entry and entry.buckets or {}) do
             if bucket.kind == "D" and bucket.claimAuthority
-                and samePeer(bucket.claimAuthority, responder) then
+                and transportOwnsOwner(bucket.claimAuthority, responder) then
                 authorityTier = 0
                 break
             end
@@ -362,7 +368,7 @@ function Reconciler.New(options)
         local key = tostring(description.requester) .. ":"
             .. tostring(description.requestId)
         local entry = pendingResponses[key]
-        if not entry or description.responder == myName() then return false end
+        if not entry or isLocalPeer(description.responder) then return false end
         local claim = {
             responder=tostring(description.responder or ""),
             buildHash=tostring(description.buildHash or "0"),
@@ -467,7 +473,7 @@ function Reconciler.New(options)
     end
 
     function R.HandleBucketClaim(description)
-        if description.responder == myName() then return false end
+        if isLocalPeer(description.responder) then return false end
         local key = tostring(description.requester) .. ":"
             .. tostring(description.requestId)
         local entry = pendingResponses[key]
@@ -482,6 +488,9 @@ function Reconciler.New(options)
         end
         if bucket and bucket.kind == "B"
             and bucketClaimable(bucket.bucket)
+            and bucket.snapshot.complete == true
+            and type(bucket.snapshot.claimSafeByBucket) == "table"
+            and bucket.snapshot.claimSafeByBucket[bucket.bucket] == true
             and tostring(bucket.hash) == tostring(description.hash) then
             entry.buckets[id] = nil
             log("RX", "mesh bucket %s claimed by %s for %s", id,
@@ -494,6 +503,7 @@ function Reconciler.New(options)
         end
         if bucket and bucket.kind == "D"
             and entry.requestContextSupported == true
+            and bucket.claimSafe == true
             and not localOwnsDpsBucket(bucket.bucket)
             and tostring(bucket.hash) == tostring(description.hash) then
             entry.buckets[id] = nil
@@ -517,7 +527,7 @@ function Reconciler.New(options)
                 ~= tostring(entry.requestId or "") then
             return false
         end
-        if description.responder ~= myName() and entry then
+        if not isLocalPeer(description.responder) and entry then
             pendingLoadouts[key] = nil
             log("RX", "suppressed duplicate loadout response; %s claimed %s",
                 tostring(description.responder), tostring(description.buildId))
@@ -674,7 +684,7 @@ function Reconciler.New(options)
             progressed = true
         end
         if not entry.preparedBuild then
-            local build = catalogGet(entry.buildId)
+            local build, source = catalogGet(entry.buildId)
             if not build or type(build.echoes) ~= "table"
                 or #build.echoes == 0 then
                 return true, false, "loadout unavailable"
@@ -682,7 +692,8 @@ function Reconciler.New(options)
             local responseContext = {requester=entry.requester,
                 requestId=entry.requestId,
                 contextCapable=supportsRequestContext(entry.requestId)}
-            local prepared, why = prepareBuild(build, true, responseContext)
+            local prepared, why = prepareBuild(build, true, responseContext,
+                source)
             if not prepared then return true, false, why end
             entry.preparedBuild = prepared
             entry.preparedRevision = currentBuildHash()
@@ -693,7 +704,14 @@ function Reconciler.New(options)
             contextCapable=supportsRequestContext(entry.requestId)}
         local admitted, why = admitBuild(entry.preparedBuild, true,
             responseContext)
-        if not admitted then return false, progressed, why end
+        if not admitted then
+            if why == "stale prepared build" then
+                entry.preparedBuild = nil
+                entry.preparedRevision = nil
+                return false, true, why
+            end
+            return false, progressed, why
+        end
         local claimed, claimWhy = publishLoadoutClaim(entry)
         if not claimed then
             log("TX", "loadout claim skipped for '%s': %s",

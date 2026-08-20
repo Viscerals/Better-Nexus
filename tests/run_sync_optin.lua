@@ -9,6 +9,7 @@ GetTime = function() return clock end
 time = function() return 50000 end
 local currentName = "Alice"
 UnitName = function() return currentName end
+GetNormalizedRealmName = function() return "Ebonhold" end
 local function Pump(steps) for _=1,steps do clock=clock+0.2; Sync.OnUpdate(0.2) end end
 
 local function EncodeBob(id, title, stamp)
@@ -16,7 +17,7 @@ local function EncodeBob(id, title, stamp)
     H.sentChatMessages = {}
     local prior = currentName; currentName = "Bob"
     Sync.BroadcastBuild({ id=id, title=title, description="d", author="Bob",
-        ownerKey="bob@ebonhold", class="ROGUE",
+        ownerKey="bob@ebonhold", ownerVerified=true, isMine=true, class="ROGUE",
         echoes={{spellId=200100,quality=3,stacks=1}}, postedAt=stamp,lastModified=stamp })
     Pump(100)
     currentName = prior
@@ -30,7 +31,7 @@ Sync.Init(Codec,nil)
 local msgs=EncodeBob("bob-1","Bob's Build",100)
 -- Login-time sync fires within the bounded 8-16 second startup delay above.
 assert(Sync.IsReceiving(),"automatic login sync should open the receive window")
-for _,m in ipairs(msgs) do Sync.HandleIncoming(m.text,"Bob") end
+for _,m in ipairs(msgs) do Sync.HandleIncoming(m.text,"Bob-Ebonhold") end
 assert(NexusDB.communityBuilds and NexusDB.communityBuilds["bob-1"],
     "automatic login sync did not accept current build metadata")
 print("automatic login sync receives current mesh metadata -- OK")
@@ -39,14 +40,14 @@ print("automatic login sync receives current mesh metadata -- OK")
 clock=clock+70
 assert(not Sync.IsReceiving(),"automatic receive window should expire")
 local msgs2=EncodeBob("bob-2","Bob's Second",200)
-for _,m in ipairs(msgs2) do Sync.HandleIncoming(m.text,"Bob") end
+for _,m in ipairs(msgs2) do Sync.HandleIncoming(m.text,"Bob-Ebonhold") end
 assert(NexusDB.communityBuilds["bob-2"],"direct-author data was dropped outside a sync window")
 print("direct-author updates remain accepted after the status window -- OK")
 
 -- Manual Sync Now reopens convergence.
 clock=clock+10
 assert(Sync.RequestSync(),"manual sync should succeed")
-for _,m in ipairs(msgs2) do Sync.HandleIncoming(m.text,"Bob") end
+for _,m in ipairs(msgs2) do Sync.HandleIncoming(m.text,"Bob-Ebonhold") end
 assert(NexusDB.communityBuilds["bob-2"],"manual sync lost existing metadata")
 print("manual sync reconciles already accepted metadata -- OK")
 

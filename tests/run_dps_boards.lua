@@ -12,14 +12,20 @@ DPS.Init({}, {BroadcastBuild=function() return true end})
 local a={{spellId=200001,stacks=2},{spellId=200002,stacks=1}}
 local b={{spellId=200010,stacks=1},{spellId=200011,stacks=3}}
 local fa,fb=DPS.GetEchoKey(a),DPS.GetEchoKey(b)
-assert(DPS.ReceiveRecord({v=4,f=fa,e=a,c="dummy",d=24000000,u=65,t=100,p="Alpha",k="MAGE",l=80}),"dummy A rejected")
-assert(DPS.ReceiveRecord({v=4,f=fb,e=b,c="dummy",d=28000000,u=65,t=101,p="Bravo",k="MAGE",l=80}),"dummy B rejected")
-assert(DPS.ReceiveRecord({v=4,f=fa,e=a,c="lk",d=19000000,u=240,t=102,p="Alpha",k="MAGE",l=80}),"LK A rejected")
-assert(not DPS.ReceiveRecord({v=4,f=fb,e=b,c="dummy",d=23000000,u=65,t=103,p="Alpha",k="MAGE",l=80}),"lower second loadout for the same character accepted")
+assert(DPS.ReceiveRecord({v=4,f=fa,e=a,c="dummy",d=24000000,u=65,t=100,p="Alpha",k="MAGE",l=80,
+    o="alpha@realma",r="realma"}, "Alpha-RealmA"),"dummy A rejected")
+assert(DPS.ReceiveRecord({v=4,f=fb,e=b,c="dummy",d=28000000,u=65,t=101,p="Bravo",k="MAGE",l=80,
+    o="bravo@realmb",r="realmb"}, "Bravo-RealmB"),"dummy B rejected")
+assert(DPS.ReceiveRecord({v=4,f=fa,e=a,c="lk",d=19000000,u=240,t=102,p="Alpha",k="MAGE",l=80,
+    o="alpha@realma",r="realma"}, "Alpha-RealmA"),"LK A rejected")
+assert(not DPS.ReceiveRecord({v=4,f=fb,e=b,c="dummy",d=23000000,u=65,t=103,p="Alpha",k="MAGE",l=80,
+    o="alpha@realma",r="realma"}, "Alpha-RealmA"),"lower second loadout for the same character accepted")
 local dummy=DPS.GetDpsBoard("dummy")
 assert(#dummy==2,"dummy board should contain one row per character")
 assert(dummy[1].player=="Bravo" and dummy[1].dps==28000000,"dummy board not DPS-ranked")
-assert(dummy[1].build and dummy[1].buildId and #dummy[1].echoes==2,"board row lacks copyable exact build")
+assert(dummy[1].build and dummy[1].buildId and #dummy[1].echoes==2
+    and dummy[1].ownerVerified==true and dummy[1].ownerKey=="bravo@realmb",
+    "verified board row lacks its copyable exact build")
 local collisionId=dummy[1].buildId
 local collisionBuild=NexusDB.communityBuilds[collisionId]
 collisionBuild.fingerprint="different-current-content"
@@ -28,10 +34,11 @@ local collisionRow
 for _,candidate in ipairs(DPS.GetDpsBoard("dummy")) do
     if candidate.player=="Bravo" then collisionRow=candidate break end
 end
-assert(collisionRow and collisionRow.buildIdentityMismatch==true
+assert(collisionRow and collisionRow.ownerVerified==true
+    and collisionRow.build==nil and collisionRow.buildId==nil
     and collisionRow.fingerprint==fb and #collisionRow.echoes==2
     and collisionRow.lockedFingerprint=="0",
-    "historical/current build collision did not retain exact row evidence and fail closed")
+    "stale catalog relationship did not retain exact verified row evidence and fail closed")
 local rawBravo
 for _,candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
     if candidate.player=="Bravo" then rawBravo=candidate break end

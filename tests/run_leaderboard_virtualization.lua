@@ -28,9 +28,11 @@ for index=1,150 do
     local build={id=buildId,title=string.format("Ranked Build %03d",index),
         author=player,class=class,fingerprint=fingerprint}
     boards.dummy[index]={player=player,dps=30000000-index*1000,duration=60,level=80,ts=index,
+        ownerKey=player:lower().."@ebonhold",ownerVerified=true,realm="ebonhold",
         category="dummy",fingerprint=fingerprint,buildId=buildId,echoes=echoes,
         lockedEchoes=locked,build=build}
     boards.lk[index]={player=player,dps=28000000-index*1000,duration=90,level=80,ts=index,
+        ownerKey=player:lower().."@ebonhold",ownerVerified=true,realm="ebonhold",
         category="lk",fingerprint=fingerprint,buildId=buildId,echoes=echoes,
         lockedEchoes=locked,build=build}
 end
@@ -113,7 +115,7 @@ assert(ending.last==150 and ending.created<=7
     "scrolling rebuilt data or grew an unbounded row pool")
 
 -- Stable-key selection survives offscreen scrolling and a data revision.
-local selectedKey="player080|string:"..boards.dummy[80].fingerprint
+local selectedKey="player080@ebonhold|string:"..boards.dummy[80].fingerprint
 assert(L.SelectKey(selectedKey),"stable Leaderboard key was not selectable")
 L.ScrollTo((80-1)*40)
 assert(L.VirtualStats().selectedVisible,"selected rank did not show its highlight")

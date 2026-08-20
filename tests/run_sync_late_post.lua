@@ -6,9 +6,12 @@ local Codec, Sync = Nexus.Codec, Nexus.Sync
 local clock = 1000; GetTime = function() return clock end
 local wall = 50000; time = function() return wall end
 UnitName = function() return "explore" end
+GetNormalizedRealmName = function() return "Ebonhold" end
 
 local function deliver(chunks)
-    for _,m in ipairs(chunks) do Sync.HandleIncoming(m.text, "explore") end
+    for _,m in ipairs(chunks) do
+        Sync.HandleIncoming(m.text, "explore-Ebonhold")
+    end
 end
 local function drain()
     for i=1,60 do clock=clock+0.2; Sync.OnUpdate(0.2) end
@@ -17,8 +20,10 @@ local function drain()
 end
 
 local rogueB = {id="r1",title="Rogue ST",author="explore",class="ROGUE",
+    ownerKey="explore@ebonhold",ownerVerified=true,realm="ebonhold",
     echoes={{spellId=200100,quality=3,stacks=1}},postedAt=50000,lastModified=50000,isMine=true}
 local mageB  = {id="m1",title="Fire Mage",author="explore",class="MAGE",
+    ownerKey="explore@ebonhold",ownerVerified=true,realm="ebonhold",
     echoes={{spellId=200044,quality=3,stacks=1}},postedAt=50100,lastModified=50100,isMine=true}
 
 -- 1. Both builds received in a single sync
@@ -81,6 +86,7 @@ print("late direct-author build remains available across the next sync -- OK")
 -- 3. Library hash: peer with same build set gets nothing
 NexusDB = { communityBuilds={
     ["r1"]={id="r1",title="Rogue ST",author="explore",class="ROGUE",
+            ownerKey="explore@ebonhold",ownerVerified=true,realm="ebonhold",
             echoes={{spellId=200100,quality=3,stacks=1}},
             postedAt=50000,lastModified=50000,isMine=true}
 }, syncTombstones={} }

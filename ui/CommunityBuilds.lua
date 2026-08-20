@@ -44,6 +44,20 @@ local function ControllerInstance()
         "Community controller unavailable")
 end
 
+local function ProjectSavedBuild(build)
+    return ControllerInstance().ProjectBuild(build)
+end
+
+local function BindSavedProjectionRelation(projections)
+    projections = projections or (Nexus and Nexus.ViewProjections)
+    if not (projections
+        and type(projections.BindSavedRelationResolver) == "function") then
+        return false
+    end
+    projections.BindSavedRelationResolver(ProjectSavedBuild)
+    return true
+end
+
 local function EnsureCommunityProjection()
     if communityProjection then return communityProjection end
     local internals = Nexus and Nexus.CommunityInternals
@@ -51,9 +65,11 @@ local function EnsureCommunityProjection()
     local projections = Nexus and Nexus.ViewProjections
     if not (factory and type(factory.New) == "function"
         and projections and type(projections.Builds) == "function"
-        and type(projections.BuildsCurrent) == "function") then
+        and type(projections.BuildsCurrent) == "function"
+        and type(projections.BindSavedRelationResolver) == "function") then
         return nil
     end
+    BindSavedProjectionRelation(projections)
     communityProjection = factory.New({
         builds=function(filters)
             local reader = projections.RequestBuilds or projections.Builds
@@ -63,6 +79,15 @@ local function EnsureCommunityProjection()
             return projections.BuildsCurrent(filters)
         end,
         loadBuild=function(id) return ControllerInstance().Build(id) end,
+        recordBuildId=function(build)
+            return ControllerInstance().RecordBuildId(build)
+        end,
+        publishedBuildId=function(build)
+            return ControllerInstance().PublishedBuildId(build)
+        end,
+        savedProjection=function(build)
+            return ControllerInstance().ProjectBuild(build)
+        end,
         revisionSnapshot=function()
             return ControllerInstance().RevisionSnapshot()
         end,
@@ -204,6 +229,9 @@ end
 
 function M.Init(adapter, model)
     ControllerInstance().Initialize(adapter, Nexus.BundledBuilds)
+    -- Bind before the first render so direct startup consumers such as Peer
+    -- Debug and ExplainBuild use the same Saved relationship authority.
+    BindSavedProjectionRelation()
     RendererInstance()
 end
 

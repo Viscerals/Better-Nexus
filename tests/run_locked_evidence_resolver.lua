@@ -123,6 +123,7 @@ Control(resolvedId == build.id and resolvedBy == "fingerprint",
 local function Record(category, locked, overrides)
     local row = {
         player="Fixture",class="MAGE",category=category,
+        ownerKey="fixture@ebonhold",ownerVerified=true,realm="ebonhold",
         dps=category == "dummy" and 410000 or 390000,
         duration=category == "dummy" and 30 or 180,
         level=80,ts=100,protocolVersion=7,
@@ -224,7 +225,7 @@ Nexus.Sync = {
 Nexus.Leaderboard.Init({})
 Nexus.Leaderboard.Show("combined")
 Nexus.Leaderboard.RefreshData()
-local combinedKey = "fixture|string:" .. build.fingerprint
+local combinedKey = "fixture@ebonhold|string:" .. build.fingerprint
 Control(Nexus.Leaderboard.SelectKey(combinedKey),
     "real combined Leaderboard row was not selectable")
 local leaderboardDetail = assert(NexusLeaderboardFrame._leaderboardDetail,

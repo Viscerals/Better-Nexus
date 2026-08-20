@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           mapfile -t tests < <(find tests -maxdepth 1 -type f -name 'run_*.lua' ! -name 'run_legacy_backup_smoke.lua' | sort)
-          test "${#tests[@]}" -eq 209
+          test "${#tests[@]}" -eq 212
           for test_file in "${tests[@]}"; do
             echo "::group::${test_file}"
             luajit "${test_file}"

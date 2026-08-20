@@ -20,12 +20,14 @@ Nexus.BundledBuilds = bundled
 NexusDB = {
     communityBuilds={
         collision={id="collision",title="My personal override",author="Boganic",
-            ownerKey="boganic@ebonhold",isMine=true,postedAt=1,lastModified=1,
+            ownerKey="boganic@ebonhold",realm="ebonhold",
+            ownerVerified=true,isMine=true,postedAt=1,lastModified=1,
             echoes={{spellId=200100,stacks=2}}},
         remote={id="remote",title="Newer remote overlay",author="Alice",
             postedAt=20,lastModified=20,echoes={{spellId=200101,stacks=2}}},
         personal={id="personal",title="Personal only",author="Boganic",
-            ownerKey="boganic@ebonhold",isMine=true,postedAt=5,lastModified=5,
+            ownerKey="boganic@ebonhold",realm="ebonhold",
+            ownerVerified=true,isMine=true,postedAt=5,lastModified=5,
             echoes={{spellId=200102,stacks=1}}},
     },
     syncTombstones={},
@@ -68,7 +70,8 @@ assert(bundled.builds.collision.title == immutableTitle,
     "catalog-backed delete mutated bundled data")
 
 local created = {id="created",title="Created locally",author="Boganic",
-    ownerKey="boganic@ebonhold",isMine=true,postedAt=30,lastModified=30,
+    ownerKey="boganic@ebonhold",realm="ebonhold",ownerVerified=true,
+    isMine=true,postedAt=30,lastModified=30,
     echoes={{spellId=200103,stacks=1}}}
 assert(Catalog.Put(created) and NexusDB.communityBuilds.created,
     "catalog-backed create did not enter the overlay")

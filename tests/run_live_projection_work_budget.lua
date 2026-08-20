@@ -28,6 +28,9 @@ for index = 1, 1000 do
         author=index % 10 == 0 and "LiveBudgetMage" or "Peer",
         ownerKey=index % 10 == 0
             and "livebudgetmage@ebonhold" or "peer@ebonhold",
+        ownerVerified=index % 10 == 0 and true or nil,
+        realm=index % 10 == 0 and "ebonhold" or nil,
+        isMine=index % 10 == 0,
         class=index % 5 == 0 and "WARRIOR" or "MAGE",
         postedAt=index,lastModified=index,fingerprint=fingerprint,
         echoes={{spellId=720000+index,quality=3,stacks=1}},
@@ -38,6 +41,7 @@ for index = 1, 1000 do
                 [category .. "@" .. index] = {
                 player=string.format("Player%03d", index),
                 ownerKey=string.format("player%03d@ebonhold", index),
+                ownerVerified=true,realm="ebonhold",
                 dps=(category == "dummy" and 30000000 or 28000000)-index,
                 level=80,ts=index,duration=60,class="MAGE",
                 buildId=id,fingerprint=fingerprint,
@@ -106,6 +110,10 @@ local function PublicationSnapshot()
             + (tonumber(leaderboard.dataRefreshes) or 0),
         binds=(tonumber(community.dataBinds) or 0)
             + (tonumber(leaderboard.dataBinds) or 0),
+        communityPublications=tonumber(community.dataRefreshes) or 0,
+        leaderboardPublications=tonumber(leaderboard.dataRefreshes) or 0,
+        communityBinds=tonumber(community.dataBinds) or 0,
+        leaderboardBinds=tonumber(leaderboard.dataBinds) or 0,
     }
 end
 local phaseBefore, phaseClock
@@ -325,7 +333,12 @@ end
 local afterQuiet = PublicationSnapshot()
 assert(afterQuiet.publications == beforeReceive.publications + 2
     and afterQuiet.binds == beforeReceive.binds + 2,
-    "post-Sync quiet window did not publish Community and Leaderboard exactly once each")
+    string.format(
+        "post-Sync quiet window did not publish Community and Leaderboard exactly once each (total publications %d->%d, binds %d->%d; Community %d/%d, Leaderboard %d/%d)",
+        beforeReceive.publications, afterQuiet.publications,
+        beforeReceive.binds, afterQuiet.binds,
+        afterQuiet.communityPublications, afterQuiet.communityBinds,
+        afterQuiet.leaderboardPublications, afterQuiet.leaderboardBinds))
 
 -- Hidden dirty work must remain cheap until the view is shown again.
 C.Hide(); L.Hide()

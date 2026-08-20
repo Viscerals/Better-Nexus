@@ -50,14 +50,14 @@ local record = {
     c="dummy",d=250000,u=60,t=40000,p="OriginPeer",l=80,k="MAGE",
     o="originpeer@fixturerealm",r="fixturerealm",
 }
-assert(DPS.ReceiveRecord(record, "OriginPeer"),
+assert(DPS.ReceiveRecord(record, "OriginPeer-FixtureRealm"),
     "origin fixture did not accept its direct-owner DPS record")
 local originHash = DPS.GetSyncHash()
 local outboundRecord = {
     protocolVersion=7,fingerprint=record.f,loadoutHash=record.h,
     echoes=echoes,category="dummy",dps=record.d,duration=record.u,
     ts=record.t,player=record.p,level=record.l,class=record.k,
-    ownerKey=record.o,realm=record.r,
+    ownerKey=record.o,realm=record.r,ownerVerified=true,
 }
 
 -- First prove the established direct-owner path end to end: creation,
@@ -95,7 +95,7 @@ assert(Sync.RequestSync(), "direct viewer receive window did not start")
 clock = clock + 1.1
 Sync.OnUpdate(1.1)
 for _, message in ipairs(directMessages) do
-    Sync.HandleIncoming(message.text, "OriginPeer")
+    Sync.HandleIncoming(message.text, "OriginPeer-FixtureRealm")
 end
 local directRows = DPS.GetDpsBoard("dummy")
 assert(directRows[1] and directRows[1].player == "OriginPeer",
@@ -163,7 +163,7 @@ Sync, DPS = Boot("RelayPeer", relayDb)
 assert(#DPS.GetDpsBoard("dummy") == 1,
     "relay reboot lost its accepted DPS row before reconciliation")
 for _, message in ipairs(requestMessages) do
-    Sync.HandleIncoming(message.text, "ViewerPeer")
+    Sync.HandleIncoming(message.text, "ViewerPeer-FixtureRealm")
 end
 Pump(Sync, 100)
 local responseMessages, dpsChunks = H.sentChatMessages, 0

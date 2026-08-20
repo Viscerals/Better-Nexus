@@ -225,14 +225,15 @@ function Inbound.New(options)
 
     function I.RequestCounts(requester, requestId)
         local builds, dps = 0, 0
+        local requesterKey = normalizePeerName(requester)
         for _, entry in pairs(buildInflight) do
             local context = entry.context
-            if context and context.requester == requester
+            if context and normalizePeerName(context.requester) == requesterKey
                 and context.requestId == requestId then builds = builds + 1 end
         end
         for _, entry in pairs(dpsInflight) do
             local context = entry.context
-            if context and context.requester == requester
+            if context and normalizePeerName(context.requester) == requesterKey
                 and context.requestId == requestId then dps = dps + 1 end
         end
         return {builds=builds,dps=dps,total=builds + dps}

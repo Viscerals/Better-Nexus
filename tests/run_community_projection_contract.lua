@@ -38,6 +38,8 @@ local function AddBuild(index, class, options)
         description=options.description or "",
         author=options.author or "Peer",
         ownerKey=options.ownerKey or "peer@ebonhold",
+        ownerVerified=options.ownerVerified,
+        realm=options.realm,
         class=class,
         postedAt=options.postedAt or index,
         lastModified=options.lastModified or index,
@@ -71,6 +73,8 @@ for index = 1, 40 do
         isMine=index <= 25,
         author=index <= 25 and "ContractMage" or "Peer",
         ownerKey=index <= 25 and "contractmage@ebonhold" or "peer@ebonhold",
+        ownerVerified=index <= 25 and true or nil,
+        realm=index <= 25 and "ebonhold" or nil,
     })
     AddDps("dummy", build, 100000 + index * 100, "Dummy" .. index)
     AddDps("lk", build, 200000 + index * 200, "Lk" .. index)

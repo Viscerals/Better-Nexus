@@ -30,6 +30,7 @@ local clock = 1000
 GetTime = function() return clock end
 time = function() return 50000 end
 UnitName = function() return "Alice" end
+GetNormalizedRealmName = function() return "Ebonhold" end
 
 NexusDB = {}
 H.playerLevel = 5
@@ -67,7 +68,7 @@ NexusDB.communityBuilds = nil
 Sync.ClearLog()
 clock = clock + 3600   -- ensure any window is closed
 for _, m in ipairs(msgs) do
-    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice", "Common",
+    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice-Ebonhold", "Common",
         "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
 end
 assert(NexusDB.communityBuilds and NexusDB.communityBuilds[id],
@@ -85,7 +86,7 @@ clock = clock + 1.1
 Sync.OnUpdate(1.1)
 assert(LogHas("requested sync"), "the sync request itself was not logged")
 for _, m in ipairs(msgs) do
-    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice", "Common",
+    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice-Ebonhold", "Common",
         "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
 end
 assert(LogHas("STORED"), "a successful store was not logged")
@@ -96,7 +97,7 @@ Sync.ClearLog()
 clock = clock + 10
 Sync.RequestSync()
 for _, m in ipairs(msgs) do
-    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice", "Common",
+    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice-Ebonhold", "Common",
         "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
 end
 assert(LogHas("DUPLICATE") or LogHas("duplicate"),

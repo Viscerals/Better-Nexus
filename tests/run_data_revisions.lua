@@ -149,7 +149,7 @@ local enriched = {}
 for key, value in pairs(record) do enriched[key] = value end
 enriched.o, enriched.r = "peer@ebonhold", "ebonhold"
 enriched.lk = {{spellId=200999,stacks=1}}
-assert(DPS.ReceiveRecord(enriched, "Peer")
+assert(DPS.ReceiveRecord(enriched, "Peer-Ebonhold")
     and R.Get(R.DPS_CHANGED) == 2,
     "same-record metadata enrichment did not advance once")
 local enrichedRows = DPS.GetLeaderboardForIdentity(
@@ -159,7 +159,7 @@ assert(enrichedRows[1] and enrichedRows[1].dps == 25000
     and enrichedStats.rebuilds == repeatedStats.rebuilds + 1
     and enrichedStats.rowsScanned == repeatedStats.rowsScanned + 1,
     "DPS identity index did not invalidate exactly once after a revision")
-assert(not DPS.ReceiveRecord(enriched, "Peer")
+assert(not DPS.ReceiveRecord(enriched, "Peer-Ebonhold")
     and R.Get(R.DPS_CHANGED) == 2,
     "duplicate enriched DPS record advanced the revision")
 local rejected = {}

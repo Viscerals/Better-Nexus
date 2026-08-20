@@ -37,6 +37,7 @@ local function Pump(steps)
 end
 time = function() return 50000 end
 UnitName = function() return "Boganicc" end   -- realistic long-ish name
+GetNormalizedRealmName = function() return "Ebonhold" end
 
 NexusDB = {}
 H.playerLevel = 5
@@ -60,7 +61,8 @@ local bigBuild = {
     id = "mine-1784886552-123456",       -- realistic generated id length
     title = "Full Endgame Rogue Wishlist",
     description = string.rep("This is a long description explaining the build. ", 6),
-    author = "Boganicc", class = "ROGUE",
+    author = "Boganicc", ownerKey = "boganicc@ebonhold", ownerVerified = true,
+    isMine = true, class = "ROGUE",
     echoes = bigEchoes, postedAt = 1784886552, lastModified = 1784886552,
 }
 
@@ -92,7 +94,7 @@ clock = clock + 1
 -- Deliver exactly as 3.3.5 does: arg4 = "5. wrbuildssync" (numbered),
 -- arg9 = "wrbuildssync" (bare).
 for _, m in ipairs(msgs) do
-    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Boganicc", "Common",
+    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Boganicc-Ebonhold", "Common",
         "5. " .. Sync.ChannelName(),      -- arg4, numbered
         nil, nil, nil, 5,                  -- arg5..arg8
         Sync.ChannelName())                -- arg9, bare
@@ -125,7 +127,7 @@ local msgs2 = RegenMessages(1784886999)
 clock = clock + 10
 Sync.RequestSync()
 for _, m in ipairs(msgs2) do
-    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Boganicc", "Common",
+    H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Boganicc-Ebonhold", "Common",
         "12. " .. Sync.ChannelName())      -- arg4 only, no arg9
 end
 assert(NexusDB.communityBuilds

@@ -74,7 +74,8 @@ assert(stateReceipts == 1 and statePayloads == 0,
     "matching release did not produce one payload-free state receipt")
 
 local changed = {id="overlay-change",title="Overlay Change",author="Alice",
-    ownerKey="alice@ebonhold",class="MAGE",description="Changed",
+    ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",
+    class="MAGE",description="Changed",
     postedAt=30,lastModified=30,isMine=true,
     echoes={{spellId=200103,quality=3,stacks=1}}}
 assert(Catalog.Put(changed))
@@ -161,7 +162,9 @@ Sync.Init(Nexus.Codec,{})
 Pump(100)
 H.sentChatMessages = {}
 local beforeDeleteHash, beforeDeleteDps = Sync.GetCompatibilityHashes()
-assert(Catalog.SetTombstone("baseline-b", {stamp=40,author="Alice"}))
+assert(Catalog.SetTombstone("baseline-b", {
+    stamp=40,author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,
+}))
 assert(Sync.HandleIncoming("WLRQ|DeletePeer|" .. beforeDeleteHash .. "|"
     .. beforeDeleteDps .. "|one-delete", "DeletePeer"))
 Pump(100)

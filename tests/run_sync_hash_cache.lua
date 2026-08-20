@@ -137,10 +137,12 @@ local enriched = {}
 for key, value in pairs(record) do enriched[key] = value end
 enriched.o, enriched.r = "peer@ebonhold", "ebonhold"
 enriched.lk = {{spellId=200999,stacks=1}}
-assert(DPS.ReceiveRecord(enriched, "Peer"))
+assert(DPS.ReceiveRecord(enriched, "Peer-Ebonhold"))
 local enrichedDps = DPS.GetSyncHash()
-assert(enrichedDps ~= changedDps
-    and enrichedDps == DPS.GetSyncHashUncached())
+local enrichedUncached = DPS.GetSyncHashUncached()
+assert(enrichedDps ~= changedDps and enrichedDps == enrichedUncached,
+    string.format("identity enrichment hash mismatch: before=%s cached=%s uncached=%s",
+        tostring(changedDps), tostring(enrichedDps), tostring(enrichedUncached)))
 local afterMetadata = DPS.HashCacheStats()
 assert(afterMetadata.targetedInvalidations
         == afterDuplicate.targetedInvalidations + 1

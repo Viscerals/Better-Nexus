@@ -20,6 +20,7 @@ GetTime = function() return clock end
 local wallclock = 50000
 time = function() return wallclock end
 UnitName = function() return "Alice" end
+GetNormalizedRealmName = function() return "Ebonhold" end
 
 NexusDB = {}
 H.wishlist = { name = "MyBuild", class = "MAGE", echoes = {
@@ -82,9 +83,9 @@ NexusDB = {}
 Sync.Init(Codec, Adapter)   -- fresh peer state
 clock = clock + 10
 Sync.RequestSync()
-for _, m in ipairs(postMsgs) do Sync.HandleIncoming(m.text, "Alice") end
-for _, m in ipairs(editMsgs) do Sync.HandleIncoming(m.text, "Alice") end
-for _, m in ipairs(updMsgs) do Sync.HandleIncoming(m.text, "Alice") end
+for _, m in ipairs(postMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") end
+for _, m in ipairs(editMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") end
+for _, m in ipairs(updMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") end
 
 local peerCopy = NexusDB.communityBuilds[id]
 assert(peerCopy, "peer never received the build at all")
@@ -103,7 +104,8 @@ print("every successive edit propagates to peers, in place, with no duplicates -
 NexusDB.communityBuilds["theirs"] = { id = "theirs", title = "Theirs",
     description = "d", author = "Bob", class = "ROGUE",
     echoes = { { spellId = 1, quality = 0, stacks = 1 } },
-    postedAt = 1, lastModified = 1, isMine = false }
+    postedAt = 1, lastModified = 1, ownerKey = "bob@ebonhold",
+    ownerVerified = true, isMine = false }
 local okE, errE = CB.EditBuild("theirs", "Hijacked", "nope")
 assert(not okE, "editing someone else's build must be refused")
 local okU, errU = CB.UpdateFromWishlist("theirs")

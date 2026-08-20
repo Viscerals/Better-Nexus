@@ -110,8 +110,9 @@ local alice = {
 Sync.HandleIncoming(BuildPacket("Mallory", alice, 10), "Mallory")
 local relayed = NexusDB.communityBuilds[alice.id]
 assert(relayed and relayed.ownerVerified == false and relayed.ownerKey == nil
+    and relayed.claimedOwnerKey == "alice@ebonhold"
     and not relayed.isMine, "relay gained build-owner authority")
-Sync.HandleIncoming(BuildPacket("Alice", alice, 10), "Alice")
+Sync.HandleIncoming(BuildPacket("Alice", alice, 10), "Alice-Ebonhold")
 local verified = NexusDB.communityBuilds[alice.id]
 assert(verified and verified.ownerVerified == true
     and verified.ownerKey == "alice@ebonhold",
@@ -129,7 +130,7 @@ assert(NexusDB.communityBuilds[alice.id], "spoofed tombstone deleted a build")
 Sync.HandleIncoming("WLRD|Mallory|unknown|100|Mallory", "Mallory")
 assert(NexusDB.syncTombstones.unknown == nil,
     "unknown tombstone gained persistent authority")
-Sync.HandleIncoming("WLRD|Alice|alice-build|101|Alice", "Alice")
+Sync.HandleIncoming("WLRD|Alice|alice-build|101|Alice", "Alice-Ebonhold")
 assert(NexusDB.communityBuilds[alice.id] == nil,
     "actual owner could not delete the build")
 
@@ -149,7 +150,7 @@ local record = {
     k="MAGE", o="alice@ebonhold", r="ebonhold",
 }
 local dpsData = Codec.Base64Encode(Codec.JSONEncode(record))
-local function DeliverDps(sender, transferId, encoded)
+local function DeliverDps(sender, transferId, encoded, transportSender)
     local chunkSize = 160
     local total = math.ceil(#encoded / chunkSize)
     for i = 1, total do
@@ -157,13 +158,13 @@ local function DeliverDps(sender, transferId, encoded)
         local packet = "WLD2|" .. sender .. "|" .. transferId .. "|"
             .. i .. "/" .. total .. "|" .. chunk
         assert(#packet <= 255, "DPS test fixture exceeded the real wire limit")
-        Sync.HandleIncoming(packet, sender)
+        Sync.HandleIncoming(packet, transportSender or sender)
     end
 end
 DeliverDps("Mallory", "spoof", dpsData)
 assert(#DPS.GetDpsBoard("dummy") == 0,
     "DPS player spoof entered the verified board")
-DeliverDps("Alice", "valid", dpsData)
+DeliverDps("Alice", "valid", dpsData, "Alice-Ebonhold")
 assert(#DPS.GetDpsBoard("dummy") == 1,
     "valid owner-bound DPS record was rejected")
 Sync.HandleIncoming("WLDS|Mallory|x|Mallory|999999999999|80|dummy",
@@ -186,7 +187,8 @@ local Builds = Nexus.CommunityBuilds
 local originalEchoes = {{spellId=200300, quality=2, stacks=1}}
 NexusDB.communityBuilds = {
     mine={id="mine", title="Original", description="Original description",
-        author="Boganic", ownerKey="boganic@ebonhold", class="MAGE",
+        author="Boganic", ownerKey="boganic@ebonhold",
+        ownerVerified=true,realm="ebonhold",class="MAGE",
         echoes=originalEchoes, postedAt=10, lastModified=10, isMine=true,
         fingerprint="stale", fingerprintHash="stale", echoCount=99},
 }

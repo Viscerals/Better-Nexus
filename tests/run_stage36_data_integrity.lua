@@ -112,12 +112,17 @@ local function Encode(value)
     return Codec.Base64Encode(Codec.JSONEncode(value))
 end
 
+local function ActualSender(sender)
+    return tostring(sender):find("-", 1, true)
+        and sender or (tostring(sender) .. "-Ebonhold")
+end
+
 local function DeliverSummary(sender, payload, context)
     local wire = "WLBI|" .. sender .. "|" .. Encode(payload)
     if context then
         wire = wire .. "|" .. context.requester .. "|" .. context.requestId
     end
-    return Sync.HandleIncoming(wire, sender)
+    return Sync.HandleIncoming(wire, ActualSender(sender))
 end
 
 local function DeliverBuild(sender, payload, context)
@@ -133,7 +138,7 @@ local function DeliverBuild(sender, payload, context)
             wire = wire .. "|" .. context.requester .. "|" .. context.requestId
         end
         Control(#wire <= 255, "build fixture remains inside the real wire cap")
-        result = Sync.HandleIncoming(wire, sender) or result
+        result = Sync.HandleIncoming(wire, ActualSender(sender)) or result
     end
     return result
 end
@@ -152,7 +157,7 @@ local function DeliverDps(sender, transferId, record, context)
                 .. context.requestId .. "|" .. tostring(context.bucket)
         end
         Control(#wire <= 255, "DPS fixture remains inside the real wire cap")
-        result = Sync.HandleIncoming(wire, sender) or result
+        result = Sync.HandleIncoming(wire, ActualSender(sender)) or result
     end
     return result
 end
@@ -165,7 +170,7 @@ local function BuildRecord(id, echoes, stamp)
     return {
         id=id,title="Replacement " .. id,author="Owner",class="MAGE",
         lastModified=stamp or 1,postedAt=stamp or 1,echoes=echoes,
-        ownerVerified=true,
+        ownerKey="owner@ebonhold",realm="Ebonhold",ownerVerified=true,
     }
 end
 
@@ -473,7 +478,8 @@ local futureDb = {
     buildCatalog={schemaVersion=99,catalogVersion="future",futureMeta={7,8,9}},
     communityBuilds={
         ["future-existing"]={id="future-existing",title="Future Existing",
-            author="FuturePeer",class="MAGE",lastModified=5,postedAt=5,
+            author="FuturePeer",ownerKey="futurepeer@ebonhold",
+            class="MAGE",lastModified=5,postedAt=5,
             echoes={{spellId=620001,quality=3,stacks=1}},
             ownerVerified=true,futureRow={opaque="keep"}},
         ["future-mine"]={id="future-mine",title="Future Mine",
@@ -518,7 +524,7 @@ local beforeRequestNew = Sync.Stats().requestNew
 local beforeStorageRejected = Sync.Stats().storageRejected
 local beforeMalformedRejected = Sync.Stats().malformedRejected
 local summaryHandled = DeliverSummary("FuturePeer", futureSummary,
-    {requester="Viewer",requestId=futureRequestId})
+    {requester="Viewer-Ebonhold",requestId=futureRequestId})
 local summaryStats = Sync.Stats()
 Desired("storage", summaryHandled == false
         and Catalog.Get(futureSummary.id) == nil,
@@ -611,8 +617,8 @@ beforeStorageRejected = Sync.Stats().storageRejected
 beforeMalformedRejected = Sync.Stats().malformedRejected
 local inboundDelete = Sync.HandleIncoming(table.concat({
     "WLRD","FuturePeer","future-existing","7","FuturePeer",
-    "Viewer",futureRequestId,
-}, "|"), "FuturePeer")
+    "Viewer-Ebonhold",futureRequestId,
+}, "|"), "FuturePeer-Ebonhold")
 Desired("storage", inboundDelete == false
         and Catalog.Get("future-existing") ~= nil
         and Sync.Stats().storageRejected == beforeStorageRejected + 1
@@ -649,7 +655,7 @@ local directRejectedBefore = syncBeforeDps.dpsDirectRejected
 local directStorageBefore = syncBeforeDps.storageRejected
 local directStored = DeliverDps(directPlayer,"future-dps-direct",
     FutureDpsRecord(directPlayer,620100,260000,50001),
-    {requester="Viewer",requestId=futureRequestId,bucket=directBucket})
+    {requester="Viewer-Ebonhold",requestId=futureRequestId,bucket=directBucket})
 local directStats = Sync.Stats()
 Desired("storage", directStored == false
         and directStats.dpsDirectAccepted == directAcceptedBefore
@@ -661,7 +667,7 @@ Desired("storage", directStored == false
     "future-schema direct DPS ingress reported transient storage as accepted")
 
 local relayPlayer = "FutureDpsRelay"
-local relayContext = {requester="Viewer",requestId=futureRequestId,
+local relayContext = {requester="Viewer-Ebonhold",requestId=futureRequestId,
     bucket=DPS.SyncBucket("dummy", relayPlayer)}
 syncBeforeDps = Sync.Stats()
 local relayAcceptedBefore = syncBeforeDps.dpsRelayAccepted
@@ -998,43 +1004,45 @@ local dpsFingerprint = DPS.GetEchoKey(dpsEchoes)
 local dpsHash = DPS.GetEchoHash(dpsEchoes)
 local function DpsRecord(player, score, stamp)
     return {v=7,f=dpsFingerprint,h=dpsHash,e=dpsEchoes,c="dummy",
-        d=score,u=30,t=stamp,p=player,l=80,k="MAGE"}
+        d=score,u=30,t=stamp,p=player,l=80,k="MAGE",
+        o=player:lower() .. "@ebonhold",r="ebonhold"}
 end
 Control(DPS.ReceiveRelayedRecord(
-        DpsRecord("DpsOrigin",250000,100),"RelayOne") == true,
+        DpsRecord("DpsOrigin",250000,100),"RelayOne-Ebonhold") == true,
     "first DPS relay fills an empty unverified slot")
 local firstRelayedDps = DPS.GetCharacterBest("dummy", "DpsOrigin")
 Control(firstRelayedDps and firstRelayedDps.ownerVerified == false
-        and firstRelayedDps.relaySender == "RelayOne",
+        and firstRelayedDps.relaySender == "RelayOne-Ebonhold",
     "first DPS relay retains non-owner provenance")
 local relayConflictEchoes = {{spellId=650101,quality=3,stacks=2}}
 local relayConflictRecord = {
     v=7,f=DPS.GetEchoKey(relayConflictEchoes),
     h=DPS.GetEchoHash(relayConflictEchoes),e=relayConflictEchoes,
     c="dummy",d=300000,u=30,t=101,p="DpsOrigin",l=80,k="MAGE",
+    o="dpsorigin@ebonhold",r="ebonhold",
 }
 local evidenceBeforeSecondRelay = Codec.JSONEncode(Evidence.Snapshot())
 local rootBeforeSecondRelay = Codec.JSONEncode(provenanceDb)
 local secondRelayAccepted = DPS.ReceiveRelayedRecord(
-    relayConflictRecord,"RelayTwo")
+    relayConflictRecord,"RelayTwo-Ebonhold")
 local afterSecondRelay = DPS.GetCharacterBest("dummy", "DpsOrigin")
 Desired("provenance", secondRelayAccepted == false
         and afterSecondRelay and afterSecondRelay.dps == 250000
-        and afterSecondRelay.relaySender == "RelayOne"
+        and afterSecondRelay.relaySender == "RelayOne-Ebonhold"
         and afterSecondRelay.ownerVerified == false
         and Codec.JSONEncode(Evidence.Snapshot()) == evidenceBeforeSecondRelay
         and Codec.JSONEncode(provenanceDb) == rootBeforeSecondRelay,
     "second DPS relay overwrote provenance or interned rejected evidence")
 
 Control(DPS.ReceiveRecord(
-        DpsRecord("DpsOrigin",350000,102),"DpsOrigin") == true,
+        DpsRecord("DpsOrigin",350000,102),"DpsOrigin-Ebonhold") == true,
     "direct DPS owner supersedes unverified relay provenance")
 local directDps = DPS.GetCharacterBest("dummy", "DpsOrigin")
 Control(directDps and directDps.ownerVerified == true
         and directDps.relaySender == nil and directDps.dps == 350000,
     "direct DPS owner retained verified authority")
 Control(DPS.ReceiveRelayedRecord(
-        DpsRecord("DpsOrigin",400000,103),"RelayThree") == false
+        DpsRecord("DpsOrigin",400000,103),"RelayThree-Ebonhold") == false
         and DPS.GetCharacterBest("dummy", "DpsOrigin").dps == 350000,
     "DPS relay cannot overwrite direct-owner authority")
 
@@ -1046,11 +1054,11 @@ Control(DPS.ReceiveRecord(
         and DPS.ReceiveRecord(
             DpsRecord("LegacyLocal",220000,111)) == true
         and DPS.ReceiveRelayedRecord(
-            DpsRecord("LegacyLocal",225000,112),"RelayFour") == false
+            DpsRecord("LegacyLocal",225000,112),"RelayFour-Ebonhold") == false
         and DPS.GetCharacterBest("dummy", "LegacyLocal").dps == 220000,
     "nil-sender replacement remains unverified and relay-contained")
 Control(DPS.ReceiveRecord(
-        DpsRecord("LegacyLocal",230000,113),"LegacyLocal") == true
+        DpsRecord("LegacyLocal",230000,113),"LegacyLocal-Ebonhold") == true
         and DPS.ReceiveRecord(
             DpsRecord("LegacyLocal",240000,114)) == false
         and DPS.GetCharacterBest("dummy", "LegacyLocal").dps == 230000
@@ -1098,6 +1106,9 @@ local relayCommunityState = relayCommunityId
     and Catalog.SyncState(relayCommunityId) or nil
 Desired("provenance", relayCommunity
         and relayCommunity.ownerVerified == false
+        and relayCommunity.ownerKey == nil
+        and relayCommunity.claimedOwnerKey == "communityorigin@ebonhold"
+        and relayCommunity.isMine ~= true
         and relayCommunity.relaySender == "RelayOne"
         and #communityBroadcasts == 0
         and relayCommunityState and relayCommunityState.delta == nil,
@@ -1116,8 +1127,10 @@ local afterCommunityCollision = relayCommunityId
 Desired("provenance", afterCommunityCollision
         and collisionCommunityId ~= relayCommunityId
         and afterCommunityCollision.author == "CommunityOrigin"
-        and afterCommunityCollision.ownerKey == "communityorigin@ebonhold"
+        and afterCommunityCollision.ownerKey == nil
+        and afterCommunityCollision.claimedOwnerKey == "communityorigin@ebonhold"
         and afterCommunityCollision.ownerVerified == false
+        and afterCommunityCollision.isMine ~= true
         and afterCommunityCollision.relaySender == "RelayOne"
         and Catalog.SyncState(relayCommunityId).delta == nil,
     "cross-author exact Community collision promoted relayed provenance")
@@ -1137,7 +1150,9 @@ local promotedCommunityState = promotedCommunityId
     and Catalog.SyncState(promotedCommunityId) or nil
 Desired("provenance", promotedCommunityId == relayCommunityId
         and promotedCommunity and promotedCommunity.ownerVerified == true
+        and promotedCommunity.claimedOwnerKey == nil
         and promotedCommunity.relaySender == nil
+        and promotedCommunity.isMine ~= true
         and promotedCommunity.author == "CommunityOrigin"
         and promotedCommunity.ownerKey == "communityorigin@ebonhold"
         and promotedCommunityState and promotedCommunityState.delta ~= nil
@@ -1292,14 +1307,15 @@ Control(DPS.ReceiveRecord({
         v=7,f=claimantFingerprint,h=DPS.GetEchoHash(claimantEchoes),
         e=claimantEchoes,c="dummy",d=275000,u=30,t=51001,
         p="DpsClaimant",l=80,k="MAGE",b=victimId,
-    }, "DpsClaimant") == true,
+        o="dpsclaimant@ebonhold",r="ebonhold",
+    }, "DpsClaimant-Ebonhold") == true,
     "verified ownerless direct DPS fixture reached normal storage")
 local claimantRow = DPS.GetCharacterBest("dummy", "DpsClaimant")
 local claimantBuild = claimantRow and claimantRow.buildId
     and Catalog.Get(claimantRow.buildId) or nil
 local victimAfterClaim = Catalog.Get(victimId)
 Desired("provenance", claimantRow and claimantRow.ownerVerified == true
-        and claimantRow.ownerKey == nil
+        and claimantRow.ownerKey == "dpsclaimant@ebonhold"
         and claimantRow.buildId ~= nil and claimantRow.buildId ~= victimId
         and claimantRow.buildId:find("^dps%-") ~= nil
         and claimantBuild and claimantBuild.author == "DpsClaimant"

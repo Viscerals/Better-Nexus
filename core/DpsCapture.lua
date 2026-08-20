@@ -111,6 +111,10 @@ local function NormalizeClass(class)
 end
 
 local Adapter, Sync
+-- Response cursors may be retained by Sync across module reinitialization.
+-- A monotonic binding generation prevents a same-digest/same-revision profile
+-- replacement from replaying candidates captured from the previous store.
+local responseGeneration = 0
 local inCombat         = false
 local sessionStart     = 0
 local latestDps        = 0
@@ -299,10 +303,7 @@ local function SameLocalCharacter(row, localName)
     if type(row) ~= "table" then return false end
     localName = localName or ((UnitName and UnitName("player")) or "?")
     local localKey = CurrentCharacterKey(localName)
-    local rowKey = Identity.CanonicalOwnerKey(row.ownerKey)
-    return row.ownerVerified == true and localKey ~= "invalid"
-        and rowKey ~= nil and not rowKey:match("@unknown$")
-        and rowKey == localKey
+    return localKey ~= "invalid" and DPS.VerifiedOwnerKey(row) == localKey
 end
 
 -- Repair legacy class metadata only for the exact character currently logged
@@ -324,16 +325,11 @@ local function RepairCurrentCharacterClass()
 
     for _, category in ipairs({ "dummy", "lk" }) do
         for _, row in pairs(character[category] or {}) do
-            local rowOwner = row
-                and Identity.CanonicalOwnerKey(row.ownerKey) or nil
-            if row and row.ownerVerified == true and rowOwner == localOwner then
+            if row and DPS.VerifiedOwnerKey(row) == localOwner then
                 if row.class ~= class then row.class = class; changed = true end
                 local prow = row.fingerprint and personal[row.fingerprint]
                     and personal[row.fingerprint][category]
-                local personalOwner = prow
-                    and Identity.CanonicalOwnerKey(prow.ownerKey) or nil
-                if prow and prow.ownerVerified == true
-                    and personalOwner == localOwner then
+                if prow and DPS.VerifiedOwnerKey(prow) == localOwner then
                     if prow.class ~= class then prow.class = class; changed = true end
                     if not prow.realm then
                         prow.realm = realm
@@ -343,9 +339,7 @@ local function RepairCurrentCharacterClass()
 
                 local build = row.buildId and builds[row.buildId]
                 if build and build.autoDps then
-                    local buildOwner = Identity.CanonicalOwnerKey(build.ownerKey)
-                    if build.ownerVerified == true
-                        and buildOwner == localOwner then
+                    if Identity.VerifiedOwnerKey(build) == localOwner then
                         local buildChanged = false
                         if build.class ~= class then build.class = class; buildChanged = true end
                         local title = tostring(build.title or "")
@@ -786,6 +780,28 @@ local function BuildKey(buildId)
     local key = build.fingerprint or EchoKey(BuildSnapshot(build))
     if not key and build.fingerprintHash then key = "@"..tostring(build.fingerprintHash) end
     return key, build
+end
+
+local function RelationshipFingerprint(record)
+    if type(record) ~= "table" then return nil end
+    return record.fingerprint or EchoKey(BuildSnapshot(record))
+end
+
+local function VerifiedBuildRelation(row, buildId)
+    local ownerKey = DPS.VerifiedOwnerKey(row)
+    local build = buildId and CatalogGet(buildId) or nil
+    if not ownerKey or type(build) ~= "table"
+        or Identity.SavedMirrorKind(build) ~= "ordinary"
+        or Identity.VerifiedOwnerKey(build) ~= ownerKey then
+        return nil, nil
+    end
+    local rowFingerprint = RelationshipFingerprint(row)
+    local buildFingerprint = RelationshipFingerprint(build)
+    if rowFingerprint and buildFingerprint
+        and tostring(rowFingerprint) ~= tostring(buildFingerprint) then
+        return nil, nil
+    end
+    return buildId, build
 end
 
 ------------------------------------------------------------------------
@@ -1418,6 +1434,35 @@ local function FiniteNumber(value)
         and value < math.huge and value > -math.huge
 end
 
+local function WireScalarAliasesAgree(compact, verbose, normalize)
+    if compact == nil or verbose == nil then return true end
+    if normalize then
+        local left, right = normalize(compact), normalize(verbose)
+        return left ~= nil and left == right
+    end
+    return type(compact) == type(verbose) and compact == verbose
+end
+
+local function WireEchoValue(echo)
+    if type(echo) ~= "table"
+        or not WireScalarAliasesAgree(echo.spellId, echo.id)
+        or not WireScalarAliasesAgree(echo.count, echo.stacks)
+        or not WireScalarAliasesAgree(echo.count, echo.stack)
+        or not WireScalarAliasesAgree(echo.stacks, echo.stack) then
+        return nil
+    end
+    local spellId = echo.spellId
+    if spellId == nil then spellId = echo.id end
+    local count = echo.count
+    if count == nil then count = echo.stacks end
+    if count == nil then count = echo.stack end
+    if count == nil then count = 1 end
+    local locked = echo.locked
+    if locked ~= nil and locked ~= true and locked ~= false
+        and locked ~= 0 and locked ~= 1 then return nil end
+    return spellId, count, echo.quality, locked == true or locked == 1
+end
+
 local function ValidWireEchoList(source)
     if type(source) ~= "table" then return false end
     local entries, maxIndex, total = 0, 0, 0
@@ -1426,8 +1471,9 @@ local function ValidWireEchoList(source)
             or index ~= math.floor(index) or type(echo) ~= "table" then
             return false
         end
-        local spellId = tonumber(echo.spellId or echo.id)
-        local count = tonumber(echo.count or echo.stacks or echo.stack) or 1
+        local rawSpellId, rawCount = WireEchoValue(echo)
+        local spellId = tonumber(rawSpellId)
+        local count = tonumber(rawCount)
         if not FiniteNumber(spellId) or spellId < 1
             or spellId ~= math.floor(spellId) or spellId > 2147483647
             or not FiniteNumber(count) or count < 1
@@ -1440,6 +1486,124 @@ local function ValidWireEchoList(source)
         if entries > 120 or total > 120 then return false end
     end
     return entries > 0 and entries == maxIndex
+end
+
+local function WireEchoListsAgree(left, right)
+    if left == nil or right == nil then return true end
+    if not ValidWireEchoList(left) or not ValidWireEchoList(right)
+        or #left ~= #right then return false end
+    for index = 1, #left do
+        local li, lc, lq, ll = WireEchoValue(left[index])
+        local ri, rc, rq, rl = WireEchoValue(right[index])
+        if li ~= ri or lc ~= rc or lq ~= rq or ll ~= rl then return false end
+    end
+    return true
+end
+
+local function WireDpsAliasesAgree(record)
+    local function Lower(value)
+        return type(value) == "string" and value:lower() or nil
+    end
+    local function Realm(value)
+        return type(value) == "string"
+            and value:lower():gsub("%s+", "") or nil
+    end
+    return WireScalarAliasesAgree(record.v, record.protocolVersion)
+        and WireScalarAliasesAgree(record.c, record.category)
+        and WireScalarAliasesAgree(record.d, record.dps)
+        and WireScalarAliasesAgree(record.u, record.duration)
+        and WireScalarAliasesAgree(record.t, record.ts)
+        and WireScalarAliasesAgree(record.p, record.player)
+        and WireScalarAliasesAgree(record.l, record.level)
+        and WireScalarAliasesAgree(record.k, record.class, Lower)
+        and WireScalarAliasesAgree(record.o, record.ownerKey,
+            Identity.CanonicalOwnerKey)
+        and WireScalarAliasesAgree(record.r, record.realm, Realm)
+        and WireScalarAliasesAgree(record.b, record.buildId)
+        and WireScalarAliasesAgree(record.f, record.fingerprint)
+        and WireScalarAliasesAgree(record.h, record.loadoutHash, Lower)
+        and WireEchoListsAgree(record.e, record.echoes)
+        and WireEchoListsAgree(record.lk, record.lockedEchoes)
+end
+
+-- Canonical DPS identity is one tuple. Compact wire and verbose storage aliases
+-- may coexist, but every present value must agree. Authority is layered below
+-- so contextual relays may validate the tuple without becoming record owners.
+function DPS.HasCanonicalOwnerIdentity(record)
+    if type(record) ~= "table" then return false end
+    local ownerKey
+    local function AcceptOwner(value)
+        if value == nil then return true end
+        local canonical = Identity.CanonicalOwnerKey(value)
+        if not canonical or canonical:match("@unknown$")
+            or (ownerKey and ownerKey ~= canonical) then return false end
+        ownerKey = canonical
+        return true
+    end
+    if not AcceptOwner(record.o) or not AcceptOwner(record.ownerKey)
+        or not ownerKey then return false end
+
+    local hasPlayer = false
+    local function AcceptPlayer(value)
+        if value == nil then return true end
+        hasPlayer = true
+        if type(value) ~= "string" or not Identity.ValidPlayer(value)
+            or not Identity.OwnerKeyMatchesAuthor(ownerKey, value) then
+            return false
+        end
+        if value:find("-", 1, true)
+            and Identity.CanonicalOwnerFromTransport(value) ~= ownerKey then
+            return false
+        end
+        return true
+    end
+    if not AcceptPlayer(record.p) or not AcceptPlayer(record.player)
+        or not hasPlayer then return false end
+
+    local ownerName = ownerKey:match("^([^@]+)@")
+    local function AcceptRealm(value)
+        if value == nil then return true end
+        if type(value) ~= "string" or #value > 96
+            or value:find("[%c|%s]") then return false end
+        return Identity.CanonicalOwnerKey(
+            Identity.OwnerKey(ownerName, value)) == ownerKey
+    end
+    if not AcceptRealm(record.r) or not AcceptRealm(record.realm) then
+        return false
+    end
+    return true, ownerKey
+end
+
+function DPS.VerifiedOwnerKey(record)
+    if type(record) ~= "table" or record.ownerVerified ~= true
+        or record.claimedOwnerKey ~= nil or record.relaySender ~= nil
+        or not WireDpsAliasesAgree(record) then
+        return nil
+    end
+    local valid, ownerKey = DPS.HasCanonicalOwnerIdentity(record)
+    return valid == true and ownerKey or nil
+end
+
+-- Stable read identity for visible but non-authoritative evidence. This never
+-- grants ownership; it only lets UI freshness checks re-read the same retained
+-- realm/provenance tuple instead of falling back to a stronger same-short-name
+-- row from another realm.
+function DPS.EvidenceIdentityKey(record)
+    if type(record) ~= "table" then return nil end
+    local verified = DPS.VerifiedOwnerKey(record)
+    if verified then return "verified:" .. verified end
+    local player = type(record.player) == "string"
+        and record.player:lower() or ""
+    local realm = type(record.realm) == "string"
+        and record.realm:lower() or ""
+    local owner = type(record.ownerKey) == "string"
+        and record.ownerKey:lower() or ""
+    local claimed = type(record.claimedOwnerKey) == "string"
+        and record.claimedOwnerKey:lower() or ""
+    local relay = type(record.relaySender) == "string"
+        and record.relaySender:lower() or ""
+    if player == "" then return nil end
+    return table.concat({"evidence",player,realm,owner,claimed,relay}, "\0")
 end
 
 -- The response election may suppress every equivalent peer, so its cached
@@ -1457,15 +1621,7 @@ local function DpsResponseClaimInfo(category, playerKey, row)
     local dps, stamp, level = tonumber(row.dps), tonumber(row.ts),
         tonumber(row.level)
     local nowTs = (time and time()) or 0
-    local realm = row.realm
-    local ownerValid = row.ownerKey ~= nil
-        and Identity.OwnerKeyMatchesAuthor(row.ownerKey, player)
-    local realmValid = realm == nil or (type(realm) == "string"
-        and #realm <= 96 and not realm:find("[%c|%s]")
-        and Identity.OwnerKey(player, realm) ~= nil)
-    local me = (UnitName and UnitName("player")) or nil
-    local authorityValid = row.ownerVerified == true
-        or (me and Identity.SamePlayer(player, me))
+    local authorityValid = DPS.VerifiedOwnerKey(row) ~= nil
     local safe = authorityValid and Identity.ValidPlayer(player)
         and #player <= 64
         and CharacterKey(player, row.ownerKey, row.realm) == tostring(playerKey)
@@ -1477,7 +1633,6 @@ local function DpsResponseClaimInfo(category, playerKey, row)
         and level == math.floor(level) and NormalizeClass(row.class) ~= nil
         and fingerprint ~= nil and fingerprint == row.fingerprint
         and loadoutHash ~= nil and EchoHashFromKey(fingerprint) == loadoutHash
-        and ownerValid and realmValid
     return safe, safe and CharacterKey(player, row.ownerKey, row.realm) or nil
 end
 
@@ -1865,17 +2020,25 @@ function DPS.BroadcastBestForBuild(buildId)
     local store = CharacterBestStore()
     for _, category in ipairs({ "dummy", "lk" }) do
         for _, row in pairs(store[category] or {}) do
-            if row and row.buildId == buildId
+            local relatedId, relatedBuild
+            if row then
+                relatedId, relatedBuild = VerifiedBuildRelation(row, buildId)
+            end
+            if row and row.buildId == buildId and relatedId
                 and (tonumber(row.dps) or 0) > 0
-                and DPS.IsDurationEligible(category, row.duration) then
+                and DPS.IsDurationEligible(category, row.duration)
+                and DPS.VerifiedOwnerKey(row) ~= nil then
                 local record = {
                     protocolVersion = PROTOCOL_VERSION, fingerprint = row.fingerprint or key,
-                    loadoutHash = row.loadoutHash or build.fingerprintHash or EchoHashFromKey(key),
+                    loadoutHash = row.loadoutHash or relatedBuild.fingerprintHash
+                        or EchoHashFromKey(key),
                     category = category, dps = math.floor(tonumber(row.dps) or 0),
                     duration = tonumber(row.duration) or 0, ts = tonumber(row.ts) or 0,
-                    player = row.player or "?", level = tonumber(row.level) or 0, buildId = buildId,
+                    player = row.player or "?", level = tonumber(row.level) or 0,
+                    buildId = relatedId,
                     class = row.class, ownerKey = row.ownerKey, realm = row.realm,
-                    echoes = StoredEchoes(row, false) or BuildSnapshot(build),
+                    ownerVerified = row.ownerVerified == true,
+                    echoes = StoredEchoes(row, false) or BuildSnapshot(relatedBuild),
                     lockedEchoes = StoredEchoes(row, true),
                 }
                 local ok, result = pcall(Sync.BroadcastDpsRecord, record)
@@ -1910,11 +2073,16 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
     local myBuckets = SplitBucketHash(localHash)
     local legacyPeer = #peerBuckets ~= DPS_BUCKETS
     local stateKey = table.concat({tostring(peerHash or "0"),
-        tostring(onlyBucket or "*"), localHash}, "|")
+        tostring(onlyBucket or "*"), localHash,
+        tostring(responseGeneration)}, "|")
     local revisionChanged = state and state.revision ~= localRevision
-    if state and (state.key ~= stateKey or revisionChanged) then
+    local generationChanged = state
+        and state.generation ~= responseGeneration
+    if state and (state.key ~= stateKey or revisionChanged
+            or generationChanged) then
         local pending = math.max(0, math.floor(tonumber(state.pending) or 0))
         local superseded = state.localHash ~= localHash or revisionChanged
+            or generationChanged
         if pending > 0 then
             TerminalOutbound(superseded
                 and "stale_record" or "outside_request", pending)
@@ -1932,12 +2100,14 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
     end
     if not state then
         state = {key=stateKey, localHash=localHash, revision=localRevision,
+            generation=responseGeneration,
             categoryIndex=1,
             cursor=nil, scanComplete=false, candidates={}, sendCursor=1,
             pending=0,claimSafe=true}
         progress._responseState = state
     elseif tostring(DPS.GetSyncHash()) ~= state.localHash
-        or CurrentDpsRevision() ~= state.revision then
+        or CurrentDpsRevision() ~= state.revision
+        or state.generation ~= responseGeneration then
         local pending = math.max(0, math.floor(tonumber(state.pending) or 0))
         if pending > 0 then TerminalOutbound("stale_record", pending) end
         progress._responseState = nil
@@ -1969,6 +2139,8 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
                     local bucket = DpsBucket(category,
                         type(row) == "table" and row.player or playerKey)
                     local skipReason
+                    local verifiedOwner = type(row) == "table"
+                        and DPS.VerifiedOwnerKey(row) or nil
                     if onlyBucket and bucket ~= onlyBucket then
                         skipReason = "outside_bucket"
                     elseif not legacyPeer
@@ -1981,6 +2153,9 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
                         skipReason = "score"
                     elseif not DPS.IsDurationEligible(category, row.duration) then
                         skipReason = "duration"
+                    elseif not verifiedOwner then
+                        state.claimSafe = false
+                        skipReason = "relay_authorization"
                     elseif not (Sync and Sync.BroadcastDpsRecord) then
                         skipReason = "other"
                     end
@@ -1991,8 +2166,10 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
                         local loadoutHash = row.loadoutHash
                             or EchoHashFromKey(row.fingerprint or "")
                         local key = table.concat({category, tostring(playerKey),
+                            tostring(verifiedOwner),
                             tostring(math.floor(tonumber(row.dps) or 0)),
                             tostring(loadoutHash or "0")}, "|")
+                        local relatedId = VerifiedBuildRelation(row, row.buildId)
                         state.candidates[#state.candidates + 1] = {
                             key=key,
                             record={
@@ -2005,15 +2182,16 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
                                 ts=tonumber(row.ts) or 0,
                                 player=row.player or "?",
                                 level=tonumber(row.level) or 0,
-                                buildId=row.buildId, class=row.class,
-                                ownerKey=row.ownerKey, realm=row.realm,
+                                buildId=relatedId, class=row.class,
+                                ownerKey=verifiedOwner, realm=row.realm,
+                                ownerVerified=true,
                                 echoes=StoredEchoes(row, false),
                                 lockedEchoes=StoredEchoes(row, true),
                                 -- Only a row this client received directly from
                                 -- its named owner may cross the response-only
                                 -- relay path. Legacy/locally injected rows keep
                                 -- the old owner-only behavior.
-                                _originVerified=row.ownerVerified == true,
+                                _originVerified=true,
                             },
                         }
                         state.pending = (tonumber(state.pending) or 0) + 1
@@ -2089,6 +2267,29 @@ local function DpsBoardEntry(row, category, summaryOnly)
         or not DPS.IsDurationEligible(category, row.duration) then return nil end
     local rawBuildId = row.buildId
     local buildId = rawBuildId
+    local verifiedOwnerKey = DPS.VerifiedOwnerKey(row)
+    local relationFingerprint = RelationshipFingerprint(row)
+    local protocolVersion = tonumber(row.protocolVersion)
+    local legacyProtocol = protocolVersion
+        and protocolVersion == math.floor(protocolVersion)
+        and protocolVersion > 0 and protocolVersion < PROTOCOL_VERSION
+    local function CanRelate(candidate, source)
+        if type(candidate) ~= "table"
+            or Identity.SavedMirrorKind(candidate) ~= "ordinary" then
+            return false
+        end
+        if verifiedOwnerKey ~= nil
+            and Identity.VerifiedOwnerKey(candidate) == verifiedOwnerKey then
+            local candidateFingerprint = RelationshipFingerprint(candidate)
+            return relationFingerprint ~= nil and candidateFingerprint ~= nil
+                and tostring(candidateFingerprint)
+                    == tostring(relationFingerprint)
+        end
+        -- Historical protocol rows may retain their already-proven immutable
+        -- catalog navigation identity. Overlay/current rows never enter this
+        -- compatibility branch, even when their content looks identical.
+        return legacyProtocol and source == "bundled"
+    end
     local resolvedBuildId
     local resolvedFingerprintEpoch, resolvedFingerprintRevision
     local rowEchoes = StoredEchoes(row, false)
@@ -2112,25 +2313,34 @@ local function DpsBoardEntry(row, category, summaryOnly)
             and tostring(legacyProof.fingerprint) == tostring(rowKey)) then
         recordIdentityMismatch = true
     end
-    local idBuild = summaryOnly and rowEchoes and catalog
-        and type(catalog.GetSummary) == "function"
-        and catalog.GetSummary(buildId) or CatalogGet(buildId)
+    local idBuild, idSource
+    if summaryOnly and rowEchoes and catalog
+        and type(catalog.GetSummary) == "function" then
+        idBuild, idSource = catalog.GetSummary(buildId)
+    else
+        idBuild, idSource = CatalogGet(buildId)
+    end
     local build = idBuild
+    local legacyRawBuildId = legacyProtocol and idSource == "bundled"
+        and not recordIdentityMismatch and rawBuildId or nil
     if build then
-        local buildKey = build.fingerprint or EchoKey(BuildSnapshot(build))
-        if row.fingerprint and buildKey
+        if not CanRelate(build, idSource) then
+            build, buildId = nil, nil
+        else
+            local buildKey = build.fingerprint or EchoKey(BuildSnapshot(build))
+            if row.fingerprint and buildKey
             and tostring(buildKey) ~= tostring(row.fingerprint)
             and not (legacyProof
                 and type(build.id) == type(legacyProof.buildId)
                 and build.id == legacyProof.buildId
                 and tostring(buildKey) == tostring(legacyProof.fingerprint)) then
-            buildIdentityMismatch = true
-            build = nil
+                buildIdentityMismatch = true
+                build, buildId = nil, nil
+            end
         end
+    else
+        buildId = nil
     end
-    local protocolVersion = tonumber(row.protocolVersion)
-    local legacyProtocol = protocolVersion and protocolVersion == math.floor(protocolVersion)
-        and protocolVersion > 0 and protocolVersion < PROTOCOL_VERSION
     if summaryOnly and build and legacyProtocol then
         resolvedBuildId = legacyProof and legacyProof.buildId or buildId
         if type(catalog.ExactFingerprintRevision) == "function" then
@@ -2146,16 +2356,22 @@ local function DpsBoardEntry(row, category, summaryOnly)
             catalog.ResolveFingerprintIdentity,
             rawBuildId, row.fingerprint, {legacyRecord=row})
         if ok and resolved then
-            resolvedBuildId = resolved
-            if type(catalog.ExactFingerprintRevision) == "function" then
-                resolvedFingerprintEpoch, resolvedFingerprintRevision =
-                    catalog.ExactFingerprintRevision(
-                        resolvedFingerprint or row.fingerprint)
+            local resolvedBuild, resolvedSource = CatalogGet(resolved)
+            if CanRelate(resolvedBuild, resolvedSource) then
+                resolvedBuildId = resolved
+                if type(catalog.ExactFingerprintRevision) == "function" then
+                    resolvedFingerprintEpoch, resolvedFingerprintRevision =
+                        catalog.ExactFingerprintRevision(
+                            resolvedFingerprint or row.fingerprint)
+                end
             end
         end
     end
     if not build and rowEchoes and not summaryOnly then
-        buildId, build = FindMatchingBuild(rowEchoes)
+        local candidateId, candidate, candidateSource = FindMatchingBuild(rowEchoes)
+        if CanRelate(candidate, candidateSource) then
+            buildId, build = candidateId, candidate
+        end
     end
     local displayBuild = build
     if not displayBuild and not rowEchoes
@@ -2163,14 +2379,15 @@ local function DpsBoardEntry(row, category, summaryOnly)
     return {
         player=row.player or "?",dps=math.floor(tonumber(row.dps) or 0),
         class=row.class,ownerKey=row.ownerKey,realm=row.realm,
-        ownerVerified=row.ownerVerified == true,relaySender=row.relaySender,
+        ownerVerified=verifiedOwnerKey ~= nil,relaySender=row.relaySender,
+        claimedOwnerKey=row.claimedOwnerKey,
         level=tonumber(row.level) or 0,ts=tonumber(row.ts) or 0,
         duration=tonumber(row.duration) or 0,category=category,
         fingerprint=row.fingerprint,
         echoes=rowEchoes or (not buildIdentityMismatch and BuildSnapshot(build) or nil),
         lockedEchoes=lockedEchoes,lockedFingerprint=LockedKey(lockedEchoes),
         protocolVersion=row.protocolVersion,
-        buildId=summaryOnly and rawBuildId or buildId,
+        buildId=buildId or legacyRawBuildId,
         resolvedBuildId=resolvedBuildId,build=displayBuild,
         resolvedFingerprintEpoch=resolvedFingerprintEpoch,
         resolvedFingerprintRevision=resolvedFingerprintRevision,
@@ -2276,14 +2493,36 @@ local function FindCharacterRow(rows, name)
     return row
 end
 
-function DPS.GetCharacterBest(category, playerName)
+function DPS.GetCharacterBest(category, playerName, expectedOwnerKey,
+        expectedEvidenceKey)
     if category ~= "dummy" and category ~= "lk" then return nil end
     MigrateLocalLockedBaseline()
     MigrateLegacyLeaderboard()
     local name = playerName or ((UnitName and UnitName("player")) or "?")
     local rows = CharacterBestStore()[category]
-    local row = playerName and FindCharacterRow(rows, name)
-        or rows[CurrentCharacterKey(name)] or rows[PlayerKey(name)]
+    local expectedOwner = expectedOwnerKey ~= nil
+        and Identity.CanonicalOwnerKey(expectedOwnerKey) or nil
+    if expectedOwnerKey ~= nil and not expectedOwner then return nil end
+    local row
+    if expectedOwner then
+        row = rows[expectedOwner]
+        if DPS.VerifiedOwnerKey(row) ~= expectedOwner then return nil end
+    elseif expectedEvidenceKey ~= nil then
+        if type(expectedEvidenceKey) ~= "string"
+            or expectedEvidenceKey == "" then return nil end
+        for _, candidate in pairs(rows) do
+            if type(candidate) == "table"
+                and Identity.SamePlayer(candidate.player, name)
+                and DPS.EvidenceIdentityKey(candidate) == expectedEvidenceKey
+                and BetterRow(candidate, row) then
+                row = candidate
+            end
+        end
+        if not row then return nil end
+    else
+        row = playerName and FindCharacterRow(rows, name)
+            or rows[CurrentCharacterKey(name)] or rows[PlayerKey(name)]
+    end
     if not row or (tonumber(row.dps) or 0) <= 0
         or not DPS.IsDurationEligible(category, row.duration) then return nil end
     return DPS.MaterializeRecord(row)
@@ -2450,8 +2689,16 @@ local function CommitSession(category)
         return
     end
 
-    local buildId, build = FindMatchingBuild(snap)
     local player = (UnitName and UnitName("player")) or "?"
+    local buildId, build = FindMatchingBuild(snap)
+    local localOwner = OwnerKey(player)
+    if buildId and (Identity.SavedMirrorKind(build) ~= "ordinary"
+        or Identity.VerifiedOwnerKey(build) ~= localOwner) then
+        -- Exact fingerprints are content matches, not relationship authority.
+        -- Let the Community owner create or reuse this character's own page
+        -- instead of persisting a foreign or unverified catalog identity.
+        buildId, build = nil, nil
+    end
     local level = (UnitLevel and UnitLevel("player")) or 0
     MigrateLegacyLeaderboard()
     local dpsFloor = math.floor(sessionDps)
@@ -2550,7 +2797,7 @@ local function CommitSession(category)
                 duration = elapsed, ts = stamp, player = player,
                 level = level, buildId = buildId, lockedEchoes = lockedSnap,
                 class = localClass, ownerKey = personalRow.ownerKey,
-                realm = personalRow.realm,
+                realm = personalRow.realm, ownerVerified = true,
             })
         end
     end
@@ -2599,7 +2846,7 @@ function DPS.LocalOwnsDpsBucket(bucket)
     local row = store.dummy
         and (store.dummy[playerKey] or store.dummy[legacyKey])
     if type(row) == "table"
-        and Identity.SamePlayer(row.player, me)
+        and DPS.VerifiedOwnerKey(row) == playerKey
         and (tonumber(row.dps) or 0) > 0
         and DPS.IsDurationEligible("dummy", row.duration)
         and DpsBucket("dummy", me) == bucket then
@@ -2607,7 +2854,7 @@ function DPS.LocalOwnsDpsBucket(bucket)
     end
     row = store.lk and (store.lk[playerKey] or store.lk[legacyKey])
     if type(row) == "table"
-        and Identity.SamePlayer(row.player, me)
+        and DPS.VerifiedOwnerKey(row) == playerKey
         and (tonumber(row.dps) or 0) > 0
         and DPS.IsDurationEligible("lk", row.duration)
         and DpsBucket("lk", me) == bucket then
@@ -2618,6 +2865,7 @@ end
 
 local function ReceiveRecord(record, transportSender, relayed)
     if type(record) ~= "table" then return RejectReceive("schema") end
+    if not WireDpsAliasesAgree(record) then return RejectReceive("schema") end
     local version = tonumber(record.v or record.protocolVersion)
     local category = record.c or record.category
     local dps = tonumber(record.d or record.dps)
@@ -2714,10 +2962,28 @@ local function ReceiveRecord(record, transportSender, relayed)
         return RejectReceive("storage"), "storage"
     end
 
+    local directSender = not relayed and transportSender ~= nil
+        and Identity.SamePlayer(player, transportSender)
+    local directOwner = directSender
+        and DPS.HasCanonicalOwnerIdentity(record) == true
+        and record.claimedOwnerKey == nil and record.relaySender == nil
+        and Identity.TransportOwns(canonicalOwner, transportSender)
+    local transportOwner = directSender
+        and Identity.CanonicalOwnerFromTransport(transportSender) or nil
+    local transportRealm = transportOwner
+        and transportOwner:match("@(.+)$") or nil
+    local storageOwner, storageRealm
+    if directOwner then
+        storageOwner, storageRealm = canonicalOwner, realm or ownerRealm
+    elseif directSender then
+        storageOwner, storageRealm = transportOwner, transportRealm
+    else
+        storageOwner, storageRealm = canonicalOwner, realm or ownerRealm
+    end
+
     MigrateLegacyLeaderboard()
     local bucket = CharacterBestStore()[category]
-    local characterKey = CharacterKey(player, canonicalOwner,
-        realm or ownerRealm)
+    local characterKey = CharacterKey(player, storageOwner, storageRealm)
     local existing = bucket[characterKey]
     local existingKey = characterKey
     local legacyKey = PlayerKey(player)
@@ -2736,22 +3002,28 @@ local function ReceiveRecord(record, transportSender, relayed)
         return RejectReceive("schema")
     end
     local incomingLocked = NormalizeEchoes(rawLocked)
-    local directOwner = not relayed and transportSender ~= nil
-        and Identity.SamePlayer(player, transportSender)
     local legacyLocal = not relayed and transportSender == nil
+    local existingVerifiedOwner = existing and DPS.VerifiedOwnerKey(existing)
+    local promotedBuildId = directOwner and existing
+        and existingVerifiedOwner ~= canonicalOwner and existing.buildId or nil
     local row = {
         dps = math.floor(dps), level = level, ts = ts, duration = duration,
         player = player,
         class = playerClass and tostring(playerClass):upper() or nil,
-        ownerKey = canonicalOwner,
-        realm = realm and Identity.OwnerKey(player, realm):match("@(.+)$")
-            or ownerRealm,
-        buildId = record.b or record.buildId,
+        ownerKey = directOwner and canonicalOwner
+            or (relayed or legacyLocal) and canonicalOwner or nil,
+        realm = directOwner and (realm and Identity.OwnerKey(player, realm):match("@(.+)$")
+                or ownerRealm)
+            or directSender and transportRealm
+            or (relayed or legacyLocal) and (realm and Identity.OwnerKey(player, realm):match("@(.+)$")
+                or ownerRealm) or nil,
+        buildId = record.b or record.buildId or promotedBuildId,
         echoes = echoes, fingerprint = fingerprint, loadoutHash = hash or EchoHashFromKey(fingerprint),
         lockedEchoes = incomingLocked,
         protocolVersion = PROTOCOL_VERSION,
         ownerVerified = directOwner and true or false,
-        relaySender = relayed and Identity.DisplayPlayer(transportSender) or nil,
+        relaySender = not directOwner and transportSender or nil,
+        _promotedFromUnverified = promotedBuildId and true or nil,
     }
     -- A relayed row may fill an empty slot, but it never overwrites an existing
     -- row. The established nil-sender compatibility path may still replace a
@@ -2759,10 +3031,11 @@ local function ReceiveRecord(record, transportSender, relayed)
     -- Conversely, a later direct owner copy supersedes relay provenance even
     -- when the score ties.
     if existing and not directOwner
-        and (not legacyLocal or existing.ownerVerified == true) then
+        and (not legacyLocal or existingVerifiedOwner ~= nil) then
         return RejectReceive("relay_authorization")
     end
-    local better = directOwner and existing and existing.ownerVerified ~= true
+    local better = directOwner and existing
+        and existingVerifiedOwner ~= canonicalOwner
         or IsBetterPublicRecord(row, existing)
     if not better then
         -- Metadata enrichment: the same winning parse may have been received
@@ -2779,22 +3052,22 @@ local function ReceiveRecord(record, transportSender, relayed)
                 existing.class = normalizedClass
                 enriched = true
             end
-            if ownerKey and not existing.ownerKey then
+            if directOwner and existingVerifiedOwner ~= canonicalOwner then
+                existing.player = player
                 existing.ownerKey = canonicalOwner
+                existing.realm = row.realm
+                existing.ownerVerified = true
+                existing.o, existing.p, existing.r = nil, nil, nil
+                existing.claimedOwnerKey, existing.relaySender = nil, nil
+                existing._originVerified = nil
                 enriched = true
-            end
-            if realm and not existing.realm then
-                existing.realm = tostring(realm):lower()
+            elseif row.realm and not existing.realm then
+                existing.realm = row.realm
                 enriched = true
             end
             if incomingLocked and not StoredEchoes(existing, true) then
                 existing.lockedEchoes = incomingLocked
                 ReferenceEvidence(existing)
-                enriched = true
-            end
-            if directOwner and existing.ownerVerified ~= true then
-                existing.ownerVerified = true
-                existing.relaySender = nil
                 enriched = true
             end
             local rekeyed = existingKey ~= characterKey
@@ -2839,11 +3112,15 @@ local function ReceiveRecord(record, transportSender, relayed)
             if safeOk and safeId then row.buildId = safeId end
         end
     end
-    if existingKey ~= characterKey and existing then bucket[existingKey] = nil end
+    row._promotedFromUnverified = nil
+    local previousCharacterKey = existing and existingKey ~= characterKey
+        and existingKey or nil
+    if previousCharacterKey then bucket[previousCharacterKey] = nil end
     bucket[characterKey] = row
     BumpDps("public record received", {
         scope="record", category=category, player=player,
         ownerKey=row.ownerKey, realm=row.realm, characterKey=characterKey,
+        previousCharacterKey=previousCharacterKey,
     })
     if Nexus.DataRetention and Nexus.DataRetention.Request then
         Nexus.DataRetention.Request("public DPS record received")
@@ -2920,8 +3197,14 @@ end
 
 function DPS.Init(adapter, sync)
     Adapter, Sync = adapter, sync
+    responseGeneration = responseGeneration + 1
     ResetRejectionStats()
     ResetOutboundStats()
+    -- Init may bind a different SavedVariables profile while revision counters
+    -- coincidentally match. Cached identities and response authority are scoped
+    -- to the represented store, not only to its scalar revision.
+    identityIndex.initialized = false
+    InvalidateAllDpsHashes()
     NexusDB = NexusDB or {}
     if Nexus.LoadoutEvidence and Nexus.LoadoutEvidence.Init then
         Nexus.LoadoutEvidence.Init(NexusDB)

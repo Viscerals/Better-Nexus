@@ -6,7 +6,9 @@ local clock=1000; GetTime=function() return clock end; time=function() return 50
 local function Pump(steps) for _=1,steps do clock=clock+0.2; Sync.OnUpdate(0.2) end end
 local playerName="RelayB"; UnitName=function() return playerName end; UnitLevel=function() return 80 end
 local echoes={{spellId=200001,stacks=2},{spellId=200002,stacks=1}}
-local build={id="manual-build",title="Real Build",description="Real description",author="Author",class="MAGE",echoes=echoes,postedAt=10,lastModified=10,isMine=false}
+local build={id="manual-build",title="Real Build",description="Real description",
+  author="Author",ownerKey="author@ebonhold",ownerVerified=true,
+  class="MAGE",echoes=echoes,postedAt=10,lastModified=10,isMine=false}
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
 Sync.Init(Nexus.Codec,{})
 DPS.Init({},Sync)

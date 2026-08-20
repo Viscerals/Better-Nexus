@@ -2,12 +2,24 @@
 -- Pure Community list/detail preparation over established defensive readers.
 
 Nexus = Nexus or {}
+local Identity = assert(Nexus.Identity,
+    "Nexus Identity must load before CommunityProjection")
 if type(Nexus.CommunityInternals) ~= "table" then
     Nexus.CommunityInternals = {}
 end
 
 local Projection = {}
 Nexus.CommunityInternals.Projection = Projection
+
+local VALID_CLASS = {
+    WARRIOR=true,PALADIN=true,HUNTER=true,ROGUE=true,PRIEST=true,
+    DEATHKNIGHT=true,SHAMAN=true,MAGE=true,WARLOCK=true,DRUID=true,
+}
+
+local function NormalizeClass(value)
+    value = type(value) == "string" and value:upper() or nil
+    return value and VALID_CLASS[value] and value or nil
+end
 
 local function Copy(value, seen)
     if type(value) ~= "table" then return value end
@@ -64,15 +76,7 @@ local function RevisionKey(snapshot)
 end
 
 local function IsOwnBuild(build, context)
-    if type(build) ~= "table" then return false end
-    local ownerKey = tostring(context.ownerKey or ""):lower()
-    if build.ownerKey then
-        return ownerKey ~= ""
-            and tostring(build.ownerKey):lower() == ownerKey
-    end
-    local player = tostring(context.player or ""):lower()
-    return build.isMine == true and player ~= ""
-        and tostring(build.author or ""):lower() == player
+    return Identity.LocalOwnsBuild(build, context.ownerKey)
 end
 
 local function PublicOrdinaryComplete(build)
@@ -87,9 +91,12 @@ local function PublicOrdinaryComplete(build)
     return ok and type(verdict) == "table" and verdict.complete == true
 end
 
-local function RecordBuildId(build)
-    return build and (build.recordBuildId
-        or build.publishedBuildId or build.id) or nil
+local function DefaultRecordBuildId(build)
+    return build and build.id or nil
+end
+
+local function DefaultPublishedBuildId()
+    return nil
 end
 
 local function DpsText(value)
@@ -131,6 +138,7 @@ local function DetailKey(id, revisions, context, build)
         Part(id), RevisionKey(revisions),
         Part(tostring(context.ownerKey or ""):lower()),
         Part(tostring(context.player or ""):lower()),
+        Part(NormalizeClass(context.currentClass) or ""),
         Part(context.isAdmin == true), Part(context.detailsAvailable == true),
         RelevantOwnedKey(build, context),
     }, "|")
@@ -170,6 +178,12 @@ function Projection.New(options)
         "CommunityProjection requires a build currentness reader")
     local loadBuild = assert(options.loadBuild,
         "CommunityProjection requires an exact build reader")
+    local recordBuildId = type(options.recordBuildId) == "function"
+        and options.recordBuildId or DefaultRecordBuildId
+    local publishedBuildId = type(options.publishedBuildId) == "function"
+        and options.publishedBuildId or DefaultPublishedBuildId
+    local savedProjection = type(options.savedProjection) == "function"
+        and options.savedProjection or nil
     local revisionSnapshot = type(options.revisionSnapshot) == "function"
         and options.revisionSnapshot or function() return {} end
     local listCache, detailCache
@@ -290,6 +304,7 @@ function Projection.New(options)
     end
 
     local function BuildDetail(build, context)
+        local savedKind = Identity.SavedMirrorKind(build)
         local lockedResult = LockedEvidence(build)
         local lockedEchoes = lockedResult.status == "ok"
             and Copy(lockedResult.lockedEchoes) or nil
@@ -310,28 +325,45 @@ function Projection.New(options)
         local hasLoadout = #echoes > 0
         local mine = IsOwnBuild(build, context)
         local admin = context.isAdmin == true
-        local recordId = RecordBuildId(build)
-
-        stats.detail.leaderboardReads = stats.detail.leaderboardReads + 2
-        local dummy = SafeRows(options.leaderboard, recordId, "dummy")
-        local lk = SafeRows(options.leaderboard, recordId, "lk")
-        stats.detail.personalReads = stats.detail.personalReads + 2
-        local dummyPersonal = type(options.personalBest) == "function"
-            and options.personalBest(recordId, "dummy") or nil
-        local lkPersonal = type(options.personalBest) == "function"
-            and options.personalBest(recordId, "lk") or nil
-        local lockDummy, lockLk = dummy, lk
-        if recordId ~= build.id then
-            stats.detail.leaderboardReads = stats.detail.leaderboardReads + 2
-            lockDummy = SafeRows(options.leaderboard, build.id, "dummy")
-            lockLk = SafeRows(options.leaderboard, build.id, "lk")
+        local recordId, validPublishedId
+        if savedKind == "saved" then
+            recordId = type(build.recordBuildId) == "string"
+                and build.recordBuildId or nil
+            validPublishedId = type(build.publishedBuildId) == "string"
+                and build.publishedBuildId or nil
+        else
+            local okRecordId
+            okRecordId, recordId = pcall(recordBuildId, build)
+            if not okRecordId then recordId = nil end
+            local okPublishedId
+            okPublishedId, validPublishedId = pcall(publishedBuildId, build)
+            if not okPublishedId then validPublishedId = nil end
         end
-        local loadoutLocked = build.autoDps == true
-            or #lockDummy > 0 or #lockLk > 0
+        local publicBuild = Copy(build)
+        if savedKind == "saved" then
+            publicBuild.class = NormalizeClass(build.class) or "UNKNOWN"
+        end
+
+        local dummy, lk, dummyPersonal, lkPersonal = {}, {}, nil, nil
+        if recordId ~= nil then
+            stats.detail.leaderboardReads = stats.detail.leaderboardReads + 2
+            dummy = SafeRows(options.leaderboard, recordId, "dummy")
+            lk = SafeRows(options.leaderboard, recordId, "lk")
+            stats.detail.personalReads = stats.detail.personalReads + 2
+            dummyPersonal = type(options.personalBest) == "function"
+                and options.personalBest(recordId, "dummy") or nil
+            lkPersonal = type(options.personalBest) == "function"
+                and options.personalBest(recordId, "lk") or nil
+        end
+        -- Saved mirrors remain editable local slot projections. A validated
+        -- publication relationship may supply display DPS, but it must not
+        -- borrow the ordinary publication's leaderboard lock state.
+        local loadoutLocked = savedKind ~= "saved"
+            and (build.autoDps == true or #dummy > 0 or #lk > 0)
 
         local editState
-        if build.importedSavedBuild then
-            editState = build.publishedBuildId
+        if savedKind == "saved" then
+            editState = validPublishedId
                 and "Uploaded. Upload Build again to publish title/description or loadout changes."
                 or "Local server loadout. Edit its title/description, then Upload Build when ready."
         elseif mine and loadoutLocked then
@@ -343,7 +375,7 @@ function Projection.New(options)
         local hasLink = type(build.link) == "string" and build.link ~= ""
         local ownThis = mine or admin
         return {
-            build=Copy(build), echoes=echoes,
+            build=publicBuild, echoes=echoes,
             lockedEchoes=lockedEchoes,
             lockedEvidenceStatus=lockedResult.status,
             lockedEvidenceReason=lockedResult.reason ~= ""
@@ -355,12 +387,12 @@ function Projection.New(options)
             hasLink=hasLink,showLink=hasLink or ownThis,
             canSaveLink=ownThis,
             showEdit=mine,
-            showDelete=(mine and not build.importedSavedBuild)
+            showDelete=(mine and savedKind ~= "saved")
                 or (not mine and admin),
             deleteText=admin and not mine and "Remove" or "Stop Sharing",
             editState=editState,
-            actionText=build.importedSavedBuild
-                and (build.publishedBuildId and "Update Upload" or "Upload Build")
+            actionText=savedKind == "saved"
+                and (validPublishedId and "Update Upload" or "Upload Build")
                 or (hasLoadout and "Copy into Editor" or "Request Loadout"),
             detailsAvailable=context.detailsAvailable == true,
             dummyRows=Copy(dummy),lkRows=Copy(lk),
@@ -389,6 +421,16 @@ function Projection.New(options)
         if not okLoad then
             stats.detail.failures = stats.detail.failures + 1
             return nil, tostring(build)
+        end
+        if Identity.SavedMirrorKind(build) == "saved" then
+            local okProject, projected = false, nil
+            if savedProjection then
+                okProject, projected = pcall(savedProjection, build)
+            end
+            if not okProject or type(projected) ~= "table" then return nil end
+            build = projected
+        elseif Identity.SavedMirrorKind(build) == "invalid" then
+            return nil
         end
         if not PublicOrdinaryComplete(build) then return nil end
         key = DetailKey(id, revisions, context, build)

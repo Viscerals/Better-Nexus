@@ -8,7 +8,8 @@ local function Pump(steps) for _=1,steps do clock=clock+0.2; Sync.OnUpdate(0.2) 
 local who='Source'; UnitName=function() return who end
 local echoes={}; for i=1,79 do echoes[i]={spellId=200000+i,stacks=(i%3)+1,quality=3} end
 local build={id='build-79',title='AoE | ST',description=string.rep('description ',50),
-    author='Source',ownerKey='source@ebonhold',class='MAGE',echoes=echoes,
+    author='Source',ownerKey='source@ebonhold',ownerVerified=true,
+    realm='ebonhold',class='MAGE',echoes=echoes,
     postedAt=10,lastModified=10,isMine=true}
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
 Sync.Init(Nexus.Codec,{}); Nexus.DpsCapture.Init({},Sync)
@@ -24,7 +25,9 @@ assert(#complete>1,'complete 79-Echo reconciliation was not chunked')
 
 who='Receiver'; NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
 clock=1200; Sync.Init(Nexus.Codec,{})
-for _,m in ipairs(complete) do Sync.HandleIncoming(m.text,'Source') end
+for _,m in ipairs(complete) do
+    Sync.HandleIncoming(m.text,'Source-Ebonhold')
+end
 local loaded=NexusDB.communityBuilds['build-79']
 assert(loaded and loaded.echoes and #loaded.echoes==79,'complete loadout did not reassemble')
 assert(loaded.description:find('description'),'full description was not restored')
@@ -37,7 +40,9 @@ H.sentChatMessages={}; assert(Sync.BroadcastBuildSummary(build)); Pump(10)
 local summaries=H.sentChatMessages
 who='Receiver'; NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
 Sync.Init(Nexus.Codec,{})
-for _,m in ipairs(summaries) do Sync.HandleIncoming(m.text,'Source') end
+for _,m in ipairs(summaries) do
+    Sync.HandleIncoming(m.text,'Source-Ebonhold')
+end
 local placeholder=NexusDB.communityBuilds['build-79']
 assert(placeholder and not placeholder.loadoutAvailable and not placeholder.echoes,
     'legacy summary was incorrectly treated as exact evidence')

@@ -244,7 +244,7 @@ assert(Catalog.Put({
     id="outgoing-retry", title="Retry", author="Compactor",
     ownerKey="compactor@ebonhold", class="MAGE", postedAt=60001,
     lastModified=60001, fingerprint=Fingerprint(retryEchoes),
-    echoes=retryEchoes,
+    echoes=retryEchoes, ownerVerified=true,
 }))
 local retryReference = NexusDB.communityBuilds["outgoing-retry"].evidenceKey
 assert(Sync.BroadcastBuild(Catalog.Get("outgoing-retry"))

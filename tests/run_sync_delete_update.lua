@@ -33,6 +33,7 @@ GetTime = function() return clock end
 local wall = 50000
 time = function() return wall end
 UnitName = function() return "Solkr" end
+GetNormalizedRealmName = function() return "Ebonhold" end
 
 NexusDB = {}
 H.playerLevel = 5
@@ -45,7 +46,8 @@ H.Advance(2)
 
 local function Deliver(msgs, fromName)
     for _, m in ipairs(msgs) do
-        H.FireEvent("CHAT_MSG_CHANNEL", m.text, fromName, "Common",
+        H.FireEvent("CHAT_MSG_CHANNEL", m.text,
+            fromName .. "-Ebonhold", "Common",
             "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
     end
 end
@@ -120,7 +122,8 @@ print("re-delivering the same wire version is idempotent, still one entry -- OK"
 Sync.ClearLog()
 clock = clock + 10
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Solkr||" .. id .. "||99999",
-    "Solkr", "Common", "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
+    "Solkr-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
+    nil, nil, nil, 5, Sync.ChannelName())
 assert(NexusDB.communityBuilds[id] == nil,
     "the author's delete did not remove the build -- it would linger forever")
 text = provider("sync")
@@ -142,7 +145,8 @@ print("a deleted build stays deleted, even if a stale copy arrives later -- OK")
 UnitName = function() return "Griefer" end
 H.sentChatMessages = {}
 assert(Sync.BroadcastBuild({ id=id, title="Hijacked ID", description="bad",
-    author="Griefer", class="ROGUE",
+    author="Griefer", ownerKey="griefer@ebonhold",
+    ownerVerified=true, isMine=true, class="ROGUE",
     echoes={{spellId=200999,quality=0,stacks=1}},
     postedAt=100000, lastModified=100000 }))
 local hijackMsgs = Drain()
@@ -157,7 +161,8 @@ print("a tombstoned build ID cannot be seized by a different author -- OK")
 
 H.sentChatMessages = {}
 assert(Sync.BroadcastBuildSummary({ id=id, title="Summary hijack",
-    author="Griefer", class="ROGUE", fingerprintHash="deadbeef",
+    author="Griefer", ownerKey="griefer@ebonhold",
+    ownerVerified=true, isMine=true, class="ROGUE", fingerprintHash="deadbeef",
     echoCount=1, postedAt=100002, lastModified=100002 }))
 local summaryHijackMsgs = Drain()
 clock = clock + 10
@@ -170,7 +175,8 @@ print("summary-only sync cannot bypass tombstone ownership -- OK")
 
 H.sentChatMessages = {}
 assert(Sync.BroadcastBuild({ id=id, title="Authorized return", description="good",
-    author="Solkr", ownerKey="solkr@unknown", class="ROGUE",
+    author="Solkr", ownerKey="solkr@ebonhold",
+    ownerVerified=true, isMine=true, class="ROGUE",
     echoes={{spellId=200100,quality=3,stacks=1}},
     postedAt=100001, lastModified=100001 }))
 local returnMsgs = Drain()
@@ -187,11 +193,13 @@ print("the original author can supersede their tombstone with a newer revision -
 -- 6. A delete from someone who is NOT the author must be REFUSED
 NexusDB.communityBuilds = { ["victim"] = { id = "victim",
     title = "Someone Else's Build", description = "d", author = "Solkr",
+    ownerKey = "solkr@ebonhold", ownerVerified = true,
     class = "ROGUE", echoes = { { spellId = 1, quality = 0, stacks = 1 } },
     postedAt = 1, lastModified = 1, isMine = false } }
 Sync.ClearLog()
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Griefer||victim||99999",
-    "Griefer", "Common", "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
+    "Griefer-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
+    nil, nil, nil, 5, Sync.ChannelName())
 assert(NexusDB.communityBuilds["victim"],
     "a non-author was allowed to delete someone else's shared build")
 text = provider("sync")
@@ -201,11 +209,13 @@ print("a delete from a non-author is refused and logged -- OK")
 -- 7. Nobody can delete YOUR OWN build out from under you
 NexusDB.communityBuilds = { ["mine"] = { id = "mine", title = "My Build",
     description = "d", author = "Solkr", class = "ROGUE",
+    ownerKey = "solkr@ebonhold", ownerVerified = true,
     echoes = { { spellId = 1, quality = 0, stacks = 1 } },
     postedAt = 1, lastModified = 1, isMine = true } }
 Sync.ClearLog()
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Solkr||mine||99999",
-    "Solkr", "Common", "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
+    "Solkr-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
+    nil, nil, nil, 5, Sync.ChannelName())
 assert(NexusDB.communityBuilds["mine"],
     "an incoming delete removed one of MY OWN builds")
 print("incoming deletes can never remove your own builds -- OK")

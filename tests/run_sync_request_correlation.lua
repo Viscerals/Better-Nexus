@@ -21,6 +21,18 @@ local clock = 1000
 local fixture = 0
 GetTime = function() return clock end
 UnitName = function() return "Alice" end
+GetNormalizedRealmName = function() return "Ebonhold" end
+
+local LOCAL_TRANSPORT = "Alice-Ebonhold"
+local function ActualSender(sender)
+    sender = tostring(sender or "")
+    return sender:find("-", 1, true) and sender or (sender .. "-Ebonhold")
+end
+
+local function OwnerKey(sender)
+    local name = tostring(sender or ""):match("^([^-]+)")
+    return name and (name:lower() .. "@ebonhold") or nil
+end
 
 local failures, checks, controls = {}, 0, 0
 local function Check(ok, label)
@@ -131,7 +143,8 @@ end
 
 local function EncodeBuild(id, author, stamp)
     return Codec.Base64Encode(Codec.JSONEncode({
-        id=id,t="Correlation " .. id,a=author,c="MAGE",m=stamp,
+        id=id,t="Correlation " .. id,a=author,o=OwnerKey(author),
+        c="MAGE",m=stamp,
         e={{410001,3,1}},
     }))
 end
@@ -157,12 +170,13 @@ end
 local function SendSingle(id, stamp, context, sender)
     sender = sender or "Bob"
     return Sync.HandleIncoming(BuildWire(sender, id, stamp, 1, 1,
-        EncodeBuild(id, sender, stamp), context), sender)
+        EncodeBuild(id, sender, stamp), context), ActualSender(sender))
 end
 
 local function SummaryWire(sender, id, stamp, context)
     local payload = {
-        id=id,t="Summary " .. id,a=sender,c="MAGE",m=stamp,
+        id=id,t="Summary " .. id,a=sender,o=OwnerKey(sender),
+        c="MAGE",m=stamp,
         h="36a3",n=3,
     }
     local wire = "WLBI|" .. sender .. "|"
@@ -206,7 +220,7 @@ local function SendDpsRecord(sender, transferId, record, context)
     local accepted = false
     for index = 1, total do
         accepted = Sync.HandleIncoming(DpsChunkWire(sender, transferId,
-            index, total, chunks[index], context), sender)
+            index, total, chunks[index], context), ActualSender(sender))
     end
     return accepted
 end
@@ -218,6 +232,7 @@ local function PutBuild(id, author, stamp, complete)
     end
     local record = {
         id=id,title="Wire " .. id,author=author,class="MAGE",
+        ownerKey=OwnerKey(author),
         postedAt=stamp,lastModified=stamp,isMine=author == "Alice",
         ownerVerified=true,echoes=echoes,echoCount=echoes and 2 or 2,
         loadoutAvailable=echoes ~= nil,
@@ -287,7 +302,7 @@ Check(matchingId:find("^c1%-") ~= nil,
     "marked-request: local protocol-7 request lacks the c1 capability prefix")
 clock = matchingSent + 55
 local matchingAccepted = SendSingle("matching-build-1", 101, {
-    requester="Alice",requestId=matchingId,
+    requester=LOCAL_TRANSPORT,requestId=matchingId,
 })
 local matchingOutcome = RequestOutcome()
 Check(matchingAccepted and Stored("matching-build-1")
@@ -301,7 +316,7 @@ Check(Session.StatusSnapshot().receiving == true,
 for index, offset in ipairs({80,110,140,170}) do
     clock = matchingSent + offset
     SendSingle("matching-build-" .. tostring(index + 1), 101 + index, {
-        requester="Alice",requestId=matchingId,
+        requester=LOCAL_TRANSPORT,requestId=matchingId,
     })
 end
 clock = matchingSent + 181
@@ -359,7 +374,7 @@ Control(FlatSanitized(diagnosticWork)
 local staleActive, staleSent = BeginManual()
 clock = staleSent + 55
 local staleAccepted = SendSingle("stale-build", 301, {
-    requester="Alice",requestId="c1-stale-request",
+    requester=LOCAL_TRANSPORT,requestId="c1-stale-request",
 })
 local staleOutcome = RequestOutcome()
 clock = staleSent + 61
@@ -374,7 +389,7 @@ Check(staleAccepted and Stored("stale-build")
 local foreignActive, foreignSent = BeginManual()
 clock = foreignSent + 55
 local foreignAccepted = SendSingle("foreign-build", 302, {
-    requester="Mallory",requestId=foreignActive,
+    requester="Mallory-Ebonhold",requestId=foreignActive,
 })
 local foreignOutcome = RequestOutcome()
 clock = foreignSent + 61
@@ -395,7 +410,7 @@ Check(foreignAccepted and Stored("foreign-build")
 local duplicateId, duplicateSent = BeginManual()
 local duplicateEncoded = EncodeBuild("duplicate-chunks", "Bob", 401)
 local duplicateChunks = Chunks(duplicateEncoded, 2)
-local duplicateContext = {requester="Alice",requestId=duplicateId}
+local duplicateContext = {requester=LOCAL_TRANSPORT,requestId=duplicateId}
 clock = duplicateSent + 55
 Sync.HandleIncoming(BuildWire("Bob", "duplicate-chunks", 401, 1, 2,
     duplicateChunks[1], duplicateContext), "Bob")
@@ -412,7 +427,7 @@ Check(duplicateStarted and Sync.WorkState().buildInflight == 0
 local conflictId, conflictSent = BeginManual()
 local conflictEncoded = EncodeBuild("conflict-chunks", "Bob", 402)
 local conflictChunks = Chunks(conflictEncoded, 2)
-local conflictContext = {requester="Alice",requestId=conflictId}
+local conflictContext = {requester=LOCAL_TRANSPORT,requestId=conflictId}
 clock = conflictSent + 55
 Sync.HandleIncoming(BuildWire("Bob", "conflict-chunks", 402, 1, 2,
     conflictChunks[1], conflictContext), "Bob")
@@ -450,14 +465,14 @@ Check(laterId ~= oldId and laterId:find("^c1%-") ~= nil,
     "later-request: replacement request lacks a distinct marked identity")
 clock = laterSent + 55
 local oldAccepted = SendSingle("expired-old-build", 501, {
-    requester="Alice",requestId=oldId,
+    requester=LOCAL_TRANSPORT,requestId=oldId,
 })
 local afterOld = RequestOutcome()
 clock = laterSent + 61
 local oldDidNotExtend = Session.StatusSnapshot().receiving == false
 clock = laterSent + 62
 local laterAccepted = SendSingle("later-matching-build", 502, {
-    requester="Alice",requestId=laterId,
+    requester=LOCAL_TRANSPORT,requestId=laterId,
 })
 local afterLater = RequestOutcome()
 Check(oldAccepted and laterAccepted and Stored("expired-old-build")
@@ -479,7 +494,8 @@ do
 local summaryId, summarySent = BeginManual()
 clock = summarySent + 55
 local summaryAccepted = Sync.HandleIncoming(SummaryWire("Bob",
-    "context-summary", 601, {requester="Alice",requestId=summaryId}), "Bob")
+    "context-summary", 601, {requester=LOCAL_TRANSPORT,
+        requestId=summaryId}), "Bob-Ebonhold")
 local summaryOutcome = RequestOutcome()
 clock = summarySent + 61
 Check(summaryAccepted and Stored("context-summary")
@@ -491,7 +507,7 @@ Check(summaryAccepted and Stored("context-summary")
 local legacySummaryId, legacySummarySent = BeginManual()
 clock = legacySummarySent + 55
 Control(Sync.HandleIncoming(SummaryWire("Bob",
-    "legacy-summary", 602, nil), "Bob") == true,
+    "legacy-summary", 602, nil), "Bob-Ebonhold") == true,
     "legacy three-field WLBI remains accepted")
 local legacySummaryOutcome = RequestOutcome()
 clock = legacySummarySent + 61
@@ -506,7 +522,8 @@ Check(Stored("legacy-summary") and legacySummaryOutcome.requestId == legacySumma
 local malformedId, malformedSent = BeginManual()
 clock = malformedSent + 55
 Control(Sync.HandleIncoming(BuildWire("Bob", "matching-malformed", 603,
-    1, 1, "!!!!", {requester="Alice",requestId=malformedId}), "Bob") == false,
+    1, 1, "!!!!", {requester=LOCAL_TRANSPORT,
+        requestId=malformedId}), "Bob") == false,
     "matching malformed WLRB remained rejected")
 local malformedOutcome = RequestOutcome()
 clock = malformedSent + 61
@@ -528,8 +545,8 @@ Control(PutBuild("context-delete", "Bob", 610, true) ~= nil,
     "contextual delete fixture stored its remote build")
 clock = deleteSent + 55
 local deleteAccepted = Sync.HandleIncoming(table.concat({
-    "WLRD","Bob","context-delete","611","Bob","Alice",deleteId,
-}, "|"), "Bob")
+    "WLRD","Bob","context-delete","611","Bob",LOCAL_TRANSPORT,deleteId,
+}, "|"), "Bob-Ebonhold")
 local deleteOutcome = RequestOutcome()
 clock = deleteSent + 61
 Check(deleteAccepted and not Stored("context-delete")
@@ -543,7 +560,7 @@ Control(PutBuild("legacy-delete", "Bob", 620, true) ~= nil,
     "legacy delete fixture stored its remote build")
 clock = legacyDeleteSent + 55
 Control(Sync.HandleIncoming(
-    "WLRD|Bob|legacy-delete|621|Bob", "Bob") == true,
+    "WLRD|Bob|legacy-delete|621|Bob", "Bob-Ebonhold") == true,
     "legacy five-field WLRD remains accepted")
 local legacyDeleteOutcome = RequestOutcome()
 clock = legacyDeleteSent + 61
@@ -567,8 +584,9 @@ do
 local wholeClaimId, wholeClaimSent = BeginManual()
 local claimBuildHash, claimDpsHash = Sync.GetCompatibilityHashes()
 clock = wholeClaimSent + 55
-Control(Sync.HandleIncoming(table.concat({"WLRC","ClaimPeer","Alice",
-    wholeClaimId,claimBuildHash,claimDpsHash}, "|"), "ClaimPeer") == true,
+Control(Sync.HandleIncoming(table.concat({"WLRC","ClaimPeer",LOCAL_TRANSPORT,
+    wholeClaimId,claimBuildHash,claimDpsHash}, "|"),
+    "ClaimPeer-Ebonhold") == true,
     "matching WLRC was accepted by the real session owner")
 local wholeClaimOutcome = RequestOutcome()
 clock = wholeClaimSent + 61
@@ -580,8 +598,9 @@ Check(not wholeClaimOutcome.useful and wholeClaimOutcome.new == 0
 
 local staleClaimId, staleClaimSent = BeginManual()
 clock = staleClaimSent + 55
-Control(Sync.HandleIncoming(table.concat({"WLRC","ClaimPeer","Alice",
-    "legacy-claim-id",claimBuildHash,claimDpsHash}, "|"), "ClaimPeer") == false,
+Control(Sync.HandleIncoming(table.concat({"WLRC","ClaimPeer",LOCAL_TRANSPORT,
+    "legacy-claim-id",claimBuildHash,claimDpsHash}, "|"),
+    "ClaimPeer-Ebonhold") == false,
     "stale unmarked WLRC did not masquerade as matching")
 local staleClaimOutcome = RequestOutcome()
 clock = staleClaimSent + 61
@@ -593,8 +612,9 @@ Check(staleClaimOutcome.requestId == staleClaimId
 
 local bucketClaimId, bucketClaimSent = BeginManual()
 clock = bucketClaimSent + 55
-Control(Sync.HandleIncoming(table.concat({"WLBC","ClaimPeer","Alice",
-    bucketClaimId,"B","1","0"}, "|"), "ClaimPeer") == true,
+Control(Sync.HandleIncoming(table.concat({"WLBC","ClaimPeer",LOCAL_TRANSPORT,
+    bucketClaimId,"B","1","0"}, "|"),
+    "ClaimPeer-Ebonhold") == true,
     "matching WLBC was accepted by the real session owner")
 clock = bucketClaimSent + 61
 Check(Session.StatusSnapshot().receiving == true
@@ -603,8 +623,9 @@ Check(Session.StatusSnapshot().receiving == true
 
 local staleBucketId, staleBucketSent = BeginManual()
 clock = staleBucketSent + 55
-Control(Sync.HandleIncoming(
-    "WLBC|ClaimPeer|Alice|legacy-bucket-id|B|1|0", "ClaimPeer") == false,
+Control(Sync.HandleIncoming(table.concat({"WLBC","ClaimPeer",LOCAL_TRANSPORT,
+    "legacy-bucket-id","B","1","0"}, "|"),
+    "ClaimPeer-Ebonhold") == false,
     "stale unmarked WLBC did not masquerade as matching")
 local staleBucketOutcome = RequestOutcome()
 clock = staleBucketSent + 61
@@ -615,8 +636,9 @@ Check(staleBucketOutcome.requestId == staleBucketId
 
 local loadoutClaimId, loadoutClaimSent = BeginManual()
 clock = loadoutClaimSent + 55
-Control(Sync.HandleIncoming(table.concat({"WLLC","ClaimPeer","Alice",
-    "loadout-target",loadoutClaimId}, "|"), "ClaimPeer") == true,
+Control(Sync.HandleIncoming(table.concat({"WLLC","ClaimPeer",LOCAL_TRANSPORT,
+    "loadout-target",loadoutClaimId}, "|"),
+    "ClaimPeer-Ebonhold") == true,
     "matching contextual WLLC was accepted")
 clock = loadoutClaimSent + 61
 Check(Session.StatusSnapshot().receiving == true
@@ -639,8 +661,9 @@ Check(legacyLoadoutClaimOutcome.requestId == legacyLoadoutClaimId
 
 local staleLoadoutClaimId, staleLoadoutClaimSent = BeginManual()
 clock = staleLoadoutClaimSent + 55
-Control(Sync.HandleIncoming(table.concat({"WLLC","ClaimPeer","Alice",
-    "loadout-target","c1-stale-loadout-claim"}, "|"), "ClaimPeer") == false,
+Control(Sync.HandleIncoming(table.concat({"WLLC","ClaimPeer",LOCAL_TRANSPORT,
+    "loadout-target","c1-stale-loadout-claim"}, "|"),
+    "ClaimPeer-Ebonhold") == false,
     "stale contextual WLLC did not masquerade as matching")
 local staleLoadoutClaimOutcome = RequestOutcome()
 clock = staleLoadoutClaimSent + 61
@@ -668,7 +691,7 @@ local function CaptureLoadoutResponse(buildId, requestId)
     H.sentChatMessages = {}
     local wire = "WLLQ|Bob|" .. buildId
     if requestId then wire = wire .. "|" .. requestId end
-    Control(Sync.HandleIncoming(wire, "Bob") == true,
+    Control(Sync.HandleIncoming(wire, "Bob-Ebonhold") == true,
         "loadout request scheduled " .. buildId)
     Pump(25)
     return FindSentWire("WLRB", function(parts)
@@ -688,16 +711,17 @@ local contextualLoadoutId = "c1-loadout-wire"
 local contextualLoadoutBuild, contextualLoadoutClaim = CaptureLoadoutResponse(
     "context-loadout-wire", contextualLoadoutId)
 Check(contextualLoadoutBuild and #contextualLoadoutBuild == 8
-        and contextualLoadoutBuild[7] == "Bob"
+        and contextualLoadoutBuild[7] == "Bob-Ebonhold"
         and contextualLoadoutBuild[8] == contextualLoadoutId
         and contextualLoadoutClaim and #contextualLoadoutClaim == 5
-        and contextualLoadoutClaim[3] == "Bob"
+        and contextualLoadoutClaim[3] == "Bob-Ebonhold"
         and contextualLoadoutClaim[5] == contextualLoadoutId,
     "contextual-WLLQ: WLRB/WLLC did not repeat exact request ownership")
 
 local function PrepareSummaryResponse(buildId, requestId)
     local build = assert(PutBuild(buildId, "Alice", 720 + fixture, false))
-    local context = requestId and {requester="Bob",requestId=requestId} or nil
+    local context = requestId
+        and {requester="Bob-Ebonhold",requestId=requestId} or nil
     local prepared = assert(Compatibility.PrepareSummary(build, context))
     return SplitWire(assert(prepared.messages[1]))
 end
@@ -710,7 +734,7 @@ Check(legacySummaryResponse and #legacySummaryResponse == 3,
 local contextualSummaryResponse = PrepareSummaryResponse(
     "context-summary-wire", "c1-summary-wire-request")
 Check(contextualSummaryResponse and #contextualSummaryResponse == 5
-        and contextualSummaryResponse[4] == "Bob"
+        and contextualSummaryResponse[4] == "Bob-Ebonhold"
         and contextualSummaryResponse[5] == "c1-summary-wire-request",
     "contextual-WLRQ: WLBI response lost exact request ownership")
 
@@ -719,10 +743,10 @@ Control(PutBuild("overlap-loadout-wire", "Alice", 730, true) ~= nil,
     "overlapping loadout fixture stored")
 H.sentChatMessages = {}
 Control(Sync.HandleIncoming(
-    "WLLQ|Bob|overlap-loadout-wire|c1-loadout-old", "Bob") == true,
+    "WLLQ|Bob|overlap-loadout-wire|c1-loadout-old", "Bob-Ebonhold") == true,
     "first overlapping WLLQ scheduled")
 Control(Sync.HandleIncoming(
-    "WLLQ|Bob|overlap-loadout-wire|c1-loadout-new", "Bob") == true,
+    "WLLQ|Bob|overlap-loadout-wire|c1-loadout-new", "Bob-Ebonhold") == true,
     "later overlapping WLLQ scheduled")
 Pump(25)
 local overlapBuild = FindSentWire("WLRB", function(parts)
@@ -731,7 +755,7 @@ end)
 local overlapClaim = FindSentWire("WLLC", function(parts)
     return parts[4] == "overlap-loadout-wire"
 end)
-Check(overlapBuild and overlapBuild[7] == "Bob"
+Check(overlapBuild and overlapBuild[7] == "Bob-Ebonhold"
         and overlapBuild[8] == "c1-loadout-new"
         and overlapClaim and overlapClaim[5] == "c1-loadout-new",
     "overlapping-WLLQ: later request inherited stale loadout response context")
@@ -749,7 +773,7 @@ local directRecord = CompactDps("DirectDps", 910000, 801)
 local directBucket = assert(DPS.SyncBucket("dummy", "DirectDps"))
 clock = directDpsSent + 55
 local directAccepted = SendDpsRecord("DirectDps", "direct-context",
-    directRecord, {requester="Alice",
+    directRecord, {requester=LOCAL_TRANSPORT,
         requestId=directDpsId,bucket=directBucket})
 local directOutcome = RequestOutcome()
 clock = directDpsSent + 61
@@ -778,7 +802,8 @@ local staleDirectRecord = CompactDps("StaleDirectDps", 925000, 805)
 local staleDirectBucket = assert(DPS.SyncBucket("dummy", "StaleDirectDps"))
 clock = staleDirectSent + 55
 local staleDirectAccepted = SendDpsRecord("StaleDirectDps", "direct-stale",
-    staleDirectRecord, {requester="Alice",requestId="c1-stale-direct",
+    staleDirectRecord, {requester=LOCAL_TRANSPORT,
+        requestId="c1-stale-direct",
         bucket=staleDirectBucket})
 local staleDirectOutcome = RequestOutcome()
 local staleDirectStored = NexusDB and NexusDB.dpsCapture
@@ -800,7 +825,7 @@ local foreignDirectRecord = CompactDps("ForeignDirectDps", 927000, 806)
 local foreignDirectBucket = assert(DPS.SyncBucket("dummy", "ForeignDirectDps"))
 clock = foreignDirectSent + 55
 local foreignDirectAccepted = SendDpsRecord("ForeignDirectDps",
-    "direct-foreign", foreignDirectRecord, {requester="Mallory",
+    "direct-foreign", foreignDirectRecord, {requester="Mallory-Ebonhold",
         requestId=foreignDirectId,bucket=foreignDirectBucket})
 local foreignDirectOutcome = RequestOutcome()
 local foreignDirectStored = NexusDB and NexusDB.dpsCapture
@@ -819,7 +844,7 @@ Check(foreignDirectAccepted and foreignDirectStored
 
 local relayDpsId, relayDpsSent = BeginManual()
 local relayBucket = assert(DPS.SyncBucket("dummy", "RelayOrigin"))
-local relayContext = {requester="Alice",requestId=relayDpsId,
+local relayContext = {requester=LOCAL_TRANSPORT,requestId=relayDpsId,
     bucket=relayBucket,relay=true}
 local relayRecord = CompactDps("RelayOrigin", 930000, 803, relayContext)
 clock = relayDpsSent + 55
@@ -838,7 +863,7 @@ local correctBucket = assert(DPS.SyncBucket("dummy", "WrongBucketDps"))
 local wrongBucket = (correctBucket % 8) + 1
 clock = wrongBucketSent + 55
 local wrongBucketAccepted = SendDpsRecord("WrongBucketDps", "wrong-bucket",
-    wrongBucketRecord, {requester="Alice",requestId=wrongBucketId,
+    wrongBucketRecord, {requester=LOCAL_TRANSPORT,requestId=wrongBucketId,
         bucket=wrongBucket})
 Check(wrongBucketAccepted == false,
     "direct contextual WLD2 with wrong bucket remained fail-closed")
@@ -869,18 +894,21 @@ clock = exactWorkSent + 10
 local exactEncoded = EncodeBuild("exact-partial", "Bob", 850)
 local exactChunks = Chunks(exactEncoded, 2)
 Control(Sync.HandleIncoming(BuildWire("Bob", "exact-partial", 850,
-    1, 2, exactChunks[1], {requester="Alice",requestId=exactWorkId}),
-    "Bob") == false, "matching partial build remains inflight")
+    1, 2, exactChunks[1], {requester=LOCAL_TRANSPORT,
+        requestId=exactWorkId}),
+    "Bob-Ebonhold") == false, "matching partial build remains inflight")
 Control(Session.QueueLegacyRecovery("unrelated-recovery") == true,
     "unrelated recovery work queued")
 local shareBuild = assert(PutBuild("unrelated-share", "Alice", 851, false))
 Control(Sync.BroadcastBuildSummary(shareBuild, {retryOnFull=true}) == true,
     "unrelated Share summary admitted")
 Control(Sync.BroadcastDelete({id="unrelated-delete",title="Unrelated delete",
-    author="Alice"}) == true, "unrelated delete admitted")
+    author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,isMine=true})
+    == true, "unrelated delete admitted")
 Control(Sync.HandleIncoming(
     "WLRQ|ResponderPeer|0|0|c1-unrelated-response|1.20.0-beta.1",
-    "ResponderPeer") == true, "unrelated responder reconciliation scheduled")
+    "ResponderPeer-Ebonhold") == true,
+    "unrelated responder reconciliation scheduled")
 local exactWork = Sync.WorkState()
 local _, _, _, exactLeaderboardWork = Sync.GetLeaderboardSyncStatus()
 Check(exactWork.requestRelated == 1
@@ -912,39 +940,42 @@ end
 
 MatchingReject(function(requestId)
     return table.concat({"WLRB","Bob","bad-geometry", "1", "0/1", "e30=",
-        "Alice",requestId}, "|")
+        LOCAL_TRANSPORT,requestId}, "|")
 end, "Bob", "malformed-WLRB")
 
 MatchingReject(function(requestId)
     return table.concat({"WLD2","DpsOwner","bad-geometry", "2/1", "e30=",
-        "Alice",requestId,"1"}, "|")
+        LOCAL_TRANSPORT,requestId,"1"}, "|")
 end, "DpsOwner", "malformed-WLD2")
 
 MatchingReject(function(requestId)
-    return table.concat({"WLBI","Bob","!!!!", "Alice",requestId}, "|")
+    return table.concat({"WLBI","Bob","!!!!", LOCAL_TRANSPORT,requestId}, "|")
 end, "Bob", "malformed-WLBI")
 
 MatchingReject(function(requestId)
     return table.concat({"WLRD","Bob","bad id","1","Bob",
-        "Alice",requestId}, "|")
+        LOCAL_TRANSPORT,requestId}, "|")
 end, "Bob", "malformed-WLRD")
 
 MatchingReject(function(requestId)
-    return table.concat({"WLLC","Bob","Alice","bad id",requestId}, "|")
+    return table.concat({"WLLC","Bob",LOCAL_TRANSPORT,
+        "bad id",requestId}, "|")
 end, "Bob", "malformed-WLLC")
 
 MatchingReject(function(requestId)
-    return table.concat({"WLRC","Bob","Alice",requestId,
+    return table.concat({"WLRC","Bob",LOCAL_TRANSPORT,requestId,
         string.rep("a", 193),"0"}, "|")
 end, "Bob", "malformed-WLRC")
 
 MatchingReject(function(requestId)
-    return table.concat({"WLBC","Bob","Alice",requestId,"X","1","0"}, "|")
+    return table.concat({"WLBC","Bob",LOCAL_TRANSPORT,
+        requestId,"X","1","0"}, "|")
 end, "Bob", "malformed-WLBC")
 
 local staleRejectId = BeginManual()
 Control(Sync.HandleIncoming(table.concat({"WLRB","Bob","stale-reject","1",
-    "0/1","e30=","Alice","c1-stale-reject"}, "|"), "Bob") == false,
+    "0/1","e30=",LOCAL_TRANSPORT,"c1-stale-reject"}, "|"),
+    "Bob") == false,
     "stale malformed contextual response remains rejected")
 local staleRejectOutcome = RequestOutcome()
 Check(staleRejectOutcome.rejected == 0
@@ -953,7 +984,8 @@ Check(staleRejectOutcome.rejected == 0
     "stale malformed context was not bounded as unrelated")
 
 Control(Sync.HandleIncoming(table.concat({"WLRB","Bob","foreign-reject","1",
-    "0/1","e30=","Mallory",staleRejectId}, "|"), "Bob") == false,
+    "0/1","e30=","Mallory-Ebonhold",staleRejectId}, "|"),
+    "Bob") == false,
     "foreign malformed contextual response remains rejected")
 local foreignRejectOutcome = RequestOutcome()
 Check(foreignRejectOutcome.rejected == 0
@@ -977,7 +1009,8 @@ for index = 1, 4 do
         "per-sender inflight capacity fixture admitted partial " .. index)
 end
 Control(Sync.HandleIncoming(table.concat({"WLRB","Bob","capacity-overflow",
-    "1","1/2","e30=","Alice",capacityId}, "|"), "Bob") == false,
+    "1","1/2","e30=",LOCAL_TRANSPORT,capacityId}, "|"),
+    "Bob") == false,
     "matching capacity overflow remains rejected")
 local capacityOutcome = RequestOutcome()
 Check(capacityOutcome.rejected == 1 and capacityOutcome.unrelated == 0
@@ -991,7 +1024,8 @@ for index = 1, 4 do
         "DPS per-sender inflight capacity fixture admitted partial " .. index)
 end
 Control(Sync.HandleIncoming(table.concat({"WLD2","DpsOwner",
-    "dps-capacity-overflow","1/2","e30=","Alice",dpsCapacityId,"1"}, "|"),
+    "dps-capacity-overflow","1/2","e30=",LOCAL_TRANSPORT,
+    dpsCapacityId,"1"}, "|"),
     "DpsOwner") == false, "matching DPS capacity overflow remains rejected")
 local dpsCapacityOutcome = RequestOutcome()
 Check(dpsCapacityOutcome.rejected == 1
@@ -1002,7 +1036,7 @@ Check(dpsCapacityOutcome.rejected == 1
 local conflictId = BeginManual()
 local conflictEncoded = EncodeBuild("conflict-reason", "Bob", 990)
 local conflictChunks = Chunks(conflictEncoded, 2)
-local conflictContext = {requester="Alice",requestId=conflictId}
+local conflictContext = {requester=LOCAL_TRANSPORT,requestId=conflictId}
 Control(Sync.HandleIncoming(BuildWire("Bob", "conflict-reason", 990,
     1, 2, conflictChunks[1], conflictContext), "Bob") == false,
     "conflicting transfer starts with one valid chunk")
@@ -1015,7 +1049,8 @@ Check(conflictOutcome.rejected == 1
     "chunk-conflict: bounded rejection reason was suppressed")
 
 local dpsConflictId = BeginManual()
-local dpsConflictContext = {requester="Alice",requestId=dpsConflictId,bucket=1}
+local dpsConflictContext = {requester=LOCAL_TRANSPORT,
+    requestId=dpsConflictId,bucket=1}
 Control(Sync.HandleIncoming(DpsChunkWire("DpsOwner", "dps-conflict", 1, 2,
     "e30=", dpsConflictContext), "DpsOwner") == false,
     "conflicting DPS transfer starts with one valid chunk")
@@ -1038,15 +1073,18 @@ do
 local overlapBuildId, overlapBuildSent = BeginManual()
 local overlapEncoded = EncodeBuild("overlap-build", "Bob", 901)
 local overlapChunks = Chunks(overlapEncoded, 2)
-local oldBuildContext = {requester="Alice",requestId="c1-overlap-old"}
-local newBuildContext = {requester="Alice",requestId=overlapBuildId}
+local oldBuildContext = {requester=LOCAL_TRANSPORT,
+    requestId="c1-overlap-old"}
+local newBuildContext = {requester=LOCAL_TRANSPORT,
+    requestId=overlapBuildId}
 clock = overlapBuildSent + 10
 Sync.HandleIncoming(BuildWire("Bob", "overlap-build", 901, 1, 2,
-    overlapChunks[1], oldBuildContext), "Bob")
+    overlapChunks[1], oldBuildContext), "Bob-Ebonhold")
 Sync.HandleIncoming(BuildWire("Bob", "overlap-build", 901, 1, 2,
-    overlapChunks[1], newBuildContext), "Bob")
+    overlapChunks[1], newBuildContext), "Bob-Ebonhold")
 local overlapBuildAccepted = Sync.HandleIncoming(BuildWire("Bob",
-    "overlap-build", 901, 2, 2, overlapChunks[2], newBuildContext), "Bob")
+    "overlap-build", 901, 2, 2, overlapChunks[2], newBuildContext),
+    "Bob-Ebonhold")
 local overlapBuildOutcome = RequestOutcome()
 Check(overlapBuildAccepted and Stored("overlap-build")
         and overlapBuildOutcome.new == 1
@@ -1059,22 +1097,22 @@ local overlapDpsBucket = assert(DPS.SyncBucket("dummy", "OverlapDps"))
 local overlapDpsData = Codec.Base64Encode(Codec.JSONEncode(overlapDpsRecord))
 local overlapDpsTotal = math.max(2, math.ceil(#overlapDpsData / 96))
 local overlapDpsChunks = Chunks(overlapDpsData, overlapDpsTotal)
-local oldDpsContext = {requester="Alice",requestId="c1-dps-old",
+local oldDpsContext = {requester=LOCAL_TRANSPORT,requestId="c1-dps-old",
     bucket=overlapDpsBucket}
-local newDpsContext = {requester="Alice",requestId=overlapDpsId,
+local newDpsContext = {requester=LOCAL_TRANSPORT,requestId=overlapDpsId,
     bucket=overlapDpsBucket}
 clock = overlapDpsSent + 10
 Sync.HandleIncoming(DpsChunkWire("OverlapDps", "overlap-dps", 1,
     overlapDpsTotal,
-    overlapDpsChunks[1], oldDpsContext), "OverlapDps")
+    overlapDpsChunks[1], oldDpsContext), "OverlapDps-Ebonhold")
 Sync.HandleIncoming(DpsChunkWire("OverlapDps", "overlap-dps", 1,
     overlapDpsTotal,
-    overlapDpsChunks[1], newDpsContext), "OverlapDps")
+    overlapDpsChunks[1], newDpsContext), "OverlapDps-Ebonhold")
 local overlapDpsAccepted = false
 for index = 2, overlapDpsTotal do
     overlapDpsAccepted = Sync.HandleIncoming(DpsChunkWire("OverlapDps",
         "overlap-dps", index, overlapDpsTotal, overlapDpsChunks[index],
-        newDpsContext), "OverlapDps")
+        newDpsContext), "OverlapDps-Ebonhold")
 end
 local overlapDpsOutcome = RequestOutcome()
 Check(overlapDpsAccepted and overlapDpsOutcome.updated == 1

@@ -28,6 +28,10 @@ function Session.New(options)
     local myName = assert(options.myName, "SyncSession requires myName")
     local normalizePeerName = assert(options.normalizePeerName,
         "SyncSession requires normalizePeerName")
+    local shortPeerName = options.shortPeerName or normalizePeerName
+    local isLocalPeer = options.isLocalPeer or function(name)
+        return shortPeerName(name) == shortPeerName(myName())
+    end
     local log = options.log or function() end
 
     local receiveWindow = Number(options.receiveWindow)
@@ -145,7 +149,7 @@ function Session.New(options)
 
     function M.MarkPeer(name, version)
         if not name or name == "" then return false end
-        if normalizePeerName(name) == normalizePeerName(myName()) then
+        if isLocalPeer(name) then
             return false
         end
         local key = normalizePeerName(name)
@@ -166,6 +170,7 @@ function Session.New(options)
         local peer = knownPeers[key] or {}
         local oldName, oldVersion = peer.name, peer.version
         peer.name = tostring(name):match("^([^%-]+)") or tostring(name)
+        peer.transportName = tostring(name)
         if version and version ~= "" then peer.version = tostring(version) end
         peer.lastSeen = current
         knownPeers[key] = peer
@@ -180,9 +185,22 @@ function Session.New(options)
 
     function M.GetPeerInfo(name)
         local peer = knownPeers[normalizePeerName(name)]
-        if not peer then return nil end
-        if peer.lastSeen and now() - peer.lastSeen > 7200 then return nil end
-        return peer
+        if peer then
+            if peer.lastSeen and now() - peer.lastSeen > 7200 then return nil end
+            return peer
+        end
+        local short = shortPeerName(name)
+        if not short or normalizePeerName(name) ~= short then return nil end
+        local unique
+        for _, candidate in pairs(knownPeers) do
+            if shortPeerName(candidate.transportName or candidate.name) == short
+                and not (candidate.lastSeen
+                    and now() - candidate.lastSeen > 7200) then
+                if unique and unique ~= candidate then return nil end
+                unique = candidate
+            end
+        end
+        return unique
     end
 
     function M.IsKnownPeer(name)

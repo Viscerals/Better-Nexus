@@ -172,7 +172,8 @@ local WireSync, WireCatalog = BootBuild("BuildSender", senderDb)
 local wireBuild = {
     id="mine-stage24-generated",title="Generated Transfer Fixture",
     description="generated fixture",author="BuildSender",
-    ownerKey="buildsender@fixturerealm",class="MAGE",
+    ownerKey="buildsender@fixturerealm",realm="fixturerealm",
+    ownerVerified=true,class="MAGE",
     echoes={{spellId=300201,quality=3,stacks=1}},
     postedAt=40000,lastModified=40000,isMine=true,
 }
@@ -239,7 +240,8 @@ for index = 1, retryLimits.maxOutboundQueue do
 end
 local immutableBuild = {
     id="mine-stage24-immutable",title="Immutable Before Retry",
-    author="RetrySender",ownerKey="retrysender@fixturerealm",class="MAGE",
+    author="RetrySender",ownerKey="retrysender@fixturerealm",
+    realm="fixturerealm",ownerVerified=true,class="MAGE",
     echoes={{spellId=300301,quality=3,stacks=1}},
     postedAt=50001,lastModified=50001,isMine=true,
 }

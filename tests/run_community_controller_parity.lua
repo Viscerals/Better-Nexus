@@ -8,7 +8,8 @@ time = function() return 5000 end
 local records = {
     owned={
         id="owned",title="Owned",description="before",author="Owner",
-        ownerKey="owner@ebonhold",class="MAGE",isMine=true,
+        ownerKey="owner@ebonhold",ownerVerified=true,realm="ebonhold",
+        class="MAGE",isMine=true,
         postedAt=1,lastModified=1,
         echoes={{spellId=200100,quality=3,stacks=1}},
     },

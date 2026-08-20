@@ -42,6 +42,8 @@ for index = 1, 4 do
         local player = string.format("PersistedMage%02d", index)
         NexusDB.dpsCapture.characterBest[category][player:lower()] = {
             player=player,dps=(category == "dummy" and 90000 or 80000)+index,
+            ownerKey=player:lower() .. "@ebonhold",
+            ownerVerified=true,realm="ebonhold",
             level=80,ts=index,duration=(category == "dummy" and 60 or 90),
             category=category,class="MAGE",buildId=id,
             fingerprint=fingerprint,echoes={{spellId=760000+index,count=1}},

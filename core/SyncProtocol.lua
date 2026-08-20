@@ -33,6 +33,18 @@ function Protocol.New(options)
         or (identity and identity.CanonicalOwnerKey)
     local P = {}
 
+    local function OwnerIdentityMatches(ownerKey, author)
+        if not ownerKeyMatchesAuthor(ownerKey, author) then return false end
+        if ownerKey == nil or type(author) ~= "string"
+            or not author:find("-", 1, true) then return true end
+        if not canonicalOwnerKey then return true end
+        local name, realm = author:match("^([^-]+)%-(.+)$")
+        if not name or not realm then return false end
+        local owner = canonicalOwnerKey(ownerKey)
+        local qualifiedAuthor = canonicalOwnerKey(name .. "@" .. realm)
+        return owner ~= nil and owner == qualifiedAuthor
+    end
+
     function P.EscapedLen(value)
         return #value + select(2, value:gsub("|", ""))
     end
@@ -151,7 +163,7 @@ function Protocol.New(options)
             and type(rawEchoes) == "table" and #rawEchoes <= maxBuildEchoes) then
             return nil
         end
-        if not ownerKeyMatchesAuthor(ownerKey, author) then return nil end
+        if not OwnerIdentityMatches(ownerKey, author) then return nil end
 
         local echoes = {}
         for _, echo in ipairs(rawEchoes) do
@@ -234,17 +246,66 @@ function Protocol.New(options)
                 echo.quality, echo.stacks, echo.locked
             if locked ~= nil and type(locked) ~= "boolean" then return false end
         end
-        return P.FiniteNumber(spellId) and spellId >= 1
+        local valid = P.FiniteNumber(spellId) and spellId >= 1
             and spellId <= 2147483647 and spellId == math.floor(spellId)
             and P.FiniteNumber(quality) and quality >= 0 and quality <= 255
             and quality == math.floor(quality)
             and P.FiniteNumber(stacks) and stacks >= 1 and stacks <= 120
-            and stacks == math.floor(stacks), stacks
+            and stacks == math.floor(stacks)
+        return valid, stacks, spellId, quality,
+            locked == true or locked == 1
     end
+
+    local function ScalarAliasesAgree(compact, verbose, normalize)
+        if compact == nil or verbose == nil then return true end
+        if normalize then
+            local left, right = normalize(compact), normalize(verbose)
+            return left ~= nil and left == right
+        end
+        return type(compact) == type(verbose) and compact == verbose
+    end
+
+    local function EchoAliasesAgree(compact, verbose)
+        if compact == nil or verbose == nil then return true end
+        if not DenseArray(compact, maxBuildEchoes)
+            or not DenseArray(verbose, maxBuildEchoes)
+            or #compact ~= #verbose then return false end
+        for index = 1, #compact do
+            local lv, ls, li, lq, ll = NetworkEcho(compact[index])
+            local rv, rs, ri, rq, rl = NetworkEcho(verbose[index])
+            if not lv or not rv or ls ~= rs or li ~= ri or lq ~= rq
+                or ll ~= rl then return false end
+        end
+        return true
+    end
+
+    local function NetworkAliasesAgree(data)
+        return ScalarAliasesAgree(data.t, data.title)
+            and ScalarAliasesAgree(data.a, data.author)
+            and ScalarAliasesAgree(data.o, data.ownerKey,
+                canonicalOwnerKey)
+            and ScalarAliasesAgree(data.c, data.class)
+            and ScalarAliasesAgree(data.m, data.lastModified)
+            and ScalarAliasesAgree(data.d, data.description)
+            and ScalarAliasesAgree(data.lk, data.link)
+            and (data.x == nil or data.autoDps == nil
+                or data.x == 1 and data.autoDps == true)
+            and EchoAliasesAgree(data.e, data.echoes)
+    end
+
+    local unsupportedNetworkAuthority = {
+        player=true,p=true,realm=true,r=true,claimedOwnerKey=true,
+        relaySender=true,ownerVerified=true,isMine=true,
+        importedSavedBuild=true,
+    }
 
     function P.ValidateNetworkPayload(data)
         if type(data) ~= "table" or not isSafeTree(data, 6, 2000) then
             return nil
+        end
+        if not NetworkAliasesAgree(data) then return nil end
+        for field in pairs(unsupportedNetworkAuthority) do
+            if data[field] ~= nil then return nil end
         end
         local title, author = data.t or data.title, data.a or data.author
         local ownerKey, class = data.o or data.ownerKey, data.c or data.class
@@ -260,7 +321,7 @@ function Protocol.New(options)
             or not P.ValidText(title, 120, false)
             or not P.ValidPeerName(author)
             or (ownerKey ~= nil and not P.ValidField(ownerKey, 160, false))
-            or not ownerKeyMatchesAuthor(ownerKey, author)
+            or not OwnerIdentityMatches(ownerKey, author)
             or (class ~= nil and not P.ValidField(class, 32, false))
             or not P.FiniteNumber(modified) or modified < 0
             or modified > 9007199254740991
@@ -327,7 +388,7 @@ function Protocol.New(options)
             or (data.x ~= nil and data.x ~= 1) then
             return nil, "schema"
         end
-        if not ownerKeyMatchesAuthor(data.o, data.a) then
+        if not OwnerIdentityMatches(data.o, data.a) then
             return nil, "ownership"
         end
         return data
@@ -335,19 +396,29 @@ function Protocol.New(options)
 
     local function DpsEcho(echo)
         if type(echo) ~= "table" then return false end
+        if not ScalarAliasesAgree(echo.spellId, echo.id)
+            or not ScalarAliasesAgree(echo.count, echo.stacks)
+            or not ScalarAliasesAgree(echo.count, echo.stack)
+            or not ScalarAliasesAgree(echo.stacks, echo.stack) then
+            return false
+        end
         local spellId = echo.spellId
         if spellId == nil then spellId = echo.id end
         local stacks = echo.count
         if stacks == nil then stacks = echo.stacks end
         if stacks == nil then stacks = echo.stack end
         local quality = echo.quality
+        local locked = echo.locked
+        if locked ~= nil and locked ~= true and locked ~= false
+            and locked ~= 0 and locked ~= 1 then return false end
         return P.FiniteNumber(spellId) and spellId >= 1
             and spellId <= 2147483647 and spellId == math.floor(spellId)
             and P.FiniteNumber(stacks) and stacks >= 1 and stacks <= 120
             and stacks == math.floor(stacks)
             and (quality == nil or (P.FiniteNumber(quality)
                 and quality >= 0 and quality <= 255
-                and quality == math.floor(quality))), stacks
+                and quality == math.floor(quality))), stacks, spellId, quality,
+            locked == true or locked == 1
     end
 
     local function DpsEchoList(echoes)
@@ -362,6 +433,55 @@ function Protocol.New(options)
         return true
     end
 
+    local function DpsEchoAliasesAgree(compact, verbose)
+        if compact == nil or verbose == nil then return true end
+        if not DenseArray(compact, maxBuildEchoes)
+            or not DenseArray(verbose, maxBuildEchoes)
+            or #compact ~= #verbose then return false end
+        for index = 1, #compact do
+            local lv, ls, li, lq, ll = DpsEcho(compact[index])
+            local rv, rs, ri, rq, rl = DpsEcho(verbose[index])
+            if not lv or not rv or ls ~= rs or li ~= ri or lq ~= rq
+                or ll ~= rl then
+                return false
+            end
+        end
+        return true
+    end
+
+    local function LowerText(value)
+        return type(value) == "string" and value:lower() or nil
+    end
+
+    local function RealmText(value)
+        return type(value) == "string"
+            and value:lower():gsub("%s+", "") or nil
+    end
+
+    local function DpsAliasesAgree(data)
+        return ScalarAliasesAgree(data.v, data.protocolVersion)
+            and ScalarAliasesAgree(data.c, data.category)
+            and ScalarAliasesAgree(data.d, data.dps)
+            and ScalarAliasesAgree(data.u, data.duration)
+            and ScalarAliasesAgree(data.t, data.ts)
+            and ScalarAliasesAgree(data.p, data.player)
+            and ScalarAliasesAgree(data.l, data.level)
+            and ScalarAliasesAgree(data.k, data.class, LowerText)
+            and ScalarAliasesAgree(data.o, data.ownerKey,
+                canonicalOwnerKey)
+            and ScalarAliasesAgree(data.r, data.realm, RealmText)
+            and ScalarAliasesAgree(data.b, data.buildId)
+            and ScalarAliasesAgree(data.f, data.fingerprint)
+            and ScalarAliasesAgree(data.h, data.loadoutHash, LowerText)
+            and DpsEchoAliasesAgree(data.e, data.echoes)
+            and DpsEchoAliasesAgree(data.lk, data.lockedEchoes)
+    end
+
+    local unsupportedDpsAuthority = {
+        claimedOwnerKey=true,relaySender=true,ownerVerified=true,isMine=true,
+        importedSavedBuild=true,_originVerified=true,
+    }
+
     local function Prefer(data, compact, verbose)
         local value = data[compact]
         if value == nil then value = data[verbose] end
@@ -371,6 +491,10 @@ function Protocol.New(options)
     function P.ValidateNetworkDpsPayload(data)
         if type(data) ~= "table" or not isSafeTree(data, 6, 2000) then
             return nil, "schema"
+        end
+        if not DpsAliasesAgree(data) then return nil, "schema" end
+        for field in pairs(unsupportedDpsAuthority) do
+            if data[field] ~= nil then return nil, "schema" end
         end
         local version = Prefer(data, "v", "protocolVersion")
         local category = Prefer(data, "c", "category")
@@ -401,7 +525,7 @@ function Protocol.New(options)
             or level ~= math.floor(level)
             or not P.ValidField(class, 32, false)
             or (ownerKey ~= nil and not P.ValidField(ownerKey, 160, false))
-            or not ownerKeyMatchesAuthor(ownerKey, player)
+            or not OwnerIdentityMatches(ownerKey, player)
             or (realm ~= nil and not P.ValidField(realm, 96, false))
             or (buildId ~= nil
                 and not P.ValidIdentifier(buildId, maxBuildIdBytes))

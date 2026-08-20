@@ -60,4 +60,73 @@ assert(DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=27000000,u=65,t=60000,p=
 assert(DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=25000000,u=65,t=60001,p="Oldmage",k="MAGE",l=80,b=buildId}), "a different character should keep its own best entry")
 assert(not DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=24000000,u=65,t=60002,p="Oldmage",k="MAGE",l=80,b=buildId}), "a lower record for the same character should be rejected")
 assert(DPS.GetLeaderboard(buildId,"dummy")[1].player=="Othermage", "highest exact-loadout holder should remain authoritative")
+
+-- A current-character pull may share an exact fingerprint with another
+-- verified owner. The content match is useful for display, but it cannot bind
+-- this character's durable DPS row to that foreign Community identity.
+local collisionEchoes={
+    {spellId=200110,quality=3,stacks=1},
+}
+H.wishlist={name="Collision Set",class="MAGE",echoes=collisionEchoes}
+H.granted={
+    A={{spellId=200110,stack=1,maxStack=1,quality=3}},
+    B={},
+}
+H.FireEvent("SPELLS_CHANGED"); H.Advance(2)
+local collisionFp=DPS.GetEchoKey(collisionEchoes)
+local foreignId="foreign-exact-owner"
+assert(Nexus.BuildCatalog.Put({
+    id=foreignId,title="Foreign Exact",author="Othermage",
+    ownerKey="othermage@ebonhold",ownerVerified=true,realm="ebonhold",
+    class="MAGE",echoes=collisionEchoes,fingerprint=collisionFp,
+    fingerprintHash=DPS.GetEchoHash(collisionEchoes),echoCount=1,
+    loadoutAvailable=true,lastModified=70000,
+}), "foreign exact-fingerprint fixture was not stored")
+local foreignBefore=Nexus.BuildCatalog.Get(foreignId)
+stubDps=30000000
+DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
+local localCollision=NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"]
+local foreignAfter=Nexus.BuildCatalog.Get(foreignId)
+assert(localCollision and localCollision.fingerprint==collisionFp
+    and localCollision.buildId and localCollision.buildId~=foreignId
+    and Nexus.BuildCatalog.Get(localCollision.buildId),
+    "EXPECTED RED: local capture associated with a foreign exact-fingerprint build: "
+        .. tostring(localCollision and localCollision.buildId) .. "/"
+        .. tostring(localCollision and localCollision.fingerprint) .. "/"
+        .. tostring(collisionFp) .. "/"
+        .. tostring(localCollision and Nexus.BuildCatalog.Get(localCollision.buildId)))
+assert(foreignAfter and foreignBefore
+    and foreignAfter.ownerKey==foreignBefore.ownerKey
+    and foreignAfter.title==foreignBefore.title,
+    "local capture mutated the foreign exact-fingerprint build")
+
+-- Imported Saved mirrors are private local projections, not public DPS build
+-- identities. Even an exact verified local mirror requires a distinct ordinary
+-- record page before its ID can enter the DPS mesh.
+local savedEchoes={{spellId=200112,quality=3,stacks=1}}
+H.wishlist={name="Saved Collision",class="MAGE",echoes=savedEchoes}
+H.granted={A={{spellId=200112,stack=1,maxStack=1,quality=3}},B={}}
+H.FireEvent("SPELLS_CHANGED"); H.Advance(2)
+local savedFp=DPS.GetEchoKey(savedEchoes)
+local savedId="private-saved-recordmage"
+assert(Nexus.BuildCatalog.Put({
+    id=savedId,title="Private Saved Recordmage",author="Recordmage",
+    ownerKey="recordmage@ebonhold",ownerVerified=true,realm="ebonhold",
+    importedSavedBuild=true,isMine=true,class="MAGE",echoes=savedEchoes,
+    fingerprint=savedFp,fingerprintHash=DPS.GetEchoHash(savedEchoes),
+    echoCount=1,loadoutAvailable=true,lastModified=71000,
+}), "private Saved collision fixture was not stored")
+stubDps=32000000
+DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
+local savedCollision=NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"]
+local savedMirror=Nexus.BuildCatalog.Get(savedId)
+assert(savedCollision and savedCollision.fingerprint==savedFp
+    and savedCollision.buildId and savedCollision.buildId~=savedId
+    and Nexus.Identity.SavedMirrorKind(
+        Nexus.BuildCatalog.Get(savedCollision.buildId))=="ordinary",
+    "EXPECTED RED: local DPS capture reused a private Saved mirror ID")
+assert(savedMirror and savedMirror.importedSavedBuild==true
+    and savedMirror.title=="Private Saved Recordmage"
+    and sent[#sent] and sent[#sent].buildId~=savedId,
+    "private Saved collision was mutated or disclosed through DPS egress")
 print("automatic exact-loadout build and single-record DPS workflow -- OK")

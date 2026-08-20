@@ -16,6 +16,25 @@ local function Measure(name, callback, ...)
     return callback(...)
 end
 
+local function StableIdHash(text)
+    text = tostring(text or "")
+    local h1, h2 = 5381, 2166136261
+    for i = 1, #text do
+        local b = text:byte(i)
+        h1 = (h1 * 33 + b) % 2147483647
+        h2 = (h2 * 131 + b) % 2147483629
+    end
+    return string.format("%08x%08x", h1, h2)
+end
+
+local COLLISION_ATTEMPT_LIMIT = 16
+
+local function CollisionCandidateId(base, token, attempt)
+    if attempt == 0 then return base end
+    if attempt == 1 then return base .. "-" .. token end
+    return base .. "-" .. token .. "-" .. tostring(attempt)
+end
+
 function Controller.New(options)
     options = type(options) == "table" and options or {}
     local M = {}
@@ -46,6 +65,8 @@ function Controller.New(options)
     local fallbackFilters = {}
     local RefreshBuildIdentity
     local IsOwnBuild
+    local RelatedBuild
+    local PublishedBuild
     local refreshView = type(options.refresh) == "function"
         and options.refresh or function() end
     local notify = type(options.notify) == "function"
@@ -92,6 +113,56 @@ function Controller.New(options)
         local catalog = Catalog()
         if not (catalog and catalog.Get) then return nil end
         return catalog.Get(id)
+    end
+
+    local function ShallowCopy(record)
+        if type(record) ~= "table" then return nil end
+        local out = {}
+        for key, value in pairs(record) do out[key] = value end
+        return out
+    end
+
+    local function LoadBuildSummary(id)
+        local catalog = Catalog()
+        if not (catalog and type(catalog.GetSummary) == "function") then
+            return nil
+        end
+        return catalog.GetSummary(id)
+    end
+
+    local function AllocationOccupancy(id)
+        local catalog = Catalog()
+        if catalog and type(catalog.AllocationOccupancy) == "function" then
+            local ok, state, represented = pcall(
+                catalog.AllocationOccupancy, id)
+            if ok and (state == "absent" or state == "visible"
+                or state == "bundled" or state == "tombstone"
+                or state == "opaque") then
+                return state, represented
+            end
+            return "opaque", nil
+        end
+        -- Compatibility for injected controller-only tests. The shipped
+        -- catalog always supplies AllocationOccupancy and therefore protects
+        -- tombstones, bundled IDs, and malformed raw persistence.
+        local represented = LoadBuild(id)
+        return represented and "visible" or "absent", represented
+    end
+
+    local function FindStableCollisionTarget(base, token, reusable)
+        local firstFree
+        local lastAttempt = token and COLLISION_ATTEMPT_LIMIT or 0
+        for attempt = 0, lastAttempt do
+            local candidateId = CollisionCandidateId(base, token, attempt)
+            local state, candidate = AllocationOccupancy(candidateId)
+            if state == "absent" then
+                if not firstFree then firstFree = candidateId end
+            elseif state == "visible" and type(reusable) == "function"
+                and reusable(candidate) then
+                return candidateId, candidate
+            end
+        end
+        return firstFree, nil
     end
 
     local function SaveBuild(build)
@@ -255,12 +326,125 @@ function Controller.New(options)
         return OwnerKey(UnitName and UnitName("player"), CurrentRealm())
     end
 
+    local function CurrentVerifiedOwnerKey()
+        local ownerKey = Identity.CanonicalOwnerKey(CurrentOwnerKey())
+        return ownerKey and not ownerKey:match("@unknown$")
+            and ownerKey or nil
+    end
+
+    local function OwnerEvidenceKey(record)
+        if type(record) ~= "table" then return nil end
+        if record.a ~= nil then return nil end
+        local ownerKey
+        for _, field in ipairs({"claimedOwnerKey", "ownerKey", "o"}) do
+            local value = record[field]
+            if value ~= nil then
+                local canonical = Identity.CanonicalOwnerKey(value)
+                if not canonical or canonical:match("@unknown$")
+                    or (ownerKey and ownerKey ~= canonical) then return nil end
+                ownerKey = canonical
+            end
+        end
+        local authorFields = {"player", "p", "author"}
+        local firstAuthor
+        for _, field in ipairs(authorFields) do
+            local value = record[field]
+            if value ~= nil then
+                if type(value) ~= "string" or not Identity.ValidPlayer(value) then
+                    return nil
+                end
+                firstAuthor = firstAuthor or value
+            end
+        end
+        local realmFields = {"realm", "r"}
+        local firstRealm
+        for _, field in ipairs(realmFields) do
+            local value = record[field]
+            if value ~= nil then
+                if type(value) ~= "string" or value == ""
+                    or value:find("[%c|%s]") then return nil end
+                firstRealm = firstRealm or value
+            end
+        end
+        if ownerKey == nil and firstAuthor and firstRealm then
+            ownerKey = Identity.CanonicalOwnerKey(
+                Identity.OwnerKey(firstAuthor, firstRealm))
+        end
+        if not ownerKey then return nil end
+        for _, field in ipairs(authorFields) do
+            local author = record[field]
+            if author ~= nil then
+                if not Identity.OwnerKeyMatchesAuthor(ownerKey, author)
+                    or (author:find("-", 1, true)
+                        and Identity.CanonicalOwnerFromTransport(author)
+                            ~= ownerKey) then return nil end
+            end
+        end
+        local ownerName = ownerKey:match("^([^@]+)@")
+        for _, field in ipairs(realmFields) do
+            local realm = record[field]
+            if realm ~= nil and Identity.CanonicalOwnerKey(
+                Identity.OwnerKey(ownerName, realm)) ~= ownerKey then
+                return nil
+            end
+        end
+        return ownerKey
+    end
+
+    -- A fresh verified DPS owner may repair its own retained auto page even
+    -- when old transport aliases made that page non-authoritative. This helper
+    -- is promotion-only: it never grants reads, edits, publication, or relay.
+    local function CanPromoteOwnerEvidence(record, incomingOwner)
+        incomingOwner = Identity.CanonicalOwnerKey(incomingOwner)
+        if type(record) ~= "table" or not incomingOwner
+            or Identity.SavedMirrorKind(record) ~= "ordinary"
+            or record.autoDps ~= true
+            or Identity.VerifiedOwnerKey(record) ~= nil then return false end
+        local claimedKey = Identity.CanonicalOwnerKey(record.claimedOwnerKey)
+        local storedKey = Identity.CanonicalOwnerKey(record.ownerKey)
+        if claimedKey and storedKey and claimedKey ~= storedKey then return false end
+        local claim = claimedKey or storedKey
+        if claim ~= incomingOwner then return false end
+        local author = record.author
+        if author ~= nil and (type(author) ~= "string"
+            or not Identity.OwnerKeyMatchesAuthor(incomingOwner, author)
+            or (author:find("-", 1, true)
+                and Identity.CanonicalOwnerFromTransport(author)
+                    ~= incomingOwner)) then return false end
+        return true
+    end
+
+    local function VerifiedDpsOwnerKey(record)
+        if type(record) ~= "table" or record.ownerVerified ~= true then
+            return nil
+        end
+        local dps = Nexus and Nexus.DpsCapture
+        if not (dps and type(dps.VerifiedOwnerKey) == "function") then
+            return nil
+        end
+        return dps.VerifiedOwnerKey(record)
+    end
+
+    local function ApplyVerifiedBuildOwner(build, ownerKey, author)
+        build.ownerKey = ownerKey
+        build.ownerVerified = true
+        build.claimedOwnerKey = nil
+        build.relaySender = nil
+        build.author = author
+        build.player = nil
+        build.realm = ownerKey:match("@(.+)$")
+        build.a, build.o, build.p, build.r = nil, nil, nil, nil
+        build.isMine = ownerKey == CurrentVerifiedOwnerKey()
+    end
+
     function M.BindAdapter(adapter)
         Adapter = adapter
     end
 
     function M.Build(id)
-        return LoadBuild(id)
+        local build = LoadBuild(id)
+        if M.ProjectBuild then return M.ProjectBuild(build) end
+        return build
     end
 
     function M.Builds()
@@ -304,10 +488,16 @@ function Controller.New(options)
             local ok, available = pcall(dps.IsDetailsAvailable)
             if ok then detailsAvailable = available and true or false end
         end
+        local currentClass = ""
+        if type(UnitClass) == "function" then
+            local ok, _, token = pcall(UnitClass, "player")
+            currentClass = ok and (NormalizeClass(token) or "") or ""
+        end
         return {
             ownerKey=CurrentOwnerKey() or "",
             player=Identity.PlayerKey(
                 (UnitName and UnitName("player")) or "") or "",
+            currentClass=currentClass,
             isAdmin=IsAdmin() and true or false,
             ownedBySpell=ownedBySpell,
             detailsAvailable=detailsAvailable,
@@ -324,8 +514,11 @@ function Controller.New(options)
         local dps = Nexus and Nexus.DpsCapture
         if type(build) ~= "table" or not (dps
             and type(dps.GetRecordForIdentity) == "function") then return nil end
-        return dps.GetRecordForIdentity(build.id, build.fingerprint,
-            build.fingerprintHash, category)
+        local savedKind = Identity.SavedMirrorKind(build)
+        local related, valid = RelatedBuild(build)
+        if savedKind ~= "ordinary" and not valid then return nil end
+        return dps.GetRecordForIdentity(related.id, related.fingerprint,
+            related.fingerprintHash, category)
     end
 
     function M.Leaderboard(buildId, category)
@@ -452,7 +645,9 @@ function Controller.New(options)
     end
 
     function M.SelectedBuild()
-        return selectedId and LoadBuild(selectedId) or nil
+        local build = selectedId and LoadBuild(selectedId) or nil
+        if M.ProjectBuild then return M.ProjectBuild(build) end
+        return build
     end
 
     function M.SelectedBuildKey()
@@ -595,17 +790,87 @@ function Controller.New(options)
     end
 
     IsOwnBuild = function(build)
-        if not build then return false end
-        local mine = CurrentOwnerKey()
-        if not mine then return false end
-        if build.ownerKey then
-            return Identity.CanonicalOwnerKey(build.ownerKey) == mine
+        return Identity.LocalOwnsBuild(build, CurrentOwnerKey())
+    end
+
+    local function HasVerifiedRelatedOwner(candidate, ownerKey)
+        ownerKey = Identity.CanonicalOwnerKey(ownerKey)
+        return ownerKey ~= nil and type(candidate) == "table"
+            and Identity.SavedMirrorKind(candidate) == "ordinary"
+            and Identity.VerifiedOwnerKey(candidate) == ownerKey
+    end
+
+    local NewRelatedScorer
+
+    local function BetterRelatedCandidate(candidate, score, best, bestScore,
+        keepBestOnTie)
+        if not score then return false end
+        if score ~= bestScore then return score > bestScore end
+        if keepBestOnTie then return false end
+        return tostring(candidate and candidate.id or "")
+            < tostring(best and best.id or "")
+    end
+
+    PublishedBuild = function(source, loadCandidate)
+        if Identity.SavedMirrorKind(source) ~= "saved" then
+            return nil
         end
-        -- Legacy builds predate ownerKey. They remain editable only when both
-        -- their local marker and author name match the current character.
-        if not build.isMine then return false end
-        local me = (UnitName and UnitName("player")) or ""
-        return Identity.SamePlayer(build.author, me)
+        loadCandidate = type(loadCandidate) == "function"
+            and loadCandidate or LoadBuild
+        local ownerKey = Identity.VerifiedOwnerKey(source)
+        if not ownerKey then return nil end
+        local seen = {}
+        for _, field in ipairs({"publishedBuildId", "recordBuildId"}) do
+            local candidateId = source[field]
+            if candidateId ~= nil and not seen[candidateId] then
+                seen[candidateId] = true
+                local candidate = loadCandidate(candidateId)
+                if HasVerifiedRelatedOwner(candidate, ownerKey)
+                    and candidate.sourceSavedBuildId == source.id then
+                    return candidate
+                end
+            end
+        end
+        return nil
+    end
+
+    local function PreferredRelatedCandidates(source, loadCandidate)
+        loadCandidate = type(loadCandidate) == "function"
+            and loadCandidate or LoadBuild
+        local preferred = {}
+        local published = PublishedBuild(source, loadCandidate)
+        if published then preferred[#preferred + 1] = published end
+        local record = source and source.recordBuildId
+            and loadCandidate(source.recordBuildId) or nil
+        if record and (not published or record.id ~= published.id) then
+            preferred[#preferred + 1] = record
+        end
+        return preferred
+    end
+
+    local function BestPreferredRelated(source, score, loadCandidate)
+        local best, bestScore = nil, -1
+        for _, candidate in ipairs(
+            PreferredRelatedCandidates(source, loadCandidate)) do
+            local candidateScore = score(candidate)
+            if BetterRelatedCandidate(candidate, candidateScore,
+                best, bestScore, true) then
+                best, bestScore = candidate, candidateScore
+            end
+        end
+        return best, bestScore
+    end
+
+    RelatedBuild = function(build)
+        local savedKind = Identity.SavedMirrorKind(build)
+        if savedKind == "ordinary" then return build, true end
+        if savedKind ~= "saved" then return build, false end
+        local ownerKey = Identity.VerifiedOwnerKey(build)
+        if not ownerKey then return build, false end
+        local score = NewRelatedScorer(
+            build.serverTitle or build.title, build.echoes, ownerKey)
+        local best = BestPreferredRelated(build, score)
+        return best or build, best ~= nil
     end
 
     function M.IsOwnBuild(idOrBuild)
@@ -618,66 +883,99 @@ function Controller.New(options)
         return tostring(text or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
     end
 
-    local function EchoPresence(echoes)
+    local function EchoPresence(evidence, fingerprintComplete)
         local out = {}
-        for _, e in ipairs(type(echoes) == "table" and echoes or {}) do
-            local id = tonumber(e.spellId or e.id)
-            if id then out[id] = (out[id] or 0) + (tonumber(e.stacks or e.count) or 1) end
+        if type(evidence) == "table" then
+            for _, e in ipairs(evidence) do
+                local id = tonumber(e.spellId or e.id)
+                if id then
+                    out[id] = (out[id] or 0)
+                        + (tonumber(e.stacks or e.count) or 1)
+                end
+            end
+            return out
         end
+        if type(evidence) ~= "string" or fingerprintComplete ~= true
+            or evidence == "" or evidence == "0" then return nil end
+        local parts = {}
+        for part in evidence:gmatch("[^,]+") do
+            local rawId, rawCount = part:match("^(%d+)x(%d+)$")
+            local id, count = tonumber(rawId), tonumber(rawCount)
+            if not id or id <= 0 or not count or count <= 0 then return nil end
+            parts[#parts + 1] = part
+            out[id] = (out[id] or 0) + count
+        end
+        if #parts == 0 or table.concat(parts, ",") ~= evidence then return nil end
         return out
+    end
+
+    NewRelatedScorer = function(serverTitle, evidence, ownerKey,
+        fingerprintComplete)
+        local D = Nexus.DpsCapture
+        local wanted = EchoPresence(evidence, fingerprintComplete)
+        local exactKey = type(evidence) == "table" and D and D.GetEchoKey
+            and D.GetEchoKey(evidence) or wanted and evidence or nil
+        local titleKey = NormalizeTitle(serverTitle)
+        ownerKey = Identity.CanonicalOwnerKey(ownerKey)
+        local wantedTotal = 0
+        for _, count in pairs(wanted or {}) do wantedTotal = wantedTotal + count end
+
+        local function CandidateScore(candidate)
+            if not wanted or not exactKey
+                or not HasVerifiedRelatedOwner(candidate, ownerKey) then
+                return nil
+            end
+
+            local candidateEvidence = type(candidate.echoes) == "table"
+                and candidate.echoes or candidate.fingerprint
+            local have = EchoPresence(candidateEvidence,
+                candidate.ordinaryComplete == true)
+            if not have then return nil end
+            local candidateKey = type(candidateEvidence) == "table"
+                and D and D.GetEchoKey and D.GetEchoKey(candidateEvidence)
+                or candidate.fingerprint
+            if exactKey and candidateKey == exactKey then return 100000 end
+
+            local overlap = 0
+            for id, count in pairs(wanted) do
+                overlap = overlap + math.min(count, have[id] or 0)
+            end
+
+            -- Server Saved Builds commonly expose only the currently locked Echoes,
+            -- while the published leaderboard build contains the complete 79-Echo
+            -- loadout. Treat the locked set as a subset match, but only after exact
+            -- verified owner authority and strongly prefer the same server title.
+            local sameTitle = titleKey ~= "" and NormalizeTitle(
+                candidate.title or candidate.serverTitle) == titleKey
+            local required = math.min(8,
+                math.max(1, math.floor(wantedTotal / 2)))
+            if overlap < required then return nil end
+            if sameTitle then return 10000 + overlap end
+            if overlap == wantedTotal and wantedTotal >= 6 then
+                return 1000 + overlap
+            end
+            return nil
+        end
+        return CandidateScore, exactKey
     end
 
     -- A Saved Build mirror and its leaderboard/community record can use different
     -- ids even though they describe the same loadout. Resolve the published/record
     -- copy once so class and DPS stay attached to the local mirror.
-    local function BeginRelatedBuild(serverTitle, echoes, old, author)
+    local function BeginRelatedBuild(serverTitle, echoes, old, author, ownerKey)
         local catalog = Catalog()
-        local D = Nexus.DpsCapture
-        local exactKey = D and D.GetEchoKey and D.GetEchoKey(echoes) or nil
-        local titleKey = NormalizeTitle(serverTitle)
-        local authorKey = NormalizeTitle(author)
-        local wanted = EchoPresence(echoes)
-        local wantedTotal = 0
-        for _, count in pairs(wanted) do wantedTotal = wantedTotal + count end
-
-        local function CandidateScore(candidate)
-            if not candidate or candidate.importedSavedBuild then return nil end
-            if authorKey ~= "" and NormalizeTitle(candidate.author) ~= authorKey then return nil end
-
-            local candidateKey = D and D.GetEchoKey and D.GetEchoKey(candidate.echoes) or candidate.fingerprint
-            if exactKey and candidateKey == exactKey then return 100000 end
-
-            local have, overlap = EchoPresence(candidate.echoes), 0
-            for id, count in pairs(wanted) do overlap = overlap + math.min(count, have[id] or 0) end
-
-            -- Server Saved Builds commonly expose only the currently locked Echoes,
-            -- while the published leaderboard build contains the complete 79-Echo
-            -- loadout. Treat the locked set as a subset match, but require the same
-            -- owner and strongly prefer the same server/build title.
-            local sameTitle = titleKey ~= "" and NormalizeTitle(candidate.title or candidate.serverTitle) == titleKey
-            local required = math.min(8, math.max(1, math.floor(wantedTotal / 2)))
-            if overlap < required then return nil end
-            if sameTitle then return 10000 + overlap end
-            if overlap == wantedTotal and wantedTotal >= 6 then return 1000 + overlap end
-            return nil
-        end
+        local CandidateScore, exactKey = NewRelatedScorer(
+            serverTitle, echoes, ownerKey)
 
         -- Never trust a persisted recordBuildId blindly. Saved slot numbers and
         -- mirrored records survive reloads and can otherwise keep a stale record
         -- from another class attached forever.
-        local preferred = {
-            old and old.recordBuildId and LoadBuild(old.recordBuildId) or nil,
-            old and old.publishedBuildId and LoadBuild(old.publishedBuildId) or nil,
-        }
-        local best, bestScore = nil, -1
-        for _, candidate in ipairs(preferred) do
-            local score = CandidateScore(candidate)
-            if score and score > bestScore then best, bestScore = candidate, score end
-        end
+        local best, bestScore = BestPreferredRelated(old, CandidateScore)
         local cursor = catalog and catalog.BeginRelatedCursor
             and catalog.BeginRelatedCursor(author, serverTitle, exactKey) or nil
         return {
             cursor=cursor,best=best,bestScore=bestScore,
+            bestPreferred=best ~= nil,
             score=CandidateScore,author=author,title=serverTitle,
             exactKey=exactKey,
         }
@@ -691,8 +989,10 @@ function Controller.New(options)
         if err then return nil, false, err end
         if candidate then
             local score = job.score(candidate)
-            if score and score > job.bestScore then
+            if BetterRelatedCandidate(candidate, score,
+                job.best, job.bestScore, job.bestPreferred) then
                 job.best, job.bestScore = candidate, score
+                job.bestPreferred = false
             end
         end
         return job.best, done == true, nil, candidate ~= nil
@@ -714,11 +1014,12 @@ function Controller.New(options)
         end
         table.sort(keys)
         local me = tostring((UnitName and UnitName("player")) or "You")
+        local ownerKey = CurrentVerifiedOwnerKey()
         local buildRevision = BuildRevision()
         local cacheValid = savedRelatedCacheRevision == buildRevision
         if not cacheValid then savedRelatedCache = {} end
         savedImportJob = {
-            slots=slots,keys=keys,index=1,me=me,
+            slots=slots,keys=keys,index=1,me=me,ownerKey=ownerKey,
             meKey=me:lower():gsub("[^%w]", "_"),seen={},
             changed=0,phase="slots",cacheValid=cacheValid,cacheUpdates={},
             buildRevision=buildRevision,slotGeneration=SlotGeneration(),
@@ -761,6 +1062,21 @@ function Controller.New(options)
         return nil
     end
 
+    local function SavedMirrorReusableBy(candidate, ownerKey)
+        return Identity.CanAdoptSavedMirror(candidate, ownerKey)
+    end
+
+    local function SavedMirrorId(job, slot)
+        local base = string.format("saved-%s-%d", job.meKey, slot)
+        local token = job.ownerKey
+            and StableIdHash(job.ownerKey):sub(1, 8) or nil
+        return FindStableCollisionTarget(base, token, function(candidate)
+            return Identity.SavedMirrorKind(candidate) == "saved"
+                and tonumber(candidate.serverSlot) == slot
+                and SavedMirrorReusableBy(candidate, job.ownerKey)
+        end)
+    end
+
     local function PrepareSavedSlot(job, slot)
         savedImportStats.slotPreparations =
             savedImportStats.slotPreparations + 1
@@ -769,7 +1085,8 @@ function Controller.New(options)
             savedImportStats.emptySlots = savedImportStats.emptySlots + 1
             return nil
         end
-        local id = string.format("saved-%s-%d", job.meKey, slot)
+        local id = SavedMirrorId(job, slot)
+        if not id then return nil end
         local echoes, total = {}, 0
         for _, e in ipairs(live.echoes) do
             local stacks = tonumber(e.stacks or e.count) or 1
@@ -798,19 +1115,28 @@ function Controller.New(options)
             echoes, linked and linked.echoes or nil)
         local D = Nexus and Nexus.DpsCapture
         local exactKey = D and D.GetEchoKey and D.GetEchoKey(echoes) or ""
-        local inputKey = table.concat({job.me,serverTitle,tostring(exactKey)}, "\0")
+        local inputKey = table.concat({
+            tostring(job.ownerKey or ""),serverTitle,tostring(exactKey),
+        }, "\0")
         local cached = job.cacheValid and savedRelatedCache[id] or nil
-        local cachedBuild = cached and cached.inputKey == inputKey
+        local cacheMatch = cached and cached.inputKey == inputKey
+        local cachedBuild = cacheMatch
             and cached.relatedId and LoadBuild(cached.relatedId) or nil
+        if cacheMatch and cached.relatedId then
+            local score = NewRelatedScorer(
+                serverTitle, echoes, job.ownerKey)
+            if not score(cachedBuild) then cacheMatch = false end
+        end
         return {
             slot=slot,id=id,live=live,echoes=echoes,total=total,
             serverTitle=serverTitle,old=old,title=title,linked=linked,
             destinationName=destinationName,progress=progress,
             destinationTotal=destinationTotal,
             inputKey=inputKey,
-            related=cached and cached.inputKey == inputKey and {
+            related=cacheMatch and {
                 cached=true,best=cachedBuild,
-            } or BeginRelatedBuild(serverTitle, echoes, old, job.me),
+            } or BeginRelatedBuild(
+                serverTitle, echoes, old, job.me, job.ownerKey),
         }
     end
 
@@ -834,11 +1160,21 @@ function Controller.New(options)
                 -- Do not preserve a stale record link after validation fails. A bad
                 -- link was also allowing an unrelated class/record to remain attached.
         local recordBuildId = related and related.id or nil
+        local published = old and PublishedBuild(old) or nil
+        -- A stale publishedBuildId may be repaired from the already admitted
+        -- relation, but only when that verified publication is explicitly bound
+        -- to this Saved Build. The relation scorer has already established both
+        -- owner authority and content compatibility.
+        if not published and related
+            and related.sourceSavedBuildId == current.id then
+            published = related
+        end
         job.cacheUpdates[current.id] = {
             inputKey=current.inputKey,relatedId=recordBuildId,
         }
         local signatureParts = {
             current.serverTitle,tostring(class),tostring(recordBuildId or ""),
+            tostring(published and published.id or ""),
             tostring(total),tostring(current.destinationName or ""),
             tostring(current.progress),tostring(current.destinationTotal),
             tostring(job.slots.activeSlot == slot),
@@ -850,8 +1186,12 @@ function Controller.New(options)
             }, ":")
         end
         local signature = table.concat(signatureParts, "|")
-        if not old or old._savedSignature ~= signature then
+        local desiredPublishedId = published and published.id or nil
+        if not old or old._savedSignature ~= signature
+            or old.recordBuildId ~= recordBuildId
+            or old.publishedBuildId ~= desiredPublishedId then
             local stamp = NextStamp(old and old.lastModified or 0)
+            local localOwner = CurrentVerifiedOwnerKey()
             local record = {
                         id=current.id, title=current.title,
                         serverTitle=current.serverTitle,
@@ -860,11 +1200,15 @@ function Controller.New(options)
                             and string.format("Destination wishlist: %s - in progress (%d/%d).", destinationName, progress, destinationTotal)
                             or "No destination wishlist associated yet."),
                         userDescription=old and old.userDescription or nil,
-                        publishedBuildId=old and old.publishedBuildId or nil,
-                        lastPublishedAt=old and old.lastPublishedAt or nil,
-                        author=job.me, ownerKey=CurrentOwnerKey(), class=class, echoes=echoes,
+                        publishedBuildId=desiredPublishedId,
+                        lastPublishedAt=published and (
+                            (old and old.lastPublishedAt)
+                            or published.lastModified or published.postedAt) or nil,
+                        author=job.me, ownerKey=localOwner,
+                        ownerVerified=localOwner and true or false,
+                        class=class, echoes=echoes,
                         postedAt=(old and old.postedAt) or stamp, lastModified=stamp,
-                        isMine=true, importedSavedBuild=true, serverSlot=slot,
+                        isMine=localOwner ~= nil, importedSavedBuild=true, serverSlot=slot,
                         recordBuildId=recordBuildId,
                         destinationWishlistName=current.destinationName,
                         destinationWishlistSlot=current.linked and current.linked.slot or nil,
@@ -935,7 +1279,7 @@ function Controller.New(options)
                     if err then
                         job.current.related = BeginRelatedBuild(
                             job.current.serverTitle, job.current.echoes,
-                            job.current.old, job.me)
+                            job.current.old, job.me, job.ownerKey)
                         savedImportStats.restarts = savedImportStats.restarts + 1
                         savedImportStats.cursorRestarts =
                             savedImportStats.cursorRestarts + 1
@@ -958,8 +1302,8 @@ function Controller.New(options)
                     savedImportStats.cleanupExamined =
                         savedImportStats.cleanupExamined + 1
                     local build = LoadBuild(id)
-                    if build and build.importedSavedBuild
-                        and Identity.SamePlayer(build.author, job.me)
+                    if Identity.SavedMirrorKind(build) == "saved"
+                        and Identity.LocalOwnsSavedMirror(build, job.ownerKey)
                         and not job.seen[id] then
                         if RemoveOverlay(id) then
                             if selectedId == id then selectedId = nil end
@@ -1113,16 +1457,6 @@ function Controller.New(options)
         return nil
     end
 
-    local function FingerprintHash(text)
-        local h1, h2 = 5381, 2166136261
-        for i = 1, #text do
-            local b = text:byte(i)
-            h1 = (h1 * 33 + b) % 2147483647
-            h2 = (h2 * 131 + b) % 2147483629
-        end
-        return string.format("%08x%08x", h1, h2)
-    end
-
     local function CanonicalFingerprintHash(text)
         if type(text) ~= "string" or text == "" then return nil end
         local h = 5381
@@ -1227,11 +1561,11 @@ function Controller.New(options)
         end
         local key = D.GetEchoKey(echoes)
         if not key then return nil end
-        local incomingOwnerVerified = record and record.ownerVerified
         local explicitClass = NormalizeClass(record and (record.class or record.k))
         local player = tostring(record and record.player
             or (UnitName and UnitName("player")) or "Unknown")
-        local recordOwner = record and record.ownerKey
+        local recordOwner = VerifiedDpsOwnerKey(record)
+        local recordClaim = OwnerEvidenceKey(record)
         local explicitId = record and (record.buildId or record.b)
         if type(explicitId) ~= "string" or explicitId == "" then explicitId = nil end
         local catalog = Catalog()
@@ -1241,23 +1575,37 @@ function Controller.New(options)
             local verdict = evidence and recovered
                 and type(evidence.OrdinaryCompleteness) == "function"
                 and evidence.OrdinaryCompleteness(recovered) or nil
-            if recoveredId and type(verdict) == "table"
+            if recoveredId
+                and Identity.SavedMirrorKind(recovered) == "ordinary"
+                and type(verdict) == "table"
                 and verdict.complete == true then
-                local recoveredOwner = recovered.ownerKey
-                    and Identity.CanonicalOwnerKey(recovered.ownerKey) or nil
-                local incomingOwner = recordOwner
-                    and Identity.CanonicalOwnerKey(recordOwner) or nil
-                local sameAutoOwner = recovered.autoDps ~= true
-                    or (incomingOwner and recoveredOwner
-                        and incomingOwner == recoveredOwner)
-                    or ((not incomingOwner or not recoveredOwner)
-                        and Identity.SamePlayer(recovered.author, player))
+                local recoveredOwner = Identity.VerifiedOwnerKey(recovered)
+                local recoveredClaim = OwnerEvidenceKey(recovered)
+                local sameAutoOwner
+                if recovered.autoDps == true then
+                    if recordOwner then
+                        sameAutoOwner = recoveredOwner == recordOwner
+                            or (not recoveredOwner
+                                and (recoveredClaim == recordOwner
+                                    or CanPromoteOwnerEvidence(
+                                        recovered, recordOwner)))
+                    elseif recordClaim then
+                        sameAutoOwner = recoveredOwner == recordClaim
+                            or (not recoveredOwner
+                                and recoveredClaim == recordClaim)
+                    else
+                        sameAutoOwner = false
+                    end
+                else
+                    sameAutoOwner = recordOwner ~= nil
+                        and recoveredOwner == recordOwner
+                end
                 -- A relay-created page may be reused for ambient reads, but
                 -- the exact direct owner must reach the promotion boundary.
                 -- Auto-DPS pages are owner-specific even when their ordinary
                 -- fingerprint happens to match another player's record.
-                if sameAutoOwner and not (incomingOwnerVerified == true
-                    and recovered.ownerVerified == false) then
+                if sameAutoOwner and not (recordOwner
+                    and not recoveredOwner) then
                     return recoveredId, recovered
                 end
             end
@@ -1266,10 +1614,14 @@ function Controller.New(options)
         -- A protocol build ID is an identity, not a derived alias. Never attach
         -- its record to a different loadout or owner merely because IDs collide.
         local explicitExisting = explicitId and LoadBuild(explicitId) or nil
+        if explicitExisting
+            and Identity.SavedMirrorKind(explicitExisting) ~= "ordinary" then
+            explicitId, explicitExisting = nil, nil
+        end
         if explicitExisting then
-            -- Relayed DPS evidence may remain visible as an ambient record, but
-            -- it cannot hydrate or publish an existing Community identity.
-            if record and record.ownerVerified == false then return nil end
+            -- Only a verified canonical DPS owner may hydrate or promote an
+            -- existing opaque identity.  Claims remain evidence, never power.
+            if not recordOwner then return nil end
             local evidence = Nexus and Nexus.LoadoutEvidence
             local existingVerdict = evidence
                 and type(evidence.OrdinaryCompleteness) == "function"
@@ -1279,26 +1631,33 @@ function Controller.New(options)
             local existingKey = existingComplete
                 and existingVerdict.fingerprint or nil
             if existingComplete and existingKey ~= key then return nil end
-            if explicitExisting.ownerKey then
-                if not recordOwner then return nil end
-                local recordOwnerKey = Identity.CanonicalOwnerKey(recordOwner)
-                if not recordOwnerKey or recordOwnerKey
-                    ~= Identity.CanonicalOwnerKey(explicitExisting.ownerKey) then
-                    return nil
-                end
-            elseif not Identity.SamePlayer(explicitExisting.author, player) then
-                return nil
-            end
-            local promoteOwner = incomingOwnerVerified == true
-                and explicitExisting.ownerVerified == false
-            if promoteOwner
-                and not Identity.SamePlayer(explicitExisting.author, player) then
-                return nil
-            end
+            local existingOwner = Identity.VerifiedOwnerKey(explicitExisting)
+            local existingClaim = OwnerEvidenceKey(explicitExisting)
+            local producerPromotion = record
+                and record._promotedFromUnverified == true
+                and explicitExisting.autoDps == true
+                and existingClaim == nil
+                and Identity.OwnerKeyMatchesAuthor(
+                    recordOwner, explicitExisting.author)
+            if existingOwner and existingOwner ~= recordOwner then return nil end
+            if not existingOwner and existingClaim ~= recordOwner
+                and not producerPromotion
+                and not CanPromoteOwnerEvidence(
+                    explicitExisting, recordOwner) then return nil end
+            local promoteOwner = existingOwner == nil
+            local presentationChanged = false
             if promoteOwner then
-                explicitExisting.ownerVerified = true
-                explicitExisting.relaySender = nil
-                explicitExisting.ownerKey = explicitExisting.ownerKey or recordOwner
+                ApplyVerifiedBuildOwner(explicitExisting, recordOwner, player)
+                if explicitExisting.autoDps == true and explicitClass then
+                    local verifiedTitle = (CLASS_LABEL[explicitClass]
+                        or explicitClass) .. " Record Loadout"
+                    if explicitExisting.class ~= explicitClass
+                        or explicitExisting.title ~= verifiedTitle then
+                        explicitExisting.class = explicitClass
+                        explicitExisting.title = verifiedTitle
+                        presentationChanged = true
+                    end
+                end
             end
             if not existingComplete then
                 if type(explicitExisting.echoes) == "table"
@@ -1320,8 +1679,7 @@ function Controller.New(options)
                 explicitExisting.needsFullBuild = false
                 explicitExisting.tombstoned = nil
                 explicitExisting.autoDps = true
-                explicitExisting.author = explicitExisting.author or player
-                explicitExisting.ownerKey = explicitExisting.ownerKey or recordOwner
+                ApplyVerifiedBuildOwner(explicitExisting, recordOwner, player)
                 explicitExisting.class = explicitClass or explicitExisting.class
                     or InferBuildClass(copied) or "UNKNOWN"
                 if explicitExisting.title == "Loadout pending" then
@@ -1333,10 +1691,10 @@ function Controller.New(options)
                     explicitExisting.lastModified or explicitExisting.postedAt or 0)
                 local saved = SaveBuild(explicitExisting)
                 if not saved then return nil end
-                if explicitExisting.ownerVerified ~= false then
+                if Identity.VerifiedOwnerKey(explicitExisting) then
                     BroadcastIfPossible(explicitExisting)
                 end
-            elseif promoteOwner then
+            elseif promoteOwner or presentationChanged then
                 explicitExisting.lastModified = NextStamp(
                     explicitExisting.lastModified
                         or explicitExisting.postedAt or 0)
@@ -1348,34 +1706,38 @@ function Controller.New(options)
         end
 
         local ownAutoId, ownAutoBuild
-        local manualId, manualBuild
         if not explicitId then
             for id, build in pairs(Store()) do
                 local evidence = Nexus and Nexus.LoadoutEvidence
                 local verdict = evidence
                     and type(evidence.OrdinaryCompleteness) == "function"
                     and evidence.OrdinaryCompleteness(build) or nil
-                if type(verdict) == "table" and verdict.complete == true
+                if Identity.SavedMirrorKind(build) == "ordinary"
+                    and type(verdict) == "table" and verdict.complete == true
                     and verdict.fingerprint == key then
                     if not build.autoDps then
-                        if IsOwnBuild(build) then return id, build end
-                        manualId, manualBuild = manualId or id, manualBuild or build
+                        if recordOwner
+                            and Identity.VerifiedOwnerKey(build)
+                                == recordOwner then return id, build end
                     else
-                        local recordOwnerKey = recordOwner
-                            and Identity.CanonicalOwnerKey(recordOwner)
-                        local sameOwner = recordOwnerKey and build.ownerKey
-                            and recordOwnerKey
-                                == Identity.CanonicalOwnerKey(build.ownerKey)
-                        local sameLegacyAuthor = not recordOwner
-                            and Identity.SamePlayer(build.author, player)
-                        if sameOwner or sameLegacyAuthor then
+                        local buildOwner = Identity.VerifiedOwnerKey(build)
+                        local buildClaim = OwnerEvidenceKey(build)
+                        local sameOwner = recordOwner and (
+                            buildOwner == recordOwner
+                            or (not buildOwner and (buildClaim == recordOwner
+                                or CanPromoteOwnerEvidence(
+                                    build, recordOwner))))
+                        local sameClaim = not recordOwner and recordClaim
+                            and (buildOwner == recordClaim
+                                or (not buildOwner
+                                    and buildClaim == recordClaim))
+                        if sameOwner or sameClaim then
                             ownAutoId, ownAutoBuild = id, build
                         end
                     end
                 end
             end
         end
-        if manualId then return manualId, manualBuild end
 
         local copied = {}
         for _, e in ipairs(echoes or {}) do
@@ -1384,8 +1746,8 @@ function Controller.New(options)
         end
         -- Locked Echoes remain supplemental record evidence. They are never
         -- folded into the ordinary build pool or its fingerprint.
-        local me = tostring((UnitName and UnitName("player")) or "")
-        local playerIsLocal = Identity.SamePlayer(player, me)
+        local playerIsLocal = recordOwner ~= nil
+            and recordOwner == CurrentVerifiedOwnerKey()
         local localClass
         if playerIsLocal and UnitClass then
             local _, token = UnitClass("player")
@@ -1396,17 +1758,15 @@ function Controller.New(options)
 
         if ownAutoId then
             local changed = false
-            if incomingOwnerVerified == true
-                and ownAutoBuild.ownerVerified == false then
-                if not Identity.SamePlayer(ownAutoBuild.author, player) then
-                    return nil
-                end
-                ownAutoBuild.ownerVerified = true
-                ownAutoBuild.relaySender = nil
-                ownAutoBuild.ownerKey = ownAutoBuild.ownerKey or recordOwner
+            if recordOwner and not Identity.VerifiedOwnerKey(ownAutoBuild) then
+                if OwnerEvidenceKey(ownAutoBuild) ~= recordOwner
+                    and not CanPromoteOwnerEvidence(
+                        ownAutoBuild, recordOwner) then return nil end
+                ApplyVerifiedBuildOwner(ownAutoBuild, recordOwner, player)
                 changed = true
             end
-            if explicitClass and ownAutoBuild.class ~= explicitClass then
+            if recordOwner and explicitClass
+                and ownAutoBuild.class ~= explicitClass then
                 ownAutoBuild.class = explicitClass
                 ownAutoBuild.title = (CLASS_LABEL[explicitClass] or explicitClass)
                     .. " Record Loadout"
@@ -1417,7 +1777,7 @@ function Controller.New(options)
                     ownAutoBuild.lastModified or ownAutoBuild.postedAt)
                 local saved = SaveBuild(ownAutoBuild)
                 if not saved then return nil end
-                if ownAutoBuild.ownerVerified ~= false then
+                if Identity.VerifiedOwnerKey(ownAutoBuild) then
                     BroadcastIfPossible(ownAutoBuild)
                 end
             end
@@ -1425,28 +1785,28 @@ function Controller.New(options)
         end
 
         local stamp = NextStamp(0)
-        local ownerKey = recordOwner or (playerIsLocal and CurrentOwnerKey() or nil)
-        local buildOwnerVerified
-        if incomingOwnerVerified == true then
-            buildOwnerVerified = true
-        elseif incomingOwnerVerified == false then
-            buildOwnerVerified = false
-        end
-        local identity = ownerKey or Identity.PlayerKey(player)
+        local ownerKey = recordOwner
+        local claimKey = not recordOwner and recordClaim or nil
+        local identity = ownerKey or claimKey or Identity.PlayerKey(player)
         if not identity then return nil end
-        local id = explicitId or ("dps-" .. FingerprintHash(key) .. "-"
-            .. FingerprintHash(identity):sub(1, 8))
+        local id = explicitId or ("dps-" .. StableIdHash(key) .. "-"
+            .. StableIdHash(identity):sub(1, 8))
+        -- Deterministic IDs derived from ambiguous evidence may already belong
+        -- to a page that was later promoted. Never replace any represented row
+        -- merely because a claimless packet recomputed the same short-name ID.
+        if LoadBuild(id) then return nil end
         local build = {
             id=id, title=(CLASS_LABEL[class] or class) .. " Record Loadout",
             description="Automatically created from a compatible DPS record. Exact Echo IDs and stack quantities are preserved for copying and comparison.",
-            author=player, ownerKey=ownerKey, class=class, echoes=copied,
+            author=player, ownerKey=ownerKey, claimedOwnerKey=claimKey,
+            realm=record and (record.realm or record.r) or nil,
+            class=class, echoes=copied,
             postedAt=stamp, lastModified=stamp,
-            isMine=(ownerKey and ownerKey == CurrentOwnerKey()) or false,
+            isMine=ownerKey ~= nil and ownerKey == CurrentVerifiedOwnerKey(),
             autoDps=true, fingerprint=key, loadoutAvailable=true,
             needsFullBuild=false,
-            ownerVerified=buildOwnerVerified,
-            relaySender=incomingOwnerVerified == false
-                and record.relaySender or nil,
+            ownerVerified=ownerKey ~= nil,
+            relaySender=not ownerKey and record and record.relaySender or nil,
         }
         if record and type(record.lockedEchoes) == "table" then
             build.lockedEchoes = {}
@@ -1460,7 +1820,7 @@ function Controller.New(options)
         if not RefreshBuildIdentity(build) then return nil end
         local saved = SaveBuild(build)
         if not saved then return nil end
-        if build.ownerVerified ~= false then BroadcastIfPossible(build) end
+        if Identity.VerifiedOwnerKey(build) then BroadcastIfPossible(build) end
         return id, build
     end
 
@@ -1517,13 +1877,15 @@ function Controller.New(options)
         end
         local stamp = NextStamp(0)
         local id = string.format("mine-%d-%d", stamp, math.random(100000,999999))
+        local localOwner = CurrentVerifiedOwnerKey()
         local record = {
             id=id, title=title, description=description,
             author=(UnitName and UnitName("player")) or "You",
-            ownerKey=CurrentOwnerKey(),
+            ownerKey=localOwner, ownerVerified=localOwner and true or false,
             class=NormalizeClass(selectedClass) or InferBuildClass(echoes)
                 or NormalizeClass(wl.class),
-            echoes=echoes, postedAt=stamp, lastModified=stamp, isMine=true,
+            echoes=echoes, postedAt=stamp, lastModified=stamp,
+            isMine=localOwner ~= nil,
         }
         local identityOk, identityErr = RefreshBuildIdentity(record)
         if not identityOk then return false, identityErr end
@@ -1685,6 +2047,13 @@ function Controller.New(options)
 
     local function HasLeaderboardRecord(build)
         if not build then return false end
+        if Identity.SavedMirrorKind(build) == "saved" then
+            local related, valid = RelatedBuild(build)
+            if not valid or type(related) ~= "table" then return false end
+            build = related
+        elseif Identity.SavedMirrorKind(build) ~= "ordinary" then
+            return false
+        end
         if build.autoDps then return true end
         local D = Nexus.DpsCapture
         if not D or not D.GetLeaderboard then return false end
@@ -1700,8 +2069,80 @@ function Controller.New(options)
     end
 
     function M.RecordBuildId(build)
-        return build and (build.recordBuildId
-            or build.publishedBuildId or build.id) or nil
+        local savedKind = Identity.SavedMirrorKind(build)
+        local related, valid = RelatedBuild(build)
+        if savedKind ~= "ordinary" and not valid then return nil end
+        return related and related.id or nil
+    end
+
+    -- Compact projection rows deliberately omit Echo arrays. Revalidate only
+    -- their persisted relationship hints against compact catalog summaries;
+    -- the list projection can then join the accepted target to its one bulk
+    -- DPS eligibility snapshot without per-row leaderboard reads.
+    function M.SavedProjectionRelation(build)
+        if Identity.SavedMirrorKind(build) ~= "saved" then
+            return nil
+        end
+        local ownerKey = Identity.VerifiedOwnerKey(build)
+        if not ownerKey then return nil end
+        local score = NewRelatedScorer(
+            build.serverTitle or build.title, build.fingerprint,
+            ownerKey, build.ordinaryComplete == true)
+        local related = BestPreferredRelated(build, score, LoadBuildSummary)
+        if not related or type(related.id) ~= "string"
+            or type(related.fingerprint) ~= "string" then return nil end
+        return {
+            buildId=related.id,
+            fingerprint=related.fingerprint,
+            fingerprintHash=related.fingerprintHash,
+            class=NormalizeClass(related.class),
+        }
+    end
+
+    -- One controller-owned projection verdict prevents list, detail, renderer,
+    -- and diagnostic consumers from independently interpreting persisted Saved
+    -- class or relationship hints. Publication identity is source-bound but
+    -- content-independent, so it remains valid across local loadout edits.
+    function M.SavedProjectionState(build)
+        if Identity.SavedMirrorKind(build) ~= "saved" then return nil end
+        local relation = M.SavedProjectionRelation(build)
+        local published = PublishedBuild(build, LoadBuildSummary)
+        local localOwner = Identity.LocalOwnsSavedMirror(
+            build, CurrentOwnerKey())
+        local projectedClass = localOwner and CurrentClass() or nil
+        projectedClass = NormalizeClass(projectedClass)
+            or NormalizeClass(relation and relation.class) or "UNKNOWN"
+        return {
+            recordBuildId=relation and relation.buildId or nil,
+            fingerprint=relation and relation.fingerprint or nil,
+            fingerprintHash=relation and relation.fingerprintHash or nil,
+            class=projectedClass,
+            publishedBuildId=published and published.id or nil,
+        }, relation
+    end
+
+    -- Public readers receive a defensive Saved projection whose class and
+    -- relationship IDs all originate in the verdict above. Ordinary rows keep
+    -- their established catalog-reader semantics; malformed markers disappear.
+    function M.ProjectBuild(idOrBuild)
+        local build = type(idOrBuild) == "table" and idOrBuild
+            or LoadBuild(idOrBuild)
+        local kind = Identity.SavedMirrorKind(build)
+        if kind == "ordinary" then return build, nil end
+        if kind ~= "saved" then return nil, nil end
+        local state, relation = M.SavedProjectionState(build)
+        local projected = ShallowCopy(build)
+        projected.recordBuildId = state and state.recordBuildId or nil
+        projected.publishedBuildId = state and state.publishedBuildId or nil
+        projected.class = NormalizeClass(state and state.class) or "UNKNOWN"
+        return projected, relation
+    end
+
+    function M.PublishedBuildId(idOrBuild)
+        local build = type(idOrBuild) == "table" and idOrBuild
+            or LoadBuild(idOrBuild)
+        local published = PublishedBuild(build)
+        return published and published.id or nil
     end
 
     function M.DpsSummary(build)
@@ -1710,7 +2151,11 @@ function Controller.New(options)
             dummy=0,lk=0,best=0,average=0,count=0,
         }
         if not (dps and build) then return summary end
-        local recordId = M.RecordBuildId(build)
+        local savedKind = Identity.SavedMirrorKind(build)
+        local related, valid = RelatedBuild(build)
+        local recordId = (savedKind == "ordinary" or valid)
+            and related and related.id or nil
+        local allowEchoFallback = savedKind == "ordinary" or valid
         for _, category in ipairs({"dummy", "lk"}) do
             local rows
             if recordId and dps.GetLeaderboard then
@@ -1718,10 +2163,10 @@ function Controller.New(options)
                     dps.GetLeaderboard, recordId, category)
                 if ok then rows = result end
             end
-            if (not rows or #rows == 0)
-                and dps.GetLeaderboardForEchoes and build.echoes then
+            if (not rows or #rows == 0) and allowEchoFallback
+                and dps.GetLeaderboardForEchoes and related.echoes then
                 local ok, result = pcall(
-                    dps.GetLeaderboardForEchoes, build.echoes, category)
+                    dps.GetLeaderboardForEchoes, related.echoes, category)
                 if ok then rows = result end
             end
             if type(rows) == "table" then
@@ -1751,7 +2196,7 @@ function Controller.New(options)
         local editName = build.title
         if not editName or editName == "" then editName = build.userTitle end
         if (not editName or editName == "")
-            and build.importedSavedBuild then
+            and Identity.SavedMirrorKind(build) == "saved" then
             editName = build.serverTitle
             if (not editName or editName == "") and build.serverSlot
                 and Adapter and Adapter.Slots then
@@ -1798,16 +2243,34 @@ function Controller.New(options)
         return changed
     end
 
+    local function PublicationTarget(source, ownerKey)
+        local linked = PublishedBuild(source)
+        if linked then return linked.id, linked end
+
+        local base = "published-" .. tostring(source.id)
+        local token = StableIdHash(ownerKey):sub(1, 8)
+        local candidateId, candidate = FindStableCollisionTarget(
+            base, token, function(existing)
+            return HasVerifiedRelatedOwner(existing, ownerKey)
+                and existing.sourceSavedBuildId == source.id
+        end)
+        if candidateId then return candidateId, candidate end
+        return nil, nil, "no safe publication identity is available"
+    end
+
     function M.PublishImportedBuild(id)
         local source = LoadBuild(id)
-        if not source or not source.importedSavedBuild then return false, "not a saved loadout" end
+        if Identity.SavedMirrorKind(source) ~= "saved" then
+            return false, "not a saved loadout"
+        end
         if not IsOwnBuild(source) then return false, "not your build" end
         if type(source.echoes) ~= "table" or #source.echoes == 0 then return false, "that build has no echoes" end
 
-        -- Use one stable published record per Saved Build mirror. Re-uploading
-        -- updates the existing community record rather than creating duplicates.
-        local publishedId = source.publishedBuildId or ("published-" .. tostring(id))
-        local old = LoadBuild(publishedId)
+        -- Use one stable, source-bound publication per Saved Build mirror.
+        -- A stale/colliding persisted ID has no write authority.
+        local localOwner = CurrentVerifiedOwnerKey()
+        local publishedId, old, targetWhy = PublicationTarget(source, localOwner)
+        if not publishedId then return false, targetWhy end
         local stamp = NextStamp(old and old.lastModified or 0)
         local echoes, lockedEchoes = {}, {}
         for _, e in ipairs(source.echoes) do
@@ -1828,18 +2291,22 @@ function Controller.New(options)
             }
         end
         if #echoes == 0 then return false, "that build has no ordinary echoes" end
+        local projectionState = M.SavedProjectionState(source)
+        local publicationClass = NormalizeClass(
+            projectionState and projectionState.class)
+            or InferBuildClass(echoes)
         -- Build and validate a complete replacement before changing either record.
         local record = {
             id=publishedId,
             title=source.title or "Saved Build",
             description=source.userDescription or source.description or "",
             author=(UnitName and UnitName("player")) or "You",
-            ownerKey=CurrentOwnerKey(),
-            class=NormalizeClass(source.class) or InferBuildClass(echoes),
+            ownerKey=localOwner, ownerVerified=localOwner and true or false,
+            class=publicationClass,
             echoes=echoes,
             postedAt=old and old.postedAt or stamp,
             lastModified=stamp,
-            isMine=true,
+            isMine=localOwner ~= nil,
             sourceSavedBuildId=id,
             link=old and old.link or nil,
         }
@@ -1851,6 +2318,7 @@ function Controller.New(options)
             return false, recordSaveWhy or "build storage refused"
         end
         source.publishedBuildId = publishedId
+        source.recordBuildId = publishedId
         source.lastPublishedAt = stamp
         local sourceSaved, sourceSaveWhy = SaveBuild(source)
         if not sourceSaved then
@@ -1896,7 +2364,8 @@ function Controller.New(options)
         b.title = nextTitle
         b.description = nextDescription
         b.link = nextLink
-        if b.importedSavedBuild then
+        local savedKind = Identity.SavedMirrorKind(b)
+        if savedKind == "saved" then
             b.userTitle = nextTitle
             b.userDescription = nextDescription
         end
@@ -1906,7 +2375,7 @@ function Controller.New(options)
         -- Editing a server Saved Build mirror is local-only. It reaches the
         -- community only through the explicit Upload Build action (or a DPS
         -- record path handled by DpsCapture).
-        if not b.importedSavedBuild then BroadcastIfPossible(b) end
+        if savedKind == "ordinary" then BroadcastIfPossible(b) end
         return true
     end
 
@@ -1914,7 +2383,7 @@ function Controller.New(options)
         local b = LoadBuild(id)
         if not b then return false, "not found" end
         if not IsOwnBuild(b) then return false, "not your build" end
-        if b.importedSavedBuild then
+        if Identity.SavedMirrorKind(b) == "saved" then
             return false, "saved loadouts update from the server; edit the server loadout itself to change its Echoes"
         end
         if HasLeaderboardRecord(b) then
@@ -1956,7 +2425,7 @@ function Controller.New(options)
         if not owner and not IsAdmin() then
             return false, "not your build"
         end
-        if b.importedSavedBuild then
+        if Identity.SavedMirrorKind(b) == "saved" then
             return false, "server Saved Builds cannot be deleted here"
         end
         local outcome = {

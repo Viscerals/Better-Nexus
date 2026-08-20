@@ -18,8 +18,13 @@ function Compatibility.New(options)
         "DPS callback required")
     local getTombstones = assert(options.getTombstones,
         "tombstone callback required")
-    local samePeer = assert(options.samePeer, "peer callback required")
+    local localOwnsTomb = assert(options.localOwnsTomb,
+        "tombstone authority callback required")
+    local relayEligible = assert(options.relayEligible,
+        "build relay authority callback required")
     local myName = assert(options.myName, "name callback required")
+    local currentOwnerKey = assert(options.currentOwnerKey,
+        "exact owner callback required")
     local now = assert(options.now, "clock callback required")
     local getCodec = assert(options.getCodec, "Codec callback required")
     local validIdentifier = assert(options.validIdentifier,
@@ -247,6 +252,7 @@ function Compatibility.New(options)
 
     local function CandidateKey(deltaHash)
         return tostring(deltaHash) .. "|" .. tostring(myName()) .. "|"
+            .. tostring(currentOwnerKey() or "") .. "|"
             .. tostring(getBuildRevision())
     end
 
@@ -263,6 +269,7 @@ function Compatibility.New(options)
         end
         candidateCache = {
             key=key, deltaHash=tostring(deltaHash), sender=myName(),
+            ownerKey=currentOwnerKey(),
             byBucket=byBucket, phase="overlay", cursor=nil,
             claimSafeByBucket=claimSafeByBucket,
             complete=false, createdAt=now(),
@@ -303,7 +310,7 @@ function Compatibility.New(options)
                         or build.fingerprint or "0")}, ":")
                 local bucket = C.BuildBucket(id)
                 if not validIdentifier(tostring(build.id or ""),
-                        maxBuildIdBytes) then
+                        maxBuildIdBytes) or not relayEligible(build) then
                     snapshot.claimSafeByBucket[bucket] = false
                 end
                 snapshot.byBucket[bucket][#snapshot.byBucket[bucket] + 1] = {
@@ -319,12 +326,14 @@ function Compatibility.New(options)
             return true, nil, true
         end
         snapshot.cursor = id
-        if samePeer(C.TombAuthor(tombstone), snapshot.sender) then
+        local bucket = C.BuildBucket(id)
+        snapshot.claimSafeByBucket[bucket] = false
+        if localOwnsTomb(tombstone) then
             local copy = {
                 stamp=C.TombStamp(tombstone), author=C.TombAuthor(tombstone),
+                ownerKey=tombstone.ownerKey,
+                ownerVerified=tombstone.ownerVerified == true,
             }
-            local bucket = C.BuildBucket(id)
-            snapshot.claimSafeByBucket[bucket] = false
             snapshot.byBucket[bucket][#snapshot.byBucket[bucket] + 1] = {
                 kind="tomb", id=id, tomb=copy,
                 token=table.concat({"T", tostring(id),

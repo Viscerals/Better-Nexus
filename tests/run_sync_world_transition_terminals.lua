@@ -110,7 +110,8 @@ end
 local function ShareBuild(id)
     return {
         id=id,title="Stage 36 Share " .. id,description="terminal fixture",
-        author=player,ownerKey=player:lower() .. "@ebonhold",class="MAGE",
+        author=player,ownerKey=player:lower() .. "@ebonhold",
+        ownerVerified=true,realm="ebonhold",class="MAGE",
         echoes={{spellId=730001,quality=3,stacks=1}},
         postedAt=50001,lastModified=50001,isMine=true,
     }
@@ -465,7 +466,8 @@ Check(pendingOk == false and pendingWhy == "sync queue full"
     "unadmitted Share supersession was not exact and bounded")
 local rejectedOk, _, rejectedShare = Sync.BroadcastBuildSummary({
     id="rejected-share",title="Rejected Share",author=player,
-    ownerKey=player:lower() .. "@ebonhold",class="MAGE",
+    ownerKey=player:lower() .. "@ebonhold",ownerVerified=true,
+    realm="ebonhold",class="MAGE",
     postedAt=50001,lastModified=50001,isMine=true,
 }, {retryOnFull=true})
 local rejectedVisible = ShareStatus("rejected-share")
@@ -700,7 +702,8 @@ for index = 1, 60 do
 end
 local chunkBuild = {
     id="zoned-chunks",title="Zoned Chunks",author="ChunkSender",
-    ownerKey="chunksender@ebonhold",class="MAGE",echoes=echoes,
+    ownerKey="chunksender@ebonhold",ownerVerified=true,realm="ebonhold",
+    class="MAGE",echoes=echoes,
     postedAt=60001,lastModified=60001,isMine=true,
 }
 H.sentChatMessages = {}

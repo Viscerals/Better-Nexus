@@ -4,11 +4,15 @@ dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTran
 local Sync=Nexus.Sync
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 UnitName=function() return "Relay" end
-NexusDB={communityBuilds={x={id="x",title="Old",author="Origin",class="MAGE",echoes={{spellId=1,stacks=1}},lastModified=10,postedAt=10,isMine=false}},syncTombstones={}}
+GetNormalizedRealmName=function() return "Ebonhold" end
+NexusDB={communityBuilds={x={id="x",title="Old",author="Origin",
+    ownerKey="origin@ebonhold",ownerVerified=true,class="MAGE",
+    echoes={{spellId=1,stacks=1}},lastModified=10,postedAt=10,
+    isMine=false}},syncTombstones={}}
 Sync.Init(Nexus.Codec,{})
 Sync.HandleIncoming("WLRD|PeerA||x||20||Origin","PeerA")
 assert(NexusDB.communityBuilds.x,"relayed author deletion gained owner authority")
-Sync.HandleIncoming("WLRD|Origin||x||20||Origin","Origin")
+Sync.HandleIncoming("WLRD|Origin||x||20||Origin","Origin-Ebonhold")
 assert(not NexusDB.communityBuilds.x,"direct author deletion was not applied")
 H.sentChatMessages={}; clock=clock+100
 Sync.HandleIncoming("WLRQ|NewPeer|0|0|relay-delete","NewPeer")

@@ -16,6 +16,8 @@ local function Add(id, class, state, mine, imported)
         id=id,title=string.format("%02d %s", index, id),
         description="generated fixture",author=mine and "FixtureOwner" or "Peer",
         ownerKey=mine and "fixtureowner@fixturerealm" or "peer@fixturerealm",
+        ownerVerified=mine and true or nil,
+        realm=mine and "fixturerealm" or nil,
         class=class,fingerprint=fingerprint,fingerprintHash="h-" .. id,
         ordinaryComplete=true,
         echoCount=1,loadoutAvailable=true,postedAt=index,lastModified=index,

@@ -83,7 +83,7 @@ local communityBuilds = {
     ["exact-current"] = Build("exact-current",
         "Exact Fixture", "MAGE", exactFingerprint, exactEchoes, {
             author="FixtureOwner",ownerKey="fixtureowner@fixturerealm",
-            isMine=true,
+            ownerVerified=true,realm="fixturerealm",isMine=true,
         }),
     ["warrior-current"] = Build("warrior-current",
         "Warrior Fixture", "WARRIOR", warriorFingerprint, warriorEchoes),

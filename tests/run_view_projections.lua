@@ -24,6 +24,7 @@ for index = 1, 1000 do
         description=index % 7 == 0 and "needle" or "",
         author=index % 10 == 0 and "ProjectionMage" or "Peer",
         ownerKey=index % 10 == 0 and "projectionmage@ebonhold" or "peer@ebonhold",
+        ownerVerified=true,
         class=index % 2 == 0 and "MAGE" or "WARRIOR",
         postedAt=index, lastModified=index,
         importedSavedBuild=index <= 15 and true or nil,
@@ -42,6 +43,8 @@ local boards = {dummy={},lk={}}
 for index = 1, 100 do
     local common = {
         player="Player"..index, buildId="board-"..index,
+        ownerKey="player"..index.."@realma",ownerVerified=true,
+        realm="realma",
         fingerprint=tostring(600000+index).."x1",
         build={id="board-"..index,title="Board "..index,
             author="Author"..index,class=index%2==0 and "MAGE" or "WARRIOR",
@@ -123,6 +126,51 @@ P.Builds({scope="mine",search="needle",sortMode="title"})
 assert(P.Stats().builds.rebuilds == beforeStatus + 1,
     "DPS revision did not invalidate DPS-sorted build metadata")
 
+-- Imported Saved rows may join the bulk eligibility snapshot only through a
+-- relation that the Community controller already validated. Binding changes
+-- projection identity, and a warm cache must not re-run the resolver.
+local savedFilters = {scope="mine",search="build 0991",sortMode="dps",
+    currentClassOnly=false,qualifiedOnly=true}
+eligibility["500010x1"] = {dummy=0,lk=0,best=0,average=0,count=0}
+Revisions.Advance(Revisions.DPS_CHANGED, {scope="saved-relation"})
+assert(#P.Builds(savedFilters) == 0,
+    "raw Saved fingerprint remained qualified without a relation resolver")
+local relationCalls = 0
+local function ResolveSaved(build)
+    relationCalls = relationCalls + 1
+    if build.id == "projection-0010" then
+        local projected = {}
+        for key, value in pairs(build) do projected[key] = value end
+        projected.recordBuildId = "projection-0020"
+        projected.class = "MAGE"
+        return projected,
+            {buildId="projection-0020",fingerprint="500020x1"}
+    end
+    return nil
+end
+assert(P.BindSavedRelationResolver(ResolveSaved),
+    "Saved relation resolver did not invalidate the build projection")
+local resolvedSaved = P.Builds(savedFilters)
+assert(#resolvedSaved == 1 and resolvedSaved[1].id == "projection-0010"
+    and resolvedSaved[1]._nexusDps.dummy == 200
+    and resolvedSaved[1]._nexusDps.lk == 400
+    and relationCalls == 1,
+    "Saved relation did not join its canonical target eligibility")
+assert((P.WorkStats().joins or 0) >= 1,
+    "Saved relation join was omitted from bounded work telemetry")
+local warmRelationCalls = relationCalls
+assert(#P.Builds(savedFilters) == 1 and relationCalls == warmRelationCalls,
+    "warm Saved projection repeated relation resolution")
+assert(P.BindSavedRelationResolver(function() return nil end)
+    and not P.BuildsCurrent(savedFilters)
+    and #P.Builds(savedFilters) == 0,
+    "rebinding the Saved relation policy did not fail closed")
+P.BindSavedRelationResolver(nil)
+eligibility["500010x1"] = {
+    dummy=100,lk=200,best=200,average=150,count=2,
+}
+Revisions.Advance(Revisions.DPS_CHANGED, {scope="saved-relation-reset"})
+
 local combined = P.Leaderboard("combined", {classFilter="MAGE",search="player"})
 assert(#combined == 50 and combined[1].category == "combined"
     and combined[1].average == (combined[1].dummyDps+combined[1].lkDps)/2,
@@ -190,8 +238,10 @@ assert(#orderedCollision == 2 and type(orderedCollision[1].id) == "number"
 
 local collisionBoards = {
     dummy={{player="Collision",buildId=1,dps=100,category="dummy",
+        ownerKey="collision@realma",ownerVerified=true,realm="realma",
         build={id=1,title="Numeric",class="MAGE"}}},
     lk={{player="Collision",buildId="1",dps=200,category="lk",
+        ownerKey="collision@realma",ownerVerified=true,realm="realma",
         build={id="1",title="String",class="MAGE"}}},
 }
 Nexus.DpsCapture.GetDpsBoard = function(category)
@@ -213,6 +263,19 @@ Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})
 local exactCombined = P.Leaderboard("combined", {classFilter="ALL"})
 assert(#exactCombined == 1 and not exactCombined[1].lockedEvidenceMismatch,
     "matching exact fingerprints did not pair leaderboard records")
+collisionBoards.lk[1].player = "Collision-RealmB"
+collisionBoards.lk[1].ownerKey = "collision@realmb"
+collisionBoards.lk[1].realm = "realmb"
+Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})
+assert(#P.Leaderboard("combined", {classFilter="ALL"}) == 0,
+    "same-name different-realm records were combined")
+collisionBoards.lk[1].player = "Collision"
+collisionBoards.lk[1].ownerKey = "collision@realma"
+collisionBoards.lk[1].realm = "realma"
+Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})
+exactCombined = P.Leaderboard("combined", {classFilter="ALL"})
+assert(#exactCombined == 1,
+    "restored exact owner records did not combine")
 collisionBoards.dummy[1].lockedEchoes = {{spellId=810001,count=1}}
 collisionBoards.lk[1].lockedEchoes = {{spellId=810002,count=1}}
 Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})

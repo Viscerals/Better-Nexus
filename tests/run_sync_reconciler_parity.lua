@@ -61,8 +61,12 @@ local function NewHarness(overrides)
         buildCandidateSnapshot=function(hash)
             Count("candidateSnapshot")
             assert(hash == deltaHash, "candidate snapshot uses delta hash")
-            return overrides.snapshot
-                or {revision=1, candidates={{id="overlay-only"}}}
+            if overrides.snapshot then return overrides.snapshot end
+            local claimSafeByBucket = {}
+            for bucket = 1, buckets do claimSafeByBucket[bucket] = true end
+            return {revision=1,complete=true,
+                candidates={{id="overlay-only"}},
+                claimSafeByBucket=claimSafeByBucket}
         end,
         snapshotCurrent=function()
             Count("snapshotCurrent")
@@ -90,6 +94,10 @@ local function NewHarness(overrides)
         end,
         admitBuild=function(prepared)
             Count("admitBuild")
+            if state.stalePrepared then
+                state.stalePrepared = false
+                return false, "stale prepared build"
+            end
             if state.queueFull then return false, "sync queue full" end
             state.successfulAdmissions = state.successfulAdmissions + 1
             state.workOrder[#state.workOrder + 1] =
@@ -123,6 +131,12 @@ local function NewHarness(overrides)
         end or nil,
         supportsRequestContext=function()
             return overrides.supportsRequestContext == true
+        end,
+        localOwnsDpsBucket=function()
+            return overrides.localOwnsDpsBucket ~= false
+        end,
+        dpsBucketClaimInfo=function()
+            return overrides.dpsClaimSafe == true
         end,
         noteSyncStat=function(name, amount)
             state.syncStats[name] = (state.syncStats[name] or 0)
@@ -251,6 +265,28 @@ AssertEqual(#ls.claims, 1, "claim follows successful admission")
 loadouts.Process(1)
 AssertEqual(ls.calls.admitBuild, 2, "completed loadout never readmitted")
 
+-- A prepared loadout is only a serialization cache. If its catalog authority
+-- changes before admission, the reconciler discards it and re-prepares the
+-- current record before publishing a claim.
+local staleLoadout, staleLoadoutState = NewHarness()
+staleLoadoutState.builds["known"] = {id="known",echoes={1}}
+staleLoadoutState.stalePrepared = true
+assert(staleLoadout.ScheduleLoadout({requester="Alice",buildId="known"}))
+staleLoadout.Process(1)
+AssertEqual(staleLoadoutState.calls.prepareBuild, 1,
+    "stale loadout initial preparation")
+AssertEqual(staleLoadout.Counts().loadouts, 1,
+    "stale prepared loadout was dropped instead of retained for repair")
+AssertEqual(#staleLoadoutState.claims, 0,
+    "stale prepared loadout published a claim")
+staleLoadout.Process(1)
+AssertEqual(staleLoadoutState.calls.prepareBuild, 2,
+    "stale prepared loadout was not regenerated")
+AssertEqual(staleLoadoutState.successfulAdmissions, 1,
+    "regenerated loadout was not admitted exactly once")
+AssertEqual(#staleLoadoutState.claims, 1,
+    "regenerated loadout did not publish its post-admission claim")
+
 -- A matching peer claim uses current candidate and ownership state.
 local claims, claimState = NewHarness()
 local oneBucketMismatch = "0,12,13,14,15,16,17,18,catalog-v2"
@@ -271,6 +307,37 @@ claims.HandleBucketClaim({responder="Other", requester="Alice",
     requestId="claimable", kind="B", bucket=1, hash="11"})
 AssertEqual(claims.Counts().responses, 0,
     "current claimable bucket accepts matching peer claim")
+
+local unsafeClaim = NewHarness({snapshot={revision=1,complete=true,
+    candidates={{id="unverified"}},claimSafeByBucket={[1]=false}}})
+assert(unsafeClaim.ScheduleRequest({requester="Alice",requestId="unsafe",
+    peerBuildHash=oneBucketMismatch,peerDpsHash=ZeroHash(8)}))
+unsafeClaim.Process(1)
+unsafeClaim.HandleBucketClaim({responder="Other",requester="Alice",
+    requestId="unsafe",kind="B",bucket=1,hash="11"})
+AssertEqual(unsafeClaim.Counts().responses, 1,
+    "relay-ineligible snapshot rejects matching peer suppression")
+
+local pendingClaim = NewHarness({snapshot={revision=1,complete=false,
+    candidates={},claimSafeByBucket={[1]=true}}})
+assert(pendingClaim.ScheduleRequest({requester="Alice",requestId="pending",
+    peerBuildHash=oneBucketMismatch,peerDpsHash=ZeroHash(8)}))
+pendingClaim.Process(1)
+pendingClaim.HandleBucketClaim({responder="Other",requester="Alice",
+    requestId="pending",kind="B",bucket=1,hash="11"})
+AssertEqual(pendingClaim.Counts().responses, 1,
+    "incomplete snapshot rejects early peer suppression")
+
+local unsafeDpsHash = "21,0,0,0,0,0,0,0"
+local unsafeDps = NewHarness({dpsHash=unsafeDpsHash,
+    supportsRequestContext=true,localOwnsDpsBucket=false,dpsClaimSafe=false})
+assert(unsafeDps.ScheduleRequest({requester="Alice",requestId="dps-unsafe",
+    peerBuildHash=currentWire,peerDpsHash=ZeroHash(8)}))
+unsafeDps.Process(1)
+unsafeDps.HandleBucketClaim({responder="Other",requester="Alice",
+    requestId="dps-unsafe",kind="D",bucket=1,hash="21"})
+AssertEqual(unsafeDps.Counts().responses, 1,
+    "unverified DPS bucket rejects matching peer suppression")
 
 -- A stale immutable candidate is reset instead of trusting its old hash.
 local stale, staleState = NewHarness()

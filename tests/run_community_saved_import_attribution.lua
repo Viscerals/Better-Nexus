@@ -45,6 +45,8 @@ for index = 1, 568 do
         author=collision and "AttributionMage" or "Other",
         ownerKey=collision and "attributionmage@ebonhold"
             or "other@ebonhold",
+        ownerVerified=collision and true or nil,
+        realm=collision and "ebonhold" or nil,
         class="MAGE",postedAt=index,lastModified=index,echoes=echoes,
     }
 end

@@ -51,6 +51,18 @@ local bundle = {schemaVersion=1,catalogVersion="class-test",sourceVersion="test"
     ambiguousA=Build("ambiguousA",810004,"SHAMAN"),
     ambiguousB=Build("ambiguousB",810004,"SHAMAN"),
     ownerOnly=Build("ownerOnly",810005,"HUNTER","Owneronly","RealmA",true),
+    staleSavedClass={id="staleSavedClass",title="Stale Saved Class",
+        class="ROGUE",author="Owneronly",ownerKey="owneronly@realma",
+        ownerVerified=true,realm="realma",importedSavedBuild=true,
+        fingerprint="810005x1",echoes={{spellId=810005,stacks=1}}},
+    ownerAliasPoison={id="ownerAliasPoison",title="ownerAliasPoison",
+        class="WARLOCK",author="Owneronly",ownerKey="owneronly@realma",
+        ownerVerified=true,realm="realma",o="other@realma",
+        fingerprint="810105x1",echoes={{spellId=810105,stacks=1}}},
+    ownerClaimPoison={id="ownerClaimPoison",title="ownerClaimPoison",
+        class="DRUID",author="Owneronly",ownerKey="owneronly@realma",
+        ownerVerified=true,realm="realma",claimedOwnerKey="other@realma",
+        fingerprint="810106x1",echoes={{spellId=810106,stacks=1}}},
     ownerConflictA=Build("ownerConflictA",810006,"MAGE","Ownerconflict","RealmA",true),
     ownerConflictB=Build("ownerConflictB",810007,"ROGUE","Ownerconflict","RealmA",true),
     sameNameA=Build("sameNameA",810009,"MAGE","Sameperson","RealmA",true),
@@ -60,20 +72,24 @@ local bundle = {schemaVersion=1,catalogVersion="class-test",sourceVersion="test"
 local db = {communityBuilds={},syncTombstones={tombstoned={stamp=50,author="Owner"}}}
 Nexus.BuildCatalog.Init(db,bundle)
 local ownerKey = Nexus.Identity.OwnerKey("Owneronly","RealmA")
-local ownerClass, ownerSource = Nexus.BuildCatalog.ResolveOwnerClass(ownerKey,true)
+local ownerRequest = {player="Owneronly",ownerKey=ownerKey,
+    ownerVerified=true,realm="realma"}
+local ownerClass, ownerSource = Nexus.BuildCatalog.ResolveOwnerClass(ownerRequest)
 assert(ownerClass=="HUNTER" and ownerSource=="owner-consensus",
     "verified owner class index did not resolve its single class")
-assert(Nexus.BuildCatalog.ResolveOwnerClass(ownerKey,false)==nil,
+local unverifiedOwnerRequest = Copy(ownerRequest)
+unverifiedOwnerRequest.ownerVerified = false
+assert(Nexus.BuildCatalog.ResolveOwnerClass(unverifiedOwnerRequest)==nil,
     "unverified requester gained owner class authority")
 local conflictBuild = Build(
     "ownerOnlyConflict",810008,"MAGE","Owneronly","RealmA",true)
 assert(Nexus.BuildCatalog.Put(conflictBuild))
 local conflictedClass, conflictReason =
-    Nexus.BuildCatalog.ResolveOwnerClass(ownerKey,true)
+    Nexus.BuildCatalog.ResolveOwnerClass(ownerRequest)
 assert(conflictedClass==nil and conflictReason=="owner class evidence conflicts",
     "incremental owner class conflict did not fail closed")
 assert(Nexus.BuildCatalog.RemoveOverlay(conflictBuild.id))
-assert(Nexus.BuildCatalog.ResolveOwnerClass(ownerKey,true)=="HUNTER",
+assert(Nexus.BuildCatalog.ResolveOwnerClass(ownerRequest)=="HUNTER",
     "owner class index did not recover after incremental removal")
 
 local rows = {
@@ -143,6 +159,10 @@ for index = 21, 200 do
         buildId="bulk-"..index,fingerprint=tostring(spellId).."x1",
         echoes={{spellId=spellId,stacks=1}}}
 end
+rows[21] = {player="Ownerclaim",ownerKey="owneronly@realma",
+    ownerVerified=true,claimedOwnerKey="other@realma",
+    dps=979000,duration=60,ts=21,buildId="missing-owner-claim",
+    fingerprint="820021x1",echoes={{spellId=820021,stacks=1}}}
 local sourceSignature = Signature(rows)
 local boardReads = 0
 Nexus.DpsCapture = {GetDpsBoard=function(category)
@@ -182,7 +202,8 @@ for _, player in ipairs({"Mismatchedrow","Tombstonedpriest",
 end
 for _, player in ipairs({"Unknownlegacy","Invalidlegacy",
         "Laterrogue","Categoryconflict","Ownerconflict","Sameperson",
-        "Sameperson-RealmC","Unverified","Currenthero-OtherRealm"}) do
+        "Sameperson-RealmC","Unverified","Currenthero-OtherRealm",
+        "Ownerclaim"}) do
     assert(byPlayer[player].resolvedClass==nil
         and byPlayer[player].classUnavailable==true,
         player.." gained unproven class authority")

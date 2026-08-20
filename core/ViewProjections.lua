@@ -20,6 +20,8 @@ local counters = {
         defensiveCopies=0},
 }
 local jobs = {builds=nil,leaderboard=nil}
+local savedRelationResolver
+local savedRelationGeneration = 0
 local workStats = {
     acquisitions=0,sourceRows=0,joins=0,comparisons=0,copies=0,
     sortMoves=0,publications=0,cancellations=0,binds=0,
@@ -106,7 +108,8 @@ local function NormalizeBuildFilters(filters)
     local search = tostring(filters.search or ""):lower()
         :gsub("^%s+", ""):gsub("%s+$", "")
     local currentClassOnly = filters.currentClassOnly ~= false
-    local classFilter = currentClassOnly and (CurrentClass() or "") or "ALL"
+    local currentClass = CurrentClass() or ""
+    local classFilter = currentClassOnly and currentClass or "ALL"
     local scope = filters.scope == "mine" and "mine" or "all"
     local sortMode = filters.sortMode
     if sortMode ~= "recent" and sortMode ~= "title" then sortMode = "dps" end
@@ -115,7 +118,7 @@ local function NormalizeBuildFilters(filters)
     return {
         search=search, classFilter=classFilter, scope=scope,
         sortMode=sortMode, player=player, ownerKey=ownerKey,
-        currentClassOnly=currentClassOnly,
+        currentClassOnly=currentClassOnly,currentClass=currentClass,
         qualifiedOnly=filters.qualifiedOnly ~= false,
         page=page,pageSize=20,
     }
@@ -144,7 +147,8 @@ local function BuildKey(filters)
         Revision(revisions.DPS_CHANGED),
         filters.scope, filters.classFilter, filters.search, filters.sortMode,
         filters.player, filters.ownerKey,
-        filters.currentClassOnly,filters.qualifiedOnly,
+        filters.currentClassOnly,filters.currentClass,filters.qualifiedOnly,
+        savedRelationGeneration,
     })
 end
 
@@ -192,13 +196,52 @@ local function Cached(kind, keyBuilder, builder)
 end
 
 local function IsOwnBuild(build, filters)
-    if type(build) ~= "table" then return false end
-    if build.ownerKey then
-        return filters.ownerKey ~= ""
-            and Identity.CanonicalOwnerKey(build.ownerKey) == filters.ownerKey
+    return Identity.LocalOwnsBuild(build, filters.ownerKey)
+end
+
+local function ProjectSavedBuild(build, unit)
+    if Identity.SavedMirrorKind(build) ~= "saved"
+        or type(savedRelationResolver) ~= "function" then return nil end
+    workStats.joins = workStats.joins + 1
+    if type(unit) == "table" then
+        unit.joins = (unit.joins or 0) + 1
     end
-    return build.isMine == true and filters.player ~= ""
-        and Identity.PlayerKey(build.author) == filters.player
+    local ok, projected, relation = pcall(savedRelationResolver, build)
+    if not ok or type(projected) ~= "table"
+        or tostring(projected.id or "") ~= tostring(build.id or "") then
+        return nil, nil
+    end
+    if type(relation) ~= "table"
+        or type(relation.buildId) ~= "string"
+        or type(relation.fingerprint) ~= "string" then
+        relation = nil
+    end
+    projected.recordBuildId = relation and relation.buildId or nil
+    projected.publishedBuildId = type(projected.publishedBuildId) == "string"
+        and projected.publishedBuildId or nil
+    projected.class = NormalizeClass(projected.class) or "UNKNOWN"
+    return projected, relation
+end
+
+local function PrepareSavedBuild(build, filters, unit)
+    if Identity.SavedMirrorKind(build) ~= "saved" then return build, nil end
+    local projected, relation = ProjectSavedBuild(build, unit)
+    if projected then return projected, relation end
+    build.recordBuildId, build.publishedBuildId = nil, nil
+    build.class = "UNKNOWN"
+    return build, nil
+end
+
+local function BuildDpsSummary(build, eligibility, relation)
+    local fingerprint
+    local savedKind = Identity.SavedMirrorKind(build)
+    if savedKind == "saved" then
+        fingerprint = relation and relation.fingerprint or nil
+    elseif savedKind == "ordinary" then
+        fingerprint = type(build) == "table"
+            and type(build.fingerprint) == "string" and build.fingerprint or nil
+    end
+    return fingerprint and eligibility[fingerprint] or nil
 end
 
 local function IsLoaded(build)
@@ -309,39 +352,43 @@ local function BuildProjection(filters)
     local out = {}
     for _, build in pairs(all) do
         if type(build) == "table" and IsLoaded(build) then
+            local savedKind = Identity.SavedMirrorKind(build)
             summary.total = summary.total + 1
             summary.ready = summary.ready + 1
             local own = IsOwnBuild(build, filters)
             if own then summary.mine = summary.mine + 1 end
-            if build.importedSavedBuild then
+            if savedKind == "saved" then
                 summary.savedLoadouts = summary.savedLoadouts + 1
-            elseif own then
+            elseif savedKind == "ordinary" and own then
                 summary.uploaded = summary.uploaded + 1
             end
-            local classMatch = not filters.currentClassOnly
-                or tostring(build.class or ""):upper() == filters.classFilter
             local scopeMatch = filters.scope == "mine"
-                and (build.importedSavedBuild or own)
-                or filters.scope ~= "mine" and not build.importedSavedBuild
+                and own
+                or filters.scope ~= "mine" and savedKind == "ordinary"
             local searchMatch = filters.search == ""
                 or tostring(build.title or ""):lower():find(filters.search, 1, true)
                 or tostring(build.author or ""):lower():find(filters.search, 1, true)
                 or tostring(build.description or ""):lower():find(filters.search, 1, true)
-            local fingerprint = type(build.fingerprint) == "string"
-                and build.fingerprint or nil
-            local dpsSummary = fingerprint and eligibility[fingerprint] or nil
+            local relation
+            if scopeMatch and searchMatch and savedKind == "saved" then
+                build, relation = PrepareSavedBuild(build, filters)
+            end
+            local classMatch = not filters.currentClassOnly
+                or tostring(build.class or ""):upper() == filters.classFilter
+            local matched = classMatch and scopeMatch and searchMatch
+            local dpsSummary = matched
+                and BuildDpsSummary(build, eligibility, relation) or nil
             local dummy = type(dpsSummary) == "table"
                 and (tonumber(dpsSummary.dummy) or 0) or 0
             local lk = type(dpsSummary) == "table"
                 and (tonumber(dpsSummary.lk) or 0) or 0
             local dpsCount = (dummy > 0 and 1 or 0) + (lk > 0 and 1 or 0)
             local eligible = dummy > 0 and lk > 0 and dpsCount == 2
-            if classMatch and scopeMatch and searchMatch then
+            if matched then
                 summary.filterMatchedCount = summary.filterMatchedCount + 1
                 if eligible then summary.qualifying = summary.qualifying + 1 end
             end
-            if classMatch and scopeMatch and searchMatch
-                and (eligible or not filters.qualifiedOnly) then
+            if matched and (eligible or not filters.qualifiedOnly) then
                 -- BuildCatalog readers return fresh public snapshots. This
                 -- projection owns the row and may attach derived DPS fields
                 -- without another full-table copy.
@@ -385,21 +432,39 @@ local function BuildProjection(filters)
     return out, summary
 end
 
-local function PlayerKey(value)
-    return Identity.PlayerKey(value) or "invalid"
+local function EvidenceIdentityKey(row)
+    if type(row) ~= "table" then return "invalid" end
+    local ownerKey = Identity.VerifiedOwnerKey(row)
+    if ownerKey then return ownerKey end
+    local player = type(row.player) == "string" and row.player:lower() or ""
+    local realm = type(row.realm) == "string" and row.realm:lower() or ""
+    local claimed = type(row.claimedOwnerKey) == "string"
+        and row.claimedOwnerKey:lower() or ""
+    local relay = type(row.relaySender) == "string"
+        and row.relaySender:lower() or ""
+    local owner = type(row.ownerKey) == "string"
+        and row.ownerKey:lower() or ""
+    if realm == "" and claimed == "" and relay == "" and owner == "" then
+        return Identity.PlayerKey(row.player) or "invalid"
+    end
+    return "evidence:" .. TypedIdentity(player)
+        .. ":" .. TypedIdentity(realm)
+        .. ":" .. TypedIdentity(owner)
+        .. ":" .. TypedIdentity(claimed)
+        .. ":" .. TypedIdentity(relay)
 end
 
 local function RecordKey(row)
-    return PlayerKey(row and row.player)
+    return EvidenceIdentityKey(row)
         .. "|" .. TypedIdentity(row and (row.fingerprint or row.buildId))
 end
 
-local function ExactRecordKey(row)
+local function CombinedRecordKey(row)
     if type(row) ~= "table" or type(row.fingerprint) ~= "string"
         or row.fingerprint == "" then return nil end
-    local player = Identity.PlayerKey(row.player)
-    if not player then return nil end
-    return player .. "|" .. TypedIdentity(row.fingerprint)
+    local ownerKey = Identity.VerifiedOwnerKey(row)
+    if not ownerKey then return nil end
+    return ownerKey .. "|" .. TypedIdentity(row.fingerprint)
 end
 
 local function CommonTypedIdentity(left, right)
@@ -413,7 +478,7 @@ local function EvidenceRecord(row)
         player=row.player,fingerprint=row.fingerprint,
         buildId=row.buildId,resolvedBuildId=row.resolvedBuildId,
         ownerKey=row.ownerKey,ownerVerified=row.ownerVerified == true,
-        relaySender=row.relaySender,
+        claimedOwnerKey=row.claimedOwnerKey,relaySender=row.relaySender,
         buildIdentityMismatch=row.buildIdentityMismatch,
         recordIdentityMismatch=row.recordIdentityMismatch,
         resolvedIdentityMismatch=row.resolvedIdentityMismatch,
@@ -449,12 +514,12 @@ local function CombinedRows()
     local dummy, lk = Board("dummy"), Board("lk")
     local dummyByKey = {}
     for _, row in ipairs(dummy) do
-        local key = ExactRecordKey(row)
+        local key = CombinedRecordKey(row)
         if key then dummyByKey[key] = row end
     end
     local out = {}
     for _, lrow in ipairs(lk) do
-        local key = ExactRecordKey(lrow)
+        local key = CombinedRecordKey(lrow)
         local drow = key and dummyByKey[key]
         if drow then
             local average = ((tonumber(drow.dps) or 0)
@@ -472,6 +537,7 @@ local function CombinedRows()
             local resolvedFingerprintRevision = CommonTypedIdentity(
                 drow.resolvedFingerprintRevision,
                 lrow.resolvedFingerprintRevision)
+            local ownerKey = Identity.VerifiedOwnerKey(lrow)
             out[#out + 1] = {
                 player=lrow.player, dps=average, average=average,
                 dummyDps=drow.dps, lkDps=lrow.dps,
@@ -483,10 +549,7 @@ local function CombinedRows()
                 fingerprint=lrow.fingerprint or drow.fingerprint,
                 class=not classConflict and (lkClass or dummyClass) or nil,
                 classEvidenceMismatch=classConflict or nil,
-                ownerKey=lrow.ownerKey or drow.ownerKey,
-                ownerVerified=lrow.ownerVerified == true
-                    and drow.ownerVerified == true,
-                relaySender=lrow.relaySender or drow.relaySender,
+                ownerKey=ownerKey,ownerVerified=true,
                 dummyEvidence=EvidenceRecord(drow),
                 lkEvidence=EvidenceRecord(lrow),
                 echoes=ordinary,
@@ -709,35 +772,41 @@ local function PumpBuildJob(job, unit)
                 summary.total = summary.total + 1
                 summary.availableCount = summary.availableCount + 1
                 summary.ready = summary.ready + 1
+                local savedKind = Identity.SavedMirrorKind(build)
                 local own = IsOwnBuild(build, filters)
                 if own then summary.mine = summary.mine + 1 end
-                if build.importedSavedBuild then
+                if savedKind == "saved" then
                     summary.savedLoadouts = summary.savedLoadouts + 1
-                elseif own then summary.uploaded = summary.uploaded + 1 end
-                local classMatch = not filters.currentClassOnly
-                    or tostring(build.class or ""):upper() == filters.classFilter
+                elseif savedKind == "ordinary" and own then
+                    summary.uploaded = summary.uploaded + 1
+                end
                 local scopeMatch = filters.scope == "mine"
-                    and (build.importedSavedBuild or own)
-                    or filters.scope ~= "mine" and not build.importedSavedBuild
+                    and own
+                    or filters.scope ~= "mine" and savedKind == "ordinary"
                 local searchMatch = filters.search == ""
                     or tostring(build.title or ""):lower():find(filters.search,1,true)
                     or tostring(build.author or ""):lower():find(filters.search,1,true)
                     or tostring(build.description or ""):lower():find(filters.search,1,true)
-                local fingerprint = type(build.fingerprint) == "string"
-                    and build.fingerprint or nil
-                local dpsSummary = fingerprint and job.eligibility[fingerprint] or nil
+                local relation
+                if scopeMatch and searchMatch and savedKind == "saved" then
+                    build, relation = PrepareSavedBuild(build, filters, unit)
+                end
+                local classMatch = not filters.currentClassOnly
+                    or tostring(build.class or ""):upper() == filters.classFilter
+                local matched = classMatch and scopeMatch and searchMatch
+                local dpsSummary = matched
+                    and BuildDpsSummary(build, job.eligibility, relation) or nil
                 local dummy = type(dpsSummary) == "table"
                     and (tonumber(dpsSummary.dummy) or 0) or 0
                 local lk = type(dpsSummary) == "table"
                     and (tonumber(dpsSummary.lk) or 0) or 0
                 local dpsCount = (dummy > 0 and 1 or 0) + (lk > 0 and 1 or 0)
                 local eligible = dummy > 0 and lk > 0 and dpsCount == 2
-                if classMatch and scopeMatch and searchMatch then
+                if matched then
                     summary.filterMatchedCount = summary.filterMatchedCount + 1
                     if eligible then summary.qualifying = summary.qualifying + 1 end
                 end
-                if classMatch and scopeMatch and searchMatch
-                    and (eligible or not filters.qualifiedOnly) then
+                if matched and (eligible or not filters.qualifiedOnly) then
                     build._nexusDps = {
                         dummy=dummy,lk=lk,best=math.max(dummy,lk),
                         average=dpsCount > 0 and (dummy+lk)/dpsCount or 0,
@@ -818,6 +887,7 @@ local function CombinedRow(drow, lrow)
     local dummyClass = NormalizeClass(drow.resolvedClass or drow.class)
     local lkClass = NormalizeClass(lrow.resolvedClass or lrow.class)
     local classConflict = dummyClass and lkClass and dummyClass ~= lkClass
+    local ownerKey = Identity.VerifiedOwnerKey(lrow)
     return {
         player=lrow.player,dps=average,average=average,
         dummyDps=drow.dps,lkDps=lrow.dps,
@@ -827,10 +897,7 @@ local function CombinedRow(drow, lrow)
         category="combined",fingerprint=lrow.fingerprint or drow.fingerprint,
         class=not classConflict and (lkClass or dummyClass) or nil,
         classEvidenceMismatch=classConflict or nil,
-        ownerKey=lrow.ownerKey or drow.ownerKey,
-        ownerVerified=lrow.ownerVerified == true
-            and drow.ownerVerified == true,
-        relaySender=lrow.relaySender or drow.relaySender,
+        ownerKey=ownerKey,ownerVerified=true,
         dummyEvidence=EvidenceRecord(drow),
         lkEvidence=EvidenceRecord(lrow),
         echoes=ordinary,
@@ -979,11 +1046,7 @@ end
 local function IsCurrentPlayerRow(row, context)
     if type(row) ~= "table" then return false end
     local owner = type(context) == "table" and context.ownerKey or ""
-    if row.ownerVerified == true and owner ~= ""
-        and type(Identity.CanonicalOwnerKey) == "function" then
-        return Identity.CanonicalOwnerKey(row.ownerKey) == owner
-    end
-    return false
+    return owner ~= "" and Identity.VerifiedOwnerKey(row) == owner
 end
 
 local function ResolveLeaderboardClass(row, resolvedBuild, context,
@@ -1018,7 +1081,7 @@ local function ResolveLeaderboardClass(row, resolvedBuild, context,
     local catalog = Nexus and Nexus.BuildCatalog
     if catalog and type(catalog.ResolveOwnerClass) == "function" then
         local ok, recovered, source = pcall(
-            catalog.ResolveOwnerClass, row.ownerKey, row.ownerVerified)
+            catalog.ResolveOwnerClass, row)
         recovered = ok and NormalizeClass(recovered) or nil
         if recovered then return recovered, source or "owner-consensus" end
         if ok and source == "owner class evidence conflicts" then
@@ -1144,7 +1207,7 @@ local function PumpLeaderboardJob(job, unit)
             local row = dummy[job.sourceIndex]
             job.sourceIndex = job.sourceIndex + 1
             sourceRows = sourceRows + 1
-            local key = ExactRecordKey(row)
+            local key = CombinedRecordKey(row)
             if key then job.dummyByKey[key] = row end
         end
         if job.sourceIndex > #dummy then
@@ -1160,7 +1223,7 @@ local function PumpLeaderboardJob(job, unit)
             sourceRows = sourceRows + 1
             local row = raw
             if combined then
-                local key = ExactRecordKey(raw)
+                local key = CombinedRecordKey(raw)
                 local drow = key and job.dummyByKey[key]
                 if drow then
                     row = CombinedRow(drow, raw)
@@ -1292,6 +1355,18 @@ local function Pump(kind)
     return published == true
 end
 
+function Projections.BindSavedRelationResolver(resolver)
+    if resolver ~= nil and type(resolver) ~= "function" then
+        return false, "Saved relation resolver must be a function or nil"
+    end
+    if savedRelationResolver == resolver then return false end
+    savedRelationResolver = resolver
+    savedRelationGeneration = savedRelationGeneration + 1
+    CancelJob("builds")
+    caches.builds = {}
+    return true
+end
+
 function Projections.Builds(filters)
     local normalized = NormalizeBuildFilters(filters)
     local cache, stats = caches.builds, counters.builds
@@ -1384,13 +1459,18 @@ function Projections.ExplainBuild(id, filters)
     end
     if type(build) ~= "table" then return "build unavailable" end
 
+    local savedKind = Identity.SavedMirrorKind(build)
     local own = IsOwnBuild(build, normalized)
     local scopeMatch = normalized.scope == "mine"
-        and (build.importedSavedBuild or own)
-        or normalized.scope ~= "mine" and not build.importedSavedBuild
+        and own
+        or normalized.scope ~= "mine" and savedKind == "ordinary"
     if not scopeMatch then
         return normalized.scope == "mine"
             and "scope filter: not mine" or "scope filter: saved loadout"
+    end
+    local relation
+    if savedKind == "saved" then
+        build, relation = PrepareSavedBuild(build, normalized)
     end
     if normalized.currentClassOnly then
         if normalized.classFilter == "" then
@@ -1407,10 +1487,18 @@ function Projections.ExplainBuild(id, filters)
     if normalized.qualifiedOnly then
         local dpsOwner = Nexus and Nexus.DpsCapture
         local ok, dps = false, nil
-        if dpsOwner
+        local lookupId = relation and relation.buildId or build.id
+        local lookupFingerprint = relation and relation.fingerprint
+            or build.fingerprint
+        local lookupHash = relation and relation.fingerprintHash
+            or build.fingerprintHash
+        if savedKind == "invalid"
+            or savedKind == "saved" and not relation then
+            return "qualification unavailable"
+        elseif dpsOwner
             and type(dpsOwner.GetCachedCommunityQualification) == "function" then
             ok, dps = pcall(dpsOwner.GetCachedCommunityQualification,
-                build.id, build.fingerprint, build.fingerprintHash)
+                lookupId, lookupFingerprint, lookupHash)
         elseif dpsOwner and type(dpsOwner.GetCommunityEligibility) == "function" then
             -- Compatibility for injected/older projection providers. The
             -- shipped DPS owner always supplies the narrow current-cache API,
@@ -1418,7 +1506,7 @@ function Projections.ExplainBuild(id, filters)
             local eligibility
             ok, eligibility = pcall(CommunityEligibility)
             dps = ok and type(eligibility) == "table"
-                and (eligibility[build.fingerprint] or {}) or nil
+                and (eligibility[lookupFingerprint] or {}) or nil
         end
         if not ok or type(dps) ~= "table" then
             return "qualification unavailable"

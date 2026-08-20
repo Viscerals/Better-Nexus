@@ -4,18 +4,36 @@ local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local Codec, Sync = Nexus.Codec, Nexus.Sync
+local Catalog = Nexus.BuildCatalog
 
 NexusDB = {}
 UnitName = function() return "Alice" end
+GetNormalizedRealmName = function() return "Ebonhold" end
 fakeClock = 100
 GetTime = function() return fakeClock end
 Sync.Init(Codec, nil)
 
 local function BroadcastAndCollect(build)
+    local previous = Catalog.Get(build.id)
+    assert(Catalog.Put(build), "sender build could not enter the catalog")
+    local selected = Catalog.Get(build.id)
     H.sentChatMessages = {}
-    Sync.BroadcastBuild(build)
+    local queued, why = Sync.BroadcastBuild(selected)
+    assert(queued, "selected sender build was not queued: " .. tostring(why))
     for i = 1, 30 do Sync.OnUpdate(0.2) end
-    return H.sentChatMessages
+    local messages = H.sentChatMessages
+    local emitted = false
+    for _, message in ipairs(messages) do
+        if tostring(message.text):match("^WLRB|") then emitted = true break end
+    end
+    assert(emitted, "selected sender build emitted no WLRB payload")
+    if previous then
+        assert(Catalog.Put(previous), "receiver snapshot could not be restored")
+    else
+        assert(Catalog.RemoveOverlay(build.id),
+            "temporary sender build could not be removed")
+    end
+    return messages
 end
 
 -- Receiving is opt-in: every delivery in these tests happens inside an
@@ -24,14 +42,15 @@ end
 local function DeliverAll(msgs)
     fakeClock = (fakeClock or 100) + 10   -- clear the request cooldown
     Sync.RequestSync()
-    for _, msg in ipairs(msgs) do Sync.HandleIncoming(msg.text, "Alice") end
+    for _, msg in ipairs(msgs) do Sync.HandleIncoming(msg.text, "Alice-Ebonhold") end
 end
 
 -- 1. Sending the exact same build twice must NOT create a duplicate or
 -- double-count as newly received.
 NexusDB = {}
 local build = { id = "b1", title = "Build One", description = "d", author = "Alice",
-    class = "MAGE", echoes = { { spellId = 200100, quality = 3, stacks = 1 } }, postedAt = 1000 }
+    ownerKey = "alice@ebonhold", ownerVerified = true, isMine = true, class = "MAGE",
+    echoes = { { spellId = 200100, quality = 3, stacks = 1 } }, postedAt = 1000 }
 DeliverAll(BroadcastAndCollect(build))
 local receivedAfterFirst = Sync.Stats().received
 DeliverAll(BroadcastAndCollect(build))  -- identical rebroadcast
@@ -46,7 +65,8 @@ print("identical rebroadcast is correctly deduplicated, no double-entry -- OK")
 -- 2. A NEWER version of the same build (higher postedAt) must update the
 -- stored copy.
 local buildV2 = { id = "b1", title = "Build One (updated)", description = "d2", author = "Alice",
-    class = "MAGE", echoes = { { spellId = 200100, quality = 3, stacks = 2 } }, postedAt = 2000 }
+    ownerKey = "alice@ebonhold", ownerVerified = true, isMine = true, class = "MAGE",
+    echoes = { { spellId = 200100, quality = 3, stacks = 2 } }, postedAt = 2000 }
 DeliverAll(BroadcastAndCollect(buildV2))
 assert(NexusDB.communityBuilds["b1"].title == "Build One (updated)",
     "newer version should have updated the stored title")
@@ -60,7 +80,8 @@ print("a newer version correctly updates the existing entry, still no duplicate 
 -- 3. An OLDER/stale rebroadcast must NOT overwrite the newer stored copy
 -- (protects against a stale peer's old data clobbering something newer).
 local staleReplay = { id = "b1", title = "Build One (STALE)", description = "old", author = "Alice",
-    class = "MAGE", echoes = { { spellId = 200100, quality = 3, stacks = 1 } }, postedAt = 1000 }
+    ownerKey = "alice@ebonhold", ownerVerified = true, isMine = true, class = "MAGE",
+    echoes = { { spellId = 200100, quality = 3, stacks = 1 } }, postedAt = 1000 }
 DeliverAll(BroadcastAndCollect(staleReplay))
 assert(NexusDB.communityBuilds["b1"].title == "Build One (updated)",
     "a stale/older replay must NOT overwrite the newer stored version")

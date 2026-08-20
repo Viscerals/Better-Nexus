@@ -35,7 +35,7 @@ assert(claimBefore == false,
 assert(DPS.ReceiveRecord({
     v=7,f=fingerprint,h=hash,e=echoes,c="dummy",d=250000,u=30,
     t=40000,p="Claimant",o=owner,r="ebonhold",l=80,k="MAGE",
-}, "Claimant") == true, "same-key metadata enrichment was rejected")
+}, "Claimant-Ebonhold") == true, "same-key metadata enrichment was rejected")
 
 local digestAfter = DPS.GetSyncHash()
 local claimAfter, authority = DPS.ResponseBucketClaimInfo(bucket)

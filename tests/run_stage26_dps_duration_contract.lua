@@ -11,6 +11,7 @@ UnitName = function(unit)
 end
 UnitLevel = function() return 80 end
 UnitClass = function() return "Mage", "MAGE" end
+GetNormalizedRealmName = function() return "Ebonhold" end
 
 dofile("core/Revisions.lua")
 dofile("core/Codec.lua")
@@ -51,6 +52,7 @@ local function Record(category, duration, player, dps, stamp)
         v=7,f=fingerprint,h=hash,e=echoes,c=category,
         d=dps or 250000,u=duration,t=stamp or (40000 + duration),
         p=player,l=80,k="MAGE",
+        o=player:lower() .. "@ebonhold",r="ebonhold",
     }
 end
 
@@ -58,7 +60,7 @@ for _, category in ipairs({"dummy", "lk"}) do
     for _, duration in ipairs({19,20,29,30}) do
         local player = "Direct" .. category .. tostring(duration)
         local accepted = DPS.ReceiveRecord(
-            Record(category, duration, player), player)
+            Record(category, duration, player), player .. "-Ebonhold")
         Check(accepted == expected[category][duration], string.format(
             "direct inbound %s %ds expected %s got %s", category, duration,
             tostring(expected[category][duration]), tostring(accepted)))
@@ -82,6 +84,8 @@ for _, category in ipairs({"dummy", "lk"}) do
         direct.echoes, direct.category, direct.dps = direct.e, direct.c, direct.d
         direct.duration, direct.ts, direct.player = direct.u, direct.t, direct.p
         direct.level, direct.class = direct.l, direct.k
+        direct.ownerKey, direct.realm = direct.o, direct.r
+        direct.ownerVerified = true
         local admitted = Sync.BroadcastDpsRecord(direct)
         Check(admitted == expected[category][duration], string.format(
             "direct outbound %s %ds expected %s got %s", category, duration,
@@ -95,6 +99,8 @@ for _, category in ipairs({"dummy", "lk"}) do
         relay.echoes, relay.category, relay.dps = relay.e, relay.c, relay.d
         relay.duration, relay.ts, relay.player = relay.u, relay.t, relay.p
         relay.level, relay.class, relay._originVerified = relay.l, relay.k, true
+        relay.ownerKey, relay.realm = relay.o, relay.r
+        relay.ownerVerified = true
         local bucket = DPS.SyncBucket(category, relayPlayer)
         local offered = Sync.BroadcastDpsRecord(relay, nil, true, {
             requester="Requester",requestId="duration-contract",bucket=bucket,
@@ -148,7 +154,8 @@ local function StoredRow(category, duration, player, fp)
     return {
         fingerprint=fp,loadoutHash=hash,echoes=echoes,category=category,
         dps=250000,duration=duration,ts=30000,player=player,
-        level=80,class="MAGE",ownerVerified=true,
+        level=80,class="MAGE",ownerKey=player:lower() .. "@ebonhold",
+        realm="ebonhold",ownerVerified=true,
     }
 end
 NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={
@@ -221,9 +228,10 @@ RejectProbe(Record("dummy",30,"OwnerMismatch"), "OtherSender")
 RejectProbe(Record("dummy",30,"SameRelay"), "SameRelay", true)
 RejectProbe(Record("dummy",30,"BadIntegrity",500), "BadIntegrity")
 local winner = Record("dummy",30,"Duplicate",300000,41000)
-RejectProbe(winner,"Duplicate")
-RejectProbe(winner,"Duplicate")
-RejectProbe(Record("dummy",30,"Duplicate",200000,40000),"Duplicate")
+RejectProbe(winner,"Duplicate-Ebonhold")
+RejectProbe(winner,"Duplicate-Ebonhold")
+RejectProbe(Record("dummy",30,"Duplicate",200000,40000),
+    "Duplicate-Ebonhold")
 actor = "Viewer"
 local outside = Record("dummy",30,"OutsideOwner")
 outside.x = {n="Viewer",i="outside-request",b=DPS.SyncBucket(

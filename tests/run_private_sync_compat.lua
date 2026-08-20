@@ -37,7 +37,8 @@ NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
 Sync.Init(Codec,{}); DPS.Init({},Sync)
 local record={protocolVersion=7,fingerprint=fp,loadoutHash=hash,echoes=echoes,
     category='dummy',dps=25000000,duration=65,ts=49000,player='Localhero',class='MAGE',
-    ownerKey='localhero@ebonhold',realm='ebonhold',level=80,buildId='dps-local'}
+    ownerKey='localhero@ebonhold',realm='ebonhold',ownerVerified=true,
+    level=80,buildId='dps-local'}
 H.sentChatMessages={}; assert(Sync.BroadcastDpsRecord(record,'local')); Pump(8)
 local payload=DecodeDps(H.sentChatMessages)
 assert(payload.v==7 and payload.f==fp and payload.h==hash and type(payload.e)=='table',
@@ -50,7 +51,8 @@ assert(payload.p=='Localhero' and payload.k=='MAGE' and payload.o=='localhero@eb
 currentName='Duká'
 local localizedRecord={protocolVersion=7,fingerprint=fp,loadoutHash=hash,echoes=echoes,
     category='dummy',dps=26000000,duration=66,ts=49001,player='Duká',class='MAGE',
-    ownerKey='duká@ebonhold',realm='ebonhold',level=80,buildId='dps-localized'}
+    ownerKey='duká@ebonhold',realm='ebonhold',ownerVerified=true,
+    level=80,buildId='dps-localized'}
 H.sentChatMessages={}
 assert(Sync.BroadcastDpsRecord(localizedRecord),
     'localized player name was rejected from DPS transfer ID')

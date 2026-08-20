@@ -211,10 +211,22 @@ end
 
 Nexus.WishlistEditor.Init(Adapter, Nexus.Model)
 local currentRecordAvailable = true
+local function FixtureEvidenceKey(record)
+    record = type(record) == "table" and record or {}
+    return table.concat({
+        tostring(record.player or ""), tostring(record.realm or ""),
+        tostring(record.ownerKey or ""), tostring(record.claimedOwnerKey or ""),
+        tostring(record.relaySender or ""),
+    }, "|")
+end
 Nexus.DpsCapture = {GetDpsBoard=function(category)
     return category == "dummy" and {row} or {}
-end,GetCharacterBest=function(category)
-    return currentRecordAvailable and category == "dummy" and row or nil
+end,EvidenceIdentityKey=FixtureEvidenceKey,
+GetCharacterBest=function(category, player, expectedOwner, expectedEvidence)
+    if not currentRecordAvailable or category ~= "dummy"
+        or player ~= row.player or expectedOwner ~= nil
+        or expectedEvidence ~= FixtureEvidenceKey(row) then return nil end
+    return row
 end}
 row.echoes = validOrdinary
 row.fingerprint = EchoKey(validOrdinary)

@@ -19,10 +19,12 @@ local baseline = {
 local database = {
     communityBuilds = {
         base = { id="base", title="Overlay", author="A", postedAt=10,
-            lastModified=11, echoes={{spellId=1,stacks=2}} },
+            lastModified=11, ownerKey="a@realma",realm="realma",
+            ownerVerified=true,echoes={{spellId=1,stacks=2}} },
         newer = { id="newer", title="Stale overlay", author="A", postedAt=5,
             lastModified=5, echoes={{spellId=2,stacks=1}} },
         personal = { id="personal", title="Mine", author="Me", isMine=true,
+            ownerKey="me@realma",realm="realma",ownerVerified=true,
             postedAt=1, lastModified=1, echoes={{spellId=4,stacks=1}} },
     },
     syncTombstones = { deleted={stamp=30,author="A"} },
@@ -55,6 +57,21 @@ assert(delta.base and delta.personal and not delta.newer and not delta.deleted,
 delta.base.title = "mutated delta copy"
 assert(Nexus.BuildCatalog.Get("base").title == "Overlay",
     "DeltaSnapshot exposed mutable overlay storage")
+
+assert(Nexus.BuildCatalog.Put({id="delta-unverified",title="Unverified",
+    author="Peer",ownerKey="peer@realma",realm="realma",
+    postedAt=12,lastModified=12,echoes={{spellId=6,stacks=1}}}))
+assert(Nexus.BuildCatalog.Put({id="delta-saved",title="Private Saved",
+    author="Me",ownerKey="me@realma",realm="realma",ownerVerified=true,
+    importedSavedBuild=true,isMine=true,serverSlot=1,
+    postedAt=13,lastModified=13,echoes={{spellId=7,stacks=1}}}))
+local authorityDelta = Nexus.BuildCatalog.DeltaSnapshot()
+assert(authorityDelta["delta-unverified"] == nil
+        and authorityDelta["delta-saved"] == nil,
+    "EXPECTED RED: unverified or private Saved rows entered Sync delta state")
+assert(Nexus.BuildCatalog.RemoveOverlay("delta-unverified")
+        and Nexus.BuildCatalog.RemoveOverlay("delta-saved"),
+    "authority delta fixtures were not removed cleanly")
 
 assert(Nexus.BuildCatalog.Put({ id="deleted", title="Resurrection attempt",
     postedAt=50, lastModified=50, echoes={{spellId=3,stacks=2}} }))
@@ -91,5 +108,98 @@ assert(Nexus.BuildCatalog.Get("copy") == nil,
 assert(Nexus.BuildCatalog.ClearTombstone("copy"))
 assert(Nexus.BuildCatalog.Get("copy") == nil,
     "clearing a tombstone unexpectedly restored a removed overlay")
+
+local allocationDb = {
+    communityBuilds={
+        opaque="future-owned-row",
+        booleanOpaque=false,
+        opaqueBundled="future-owned-bundled-row",
+        malformed={title="Missing durable identity",future={keep=true}},
+        mismatched={id="different-id",future={keep=true}},
+        visible={id="visible",title="Visible",echoes={{spellId=91,stacks=1}}},
+        shadowed={id="shadowed",title="Overlay on bundled ID",
+            echoes={{spellId=93,stacks=2}}},
+    },
+    syncTombstones={
+        tombstoned={stamp=93,future={keep=true}},
+    },
+}
+local allocationBundle = {
+    schemaVersion=1,catalogVersion="allocation-1",sourceVersion="test",
+    builds={
+        bundled={id="bundled",title="Bundled allocation",
+            echoes={{spellId=92,stacks=1}}},
+        shadowed={id="shadowed",title="Bundled shadow target",
+            echoes={{spellId=93,stacks=1}}},
+        opaqueBundled={id="opaqueBundled",title="Opaque shadow target",
+            echoes={{spellId=94,stacks=1}}},
+        tombstoned={id="tombstoned",title="Tombstone target",
+            echoes={{spellId=95,stacks=1}}},
+    },
+}
+Nexus.BuildCatalog.Init(allocationDb, allocationBundle)
+local occupancy, represented =
+    Nexus.BuildCatalog.AllocationOccupancy("absent")
+assert(occupancy == "absent" and represented == nil,
+    "truly absent allocation ID was not distinguished")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("opaque")
+assert(occupancy == "opaque" and represented == nil
+    and allocationDb.communityBuilds.opaque == "future-owned-row",
+    "opaque raw overlay evidence was exposed, cleared, or reported free")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("booleanOpaque")
+assert(occupancy == "opaque" and represented == nil
+    and allocationDb.communityBuilds.booleanOpaque == false,
+    "false raw overlay evidence was cleared or reported free")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("malformed")
+assert(occupancy == "opaque" and represented == nil
+    and allocationDb.communityBuilds.malformed.future.keep == true,
+    "malformed raw overlay evidence was exposed, cleared, or reported free")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("mismatched")
+assert(occupancy == "opaque" and represented == nil
+    and allocationDb.communityBuilds.mismatched.id == "different-id"
+    and allocationDb.communityBuilds.mismatched.future.keep == true,
+    "mismatched raw overlay evidence was exposed, cleared, or reported free")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("visible")
+assert(occupancy == "visible" and represented
+    and represented.id == "visible" and represented.title == "Visible",
+    "represented overlay row was not distinguished from opaque evidence")
+represented.title = "caller mutation"
+represented.echoes[1].stacks = 99
+assert(allocationDb.communityBuilds.visible.title == "Visible"
+    and allocationDb.communityBuilds.visible.echoes[1].stacks == 1,
+    "allocation occupancy exposed mutable overlay storage")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("bundled")
+assert(occupancy == "bundled" and represented
+    and represented.id == "bundled"
+    and represented.title == "Bundled allocation",
+    "bundled allocation ID was reported free or not represented")
+represented.title = "caller mutation"
+represented.echoes[1].stacks = 99
+assert(allocationBundle.builds.bundled.title == "Bundled allocation"
+    and allocationBundle.builds.bundled.echoes[1].stacks == 1,
+    "allocation occupancy exposed mutable bundled storage")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("shadowed")
+assert(occupancy == "bundled" and represented
+    and represented.id == "shadowed"
+    and represented.title == "Overlay on bundled ID",
+    "a represented overlay made an immutable bundled ID allocatable")
+represented.title = "caller mutation"
+represented.echoes[1].stacks = 99
+assert(allocationDb.communityBuilds.shadowed.title == "Overlay on bundled ID"
+    and allocationDb.communityBuilds.shadowed.echoes[1].stacks == 2
+    and allocationBundle.builds.shadowed.title == "Bundled shadow target",
+    "shadowed bundled occupancy exposed mutable storage")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("opaqueBundled")
+assert(occupancy == "opaque" and represented == nil
+    and allocationDb.communityBuilds.opaqueBundled
+        == "future-owned-bundled-row"
+    and allocationBundle.builds.opaqueBundled.title == "Opaque shadow target",
+    "opaque evidence on a bundled ID was exposed, cleared, or misclassified")
+occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("tombstoned")
+assert(occupancy == "tombstone" and represented == nil
+    and allocationDb.syncTombstones.tombstoned.stamp == 93
+    and allocationDb.syncTombstones.tombstoned.future.keep == true
+    and allocationBundle.builds.tombstoned.title == "Tombstone target",
+    "tombstone evidence was exposed, cleared, or reported free")
 
 print("BuildCatalog precedence and defensive copies -- OK")

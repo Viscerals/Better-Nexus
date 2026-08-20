@@ -114,15 +114,36 @@ local function DurationText(v)
     return string.format("%d:%02d", math.floor(v / 60), math.floor(v % 60))
 end
 
-local function PlayerKey(v)
-    return Identity.PlayerKey(v) or "invalid"
+local function TypedIdentity(value)
+    return type(value) .. ":" .. tostring(value or "")
+end
+
+local function EvidenceIdentityKey(row)
+    if type(row) ~= "table" then return "invalid" end
+    local ownerKey = Identity.VerifiedOwnerKey(row)
+    if ownerKey then return ownerKey end
+    local player = type(row.player) == "string" and row.player:lower() or ""
+    local realm = type(row.realm) == "string" and row.realm:lower() or ""
+    local owner = type(row.ownerKey) == "string"
+        and row.ownerKey:lower() or ""
+    local claimed = type(row.claimedOwnerKey) == "string"
+        and row.claimedOwnerKey:lower() or ""
+    local relay = type(row.relaySender) == "string"
+        and row.relaySender:lower() or ""
+    if realm == "" and owner == "" and claimed == "" and relay == "" then
+        return Identity.PlayerKey(row.player) or "invalid"
+    end
+    return "evidence:" .. TypedIdentity(player)
+        .. ":" .. TypedIdentity(realm)
+        .. ":" .. TypedIdentity(owner)
+        .. ":" .. TypedIdentity(claimed)
+        .. ":" .. TypedIdentity(relay)
 end
 
 local function RecordKey(row)
-    if not row then return "" end
+    if type(row) ~= "table" then return "" end
     local identity = row.fingerprint or row.buildId
-    return PlayerKey(row.player) .. "|" .. type(identity) .. ":"
-        .. tostring(identity or "")
+    return EvidenceIdentityKey(row) .. "|" .. TypedIdentity(identity)
 end
 
 local function ExactRecordKey(row)
@@ -131,6 +152,14 @@ local function ExactRecordKey(row)
     local player = Identity.PlayerKey(row.player)
     if not player then return nil end
     return player .. "|string:" .. row.fingerprint
+end
+
+local function CombinedRecordKey(row)
+    if type(row) ~= "table" or type(row.fingerprint) ~= "string"
+        or row.fingerprint == "" then return nil end
+    local ownerKey = Identity.VerifiedOwnerKey(row)
+    if not ownerKey then return nil end
+    return ownerKey .. "|string:" .. row.fingerprint
 end
 
 local function DeepCopy(value, seen)
@@ -156,7 +185,7 @@ local function EvidenceRecord(row)
         player=row.player,fingerprint=row.fingerprint,
         buildId=row.buildId,resolvedBuildId=row.resolvedBuildId,
         ownerKey=row.ownerKey,ownerVerified=row.ownerVerified==true,
-        relaySender=row.relaySender,
+        claimedOwnerKey=row.claimedOwnerKey,relaySender=row.relaySender,
         buildIdentityMismatch=row.buildIdentityMismatch,
         recordIdentityMismatch=row.recordIdentityMismatch,
         resolvedIdentityMismatch=row.resolvedIdentityMismatch,
@@ -174,12 +203,12 @@ local function CombinedRows()
     local dummy, lk = Board("dummy"), Board("lk")
     local dummyByKey = {}
     for _, row in ipairs(dummy) do
-        local key = ExactRecordKey(row)
+        local key = CombinedRecordKey(row)
         if key then dummyByKey[key] = row end
     end
     local out = {}
     for _, lrow in ipairs(lk) do
-        local key = ExactRecordKey(lrow)
+        local key = CombinedRecordKey(lrow)
         local drow = key and dummyByKey[key]
         if drow then
             local avg = ((tonumber(drow.dps) or 0) + (tonumber(lrow.dps) or 0)) / 2
@@ -193,16 +222,14 @@ local function CombinedRows()
                 fingerprint=lrow.fingerprint or drow.fingerprint,
                 dummyRecord=drow,lkRecord=lrow,
             })
+            local ownerKey = Identity.VerifiedOwnerKey(lrow)
             out[#out+1] = {
                 player=lrow.player, dps=avg, average=avg, dummyDps=drow.dps, lkDps=lrow.dps,
                 dummyDuration=drow.duration, lkDuration=lrow.duration,
                 level=math.max(tonumber(drow.level) or 0, tonumber(lrow.level) or 0),
                 ts=math.min(tonumber(drow.ts) or 0, tonumber(lrow.ts) or 0),
                 category="combined", fingerprint=lrow.fingerprint or drow.fingerprint,
-                ownerKey=lrow.ownerKey or drow.ownerKey,
-                ownerVerified=lrow.ownerVerified == true
-                    and drow.ownerVerified == true,
-                relaySender=lrow.relaySender or drow.relaySender,
+                ownerKey=ownerKey,ownerVerified=true,
                 dummyEvidence=EvidenceRecord(drow),
                 lkEvidence=EvidenceRecord(lrow),
                 echoes=ordinary,
@@ -417,7 +444,6 @@ local function CurrentEvidenceRows(seed, selected)
         return CurrentEvidenceRows(seed, true)
     end
     local function Read(which)
-        local ok, value = pcall(dps.GetCharacterBest, which, seed.player)
         local expected = seed
         if seed.category == "combined" then
             if which == "dummy" then
@@ -426,6 +452,17 @@ local function CurrentEvidenceRows(seed, selected)
                 expected = seed.lkEvidence or seed
             end
         end
+        local expectedOwner = Identity.VerifiedOwnerKey(expected)
+        if seed.category == "combined" and not expectedOwner then return nil end
+        local expectedEvidence
+        if not expectedOwner then
+            if type(dps.EvidenceIdentityKey) ~= "function" then return nil end
+            expectedEvidence = dps.EvidenceIdentityKey(expected)
+            if not expectedEvidence then return nil end
+        end
+        local ok, value = pcall(
+            dps.GetCharacterBest, which, seed.player, expectedOwner,
+            expectedEvidence)
         return ok and PreparedEvidenceRecord(expected, value) or nil
     end
     if seed.category == "combined" then return Read("dummy"),Read("lk") end

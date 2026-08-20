@@ -6,6 +6,12 @@ Nexus.CommunityInternals = Nexus.CommunityInternals or {}
 
 local Renderer = {}
 
+local function IsSavedMirror(build)
+    local identity = Nexus and Nexus.Identity
+    return identity and type(identity.SavedMirrorKind) == "function"
+        and identity.SavedMirrorKind(build) == "saved" or false
+end
+
 local function InstallPopupDragHandle(parent)
     parent:SetMovable(true)
     local handle = CreateFrame("Frame", nil, parent)
@@ -161,6 +167,13 @@ function Renderer.New(options)
 
     local function RecordBuildId(build)
         return ControllerInstance().RecordBuildId(build)
+    end
+
+    local function PublishedBuildId(build)
+        local controller = ControllerInstance()
+        if type(controller.PublishedBuildId) ~= "function" then return nil end
+        local ok, publishedId = pcall(controller.PublishedBuildId, build)
+        return ok and publishedId or nil
     end
 
     local function IsBuildFullyLoaded(build)
@@ -1128,7 +1141,7 @@ local function EnsureDetailPanel(parent)
             print("|cffff6060Nexus:|r Copy unavailable: ordinary Echo evidence is still syncing.")
             return
         end
-        if b.importedSavedBuild then
+        if IsSavedMirror(b) then
             local ok, err = PublishImportedBuild(selected)
             if ok then
                 print("|cff4dff80Nexus:|r uploaded '" .. tostring(b.title or "Saved Build") .. "' to community builds.")
@@ -1164,7 +1177,7 @@ local function EnsureDetailPanel(parent)
     p.lockBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
         local b = ControllerInstance().SelectedBuild()
-        if b and b.importedSavedBuild then
+        if IsSavedMirror(b) then
             GameTooltip:AddLine("Publish this saved loadout",0.9,0.9,0.9,true)
             GameTooltip:AddLine("Uploads it to the community build list so others can see and copy it.",0.7,0.7,0.7,true)
         else
@@ -1381,7 +1394,7 @@ local function RefreshDetailPanel(buildId)
     end
     if mine then
         detailPanel.editBtn:Show()
-        if build.importedSavedBuild then
+        if IsSavedMirror(build) then
             detailPanel.deleteBtn:Hide()
         else
             detailPanel.deleteBtn:Show()
@@ -1403,8 +1416,10 @@ local function RefreshDetailPanel(buildId)
         else
             detailPanel.editState:Hide()
         end
-    elseif build.importedSavedBuild then
-        local state = build.publishedBuildId and "Uploaded. Upload Build again to publish title/description or loadout changes." or "Local server loadout. Edit its title/description, then Upload Build when ready."
+    elseif IsSavedMirror(build) then
+        local state = PublishedBuildId(build)
+            and "Uploaded. Upload Build again to publish title/description or loadout changes."
+            or "Local server loadout. Edit its title/description, then Upload Build when ready."
         detailPanel.editState:SetText(state)
         detailPanel.editState:Show()
     elseif mine and loadoutLocked then
@@ -1443,8 +1458,9 @@ local function RefreshDetailPanel(buildId)
     end
     if detail then
         detailPanel.lockBtn:SetText(detail.actionText)
-    elseif build.importedSavedBuild then
-        detailPanel.lockBtn:SetText(build.publishedBuildId and "Update Upload" or "Upload Build")
+    elseif IsSavedMirror(build) then
+        detailPanel.lockBtn:SetText(
+            PublishedBuildId(build) and "Update Upload" or "Upload Build")
     else
         detailPanel.lockBtn:SetText(not hasLoadout and "Request Loadout" or "Copy into Editor")
     end
@@ -2696,7 +2712,7 @@ function M.Refresh()
         card.title:SetText(displayTitle)
         do
             local ownerTag = ""
-            if b.importedSavedBuild then ownerTag = "  |cff66ccffSaved loadout|r"
+            if IsSavedMirror(b) then ownerTag = "  |cff66ccffSaved loadout|r"
             elseif IsOwnBuild(b) then ownerTag = "  |cffffd200Your build|r" end
             local qualityTag = ""
             if b._nexusQualified == false then
@@ -2707,7 +2723,7 @@ function M.Refresh()
             end
             card.author:SetText("by "..(b.author or "?")..ownerTag..qualityTag)
         end
-        if b.importedSavedBuild then
+        if IsSavedMirror(b) then
             if b.destinationWishlistName then
                 card.destination:SetText(string.format("|cffffd200Destination:|r %s  |cff66ff99%d/%d in progress|r", b.destinationWishlistName, tonumber(b.destinationProgress) or 0, tonumber(b.destinationTotal) or 79))
             else

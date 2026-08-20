@@ -35,6 +35,12 @@ local P = Nexus.SyncInternals.Protocol.New({
         return ownerName ~= nil and realm ~= nil
             and PeerKey(ownerName) == PeerKey(author)
     end,
+    canonicalOwnerKey=function(value)
+        if type(value) ~= "string" then return nil end
+        local name, realm = value:match("^([^@]+)@([^@]+)$")
+        if not name or not realm then return nil end
+        return PeerKey(name) .. "@" .. realm:lower():gsub("%s+", "")
+    end,
     isSafeTree=function(value, depth, nodes)
         safeTreeCalls = safeTreeCalls + 1
         return Nexus.Codec.IsSafeTree(value, depth, nodes)
@@ -104,6 +110,94 @@ assert(P.ValidatePayload({id="bad owner",t="Bad",a="Hero",e={{1,1,1}}}) == nil
         o="hero@realm",e={{1,1,1}}}) == nil,
     "malformed payload was accepted")
 assert(safeTreeCalls == 4, "payload safety callback count changed")
+
+local networkCompact = P.CompactEncode(build)
+local networkVerbose = {
+    id="network-verbose",title="Verbose",author="Hero-Realm",
+    ownerKey="hero@realm",class="MAGE",lastModified=124,
+    description="D",autoDps=true,link="https://example.invalid/v",
+    echoes={{spellId=200102,quality=3,stacks=1}},
+}
+assert(P.ValidateNetworkPayload(networkCompact)
+        and P.ValidateNetworkPayload(networkVerbose),
+    "pure compact or verbose network payload compatibility changed")
+local mixedConflict = P.CompactEncode(build)
+mixedConflict.author = "Mallory-RealmX"
+mixedConflict.ownerKey = "mallory@realmx"
+assert(P.ValidateNetworkPayload(mixedConflict) == nil,
+    "EXPECTED RED: conflicting compact/verbose owner aliases were laundered")
+local qualifiedConflict = P.CompactEncode(build)
+qualifiedConflict.a = "Hero-OtherRealm"
+assert(P.ValidateNetworkPayload(qualifiedConflict) == nil,
+    "EXPECTED RED: realm-qualified author contradicted its canonical owner")
+local unsupportedAuthority = {
+    player="Hero",p="Hero",realm="realm",r="realm",
+    claimedOwnerKey="hero@realm",relaySender="Relay-RealmX",
+    ownerVerified=true,isMine=true,importedSavedBuild=true,
+}
+for field, value in pairs(unsupportedAuthority) do
+    local payload = P.CompactEncode(build)
+    payload[field] = value
+    assert(P.ValidateNetworkPayload(payload) == nil,
+        "EXPECTED RED: unsupported full-build authority field was laundered: "
+            .. field)
+end
+local validSummary = {
+    id="summary-qualified",t="Summary",a="Hero-Realm",o="hero@realm",
+    c="MAGE",m=125,h="1a2b",n=1,
+}
+assert(P.ValidateNetworkSummary(validSummary),
+    "realm-qualified summary positive control was rejected")
+validSummary.a = "Hero-OtherRealm"
+assert(P.ValidateNetworkSummary(validSummary) == nil,
+    "EXPECTED RED: realm-qualified summary author contradicted its owner")
+
+local function DpsPayload()
+    return {
+        v=7,h="1a2b",f="200120x1",e={{spellId=200120,stacks=1}},
+        c="dummy",d=25000000,u=65,t=130,p="Hero",l=80,k="MAGE",
+        o="hero@realm",r="realm",b="build-1",
+    }
+end
+assert(P.ValidateNetworkDpsPayload(DpsPayload()),
+    "pure compact DPS network payload compatibility changed")
+local dpsConflicts = {
+    ownerKey="other@realm",player="Other",realm="otherrealm",
+    buildId="build-2",fingerprint="200121x1",loadoutHash="deadbeef",
+}
+for field, value in pairs(dpsConflicts) do
+    local payload = DpsPayload()
+    payload[field] = value
+    assert(P.ValidateNetworkDpsPayload(payload) == nil,
+        "EXPECTED RED: conflicting DPS compact/verbose alias was laundered: "
+            .. field)
+end
+for label, mutate in pairs({
+    echoSpell=function(payload) payload.e[1].id=200121 end,
+    echoStacks=function(payload) payload.e[1].count=2 end,
+    ordinaryRole=function(payload)
+        payload.echoes={{spellId=200120,stacks=1,locked=true}}
+    end,
+    lockedRole=function(payload)
+        payload.lk={{spellId=200122,stacks=1}}
+        payload.lockedEchoes={{spellId=200122,stacks=1,locked=true}}
+    end,
+}) do
+    local payload = DpsPayload()
+    mutate(payload)
+    assert(P.ValidateNetworkDpsPayload(payload) == nil,
+        "EXPECTED RED: conflicting DPS Echo alias was laundered: " .. label)
+end
+for field, value in pairs({
+        claimedOwnerKey="hero@realm",relaySender="Relay-RealmX",
+        ownerVerified=true,isMine=true,importedSavedBuild=true,
+        _originVerified=true,
+    }) do
+    local payload = DpsPayload()
+    payload[field] = value
+    assert(P.ValidateNetworkDpsPayload(payload) == nil,
+        "EXPECTED RED: unsupported DPS authority field was laundered: " .. field)
+end
 
 assert(NexusDB == root and root.future.keep
     and mutation.catalog == 0 and mutation.send == 0 and mutation.diagnostic == 0,

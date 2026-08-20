@@ -197,6 +197,8 @@ characterBest.dummy.mismatch = {
 }
 characterBest.dummy.conflict = {
     player="Categoryconflict",class="MAGE",dps=840000,duration=60,
+    ownerKey=Identity.OwnerKey("Categoryconflict", realm),
+    ownerVerified=true,realm=realm,
     level=80,ts=7,protocolVersion=6,
     buildId="stage36-class-conflict",
     fingerprint=Fingerprint(CONFLICT_SPELL),echoes=Echoes(CONFLICT_SPELL),
@@ -254,6 +256,8 @@ characterBest.dummy.legacyAmbiguous = {
 }
 characterBest.lk.conflict = {
     player="Categoryconflict",class="ROGUE",dps=830000,duration=30,
+    ownerKey=Identity.OwnerKey("Categoryconflict", realm),
+    ownerVerified=true,realm=realm,
     level=80,ts=8,protocolVersion=6,
     buildId="stage36-class-conflict",
     fingerprint=Fingerprint(CONFLICT_SPELL),echoes=Echoes(CONFLICT_SPELL),
