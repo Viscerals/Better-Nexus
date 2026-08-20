@@ -1,0 +1,720 @@
+-- Nexus: core/WishlistModel.lua
+-- Pure Wishlist draft, budget, canonicalization, and lock-plan calculations.
+
+Nexus = Nexus or {}
+
+local Factory = {}
+Nexus.WishlistModel = Factory
+
+local MAX_WISHLIST_ECHOES = 79
+local MAX_LOCK_SLOTS = 6
+
+local function CopyEntry(value)
+    if type(value) ~= "table" then return value end
+    local out = {}
+    for key, field in pairs(value) do out[key] = field end
+    return out
+end
+
+local function CopyMap(value)
+    local out = {}
+    for key, field in pairs(type(value) == "table" and value or {}) do
+        out[key] = CopyEntry(field)
+    end
+    return out
+end
+
+local function CountMap(value)
+    local count = 0
+    for _ in pairs(type(value) == "table" and value or {}) do
+        count = count + 1
+    end
+    return count
+end
+
+local function PositiveInteger(value)
+    value = tonumber(value)
+    if not value or value ~= value or value <= 0 or value >= math.huge
+        or value ~= math.floor(value) then return nil end
+    return value
+end
+
+local function NonNegativeInteger(value)
+    value = tonumber(value)
+    if not value or value ~= value or value < 0 or value >= math.huge
+        or value ~= math.floor(value) then return nil end
+    return value
+end
+
+local function NormalizeEchoName(name)
+    name = tostring(name or ""):lower()
+    name = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    name = name:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
+    return name
+end
+
+local function Family(spellId, catalog)
+    spellId = tonumber(spellId)
+    local row = catalog and catalog.rows and catalog.rows[spellId]
+    local nameKey = row and NormalizeEchoName(row.name) or ""
+    if nameKey ~= "" then
+        local groupId = tonumber(row and row.groupId) or 0
+        if groupId > 0 then return "ng:" .. nameKey .. ":" .. tostring(groupId) end
+        return "n:" .. nameKey
+    end
+    return "s:" .. tostring(spellId or 0)
+end
+
+local function MaxStack(spellId, catalog)
+    local row = catalog and catalog.rows and catalog.rows[tonumber(spellId)]
+    return math.max(1, tonumber(row and row.maxStack) or 1)
+end
+
+local function EchoListTotal(echoes)
+    local total = 0
+    for _, echo in ipairs(type(echoes) == "table" and echoes or {}) do
+        total = total + math.max(1, tonumber(echo and echo.stacks) or 1)
+    end
+    return total
+end
+
+local function PendingTotal(pending)
+    local total = 0
+    for _, row in pairs(type(pending) == "table" and pending or {}) do
+        if not (row and row.lockIntent) then
+            total = total + math.max(1, tonumber(row and row.stacks) or 1)
+        end
+    end
+    return total
+end
+
+local function LockBudgetUsed(pending, pendingLock, lockedBySpell, excludeRealLockedId)
+    local realLocked = {}
+    for spellId in pairs(type(lockedBySpell) == "table" and lockedBySpell or {}) do
+        realLocked[tonumber(spellId)] = true
+    end
+    if excludeRealLockedId then realLocked[tonumber(excludeRealLockedId)] = nil end
+
+    local function ExemptReplaced(row)
+        local replaces = row and row.replaces
+        if type(replaces) == "number" then realLocked[replaces] = nil end
+    end
+    for _, row in pairs(type(pending) == "table" and pending or {}) do
+        if row and row.lockIntent then ExemptReplaced(row) end
+    end
+    for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        ExemptReplaced(row)
+    end
+
+    local used = 0
+    for _ in pairs(realLocked) do used = used + 1 end
+    for _, row in pairs(type(pending) == "table" and pending or {}) do
+        if row and row.lockIntent then used = used + 1 end
+    end
+    for _ in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        used = used + 1
+    end
+    return used
+end
+
+local function NormalizeDraft(echoes, options)
+    options = options or {}
+    echoes = type(echoes) == "table" and echoes or {}
+    local trustOrder = options.trustOrder
+    if trustOrder == nil then trustOrder = true end
+    local catalog = options.catalog
+    local lockedBySpell = type(options.lockedBySpell) == "table" and options.lockedBySpell or {}
+
+    local pending, pendingLock, fulfilledTargets = {}, {}, {}
+    local metrics = {
+        lockedSkipped = 0,
+        overflowSkipped = 0,
+        untrustedOverflowSkipped = 0,
+        lockDesignCollisions = 0,
+        lockBudgetExceeded = 0,
+        swapPairs = 0,
+    }
+
+    local importedLockedIds = {}
+    for _, echo in ipairs(echoes) do
+        if echo and echo.locked then
+            local id = tonumber(echo.spellId)
+            if id then importedLockedIds[id] = true end
+        end
+    end
+
+    local wantsLockedSlots = next(importedLockedIds) ~= nil
+    if not wantsLockedSlots and trustOrder and EchoListTotal(echoes) > MAX_WISHLIST_ECHOES then
+        wantsLockedSlots = true
+    end
+    local swapCandidates = {}
+    if wantsLockedSlots then
+        for spellId in pairs(lockedBySpell) do
+            local id = tonumber(spellId)
+            if id and not importedLockedIds[id] then
+                swapCandidates[#swapCandidates + 1] = id
+            end
+        end
+        table.sort(swapCandidates)
+    end
+    local swapIndex = 1
+    local remaining = MAX_WISHLIST_ECHOES
+    local lockDesignCount = 0
+
+    for _, echo in ipairs(echoes) do
+        local id = tonumber(echo and echo.spellId)
+        if id and echo and echo.locked and (tonumber(lockedBySpell[id]) or 0) > 0 then
+            fulfilledTargets[id] = true
+        end
+        if id and (tonumber(lockedBySpell[id]) or 0) > 0 then
+            metrics.lockedSkipped = metrics.lockedSkipped + 1
+        elseif id and echo.locked and lockDesignCount < MAX_LOCK_SLOTS and remaining > 0 then
+            local catalogRow = catalog and catalog.rows and catalog.rows[id]
+            local family = Family(id, catalog)
+            local maxStack = MaxStack(id, catalog)
+            local swap = swapCandidates[swapIndex]
+            if swap then swapIndex = swapIndex + 1 end
+            pending[family] = {
+                spellId = id,
+                family = family,
+                quality = tonumber(catalogRow and catalogRow.quality) or tonumber(echo.quality) or 0,
+                stacks = 1,
+                maxStack = maxStack,
+                lockIntent = true,
+                replaces = swap,
+            }
+            lockDesignCount = lockDesignCount + 1
+            remaining = MAX_WISHLIST_ECHOES - PendingTotal(pending)
+        elseif id and echo.locked and lockDesignCount < MAX_LOCK_SLOTS then
+            local catalogRow = catalog and catalog.rows and catalog.rows[id]
+            local family = Family(id, catalog)
+            local quality = tonumber(catalogRow and catalogRow.quality) or tonumber(echo.quality) or 0
+            local existing = pendingLock[family]
+            if not existing then
+                local swap = swapCandidates[swapIndex]
+                if swap then swapIndex = swapIndex + 1 end
+                pendingLock[family] = {
+                    spellId = id,
+                    family = family,
+                    quality = quality,
+                    name = (catalogRow and catalogRow.name) or ("spell " .. tostring(id)),
+                    replaces = swap,
+                }
+                lockDesignCount = lockDesignCount + 1
+            elseif id ~= existing.spellId then
+                metrics.lockDesignCollisions = metrics.lockDesignCollisions + 1
+                if quality > (tonumber(existing.quality) or 0) then
+                    existing.spellId, existing.quality = id, quality
+                    existing.name = (catalogRow and catalogRow.name) or ("spell " .. tostring(id))
+                end
+            end
+        elseif id and remaining <= 0 and trustOrder then
+            metrics.overflowSkipped = metrics.overflowSkipped + 1
+            local catalogRow = catalog and catalog.rows and catalog.rows[id]
+            local family = Family(id, catalog)
+            local quality = tonumber(catalogRow and catalogRow.quality) or tonumber(echo.quality) or 0
+            local existing = pendingLock[family]
+            if existing then
+                if id ~= existing.spellId then
+                    metrics.lockDesignCollisions = metrics.lockDesignCollisions + 1
+                    if quality > (tonumber(existing.quality) or 0) then
+                        existing.spellId, existing.quality = id, quality
+                        existing.name = (catalogRow and catalogRow.name) or ("spell " .. tostring(id))
+                    end
+                end
+            elseif lockDesignCount < MAX_LOCK_SLOTS then
+                local swap = swapCandidates[swapIndex]
+                if swap then swapIndex = swapIndex + 1 end
+                lockDesignCount = lockDesignCount + 1
+                pendingLock[family] = {
+                    spellId = id,
+                    family = family,
+                    quality = quality,
+                    name = (catalogRow and catalogRow.name) or ("spell " .. tostring(id)),
+                    replaces = swap,
+                }
+            else
+                metrics.lockBudgetExceeded = metrics.lockBudgetExceeded + 1
+            end
+        elseif id and remaining <= 0 then
+            metrics.untrustedOverflowSkipped = metrics.untrustedOverflowSkipped + 1
+        elseif id then
+            local catalogRow = catalog and catalog.rows and catalog.rows[id]
+            local family = Family(id, catalog)
+            local quality = tonumber(catalogRow and catalogRow.quality) or tonumber(echo.quality) or 0
+            local maxStack = MaxStack(id, catalog)
+            local stacks = math.min(maxStack, math.max(1, tonumber(echo.stacks) or 1), remaining)
+            local current = pending[family]
+            if not current or quality > (tonumber(current.quality) or 0) then
+                local oldStacks = current and math.max(1, tonumber(current.stacks) or 1) or 0
+                local keepStacks = math.min(maxStack, math.max(stacks, oldStacks))
+                pending[family] = {
+                    spellId = id,
+                    family = family,
+                    quality = quality,
+                    stacks = keepStacks,
+                    maxStack = maxStack,
+                }
+                remaining = MAX_WISHLIST_ECHOES - PendingTotal(pending)
+            elseif id == current.spellId then
+                local add = math.min(stacks, remaining)
+                current.stacks = math.min(current.maxStack or maxStack,
+                    (tonumber(current.stacks) or 1) + add)
+                remaining = MAX_WISHLIST_ECHOES - PendingTotal(pending)
+            else
+                current.stacks = math.min(current.maxStack or maxStack,
+                    math.max(tonumber(current.stacks) or 1, stacks))
+                remaining = MAX_WISHLIST_ECHOES - PendingTotal(pending)
+            end
+        end
+    end
+
+    metrics.swapPairs = swapIndex - 1
+
+    return {
+        pending = pending,
+        pendingLock = pendingLock,
+        fulfilledTargets = fulfilledTargets,
+        metrics = metrics,
+    }
+end
+
+-- Leaderboard records carry ordinary and permanently locked Echoes as two
+-- independently captured evidence pools.  Keep those roles typed all the way
+-- into the draft: ordering and shared spell IDs are never used to infer which
+-- pool an entry belongs to.
+local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
+    options = options or {}
+    if type(ordinaryEchoes) ~= "table" or type(lockedEchoes) ~= "table" then
+        return nil, "typed Echo evidence is unavailable"
+    end
+
+    local ordinaryTotal = 0
+    for _, echo in ipairs(ordinaryEchoes) do
+        if type(echo) ~= "table" then
+            return nil, "ordinary Echo evidence is invalid"
+        end
+        local id = PositiveInteger(echo.spellId)
+        local stacks = PositiveInteger(echo.stacks or 1)
+        local quality = echo.quality
+        if not id or not stacks
+            or (quality ~= nil and not NonNegativeInteger(quality)) then
+            return nil, "ordinary Echo evidence is invalid"
+        end
+        ordinaryTotal = ordinaryTotal + math.max(1, stacks)
+        if ordinaryTotal > MAX_WISHLIST_ECHOES then
+            return nil, "ordinary Echo evidence exceeds the 79-copy limit"
+        end
+    end
+
+    local explicitIds, explicitCount = {}, 0
+    for _, echo in ipairs(lockedEchoes) do
+        if type(echo) ~= "table" then
+            return nil, "locked Echo evidence is invalid"
+        end
+        local id = PositiveInteger(echo.spellId)
+        local stacks = PositiveInteger(echo.stacks or 1)
+        local quality = echo.quality
+        if not id or not stacks
+            or (quality ~= nil and not NonNegativeInteger(quality)) then
+            return nil, "locked Echo evidence is invalid"
+        end
+        if explicitIds[id] then
+            return nil, "locked Echo evidence contains a duplicate identity"
+        end
+        explicitIds[id] = true
+        explicitCount = explicitCount + 1
+        if explicitCount > MAX_LOCK_SLOTS then
+            return nil, "locked Echo evidence exceeds the six-slot limit"
+        end
+    end
+
+    -- Local locked ownership must not consume or suppress an ordinary role
+    -- with the same spell ID.  It is considered only while materializing the
+    -- separate explicit-lock pool below.
+    local prepared = NormalizeDraft(ordinaryEchoes, {
+        trustOrder=false,
+        catalog=options.catalog,
+        lockedBySpell={},
+    })
+    if prepared.metrics.untrustedOverflowSkipped > 0
+        or prepared.metrics.overflowSkipped > 0
+        or prepared.metrics.lockBudgetExceeded > 0
+        or PendingTotal(prepared.pending) ~= ordinaryTotal then
+        return nil, "ordinary Echo evidence could not be represented exactly"
+    end
+
+    local lockedBySpell = type(options.lockedBySpell) == "table"
+        and options.lockedBySpell or {}
+    local replacementIds = {}
+    for spellId in pairs(lockedBySpell) do
+        local id = tonumber(spellId)
+        if id and not explicitIds[id] then replacementIds[#replacementIds + 1] = id end
+    end
+    table.sort(replacementIds)
+
+    prepared.pendingLock = {}
+    prepared.fulfilledTargets = {}
+    local replacementIndex = 1
+    for _, echo in ipairs(lockedEchoes) do
+        local id = tonumber(echo.spellId)
+        if (tonumber(lockedBySpell[id]) or 0) > 0 then
+            prepared.fulfilledTargets[id] = true
+        else
+            local catalogRow = options.catalog and options.catalog.rows
+                and options.catalog.rows[id]
+            local replacement = replacementIds[replacementIndex]
+            if replacement then replacementIndex = replacementIndex + 1 end
+            -- Key by explicit identity, not family.  Two authoritative locked
+            -- picks may share a catalog family/quality collision and both must
+            -- remain visible and committable.
+            prepared.pendingLock["explicit:" .. tostring(id)] = {
+                spellId=id,
+                family=Family(id, options.catalog),
+                quality=tonumber(echo.quality)
+                    or tonumber(catalogRow and catalogRow.quality) or 0,
+                name=(catalogRow and catalogRow.name) or ("spell " .. tostring(id)),
+                stacks=math.max(1, tonumber(echo.stacks) or 1),
+                replaces=replacement,
+                explicitEvidence=true,
+            }
+        end
+    end
+    prepared.metrics.explicitLocked = explicitCount
+    prepared.metrics.explicitFulfilled = CountMap(prepared.fulfilledTargets)
+    prepared.metrics.swapPairs = replacementIndex - 1
+    return prepared
+end
+
+local function ApplyCommittedTargets(prepared, committedTargets, options)
+    prepared = type(prepared) == "table" and prepared or {}
+    committedTargets = type(committedTargets) == "table" and committedTargets or {}
+    options = options or {}
+    local catalog = options.catalog
+    local lockedBySpell = type(options.lockedBySpell) == "table" and options.lockedBySpell or {}
+    local pending = CopyMap(prepared.pending)
+    local pendingLock = CopyMap(prepared.pendingLock)
+    local fulfilledTargets = CopyMap(prepared.fulfilledTargets)
+
+    for spellIdKey, replaces in pairs(committedTargets) do
+        local id = tonumber(spellIdKey)
+        if id and (tonumber(lockedBySpell[id]) or 0) > 0 then
+            fulfilledTargets[id] = replaces
+        end
+    end
+    if next(committedTargets) then
+        for _, row in pairs(pending) do
+            local committed = committedTargets[tonumber(row.spellId)]
+            if not row.lockIntent and committed
+                and LockBudgetUsed(pending, pendingLock, lockedBySpell) < MAX_LOCK_SLOTS then
+                row.lockIntent = true
+                if type(committed) == "number" then row.replaces = committed end
+            end
+        end
+        for spellIdKey, replaces in pairs(committedTargets) do
+            local id = tonumber(spellIdKey)
+            if id and (tonumber(lockedBySpell[id]) or 0) <= 0 then
+                local catalogRow = catalog and catalog.rows and catalog.rows[id]
+                local family = Family(id, catalog)
+                if family and not pending[family] and not pendingLock[family] then
+                    pendingLock[family] = {
+                        spellId = id,
+                        family = family,
+                        quality = tonumber(catalogRow and catalogRow.quality) or 0,
+                        name = (catalogRow and catalogRow.name) or ("spell " .. tostring(id)),
+                        replaces = type(replaces) == "number" and replaces or nil,
+                    }
+                end
+            end
+        end
+    end
+
+    return {
+        pending = pending,
+        pendingLock = pendingLock,
+        fulfilledTargets = fulfilledTargets,
+        metrics = CopyEntry(prepared.metrics),
+    }
+end
+
+local function AddPending(pending, row, options)
+    if not row or not tonumber(row.spellId) then return pending, "invalid" end
+    options = options or {}
+    local spellId = tonumber(row.spellId)
+    local lockedBySpell = type(options.lockedBySpell) == "table" and options.lockedBySpell or {}
+    if (tonumber(lockedBySpell[spellId]) or 0) > 0 then return pending, "already_locked" end
+    local family = Family(spellId, options.catalog)
+    local maxStack = math.max(1, tonumber(row.maxStack) or 1)
+    local old = type(pending) == "table" and pending[family]
+    if old and tonumber(old.spellId) == spellId then return pending, "unchanged" end
+    if not old and PendingTotal(pending) >= MAX_WISHLIST_ECHOES then return pending, "full" end
+    local nextPending = CopyMap(pending)
+    nextPending[family] = {
+        spellId = spellId,
+        family = family,
+        quality = tonumber(row.quality) or 0,
+        stacks = math.min(maxStack, math.max(1, tonumber(old and old.stacks) or 1)),
+        maxStack = maxStack,
+    }
+    return nextPending, "added"
+end
+
+local function RemovePending(pending, pendingLock, family)
+    if not family then return pending, pendingLock, "invalid" end
+    if type(pendingLock) == "table" and pendingLock[family] then
+        local nextLock = CopyMap(pendingLock)
+        nextLock[family] = nil
+        return pending, nextLock, "removed_lock"
+    end
+    for key, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        if row and row.family == family then
+            local nextLock = CopyMap(pendingLock)
+            nextLock[key] = nil
+            return pending, nextLock, "removed_lock"
+        end
+    end
+    if type(pending) == "table" and pending[family] then
+        local nextPending = CopyMap(pending)
+        nextPending[family] = nil
+        return nextPending, pendingLock, "removed"
+    end
+    return pending, pendingLock, "unchanged"
+end
+
+local function ToggleDesignLock(pending, pendingLock, family, options)
+    options = options or {}
+    if not family then return pending, pendingLock, options.replacingSpellId, "invalid" end
+    if type(pendingLock) == "table" and pendingLock[family] then
+        local nextLock = CopyMap(pendingLock)
+        nextLock[family] = nil
+        return pending, nextLock, options.replacingSpellId, "untagged_lock"
+    end
+    local row = type(pending) == "table" and pending[family]
+    if not row then return pending, pendingLock, options.replacingSpellId, "unchanged" end
+    local nextPending = CopyMap(pending)
+    local nextRow = nextPending[family]
+    if nextRow.lockIntent then
+        if PendingTotal(pending) + math.max(1, tonumber(nextRow.stacks) or 1)
+            > MAX_WISHLIST_ECHOES then
+            return pending, pendingLock, options.replacingSpellId, "normal_full"
+        end
+        nextRow.lockIntent = nil
+        nextRow.replaces = nil
+        return nextPending, pendingLock, options.replacingSpellId, "untagged"
+    end
+    if LockBudgetUsed(pending, pendingLock, options.lockedBySpell,
+        options.replacingSpellId) >= MAX_LOCK_SLOTS then
+        return pending, pendingLock, nil, "lock_full"
+    end
+    nextRow.lockIntent = true
+    nextRow.replaces = options.replacingSpellId
+    return nextPending, pendingLock, nil, "tagged"
+end
+
+local function AdjustStacks(pending, family, delta)
+    local row = type(pending) == "table" and pending[family]
+    if not row then return pending, "unchanged" end
+    local maxStack = math.max(1, tonumber(row.maxStack) or 1)
+    local current = math.max(1, tonumber(row.stacks) or 1)
+    if delta > 0 and PendingTotal(pending) >= MAX_WISHLIST_ECHOES then
+        return pending, "full"
+    end
+    local room = math.max(0, MAX_WISHLIST_ECHOES - PendingTotal(pending))
+    local nextValue = current + delta
+    if delta > 0 then nextValue = math.min(nextValue, current + room) end
+    local nextPending = CopyMap(pending)
+    nextPending[family].stacks = math.max(1, math.min(maxStack, nextValue))
+    return nextPending, "adjusted"
+end
+
+local function AssignLockSlot(pending, pendingLock, data, options)
+    options = options or {}
+    if not data or not tonumber(data.spellId) then
+        return pending, pendingLock, options.replacingSpellId, "invalid"
+    end
+    local id = tonumber(data.spellId)
+    local catalog = options.catalog
+    local family = Family(id, catalog)
+    local row = type(pending) == "table" and pending[family]
+    if row then
+        local nextPending = pending
+        if not row.lockIntent then
+            if LockBudgetUsed(pending, pendingLock, options.lockedBySpell,
+                options.replacingSpellId) >= MAX_LOCK_SLOTS then
+                return pending, pendingLock, nil, "lock_full"
+            end
+            nextPending = CopyMap(pending)
+            nextPending[family].lockIntent = true
+            nextPending[family].replaces = options.replacingSpellId
+            nextPending[family].stacks = 1
+        end
+        return nextPending, pendingLock, nil, "tagged"
+    end
+    for _, lockedRow in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        if lockedRow and lockedRow.family == family then
+            return pending, pendingLock, nil, "already"
+        end
+    end
+    if LockBudgetUsed(pending, pendingLock, options.lockedBySpell,
+        options.replacingSpellId) >= MAX_LOCK_SLOTS then
+        return pending, pendingLock, nil, "lock_full"
+    end
+    local catalogRow = catalog and catalog.rows and catalog.rows[id]
+    local nextLock = CopyMap(pendingLock)
+    nextLock[family] = {
+        spellId = id,
+        family = family,
+        quality = tonumber((catalogRow and catalogRow.quality) or data.quality) or 0,
+        name = tostring((catalogRow and catalogRow.name) or data.name or ("spell " .. tostring(id))),
+        replaces = options.replacingSpellId,
+    }
+    return pending, nextLock, nil, "queued"
+end
+
+local function CanonicalEchoes(pending)
+    local echoes = {}
+    for _, row in pairs(type(pending) == "table" and pending or {}) do
+        if row and not row.lockIntent then
+            echoes[#echoes + 1] = {
+                spellId = tonumber(row.spellId),
+                quality = tonumber(row.quality) or 0,
+                stacks = math.max(1,
+                    math.min(tonumber(row.maxStack) or 1, tonumber(row.stacks) or 1)),
+            }
+        end
+    end
+    table.sort(echoes, function(a, b) return (a.spellId or 0) < (b.spellId or 0) end)
+    return echoes
+end
+
+local function ExportEntries(pending, pendingLock, lockedBySpell, catalog)
+    local entries, seenLocked = {}, {}
+    local function LockIdentity(value)
+        return tonumber(value) or tostring(value)
+    end
+    for _, row in pairs(type(pending) == "table" and pending or {}) do
+        entries[#entries + 1] = {
+            spellId = row.spellId,
+            quality = row.quality,
+            stacks = row.lockIntent and 1 or row.stacks,
+            locked = row.lockIntent and true or nil,
+        }
+        if row.lockIntent then seenLocked[LockIdentity(row.spellId)] = true end
+    end
+    for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        local identity = LockIdentity(row.spellId)
+        if not seenLocked[identity] then
+            entries[#entries + 1] = {
+                spellId = row.spellId,
+                quality = row.quality,
+                stacks = 1,
+                locked = true,
+            }
+            seenLocked[identity] = true
+        end
+    end
+    for id, count in pairs(type(lockedBySpell) == "table" and lockedBySpell or {}) do
+        local identity = LockIdentity(id)
+        if not seenLocked[identity] then
+            local catalogRow = catalog and catalog.rows and catalog.rows[identity]
+            entries[#entries + 1] = {
+                spellId = identity,
+                quality = catalogRow and tonumber(catalogRow.quality) or 0,
+                stacks = count,
+                locked = true,
+            }
+            seenLocked[identity] = true
+        end
+    end
+    return entries
+end
+
+local function PlanLockCommit(pending, pendingLock, fulfilledTargets, existingTargets,
+    lockedBySpell)
+    local fresh, replaced = {}, {}
+    for _, row in pairs(type(pending) == "table" and pending or {}) do
+        if row.lockIntent and type(row.replaces) == "number" then replaced[row.replaces] = true end
+    end
+    for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        if type(row.replaces) == "number" then replaced[row.replaces] = true end
+    end
+    for _, replacementValue in pairs(type(fulfilledTargets) == "table" and fulfilledTargets or {}) do
+        if type(replacementValue) == "number" then replaced[replacementValue] = true end
+    end
+
+    lockedBySpell = type(lockedBySpell) == "table" and lockedBySpell or {}
+    for spellIdKey, value in pairs(type(existingTargets) == "table" and existingTargets or {}) do
+        local id = tonumber(spellIdKey)
+        if id and (tonumber(lockedBySpell[id]) or 0) > 0 and not replaced[id] then
+            fresh[id] = value
+        end
+    end
+    for spellIdKey, value in pairs(type(fulfilledTargets) == "table" and fulfilledTargets or {}) do
+        local id = tonumber(spellIdKey)
+        if id and (tonumber(lockedBySpell[id]) or 0) > 0 and not replaced[id] then
+            fresh[id] = value
+        end
+    end
+    for _, row in pairs(type(pending) == "table" and pending or {}) do
+        if row.lockIntent and tonumber(row.spellId) then
+            fresh[tonumber(row.spellId)] = row.replaces or true
+        end
+    end
+    for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        if tonumber(row.spellId) then fresh[tonumber(row.spellId)] = row.replaces or true end
+    end
+    return fresh
+end
+
+local function ReconcileLocked(pending, pendingLock, fulfilledTargets, lockedBySpell)
+    lockedBySpell = type(lockedBySpell) == "table" and lockedBySpell or {}
+    local nextPending, nextLock, nextFulfilled = pending, pendingLock, fulfilledTargets
+    for family, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        if (tonumber(lockedBySpell[row.spellId]) or 0) > 0 then
+            if nextLock == pendingLock then nextLock = CopyMap(pendingLock) end
+            if nextFulfilled == fulfilledTargets then nextFulfilled = CopyMap(fulfilledTargets) end
+            nextFulfilled[tonumber(row.spellId)] = row.replaces or true
+            nextLock[family] = nil
+        end
+    end
+    for family, row in pairs(type(pending) == "table" and pending or {}) do
+        if (tonumber(lockedBySpell[row.spellId]) or 0) > 0 then
+            if nextPending == pending then nextPending = CopyMap(pending) end
+            if row.lockIntent then
+                if nextFulfilled == fulfilledTargets then nextFulfilled = CopyMap(fulfilledTargets) end
+                nextFulfilled[tonumber(row.spellId)] = row.replaces or true
+            end
+            nextPending[family] = nil
+        end
+    end
+    return nextPending, nextLock, nextFulfilled
+end
+
+local function TrimName(name)
+    name = tostring(name or "")
+    return name:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+function Factory.New()
+    local Model = {}
+    Model.NormalizeEchoName = NormalizeEchoName
+    Model.Family = Family
+    Model.MaxStack = MaxStack
+    Model.EchoListTotal = EchoListTotal
+    Model.PendingTotal = PendingTotal
+    Model.LockBudgetUsed = LockBudgetUsed
+    Model.NormalizeDraft = NormalizeDraft
+    Model.NormalizeCandidateEvidence = NormalizeCandidateEvidence
+    Model.ApplyCommittedTargets = ApplyCommittedTargets
+    Model.AddPending = AddPending
+    Model.RemovePending = RemovePending
+    Model.ToggleDesignLock = ToggleDesignLock
+    Model.AdjustStacks = AdjustStacks
+    Model.AssignLockSlot = AssignLockSlot
+    Model.CanonicalEchoes = CanonicalEchoes
+    Model.ExportEntries = ExportEntries
+    Model.PlanLockCommit = PlanLockCommit
+    Model.ReconcileLocked = ReconcileLocked
+    Model.TrimName = TrimName
+    return Model
+end

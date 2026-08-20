@@ -1,0 +1,362 @@
+-- Stage 32.5: LockPerk success is only a submitted request. The existing
+-- AutoLock owner must wait for a new authoritative locked projection, expire
+-- once, and retain that terminal decision across unrelated work until the
+-- represented target changes or the user explicitly retries.
+local F = dofile("tests/automation_live_fixture.lua")
+local H = F.H
+local Adapter = Nexus.GameAdapter
+local state = Nexus.Store.State()
+
+local checks = 0
+local function Check(value, message)
+    checks = checks + 1
+    assert(value, message)
+end
+
+local function Stats()
+    return Nexus.RecomputeStats()
+end
+
+local function CopyCount(source)
+    local count = 0
+    for _ in pairs(type(source) == "table" and source or {}) do
+        count = count + 1
+    end
+    return count
+end
+
+local wishlistEchoes = {}
+for index = 1, 79 do wishlistEchoes[index] = H.wishlist.echoes[index] end
+local wishlistKey = assert(Adapter.WishlistKey(wishlistEchoes),
+    "fixture wishlist identity unavailable")
+assert(Adapter.SetLoadoutWishlistIdentity(1, "Stage32 Confirmation",
+    wishlistEchoes))
+state.lockDesignTargetsBySlot = {
+    [wishlistKey] = {[200100]=true},
+}
+state.futureStage32 = {keep=true}
+
+local lockCalls, unlockCalls = {}, {}
+H.service.GetMaximumPermanentEchoes = function() return 3 end
+H.service.LockPerk = function(spellId)
+    lockCalls[#lockCalls + 1] = {spellId=spellId, at=H.now}
+    return true
+end
+H.service.UnlockPerk = function(spellId)
+    unlockCalls[#unlockCalls + 1] = {spellId=spellId, at=H.now}
+    return true
+end
+
+-- Enable the existing master switch and rebuild the immutable target context.
+if not Stats().autoEnabled then
+    SlashCmdList.NEXUS("auto")
+end
+Check(Nexus.RequestRecompute(), "initial AutoLock recompute was refused")
+H.Advance(0.4, 0.2)
+if #lockCalls ~= 1 and Nexus.GetDiagnosticPageText then
+    print(Nexus.GetDiagnosticPageText("autolock"))
+end
+Check(#lockCalls == 1 and lockCalls[1].spellId == 200100,
+    "initial target did not submit exactly one LockPerk")
+local initialCapacity = Stats().autoLockCapacity
+Check(initialCapacity.used == 1 and initialCapacity.maximum == 3
+        and initialCapacity.known and initialCapacity.source == "service"
+        and initialCapacity.synced,
+    "runtime did not characterize authoritative locked capacity as 1/3")
+
+-- This is the test.13 expected red. The adapter returns true but the server
+-- mirror remains unchanged. Forced recomputes after the old ten-second
+-- cooldown must not manufacture confirmation or submit the same identity.
+for _ = 1, 3 do
+    H.Advance(10.1, 0.2)
+    Check(Nexus.RequestRecompute(), "unrelated recompute was refused")
+    H.Advance(0.2, 0.2)
+end
+Check(#lockCalls == 1,
+    "adapter ok without authoritative confirmation resubmitted LockPerk: "
+        .. tostring(#lockCalls))
+
+local first = Stats()
+Check(type(first.autoLockLifecycle) == "table"
+        and first.autoLockLifecycle.prepared == 1
+        and first.autoLockLifecycle.submitted == 1
+        and first.autoLockLifecycle.awaitingConfirmation == 1
+        and first.autoLockLifecycle.expired == 1,
+    "prepared/submitted/awaiting/expired lifecycle totals drifted")
+Check(first.lastAutoLockLifecycle.state == "expired"
+        and first.lastAutoLockLifecycle.reason == "confirmation_timeout"
+        and first.lastAutoLockLifecycle.spellId == 200100,
+    "unconfirmed target did not retain its structured expiry")
+first.autoLockLifecycle.expired = 999
+first.lastAutoLockLifecycle.state = "mutated"
+first.autoLockCapacity.maximum = 999
+Check(Stats().autoLockLifecycle.expired == 1
+        and Stats().lastAutoLockLifecycle.state == "expired"
+        and Stats().autoLockCapacity.maximum == 3,
+    "AutoLock lifecycle diagnostics leaked mutable internal state")
+Check(type(state.autoLockAttempts) == "table"
+        and CopyCount(state.autoLockAttempts.records) == 1
+        and state.futureStage32.keep,
+    "expiry was not retained in per-character state or changed unknown fields")
+
+-- Replace the live bucket with a scalar-equivalent deserialized table. This
+-- is the /reload boundary: runtime locals are not allowed to restart lifetime;
+-- the Store-owned record is re-read on the next pump.
+local persistedKey, persistedRecord = next(state.autoLockAttempts.records)
+local reloadedRecord = {}
+for key, value in pairs(persistedRecord) do reloadedRecord[key] = value end
+reloadedRecord.lockedRevision = 9
+reloadedRecord.identity = reloadedRecord.baseKey
+    .. "|locked=number:1:9|state=string:8:200104x1"
+state.autoLockAttempts = {
+    version=1,records={[persistedKey]=reloadedRecord},future={keep=true},
+}
+
+local callsAtExpiry = #lockCalls
+for _ = 1, 20 do Check(Nexus.RequestRecompute(), "post-expiry recompute refused") end
+H.Advance(5.2, 0.2)
+Check(#lockCalls == callsAtExpiry
+        and Stats().lastAutoLockLifecycle.state == "expired"
+        and state.autoLockAttempts.future.keep,
+    "post-expiry pumps retried or reset the terminal identity")
+
+-- Explicit user retry authorizes one new bounded lifetime. Adapter success is
+-- still not confirmation until the locked mirror changes.
+Check(type(Nexus.RetryAutoLock) == "function" and Nexus.RetryAutoLock(),
+    "explicit AutoLock retry was unavailable")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsAtExpiry + 1
+        and Stats().lastAutoLockLifecycle.state == "awaiting-confirmation",
+    "explicit retry did not submit exactly one fresh attempt")
+
+H.locked = {
+    {spellId=200104,quality=2,stack=1},
+    {spellId=200100,quality=3,stack=1},
+}
+H.NotifyEchoDataChanged()
+H.Advance(0.4, 0.2)
+local confirmed = Stats()
+Check(#lockCalls == callsAtExpiry + 1
+        and confirmed.lastAutoLockLifecycle.state == "confirmed"
+        and confirmed.autoLockLifecycle.confirmed == 1,
+    "authoritative locked evidence did not confirm exactly once")
+
+-- A new target safely supersedes the fulfilled identity. A refusal is
+-- terminal and retained; it does not become a successful confirmation.
+state.lockDesignTargetsBySlot[wishlistKey] = {[200102]=true}
+H.service.LockPerk = function(spellId)
+    lockCalls[#lockCalls + 1] = {spellId=spellId, at=H.now}
+    return false
+end
+Check(Nexus.RequestRecompute(), "replacement target recompute was refused")
+H.Advance(0.4, 0.2)
+local callsBeforeRevocation = #lockCalls
+SlashCmdList.NEXUS("auto")
+H.Advance(3.2, 0.2)
+Check(#lockCalls == callsBeforeRevocation
+        and Stats().lastAutoLockLifecycle.state == "prepared",
+    "revoked master authorization reached the spaced mutation boundary")
+SlashCmdList.NEXUS("auto")
+Check(Nexus.RequestRecompute(), "reauthorized target recompute was refused")
+H.Advance(0.4, 0.2)
+local rejected = Stats()
+Check(rejected.lastAutoLockLifecycle.state == "rejected"
+        and rejected.lastAutoLockLifecycle.reason == "refused"
+        and rejected.autoLockLifecycle.rejected == 1
+        and rejected.autoLockLifecycle.superseded >= 1,
+    string.format("target change did not supersede then retain adapter rejection: state=%s reason=%s rejected=%s superseded=%s calls=%s",
+        tostring(rejected.lastAutoLockLifecycle.state),
+        tostring(rejected.lastAutoLockLifecycle.reason),
+        tostring(rejected.autoLockLifecycle.rejected),
+        tostring(rejected.autoLockLifecycle.superseded),tostring(#lockCalls)))
+local callsAtReject = #lockCalls
+H.Advance(15, 0.2)
+for _ = 1, 5 do Check(Nexus.RequestRecompute(), "rejected recompute refused") end
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsAtReject,
+    "rejected identity retried without evidence or user authorization")
+
+-- A late authoritative mirror still confirms the desired state after a
+-- terminal refusal; it never needs another adapter call to become truth.
+H.locked = {
+    {spellId=200104,quality=2,stack=1},
+    {spellId=200100,quality=3,stack=1},
+    {spellId=200102,quality=2,stack=1},
+}
+H.NotifyEchoDataChanged()
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsAtReject
+        and Stats().lastAutoLockLifecycle.state == "confirmed"
+        and Stats().autoLockLifecycle.confirmed == 2,
+    string.format("late authoritative locked evidence did not confirm without resubmission: calls=%s state=%s confirmed=%s",
+        tostring(#lockCalls),tostring(Stats().lastAutoLockLifecycle.state),
+        tostring(Stats().autoLockLifecycle.confirmed)))
+
+-- Pause the master switch while representing a manual unlock. This isolates
+-- the following replacement-pair identity from the unpaired record.
+SlashCmdList.NEXUS("auto")
+H.locked = {
+    {spellId=200104,quality=2,stack=1},
+    {spellId=200100,quality=3,stack=1},
+}
+H.NotifyEchoDataChanged()
+H.Advance(0.4, 0.2)
+
+-- Replacement-pairing changes form a new identity. One accepted submission
+-- then remains pending until a semantic locked-state revision arrives.
+state.lockDesignTargetsBySlot[wishlistKey] = {[200102]=200104}
+H.service.LockPerk = function(spellId)
+    lockCalls[#lockCalls + 1] = {spellId=spellId, at=H.now}
+    return true
+end
+SlashCmdList.NEXUS("auto")
+Check(Nexus.RequestRecompute(), "pairing-change recompute was refused")
+H.Advance(0.4, 0.2)
+local paired = Stats()
+Check(#lockCalls == callsAtReject + 1
+        and paired.lastAutoLockLifecycle.state == "awaiting-confirmation"
+        and paired.lastAutoLockLifecycle.replaces == 200104,
+    "replacement-pair identity did not supersede and submit once")
+
+-- An authoritative revision that does not contain the target supersedes the
+-- old pending identity. Full capacity plus an unsafe destructive context must
+-- produce no new LockPerk or UnlockPerk call.
+H.locked = {
+    {spellId=200104,quality=2,stack=1},
+    {spellId=200100,quality=3,stack=1},
+    {spellId=200999,quality=1,stack=1},
+}
+H.NotifyEchoDataChanged()
+H.Advance(0.4, 0.2)
+local revised = Stats()
+Check(#lockCalls == callsAtReject + 1 and #unlockCalls == 0
+        and revised.autoLockLifecycle.superseded >= 2,
+    "locked-state revision bypassed capacity or destructive-unlock safety")
+
+-- Capacity is server evidence, not the editor's six design cells. This live
+-- runtime fixture intentionally reports one of three before any action.
+local maximum, source = Adapter.MaxPermanentEchoes()
+Check(maximum == 3 and source == "service",
+    "runtime capacity did not retain authoritative 1/3 service evidence")
+
+-- Incompatible persisted state must fail closed and remain byte-for-byte owned
+-- by its unknown/future writer rather than being normalized into an action.
+local validAttempts = state.autoLockAttempts
+state.autoLockAttempts = {version=2,records={},futureOwner={keep=true}}
+local callsBeforeFuture = #lockCalls
+Check(Nexus.RequestRecompute(), "future-state recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsBeforeFuture and #unlockCalls == 0
+        and state.autoLockAttempts.version == 2
+        and state.autoLockAttempts.futureOwner.keep,
+    "future AutoLock state was overwritten or reached a mutation")
+
+-- A malformed current-schema record is also foreign state. Fail closed before
+-- pruning or normalizing any record, even when its target is no longer active.
+local malformedKeyRecord = {}
+for key, value in pairs(reloadedRecord) do malformedKeyRecord[key] = value end
+state.autoLockAttempts = {version=1,records={
+    ["foreign-record-key"]=malformedKeyRecord,
+},futureOwner={keep=true}}
+local callsBeforeMalformed = #lockCalls
+Check(Nexus.RequestRecompute(), "malformed-key recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsBeforeMalformed and #unlockCalls == 0
+        and state.autoLockAttempts.records["foreign-record-key"]
+            == malformedKeyRecord
+        and state.autoLockAttempts.futureOwner.keep,
+    "malformed AutoLock record key was normalized or deleted")
+
+local malformedTimeRecord = {}
+for key, value in pairs(reloadedRecord) do malformedTimeRecord[key] = value end
+malformedTimeRecord.preparedAt = "not-a-time"
+local malformedTimeKey = malformedTimeRecord.baseKey
+state.autoLockAttempts = {version=1,records={
+    [malformedTimeKey]=malformedTimeRecord,
+},futureOwner={keep=true}}
+Check(Nexus.RequestRecompute(), "malformed-time recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsBeforeMalformed and #unlockCalls == 0
+        and state.autoLockAttempts.records[malformedTimeKey]
+            == malformedTimeRecord
+        and malformedTimeRecord.preparedAt == "not-a-time"
+        and state.autoLockAttempts.futureOwner.keep,
+    "malformed AutoLock timestamps were normalized or deleted")
+
+local malformedIdentityRecord = {}
+for key, value in pairs(reloadedRecord) do
+    malformedIdentityRecord[key] = value
+end
+malformedIdentityRecord.identity = "foreign-identity"
+local malformedIdentityKey = malformedIdentityRecord.baseKey
+state.autoLockAttempts = {version=1,records={
+    [malformedIdentityKey]=malformedIdentityRecord,
+},futureOwner={keep=true}}
+Check(Nexus.RequestRecompute(), "malformed-identity recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsBeforeMalformed and #unlockCalls == 0
+        and state.autoLockAttempts.records[malformedIdentityKey]
+            == malformedIdentityRecord
+        and malformedIdentityRecord.identity == "foreign-identity"
+        and state.autoLockAttempts.futureOwner.keep,
+    "malformed AutoLock identity was normalized or deleted")
+
+local malformedDescriptorRecord = {}
+for key, value in pairs(reloadedRecord) do
+    malformedDescriptorRecord[key] = value
+end
+malformedDescriptorRecord.wishlistKey = "foreign-wishlist"
+local malformedDescriptorKey = malformedDescriptorRecord.baseKey
+state.autoLockAttempts = {version=1,records={
+    [malformedDescriptorKey]=malformedDescriptorRecord,
+},futureOwner={keep=true}}
+Check(Nexus.RequestRecompute(), "malformed-descriptor recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsBeforeMalformed and #unlockCalls == 0
+        and state.autoLockAttempts.records[malformedDescriptorKey]
+            == malformedDescriptorRecord
+        and malformedDescriptorRecord.wishlistKey == "foreign-wishlist"
+        and state.autoLockAttempts.futureOwner.keep,
+    "malformed AutoLock descriptor was normalized or deleted")
+
+local malformedDeadlineRecord = {}
+for key, value in pairs(reloadedRecord) do
+    malformedDeadlineRecord[key] = value
+end
+malformedDeadlineRecord.nextAttemptAt = malformedDeadlineRecord.expiresAt + 1
+local malformedDeadlineKey = malformedDeadlineRecord.baseKey
+state.autoLockAttempts = {version=1,records={
+    [malformedDeadlineKey]=malformedDeadlineRecord,
+},futureOwner={keep=true}}
+Check(Nexus.RequestRecompute(), "malformed-deadline recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == callsBeforeMalformed and #unlockCalls == 0
+        and state.autoLockAttempts.records[malformedDeadlineKey]
+            == malformedDeadlineRecord
+        and malformedDeadlineRecord.nextAttemptAt
+            == malformedDeadlineRecord.expiresAt + 1
+        and state.autoLockAttempts.futureOwner.keep,
+    "malformed AutoLock retry deadline was normalized or deleted")
+state.autoLockAttempts = validAttempts
+
+local final = Stats()
+Check(final.autoLockLifecycle.prepared == 4
+        and final.autoLockLifecycle.submitted == 3
+        and final.autoLockLifecycle.awaitingConfirmation == 3
+        and final.autoLockLifecycle.confirmed == 2
+        and final.autoLockLifecycle.rejected == 1
+        and final.autoLockLifecycle.expired == 1
+        and final.autoLockLifecycle.superseded == 4
+        and final.autoLockLifecycle.spacingRetries == 1
+        and final.autoLockLifecycle.explicitRetries == 1
+        and final.autoLockLifecycle.postExpiryBlocked == 3,
+    "final AutoLock lifecycle totals were not exact and bounded")
+print(string.format(
+    "stage32 AutoLock confirmation: checks=%d calls=%d prepared=%d submitted=%d awaiting=%d confirmed=%d rejected=%d expired=%d superseded=%d postExpiry=%d capacity=1/%d",
+    checks,#lockCalls,final.autoLockLifecycle.prepared,
+    final.autoLockLifecycle.submitted,
+    final.autoLockLifecycle.awaitingConfirmation,
+    final.autoLockLifecycle.confirmed,final.autoLockLifecycle.rejected,
+    final.autoLockLifecycle.expired,final.autoLockLifecycle.superseded,
+    final.autoLockLifecycle.postExpiryBlocked,maximum))
+print("bounded AutoLock submission and authoritative confirmation -- OK")

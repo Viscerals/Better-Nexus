@@ -1,7 +1,7 @@
 -- 1.19.3 cold-start reconciliation sends complete builds so a fresh peer is
 -- usable immediately and never depends on the original author remaining online.
 local H=dofile('tests/harness.lua')
-dofile('core/Codec.lua'); dofile('core/Sync.lua'); dofile('core/DpsCapture.lua')
+dofile('core/Codec.lua'); dofile('core/SyncProtocol.lua'); dofile('core/SyncTransport.lua'); dofile('core/SyncCompatibility.lua'); dofile('core/SyncReconciler.lua'); dofile('core/SyncInbound.lua'); dofile('core/SyncDiagnostics.lua'); dofile('core/SyncSession.lua'); dofile('core/Sync.lua'); dofile('core/DpsCapture.lua')
 local Sync=Nexus.Sync
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 local who='Author'; UnitName=function() return who end

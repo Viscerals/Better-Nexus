@@ -1,6 +1,6 @@
 -- Public boards: one highest winning loadout per character, ranked separately by encounter.
 local H=dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
 dofile("core/GameAdapter.lua"); dofile("ui/CommunityBuilds.lua")
@@ -20,6 +20,31 @@ local dummy=DPS.GetDpsBoard("dummy")
 assert(#dummy==2,"dummy board should contain one row per character")
 assert(dummy[1].player=="Bravo" and dummy[1].dps==28000000,"dummy board not DPS-ranked")
 assert(dummy[1].build and dummy[1].buildId and #dummy[1].echoes==2,"board row lacks copyable exact build")
+local collisionId=dummy[1].buildId
+local collisionBuild=NexusDB.communityBuilds[collisionId]
+collisionBuild.fingerprint="different-current-content"
+collisionBuild.echoes={{spellId=299999,stacks=1}}
+local collisionRow
+for _,candidate in ipairs(DPS.GetDpsBoard("dummy")) do
+    if candidate.player=="Bravo" then collisionRow=candidate break end
+end
+assert(collisionRow and collisionRow.buildIdentityMismatch==true
+    and collisionRow.fingerprint==fb and #collisionRow.echoes==2
+    and collisionRow.lockedFingerprint=="0",
+    "historical/current build collision did not retain exact row evidence and fail closed")
+local rawBravo
+for _,candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
+    if candidate.player=="Bravo" then rawBravo=candidate break end
+end
+assert(rawBravo,"raw Bravo board row unavailable")
+rawBravo.echoes={{spellId=200010,count=1}}
+local evidenceMismatch
+for _,candidate in ipairs(DPS.GetDpsBoard("dummy")) do
+    if candidate.player=="Bravo" then evidenceMismatch=candidate break end
+end
+assert(evidenceMismatch and evidenceMismatch.recordIdentityMismatch==true
+    and evidenceMismatch.fingerprint==fb and #evidenceMismatch.echoes==1,
+    "record fingerprint/content mismatch did not remain visible and fail closed")
 local lk=DPS.GetDpsBoard("lk")
 assert(#lk==1 and lk[1].player=="Alpha" and lk[1].category=="lk","LK board not separate")
 assert(DPS.GetDpsBoard("bad")[1]==nil,"invalid category should be empty")

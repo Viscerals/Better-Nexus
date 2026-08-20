@@ -1,0 +1,92 @@
+﻿name: Release policy
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      candidate_sha: ${{ steps.resolve.outputs.candidate_sha }}
+    steps:
+      - name: Resolve immutable candidate
+        id: resolve
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $candidate = if ($env:EVENT_NAME -eq 'pull_request') { $env:PR_HEAD_SHA } else { $env:EVENT_SHA }
+          if ($candidate -notmatch '^[0-9a-f]{40}$') { throw "Unable to resolve immutable candidate for $env:EVENT_NAME." }
+          "candidate_sha=$candidate" >> $env:GITHUB_OUTPUT
+
+  release-policy:
+    name: release-policy
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the reviewed tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.candidate.outputs.candidate_sha }}
+          persist-credentials: false
+
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ needs.candidate.outputs.candidate_sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -cne $env:EXPECTED_CANDIDATE_SHA) { throw "Expected $env:EXPECTED_CANDIDATE_SHA, checked out $actual." }
+          "Exact candidate HEAD: $actual" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Verify license and release policy
+        shell: pwsh
+        run: ./tools/Test-ReleasePolicy.ps1
+
+  lua-regression:
+    name: lua-regression
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the reviewed tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.candidate.outputs.candidate_sha }}
+          persist-credentials: false
+
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ needs.candidate.outputs.candidate_sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -cne $env:EXPECTED_CANDIDATE_SHA) { throw "Expected $env:EXPECTED_CANDIDATE_SHA, checked out $actual." }
+          "Exact candidate HEAD: $actual" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes luajit
+
+      - name: Run normal Lua regression programs
+        shell: bash
+        run: |
+          mapfile -t tests < <(find tests -maxdepth 1 -type f -name 'run_*.lua' ! -name 'run_legacy_backup_smoke.lua' | sort)
+          test "${#tests[@]}" -eq 209
+          for test_file in "${tests[@]}"; do
+            echo "::group::${test_file}"
+            luajit "${test_file}"
+            echo "::endgroup::"
+          done

@@ -1,32 +1,76 @@
 ## Interface: 30300
 ## Title: Nexus
 ## Notes: Nexus — Echo build automation, community builds, DPS leaderboards, and auto-snapshot convergence.
-## Author: Boganic
-## Version: 1.19.5
-## OptionalDeps: ProjectEbonhold
+## Author: Valentine
+## Version: 1.20.0-beta.1
+## OptionalDeps: ProjectEbonhold, StutterAlert
 ## SavedVariables: NexusDB WishlistRealizerDB
 
+data\Release.lua
 data\DefaultProfile.lua
+data\BundledBuilds.lua
+logic\Version.lua
+core\Performance.lua
+core\StutterAlertIntegration.lua
+core\EchoCatalogSource.lua
 logic\Model.lua
 logic\Strategy.lua
 logic\Ratchet.lua
 logic\Policy.lua
+core\Revisions.lua
+core\Identity.lua
+core\LoadoutEvidence.lua
+core\CandidateEvidence.lua
+core\DataCompaction.lua
+core\BuildCatalog.lua
+core\DataRetention.lua
+core\BuildHashCache.lua
 core\Store.lua
+core\Errors.lua
+core\Scheduler.lua
+core\DiagnosticHistory.lua
+core\DiagnosticLogs.lua
+core\PeerDebug.lua
+core\ViewRefresh.lua
+core\Updates.lua
 core\Codec.lua
+core\WishlistModel.lua
+core\WishlistController.lua
+core\SyncProtocol.lua
+core\SyncTransport.lua
+core\SyncCompatibility.lua
+core\SyncReconciler.lua
+core\SyncInbound.lua
+core\SyncDiagnostics.lua
+core\SyncSession.lua
 core\Sync.lua
 core\DpsCapture.lua
+core\LegacyDataMigration.lua
+core\LegacyQualificationRepair.lua
+core\ViewProjections.lua
+core\CommunityProjection.lua
+core\CommunityController.lua
 core\GameAdapter.lua
+ui\VirtualList.lua
 ui\Theme.lua
+ui\LayoutMetrics.lua
 ui\Readout.lua
 ui\ServerStatus.lua
 ui\Panel.lua
 ui\JournalTab.lua
 ui\LogViewer.lua
+ui\WishlistRenderer.lua
 ui\WishlistEditor.lua
 ui\WishlistOverlay.lua
 ui\QuickStart.lua
+ui\CommunityRenderer.lua
 ui\CommunityBuilds.lua
 ui\Leaderboard.lua
 ui\Nameplate.lua
 ui\Changelog.lua
+core\AutomationRuntime.lua
+core\MainLifecycle.lua
+core\MainCommands.lua
+core\MainViewModel.lua
+core\MainDiagnostics.lua
 core\Main.lua

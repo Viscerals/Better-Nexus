@@ -25,6 +25,9 @@ CreateFrame = function(...)
     return f
 end
 
+dofile("core/WishlistModel.lua")
+dofile("core/WishlistController.lua")
+dofile("ui/WishlistRenderer.lua")
 dofile("ui/WishlistEditor.lua")
 
 -- fake GetSpellInfo returning a distinct icon per spellId

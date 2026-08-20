@@ -6,6 +6,11 @@ dofile("logic/Strategy.lua"); dofile("logic/Ratchet.lua")
 dofile("logic/Relay.lua"); dofile("logic/Policy.lua")
 dofile("core/Store.lua"); dofile("core/GameAdapter.lua")
 dofile("ui/Readout.lua"); dofile("ui/Panel.lua"); dofile("ui/JournalTab.lua")
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 
 NexusDB={}

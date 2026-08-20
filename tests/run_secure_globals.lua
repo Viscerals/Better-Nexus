@@ -2,8 +2,10 @@
 -- Nexus may add namespaced entries, but it must never reassign the globals.
 
 local files = {
-    "core/GameAdapter.lua", "core/Main.lua",
-    "ui/WishlistEditor.lua", "ui/CommunityBuilds.lua",
+    "core/GameAdapter.lua", "core/AutomationRuntime.lua",
+    "core/MainLifecycle.lua", "core/Main.lua",
+    "ui/WishlistEditor.lua", "ui/CommunityRenderer.lua",
+    "ui/CommunityBuilds.lua",
     "ui/LogViewer.lua", "ui/Leaderboard.lua",
 }
 

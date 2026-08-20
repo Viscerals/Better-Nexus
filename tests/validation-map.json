@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "routes": [
+    {
+      "id": "sync",
+      "patterns": ["^core/Sync.*\\.lua$"],
+      "groups": ["sync"],
+      "tests": [
+        "tests/run_sync_protocol_parity.lua",
+        "tests/run_sync_transport_safety.lua",
+        "tests/run_sync_inbound_parity.lua",
+        "tests/run_sync_reconciler_parity.lua",
+        "tests/run_sync_integration.lua",
+        "tests/run_sync_hostile_fuzz.lua"
+      ],
+      "full_required": true
+    },
+    {
+      "id": "dps",
+      "patterns": ["^core/DpsCapture\\.lua$"],
+      "groups": ["dps", "sync"],
+      "tests": [
+        "tests/run_dps_capture.lua",
+        "tests/run_dps_boards.lua",
+        "tests/run_dps_mesh_sync.lua",
+        "tests/run_dps_fanout_bound.lua",
+        "tests/run_sync_integration.lua"
+      ],
+      "full_required": true
+    },
+    {
+      "id": "leaderboard",
+      "patterns": ["^ui/Leaderboard\\.lua$"],
+      "groups": ["leaderboard"],
+      "tests": [
+        "tests/run_leaderboard_class_presentation.lua",
+        "tests/run_leaderboard_ui.lua",
+        "tests/run_leaderboard_virtualization.lua",
+        "tests/run_leaderboard_refresh_budget.lua"
+      ],
+      "full_required": true
+    },
+    {
+      "id": "workflow",
+      "patterns": ["^\\.github/"],
+      "groups": ["workflow", "security"],
+      "tests": ["tests/run-quality-workflow-policy.js"],
+      "full_required": true
+    },
+    {
+      "id": "tooling",
+      "patterns": ["^tools/", "^tests/validation-map\\.json$", "^tests/run-(quality|security)-.*\\.js$", "^package(?:-lock)?\\.json$", "^\\.(pre-commit-config\\.yaml|luarc\\.json|luacheckrc|gitleaks\\.toml)$", "^(stylua\\.toml|PSScriptAnalyzerSettings\\.psd1)$"],
+      "groups": ["tooling", "package", "security"],
+      "tests": [
+        "tests/run-quality-toolchain.js",
+        "tests/run-bundled-build-export.js",
+        "tests/run-savedvariables-analyzer.js",
+        "tests/run-package-metadata.js",
+        "tests/run-quality-gate-self-tests.js",
+        "tests/run-security-policy.js"
+      ],
+      "full_required": true
+    },
+    {
+      "id": "policy",
+      "patterns": ["^(AGENTS|AI_POLICY|SECURITY|RELEASE_SECURITY|CONTRACTS|UPSTREAM)\\.md$", "^(LICENSE|NOTICE)(?:\\.md)?$", "^\\.vibe/"],
+      "groups": ["policy", "security", "workflow", "package"],
+      "tests": [
+        "tests/run-quality-workflow-policy.js",
+        "tests/run-package-metadata.js",
+        "tests/run-security-policy.js"
+      ],
+      "full_required": true
+    },
+    {
+      "id": "documentation",
+      "patterns": ["^(README|CHANGELOG)\\.md$", "^docs/.*\\.md$"],
+      "groups": ["documentation"],
+      "tests": [],
+      "full_required": false
+    },
+    {
+      "id": "runtime",
+      "patterns": ["^(core|logic|ui|data)/.*\\.lua$|^Nexus\\.toc$|^tests/run_.*\\.lua$"],
+      "groups": ["runtime"],
+      "tests": ["tests/run_integration.lua"],
+      "full_required": true
+    }
+  ],
+  "default": {
+    "groups": ["repository"],
+    "tests": ["tests/run_integration.lua"],
+    "full_required": true
+  }
+}

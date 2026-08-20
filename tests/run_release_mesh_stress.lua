@@ -1,7 +1,7 @@
 -- 100-character leaderboard stress: bounded rows, bucket deltas, and exact
 -- loadout references remain stable.
 local H=dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 local DPS=Nexus.DpsCapture
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
 UnitName=function() return "Viewer" end

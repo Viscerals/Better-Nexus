@@ -1,7 +1,7 @@
 -- Safe mixed-version behavior: exact-evidence DPS remains compatible, while
 -- legacy packets that cannot carry that evidence are rejected.
 local H=dofile('tests/harness.lua')
-dofile('core/Codec.lua'); dofile('core/Sync.lua'); dofile('core/DpsCapture.lua')
+dofile('core/Codec.lua'); dofile('core/SyncProtocol.lua'); dofile('core/SyncTransport.lua'); dofile('core/SyncCompatibility.lua'); dofile('core/SyncReconciler.lua'); dofile('core/SyncInbound.lua'); dofile('core/SyncDiagnostics.lua'); dofile('core/SyncSession.lua'); dofile('core/Sync.lua'); dofile('core/DpsCapture.lua')
 local Codec,Sync,DPS=Nexus.Codec,Nexus.Sync,Nexus.DpsCapture
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 local currentName='Localhero'; UnitName=function() return currentName end

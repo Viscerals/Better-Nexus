@@ -1,0 +1,13 @@
+title = "Better-Nexus current-tree secret policy"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated and dependency state is never a source input"
+paths = [
+  '''(^|/)\.git/''',
+  '''(^|/)\.tools/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)build/'''
+]

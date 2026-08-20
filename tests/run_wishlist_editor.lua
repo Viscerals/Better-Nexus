@@ -6,6 +6,9 @@ dofile("logic/Ratchet.lua")
 dofile("logic/Policy.lua")
 dofile("core/Store.lua")
 dofile("core/GameAdapter.lua")
+dofile("core/WishlistModel.lua")
+dofile("core/WishlistController.lua")
+dofile("ui/WishlistRenderer.lua")
 dofile("ui/WishlistEditor.lua")
 
 NexusDB = {}
@@ -23,10 +26,50 @@ end
 local EW = Nexus.WishlistEditor
 EW.Init(Adapter, Model)
 
+local realCreateFrame = CreateFrame
+local checkFrames = {}
+CreateFrame = function(kind, name, parent, template)
+    local made = realCreateFrame(kind, name, parent, template)
+    if template == "UICheckButtonTemplate" then
+        checkFrames[#checkFrames + 1] = made
+    end
+    return made
+end
+local recomputeRequests = 0
+local retryRequests, retryAccepted = 0, false
+Nexus.RequestRecompute = function()
+    recomputeRequests = recomputeRequests + 1
+    return true
+end
+Nexus.RetryAutoLock = function()
+    retryRequests = retryRequests + 1
+    return retryAccepted
+end
+
 local ok = pcall(EW.OpenForCandidate, {title=H.wishlist.name, echoes=H.wishlist.echoes})
 assert(ok, "Show() threw")
 local frame = _G.NexusEditorFrame
 assert(frame:IsShown(), "editor frame not shown after Show()")
+
+-- The auto-lock setting changes Main's mutation plan. Its checkbox is the
+-- first checkbutton created by the editor and must request one next-tick
+-- recomputation instead of waiting for the slow fallback.
+local autoLockCheck = checkFrames[1]
+assert(autoLockCheck and autoLockCheck.scripts.OnClick,
+    "auto-lock checkbox was not created")
+autoLockCheck:SetChecked(true)
+autoLockCheck.scripts.OnClick(autoLockCheck)
+assert(NexusDB.settings.autoLockEchoes == true and recomputeRequests == 1
+        and retryRequests == 1,
+    "auto-lock setting did not request immediate safe recomputation")
+autoLockCheck:SetChecked(false)
+autoLockCheck.scripts.OnClick(autoLockCheck)
+retryAccepted = true
+autoLockCheck:SetChecked(true)
+autoLockCheck.scripts.OnClick(autoLockCheck)
+assert(NexusDB.settings.autoLockEchoes == true and recomputeRequests == 2
+        and retryRequests == 2,
+    "checkbox re-enable did not route an accepted terminal retry exactly once")
 
 -- pending list should be seeded from the real wishlist: 2 entries
 assert(EW.DebugPendingCount() == 2,
@@ -86,4 +129,39 @@ assert(freshDraft.scrollOffset == 0 and freshDraft.pickOffset == 0
     and freshDraft.pendingLoadoutOpen == nil,
     "unassociated active loadout did not reset complete editor draft state")
 
-print("wishlist editor: lifecycle + clean unassociated loadout open OK (checks=11)")
+-- A rejected associated Wishlist must leave the server journal and editor UI
+-- untouched. In particular, no renderer preparation may run before the
+-- controller accepts the transition.
+local serverJournal = CreateFrame("Frame", "ProjectEbonholdEchoJournal", UIParent)
+serverJournal:Show()
+frame:Hide()
+local hideCalls, attachCalls, styleCalls, closeCalls = 0, 0, 0, 0
+HideUIPanel = function(target)
+    hideCalls = hideCalls + 1
+    target:Hide()
+end
+Nexus.Panel = {
+    AttachMenuFrame = function() attachCalls = attachCalls + 1 end,
+    CloseOtherWindows = function() closeCalls = closeCalls + 1 end,
+}
+Nexus.Theme = {
+    StyleWindow = function() styleCalls = styleCalls + 1 end,
+    StyleTree = function() end,
+}
+local oversized = {}
+for i = 1, 80 do
+    oversized[i] = { spellId = 320000 + i, quality = 3, stacks = 1 }
+end
+Adapter.GetLoadoutWishlist = function()
+    return {slot=1, name="Rejected", key="rejected", echoes=oversized}
+end
+local accepted, rejectedMode = EW.Show()
+assert(serverJournal:IsShown() and hideCalls == 0,
+    "rejected Show hid the server Echo UI")
+assert(not frame:IsShown(), "rejected Show displayed the Wishlist Editor")
+assert(attachCalls == 0 and styleCalls == 0 and closeCalls == 0,
+    "rejected Show prepared or suppressed UI before controller acceptance")
+assert(accepted == false and rejectedMode == "wishlist",
+    "rejected Show did not return the controller result")
+
+print("wishlist editor: lifecycle + fail-closed Show OK (checks=17)")

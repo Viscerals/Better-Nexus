@@ -1,7 +1,7 @@
 -- Regression: build posted on A AFTER B's receive window closed must be
 -- received when B syncs again (the "Fire Mage not received" live bug).
 local H = dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local Codec, Sync = Nexus.Codec, Nexus.Sync
 local clock = 1000; GetTime = function() return clock end
 local wall = 50000; time = function() return wall end
@@ -102,9 +102,12 @@ local function bucketHash(builds)
     return table.concat(out,",")
 end
 -- Hash that matches A's isMine builds
-local matchHash = bucketHash({ ["r1"]={lastModified=50000,echoes={{spellId=200100,quality=3,stacks=1}}} })
+local matchHash = bucketHash({ ["r1"]={lastModified=50000,
+    fingerprint="200100x1",
+    echoes={{spellId=200100,quality=3,stacks=1}}} })
 Sync.HandleIncoming("WLRQ|peer2|"..matchHash.."|0|matching-state", "peer2")
 for i=1,20 do Sync.OnUpdate(0.2) end
 local skipped = Sync.Stats().skippedUpToDate or 0
-assert(skipped > 0, "peer with matching hash should have been skipped, got "..skipped)
+assert(skipped > 0, "peer with matching hash should have been skipped, got "
+    ..skipped.." expected="..matchHash.." legacy="..Sync.GetLegacyBuildHash())
 print("peer already up to date gets nothing (library hash match) -- OK")

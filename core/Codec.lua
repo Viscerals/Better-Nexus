@@ -69,6 +69,14 @@ function Codec.Base64Decode(s)
     return decoded
 end
 
+-- Network payloads require one canonical spelling. Manual imports retain the
+-- permissive decoder above for historical compatibility.
+function Codec.Base64DecodeNetwork(s)
+    local decoded = Codec.Base64Decode(s)
+    if decoded == nil or Codec.Base64Encode(decoded) ~= s then return nil end
+    return decoded
+end
+
 ------------------------------------------------------------------------
 -- Minimal JSON encoder
 ------------------------------------------------------------------------
@@ -113,7 +121,20 @@ function Codec.JSONEncode(value)
             for i = 1, #value do parts[#parts + 1] = Codec.JSONEncode(value[i]) end
             return "[" .. table.concat(parts, ",") .. "]"
         else
-            for k, v in pairs(value) do
+            -- Lua table iteration is deliberately unspecified. Canonical key
+            -- order keeps wire bytes, hashes, diagnostics, and migration
+            -- snapshots stable across clients and reloads.
+            local keys = {}
+            for key, child in pairs(value) do
+                if child ~= nil then keys[#keys + 1] = key end
+            end
+            table.sort(keys, function(left, right)
+                local leftType, rightType = type(left), type(right)
+                if leftType ~= rightType then return leftType < rightType end
+                return tostring(left) < tostring(right)
+            end)
+            for _, k in ipairs(keys) do
+                local v = value[k]
                 if v ~= nil then
                     parts[#parts + 1] = Codec.JSONEncode(tostring(k)) .. ":" .. Codec.JSONEncode(v)
                 end
@@ -257,6 +278,150 @@ function Codec.JSONDecode(s)
     return val
 end
 
+-- Strict network-only JSON grammar. The historical decoder remains available
+-- to manual imports, while Sync rejects partial values and syntax recovery.
+local function StrictJsonString(s, pos)
+    if s:byte(pos) ~= 34 then return nil end
+    local start = pos
+    pos = pos + 1
+    while pos <= #s do
+        local byte = s:byte(pos)
+        if byte == 34 then
+            return pos + 1, Codec.JSONDecode(s:sub(start, pos))
+        end
+        if byte < 32 then return nil end
+        if byte == 92 then
+            pos = pos + 1
+            local escaped = s:byte(pos)
+            if escaped == 117 then
+                local hex = s:sub(pos + 1, pos + 4)
+                local code = hex:match("^%x%x%x%x$") and tonumber(hex, 16)
+                    or nil
+                if not code or (code >= 0xD800 and code <= 0xDFFF) then
+                    return nil
+                end
+                pos = pos + 4
+            elseif escaped ~= 34 and escaped ~= 47 and escaped ~= 92
+                and escaped ~= 98 and escaped ~= 102 and escaped ~= 110
+                and escaped ~= 114 and escaped ~= 116 then
+                return nil
+            end
+        end
+        pos = pos + 1
+    end
+    return nil
+end
+
+local function StrictJsonNumber(s, pos)
+    local start = pos
+    if s:byte(pos) == 45 then pos = pos + 1 end
+    local first = s:byte(pos)
+    if first == 48 then
+        pos = pos + 1
+        local nextByte = s:byte(pos)
+        if nextByte and nextByte >= 48 and nextByte <= 57 then return nil end
+    elseif first and first >= 49 and first <= 57 then
+        repeat pos = pos + 1; first = s:byte(pos)
+        until not first or first < 48 or first > 57
+    else
+        return nil
+    end
+    if s:byte(pos) == 46 then
+        pos = pos + 1
+        local digit = s:byte(pos)
+        if not digit or digit < 48 or digit > 57 then return nil end
+        repeat pos = pos + 1; digit = s:byte(pos)
+        until not digit or digit < 48 or digit > 57
+    end
+    local exponent = s:byte(pos)
+    if exponent == 69 or exponent == 101 then
+        pos = pos + 1
+        local sign = s:byte(pos)
+        if sign == 43 or sign == 45 then pos = pos + 1 end
+        local digit = s:byte(pos)
+        if not digit or digit < 48 or digit > 57 then return nil end
+        repeat pos = pos + 1; digit = s:byte(pos)
+        until not digit or digit < 48 or digit > 57
+    end
+    local number = tonumber(s:sub(start, pos - 1))
+    if type(number) ~= "number" or number ~= number
+        or number == math.huge or number == -math.huge then return nil end
+    return pos, number
+end
+
+local StrictJsonValue
+StrictJsonValue = function(s, pos, depth, state)
+    if depth > MAX_JSON_DEPTH or state.nodes >= state.maxNodes then return nil end
+    state.nodes = state.nodes + 1
+    pos = SkipWhitespace(s, pos)
+    local byte = s:byte(pos)
+    if byte == 34 then
+        local nextPos, value = StrictJsonString(s, pos)
+        return nextPos, value, nextPos ~= nil
+    end
+    if byte == 45 or (byte and byte >= 48 and byte <= 57) then
+        local nextPos, value = StrictJsonNumber(s, pos)
+        return nextPos, value, nextPos ~= nil
+    end
+    if s:sub(pos, pos + 3) == "true" then return pos + 4, true, true end
+    if s:sub(pos, pos + 4) == "false" then return pos + 5, false, true end
+    if s:sub(pos, pos + 3) == "null" then
+        state.hasNull = true
+        return pos + 4, nil, true
+    end
+    if byte == 91 then
+        local array = {}
+        pos = SkipWhitespace(s, pos + 1)
+        if s:byte(pos) == 93 then return pos + 1, array, true end
+        while true do
+            local value, ok
+            pos, value, ok = StrictJsonValue(s, pos, depth + 1, state)
+            if not ok then return nil end
+            array[#array + 1] = value
+            pos = SkipWhitespace(s, pos)
+            if s:byte(pos) == 93 then return pos + 1, array, true end
+            if s:byte(pos) ~= 44 then return nil end
+            pos = SkipWhitespace(s, pos + 1)
+        end
+    end
+    if byte == 123 then
+        local keys = {}
+        local object = {}
+        pos = SkipWhitespace(s, pos + 1)
+        if s:byte(pos) == 125 then return pos + 1, object, true end
+        while true do
+            local key
+            pos, key = StrictJsonString(s, pos)
+            if not pos then return nil end
+            if type(key) ~= "string" or keys[key] then return nil end
+            keys[key] = true
+            pos = SkipWhitespace(s, pos)
+            if s:byte(pos) ~= 58 then return nil end
+            local value, ok
+            pos, value, ok = StrictJsonValue(s, pos + 1, depth + 1, state)
+            if not ok then return nil end
+            object[key] = value
+            pos = SkipWhitespace(s, pos)
+            if s:byte(pos) == 125 then return pos + 1, object, true end
+            if s:byte(pos) ~= 44 then return nil end
+            pos = SkipWhitespace(s, pos + 1)
+        end
+    end
+    return nil
+end
+
+function Codec.JSONDecodeNetwork(s, maxNodes)
+    if type(s) ~= "string" or s == "" or #s > MAX_DECODED_BYTES then
+        return nil
+    end
+    local state = {nodes=0,maxNodes=tonumber(maxNodes) or 4000}
+    local finish, value, ok = StrictJsonValue(s, 1, 0, state)
+    if not ok or state.hasNull or SkipWhitespace(s, finish) <= #s then
+        return nil
+    end
+    return value
+end
+
 ------------------------------------------------------------------------
 -- Safety check for decoded trees (bounded depth/breadth so a malicious
 -- or corrupted payload from a peer can't hang the client)
@@ -292,16 +457,10 @@ end
 -- separator, and everything after the second is the name (which may itself
 -- contain characters but not a leading colon in practice).
 --
--- Encode deliberately NEVER emits anything beyond this exact 3-field shape.
--- The whole value of "EBH1:" is that a player can paste it straight into
--- the server's own native ImportEchoLoadout box, and we have no way to
--- verify that parser tolerates (or safely ignores) a field it wasn't built
--- for -- an untested guess isn't worth risking on a live game-state paste.
--- Decode still tolerates an optional trailing ".1" per entry (kept as a
--- forward-compatible, purely defensive branch -- see below) since accepting
--- more on the way in is harmless, but nothing Nexus produces uses it, so
--- every string this addon exports round-trips through the native UI
--- exactly like it always has.
+-- Three-component entries are the established EBH1 shape. Nexus uses one
+-- deliberately scoped four-component extension (a trailing ".1") to preserve
+-- a locked-role tag across its own export/import round trip. We do not claim
+-- that the server's native importer understands that Nexus-only extension.
 ------------------------------------------------------------------------
 
 function Codec.EncodeEBH1(entries, classToken, name)
@@ -320,19 +479,50 @@ end
 
 function Codec.DecodeEBH1(str)
     if type(str) ~= "string" then return nil end
+    if #str == 0 or #str > 8192 or str:find("[%c]") then return nil end
     str = str:match("^%s*(.-)%s*$") or ""
-    local body, class, name = str:match("^EBH1:(.-):([^:]*):(.*)$")
-    if not body then return nil end
-    local entries = {}
-    for chunk in (body .. ","):gmatch("([^,]*),") do
-        if chunk ~= "" then
-            local id, q, n, l = chunk:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
-            if not id then id, q, n = chunk:match("^(%d+)%.(%d+)%.(%d+)$") end
-            if id then
-                entries[#entries + 1] = { spellId = tonumber(id), quality = tonumber(q),
-                    stacks = tonumber(n), locked = (l == "1") or nil }
-            end
+    if #str == 0 then return nil end
+    local body, class, name = str:match("^EBH1:([^:]*):([^:]*):(.*)$")
+    if not body or body == "" or #class > 32 or #name > 120 then return nil end
+    local validClass = class == "" or class == "UNKNOWN"
+        or class == "WARRIOR" or class == "PALADIN"
+        or class == "HUNTER" or class == "ROGUE"
+        or class == "PRIEST" or class == "DEATHKNIGHT"
+        or class == "SHAMAN" or class == "MAGE"
+        or class == "WARLOCK" or class == "DRUID"
+    if not validClass or class:find("[%c|]") or name:find("[%c]")
+        or body:sub(1, 1) == "," or body:sub(-1) == ","
+        or body:find(",,", 1, true) then return nil end
+
+    local entries, ordinarySeen, lockedSeen = {}, {}, {}
+    local ordinaryTotal, lockedCount = 0, 0
+    for chunk in body:gmatch("[^,]+") do
+        local id, quality, stacks, marker =
+            chunk:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+        local locked = marker ~= nil
+        if not id then
+            id, quality, stacks = chunk:match("^(%d+)%.(%d+)%.(%d+)$")
         end
+        if not id or (locked and marker ~= "1") then return nil end
+        id, quality, stacks = tonumber(id), tonumber(quality), tonumber(stacks)
+        if not id or id < 1 or id > 2147483647
+            or not quality or quality < 0 or quality > 255
+            or not stacks or stacks < 1 or stacks > 120 then return nil end
+        local seen = locked and lockedSeen or ordinarySeen
+        if seen[id] then return nil end
+        seen[id] = true
+        if locked then
+            lockedCount = lockedCount + 1
+            if lockedCount > 6 then return nil end
+        else
+            ordinaryTotal = ordinaryTotal + stacks
+            if ordinaryTotal > 79 then return nil end
+        end
+        entries[#entries + 1] = {
+            spellId=id,quality=quality,stacks=stacks,
+            locked=locked and true or nil,
+        }
+        if #entries > 85 then return nil end
     end
     if #entries == 0 then return nil end
     return { entries = entries, class = class, name = name }

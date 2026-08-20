@@ -1,3 +1,15 @@
+# Nexus 1.20 Beta
+
+- Ships a versioned baseline of community builds and synchronizes smaller incremental changes instead of repeatedly exchanging the full catalog.
+- Makes Sync response preparation incremental and queue-aware so busy sessions avoid frame stalls and resume fairly as capacity becomes available.
+- Keeps personal builds, newer revisions, filters, DPS records, and deletions intact while migrating existing data additively.
+- Adds bounded, coalesced, and virtualized Builds, Leaderboard, HUD, and wishlist rendering for large collections.
+- Adds session diagnostics, structured error history, and aggregate performance counters for easier tester reports without storing raw samples.
+- Refreshes the Project Ebonhold Echo catalog when represented source data changes while retaining the last known-good catalog on failure.
+- Expands deterministic compatibility and reliability coverage across data migration, synchronization, UI refreshes, reloads, and automation boundaries.
+
+This is a public beta validated by offline harnesses. Back up `NexusDB` and `WishlistRealizerDB` before testing and report `/reload`, migration, large-library, and long-session behavior.
+
 # Nexus 1.19.5
 
 - Fixed the Wishlist button for active Saved Builds without an association; it now opens a persistent Create New Wishlist editor instead of hiding the Nexus menu.

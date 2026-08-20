@@ -9,7 +9,7 @@
 --      truncated and arrived as corrupt base64.
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
-dofile("core/Sync.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua")
 dofile("logic/Model.lua")
 dofile("logic/Strategy.lua")
@@ -22,6 +22,11 @@ dofile("ui/Readout.lua")
 dofile("ui/Panel.lua")
 Nexus.LogViewer = { Init = function() end }
 dofile("ui/CommunityBuilds.lua")
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 
 local Codec, Sync = Nexus.Codec, Nexus.Sync
@@ -93,8 +98,7 @@ for _, m in ipairs(msgs) do
         Sync.ChannelName())                -- arg9, bare
 end
 
-local got = NexusDB.communityBuilds
-    and NexusDB.communityBuilds["mine-1784886552-123456"]
+local got = Nexus.BuildCatalog.Get("mine-1784886552-123456")
 assert(got, "the build was NOT received -- the 3.3.5 channel arg layout still isn't matched")
 assert(#got.echoes == 70, "received build lost echoes in transit (got " .. #got.echoes .. "/70)")
 assert(got.title == "Full Endgame Rogue Wishlist", "title corrupted in transit")

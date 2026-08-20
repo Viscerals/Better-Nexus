@@ -1,0 +1,38 @@
+minimum_pre_commit_version: "4.6.2"
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-case-conflict
+      - id: check-illegal-windows-names
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+        args: [--fix=no]
+        # Existing mixed-ending baseline; do not normalize unrelated bytes here.
+        exclude: ^(\.gitignore|tools/(check-lua51-upvalues|inject-runtime-build-label)\.js)$
+
+  - repo: local
+    hooks:
+      - id: better-nexus-staged-artifacts
+        name: Better-Nexus staged artifact policy
+        entry: pwsh -NoProfile -File tools/Test-StagedArtifacts.ps1 -Mode Staged
+        language: system
+        pass_filenames: true
+      - id: better-nexus-workflow-security
+        name: Better-Nexus workflow syntax and security
+        entry: pwsh -NoProfile -File tools/Test-SecurityPolicy.ps1 -Check Actionlint
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: false
+      - id: better-nexus-fast-pre-push
+        name: Better-Nexus Fast quality gate
+        entry: pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast
+        language: system
+        stages: [pre-push]
+        pass_filenames: false

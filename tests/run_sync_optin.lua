@@ -2,7 +2,7 @@
 -- window, unsolicited build traffic is ignored; manual Sync Now reopens it.
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
-dofile("core/Sync.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local Codec, Sync = Nexus.Codec, Nexus.Sync
 local clock = 1000
 GetTime = function() return clock end

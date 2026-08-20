@@ -13,6 +13,11 @@ dofile("core/GameAdapter.lua")
 dofile("ui/Readout.lua")
 dofile("ui/Panel.lua")
 Nexus.LogViewer = { Init = function() end }
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 
 NexusDB = {}

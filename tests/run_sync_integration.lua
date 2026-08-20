@@ -4,7 +4,7 @@
 -- some unrelated channel a player happens to be in).
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
-dofile("core/Sync.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua")
 dofile("logic/Model.lua")
 dofile("logic/Strategy.lua")
@@ -17,6 +17,11 @@ dofile("ui/Readout.lua")
 dofile("ui/Panel.lua")
 Nexus.LogViewer = { Init = function() end }
 dofile("ui/CommunityBuilds.lua")
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 
 NexusDB = {}

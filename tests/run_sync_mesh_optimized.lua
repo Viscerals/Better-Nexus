@@ -1,6 +1,6 @@
 -- Optimized mesh: state hashes skip current peers and responder claims suppress duplicates.
 local H=dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 local Sync,DPS=Nexus.Sync,Nexus.DpsCapture
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 local function Pump(steps) for _=1,steps do clock=clock+0.2; Sync.OnUpdate(0.2) end end
@@ -26,11 +26,22 @@ end
 local bh=buildHash(NexusDB.communityBuilds)
 local dh=DPS.GetSyncHash()
 local emptyBuckets="0,0,0,0,0,0,0,0"
--- Fully current requester receives nothing.
+-- A fully current requester receives one existing-protocol state receipt and
+-- no build/DPS payload. The receipt is peer proof for truthful convergence.
 H.sentChatMessages={}
 Sync.HandleIncoming("WLRQ|Current|"..bh.."|"..dh.."|req-current","Current")
 Pump(20)
-assert(#H.sentChatMessages==0,"current requester should receive no duplicate traffic")
+local currentClaims,currentPayloads=0,0
+for _,message in ipairs(H.sentChatMessages) do
+  local wire=message.text:gsub("||","|")
+  if wire:find("^WLRC|[^|]+|Current|req%-current|") then
+    currentClaims=currentClaims+1
+  elseif wire:find("^WLRB|") or wire:find("^WLD2|") then
+    currentPayloads=currentPayloads+1
+  end
+end
+assert(currentClaims==1 and currentPayloads==0,
+  "current requester did not receive one payload-free state receipt")
 -- A matching per-build bucket claim suppresses only that safely relayable
 -- build bucket. Legacy whole-state claims cannot suppress owner-only state.
 H.sentChatMessages={}

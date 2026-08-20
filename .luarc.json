@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.1",
+  "runtime.path": ["?.lua", "?/init.lua"],
+  "workspace.library": ["core", "logic", "ui", "data"],
+  "workspace.checkThirdParty": false,
+  "diagnostics.globals": [
+    "Nexus", "UIParent", "GameTooltip", "DEFAULT_CHAT_FRAME", "SlashCmdList",
+    "CreateFrame", "StaticPopupDialogs", "StaticPopup_Show", "GetTime", "GetSpellInfo",
+    "GetItemInfo", "GetItemIcon", "GetRealmName", "UnitName", "UnitGUID", "UnitClass",
+    "UnitExists", "UnitIsPlayer", "UnitIsConnected", "UnitIsDeadOrGhost", "UnitAffectingCombat",
+    "GetNumGroupMembers", "GetNumRaidMembers", "GetNumPartyMembers", "IsInRaid", "IsInGroup",
+    "SendAddonMessage", "RegisterAddonMessagePrefix", "C_ChatInfo", "ChatThrottleLib",
+    "LibStub", "Details", "date", "time", "wipe", "bit", "strsplit", "tContains"
+  ],
+  "diagnostics.enable": true,
+  "diagnostics.disable": [],
+  "diagnostics.neededFileStatus": {
+    "undefined-global": "Any",
+    "duplicate-local": "Any",
+    "unreachable-code": "Any",
+    "unbalanced-assignments": "Any",
+    "unused-local": "Any"
+  }
+}

@@ -5,11 +5,11 @@ dofile("core/DpsCapture.lua")
 
 local Codec = Nexus.Codec
 local oldKey = "200100x2,200200x1"
-local newKey = "200100x1,200200x1"
 local sourceRow = {
     dps=25000000, duration=65, ts=50000, player="Boganic", level=80,
     class="MAGE", fingerprint=oldKey,
     echoes={{spellId=200100,count=2},{spellId=200200,count=1}},
+    lockedEchoes={{spellId=200100,count=1}},
 }
 local function FreshDpsDb()
     return {
@@ -18,6 +18,7 @@ local function FreshDpsDb()
             player=sourceRow.player, level=sourceRow.level, class=sourceRow.class,
             fingerprint=sourceRow.fingerprint,
             echoes={{spellId=200100,count=2},{spellId=200200,count=1}},
+            lockedEchoes={{spellId=200100,count=1}},
         }}},
         buildBest={},
         characterBest={dummy={},lk={}},
@@ -28,7 +29,9 @@ NexusDB={communityBuilds={},dpsCapture=FreshDpsDb()}
 local lockedReady = false
 local adapter = {
     LockedOwned=function()
-        return {synced=lockedReady,bySpell=lockedReady and {[200100]=1} or {}}
+        -- Readiness still gates the pass, but neither this current-login set
+        -- nor sourceRow's unproven lockedEchoes is historical authority.
+        return {synced=lockedReady,bySpell=lockedReady and {[299999]=1} or {}}
     end,
     Owned=function() return {synced=true,bySpell={},byFamily={}} end,
 }
@@ -42,10 +45,9 @@ lockedReady=true
 DPS.Init(adapter,{})
 assert(NexusDB.dpsCapture.lockedMigrationVersion==1,
     "successful locked migration did not persist its version")
-assert(not NexusDB.dpsCapture.personalBest[oldKey]
-    and NexusDB.dpsCapture.personalBest[newKey]
-    and NexusDB.dpsCapture.personalBest[newKey].dummy.echoes[1].count==1,
-    "locked baseline was not subtracted exactly once")
+assert(NexusDB.dpsCapture.personalBest[oldKey]
+    and NexusDB.dpsCapture.personalBest[oldKey].dummy.echoes[1].count==2,
+    "unproven locked baseline changed historical data")
 local once=Codec.JSONEncode(NexusDB.dpsCapture)
 DPS.Init(adapter,{})
 assert(Codec.JSONEncode(NexusDB.dpsCapture)==once,
@@ -55,25 +57,59 @@ assert(Codec.JSONEncode(NexusDB.dpsCapture)==once,
 -- immutable source must win, so retrying cannot subtract the baseline twice.
 local original=FreshDpsDb()
 local interrupted=FreshDpsDb()
-interrupted.personalBest={ [newKey]={dummy={
+local partialEvidenceTouches=0
+local revisionBumps=0
+Nexus.LoadoutEvidence={
+    Init=function() end,
+    ReferenceDpsRow=function(row)
+        if row and row.partialOnly then
+            partialEvidenceTouches=partialEvidenceTouches+1
+        end
+        return false
+    end,
+}
+Nexus.Revisions={
+    DPS_CHANGED="dps",
+    Advance=function() revisionBumps=revisionBumps+1 end,
+}
+interrupted.personalBest={ ["200100x1,200200x1"]={dummy={
     dps=sourceRow.dps,duration=65,ts=50000,player="Boganic",level=80,
-    class="MAGE",fingerprint=newKey,
+    class="MAGE",fingerprint="200100x1,200200x1",
     echoes={{spellId=200100,count=1},{spellId=200200,count=1}},
+    lockedEchoes={{spellId=200100,count=1}},
 }}}
+local partialRow={
+    dps=sourceRow.dps,duration=65,ts=50000,player="Partial",level=80,
+    class="MAGE",fingerprint="299999x1",ownerKey="partial@ebonhold",
+    ownerVerified=true,echoes={{spellId=299999,count=1}},partialOnly=true,
+}
+interrupted.buildBest={ [partialRow.fingerprint]={dummy=partialRow} }
+interrupted.characterBest={dummy={ [partialRow.ownerKey]=partialRow },lk={}}
 interrupted.lockedMigrationSource={
     personalBest=original.personalBest,
     buildBest=original.buildBest,
     characterBest=original.characterBest,
 }
 NexusDB.dpsCapture=interrupted
+lockedReady=false
 dofile("core/DpsCapture.lua")
 DPS=Nexus.DpsCapture
 DPS.Init(adapter,{})
-local retried=NexusDB.dpsCapture.personalBest[newKey]
+local retried=NexusDB.dpsCapture.personalBest[oldKey]
 assert(retried and retried.dummy.echoes[1].spellId==200100
-    and retried.dummy.echoes[1].count==1
+    and retried.dummy.echoes[1].count==2
     and NexusDB.dpsCapture.lockedMigrationSource==nil,
-    "interrupted migration did not restore and recompute from its source")
+    "unsynced restart did not restore and retire its immutable source")
+assert(not NexusDB.dpsCapture.lockedMigrationVersion,
+    "unsynced source restoration prematurely completed the migration")
+assert(partialEvidenceTouches==0,
+    "partial live rows produced evidence before immutable source restoration")
+assert(revisionBumps>0,
+    "represented interrupted-source restoration did not advance DPS revision")
+lockedReady=true
+DPS.Init(adapter,{})
+assert(NexusDB.dpsCapture.lockedMigrationVersion==1,
+    "authoritative retry did not complete restored migration")
 local retryOnce=Codec.JSONEncode(NexusDB.dpsCapture)
 dofile("core/DpsCapture.lua")
 Nexus.DpsCapture.Init(adapter,{})

@@ -1,6 +1,6 @@
 -- Mesh audit: Sync Now responses include every held build and only its highest DPS record.
 local H=dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 local Sync, DPS=Nexus.Sync, Nexus.DpsCapture
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 local currentName="Relay"

@@ -2,7 +2,7 @@
 -- build broadcast/receive round trip end to end.
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
-dofile("core/Sync.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 
 local Codec = Nexus.Codec
 local Sync = Nexus.Sync
@@ -39,6 +39,8 @@ NexusDB = {}  -- fresh DB, as if this were Bob's client
 -- Receiving is opt-in now: Bob must have requested a sync for incoming
 -- builds to be accepted at all.
 assert(Sync.RequestSync(), "RequestSync should succeed")
+H.now = H.now + 1.1
+Sync.OnUpdate(1.1)
 assert(Sync.IsReceiving(), "receive window should be open after RequestSync")
 for _, msg in ipairs(H.sentChatMessages) do
     Sync.HandleIncoming(msg.text, "Alice")

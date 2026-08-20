@@ -2,7 +2,7 @@
 -- Tests the AugmentUnitTooltip logic directly since GameTooltip
 -- HookScript can't fire in the test harness.
 local H = dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
 dofile("core/GameAdapter.lua"); dofile("ui/CommunityBuilds.lua"); dofile("ui/Nameplate.lua")
@@ -84,10 +84,16 @@ assert(#lines==0, "unknown player should add nothing")
 print("Unknown player produces no output -- OK")
 
 -- 6. Community author with no DPS gets author badge
-NexusDB.communityBuilds["b1"]={
+assert(Nexus.BuildCatalog.Put({
     id="b1",title="Fire Mage",author="AuthorGuy",class="MAGE",
     echoes=echoes,postedAt=50000,lastModified=50000,isMine=false
-}
+}))
+local catalogAllCalls = 0
+local realCatalogAll = Nexus.BuildCatalog.All
+Nexus.BuildCatalog.All = function(...)
+    catalogAllCalls = catalogAllCalls + 1
+    return realCatalogAll(...)
+end
 lines={}
 UnitName=function(u)
     if u=="player" then return "Solkr" end
@@ -98,7 +104,10 @@ NP._AugmentUnitTooltip(fakeTooltip)
 assert(#lines>=1 and lines[1]:find("Nexus"), "author should get Nexus badge")
 assert(#lines==2 and lines[2]:find("Community build author",1,true),
     "non-ranked author tooltip lost its compact author label")
-print("Community author gets compact Nexus and author labels -- OK")
+assert(catalogAllCalls == 0,
+    "community-author tooltip copied the complete build catalog")
+Nexus.BuildCatalog.All = realCatalogAll
+print("Bundled community author gets compact Nexus and author labels -- OK")
 
 -- 7. NPC: no lines added
 lines={}

@@ -9,6 +9,9 @@ dofile("logic/Ratchet.lua")
 dofile("logic/Policy.lua")
 dofile("core/Store.lua")
 dofile("core/GameAdapter.lua")
+dofile("core/WishlistModel.lua")
+dofile("core/WishlistController.lua")
+dofile("ui/WishlistRenderer.lua")
 dofile("ui/WishlistEditor.lua")
 
 NexusDB = {}

@@ -3,7 +3,7 @@
 -- with the unlicensed architectural reference archive.
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
-dofile("core/Sync.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 
 local Sync = Nexus.Sync
 local clock = 4000
@@ -144,8 +144,8 @@ assert(state.buildInflight == 0 and state.dpsInflight == 0,
 assert(state.pendingResponses == 0 and state.pendingLoadouts == 0,
     "abandoned hostile response state survived its TTL")
 
--- Replaying one duplicate chunk may refresh idle activity, but cannot retain
--- an incomplete transfer beyond the absolute lifetime cap.
+-- Replaying an identical duplicate chunk never refreshes idle activity and
+-- cannot retain an incomplete transfer beyond the absolute lifetime cap.
 Sync.Init(Nexus.Codec, {})
 SafeHandle("WLRB|DripPeer|drip|1|1/2|AAAA", "DripPeer")
 for _ = 1, 16 do

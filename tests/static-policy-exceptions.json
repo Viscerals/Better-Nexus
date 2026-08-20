@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "project_ebonhold_globals": {
+    "patterns": ["_G.ProjectEbonhold", "_G[\"ProjectEbonhold", "_G[\"Ebonhold"],
+    "allowed_paths": [
+      "core/GameAdapter.lua",
+      "ui/JournalTab.lua",
+      "ui/Panel.lua",
+      "ui/ServerStatus.lua",
+      "ui/WishlistEditor.lua"
+    ]
+  }
+}

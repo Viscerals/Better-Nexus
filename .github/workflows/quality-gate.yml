@@ -1,0 +1,337 @@
+name: Quality gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Run Full validation regardless of changed paths
+        required: false
+        default: true
+        type: boolean
+      upload_logs:
+        description: Upload detailed validation logs even when checks pass
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: better-nexus-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    name: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      candidate_sha: ${{ steps.resolve.outputs.candidate_sha }}
+      base_ref: ${{ steps.resolve.outputs.base_ref }}
+    steps:
+      - name: Resolve immutable candidate and base
+        id: resolve
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          $candidate = if ($env:EVENT_NAME -eq 'pull_request') { $env:PR_HEAD_SHA } else { $env:EVENT_SHA }
+          $base = if ($env:EVENT_NAME -eq 'pull_request') {
+            $env:PR_BASE_SHA
+          } elseif ($env:EVENT_NAME -eq 'push' -and $env:EVENT_BEFORE -and $env:EVENT_BEFORE -notmatch '^0+$') {
+            $env:EVENT_BEFORE
+          } else {
+            $candidate
+          }
+          if ($candidate -notmatch '^[0-9a-f]{40}$' -or $base -notmatch '^[0-9a-f]{40}$') {
+            throw "Unable to resolve immutable candidate/base for $env:EVENT_NAME."
+          }
+          "candidate_sha=$candidate" >> $env:GITHUB_OUTPUT
+          "base_ref=$base" >> $env:GITHUB_OUTPUT
+
+  preflight:
+    name: preflight
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      candidate_sha: ${{ needs.candidate.outputs.candidate_sha }}
+      base_ref: ${{ steps.plan.outputs.base_ref }}
+      full_required: ${{ steps.plan.outputs.full_required }}
+      documentation_only: ${{ steps.plan.outputs.documentation_only }}
+    steps:
+      - name: Check out the exact reviewed tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.candidate.outputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ needs.candidate.outputs.candidate_sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -cne $env:EXPECTED_CANDIDATE_SHA) { throw "Expected $env:EXPECTED_CANDIDATE_SHA, checked out $actual." }
+          "Exact candidate HEAD: $actual" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Select Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.13.1"
+          cache: npm
+
+      - name: Bootstrap tracked quality tools
+        shell: pwsh
+        run: ./tools/Bootstrap-QualityTools.ps1
+
+      - name: Classify reviewed paths
+        id: plan
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ needs.candidate.outputs.base_ref }}
+          DISPATCH_FULL: ${{ inputs.full }}
+        run: |
+          $base = $env:BASE_REF
+          $plan = ./tools/Get-ChangedTestPlan.ps1 -BaseRef $base | ConvertFrom-Json
+          $paths = @($plan.paths)
+          $forceFull = $env:EVENT_NAME -eq 'push' -or ($env:EVENT_NAME -eq 'workflow_dispatch' -and $env:DISPATCH_FULL -eq 'true')
+          $fullRequired = $forceFull -or [bool] $plan.full_required
+          "base_ref=$base" >> $env:GITHUB_OUTPUT
+          "full_required=$($fullRequired.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "documentation_only=$(([bool] $plan.documentation_only).ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "### Quality plan" >> $env:GITHUB_STEP_SUMMARY
+          "Changed paths: $($paths.Count); Full required: $fullRequired; documentation only: $($plan.documentation_only)." >> $env:GITHUB_STEP_SUMMARY
+
+  fast-quality:
+    name: fast-quality
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact reviewed tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.preflight.outputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ needs.preflight.outputs.candidate_sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -cne $env:EXPECTED_CANDIDATE_SHA) { throw "Expected $env:EXPECTED_CANDIDATE_SHA, checked out $actual." }
+          "Exact candidate HEAD: $actual" >> $env:GITHUB_STEP_SUMMARY
+      - name: Select Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.13.1"
+          cache: npm
+      - name: Bootstrap tracked quality tools
+        shell: pwsh
+        run: ./tools/Bootstrap-QualityTools.ps1
+      - name: Run Fast quality profile
+        shell: pwsh
+        env:
+          BASE_REF: ${{ needs.preflight.outputs.base_ref }}
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef $env:BASE_REF
+      - name: Write compact Fast summary
+        if: always()
+        shell: pwsh
+        run: if (Test-Path build/verify/summary.md) { Get-Content build/verify/summary.md >> $env:GITHUB_STEP_SUMMARY }
+      - name: Upload Fast failure logs
+        if: failure() || (github.event_name == 'workflow_dispatch' && inputs.upload_logs)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: fast-quality-logs
+          path: build/verify/logs
+          retention-days: 5
+          if-no-files-found: ignore
+
+  security-quality:
+    name: security-quality
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact reviewed tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.preflight.outputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ needs.preflight.outputs.candidate_sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -cne $env:EXPECTED_CANDIDATE_SHA) { throw "Expected $env:EXPECTED_CANDIDATE_SHA, checked out $actual." }
+          "Exact candidate HEAD: $actual" >> $env:GITHUB_STEP_SUMMARY
+      - name: Select Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.13.1"
+          cache: npm
+      - name: Bootstrap tracked quality tools
+        shell: pwsh
+        run: ./tools/Bootstrap-QualityTools.ps1
+      - name: Run Security quality profile
+        shell: pwsh
+        env:
+          BASE_REF: ${{ needs.preflight.outputs.base_ref }}
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Security -BaseRef $env:BASE_REF
+      - name: Write compact Security summary
+        if: always()
+        shell: pwsh
+        run: if (Test-Path build/verify/summary.md) { Get-Content build/verify/summary.md >> $env:GITHUB_STEP_SUMMARY }
+      - name: Upload Security failure logs
+        if: failure() || (github.event_name == 'workflow_dispatch' && inputs.upload_logs)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: security-quality-logs
+          path: build/verify/logs
+          retention-days: 5
+          if-no-files-found: ignore
+
+  full-quality:
+    name: full-quality
+    needs: preflight
+    if: needs.preflight.outputs.full_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact reviewed tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.preflight.outputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ needs.preflight.outputs.candidate_sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -cne $env:EXPECTED_CANDIDATE_SHA) { throw "Expected $env:EXPECTED_CANDIDATE_SHA, checked out $actual." }
+          "Exact candidate HEAD: $actual" >> $env:GITHUB_STEP_SUMMARY
+      - name: Select Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.13.1"
+          cache: npm
+      - name: Bootstrap tracked quality tools
+        shell: pwsh
+        run: ./tools/Bootstrap-QualityTools.ps1
+      - name: Run Full quality profile once
+        shell: pwsh
+        env:
+          BASE_REF: ${{ needs.preflight.outputs.base_ref }}
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Full -BaseRef $env:BASE_REF
+      - name: Write compact Full summary
+        if: always()
+        shell: pwsh
+        run: if (Test-Path build/verify/summary.md) { Get-Content build/verify/summary.md >> $env:GITHUB_STEP_SUMMARY }
+      - name: Upload Full failure logs
+        if: failure() || (github.event_name == 'workflow_dispatch' && inputs.upload_logs)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: full-quality-logs
+          path: build/verify/logs
+          retention-days: 5
+          if-no-files-found: ignore
+
+  package-quality:
+    name: package-quality
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact reviewed tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.preflight.outputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        env:
+          EXPECTED_CANDIDATE_SHA: ${{ needs.preflight.outputs.candidate_sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -cne $env:EXPECTED_CANDIDATE_SHA) { throw "Expected $env:EXPECTED_CANDIDATE_SHA, checked out $actual." }
+          "Exact candidate HEAD: $actual" >> $env:GITHUB_STEP_SUMMARY
+      - name: Select Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.13.1"
+          cache: npm
+      - name: Bootstrap tracked quality tools
+        shell: pwsh
+        run: ./tools/Bootstrap-QualityTools.ps1
+      - name: Run Package quality profile without publication
+        shell: pwsh
+        env:
+          BASE_REF: ${{ needs.preflight.outputs.base_ref }}
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Package -BaseRef $env:BASE_REF
+      - name: Verify no package output was retained
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path build/package-root) { throw 'Package root was retained.' }
+          $archives = @(Get-ChildItem build -Recurse -File -Filter *.zip -ErrorAction SilentlyContinue)
+          if ($archives.Count -gt 0) { throw 'Package archive was retained.' }
+      - name: Write compact Package summary
+        if: always()
+        shell: pwsh
+        run: if (Test-Path build/verify/summary.md) { Get-Content build/verify/summary.md >> $env:GITHUB_STEP_SUMMARY }
+      - name: Upload Package failure logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: package-quality-logs
+          path: build/verify/logs
+          retention-days: 5
+          if-no-files-found: ignore
+
+  quality-gate:
+    name: quality-gate
+    needs: [preflight, fast-quality, security-quality, full-quality, package-quality]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate required results
+        shell: pwsh
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          FAST_RESULT: ${{ needs.fast-quality.result }}
+          SECURITY_RESULT: ${{ needs.security-quality.result }}
+          FULL_RESULT: ${{ needs.full-quality.result }}
+          PACKAGE_RESULT: ${{ needs.package-quality.result }}
+          FULL_REQUIRED: ${{ needs.preflight.outputs.full_required }}
+        run: |
+          $rows = @(
+            "preflight=$env:PREFLIGHT_RESULT",
+            "fast-quality=$env:FAST_RESULT",
+            "security-quality=$env:SECURITY_RESULT",
+            "full-quality=$env:FULL_RESULT (required=$env:FULL_REQUIRED)",
+            "package-quality=$env:PACKAGE_RESULT"
+          )
+          "### Final quality gate" >> $env:GITHUB_STEP_SUMMARY
+          $rows | ForEach-Object { "- $_" >> $env:GITHUB_STEP_SUMMARY }
+          $requiredFailed = $env:PREFLIGHT_RESULT -ne 'success' -or $env:FAST_RESULT -ne 'success' -or $env:SECURITY_RESULT -ne 'success' -or $env:PACKAGE_RESULT -ne 'success'
+          $fullInvalid = if ($env:FULL_REQUIRED -eq 'true') { $env:FULL_RESULT -ne 'success' } else { $env:FULL_RESULT -notin @('skipped', 'success') }
+          if ($requiredFailed -or $fullInvalid) { throw 'Selected quality policy was not satisfied.' }

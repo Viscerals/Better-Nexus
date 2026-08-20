@@ -3,7 +3,7 @@
 -- be diagnosed from the log alone instead of by guesswork.
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
-dofile("core/Sync.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua")
 dofile("logic/Model.lua")
 dofile("logic/Strategy.lua")
@@ -18,6 +18,11 @@ local provider
 Nexus.LogViewer = { Init = function(p) provider = p end,
     Show = function() end, Toggle = function() end }
 dofile("ui/CommunityBuilds.lua")
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 
 local Codec, Sync = Nexus.Codec, Nexus.Sync
@@ -76,6 +81,8 @@ Sync.Init(Codec, Nexus.GameAdapter or {})
 Sync.ClearLog()
 clock = clock + 10
 Sync.RequestSync()
+clock = clock + 1.1
+Sync.OnUpdate(1.1)
 assert(LogHas("requested sync"), "the sync request itself was not logged")
 for _, m in ipairs(msgs) do
     H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice", "Common",

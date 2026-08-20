@@ -33,6 +33,20 @@ local QUALITY_COLORS = {
 local frame, lines, lockBtn, controlsFrame, hideBtn
 local Adapter, Model
 local ticker = 0
+local cachedWishlist, cachedOwned, cachedCatalog
+local revisionsKnown = false
+local lastSlotsRevision, lastActiveRevision, lastGrantedRevision
+local lastOwnedRevision
+local lastWishlistRevision, lastCatalogRevision
+local lineState = {}
+local lastStyleTree
+local stats = {
+    refreshCalls=0,hiddenSkips=0,revisionReads=0,revisionSkips=0,
+    projectionBuilds=0,identicalModels=0,rowUpdates=0,
+    rowShows=0,rowHides=0,stylePasses=0,
+    framesCreated=0,linesCreated=0,cachedLineStates=0,
+    wishlistReads=0,ownedReads=0,catalogReads=0,
+}
 
 local function IsLocked()
     return NexusDB.overlayLocked ~= false
@@ -84,9 +98,21 @@ local function ApplyScale()
     pcall(function() if controlsFrame then controlsFrame:SetScale(scale) end end)
 end
 
+local function ApplyTheme()
+    local theme = Nexus and Nexus.Theme
+    local style = theme and theme.StyleTree
+    if controlsFrame and type(style) == "function"
+        and style ~= lastStyleTree then
+        style(controlsFrame)
+        lastStyleTree = style
+        stats.stylePasses = stats.stylePasses + 1
+    end
+end
+
 local function EnsureFrame()
     if frame then return frame end
     frame = CreateFrame("Frame", "NexusOverlay", UIParent)
+    stats.framesCreated = stats.framesCreated + 1
     frame:SetSize(COLUMNS * COLUMN_WIDTH + 20, ROWS_PER_COLUMN * ROW_HEIGHT + 30)
     frame:SetFrameStrata("DIALOG")
     frame:SetFrameLevel(60)
@@ -118,11 +144,13 @@ local function EnsureFrame()
         pcall(function() fs:SetShadowColor(0, 0, 0, 1); fs:SetShadowOffset(1, -1) end)
         fs:Hide()
         lines[i] = fs
+        stats.linesCreated = stats.linesCreated + 1
     end
 
     -- The control strip is a sibling of the click-through list. Disabling
     -- mouse input on the overlay body must never disable these controls.
     controlsFrame = CreateFrame("Frame", "NexusOverlayControls", UIParent)
+    stats.framesCreated = stats.framesCreated + 1
     controlsFrame:SetSize(80, 22)
     controlsFrame:SetFrameStrata("DIALOG")
     controlsFrame:SetFrameLevel(75)
@@ -131,6 +159,7 @@ local function EnsureFrame()
     controlsFrame:Hide()
 
     lockBtn = CreateFrame("Button", nil, controlsFrame, "UIPanelButtonTemplate")
+    stats.framesCreated = stats.framesCreated + 1
     lockBtn:SetSize(50, 18)
     lockBtn:SetPoint("LEFT", 0, 0)
     lockBtn:SetScript("OnClick", function()
@@ -141,6 +170,7 @@ local function EnsureFrame()
     -- Hide button: lets the player collapse the overlay without going
     -- into the editor or typing /nexus overlay.
     hideBtn = CreateFrame("Button", nil, controlsFrame, "UIPanelButtonTemplate")
+    stats.framesCreated = stats.framesCreated + 1
     hideBtn:SetSize(22, 18)
     hideBtn:SetPoint("LEFT", lockBtn, "RIGHT", 4, 0)
     hideBtn:SetText("-")
@@ -156,19 +186,141 @@ local function EnsureFrame()
     ApplyPosition()
     ApplyLockState()
     ApplyScale()
+    ApplyTheme()
     return frame
 end
 
+local function ReadRevisions()
+    local reader = Adapter and Adapter.PresentationRevisions
+    if type(reader) ~= "function" then return false end
+    stats.revisionReads = stats.revisionReads + 1
+    local ok, slotsRevision, activeRevision, grantedRevision,
+        ownedRevision, wishlistRevision, catalogRevision = pcall(reader)
+    if not ok or slotsRevision == nil or activeRevision == nil
+        or grantedRevision == nil or ownedRevision == nil
+        or wishlistRevision == nil
+        or catalogRevision == nil then
+        return false
+    end
+    return true,slotsRevision,activeRevision,grantedRevision,ownedRevision,
+        wishlistRevision,catalogRevision
+end
+
+local function StoreRevisions(slotsRevision, activeRevision, grantedRevision,
+    ownedRevision, wishlistRevision, catalogRevision)
+    revisionsKnown = true
+    lastSlotsRevision, lastActiveRevision = slotsRevision, activeRevision
+    lastGrantedRevision, lastOwnedRevision = grantedRevision, ownedRevision
+    lastWishlistRevision = wishlistRevision
+    lastCatalogRevision = catalogRevision
+end
+
+local function AcquirePresentation()
+    local known, slotsRevision, activeRevision, grantedRevision, ownedRevision,
+        wishlistRevision, catalogRevision = ReadRevisions()
+    if known and revisionsKnown
+        and slotsRevision == lastSlotsRevision
+        and activeRevision == lastActiveRevision
+        and grantedRevision == lastGrantedRevision
+        and ownedRevision == lastOwnedRevision
+        and wishlistRevision == lastWishlistRevision
+        and catalogRevision == lastCatalogRevision then
+        stats.revisionSkips = stats.revisionSkips + 1
+        return false
+    end
+
+    local refreshWishlist = not known or not revisionsKnown
+        or slotsRevision ~= lastSlotsRevision
+        or activeRevision ~= lastActiveRevision
+        or wishlistRevision ~= lastWishlistRevision
+    local refreshOwned = not known or not revisionsKnown
+        or grantedRevision ~= lastGrantedRevision
+        or ownedRevision ~= lastOwnedRevision
+    local refreshCatalog = not known or not revisionsKnown
+        or catalogRevision ~= lastCatalogRevision
+    if refreshWishlist then
+        cachedWishlist = Adapter and Adapter.Wishlist and Adapter.Wishlist()
+        stats.wishlistReads = stats.wishlistReads + 1
+    end
+    if refreshOwned then
+        cachedOwned = Adapter and Adapter.Owned and Adapter.Owned()
+        stats.ownedReads = stats.ownedReads + 1
+    end
+    if refreshCatalog then
+        cachedCatalog = Adapter and Adapter.Catalog and Adapter.Catalog()
+        stats.catalogReads = stats.catalogReads + 1
+    end
+    stats.projectionBuilds = stats.projectionBuilds + 1
+
+    if known then
+        -- A Wishlist read may promote the first-run association. Capture the
+        -- resulting revision so the next identical tick stays zero-work.
+        local finalKnown, finalSlots, finalActive, finalGranted,
+            finalOwned, finalWishlist, finalCatalog = ReadRevisions()
+        if finalKnown then
+            StoreRevisions(finalSlots, finalActive, finalGranted, finalOwned,
+                finalWishlist, finalCatalog)
+        else
+            revisionsKnown = false
+        end
+    else
+        revisionsKnown = false
+    end
+    return true
+end
+
+local function RememberLine(index, key)
+    if lineState[index] == nil then
+        stats.cachedLineStates = stats.cachedLineStates + 1
+    end
+    lineState[index] = key
+end
+
+local function HideLine(index)
+    if lineState[index] == "hidden" then return false end
+    lines[index]:Hide()
+    RememberLine(index, "hidden")
+    stats.rowUpdates = stats.rowUpdates + 1
+    stats.rowHides = stats.rowHides + 1
+    return true
+end
+
+local function ShowLine(index, key, text, red, green, blue, setColor)
+    if lineState[index] == key then return false end
+    local line = lines[index]
+    if setColor then line:SetTextColor(red, green, blue) end
+    line:SetText(text)
+    line:Show()
+    RememberLine(index, key)
+    stats.rowUpdates = stats.rowUpdates + 1
+    stats.rowShows = stats.rowShows + 1
+    return true
+end
+
+local function LineKey(text, red, green, blue, setColor)
+    return table.concat({
+        tostring(#text),text,setColor and "1" or "0",
+        tostring(red or ""),tostring(green or ""),tostring(blue or ""),
+    }, "|")
+end
+
 function M.Refresh()
-    if not frame or not frame:IsShown() then return end
-    local wl = Adapter and Adapter.Wishlist and Adapter.Wishlist()
-    local owned = Adapter and Adapter.Owned and Adapter.Owned()
-    local catalog = Adapter and Adapter.Catalog and Adapter.Catalog()
+    stats.refreshCalls = stats.refreshCalls + 1
+    if not frame or not frame:IsShown() then
+        stats.hiddenSkips = stats.hiddenSkips + 1
+        return
+    end
+    ApplyTheme()
+    if not AcquirePresentation() then return end
+    local wl, owned, catalog = cachedWishlist, cachedOwned, cachedCatalog
     local byFamily = (owned and owned.byFamily) or {}
+    local changed = false
     if not wl then
-        lines[1]:SetText("|cff888888No wishlist set|r")
-        lines[1]:Show()
-        for i = 2, MAX_LINES do lines[i]:Hide() end
+        local text = "|cff888888No wishlist set|r"
+        changed = ShowLine(1, LineKey(text, nil, nil, nil, false),
+            text, nil, nil, nil, false) or changed
+        for i = 2, MAX_LINES do changed = HideLine(i) or changed end
+        if not changed then stats.identicalModels = stats.identicalModels + 1 end
         return
     end
 
@@ -188,33 +340,37 @@ function M.Refresh()
 
     for i = 1, MAX_LINES do
         local e = list[i]
-        local fs = lines[i]
         if e then
             local have = tonumber(byFamily[e.family]) or 0
             local want = tonumber(e.stacks) or 1
             local nm = e.name or ("spell " .. tostring(e.spellId))
             local suffix = want > 1 and string.format(" (%d/%d)", math.min(have, want), want) or ""
+            local text, red, green, blue
             if have >= want then
                 local c = QUALITY_COLORS[e.quality] or QUALITY_COLORS[0]
-                fs:SetTextColor(c[1], c[2], c[3])
-                fs:SetText("|cff40ff80[X]|r " .. nm .. suffix)
+                red, green, blue = c[1], c[2], c[3]
+                text = "|cff40ff80[X]|r " .. nm .. suffix
             elseif have > 0 then
                 local c = QUALITY_COLORS[e.quality] or QUALITY_COLORS[0]
-                fs:SetTextColor(c[1] * 0.7, c[2] * 0.7, c[3] * 0.7)
-                fs:SetText("[~] " .. nm .. suffix)
+                red, green, blue = c[1] * 0.7, c[2] * 0.7, c[3] * 0.7
+                text = "[~] " .. nm .. suffix
             else
-                fs:SetTextColor(0.38, 0.38, 0.38)
-                fs:SetText("[ ] " .. nm .. suffix)
+                red, green, blue = 0.38, 0.38, 0.38
+                text = "[ ] " .. nm .. suffix
             end
-            fs:Show()
+            changed = ShowLine(i, LineKey(text, red, green, blue, true),
+                text, red, green, blue, true) or changed
         else
-            fs:Hide()
+            changed = HideLine(i) or changed
         end
     end
+    if not changed then stats.identicalModels = stats.identicalModels + 1 end
 end
 
 function M.Init(adapter, model)
     Adapter, Model = adapter, model
+    cachedWishlist, cachedOwned, cachedCatalog = nil, nil, nil
+    revisionsKnown = false
 end
 
 function M.Show()
@@ -279,12 +435,8 @@ function M.SetScale(value)
     ApplyScale()
 end
 
--- Dark-theme overlay controls.
-do
-    local originalRefresh = M.Refresh
-    M.Refresh = function(...)
-        local result = originalRefresh(...)
-        if controlsFrame and Nexus.Theme then Nexus.Theme.StyleTree(controlsFrame) end
-        return result
-    end
+function M.Stats()
+    local out = {}
+    for key, value in pairs(stats) do out[key] = value end
+    return out
 end

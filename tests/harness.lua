@@ -55,6 +55,24 @@ local function NewRegion()
                 return function(self, v) self.checked = v and true or false end
             elseif k == "GetChecked" then
                 return function(self) return self.checked end
+            elseif k == "SetFocus" then
+                return function(self) self.focused = true end
+            elseif k == "ClearFocus" then
+                return function(self) self.focused = false end
+            elseif k == "HasFocus" then
+                return function(self) return self.focused and true or false end
+            elseif k == "EnableMouse" then
+                return function(self, value)
+                    self.mouseEnabled = value ~= false
+                end
+            elseif k == "IsMouseEnabled" then
+                return function(self) return self.mouseEnabled and true or false end
+            elseif k == "Enable" then
+                return function(self) self.enabled = true end
+            elseif k == "Disable" then
+                return function(self) self.enabled = false end
+            elseif k == "IsEnabled" then
+                return function(self) return self.enabled ~= false end
             elseif k == "SetFrameStrata" then
                 return function(self, s) self.strata = s end
             elseif k == "GetFrameStrata" then
@@ -219,6 +237,13 @@ function UnitLevel() return H.playerLevel end
 function UnitClass() return "Boganic", "MAGE" end
 function UnitName() return "Boganic" end
 function GetNormalizedRealmName() return "Ebonhold" end
+H.projectVersion = nil
+function GetAddOnMetadata(addon, field)
+    if addon == "ProjectEbonhold" and field == "Version" then
+        return H.projectVersion
+    end
+    return nil
+end
 
 -- Catalog fixture ----------------------------------------------------------
 -- comment carries "Name - Rarity"; GetSpellInfo serves echo + tome names.
@@ -300,6 +325,19 @@ H.banishBlackhole = false
 H.runDataTable = nil   -- nil/{} until first push; replace identity via PushRunData
 function H.PushRunData(t) H.runDataTable = t end
 
+local function CloneValue(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local copy = {}
+    seen[value] = copy
+    for key, child in pairs(value) do
+        copy[CloneValue(key, seen)] = CloneValue(child, seen)
+    end
+    return copy
+end
+function H.CloneValue(value) return CloneValue(value) end
+
 H.granted = nil        -- name-keyed, one entry per stack (client shape)
 H.locked = nil
 H.wishlist = nil       -- raw client shape
@@ -314,7 +352,10 @@ function PerkUI.UpdateSinglePerk(idx, ...)
 end
 
 local EchoJournal = {}
-function EchoJournal.OnDataChanged() end
+H.echoDataChangeNotifications = 0
+function EchoJournal.OnDataChanged()
+    H.echoDataChangeNotifications = H.echoDataChangeNotifications + 1
+end
 function EchoJournal.NotifyNewEcho() end
 
 local Service = {}
@@ -455,6 +496,38 @@ function Service.RequestServerBuildSlots()
             { slot = ps.slot, name = ps.name, verified = true, echoes = ps.echoes }
         H.pendingSnapshot = nil
     end
+    if H.freshEchoReplies then
+        local beforeSlots, beforeGranted, beforeLocked =
+            Perks.serverBuildSlots, H.granted, H.locked
+        local beforeDiscovered, beforeDisabled = H.discovered, H.disabledEchoes
+        Perks.serverBuildSlots = CloneValue(Perks.serverBuildSlots)
+        H.granted = CloneValue(H.granted)
+        H.locked = CloneValue(H.locked)
+        H.discovered = CloneValue(H.discovered)
+        H.disabledEchoes = CloneValue(H.disabledEchoes)
+        H.freshEchoReplyCount = (H.freshEchoReplyCount or 0) + 1
+        if beforeSlots ~= Perks.serverBuildSlots then
+            H.freshSlotIdentityChanges = (H.freshSlotIdentityChanges or 0) + 1
+        end
+        if beforeGranted ~= H.granted then
+            H.freshGrantedIdentityChanges =
+                (H.freshGrantedIdentityChanges or 0) + 1
+        end
+        if beforeLocked ~= H.locked then
+            H.freshLockedIdentityChanges =
+                (H.freshLockedIdentityChanges or 0) + 1
+        end
+        if beforeDiscovered ~= H.discovered then
+            H.freshDiscoveredIdentityChanges =
+                (H.freshDiscoveredIdentityChanges or 0) + 1
+        end
+        if beforeDisabled ~= H.disabledEchoes then
+            H.freshDisabledIdentityChanges =
+                (H.freshDisabledIdentityChanges or 0) + 1
+        end
+        if type(H.onFreshEchoReply) == "function" then H.onFreshEchoReply(H) end
+        EchoJournal.OnDataChanged()
+    end
 end
 function Service.ActivateServerBuildSlot(slot)
     if not slot or slot < 0 then return false end
@@ -501,6 +574,19 @@ function H.DeliverSlots(bySlot, activeSlot)
     EchoJournal.OnDataChanged()
 end
 
+function H.EnableFreshEchoReplies(enabled, callback)
+    H.freshEchoReplies = enabled and true or false
+    H.onFreshEchoReply = callback
+end
+
+function H.SetServerActiveSlot(activeSlot)
+    Perks.serverActiveSlot = activeSlot or 0
+end
+
+function H.NotifyEchoDataChanged()
+    EchoJournal.OnDataChanged()
+end
+
 -- Board delivery: sets the INTERNAL table (returned by reference), clears
 -- pendingReroll (the one self-healing latch), fires PerkUI.Show like the
 -- SS-16 handler does.
@@ -541,5 +627,41 @@ ProjectEbonholdOptionsService = {
     SetSetting = function(self, k, v) optSettings[k] = v end,
 }
 H.optSettings = optSettings
+
+-- Runtime modules now consume the merged build catalog. Most focused suites do
+-- not need to parse the multi-megabyte release baseline, so give them the same
+-- schema with an empty test baseline; export/runtime-catalog suites load or
+-- replace the real bundle explicitly. Each module Init call rebinds the facade
+-- after a fixture replaces NexusDB.
+Nexus = Nexus or {}
+Nexus.BundledBuilds = {
+    schemaVersion=1, catalogVersion="test-empty", sourceVersion="test",
+    generatedAt=0, builds={},
+}
+dofile("core/Revisions.lua")
+dofile("core/Identity.lua")
+dofile("core/CandidateEvidence.lua")
+dofile("core/ViewProjections.lua")
+dofile("core/CommunityProjection.lua")
+dofile("core/CommunityController.lua")
+dofile("ui/VirtualList.lua")
+dofile("ui/LayoutMetrics.lua")
+dofile("ui/CommunityRenderer.lua")
+dofile("core/LoadoutEvidence.lua")
+dofile("core/DataCompaction.lua")
+dofile("core/BuildCatalog.lua")
+dofile("core/DataRetention.lua")
+dofile("data/Release.lua")
+dofile("logic/Version.lua")
+dofile("core/Performance.lua")
+dofile("core/StutterAlertIntegration.lua")
+dofile("core/EchoCatalogSource.lua")
+dofile("core/Errors.lua")
+dofile("core/Scheduler.lua")
+dofile("core/LegacyDataMigration.lua")
+dofile("core/DiagnosticHistory.lua")
+dofile("core/DiagnosticLogs.lua")
+dofile("core/ViewRefresh.lua")
+dofile("core/Updates.lua")
 
 return H

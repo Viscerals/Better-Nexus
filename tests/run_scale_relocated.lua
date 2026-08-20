@@ -57,6 +57,9 @@ assert(OV.GetScale() >= 0.5, "scale was not clamped to a sane minimum")
 print("scale is safely clamped to a sane range -- OK")
 
 -- Now verify the EDITOR's popup genuinely drives this real overlay.
+dofile("core/WishlistModel.lua")
+dofile("core/WishlistController.lua")
+dofile("ui/WishlistRenderer.lua")
 dofile("ui/WishlistEditor.lua")
 local EW = Nexus.WishlistEditor
 EW.Init(Adapter, Model)

@@ -12,6 +12,11 @@ dofile("ui/Panel.lua")
 local provider
 Nexus.LogViewer = { Init = function(p) provider = p end,
     Show = function() end, Toggle = function() end }
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 NexusDB = {}
 H.wishlist = { name = "MyBuild", class = "MAGE", echoes = {

@@ -1,0 +1,22 @@
+{
+  "name": "better-nexus-quality-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned development-only validation dependencies for Better-Nexus.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test:toolchain": "node tests/run-quality-toolchain.js",
+    "test:quality-gate": "node tests/run-quality-gate-self-tests.js",
+    "test:security-policy": "node tests/run-security-policy.js",
+    "quality:fast": "pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast",
+    "quality:full": "pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Full",
+    "quality:package": "pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Package",
+    "quality:security": "pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Security"
+  },
+  "dependencies": {
+    "fengari": "0.1.5",
+    "luaparse": "0.3.1"
+  }
+}

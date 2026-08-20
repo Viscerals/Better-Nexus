@@ -8,10 +8,9 @@ local M = {}
 Nexus.Panel = M
 
 local frame, minimapBtn, callbacks
-local userHidden = false
+local panelWantedVisible = true
 local menuSuppressed = false
 local menuTransition = false
-local hudWasShownBeforeMenu = false
 local attachedMenuFrames = {}
 local missingNamesCache, shedNamesCache, unknownTomesCache, toLockNamesCache = {}, {}, {}, {}
 
@@ -27,12 +26,123 @@ local completeBadge, completeSubtext
 local setupText, setupHint, setupGetStartedBtn, setupImportBtn
 local autoBtn, buildsBtn, leaderboardBtn, menuBtn, versionText, worldStatusBox, worldStatusText, worldStatusAsh, worldStatusGain, worldStatusHit, bestDpsText, bestDpsHit
 local showPerformance = false
+local renderState = {
+    committed=false,applying=false,signatures=nil,hadFailure=false,
+}
+local renderStats = {
+    calls=0, layouts=0, skipped=0, statusOnly=0,
+    performancePasses=0, noticePasses=0, themeTreeWalks=0,
+    commits=0,failures=0,recoveries=0,recoveryRequests=0,
+    hiddenUncommitted=0,
+}
+
+StaticPopupDialogs["NEXUS_UPDATE_RELEASES"] = {
+    text = "Nexus %s was reported as available. Installation is manual. Copy the releases page below:",
+    button1 = "Close",
+    hasEditBox = true,
+    editBoxWidth = 380,
+    OnShow = function(self)
+        local url = Nexus.Updates and Nexus.Updates.ReleaseUrl
+            and Nexus.Updates.ReleaseUrl() or "https://github.com/Viscerals/Better-Nexus/releases"
+        if self.editBox then
+            self.editBox:SetText(url)
+            self.editBox:HighlightText()
+            self.editBox:SetFocus()
+        end
+    end,
+    EditBoxOnEnterPressed = function(self) self:HighlightText() end,
+    EditBoxOnEscapePressed = function(self) self:ClearFocus() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
 
 local function SafeText(v) return v ~= nil and tostring(v) or "" end
+
+local function DefensiveCopy(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local out = {}
+    seen[value] = out
+    for key, child in pairs(value) do
+        out[DefensiveCopy(key, seen)] = DefensiveCopy(child, seen)
+    end
+    return out
+end
+
+local function Signature(value, seen)
+    local kind = type(value)
+    if kind ~= "table" then
+        local text = SafeText(value)
+        return kind .. ":" .. tostring(#text) .. ":" .. text
+    end
+    seen = seen or { _nextId=0 }
+    if seen[value] then return "cycle:" .. tostring(seen[value]) end
+    seen._nextId = seen._nextId + 1
+    seen[value] = seen._nextId
+    local keys = {}
+    for key in pairs(value) do keys[#keys + 1] = key end
+    table.sort(keys, function(left, right)
+        return type(left) .. ":" .. tostring(left)
+            < type(right) .. ":" .. tostring(right)
+    end)
+    local out = {"{"}
+    for _, key in ipairs(keys) do
+        out[#out + 1] = Signature(key, seen)
+        out[#out + 1] = "="
+        out[#out + 1] = Signature(value[key], seen)
+        out[#out + 1] = ";"
+    end
+    out[#out + 1] = "}"
+    return table.concat(out)
+end
+
+local function ModelSignatures(model)
+    local source = type(model.progress) == "table" and model.progress or {}
+    local layoutKey = "legacy"
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.RuntimeKey then
+        local ok, key = pcall(Nexus.LayoutMetrics.RuntimeKey,"panel",272,0)
+        if ok then layoutKey = key end
+    end
+    local progress = {
+        wishlistName=source.wishlistName,
+        owned=source.owned,
+        total=source.total,
+        missing=source.missing,
+        shed=source.shed,
+        unknownTomes=source.unknownTomes,
+        toLock=source.toLock,
+        activeSlot=source.activeSlot,
+        isCommunityPreview=source.isCommunityPreview,
+    }
+    return {
+        layout = Signature({
+            progress=progress,
+            cards=model.cards,
+            recommendation=model.recommendation,
+            level=model.level,
+            serverStatus=model.serverStatus,
+            showPerformance=showPerformance,
+            layoutRevision=layoutKey,
+        }),
+        performance = Signature({
+            performance=type(model.progress) == "table" and model.progress.performance or nil,
+            bestDps=model.bestDps,
+        }),
+        notice = Signature(model.updateNotice),
+        status = Signature(model.status),
+        auto = Signature(model.auto),
+    }
+end
 
 local function ShortName(v, maxChars)
     local s = SafeText(v)
     maxChars = maxChars or 30
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then
+        return Nexus.LayoutMetrics.Truncate(s, maxChars)
+    end
     if #s <= maxChars then return s end
     return s:sub(1, math.max(1, maxChars - 3)) .. "..."
 end
@@ -65,10 +175,13 @@ end
 -- to wire them in, and M.Render/ShowCoreProgress read them off `frame`
 -- (already a heavily-used upvalue there) instead of adding their own.
 local function CreateToLockWidgets(f)
-    f.toLockLabel = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local layout = Nexus.LayoutMetrics
+    f.toLockLabel = f:CreateFontString(nil, "OVERLAY",
+        layout and layout.FontObject("small") or "GameFontDisableSmall")
     f.toLockLabel:SetText("TO LOCK")
     f.toLockLabel:SetTextColor(0.7, 0.45, 1)
-    f.toLockText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.toLockText = f:CreateFontString(nil, "OVERLAY",
+        layout and layout.FontObject("small") or "GameFontHighlightSmall")
     f.toLockText:SetJustifyH("LEFT")
     f.toLockText:SetJustifyV("TOP")
     f.toLockText:SetTextColor(0.72, 0.45, 1)
@@ -108,6 +221,59 @@ end
 local function SetPoint(widget, point, relative, relativePoint, x, y)
     widget:ClearAllPoints()
     widget:SetPoint(point, relative or frame, relativePoint or point, x or 0, y or 0)
+end
+
+local function SetOwnedFont(widget, font)
+    if widget and type(widget.SetFontObject) == "function" then
+        pcall(widget.SetFontObject, widget, font)
+    end
+end
+
+local function SetOwnedButtonFont(widget, font)
+    if not widget then return end
+    if type(widget.SetNormalFontObject) == "function" then
+        pcall(widget.SetNormalFontObject, widget, font)
+    end
+    if type(widget.SetHighlightFontObject) == "function" then
+        pcall(widget.SetHighlightFontObject, widget, font)
+    end
+    if type(widget.SetDisabledFontObject) == "function" then
+        pcall(widget.SetDisabledFontObject, widget, font)
+    end
+end
+
+function M.ApplyOwnedFonts()
+    local layout = Nexus.LayoutMetrics
+    if not (layout and frame) then return false end
+    local small = layout.FontObject("small")
+    local normal = layout.FontObject("normal")
+    local large = layout.FontObject("large")
+    if not frame._nexusOwnedFonts then
+        frame._nexusOwnedFonts = true
+        for _, widget in ipairs({
+            statusText,recText,progressLabel,needLabel,needText,tomesLabel,
+            tomesValue,shedLabel,shedText,performanceLabel,setLabelText,
+            dummyLabel,dummyGlobal,lkLabel,lkPersonalLabel,lkGlobal,
+            completeSubtext,setupHint,bestDpsText,versionText,
+            worldStatusGain,worldStatusBox and worldStatusBox.intensityText,
+        }) do SetOwnedFont(widget, small) end
+        for _, widget in ipairs(cardTexts) do SetOwnedFont(widget, small) end
+        for _, widget in ipairs({
+            buildHeaderText,worldStatusText,worldStatusAsh,progressValue,
+            dummyValue,dummyGlobalValue,lkValue,lkGlobalValue,completeBadge,
+        }) do SetOwnedFont(widget, normal) end
+        SetOwnedFont(setupText, large)
+        for _, widget in ipairs({
+            switchBtn,setupGetStartedBtn,setupImportBtn,autoBtn,buildsBtn,
+            leaderboardBtn,menuBtn,
+        }) do SetOwnedButtonFont(widget, normal) end
+    end
+    if frame.toLockLabel and not frame.toLockLabel._nexusOwnedFont then
+        SetOwnedFont(frame.toLockLabel, small)
+        SetOwnedFont(frame.toLockText, small)
+        frame.toLockLabel._nexusOwnedFont = true
+    end
+    return true
 end
 
 local function AddDpsTooltip(widget, title, personal, global)
@@ -158,13 +324,38 @@ local function AnyNexusMenuShown()
     return false
 end
 
+local function ApplyWantedVisibility()
+    if not frame then return false end
+    if panelWantedVisible and not menuSuppressed
+        and renderState.committed and not renderState.applying then
+        frame:Show()
+        return true
+    end
+    if panelWantedVisible and not menuSuppressed and not renderState.committed then
+        renderStats.hiddenUncommitted = renderStats.hiddenUncommitted + 1
+    end
+    frame:Hide()
+    return false
+end
+
+local function RequestDisplayRecovery()
+    if renderState.committed or not panelWantedVisible or not callbacks
+        then
+        return false
+    end
+    local request = type(callbacks.RequestFirstDisplay) == "function"
+        and callbacks.RequestFirstDisplay or callbacks.RefreshDisplay
+    if type(request) ~= "function" then return false end
+    renderStats.recoveryRequests = renderStats.recoveryRequests + 1
+    local ok, result = pcall(request)
+    return ok and result ~= false
+end
+
 local function RestoreHudAfterMenus()
     if menuTransition or AnyNexusMenuShown() then return end
     menuSuppressed = false
-    if hudWasShownBeforeMenu and not userHidden then
-        if frame then frame:Show() end
-    end
-    hudWasShownBeforeMenu = false
+    RequestDisplayRecovery()
+    ApplyWantedVisibility()
 end
 
 function M.AttachMenuFrame(menuFrame)
@@ -175,10 +366,7 @@ function M.AttachMenuFrame(menuFrame)
     menuFrame:SetScript("OnShow", function(self, ...)
         if oldShow then oldShow(self, ...) end
         menuSuppressed = true
-        if frame and frame:IsShown() then
-            hudWasShownBeforeMenu = true
-            frame:Hide()
-        end
+        if frame and frame:IsShown() then frame:Hide() end
     end)
     menuFrame:SetScript("OnHide", function(self, ...)
         if oldHide then oldHide(self, ...) end
@@ -188,9 +376,6 @@ end
 
 function M.CloseOtherWindows(exceptName)
     menuTransition = true
-    if not menuSuppressed then
-        hudWasShownBeforeMenu = frame and frame:IsShown() or false
-    end
     menuSuppressed = true
     if frame then frame:Hide() end
     CloseOtherNexusWindows(exceptName)
@@ -224,12 +409,14 @@ local function EnsureFrame()
     frame:Hide()
 
     buildHeaderText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame._buildHeaderText = buildHeaderText
     buildHeaderText:SetPoint("TOP", 0, -8)
     buildHeaderText:SetSize(244, 17)
     buildHeaderText:SetJustifyH("CENTER")
     buildHeaderText:SetTextColor(0.45, 0.84, 1)
 
     switchBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._switchBtn = switchBtn
     switchBtn:SetSize(90, 19)
     switchBtn:SetPoint("TOPLEFT", 10, -26)
     switchBtn:SetText("Swap")
@@ -338,7 +525,7 @@ local function EnsureFrame()
         end
     end)
     worldStatusHit:SetScript("OnEnter", function(self)
-        local ss = Nexus.ServerStatus and Nexus.ServerStatus.GetSummary and Nexus.ServerStatus.GetSummary() or {}
+        local ss = worldStatusBox._summary or {}
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(ss.tier or ss.mode or "Difficulty", 1, 0.25, 0.25)
         if ss.ash then GameTooltip:AddLine("Soul Ash: " .. tostring(ss.ash):gsub(",",""), 1, 1, 1) end
@@ -355,6 +542,7 @@ local function EnsureFrame()
     worldStatusBox:Hide()
 
     rollArea = CreateFrame("Frame", nil, frame)
+    frame._rollArea = rollArea
     rollArea:SetPoint("TOPLEFT", 10, -98)
     rollArea:SetSize(280, 104)
 
@@ -598,6 +786,7 @@ local function EnsureFrame()
     setupImportBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     autoBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._autoBtn = autoBtn
     autoBtn:SetSize(72, 22)
     autoBtn:SetPoint("BOTTOMLEFT", 8, 7)
     autoBtn:SetText(AutoLabel(nil))
@@ -657,6 +846,7 @@ local function EnsureFrame()
     menuBtn:SetSize(30, 20)
     menuBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 7, -6)
     menuBtn:SetText("...")
+    frame._menuBtn = menuBtn
     menuBtn:SetFrameLevel(frame:GetFrameLevel() + 8)
     menuBtn:SetScript("OnClick", function(self)
         if type(EasyMenu) ~= "function" then return end
@@ -669,6 +859,34 @@ local function EnsureFrame()
             end
         end
         local items = {
+            {
+                text = (Nexus.Updates and Nexus.Updates.GetVisibleNotice
+                    and Nexus.Updates.GetVisibleNotice())
+                    and ("Update available: v" .. tostring(Nexus.Updates.GetVisibleNotice().version))
+                    or "No published update reported",
+                notCheckable = true,
+                disabled = not (Nexus.Updates and Nexus.Updates.GetVisibleNotice
+                    and Nexus.Updates.GetVisibleNotice()),
+                func = MenuAction(function()
+                    local notice = Nexus.Updates and Nexus.Updates.GetVisibleNotice
+                        and Nexus.Updates.GetVisibleNotice()
+                    if notice then
+                        StaticPopup_Show("NEXUS_UPDATE_RELEASES", notice.version,
+                            Nexus.Updates.ReleaseUrl())
+                    end
+                end),
+            },
+            {
+                text = (Nexus.Updates and Nexus.Updates.IsEnabled
+                    and Nexus.Updates.IsEnabled())
+                    and "Disable Update Notices" or "Enable Update Notices",
+                notCheckable = true,
+                func = MenuAction(function()
+                    if Nexus.Updates and Nexus.Updates.SetEnabled then
+                        Nexus.Updates.SetEnabled(not Nexus.Updates.IsEnabled())
+                    end
+                end),
+            },
             {
                 text = showPerformance and "Hide Performance" or "Show Performance",
                 notCheckable = true,
@@ -728,6 +946,12 @@ local function EnsureFrame()
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Status: " .. tostring(st), 0.6, 0.85, 1, true)
         end
+        local notice = M._lastModel and M._lastModel.updateNotice
+        if notice then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Update available: v" .. tostring(notice.version), 1, 0.82, 0, true)
+            GameTooltip:AddLine("Click to copy the manual releases-page link.", 0.8, 0.8, 0.8, true)
+        end
         GameTooltip:Show()
     end)
     menuBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -739,7 +963,8 @@ local function EnsureFrame()
     bestDpsText:SetText("|cff888888Best DPS: hit a training dummy to record|r")
     bestDpsHit = HitFrame(frame, bestDpsText)
     bestDpsHit:SetScript("OnEnter", function(self)
-        local info = Nexus.DpsCapture and Nexus.DpsCapture.GetPlayerInfo and Nexus.DpsCapture.GetPlayerInfo(UnitName("player"))
+        local info = M._lastModel and M._lastModel.bestDps
+            and M._lastModel.bestDps.info
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Character Best DPS", 1, 1, 1)
         if info then
@@ -770,6 +995,10 @@ local function EnsureFrame()
         frame:SetBackdropBorderColor(0.28, 0.28, 0.34, 0.9)
     end)
 
+    frame._footerButtons = {
+        auto=autoBtn,builds=buildsBtn,leaderboard=leaderboardBtn,
+    }
+    M.ApplyOwnedFonts()
     return frame
 end
 
@@ -827,7 +1056,10 @@ local function EnsureMinimapButton()
     return btn
 end
 
-local function PositionPerformance(topY, completed)
+local function PositionPerformance(topY, completed, metrics)
+    local small = metrics and metrics.small or 11
+    local normal = metrics and metrics.normal or 14
+    local gap = metrics and metrics.gap or 6
     if completed then
         -- Compact centered record table sized to stay inside the narrower HUD.
         -- Keep headings centered while pulling value columns inward so long DPS
@@ -835,55 +1067,64 @@ local function PositionPerformance(topY, completed)
         local left, width = 24, 224
         local labelW, valueW = 120, 72
 
+        local dummyTop = topY - small - gap
+        local dummyGlobalTop = dummyTop - normal - math.max(3,math.floor(gap/2))
+        local lkHeadingTop = dummyGlobalTop - normal - gap
+        local lkTop = lkHeadingTop - small - gap
+        local lkGlobalTop = lkTop - normal - math.max(3,math.floor(gap/2))
+
         SetPoint(performanceLabel, "TOP", frame, "TOP", 0, topY)
-        performanceLabel:SetSize(width, 13)
+        performanceLabel:SetSize(width, small)
         performanceLabel:SetJustifyH("CENTER")
 
-        SetPoint(dummyLabel, "TOPLEFT", frame, "TOPLEFT", left, topY - 21)
-        dummyLabel:SetSize(labelW, 14); dummyLabel:SetJustifyH("LEFT")
-        SetPoint(dummyValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, topY - 21)
-        dummyValue:SetSize(valueW, 14); dummyValue:SetJustifyH("RIGHT")
-        SetPoint(dummyGlobal, "TOPLEFT", frame, "TOPLEFT", left, topY - 41)
-        dummyGlobal:SetSize(labelW, 14); dummyGlobal:SetJustifyH("LEFT")
-        SetPoint(dummyGlobalValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, topY - 41)
-        dummyGlobalValue:SetSize(valueW, 14); dummyGlobalValue:SetJustifyH("RIGHT")
+        SetPoint(dummyLabel, "TOPLEFT", frame, "TOPLEFT", left, dummyTop)
+        dummyLabel:SetSize(labelW, normal); dummyLabel:SetJustifyH("LEFT")
+        SetPoint(dummyValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, dummyTop)
+        dummyValue:SetSize(valueW, normal); dummyValue:SetJustifyH("RIGHT")
+        SetPoint(dummyGlobal, "TOPLEFT", frame, "TOPLEFT", left, dummyGlobalTop)
+        dummyGlobal:SetSize(labelW, normal); dummyGlobal:SetJustifyH("LEFT")
+        SetPoint(dummyGlobalValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, dummyGlobalTop)
+        dummyGlobalValue:SetSize(valueW, normal); dummyGlobalValue:SetJustifyH("RIGHT")
 
-        SetPoint(lkPersonalLabel, "TOP", frame, "TOP", 0, topY - 70)
-        lkPersonalLabel:SetSize(width, 13); lkPersonalLabel:SetJustifyH("CENTER")
-        SetPoint(lkLabel, "TOPLEFT", frame, "TOPLEFT", left, topY - 91)
-        lkLabel:SetSize(labelW, 14); lkLabel:SetJustifyH("LEFT")
-        SetPoint(lkValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, topY - 91)
-        lkValue:SetSize(valueW, 14); lkValue:SetJustifyH("RIGHT")
-        SetPoint(lkGlobal, "TOPLEFT", frame, "TOPLEFT", left, topY - 111)
-        lkGlobal:SetSize(labelW, 14); lkGlobal:SetJustifyH("LEFT")
-        SetPoint(lkGlobalValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, topY - 111)
-        lkGlobalValue:SetSize(valueW, 14); lkGlobalValue:SetJustifyH("RIGHT")
+        SetPoint(lkPersonalLabel, "TOP", frame, "TOP", 0, lkHeadingTop)
+        lkPersonalLabel:SetSize(width, small); lkPersonalLabel:SetJustifyH("CENTER")
+        SetPoint(lkLabel, "TOPLEFT", frame, "TOPLEFT", left, lkTop)
+        lkLabel:SetSize(labelW, normal); lkLabel:SetJustifyH("LEFT")
+        SetPoint(lkValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, lkTop)
+        lkValue:SetSize(valueW, normal); lkValue:SetJustifyH("RIGHT")
+        SetPoint(lkGlobal, "TOPLEFT", frame, "TOPLEFT", left, lkGlobalTop)
+        lkGlobal:SetSize(labelW, normal); lkGlobal:SetJustifyH("LEFT")
+        SetPoint(lkGlobalValue, "TOPLEFT", frame, "TOPLEFT", left + labelW, lkGlobalTop)
+        lkGlobalValue:SetSize(valueW, normal); lkGlobalValue:SetJustifyH("RIGHT")
     else
         -- Expanded active-build performance is a separate section below progress.
         -- Keeping it out of the progress columns prevents every optional state
         -- (tomes, shed Echoes, live rolls) from competing for the same space.
         local left, right = 20, 160
         local colW = 120
+        local setTop = topY - small - math.max(3,math.floor(gap/2))
+        local rowTop = setTop - small - gap
+        local globalTop = rowTop - normal - math.max(3,math.floor(gap/2))
         SetPoint(performanceLabel, "TOP", frame, "TOP", 0, topY)
-        performanceLabel:SetSize(260, 13)
+        performanceLabel:SetSize(260, small)
         performanceLabel:SetJustifyH("CENTER")
-        SetPoint(setLabelText, "TOP", frame, "TOP", 0, topY - 15)
-        setLabelText:SetSize(260, 13)
+        SetPoint(setLabelText, "TOP", frame, "TOP", 0, setTop)
+        setLabelText:SetSize(260, small)
         setLabelText:SetJustifyH("CENTER")
 
-        SetPoint(dummyLabel, "TOPLEFT", frame, "TOPLEFT", left, topY - 38)
-        dummyLabel:SetSize(70, 14); dummyLabel:SetJustifyH("LEFT")
-        SetPoint(dummyValue, "TOPLEFT", frame, "TOPLEFT", left + 70, topY - 38)
-        dummyValue:SetSize(50, 14); dummyValue:SetJustifyH("RIGHT")
-        SetPoint(dummyGlobal, "TOPLEFT", frame, "TOPLEFT", left, topY - 57)
-        dummyGlobal:SetSize(colW, 14); dummyGlobal:SetJustifyH("LEFT")
+        SetPoint(dummyLabel, "TOPLEFT", frame, "TOPLEFT", left, rowTop)
+        dummyLabel:SetSize(70, normal); dummyLabel:SetJustifyH("LEFT")
+        SetPoint(dummyValue, "TOPLEFT", frame, "TOPLEFT", left + 70, rowTop)
+        dummyValue:SetSize(50, normal); dummyValue:SetJustifyH("RIGHT")
+        SetPoint(dummyGlobal, "TOPLEFT", frame, "TOPLEFT", left, globalTop)
+        dummyGlobal:SetSize(colW, normal); dummyGlobal:SetJustifyH("LEFT")
 
-        SetPoint(lkLabel, "TOPLEFT", frame, "TOPLEFT", right, topY - 38)
-        lkLabel:SetSize(70, 14); lkLabel:SetJustifyH("LEFT")
-        SetPoint(lkValue, "TOPLEFT", frame, "TOPLEFT", right + 70, topY - 38)
-        lkValue:SetSize(50, 14); lkValue:SetJustifyH("RIGHT")
-        SetPoint(lkGlobal, "TOPLEFT", frame, "TOPLEFT", right, topY - 57)
-        lkGlobal:SetSize(colW, 14); lkGlobal:SetJustifyH("LEFT")
+        SetPoint(lkLabel, "TOPLEFT", frame, "TOPLEFT", right, rowTop)
+        lkLabel:SetSize(70, normal); lkLabel:SetJustifyH("LEFT")
+        SetPoint(lkValue, "TOPLEFT", frame, "TOPLEFT", right + 70, rowTop)
+        lkValue:SetSize(50, normal); lkValue:SetJustifyH("RIGHT")
+        SetPoint(lkGlobal, "TOPLEFT", frame, "TOPLEFT", right, globalTop)
+        lkGlobal:SetSize(colW, normal); lkGlobal:SetJustifyH("LEFT")
     end
 
     dummyHit:ClearAllPoints()
@@ -895,16 +1136,11 @@ local function PositionPerformance(topY, completed)
 end
 
 local function RenderPerformance(pr, completed)
-    local D = Nexus.DpsCapture
-    local echoes = pr.dpsEchoes
-    local myDummy, myLK, topDummy, topLK
-    if D and type(echoes) == "table" then
-        myDummy = D.GetPersonalBestForEchoes and D.GetPersonalBestForEchoes(echoes, "dummy") or nil
-        myLK = D.GetPersonalBestForEchoes and D.GetPersonalBestForEchoes(echoes, "lk") or nil
-        local dRows = D.GetLeaderboardForEchoes and D.GetLeaderboardForEchoes(echoes, "dummy") or {}
-        local lRows = D.GetLeaderboardForEchoes and D.GetLeaderboardForEchoes(echoes, "lk") or {}
-        topDummy, topLK = dRows and dRows[1], lRows and lRows[1]
-    end
+    local performance = type(pr.performance) == "table" and pr.performance or {}
+    local dummy = type(performance.dummy) == "table" and performance.dummy or {}
+    local lk = type(performance.lk) == "table" and performance.lk or {}
+    local myDummy, myLK = dummy.personal, lk.personal
+    local topDummy, topLK = dummy.global, lk.global
 
     local count = tonumber(pr.total) or 0
     if completed then
@@ -969,7 +1205,14 @@ end
 
 function M.Toggle()
     local f = EnsureFrame()
-    if f:IsShown() then f:Hide(); userHidden = true else f:Show(); userHidden = false end
+    if f:IsShown() then
+        panelWantedVisible = false
+        f:Hide()
+    else
+        panelWantedVisible = true
+        RequestDisplayRecovery()
+        ApplyWantedVisibility()
+    end
 end
 
 local function LayoutServerStatus(completed)
@@ -1074,11 +1317,161 @@ local function LayoutFooter(showAuto, completed)
     leaderboardBtn:Show()
 end
 
-function M.Render(model)
-    if type(model) ~= "table" then return end
-    M._lastModel = model
-    EnsureFrame()
-    if not frame.toLockLabel then CreateToLockWidgets(frame) end
+local function PlacePanelRect(widget, x, y, width, height, relative)
+    if not widget then return end
+    widget:ClearAllPoints()
+    widget:SetPoint("TOPLEFT",relative or frame,"TOPLEFT",x,-y)
+    widget:SetSize(width,height)
+end
+
+local function PlacePanelBox(widget, box, relative)
+    if not box then return end
+    PlacePanelRect(widget,box.x,box.y,box.w,box.h,relative)
+end
+
+-- Apply one cached geometry snapshot after the state renderer has populated
+-- text and visibility. This final pass owns positions; model rendering remains
+-- free to update content without rebuilding or measuring the frame tree.
+local function ApplyPanelLayout(layout, completed)
+    if not (layout and frame) then return end
+    local boxes = layout.boxes
+    frame._responsiveLayout = layout
+    frame:SetSize(layout.width, layout.height)
+
+    if boxes.status then PlacePanelBox(worldStatusBox, boxes.status) end
+    if boxes.roll then
+        PlacePanelBox(rollArea, boxes.roll)
+        local inset = 2
+        local y = 1
+        statusText:ClearAllPoints()
+        statusText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -y)
+        statusText:SetSize(boxes.roll.w-inset*2, layout.small)
+        y = y + layout.small + math.max(3,math.floor(layout.gap/2))
+        for index = 1, 3 do
+            local text = cardTexts[index]
+            text:ClearAllPoints()
+            text:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -y)
+            text:SetSize(boxes.roll.w-inset*2, layout.small)
+            y = y + layout.small + math.max(2,math.floor(layout.gap/3))
+        end
+        recText:ClearAllPoints()
+        recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -y)
+        recText:SetSize(boxes.roll.w-inset*2,
+            math.max(layout.small*2,boxes.roll.h-y-layout.gap))
+        rollDivider:ClearAllPoints()
+        rollDivider:SetPoint("BOTTOMLEFT", rollArea, "BOTTOMLEFT", 1, 0)
+        rollDivider:SetSize(boxes.roll.w-2,1)
+    end
+
+    PlacePanelBox(setupText, boxes.setupTitle)
+    PlacePanelBox(setupHint, boxes.setupHint)
+    PlacePanelBox(setupGetStartedBtn, boxes.setupAssign)
+    PlacePanelBox(setupImportBtn, boxes.setupCreate)
+    PlacePanelBox(completeBadge, boxes.completeTitle)
+    PlacePanelBox(completeSubtext, boxes.completeText)
+    PlacePanelBox(progressLabel, boxes.progressHeader)
+    PlacePanelBox(progressValue, boxes.progressValue)
+
+    if boxes.tomes then
+        tomesLabel:SetText("MISSING TOMES")
+        PlacePanelRect(tomesLabel,boxes.tomes.x,boxes.tomes.y,
+            boxes.tomes.w-28,boxes.tomes.h)
+        tomesLabel:SetJustifyH("LEFT")
+        PlacePanelRect(tomesValue,boxes.tomes.x+boxes.tomes.w-24,
+            boxes.tomes.y,24,boxes.tomes.h)
+    end
+
+    local labelGap = math.max(3,math.floor(layout.gap/2))
+    if boxes.needed then
+        PlacePanelRect(needLabel,boxes.needed.x,boxes.needed.y,
+            boxes.needed.w,layout.small)
+        PlacePanelRect(needText,boxes.needed.x,
+            boxes.needed.y+layout.small+labelGap,boxes.needed.w,
+            boxes.needed.h-layout.small-labelGap)
+    end
+    if boxes.shed then
+        PlacePanelRect(shedLabel,boxes.shed.x,boxes.shed.y,
+            boxes.shed.w,layout.small)
+        PlacePanelRect(shedText,boxes.shed.x,
+            boxes.shed.y+layout.small+labelGap,boxes.shed.w,
+            boxes.shed.h-layout.small-labelGap)
+    end
+    if boxes.toLock and frame.toLockLabel then
+        PlacePanelRect(frame.toLockLabel,boxes.toLock.x,boxes.toLock.y,
+            boxes.toLock.w,layout.small)
+        PlacePanelRect(frame.toLockText,boxes.toLock.x,
+            boxes.toLock.y+layout.small+labelGap,boxes.toLock.w,
+            boxes.toLock.h-layout.small-labelGap)
+        frame.toLockHit:ClearAllPoints()
+        frame.toLockHit:SetPoint("TOPLEFT",frame.toLockLabel,"TOPLEFT",-2,2)
+        frame.toLockHit:SetPoint("BOTTOMRIGHT",frame.toLockText,"BOTTOMRIGHT",2,-2)
+    end
+    if boxes.performance then
+        PositionPerformance(-boxes.performance.y,completed,layout)
+    end
+    PlacePanelBox(bestDpsText, boxes.bestDps)
+end
+
+local function RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
+    local best = type(model.bestDps) == "table" and model.bestDps or {}
+    local dummyBest, lkBest = best.dummy, best.lk
+    if dummyBest or lkBest then
+        local dummyText = dummyBest and ("|cff4dff80" .. FmtDps(dummyBest.dps) .. "|r") or "|cff777777—|r"
+        local lkText = lkBest and ("|cff4dff80" .. FmtDps(lkBest.dps) .. "|r") or "|cff777777—|r"
+        bestDpsText:SetText("|cffb8b8b8Best DPS:|r  Dummy " .. dummyText .. "  |cff666666•|r  Lich King " .. lkText)
+    else
+        bestDpsText:SetText("|cff888888Best DPS: hit a training dummy to record|r")
+    end
+    if not noBuild then
+        bestDpsText:Show()
+        bestDpsHit:Show()
+    else
+        bestDpsText:Hide()
+        bestDpsHit:Hide()
+    end
+end
+
+local function ApplyModel(model, signatures)
+    local previousSignatures = renderState.signatures
+    if previousSignatures and signatures.layout == previousSignatures.layout then
+        local changed = false
+        if signatures.notice ~= previousSignatures.notice then
+            frame._menuBtn:SetText(model.updateNotice and "!" or "...")
+            renderStats.noticePasses = renderStats.noticePasses + 1
+            changed = true
+        end
+        if signatures.performance ~= previousSignatures.performance then
+            local pr = type(model.progress) == "table" and model.progress or {}
+            local total, owned = tonumber(pr.total) or 0, tonumber(pr.owned) or 0
+            local complete = total > 0 and owned >= total
+                and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
+            local cards = type(model.cards) == "table" and model.cards or {}
+            local activeRoll = #cards > 0 or SafeText(model.recommendation) ~= ""
+            local noBuild = total <= 0 or not pr.wishlistName
+            local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
+            local statusVisible = ss and (ss.tier or ss.mode or ss.ash
+                or ss.gain or ss.intensity ~= nil) and true or false
+            RenderPerformanceState(pr, complete, not noBuild and showPerformance)
+            RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
+            renderStats.performancePasses = renderStats.performancePasses + 1
+            changed = true
+        end
+        if signatures.auto ~= previousSignatures.auto
+            and frame._autoBtn:IsShown() then
+            frame._autoBtn:SetText(AutoLabel(model.auto))
+            changed = true
+        end
+        if signatures.status ~= previousSignatures.status then
+            renderStats.statusOnly = renderStats.statusOnly + 1
+            changed = true
+        end
+        if not changed then renderStats.skipped = renderStats.skipped + 1 end
+        return true
+    end
+    renderStats.layouts = renderStats.layouts + 1
+    if frame._menuBtn then
+        frame._menuBtn:SetText(model.updateNotice and "!" or "...")
+    end
 
     local pr = type(model.progress) == "table" and model.progress or {}
     local name = pr.wishlistName
@@ -1093,10 +1486,9 @@ function M.Render(model)
     local recommendation = SafeText(model.recommendation)
     local activeRoll = #cards > 0 or recommendation ~= ""
     local noBuild = total <= 0 or not name
-    local usingNexusStatus = Nexus.ServerStatus and Nexus.ServerStatus.IsUsingNexusHud and Nexus.ServerStatus.IsUsingNexusHud()
-    local ss = usingNexusStatus and Nexus.ServerStatus.GetSummary and Nexus.ServerStatus.GetSummary() or nil
+    local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
     local statusVisible = ss and (ss.tier or ss.mode or ss.ash or ss.gain or ss.intensity ~= nil) and true or false
-    local playerLevel = tonumber(model.level) or (UnitLevel and tonumber(UnitLevel("player"))) or 0
+    local playerLevel = tonumber(model.level) or 0
     -- Auto controls are useful only while actively progressing a build. At level
     -- 80 or once the destination is complete, the button is removed entirely
     -- instead of presenting an action that can no longer help the player.
@@ -1104,14 +1496,36 @@ function M.Render(model)
     -- including level 80 and completed-target boards. Toggling Auto off must
     -- never make the control used to turn it back on disappear.
     local showAutoControl = not noBuild and (activeRoll or (not complete and playerLevel < 80))
+    local responsiveLayout
+    if Nexus.LayoutMetrics then
+        local metricsOk, fontScale, uiScale, revision =
+            pcall(Nexus.LayoutMetrics.RuntimeMetrics)
+        if metricsOk then
+            local layoutOk, candidate = pcall(Nexus.LayoutMetrics.Panel,{
+                width=272,fontScale=fontScale,uiScale=uiScale,
+                revision=revision,activeRoll=activeRoll,
+                statusVisible=statusVisible,noBuild=noBuild,
+                complete=complete,showPerformance=showPerformance,
+                toLockCount=type(pr.toLock) == "table" and #pr.toLock or 0,
+                unknownTomes=type(pr.unknownTomes) == "table"
+                    and #pr.unknownTomes or 0,
+            })
+            if layoutOk and type(candidate) == "table" then
+                responsiveLayout = candidate
+            end
+        end
+        if not responsiveLayout and frame then
+            responsiveLayout = frame._responsiveLayout
+        end
+    end
     LayoutFooter(showAutoControl, complete and not noBuild)
 
-    buildHeaderText:SetText(name and ("|cff7fd5ff" .. ShortName(name, 29) .. "|r" .. (pr.isCommunityPreview and " |cff888888[Preview]|r" or "")) or "|cff7fd5ffNexus|r")
-    switchBtn:SetText("Swap")
+    frame._buildHeaderText:SetText(name and ("|cff7fd5ff" .. ShortName(name, 29) .. "|r" .. (pr.isCommunityPreview and " |cff888888[Preview]|r" or "")) or "|cff7fd5ffNexus|r")
+    frame._switchBtn:SetText("Swap")
 
-    SetVisible(rollArea, activeRoll)
-    rollArea:ClearAllPoints()
-    rollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, statusVisible and -98 or -39)
+    SetVisible(frame._rollArea, activeRoll)
+    frame._rollArea:ClearAllPoints()
+    frame._rollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, statusVisible and -98 or -39)
     if activeRoll then
         local activeSlot = tonumber(pr.activeSlot) or 0
         statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
@@ -1144,13 +1558,13 @@ function M.Render(model)
     local statusHeightReduction = statusVisible and 0 or 59
 
     if not complete then
-        switchBtn:ClearAllPoints()
-        switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -7)
-        switchBtn:SetSize(68, 19)
-        buildHeaderText:ClearAllPoints()
-        buildHeaderText:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
-        buildHeaderText:SetPoint("RIGHT", switchBtn, "LEFT", -5, 0)
-        buildHeaderText:SetJustifyH("CENTER")
+        frame._switchBtn:ClearAllPoints()
+        frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -7)
+        frame._switchBtn:SetSize(68, 19)
+        frame._buildHeaderText:ClearAllPoints()
+        frame._buildHeaderText:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
+        frame._buildHeaderText:SetPoint("RIGHT", frame._switchBtn, "LEFT", -5, 0)
+        frame._buildHeaderText:SetJustifyH("CENTER")
     end
 
     if noBuild then
@@ -1195,14 +1609,13 @@ function M.Render(model)
             SetVisible(completeBadge, true)
             SetVisible(completeSubtext, true)
         end
-        switchBtn:ClearAllPoints()
-        switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -7)
-        switchBtn:SetSize(68, 19)
-        buildHeaderText:ClearAllPoints()
-        buildHeaderText:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
-        buildHeaderText:SetPoint("RIGHT", switchBtn, "LEFT", -5, 0)
-        buildHeaderText:SetJustifyH("CENTER")
-        if showPerformance then PositionPerformance((activeRoll and -250 or -106) + statusHeightReduction, true) end
+        frame._switchBtn:ClearAllPoints()
+        frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -7)
+        frame._switchBtn:SetSize(68, 19)
+        frame._buildHeaderText:ClearAllPoints()
+        frame._buildHeaderText:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
+        frame._buildHeaderText:SetPoint("RIGHT", frame._switchBtn, "LEFT", -5, 0)
+        frame._buildHeaderText:SetJustifyH("CENTER")
         SetVisible(setLabelText, false)
         SetVisible(lkPersonalLabel, showPerformance)
         SetVisible(dummyGlobalValue, true)
@@ -1293,13 +1706,13 @@ function M.Render(model)
             frame.toLockHit:Hide()
         end
 
-        if showPerformance then PositionPerformance(contentTop - 118 - toLockExtra, false) end
         SetVisible(lkPersonalLabel, false)
     end
 
     if not noBuild then RenderPerformanceState(pr, complete, showPerformance) end
 
     LayoutServerStatus(complete and not noBuild)
+    worldStatusBox._summary = DefensiveCopy(ss)
     if ss and (ss.tier or ss.mode or ss.ash or ss.gain or ss.intensity ~= nil) then
         local difficulty = ss.tier or ss.mode or "Difficulty"
         -- Parse and format the ash number for compact display
@@ -1339,50 +1752,96 @@ function M.Render(model)
         worldStatusBox:Hide()
     end
 
-    -- Keep both encounter records visible. Showing only the larger of the
-    -- two made a Lich King result hide a valid Training Dummy capture.
-    local capture = Nexus.DpsCapture
-    local dummyBest = capture and capture.GetCharacterBest and capture.GetCharacterBest("dummy", UnitName("player")) or nil
-    local lkBest = capture and capture.GetCharacterBest and capture.GetCharacterBest("lk", UnitName("player")) or nil
-    if dummyBest or lkBest then
-        local dummyText = dummyBest and ("|cff4dff80" .. FmtDps(dummyBest.dps) .. "|r") or "|cff777777—|r"
-        local lkText = lkBest and ("|cff4dff80" .. FmtDps(lkBest.dps) .. "|r") or "|cff777777—|r"
-        bestDpsText:SetText("|cffb8b8b8Best DPS:|r  Dummy " .. dummyText .. "  |cff666666•|r  Lich King " .. lkText)
-    else
-        bestDpsText:SetText("|cff888888Best DPS: hit a training dummy to record|r")
+    RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
+    ApplyPanelLayout(responsiveLayout,complete)
+    if frame._autoBtn:IsShown() then
+        frame._autoBtn:SetText(AutoLabel(model.auto))
     end
-    bestDpsText:ClearAllPoints()
-    if complete and not noBuild and not activeRoll and not showPerformance then
-        bestDpsText:SetPoint("TOP", frame, "TOP", 0, statusVisible and -111 or -52)
-    else
-        bestDpsText:SetPoint("BOTTOM", frame, "BOTTOM", 0, 32)
+    if frame and Nexus.Theme and Nexus.Theme.StyleTree
+        and not frame._nexusHudTreeStyled then
+        Nexus.Theme.StyleTree(frame)
+        frame._nexusHudTreeStyled = true
+        renderStats.themeTreeWalks = renderStats.themeTreeWalks + 1
     end
-    -- The compact Best DPS prompt stays visible in every configured HUD state.
-    -- The Performance setting only controls the expanded Dummy/Lich King table.
-    if not noBuild then
-        bestDpsText:Show()
-        bestDpsHit:Show()
-    else
-        bestDpsText:Hide()
-        bestDpsHit:Hide()
-    end
-    if autoBtn:IsShown() then autoBtn:SetText(AutoLabel(model.auto)) end
-    if not userHidden and not menuSuppressed then frame:Show() else frame:Hide() end
+    return true
 end
 
-function M.Refresh() if M._lastModel then M.Render(M._lastModel) end end
-function M.Show() userHidden = false; if not menuSuppressed then EnsureFrame():Show() end end
-function M.Hide() if frame then frame:Hide() end; userHidden = true end
+local function ApplyCandidate(model, signatures)
+    if not frame.toLockLabel then CreateToLockWidgets(frame) end
+    M.ApplyOwnedFonts()
+    return ApplyModel(model, signatures)
+end
+
+function M.Render(model)
+    if type(model) ~= "table" then return false end
+    local candidate = DefensiveCopy(model)
+    local signatures = ModelSignatures(candidate)
+    renderStats.calls = renderStats.calls + 1
+    EnsureFrame()
+
+    -- A widget tree is a mutable object, so the visibility boundary is the
+    -- transaction: hide while applying, and publish commit/model/signature
+    -- state only after every required step succeeds.  On failure the prior
+    -- immutable model remains the sole last-good owner and no partial tree is
+    -- exposed.  Main retains the current input for the next ordinary retry.
+    local previousModel = M._lastModel
+    renderState.applying = true
+    frame:Hide()
+    local ok, result = pcall(ApplyCandidate, candidate, signatures)
+    renderState.applying = false
+    if not ok or result == false then
+        M._lastModel = previousModel
+        -- A mutating widget can fail after changing itself, so the old
+        -- signature cannot certify the tree anymore.  Retain only the prior
+        -- immutable model, keep the frame hidden, and force a complete apply
+        -- on the next ordinary refresh.
+        renderState.signatures = nil
+        renderState.committed = false
+        renderState.hadFailure = true
+        renderStats.failures = renderStats.failures + 1
+        frame:Hide()
+        if not ok then error(result, 0) end
+        return false
+    end
+
+    M._lastModel = candidate
+    renderState.signatures = signatures
+    renderState.committed = true
+    renderStats.commits = renderStats.commits + 1
+    if renderState.hadFailure then
+        renderStats.recoveries = renderStats.recoveries + 1
+        renderState.hadFailure = false
+    end
+    ApplyWantedVisibility()
+    return true
+end
+
+function M.Refresh()
+    if callbacks and type(callbacks.RefreshDisplay) == "function" then
+        return callbacks.RefreshDisplay()
+    end
+    if M._lastModel then return M.Render(M._lastModel) end
+    return false
+end
+function M.SetStatus(status)
+    if not M._lastModel then return false end
+    local nextStatus = SafeText(status)
+    if SafeText(M._lastModel.status) == nextStatus then return false end
+    M._lastModel.status = nextStatus
+    if renderState.signatures then
+        renderState.signatures.status = Signature(nextStatus)
+    end
+    renderStats.statusOnly = renderStats.statusOnly + 1
+    return true
+end
+function M.RenderStats() return DefensiveCopy(renderStats) end
+function M.Show()
+    panelWantedVisible = true
+    EnsureFrame()
+    RequestDisplayRecovery()
+    ApplyWantedVisibility()
+end
+function M.Hide() panelWantedVisible = false; if frame then frame:Hide() end end
 function M.IsShown() return frame and frame:IsShown() or false end
-
--- Apply the shared dark theme after every adaptive HUD render.
-do
-    local originalRender = M.Render
-    M.Render = function(...)
-        local result = originalRender(...)
-        if frame and Nexus.Theme then Nexus.Theme.StyleTree(frame) end
-        return result
-    end
-end
 
 return M

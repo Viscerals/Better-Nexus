@@ -1,135 +1,166 @@
--- Verifies the two filter controls: class dropdown and date-updated toggle.
+-- Community Builds defaults to the current class and qualified rows, while
+-- additive opt-outs expose complete synchronized storage without replacing
+-- unrelated persisted settings.
 local H = dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Relay.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
 dofile("core/GameAdapter.lua")
 dofile("ui/Readout.lua"); dofile("ui/Panel.lua")
-local provider
-Nexus.LogViewer = { Init = function(p) provider = p end,
-    Show = function() end, Toggle = function() end }
+Nexus.LogViewer = {Init=function() end,Show=function() end,Toggle=function() end}
 dofile("ui/CommunityBuilds.lua")
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 
 NexusDB = {}
-H.playerLevel = 5
-H.wishlist = { name = "W", class = "ROGUE", echoes = {
-    { spellId = 200100, quality = 3, stacks = 1 } } }
+H.playerLevel = 80
+H.wishlist = {name="W",class="ROGUE",echoes={
+    {spellId=200100,quality=3,stacks=1},
+}}
 UnitName = function() return "Alice" end
-local wall = 1000; time = function() return wall end
+local classToken = "ROGUE"
+UnitClass = function()
+    if not classToken then return nil, nil end
+    return "Rogue", classToken
+end
+time = function() return 1000 end
 
 H.FireEvent("ADDON_LOADED", "Nexus")
 H.FireEvent("SPELLS_CHANGED"); H.FireEvent("PLAYER_ENTERING_WORLD"); H.Advance(2)
 
 local CB = Nexus.CommunityBuilds
 CB.Init(Nexus.GameAdapter, Nexus.Model)
-
 NexusDB.communityBuilds = {
-    z1 = { id="z1", title="Rogue Build A",   class="ROGUE",   echoes={{spellId=1,quality=3,stacks=1}},
-           postedAt=100, lastModified=100, isMine=true,  author="Alice", description="" },
-    z2 = { id="z2", title="Mage Build B",    class="MAGE",    echoes={{spellId=2,quality=3,stacks=1}},
-           postedAt=200, lastModified=200, isMine=false, author="Bob",   description="" },
-    z3 = { id="z3", title="Warrior Build C", class="WARRIOR", echoes={{spellId=3,quality=3,stacks=1}},
-           postedAt=50,  lastModified=300, isMine=false, author="Carol", description="" },
+    z1={id="z1",title="Rogue Build",class="ROGUE",fingerprint="1x1",
+        echoes={{spellId=1,quality=3,stacks=1}},postedAt=100,lastModified=100,
+        isMine=true,author="Alice",ownerKey="alice@unknown",description=""},
+    z2={id="z2",title="Mage Build",class="MAGE",fingerprint="2x1",
+        echoes={{spellId=2,quality=3,stacks=1}},postedAt=200,lastModified=200,
+        author="Bob",ownerKey="bob@unknown",description=""},
+    z3={id="z3",title="Warrior Build",class="WARRIOR",fingerprint="3x1",
+        echoes={{spellId=3,quality=3,stacks=1}},postedAt=300,lastModified=300,
+        author="Carol",ownerKey="carol@unknown",description=""},
 }
+Nexus.DpsCapture = Nexus.DpsCapture or {}
+Nexus.DpsCapture.GetCommunityEligibility = function()
+    return {
+        ["1x1"]={dummy=100,lk=200,best=200,average=150,count=2},
+        ["2x1"]={dummy=300,lk=400,best=400,average=350,count=2},
+        ["3x1"]={dummy=500,lk=600,best=600,average=550,count=2},
+    }
+end
 
+NexusDB.buildFilters = {
+    scope="all",sortMode="recent",classFilter="MAGE",futureFilter="keep",
+}
 CB.Show()
-
--- 1. Default class sort: MAGE < ROGUE < WARRIOR
-NexusDB.buildFilters = { sortMode = "class" }
-local ok1 = pcall(CB.Refresh)
-assert(ok1, "class sort crashed")
-local list = {}
-for _, b in pairs(NexusDB.communityBuilds) do list[#list + 1] = b end
-table.sort(list, function(a, b)
-    local ORDER = {DEATHKNIGHT=1,DRUID=2,HUNTER=3,MAGE=4,PALADIN=5,PRIEST=6,ROGUE=7,SHAMAN=8,WARLOCK=9,WARRIOR=10}
-    local ca = ORDER[(a.class or ""):upper()] or 99
-    local cb = ORDER[(b.class or ""):upper()] or 99
-    if ca ~= cb then return ca < cb end
-    return (a.title or "") < (b.title or "")
-end)
-assert(list[1].class == "MAGE",    "first should be MAGE, got " .. list[1].class)
-assert(list[2].class == "ROGUE",   "second should be ROGUE")
-assert(list[3].class == "WARRIOR", "third should be WARRIOR")
-print("class sort: MAGE < ROGUE < WARRIOR -- OK")
-
--- 2. Date Updated sort: highest lastModified first
-NexusDB.buildFilters = { sortMode = "recent" }
-local recent = {}
-for _, b in pairs(NexusDB.communityBuilds) do recent[#recent + 1] = b end
-table.sort(recent, function(a, b) return (a.lastModified or 0) > (b.lastModified or 0) end)
-assert(recent[1].id == "z3", "newest-first: z3 has lastModified=300 (got " .. recent[1].id .. ")")
-assert(recent[#recent].id == "z1", "oldest: z1 has lastModified=100")
-print("date-updated sort: highest lastModified first -- OK")
-
--- 3. Class filter: only the matching class
-NexusDB.buildFilters = { sortMode = "class", classFilter = "ROGUE" }
-local filtered = {}
-for _, b in pairs(NexusDB.communityBuilds) do
-    if (b.class or ""):upper() == "ROGUE" then filtered[#filtered + 1] = b end
+local frame = assert(_G.NexusCommunityBuildsFrame)
+local onUpdate = assert(frame:GetScript("OnUpdate"))
+for _=1,20 do
+    if CB.VirtualStats().results == 1 then break end
+    onUpdate(frame,0.05)
 end
-assert(#filtered == 1, "expected 1 ROGUE build, got " .. #filtered)
-print("class filter correctly restricts to ROGUE -- OK")
+local initial = CB.VirtualStats()
+assert(initial.results == 1
+    and NexusDB.buildFilters.classFilter == "ROGUE"
+    and NexusDB.buildFilters.currentClassOnly == true
+    and NexusDB.buildFilters.qualifiedOnly == true
+    and NexusDB.buildFilters.page == 1
+    and NexusDB.buildFilters.futureFilter == "keep",
+    string.format("stale class filter exposed another class or replaced unrelated settings: results=%s class=%s future=%s",
+        tostring(initial.results),tostring(NexusDB.buildFilters.classFilter),
+        tostring(NexusDB.buildFilters.futureFilter)))
 
--- 4. Clearing filter restores all
-NexusDB.buildFilters = { sortMode = "class", classFilter = nil }
-local ok4 = pcall(CB.Refresh)
-assert(ok4, "refresh crashed after clearing filter")
-local all = {}
-for _ in pairs(NexusDB.communityBuilds) do all[#all+1] = true end
-assert(#all == 3, "all 3 builds should show after clearing filter")
-print("clearing class filter restores all builds -- OK")
+local classButton = assert(frame._classDropBtn)
+local qualifiedButton = assert(frame._qualifiedBtn)
+local resultText = assert(frame._resultText)
+local pageText = assert(frame._pageText)
+assert(frame._prevPageBtn and frame._nextPageBtn
+    and resultText:GetText():find("Showing 1-1 of 1", 1, true)
+    and pageText:GetText() == "1 / 1",
+    "Community pagination controls or truthful result range are missing")
+local classPanel = assert(_G.NexusClassDropPanel)
+assert(type(classButton:GetScript("OnClick")) == "function"
+    and not classPanel:IsShown()
+    and classButton:GetText() == "Current Class Only"
+    and qualifiedButton:GetText() == "Qualified Only",
+    "Community did not expose truthful default filter controls")
 
--- 5. Class dropdown opens a panel and selecting All Classes clears the filter.
-NexusDB.buildFilters = { classFilter = "MAGE" }
-local dropBtn = _G.NexusCommunityBuildsFrame
-    and _G.NexusCommunityBuildsFrame._classDropBtn
-assert(dropBtn, "class dropdown button not found")
-local dropPanel = _G.NexusClassDropPanel
-assert(dropPanel, "dropdown panel not found")
-
--- open the panel
-dropBtn.scripts.OnClick(dropBtn)
-assert(dropPanel:IsShown(), "clicking the dropdown button should open the panel")
-print("dropdown panel opens on click -- OK")
-
--- Instead verify behaviorally: drive the OnClick of the first dropdown row
--- (which corresponds to All Classes in our ordered list)
--- We need to walk all created frames to find ones with the right text
-local allRows = {}
-local realCreateFrame2 = CreateFrame
-CreateFrame = function(...)
-    local f = realCreateFrame2(...)
-    allRows[#allRows + 1] = f
-    return f
+classButton:GetScript("OnClick")(classButton)
+for _=1,20 do
+    if CB.VirtualStats().results == 3 then break end
+    onUpdate(frame,0.05)
 end
--- Close and re-create the panel by calling EnsureFrame fresh
-_G.WRBuildsClassDrop = nil
-_G.NexusCommunityBuildsFrame = nil
-dofile("ui/CommunityBuilds.lua")
-local CB2 = Nexus.CommunityBuilds
-CB2.Init(Nexus.GameAdapter, Nexus.Model)
-CB2.Show()
-NexusDB.buildFilters = { classFilter = "MAGE" }
+assert(CB.VirtualStats().results == 3
+    and NexusDB.buildFilters.currentClassOnly == false
+    and NexusDB.buildFilters.futureFilter == "keep"
+    and classButton:GetText() == "All Classes",
+    "All Classes did not expose the complete qualified catalog")
 
-local allClassesRow = nil
-for _, f in ipairs(allRows) do
-    if f.scripts and f.scripts.OnClick then
-        -- find the row whose click clears the class filter
-        local savedFilter = "MAGE"
-        NexusDB.buildFilters.classFilter = "MAGE"
-        local ok = pcall(f.scripts.OnClick, f)
-        if ok and NexusDB.buildFilters.classFilter == nil then
-            allClassesRow = f; break
-        end
-        NexusDB.buildFilters.classFilter = savedFilter
-    end
+qualifiedButton:GetScript("OnClick")(qualifiedButton)
+assert(NexusDB.buildFilters.qualifiedOnly == false
+    and qualifiedButton:GetText() == "All Shared",
+    "All Shared did not opt out of qualification")
+qualifiedButton:GetScript("OnClick")(qualifiedButton)
+assert(NexusDB.buildFilters.qualifiedOnly == true
+    and qualifiedButton:GetText() == "Qualified Only",
+    "Qualified Only did not restore the default restriction")
+
+-- Restore the default before exercising login-transition fail-closed behavior.
+classButton:GetScript("OnClick")(classButton)
+for _=1,20 do
+    if CB.VirtualStats().results == 1 then break end
+    onUpdate(frame,0.05)
 end
-assert(allClassesRow, "no dropdown row clears the class filter (All Classes row missing)")
-print("dropdown All Classes row correctly clears the filter -- OK")
 
--- 7. Empty library never crashes
+-- An unavailable class fails closed and retains persisted preferences until a
+-- valid token recovers. Recovery republishes the correct class exactly once.
+classToken = nil
+CB.Refresh()
+local unavailable = CB.VirtualStats()
+assert(unavailable.results == 0
+    and NexusDB.buildFilters.classFilter == "ROGUE"
+    and NexusDB.buildFilters.futureFilter == "keep"
+    and classButton:GetText() == "Class Loading...",
+    "temporarily unavailable class exposed rows or damaged preferences")
+
+classButton:GetScript("OnClick")(classButton)
+for _=1,20 do
+    if CB.VirtualStats().results == 3 then break end
+    onUpdate(frame,0.05)
+end
+assert(CB.VirtualStats().results == 3
+    and NexusDB.buildFilters.currentClassOnly == false
+    and classButton:GetText() == "All Classes",
+    "All Classes did not remain usable while player class was unavailable")
+classButton:GetScript("OnClick")(classButton)
+for _=1,20 do
+    if CB.VirtualStats().results == 0 then break end
+    onUpdate(frame,0.05)
+end
+local bindsBeforeRecovery = CB.VirtualStats().dataBinds
+classToken = "ROGUE"
+onUpdate(frame, 8.1)
+for _=1,20 do
+    if CB.VirtualStats().dataBinds == bindsBeforeRecovery + 1 then break end
+    onUpdate(frame,0.05)
+end
+local recovered = CB.VirtualStats()
+assert(recovered.results == 1
+    and recovered.dataBinds == bindsBeforeRecovery + 1
+    and NexusDB.buildFilters.classFilter == "ROGUE",
+    "current-class recovery did not publish the correct result once")
+onUpdate(frame, 8.1)
+assert(CB.VirtualStats().dataBinds == recovered.dataBinds,
+    "unchanged recovered class published more than once")
+
 NexusDB.communityBuilds = {}
-local ok7 = pcall(CB.Refresh)
-assert(ok7, "refresh crashed on empty library")
-print("empty library handled correctly -- OK")
+Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED, {scope="empty"})
+assert(pcall(CB.Refresh) and CB.VirtualStats().results == 0,
+    "empty current-class library was not handled")
+
+print("Community additive class/qualification filters and recovery -- OK")

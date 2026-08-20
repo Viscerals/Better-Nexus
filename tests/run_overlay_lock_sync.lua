@@ -10,6 +10,9 @@ dofile("logic/Policy.lua")
 dofile("core/Store.lua")
 dofile("core/GameAdapter.lua")
 dofile("ui/WishlistOverlay.lua")
+dofile("core/WishlistModel.lua")
+dofile("core/WishlistController.lua")
+dofile("ui/WishlistRenderer.lua")
 dofile("ui/WishlistEditor.lua")
 
 NexusDB = {}
@@ -66,6 +69,7 @@ CreateFrame = function(...)
     return f
 end
 _G.NexusDisplayPopup = nil
+dofile("ui/WishlistRenderer.lua")
 dofile("ui/WishlistEditor.lua")
 local EW2 = Nexus.WishlistEditor
 EW2.Init(Adapter, Model)

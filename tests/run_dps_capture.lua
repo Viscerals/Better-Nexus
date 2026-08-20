@@ -1,7 +1,7 @@
 -- DPS capture: always-on, two categories (dummy / LK), target detection,
 -- personal best tracking, leaderboard sorting, peer submission.
 local H = dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
 dofile("core/GameAdapter.lua")
@@ -94,26 +94,26 @@ assert(#DPS.GetLeaderboard(buildId,"dummy") == 1, "still one entry per player")
 print("personal best updates correctly (lower ignored, higher replaces) -- OK")
 
 -- 5. Peer submission: only the highest record for each exact build/category is retained
-DPS.ReceiveSubmission(buildId,"Alice",120000,80,"dummy",12345)
+DPS.ReceiveSubmission(buildId,"Alice",120000,80,"dummy",12345,30)
 local lb2 = DPS.GetLeaderboard(buildId,"dummy")
 assert(#lb2 == 1 and lb2[1].player=="Alice" and lb2[1].dps==120000, "Alice should hold the single dummy record")
-DPS.ReceiveSubmission(buildId,"Alice",85000,80,"lk",12345)
+DPS.ReceiveSubmission(buildId,"Alice",85000,80,"lk",12345,20)
 local lk2 = DPS.GetLeaderboard(buildId,"lk")
 assert(#lk2 == 1 and lk2[1].player=="Solkr" and lk2[1].dps==90000, "lower LK data must not replace the record")
-DPS.ReceiveSubmission(buildId,"Alice",125000,80,"lk",12346)
+DPS.ReceiveSubmission(buildId,"Alice",125000,80,"lk",12346,20)
 lk2 = DPS.GetLeaderboard(buildId,"lk")
 assert(#lk2 == 1 and lk2[1].player=="Alice" and lk2[1].dps==125000, "higher LK data should replace the record")
 print("peer submissions retain only the highest exact-build record -- OK")
 
 -- 6. Submission for unknown build: silently ignored
-DPS.ReceiveSubmission("no-such-build","Bob",999999,80,"dummy",0)
+DPS.ReceiveSubmission("no-such-build","Bob",999999,80,"dummy",0,30)
 assert(#DPS.GetLeaderboard("no-such-build","dummy") == 0,
     "unknown build submission must be silently ignored")
 print("unknown build submission ignored -- OK")
 
 -- 7. Lower remote data cannot replace the single record
-DPS.ReceiveSubmission(buildId,"Carol",110000,80,"dummy",12345)
-DPS.ReceiveSubmission(buildId,"Dave",95000,80,"dummy",12345)
+DPS.ReceiveSubmission(buildId,"Carol",110000,80,"dummy",12345,30)
+DPS.ReceiveSubmission(buildId,"Dave",95000,80,"dummy",12345,30)
 local lb3 = DPS.GetLeaderboard(buildId,"dummy")
 assert(#lb3 == 1 and lb3[1].player == "Alice" and lb3[1].dps == 120000,
     "lower remote submissions must not replace the record")

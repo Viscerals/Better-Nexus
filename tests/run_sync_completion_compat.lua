@@ -1,7 +1,7 @@
 -- The compatibility hashes must exactly reflect current build/DPS state and
 -- suppress duplicate reconciliation without changing any data.
 local H=dofile('tests/harness.lua')
-dofile('core/Codec.lua'); dofile('core/Sync.lua'); dofile('core/DpsCapture.lua')
+dofile('core/Codec.lua'); dofile('core/SyncProtocol.lua'); dofile('core/SyncTransport.lua'); dofile('core/SyncCompatibility.lua'); dofile('core/SyncReconciler.lua'); dofile('core/SyncInbound.lua'); dofile('core/SyncDiagnostics.lua'); dofile('core/SyncSession.lua'); dofile('core/Sync.lua'); dofile('core/DpsCapture.lua')
 local Sync,DPS=Nexus.Sync,Nexus.DpsCapture
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 UnitName=function() return 'Valentine' end; UnitClass=function() return 'Mage','MAGE' end
@@ -20,7 +20,17 @@ assert(b1==b2 and d1==d2,'compatibility hashes were nondeterministic')
 H.sentChatMessages={}
 Sync.HandleIncoming('WLRQ|Current|'..b1..'|'..d1..'|same-state','Current')
 Pump(8)
-assert(#H.sentChatMessages==0,'matching compatibility hashes produced duplicate traffic')
+local receipts,payloads=0,0
+for _,message in ipairs(H.sentChatMessages) do
+    local wire=message.text:gsub('||','|')
+    if wire:find('^WLRC|[^|]+|Current|same%-state|') then
+        receipts=receipts+1
+    elseif wire:find('^WLRB|') or wire:find('^WLD2|') then
+        payloads=payloads+1
+    end
+end
+assert(receipts==1 and payloads==0,
+    'matching compatibility hashes did not produce one payload-free receipt')
 
 build.lastModified=102
 local b3,d3=Sync.GetCompatibilityHashes()

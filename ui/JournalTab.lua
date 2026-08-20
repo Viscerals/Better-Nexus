@@ -1104,14 +1104,33 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             end
             row:ClearAllPoints(); row:SetPoint("TOPLEFT", 6, -24 - (i-1)*rowH)
             local selected = linked and linked.key and cKey and linked.key == cKey
-            row.nameButton.text:SetText((selected and "|cff55ff55[Selected] |r" or "") .. ((cName ~= "" and cName) or "Unnamed Wishlist"))
+            local evidenceSuffix = c.lockEvidenceStatus == "unavailable"
+                and "  |cffff9040(awaiting lock evidence)|r" or ""
+            row.nameButton.text:SetText((selected and "|cff55ff55[Selected] |r" or "")
+                .. ((cName ~= "" and cName) or "Unnamed Wishlist")
+                .. evidenceSuffix)
             local cEchoes = c.echoes
+            local cSnapshot = {
+                slot=cSlot, name=cName, key=cKey,
+                lockEvidenceVersion=c.lockEvidenceVersion,
+                lockEvidenceStatus=c.lockEvidenceStatus,
+                echoes={},
+            }
+            for echoIndex = 1, #(cEchoes or {}) do
+                local echo = cEchoes[echoIndex]
+                cSnapshot.echoes[echoIndex] = {
+                    spellId=echo.spellId, quality=echo.quality,
+                    stacks=echo.stacks, locked=echo.locked,
+                }
+            end
             local function AssociateWishlistOnly()
                 local ok, err
                 if tonumber(active) and tonumber(active) > 0 then
-                    ok, err = A.SetLoadoutWishlist(active, cSlot)
+                    ok, err = A.SetLoadoutWishlist(active, cSlot, cSnapshot)
+                elseif type(A.SetFirstRunWishlist) == "function" then
+                    ok, err = A.SetFirstRunWishlist(cSlot, cSnapshot)
                 else
-                    ok, err = A.SetFirstRunWishlist and A.SetFirstRunWishlist(cSlot)
+                    ok, err = false, "first-run association unavailable"
                 end
                 if not ok then
                     print("|cffff6060Nexus:|r " .. tostring(err or "could not select wishlist"))
@@ -1130,6 +1149,8 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                         name = cName,
                         key = cKey,
                         echoes = cEchoes,
+                        lockEvidenceVersion = c.lockEvidenceVersion,
+                        lockEvidenceStatus = c.lockEvidenceStatus,
                         loadoutName = loadoutName,
                     }, (tonumber(active) and tonumber(active) > 0) and active or nil)
                 else

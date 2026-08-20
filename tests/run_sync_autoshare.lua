@@ -3,7 +3,7 @@
 -- the peer's dedup rule).
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
-dofile("core/Sync.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua")
 dofile("logic/Model.lua")
 dofile("logic/Strategy.lua")
@@ -30,8 +30,11 @@ local Adapter = Nexus.GameAdapter
 CB.Init(Adapter, Nexus.Model)
 Sync.Init(Codec, Adapter)
 
-local function Drain()
-    for i = 1, 60 do Sync.OnUpdate(0.2) end
+local function Drain(turns)
+    for i = 1, tonumber(turns) or 60 do
+        clock = clock + 0.2
+        Sync.OnUpdate(0.2)
+    end
     local m = H.sentChatMessages
     H.sentChatMessages = {}
     return m
@@ -109,11 +112,13 @@ assert(NexusDB.communityBuilds["theirs"].title == "Theirs",
     "someone else's build was modified anyway")
 print("editing/updating another player's build is correctly refused -- OK")
 
--- 6. Answering a peer's sync request shares the full valid mesh library
+-- 6. Answering a peer's sync request shares only complete ordinary records.
+-- The received summary above has no ordinary Echo evidence and must not be
+-- re-advertised as complete; the local "theirs" control remains eligible.
 H.sentChatMessages = {}
 clock = clock + 100
 Sync.HandleIncoming("WLRQ|Bob", "Bob")
-local answer = Drain()
+local answer = Drain(180)
 assert(#answer > 0, "a peer's sync request went unanswered -- nobody would ever receive anything")
 local indexes = 0
 local fullBuilds = 0
@@ -121,9 +126,10 @@ for _, m in ipairs(answer) do
     if m.text:find("^WLBI|") then indexes = indexes + 1 end
     if m.text:find("^WLRB|") then fullBuilds = fullBuilds + 1 end
 end
-assert(indexes + fullBuilds >= 2,
-    "answering a request must redistribute every valid mesh build")
-print("answering a peer request redistributes complete valid mesh builds -- OK")
+assert(indexes == 0 and fullBuilds == 1,
+    string.format("answering a request must quarantine incomplete summaries and redistribute the complete control (index=%d full=%d total=%d)",
+        indexes, fullBuilds, #answer))
+print("answering a peer request redistributes only complete ordinary builds -- OK")
 
 -- 7. We must never answer our OWN request (would echo endlessly)
 H.sentChatMessages = {}

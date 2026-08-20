@@ -3,7 +3,7 @@
 -- bounded queue is full without overwriting older queued traffic.
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
-dofile("core/Sync.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 
 local Sync = Nexus.Sync
 local clock = 1000
@@ -125,17 +125,23 @@ for _ = 1, 40 do
     clock = clock + 1
     Sync.OnUpdate(1)
 end
-assert(Sync.WorkState().pendingLoadouts == 1,
-    "active backpressured loadout response expired at the inactivity TTL")
+assert(Sync.WorkState().pendingLoadouts == 0,
+    "queue-full retries kept an unproductive loadout alive past its TTL")
 JoinTemporaryChannel, JoinChannelByName = oldTemporary2, oldNamed2
 H.joinedChannels[Sync.ChannelName()] = 5
 for _ = 1, 10 do
     clock = clock + 1.2
     Sync.OnUpdate(1.2)
+end
+assert(Sync.HandleIncoming("WLLQ|Requester|claim-build", "Requester"),
+    "fresh loadout retry was rejected after capacity became available")
+for _ = 1, 80 do
+    clock = clock + 0.2
+    Sync.OnUpdate(0.2)
     if Sync.WorkState().pendingLoadouts == 0 then break end
 end
 assert(Sync.WorkState().pendingLoadouts == 0,
-    "retained loadout response did not complete after backpressure cleared")
+    "fresh loadout retry did not complete after capacity became available")
 
 -- Bucket election has the same invariant: WLBC may only be published after
 -- every WLRB packet in that bucket has been admitted. Leave room for one
@@ -189,24 +195,24 @@ assert(rejectedBucket.control == 0,
     "bucket claim was queued without a complete admitted payload")
 assert(rejectedBucket.pendingResponses == 1,
     "backpressured bucket response was not retained for retry")
-assert(rejectedBucket.sending == limits.maxOutboundQueue,
-    "successfully admitted bucket progress was rolled back")
+assert(rejectedBucket.sending == limits.maxOutboundQueue - 1,
+    "backpressured response changed already admitted queue data")
 JoinTemporaryChannel, JoinChannelByName = oldTemporary3, oldNamed3
 H.joinedChannels[Sync.ChannelName()] = 6
-for _ = 1, 10 do
-    clock = clock + 1.2
-    Sync.OnUpdate(1.2)
+for _ = 1, 120 do
+    clock = clock + 0.2
+    Sync.OnUpdate(0.2)
     if Sync.WorkState().pendingResponses == 0 then break end
 end
 assert(Sync.WorkState().pendingResponses == 0,
-    "bucket retry did not resume after its admitted build")
-assert(Sync.WorkState().sending == limits.maxOutboundQueue,
-    "bucket retry duplicated prior work or failed to use the released slot")
+    "bucket response did not resume after capacity became available")
+assert((Sync.Stats().overlaySent or 0) == 2,
+    "bucket response duplicated or omitted admitted build candidates")
 
 -- A permanently invalid legacy row must not roll back or indefinitely block
--- a valid build in the same bucket. Because the row was skipped, do not claim
--- the bucket; another peer may still hold a sendable copy.
-Sync.Init(Nexus.Codec, {})
+-- a valid build in the same bucket. Incomplete ordinary evidence is excluded
+-- from both the represented hash and candidate set, so the complete control
+-- may transmit and claim normally without putting the invalid row on wire.
 local validId = "sendable-bucket-build"
 local invalidKey
 for i = 1, 100 do
@@ -217,7 +223,7 @@ for i = 1, 100 do
     end
 end
 assert(invalidKey, "test setup could not colocate an unsendable row")
-NexusDB.communityBuilds = {
+NexusDB = {communityBuilds={
     [validId] = {
         id=validId, title="Sendable", author="Alice", class="MAGE",
         lastModified=21, postedAt=21,
@@ -228,21 +234,30 @@ NexusDB.communityBuilds = {
         class="MAGE", lastModified=22, postedAt=22,
         fingerprintHash="1",
     },
-}
-local oldTemporary4, oldNamed4 = JoinTemporaryChannel, JoinChannelByName
-H.joinedChannels = {}
-JoinTemporaryChannel = function() end
-JoinChannelByName = function() end
+},syncTombstones={}}
+Sync.Init(Nexus.Codec, {})
+H.sentChatMessages = {}
+H.joinedChannels = {[Sync.ChannelName()]=8}
 assert(Sync.HandleIncoming("WLRQ|Requester|" .. emptyBuckets
     .. "|0|req-unsendable", "Requester"),
     "mixed sendable/unsendable bucket request was rejected")
-Sync.OnUpdate(6)
+Pump(80)
 local mixedBucket = Sync.WorkState()
-assert(mixedBucket.pendingResponses == 0 and mixedBucket.sending == 1,
-    "unsendable row blocked the valid build sharing its bucket")
-assert(mixedBucket.control == 0,
-    "responder claimed a bucket after skipping an unsendable row")
-JoinTemporaryChannel, JoinChannelByName = oldTemporary4, oldNamed4
+local validWire, invalidWire = 0, 0
+for _, message in ipairs(H.sentChatMessages) do
+    if message.text:find("^WLRB|") then
+        if message.text:find("|"..validId.."|",1,true) then
+            validWire = validWire + 1
+        end
+        if message.text:find("invalid|wire%-id",1,false) then
+            invalidWire = invalidWire + 1
+        end
+    end
+end
+assert(mixedBucket.pendingResponses == 0 and validWire == 1,
+    "incomplete row blocked the valid build sharing its bucket")
+assert(invalidWire == 0,
+    "incomplete ordinary row entered the represented Sync candidate set")
 
 -- A locally authored delete rejected at the outbound queue limit must remain
 -- pending and use the first capacity that becomes available. Otherwise the
@@ -279,6 +294,105 @@ assert(retriedDelete.sending == limits.maxOutboundQueue - 1,
 assert(NexusDB.syncTombstones["delete-backpressure"].pending == nil,
     "admitted delete left stale persisted retry state")
 
+-- A delete that never sees a free slot still owns a fixed terminal deadline.
+-- Keep the established bulk fixture continuously full by replacing every
+-- packet drained by Transport; elapsed wall time, not queue opportunity, must
+-- clear both transient and persisted retry ownership after 300 seconds.
+while Sync.WorkState().sending < limits.maxOutboundQueue do
+    local index = Sync.WorkState().sending + 1
+    assert(Sync.BroadcastDps("delete-expiry-fill-" .. index, "Alice",
+        6000 + index, 80, "dummy"),
+        "failed to restore continuous delete saturation")
+end
+local expiredBefore = Sync.Stats().operationExpired or 0
+local expiryOk, expiryWhy = Sync.BroadcastDelete({
+    id="delete-continuous-saturation", title="Delete Continuous Saturation",
+    author="Alice", lastModified=31, postedAt=31,
+    echoes={{spellId=200302, quality=3, stacks=1}},
+})
+assert(not expiryOk and expiryWhy == "queued for retry",
+    "continuously saturated delete did not enter bounded retry ownership")
+local expiryStarted = clock
+local refillSequence = 0
+while clock - expiryStarted <= 301 do
+    clock = clock + 1.2
+    Sync.OnUpdate(1.2)
+    while Sync.WorkState().sending < limits.maxOutboundQueue do
+        refillSequence = refillSequence + 1
+        assert(Sync.BroadcastDps("delete-expiry-refill-" .. refillSequence,
+            "Alice", 7000 + refillSequence, 80, "dummy"),
+            "continuous delete saturation could not refill a freed slot")
+    end
+end
+local expiredDelete = Sync.GetDeleteStatus("delete-continuous-saturation")
+assert(expiredDelete and expiredDelete.terminal == true
+        and expiredDelete.outcome == "expired"
+        and expiredDelete.reason == "delete retry expired",
+    "continuously saturated delete did not reach its exact expiry terminal")
+assert((Sync.Stats().operationExpired or 0) == expiredBefore + 1,
+    "continuously saturated delete expiry was not counted exactly once")
+assert(Sync.WorkState().pendingDeletes == 0,
+    "expired continuously saturated delete retained transient pending work")
+assert(NexusDB.syncTombstones["delete-continuous-saturation"]
+        and NexusDB.syncTombstones["delete-continuous-saturation"].pending == nil,
+    "expired continuously saturated delete retained its persisted pending marker")
+
+-- Persisted delete discovery is sliced behind the fixed recovery cap. Capture
+-- only the public table key returned by Lua's iterator during Init, remove that
+-- tombstone through BuildCatalog, then prove the next slice neither feeds a
+-- removed key back to Lua 5.1's next() nor strands later persisted work.
+local recoveryCap = assert(limits.maxRecoveryQueue,
+    "Sync does not expose its persisted delete discovery bound")
+local persistedExtra = 40
+NexusDB = {communityBuilds={},syncTombstones={}}
+for index = 1, recoveryCap + persistedExtra do
+    NexusDB.syncTombstones[string.format("persisted-delete-%04d", index)] = {
+        stamp=80000 + index,author="Alice",pending=true,
+    }
+end
+local discoveryTable = NexusDB.syncTombstones
+local realNext = next
+local capturedCursor
+next = function(target, key)
+    local found, value = realNext(target, key)
+    if target == discoveryTable and found ~= nil then capturedCursor = found end
+    return found, value
+end
+local initOk, initError = pcall(Sync.Init, Nexus.Codec, {})
+next = realNext
+assert(initOk, "persisted delete discovery setup failed: "
+    .. tostring(initError))
+assert(capturedCursor and discoveryTable[capturedCursor]
+        and Sync.WorkState().pendingDeletes == recoveryCap
+        and Sync.WorkState().pendingDeleteDiscovery == 1,
+    "persisted delete discovery did not stop at its public fixed bound")
+assert(Nexus.BuildCatalog.ClearTombstone(capturedCursor),
+    "persisted delete cursor fixture could not remove the sliced key")
+H.joinedChannels[Sync.ChannelName()] = 7
+local discoveryOk, discoveryError = pcall(function()
+    local budget = (recoveryCap + persistedExtra) * 2
+    for _ = 1, budget do
+        clock = clock + 1.2
+        Sync.OnUpdate(1.2)
+        local work = Sync.WorkState()
+        if work.pendingDeletes == 0
+            and work.pendingDeleteDiscovery == 0 then return end
+    end
+end)
+assert(discoveryOk, "removed persisted delete cursor broke Lua 5.1 discovery: "
+    .. tostring(discoveryError))
+local pendingPersisted = 0
+for _, tomb in pairs(NexusDB.syncTombstones) do
+    if type(tomb) == "table" and tomb.pending then
+        pendingPersisted = pendingPersisted + 1
+    end
+end
+local discoveryWork = Sync.WorkState()
+assert(discoveryWork.pendingDeletes == 0
+        and discoveryWork.pendingDeleteDiscovery == 0
+        and pendingPersisted == 0,
+    "bounded persisted delete discovery stranded work after cursor removal")
+
 -- DPS bucket broadcasters report partial queue admission separately from the
 -- number of records queued. A partial result must retain the pending bucket
 -- for retry instead of treating it as complete.
@@ -296,6 +410,7 @@ local localBuildHash = Sync.GetCompatibilityHashes()
 assert(Sync.HandleIncoming("WLRQ|Requester|" .. localBuildHash .. "|"
     .. emptyBuckets .. "|req-dps-partial", "Requester"),
     "valid DPS reconciliation request was rejected")
+Sync.OnUpdate(6)
 Sync.OnUpdate(6)
 assert(partialCalls >= 1, "DPS bucket broadcaster was not invoked")
 assert(Sync.WorkState().pendingResponses == 1,

@@ -10,6 +10,11 @@ dofile("core/GameAdapter.lua")
 dofile("ui/Readout.lua")
 dofile("ui/Panel.lua")
 Nexus.LogViewer = { Init = function() end, Show = function() end }
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 NexusDB = {}
 H.wishlist = { name = "MyBuild", class = "MAGE", echoes = {

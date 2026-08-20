@@ -17,6 +17,12 @@ temp/
 *.orig
 *.rej
 
+# VibeRun machine-only state
+.vibe/workflow_runtime.json
+.vibe/LOOP_RESULT.json
+.vibe/*.tmp
+.vibe/*.lock
+
 # Local addon backups and release archives
 *.zip
 Nexus.codex-backup-*/

@@ -1,7 +1,7 @@
 -- Owner-only DPS records and tombstones must never be suppressed by a peer
 -- that knows the same state but lacks authority to retransmit it.
 local H=dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 local Sync,DPS=Nexus.Sync,Nexus.DpsCapture
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 local currentName="Relay"; UnitName=function() return currentName end
@@ -61,5 +61,29 @@ for _,m in ipairs(H.sentChatMessages) do
 end
 assert(sawDelete,"non-owner claim suppressed the actual deletion owner")
 assert(not sawDeleteClaim,"tombstone bucket emitted a suppressible claim")
+
+-- Exact UTF-8 owner bytes remain authoritative through DPS, projections, and
+-- tombstones; an ASCII lookalike stays a different identity.
+local accented="Valentin"..string.char(0xC3,0xA9)
+currentName=accented; clock=clock+100
+NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync)
+assert(DPS.ReceiveRecord({v=7,f=fp,h=hash,e=echoes,c="dummy",d=26000000,u=65,
+  t=49001,p=accented,k="MAGE",o=accented:lower().."@ebonhold",
+  r="ebonhold",l=80},accented),"exact UTF-8 DPS owner was rejected")
+local projected=Nexus.ViewProjections.Leaderboard("dummy",{classFilter="ALL"})
+assert(projected and projected[1] and projected[1].player==accented,
+  "Leaderboard projection changed exact UTF-8 player bytes")
+
+NexusDB.communityBuilds["utf8-gone"]={id="utf8-gone",title="Gone",
+  author=accented,ownerKey=accented:lower().."@ebonhold",class="MAGE",
+  echoes=echoes,postedAt=10,lastModified=10}
+assert(not Sync.HandleIncoming("WLRD|Valentine|utf8-gone|20|Valentine","Valentine")
+  and NexusDB.communityBuilds["utf8-gone"],
+  "ASCII lookalike gained UTF-8 tombstone authority")
+assert(Sync.HandleIncoming("WLRD|"..accented.."|utf8-gone|21|"..accented,
+  accented) and not NexusDB.communityBuilds["utf8-gone"]
+  and NexusDB.syncTombstones["utf8-gone"].author==accented,
+  "exact UTF-8 tombstone identity was changed or rejected")
 
 print("owner-only DPS and tombstone claims cannot suppress authoritative sync -- OK")

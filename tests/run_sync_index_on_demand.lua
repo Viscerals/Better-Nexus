@@ -1,7 +1,7 @@
 -- Current peers reconcile complete builds; compact indexes remain a safe
 -- compatibility path for an older summary-only peer.
 local H=dofile('tests/harness.lua')
-dofile('core/Codec.lua'); dofile('core/Sync.lua'); dofile('core/DpsCapture.lua')
+dofile('core/Codec.lua'); dofile('core/SyncProtocol.lua'); dofile('core/SyncTransport.lua'); dofile('core/SyncCompatibility.lua'); dofile('core/SyncReconciler.lua'); dofile('core/SyncInbound.lua'); dofile('core/SyncDiagnostics.lua'); dofile('core/SyncSession.lua'); dofile('core/Sync.lua'); dofile('core/DpsCapture.lua')
 local Sync=Nexus.Sync
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 local function Pump(steps) for _=1,steps do clock=clock+0.2; Sync.OnUpdate(0.2) end end

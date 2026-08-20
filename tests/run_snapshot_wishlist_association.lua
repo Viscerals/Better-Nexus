@@ -37,6 +37,50 @@ assert(linked.byFamily.s200104
     and linked.byFamily.s200104.targetStacks == 3,
     "associated wishlist lost requested stack quantity")
 
+-- Read paths must preserve the exact association through nil, empty, and
+-- partial eventually-consistent mirrors, then recover on the next full view.
+local state = Nexus.Store.State()
+local stored = state.loadoutWishlists[1]
+stored.futureAssociationField = {keep=true}
+H.Perks.serverBuildSlots = nil
+assert(A.GetLoadoutWishlist(1) == nil
+    and state.loadoutWishlists[1] == stored,
+    "nil slot snapshot cleared the stored association")
+H.DeliverSlots({}, 0)
+assert(A.GetLoadoutWishlist(1) == nil
+    and state.loadoutWishlists[1] == stored,
+    "empty slot snapshot cleared the stored association")
+H.DeliverSlots({
+    [1]={slot=1,name="Snapshot A",verified=true,echoes={
+        {spellId=200100,quality=3,stacks=1,locked=false},
+    }},
+    [8]={slot=8,name="Unrelated",verified=false,echoes={
+        {spellId=200200,quality=1,stacks=1,locked=false},
+    }},
+}, 1)
+linked = A.GetLoadoutWishlist(1)
+assert(linked and linked.name == "Wishlist B"
+    and linked.key == stored.key and state.loadoutWishlists[1] == stored,
+    "partial slot snapshot lost the immutable association")
+H.DeliverSlots({
+    [1]={slot=1,name="Snapshot A",verified=true,echoes={
+        {spellId=200100,quality=3,stacks=1,locked=false},
+    }},
+    [7]={slot=7,name="Wishlist B",verified=false,echoes={
+        {spellId=200102,quality=2,stacks=1,locked=false},
+        {spellId=200104,quality=2,stacks=3,locked=false},
+    }},
+}, 1)
+linked = A.GetLoadoutWishlist(1)
+assert(linked and linked.name == "Wishlist B"
+    and state.loadoutWishlists[1] == stored
+    and stored.futureAssociationField.keep,
+    "full snapshot did not recover table identity or future fields")
+Nexus.Store.Init()
+assert(Nexus.Store.State().loadoutWishlists[1] == stored
+    and stored.futureAssociationField.keep,
+    "repeat Store initialization replaced the association record")
+
 A.ClearLoadoutWishlist(1)
 assert(A.Wishlist() == nil,
     "multiple unassociated designed wishlists should remain ambiguous")

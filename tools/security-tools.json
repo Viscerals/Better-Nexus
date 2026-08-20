@@ -1,0 +1,86 @@
+{
+  "schema": 2,
+  "tools": {
+    "gitleaks": {
+      "version": "8.30.1",
+      "windows-x64": {
+        "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_windows_x64.zip",
+        "sha256": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+        "executable": "gitleaks.exe",
+        "archive_type": "zip",
+        "expected_executable_path": "gitleaks.exe",
+        "allowed_top_level": ["LICENSE", "README.md", "gitleaks.exe"]
+      },
+      "linux-x64": {
+        "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+        "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+        "executable": "gitleaks",
+        "archive_type": "tar.gz",
+        "expected_executable_path": "gitleaks",
+        "allowed_top_level": ["LICENSE", "README.md", "gitleaks"]
+      }
+    },
+    "actionlint": {
+      "version": "1.7.12",
+      "windows-x64": {
+        "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_windows_amd64.zip",
+        "sha256": "6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9",
+        "executable": "actionlint.exe",
+        "archive_type": "zip",
+        "expected_executable_path": "actionlint.exe",
+        "allowed_top_level": ["LICENSE.txt", "README.md", "docs", "man", "actionlint.exe"]
+      },
+      "linux-x64": {
+        "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
+        "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+        "executable": "actionlint",
+        "archive_type": "tar.gz",
+        "expected_executable_path": "actionlint",
+        "allowed_top_level": ["LICENSE.txt", "README.md", "docs", "man", "actionlint"]
+      }
+    },
+    "zizmor": {
+      "version": "1.29.0",
+      "windows-x64": {
+        "url": "https://github.com/zizmorcore/zizmor/releases/download/v1.29.0/zizmor-x86_64-pc-windows-msvc.zip",
+        "sha256": "68a6bc6888f10bf0d53658c75885e7c1b7a0588d4c1fbc3f0ca280ad7324bf06",
+        "executable": "zizmor.exe",
+        "archive_type": "zip",
+        "expected_executable_path": "zizmor.exe",
+        "allowed_top_level": ["zizmor.exe"]
+      },
+      "linux-x64": {
+        "url": "https://github.com/zizmorcore/zizmor/releases/download/v1.29.0/zizmor-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "dd96df044a6e8538d5f423790f453bdd03d49e5b2bcc38214acc41a2f1297839",
+        "executable": "zizmor",
+        "archive_type": "tar.gz",
+        "expected_executable_path": "zizmor",
+        "allowed_top_level": ["zizmor"]
+      }
+    }
+  },
+  "psscriptanalyzer": {
+    "version": "1.25.0",
+    "url": "https://www.powershellgallery.com/api/v2/package/PSScriptAnalyzer/1.25.0",
+    "sha256": "14e634c828eb98efb9f40b2918ba90f139ed5eccdf663a2a747736d996995d60",
+    "archive_type": "zip",
+    "expected_executable_path": "PSScriptAnalyzer.psd1",
+    "allowed_top_level": ["_rels", "PSScriptAnalyzer.nuspec", "Settings", "LICENSE", "Newtonsoft.Json.dll", "PSScriptAnalyzer.psm1", "ScriptAnalyzer.types.ps1xml", "compatibility_profiles", "PSv7", "Microsoft.PowerShell.CrossCompatibility.dll", "README.md", "SECURITY.md", "en-US", "Microsoft.Windows.PowerShell.ScriptAnalyzer.BuiltinRules.dll", "PSScriptAnalyzer.psd1", "ScriptAnalyzer.format.ps1xml", "ThirdPartyNotices.txt", "Microsoft.Windows.PowerShell.ScriptAnalyzer.dll", "[Content_Types].xml", "package", ".signature.p7s"]
+  },
+  "pre_commit": {
+    "version": "4.6.2",
+    "requirements_file": "tools/pre-commit-requirements.txt",
+    "packages": [
+      "pre-commit==4.6.2",
+      "cfgv==3.5.0",
+      "identify==2.6.19",
+      "nodeenv==1.10.0",
+      "PyYAML==6.0.3",
+      "virtualenv==21.7.4",
+      "distlib==0.4.3",
+      "filelock==3.32.3",
+      "platformdirs==4.11.3",
+      "python-discovery==1.5.2"
+    ]
+  }
+}

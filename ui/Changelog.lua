@@ -4,8 +4,8 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.Changelog = M
 
-local VERSION = "1.19.5"
-local RELEASE_KEY = "1.19.5"
+local VERSION = "1.20.0-beta.1"
+local RELEASE_KEY = "1.20.0-beta.1"
 local frame
 local shownThisSession = false
 
@@ -17,7 +17,7 @@ local function HasSeenRelease()
 end
 
 local function MarkReleaseSeen()
-    NexusDB = NexusDB or {}
+    if type(NexusDB) ~= "table" then return end
     NexusDB.lastChangelogSeen = RELEASE_KEY
     NexusDB.settings = NexusDB.settings or {}
     NexusDB.settings.lastChangelogSeen = RELEASE_KEY
@@ -43,22 +43,24 @@ local function Create()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
-    title:SetText("Nexus 1.19.5")
+    title:SetText("Nexus 1.20 Beta")
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     body:SetPoint("TOPLEFT", 28, -52)
     body:SetPoint("RIGHT", -28, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
-    body:SetText([[|cffffd200Wishlist editor|r
+    body:SetText([[|cffffd200Faster large libraries|r
 
-- Wishlist now opens reliably for active Saved Builds that do not yet have an associated wishlist.
-- The Create New Wishlist editor starts clean and automatically targets the active Saved Build.
+- Community Builds and Leaderboard now render and refresh in bounded batches.
+- Sync exchanges smaller catalog changes instead of repeatedly sending the full baseline.
 
-|cffffd200Sync reliability|r
+|cffffd200Safer testing|r
 
-- Community builds, loadouts, deletions, and DPS records now survive full queues, reconnects, and delayed retries without losing pending work.
-- Stricter ownership and packet validation reject malformed or spoofed sync traffic.]])
+- Existing personal data migrates additively; ambiguous records remain untouched.
+- New error and performance diagnostics make long-session reports easier.
+
+Back up Nexus SavedVariables before beta testing.]])
 
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(92, 24)
@@ -73,7 +75,7 @@ local function Create()
 end
 
 function M.ShowIfNeeded()
-    NexusDB = NexusDB or {}
+    if type(NexusDB) ~= "table" then return end
     if not NexusDB.hasSeenQuickStart then
         MarkReleaseSeen()
         return

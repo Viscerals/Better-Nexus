@@ -21,8 +21,10 @@ Nexus.Panel.Render({progress={wishlistName="Leveling",owned=25,total=79,missing=
 assert(panel:GetHeight() == 208, "progress state height incorrect")
 
 Nexus.Panel.Render({progress={wishlistName="Complete",owned=79,total=79,missing={},shed={},dpsEchoes={{spellId=1,stacks=1}}},cards={},recommendation="",auto=true,version="2.12"})
-assert(panel:GetHeight() == 109, "completed state should collapse progress lists")
+assert(panel:GetHeight() == 138,
+    "completed state should collapse progress lists without overlapping its footer")
 
 Nexus.Panel.Render({progress={wishlistName="Complete",owned=79,total=79,missing={},shed={},dpsEchoes={{spellId=1,stacks=1}},activeSlot=3},cards={{text="Echo A"}},recommendation="Take Echo A",auto=true,version="2.12"})
-assert(panel:GetHeight() == 233, "live roll should expand completed HUD")
+assert(panel:GetHeight() == 248,
+    "live roll should expand completed HUD without overlapping its footer")
 print("adaptive panel states OK")

@@ -28,6 +28,11 @@ dofile("core/GameAdapter.lua")
 dofile("ui/Readout.lua")
 dofile("ui/Panel.lua")
 dofile("ui/JournalTab.lua")
+dofile("core/AutomationRuntime.lua")
+dofile("core/MainLifecycle.lua")
+dofile("core/MainCommands.lua")
+dofile("core/MainViewModel.lua")
+dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 
 NexusDB = {}
@@ -475,6 +480,8 @@ H.Advance(0.3)
 ------------------------------------------------------------------------
 H.granted, H.locked = nil, nil       -- fresh run owns nothing
 H.wishlist = nil                     -- advisor mode
+H.playerLevel = 80
+H.Advance(0.3)                       -- authoritative prior-run completion
 H.playerLevel = 1
 H.Advance(0.3)                       -- run-boundary reset (owned sig "")
 H.buildBusyUntil = -1

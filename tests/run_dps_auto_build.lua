@@ -1,6 +1,6 @@
 -- Personal-best workflow: capture -> exact loadout -> auto build -> single public record.
 local H = dofile("tests/harness.lua")
-dofile("core/Codec.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
+dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
 dofile("core/GameAdapter.lua"); dofile("ui/CommunityBuilds.lua")
@@ -34,6 +34,13 @@ local count, buildId, build=0
 for id,b in pairs(NexusDB.communityBuilds) do count=count+1; buildId=id; build=b end
 assert(count==1 and build and build.autoDps, "a new exact loadout should create one automatic shareable build")
 assert(buildId:find("^dps%-"), "automatic build id should be deterministic")
+local fp=DPS.GetEchoKey(build.echoes)
+assert(build.evidenceKey and NexusDB.loadoutEvidence
+    and NexusDB.loadoutEvidence.entries[build.evidenceKey],
+    "automatic page did not dual-write exact evidence")
+assert(NexusDB.dpsCapture.personalBest[fp].dummy.evidenceKey
+    and NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"].evidenceKey,
+    "personal/public DPS rows did not dual-write exact evidence")
 local lb=DPS.GetLeaderboard(buildId,"dummy")
 assert(#lb==1 and lb[1].dps==24000000 and lb[1].player=="Recordmage", "captured personal best should become the public build record")
 assert(#sent==1 and sent[1].fingerprint==DPS.GetEchoKey(build.echoes), "the exact record should be broadcast once")
@@ -48,7 +55,7 @@ stubDps=26000000; DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnC
 assert(DPS.GetLeaderboard(buildId,"dummy")[1].dps==26000000 and #sent==2, "higher pull should replace and rebroadcast the same build record")
 
 -- Higher remote record replaces; lower stale data is rejected.
-local echoes=build.echoes; local fp=DPS.GetEchoKey(echoes)
+local echoes=build.echoes
 assert(DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=27000000,u=65,t=60000,p="Othermage",k="MAGE",l=80,b=buildId}), "higher remote record should be accepted")
 assert(DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=25000000,u=65,t=60001,p="Oldmage",k="MAGE",l=80,b=buildId}), "a different character should keep its own best entry")
 assert(not DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=24000000,u=65,t=60002,p="Oldmage",k="MAGE",l=80,b=buildId}), "a lower record for the same character should be rejected")
