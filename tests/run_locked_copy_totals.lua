@@ -44,6 +44,36 @@ Check(validated and validateReason == nil
         and validated.lockedEchoes[2].future.part == "b",
     "counted candidate did not survive public validation")
 
+local immutableCandidate = assert(Evidence.Build({
+    title="Immutable future evidence",
+    sourceIdentity="immutable-future",
+    sourceRevision="1",
+    ordinaryEchoes=ordinary,
+    lockedEchoes={{spellId=720030,quality=2,stacks=1,
+        future={provenance="original"}}},
+}))
+immutableCandidate.lockedEchoes[1].future.provenance = "mutated"
+local immutableValidated = Evidence.Validate(immutableCandidate)
+Check(immutableValidated
+        and immutableValidated.lockedEchoes[1].future.provenance == "original",
+    "candidate validation accepted mutated future/provenance evidence")
+
+local categoryConflict = Evidence.ResolveLocked({
+    ordinaryEchoes=ordinary,
+    buildId="quality-conflict",
+    fingerprint="710001x2",
+    records={
+        dummy={category="dummy",buildId="quality-conflict",
+            fingerprint="710001x2",echoes=ordinary,
+            lockedEchoes={{spellId=720031,quality=2,stacks=1}}},
+        lk={category="lk",buildId="quality-conflict",
+            fingerprint="710001x2",echoes=ordinary,
+            lockedEchoes={{spellId=720031,quality=3,stacks=1}}},
+    },
+})
+Check(categoryConflict.status == "conflict",
+    "category resolver accepted contradictory exact locked quality")
+
 local prepared, preparedReason = Model.NormalizeCandidateEvidence(
     validated.ordinaryEchoes, validated.lockedEchoes, {
         catalog={rows={

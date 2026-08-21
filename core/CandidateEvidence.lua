@@ -10,6 +10,7 @@ local CURRENT_KIND = "candidate-typed-v1"
 local LEGACY_KIND = "leaderboard-typed-v1"
 local MAX_ORDINARY = 79
 local MAX_LOCKED = 6
+local validationSnapshots = setmetatable({}, {__mode="k"})
 
 local LOCKED_DISAGREEMENT =
     "record categories disagree on locked Echo evidence"
@@ -133,6 +134,27 @@ local function CanonicalFingerprint(rows)
         parts[#parts + 1] = tostring(id) .. "x" .. tostring(counts[id])
     end
     return #parts > 0 and table.concat(parts, ",") or "0"
+end
+
+-- Locked claims historically fingerprint spell-copy totals only. Category
+-- agreement is stronger: every represented exact quality bucket must also
+-- carry the same copy total, while equivalent duplicate segmentation remains
+-- compatible.
+local function ExactLockedIdentity(rows)
+    local counts, keys = {}, {}
+    for _, row in ipairs(rows or {}) do
+        local quality = row.quality ~= nil and ("q" .. tostring(row.quality))
+            or "unknown"
+        local key = tostring(row.spellId) .. ":" .. quality
+        if counts[key] == nil then keys[#keys + 1] = key end
+        counts[key] = (counts[key] or 0) + row.stacks
+    end
+    table.sort(keys)
+    local parts = {}
+    for _, key in ipairs(keys) do
+        parts[#parts + 1] = key .. "x" .. tostring(counts[key])
+    end
+    return table.concat(parts, ",")
 end
 
 local function SameTypedIdentity(left, right)
@@ -372,7 +394,8 @@ function Evidence.ResolveLocked(options)
     if lkReason then return LockedOutcome("invalid", lkReason) end
 
     if dummyRecord ~= nil and lkRecord ~= nil then
-        if dummyFingerprint ~= lkFingerprint then
+        if dummyFingerprint ~= lkFingerprint
+            or ExactLockedIdentity(dummy) ~= ExactLockedIdentity(lk) then
             return LockedOutcome("conflict", LOCKED_DISAGREEMENT)
         end
         if buildId == nil and dummyIdentity ~= nil and lkIdentity ~= nil
@@ -511,6 +534,7 @@ function Evidence.Build(options)
         return ValidateBound(bound, expectedIdentity, expectedRevision,
             expectedToken, currentOrdinary, currentLocked)
     end
+    validationSnapshots[candidate.validate] = bound
     return candidate
 end
 
@@ -537,11 +561,14 @@ function Evidence.Validate(candidate)
     if not ok or current ~= true then
         return nil, tostring(ok and reason or "record validation failed")
     end
+    local bound = validationSnapshots[candidate.validate]
     local ordinary, ordinaryReason = NormalizePool(
-        candidate.ordinaryEchoes, false)
+        type(bound) == "table" and bound.ordinary
+            or candidate.ordinaryEchoes, false)
     if not ordinary then return nil, ordinaryReason end
     local locked, lockedReason = NormalizePool(
-        candidate.lockedEchoes, true, false, true)
+        type(bound) == "table" and bound.locked
+            or candidate.lockedEchoes, true, false, true)
     if not locked then return nil, lockedReason end
     return {
         evidenceKind=candidate.evidenceKind,
