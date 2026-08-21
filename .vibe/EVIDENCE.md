@@ -513,3 +513,9 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Adversarial probes: the dedicated runner covers same-family key collision, sibling action isolation, ambiguous legacy family selection, and the 79/80 boundary. Renderer parity exercises actual plus/remove callbacks on three visible sibling rows. No correctness, security, scope, or checkpoint-hygiene signal remains.
 - Review verification: `run_wishlist_editor.lua`, `run_wishlist_model_parity.lua`, `run_wishlist_tier_roundtrip.lua`, and `run_wishlist_renderer_parity.lua` pass at clean implementation head `6ab0eff`. Exact-base Fast again passes `17/17` with integration `70/70` and zero failed/unavailable/skipped checks; strict Vibe and diff checks pass.
 - State transition: PASS; Stage 48 auto-advanced from 48.1 `IN_REVIEW` to 48.2 `NOT_STARTED` without changing product/test/workflow bytes.
+
+# 2026-08-21 — Checkpoint 48.1 hygiene CLEAN
+
+- Bounded inspection covered `WishlistModel` exact-key derivation/resolution, controller action routing, renderer action binding, and the two changed plus one new focused runners.
+- No behavior-preserving quick win is clearer than the reviewed code: the bounded 79-row compatibility scan is explicit, injective exact keys are centralized, and UI action keys remain visibly separate from family metadata. No correctness/security defect or concrete larger debt item was found.
+- No product check rerun was required because hygiene changed only this receipt. Strict Vibe validation and `git diff --check` pass; checkpoint 48.2 remains `NOT_STARTED`.
