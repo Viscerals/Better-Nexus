@@ -50,6 +50,7 @@ Derive ordinary and locked roles from an exact verified active-loadout total and
 
 ## Work log
 
+- Checkpoint 48.2 hygiene was clean across CandidateEvidence normalization/snapshot binding, Wishlist counted budgeting/export, Codec locked-role decoding, and the focused runner; no redundant owner, stale marker, or behavior-preserving quick win justified churn.
 - Checkpoint 48.2 review initially falsified bound-snapshot immutability and exact category-quality agreement, repaired both at CandidateEvidence, reran focused checks and Fast, then passed and auto-advanced to 48.3.
 - Checkpoint 48.1 hygiene was clean across the exact-key model/controller/renderer surface; no redundant branch, correctness defect, safe quick win, or evidence-backed debt item justified post-review churn.
 - Checkpoint 48.1 review passed with no actionable correctness, security, scope, or hygiene finding and auto-advanced within Stage 48 to checkpoint 48.2 `NOT_STARTED`.
