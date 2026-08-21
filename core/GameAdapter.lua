@@ -722,6 +722,20 @@ local function LockState(value)
     return nil
 end
 
+local function PositiveInteger(value)
+    value = tonumber(value)
+    if not value or value ~= value or value <= 0 or value >= math.huge
+        or value ~= math.floor(value) then return nil end
+    return value
+end
+
+local function NonNegativeInteger(value)
+    value = tonumber(value)
+    if not value or value ~= value or value < 0 or value >= math.huge
+        or value ~= math.floor(value) then return nil end
+    return value
+end
+
 -- Build the internal wishlist shape from a raw echo list. echoHasQuality is
 -- true for the active-loadout store (carries rolled quality) and false for a
 -- designed server build (id.stack.locked on the wire -> quality is nominal,
@@ -1356,6 +1370,112 @@ local function IsPopulatedLoadout(loadoutSlot, slots)
     return row and type(row.echoes) == "table" and #row.echoes > 0 and true or false
 end
 
+-- A designed 80-85-copy mirror may carry unusable all-false lock flags even
+-- while the active numbered loadout has the exact same total plus complete
+-- roles. Bridge only that active association: exact spell/stack identity,
+-- verified active booleans, and the independent LockedOwned counts must all
+-- agree. The result is a new projection; neither mirror nor SavedVariables is
+-- rewritten.
+local function ExactActiveWishlistRoles(slots, loadoutSlot, candidate)
+    loadoutSlot = tonumber(loadoutSlot)
+    if type(slots) ~= "table" or not loadoutSlot
+        or tonumber(slots.activeSlot) ~= loadoutSlot
+        or type(candidate) ~= "table"
+        or not WishlistRequiresLockEvidence(candidate) then return nil end
+
+    local active = slots.bySlot and slots.bySlot[loadoutSlot]
+    if type(active) ~= "table" or active.verified ~= true
+        or active.verifiedFieldPresent ~= true
+        or type(active.echoes) ~= "table" or #active.echoes < 1 then
+        return nil
+    end
+    local candidateKey = type(candidate.key) == "string" and candidate.key
+        or WishlistIdentity(candidate.echoes)
+    local activeKey = WishlistIdentity(active.echoes)
+    if not candidateKey or not activeKey or candidateKey ~= activeKey then
+        return nil
+    end
+
+    local catalog = A.Catalog()
+    local ordinary, lockedRows = {}, {}
+    local activeLockedBySpell = {}
+    local totalByExact, lockedByExact, ordinaryByExact = {}, {}, {}
+    local totalCopies, lockedCopies = 0, 0
+    for index = 1, #active.echoes do
+        local echo = active.echoes[index]
+        local id = type(echo) == "table" and PositiveInteger(echo.spellId)
+        local stacks = type(echo) == "table" and PositiveInteger(echo.stacks)
+        local quality = type(echo) == "table"
+            and NonNegativeInteger(echo.quality) or nil
+        if quality == nil and id and catalog and catalog.rows
+            and catalog.rows[id] then
+            quality = NonNegativeInteger(catalog.rows[id].quality)
+        end
+        if not id or not stacks or quality == nil
+            or type(echo.locked) ~= "boolean" then return nil end
+        totalCopies = totalCopies + stacks
+        local exactKey = tostring(id) .. ":" .. tostring(quality)
+        totalByExact[exactKey] = (totalByExact[exactKey] or 0) + stacks
+        local row = {
+            spellId=id, quality=quality, stacks=stacks,
+            locked=echo.locked, sourceRole=echo.locked and "locked" or "ordinary",
+            evidenceSource="verified-active",
+        }
+        if echo.locked then
+            lockedCopies = lockedCopies + stacks
+            activeLockedBySpell[id] = (activeLockedBySpell[id] or 0) + stacks
+            lockedByExact[exactKey] = (lockedByExact[exactKey] or 0) + stacks
+            lockedRows[#lockedRows + 1] = row
+        else
+            ordinaryByExact[exactKey] = (ordinaryByExact[exactKey] or 0) + stacks
+            ordinary[#ordinary + 1] = row
+        end
+    end
+    for exactKey, total in pairs(totalByExact) do
+        local remaining = total - (lockedByExact[exactKey] or 0)
+        if remaining < 0 or remaining ~= (ordinaryByExact[exactKey] or 0) then
+            return nil
+        end
+    end
+    if totalCopies > MAX_COMPLETE_WISHLIST_ECHOES
+        or totalCopies - lockedCopies > MAX_WISHLIST_ECHOES then return nil end
+
+    local evidence = Nexus and Nexus.CandidateEvidence
+    if not (evidence
+        and type(evidence.NormalizeLockedEchoes) == "function") then return nil end
+    local normalizedLocked, lockedReason = evidence.NormalizeLockedEchoes(
+        lockedRows)
+    if not normalizedLocked or lockedReason ~= nil then return nil end
+
+    local owned = A.LockedOwned()
+    if type(owned) ~= "table" or owned.synced ~= true
+        or type(owned.bySpell) ~= "table" then return nil end
+    local represented = {}
+    for spellId, count in pairs(owned.bySpell) do
+        local id, copies = PositiveInteger(spellId), PositiveInteger(count)
+        if not id or not copies then return nil end
+        represented[id] = (represented[id] or 0) + copies
+    end
+    for id, copies in pairs(activeLockedBySpell) do
+        if represented[id] ~= copies then return nil end
+        represented[id] = nil
+    end
+    if next(represented) ~= nil then return nil end
+
+    local echoes = {}
+    for _, row in ipairs(ordinary) do echoes[#echoes + 1] = row end
+    for _, row in ipairs(normalizedLocked) do echoes[#echoes + 1] = row end
+    if WishlistIdentity(echoes) ~= activeKey then return nil end
+    return {
+        slot=candidate.slot, name=candidate.name, count=#echoes,
+        echoes=echoes, key=activeKey, active=candidate.active,
+        lockEvidenceVersion=WISHLIST_LOCK_EVIDENCE_VERSION,
+        lockEvidenceStatus="authoritative",
+        evidenceSource="verified-active",
+        activeLoadoutSlot=loadoutSlot,
+    }
+end
+
 -- Read-only association diagnosis for presentation code. Unlike
 -- ResolveAssociation, this never migrates, renames, reindexes, or otherwise
 -- rewrites SavedVariables; it admits only an exact stable identity or the
@@ -1392,6 +1512,10 @@ local function ReadLoadoutWishlistState(loadoutSlot)
             and "invalid-schema" or "association-mismatch", expectedKey
     end
 
+    if WishlistRequiresLockEvidence(candidate) then
+        candidate = ExactActiveWishlistRoles(slots, loadoutSlot, candidate)
+            or candidate
+    end
     local evidenceState, key = ClassifyWishlistEvidence(candidate,
         expectedKey ~= "" and expectedKey or nil)
     if expectedKey == nil or expectedKey == "" then
@@ -1463,8 +1587,12 @@ end
 function A.GetLoadoutWishlist(loadoutSlot)
     -- An association on an empty numbered slot is stale metadata, not a usable
     -- build. Never expose it to the panel/UI as though the player can swap to it.
-    if not IsPopulatedLoadout(loadoutSlot) then return nil end
+    local slots = A.Slots()
+    if not IsPopulatedLoadout(loadoutSlot, slots) then return nil end
     local candidate = ResolveAssociation(loadoutSlot)
+    if WishlistRequiresLockEvidence(candidate) then
+        candidate = ExactActiveWishlistRoles(slots, loadoutSlot, candidate)
+    end
     if WishlistRequiresLockEvidence(candidate) then return nil end
     return candidate
 end
@@ -1610,11 +1738,15 @@ function A.Wishlist()
     local linked = ResolveAssociation(activeSlot)
     if linked then
         if WishlistRequiresLockEvidence(linked) then
-            A._wishlistNote = "Wishlist identity found, but lock evidence is temporarily unavailable; awaiting authoritative lock evidence."
-            return nil
+            linked = ExactActiveWishlistRoles(slots, activeSlot, linked)
+            if not linked then
+                A._wishlistNote = "Wishlist identity found, but lock evidence is temporarily unavailable; awaiting authoritative lock evidence."
+                return nil
+            end
         end
         return EchoesToWishlist(linked.echoes, linked.name,
-            "loadout-association", false, linked.slot)
+            "loadout-association", linked.evidenceSource == "verified-active",
+            linked.slot)
     end
     local state = Store and Store.State and Store.State()
     if state and type(state.loadoutWishlists) == "table"
@@ -1695,6 +1827,7 @@ function A.Slots()
                     if id then
                         echoes[#echoes + 1] = {
                             spellId = id, stacks = tonumber(e.stacks) or 1,
+                            quality = tonumber(e.quality),
                             locked = LockState(e.locked),
                             family = FamilyOf(id),
                         }

@@ -569,6 +569,14 @@ latch/retry checks and cheaply detects unhooked auto-accept/rival transitions;
 level, catalog, and settings invalidations. All per design doc §4 (deep copies,
 ledger, gate v2 latch-polling, run-boundary, self-check demotion hook).
 
+An 80-85-copy designed Wishlist with unavailable lock roles gains read authority
+only from its associated active numbered loadout when that row is verified, all
+active lock booleans are represented, the sorted spell/stack identity matches
+exactly, and `LockedOwned()` reports the same exact counts. The adapter derives a
+new 79-ordinary/six-locked projection without rewriting either server mirror or
+SavedVariables; mismatch, partial/stale counts, excess/underflow, or non-active
+same-name rows remain evidence-pending.
+
 ## ui/*
 
 - `ui/Readout.lua` — `Nexus.Readout`: pure-ish formatting: `Readout.Status(model)`,

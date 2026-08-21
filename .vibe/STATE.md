@@ -8,7 +8,7 @@
 
 - Stage: 48
 - Checkpoint: 48.3
-- Status: NOT_STARTED
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp4-exact-wishlist-evidence`
 - Starting head: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
 - Worktree: `.test19-wp4-worktree`
@@ -26,16 +26,18 @@ Derive ordinary and locked roles from an exact verified active-loadout total and
 
 ## Acceptance (current checkpoint)
 
-- [ ] Exact active totals minus exact authoritative locked counts produce exact ordinary counts and preserve both roles.
-- [ ] One spell/tier may carry both ordinary and locked copies without collapsing either role.
-- [ ] Partial totals, stale/unproven locks, sibling-tier ambiguity, and locked-total underflow fail closed.
-- [ ] Short-name, family, subset, title, slot proximity, and stale-ID resemblance never authorize derivation.
-- [ ] Derivation is order-independent, deterministic across reload, and does not mutate source evidence.
+- [x] Exact active totals minus exact authoritative locked counts produce exact ordinary counts and preserve both roles.
+- [x] One spell/tier may carry both ordinary and locked copies without collapsing either role.
+- [x] Partial totals, stale/unproven locks, sibling-tier ambiguity, and locked-total underflow fail closed.
+- [x] Short-name, family, subset, title, slot proximity, and stale-ID resemblance never authorize derivation.
+- [x] Derivation is order-independent, deterministic across reload, and does not mutate source evidence.
 - [ ] Focused association tests, mapped tests, Fast, required review/Full, and diff checks pass.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- #20 expected-red failed twice at `exact active/associated mirror remained evidence-pending`; the green public GameAdapter runner passes 13 checks across exact 79+6 derivation, same-tier overlap, sibling quality preservation, mismatch/partial/underflow refusal, reload convergence, and source/SavedVariables immutability.
+- The bridge is active-slot-only and requires verified/complete active booleans, exact sorted spell/stack identity, CandidateEvidence's six-copy envelope, and exact `LockedOwned.bySpell` agreement. Exact-base Fast passes `26/26` with integration `70/70` and zero failed/unavailable/skipped checks.
 - #44 checkpoint review passed at repaired product/test head `b23259d`: immutable bound future/provenance evidence and exact Dummy/LK quality disagreement are now covered in addition to the original copy-total matrix; focused runners and exact-base Fast `24/24` pass.
 - #44 expected-red failed twice at `valid duplicate exact rows did not survive candidate normalization`; the green public runner passes 16 checks across 2+2+2, one-by-six, seven-copy, malformed, provenance/future-field, draft-budget, and EBH1 round-trip cases.
 - CandidateEvidence now owns the six-copy envelope; Wishlist draft budgeting and EBH1 locked-role import/export consume exact stack totals without changing the separate ordinary 79-copy contract.
@@ -50,6 +52,7 @@ Derive ordinary and locked roles from an exact verified active-loadout total and
 
 ## Work log
 
+- Checkpoint 48.3 implements a read-only exact active-total/locked-count bridge across `Wishlist`, `GetLoadoutWishlist`, and `GetLoadoutWishlistState`; no association, server mirror, Snapshot, Designed, or historical evidence is rewritten.
 - Checkpoint 48.2 hygiene was clean across CandidateEvidence normalization/snapshot binding, Wishlist counted budgeting/export, Codec locked-role decoding, and the focused runner; no redundant owner, stale marker, or behavior-preserving quick win justified churn.
 - Checkpoint 48.2 review initially falsified bound-snapshot immutability and exact category-quality agreement, repaired both at CandidateEvidence, reran focused checks and Fast, then passed and auto-advanced to 48.3.
 - Checkpoint 48.1 hygiene was clean across the exact-key model/controller/renderer surface; no redundant branch, correctness defect, safe quick win, or evidence-backed debt item justified post-review churn.
@@ -96,8 +99,8 @@ Derive ordinary and locked roles from an exact verified active-loadout total and
 
 ## Last completed loop
 
-- Checkpoint 48.2 review passed at repaired product/test head `b23259d`; Stage 48 auto-advanced to 48.3 `NOT_STARTED` with no unresolved findings.
+- Checkpoint 48.3 implementation is ready for review after deterministic expected-red, 13-check public bridge coverage, eight affected association/adapter/evidence runners, exact-base Fast `26/26`, strict Vibe, and clean diff checks.
 
 ## Recommended next action
 
-- Start checkpoint 48.3 with public expected-red coverage for exact read-time active-total minus authoritative locked-count derivation, including overlap, underflow, partial/stale evidence, same-family siblings, reload determinism, and source immutability.
+- Review checkpoint 48.3 against active-slot authority, exact identity equality, complete boolean/count agreement, copy-total limits, overlap/sibling preservation, mismatch/stale/underflow refusal, reload convergence, and source immutability before advancing to exact progress.

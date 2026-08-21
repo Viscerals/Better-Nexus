@@ -336,15 +336,15 @@ Sync extraction parity is complete.
 | `A.SetFirstRunWishlist` | First-run slot association | Main/UI | GA/SV -> SV | reject invalid slot | A-W/A-X |
 | `A.SetFirstRunWishlistIdentity` | First-run exact association | Main/UI | identity/SV -> SV | reject invalid | A-W |
 | `A.ClearFirstRunWishlist` | Clear first-run association | Main/UI | SV -> SV | idempotent | A-X |
-| `A.GetLoadoutWishlist` | Loadout association read | UI/Main | SV/GA -> defensive row | nil absent/ambiguous | A-W |
-| `A.GetLoadoutWishlistState` | Read-only exact association evidence diagnosis and bounded transition observation | WishlistController/tests | SV/GA -> defensive row/fixed state | identity unavailable, pending, mismatch, or invalid without mutation | A-W/A-X |
+| `A.GetLoadoutWishlist` | Loadout association read with exact verified-active role bridging | UI/Main | SV/GA -> defensive row | nil absent, ambiguous, stale, or identity/count mismatch | A-W |
+| `A.GetLoadoutWishlistState` | Read-only exact association evidence diagnosis, verified-active role bridge, and bounded transition observation | WishlistController/tests | SV/GA -> defensive row/fixed state | identity unavailable, pending, mismatch, stale counts, or invalid without mutation | A-W/A-X |
 | `A.GetLoadoutWishlistSlot` | Association slot read | UI/Main | SV -> - | nil absent | A-W/A-X |
 | `A.SetLoadoutWishlistIdentity` | Exact per-loadout association | UI/Main | identity/SV -> SV | reject invalid | A-W |
 | `A.SetFirstLoadoutWishlistIdentity` | First active loadout association | UI/Main | GA/identity/SV -> SV | reject no loadout | A-W/A-X |
 | `A.SetLoadoutWishlist` | Slot-to-slot association | UI/Main | GA/SV -> SV | reject invalid/ambiguous | A-W |
 | `A.UpdateWishlistAssociationAfterSave` | Reconcile saved association | UI/Main | GA/identity/SV -> SV | preserves prior on failure | A-W/A-X |
 | `A.ClearLoadoutWishlist` | Remove one association | UI/Main | SV -> SV | idempotent | A-W |
-| `A.Wishlist` | Active exact wishlist | Main/Model/UI | GA/SV -> defensive row | nil ambiguous | A-W |
+| `A.Wishlist` | Active exact wishlist with verified active-total minus authoritative locked-count roles | Main/Model/UI | GA/SV -> defensive row | nil ambiguous, partial, stale, or mismatched | A-W |
 | `A.WishlistNote` | Ambiguity/status note | UI/Main | adapter session -> - | nil none | A-X |
 | `A.GetLoadoutCandidates` | Active-loadout candidate list | UI | GA/SV -> defensive list | empty none | A-X |
 | `A.Slots` | Saved loadouts | Main/UI | GA -> defensive list | empty/not-ready | A-I/A-W |
