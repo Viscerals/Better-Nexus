@@ -571,3 +571,9 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Adversarial expected-red: the public Stage 32 automation fixture failed twice with `same-family locked exact quotas were dropped from automation planning`; the automation-only augmenter discarded both a locked sibling tier and an additional locked copy when the ordinary Wishlist already represented that family.
 - Repair: `WishlistWithLockTargets` now clones the represented family target, adds each locked design as one exact role quota, merges same-spell counts, preserves sibling tiers, and never mutates the server Wishlist projection.
 - Verification: the repaired Stage 32 fixture passes 65 checks and `run_wishlist_exact_progress.lua` remains green. AutomationRuntime parity/boot, integration `70/70`, Ratchet rotation, refresh-budget, and MainViewModel parity pass; exact-base Fast passes `35/35` with zero failed, unavailable, or skipped checks; `git diff --check` is clean.
+
+# 2026-08-21 — Checkpoint 48.4 hygiene CLEAN
+
+- Bounded surface: shared exact Wishlist progress projection, overlay/editor/HUD consumers, automation-only locked-target augmentation, and the two focused public fixtures.
+- Hot spots, quick wins, debt, and recommendations: none. The small copy-on-write family-target helper is the necessary immutability boundary; further extraction or consolidation would add indirection without removing another owner.
+- No product/test byte changed during hygiene, so the passing focused matrix and exact-base Fast `35/35` receipt remain applicable. Strict Vibe and `git diff --check` pass; the WP4 candidate remains frozen at checkpoint 48.4 and Stage 49/WP5 was not entered.

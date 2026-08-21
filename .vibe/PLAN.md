@@ -82,7 +82,7 @@ depends_on: [48.2]
 
 depends_on: [48.1, 48.2, 48.3]
 
-- Status: `NOT_STARTED`
+- Status: `DONE`
 - Objective:
   - Make overlay, HUD, model, and editor progress consume the same exact tier and role evidence.
 - Deliverables:
