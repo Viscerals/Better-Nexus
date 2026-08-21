@@ -833,9 +833,10 @@ end
 -- freeze, held-echo preference, least-harmful-select) already keys off
 -- plan.wishedFamilies, so a lock-designated family is automatically
 -- treated exactly like any other wished family with zero changes to that
--- carefully-tuned decision logic itself. A family already covered by the
--- real wishlist is left alone -- this only ADDS families the real
--- wishlist doesn't already ask for.
+-- carefully-tuned decision logic itself. A locked target remains an
+-- additional exact quota when the ordinary Wishlist already represents its
+-- family (or even the same exact spell), so this builds an automation-only
+-- merged target without mutating the server Wishlist projection.
 local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets)
     local targets = knownTargets or LockDesignTargetsFor(wishlist, knownKey)
     if type(targets) ~= "table" or not next(targets) then return wishlist end
@@ -843,13 +844,30 @@ local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets
     local familyOf = catalog and catalog.familyOf
     if type(rows) ~= "table" or type(familyOf) ~= "table" then return wishlist end
 
-    local entries, byFamily, existingIds = {}, {}, {}
+    local entries, byFamily = {}, {}
     if wishlist then
         for fam, t in pairs(wishlist.byFamily or {}) do byFamily[fam] = t end
         for _, e in ipairs(wishlist.entries or {}) do
             entries[#entries + 1] = e
-            if e and e.spellId then existingIds[tonumber(e.spellId)] = true end
         end
+    end
+
+    local copiedFamilies = {}
+    local function WritableTarget(fam)
+        if copiedFamilies[fam] then return byFamily[fam] end
+        local source = byFamily[fam]
+        if type(source) ~= "table" then return nil end
+        local copy = {}
+        for key, value in pairs(source) do copy[key] = value end
+        copy.qualityTiers = {}
+        for index, tier in ipairs(source.qualityTiers or {}) do
+            local tierCopy = {}
+            for key, value in pairs(tier) do tierCopy[key] = value end
+            copy.qualityTiers[index] = tierCopy
+        end
+        byFamily[fam] = copy
+        copiedFamilies[fam] = true
+        return copy
     end
 
     local changed = false
@@ -857,12 +875,42 @@ local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets
         local id = tonumber(spellIdKey)
         local row = id and rows[id]
         local fam = id and familyOf[id]
-        if id and row and fam and not existingIds[id] and not byFamily[fam] then
+        if id and row and fam then
             local q = tonumber(row.quality) or 0
-            entries[#entries + 1] = { spellId = id, quality = q, stacks = 1, family = fam }
-            byFamily[fam] = { targetStacks = 1, wishedQuality = q, spellId = id,
-                qualityTiers = { { q = q, n = 1, spellId = id } } }
-            existingIds[id] = true
+            entries[#entries + 1] = {
+                spellId=id,quality=q,stacks=1,family=fam,locked=true,
+            }
+            local target = WritableTarget(fam)
+            if target then
+                target.targetStacks = math.max(0,
+                    tonumber(target.targetStacks) or 0) + 1
+                local exactTier
+                for _, tier in ipairs(target.qualityTiers) do
+                    if tonumber(tier.spellId) == id then
+                        exactTier = tier
+                        break
+                    end
+                end
+                if exactTier then
+                    exactTier.n = math.max(0,
+                        tonumber(exactTier.n) or 0) + 1
+                else
+                    target.qualityTiers[#target.qualityTiers + 1] = {
+                        q=q,n=1,spellId=id,
+                    }
+                end
+                table.sort(target.qualityTiers, function(a, b)
+                    local aq, bq = tonumber(a.q) or 0, tonumber(b.q) or 0
+                    if aq ~= bq then return aq < bq end
+                    return (tonumber(a.spellId) or 0)
+                        < (tonumber(b.spellId) or 0)
+                end)
+            else
+                byFamily[fam] = {
+                    targetStacks=1,wishedQuality=q,spellId=id,
+                    qualityTiers={{q=q,n=1,spellId=id}},
+                }
+            end
             changed = true
         end
     end
