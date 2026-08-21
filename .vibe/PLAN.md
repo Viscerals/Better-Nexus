@@ -29,11 +29,11 @@
 - Evidence:
   - Multi-tier expected-red/green matrix, compact gates, and independent review receipt.
 
-### 48.2 — Preserve and validate exact locked copy totals (#44)
+### (DONE) 48.2 — Preserve and validate exact locked copy totals (#44)
 
 depends_on: [48.1]
 
-- Status: `NOT_STARTED`
+- Status: `DONE`
 - Objective:
   - Validate locked evidence by copy total and preserve valid stack counts through candidate, draft, and export boundaries.
 - Deliverables:
@@ -41,11 +41,11 @@ depends_on: [48.1]
   - Candidate-to-draft-to-export stack, exact-tier, provenance, and unknown-field preservation.
   - Focused valid duplicate, six-copy, seven-copy, malformed, overflow, and ordinary/locked-role coverage.
 - Acceptance:
-  - [ ] Six locked copies are accepted whether represented by one or several exact rows.
-  - [ ] Seven locked copies and malformed/overflow stacks are rejected rather than clamped.
-  - [ ] A valid `stacks=N` value never silently becomes one during conversion or export.
-  - [ ] Ordinary copies and locked copies retain separate roles and limits.
-  - [ ] Focused CandidateEvidence/Wishlist tests, mapped tests, Fast, required review/Full, and diff checks pass.
+  - [x] Six locked copies are accepted whether represented by one or several exact rows.
+  - [x] Seven locked copies and malformed/overflow stacks are rejected rather than clamped.
+  - [x] A valid `stacks=N` value never silently becomes one during conversion or export.
+  - [x] Ordinary copies and locked copies retain separate roles and limits.
+  - [x] Focused CandidateEvidence/Wishlist tests, mapped tests, Fast, checkpoint review, and diff checks pass; cumulative review/Full remain final-stage gates.
 - Demo commands:
   - `luajit tests/run_stage35_candidate_evidence.lua && luajit tests/run_locked_only_loadout_characterization.lua`
   - `luajit tests/run_locked_copy_totals.lua`

@@ -7,8 +7,8 @@
 ## Current focus
 
 - Stage: 48
-- Checkpoint: 48.2
-- Status: IN_REVIEW
+- Checkpoint: 48.3
+- Status: NOT_STARTED
 - Branch: `bugfix/test19-wp4-exact-wishlist-evidence`
 - Starting head: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
 - Worktree: `.test19-wp4-worktree`
@@ -16,25 +16,27 @@
 
 ## Objective (current checkpoint)
 
-Validate locked evidence by copy total and preserve valid stack counts through candidate, draft, and export boundaries.
+Derive ordinary and locked roles from an exact verified active-loadout total and authoritative active locked counts without rewriting the loadout mirror.
 
 ## Deliverables (current checkpoint)
 
-- One locked-role copy-total owner enforcing `sum(stacks) <= 6` without row-count shortcuts.
-- Candidate-to-draft-to-export stack, exact-tier, provenance, and unknown-field preservation.
-- Focused valid duplicate, six-copy, seven-copy, malformed, overflow, and ordinary/locked-role coverage.
+- One exact multiset subtraction boundary consuming checkpoint 48.2 locked evidence.
+- Focused mixed-role, multi-copy, same-family sibling, underflow, partial, stale, reload, and no-authority coverage.
+- Read-only preservation of active, Snapshot, and Designed evidence.
 
 ## Acceptance (current checkpoint)
 
-- [x] Six locked copies are accepted whether represented by one or several exact rows.
-- [x] Seven locked copies and malformed/overflow stacks are rejected rather than clamped.
-- [x] A valid `stacks=N` value never silently becomes one during conversion or export.
-- [x] Ordinary copies and locked copies retain separate roles and limits.
-- [ ] Focused CandidateEvidence/Wishlist tests, mapped tests, Fast, required review/Full, and diff checks pass.
+- [ ] Exact active totals minus exact authoritative locked counts produce exact ordinary counts and preserve both roles.
+- [ ] One spell/tier may carry both ordinary and locked copies without collapsing either role.
+- [ ] Partial totals, stale/unproven locks, sibling-tier ambiguity, and locked-total underflow fail closed.
+- [ ] Short-name, family, subset, title, slot proximity, and stale-ID resemblance never authorize derivation.
+- [ ] Derivation is order-independent, deterministic across reload, and does not mutate source evidence.
+- [ ] Focused association tests, mapped tests, Fast, required review/Full, and diff checks pass.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- #44 checkpoint review passed at repaired product/test head `b23259d`: immutable bound future/provenance evidence and exact Dummy/LK quality disagreement are now covered in addition to the original copy-total matrix; focused runners and exact-base Fast `24/24` pass.
 - #44 expected-red failed twice at `valid duplicate exact rows did not survive candidate normalization`; the green public runner passes 16 checks across 2+2+2, one-by-six, seven-copy, malformed, provenance/future-field, draft-budget, and EBH1 round-trip cases.
 - CandidateEvidence now owns the six-copy envelope; Wishlist draft budgeting and EBH1 locked-role import/export consume exact stack totals without changing the separate ordinary 79-copy contract.
 - Focused CandidateEvidence, locked-only, assembled Leaderboard/editor, Wishlist model/controller/tier, EBH1 integrity, and module-contract runners pass. Exact-base Fast passes `24/24` with zero failed, unavailable, or skipped checks.
@@ -48,6 +50,7 @@ Validate locked evidence by copy total and preserve valid stack counts through c
 
 ## Work log
 
+- Checkpoint 48.2 review initially falsified bound-snapshot immutability and exact category-quality agreement, repaired both at CandidateEvidence, reran focused checks and Fast, then passed and auto-advanced to 48.3.
 - Checkpoint 48.1 hygiene was clean across the exact-key model/controller/renderer surface; no redundant branch, correctness defect, safe quick win, or evidence-backed debt item justified post-review churn.
 - Checkpoint 48.1 review passed with no actionable correctness, security, scope, or hygiene finding and auto-advanced within Stage 48 to checkpoint 48.2 `NOT_STARTED`.
 - Checkpoint 48.1 implements exact ordinary draft keys from trustworthy spell IDs, collision-safe single-tier compatibility resolution, exact controller/renderer action handles, same-family tier transfer/reload coverage, and the preserved 79-copy budget.
@@ -92,8 +95,8 @@ Validate locked evidence by copy total and preserve valid stack counts through c
 
 ## Last completed loop
 
-- Checkpoint 48.2 implementation is ready for review after deterministic expected-red, public counted-evidence round-trip coverage, affected compatibility runners, exact-base Fast `24/24`, and clean diff checks.
+- Checkpoint 48.2 review passed at repaired product/test head `b23259d`; Stage 48 auto-advanced to 48.3 `NOT_STARTED` with no unresolved findings.
 
 ## Recommended next action
 
-- Review checkpoint 48.2 against copy-total authority, duplicate exact rows, malformed/nonfinite rejection, ordinary/locked separation, future-field/provenance preservation, EBH1 parity, and the six-copy budget before advancing to #20.
+- Start checkpoint 48.3 with public expected-red coverage for exact read-time active-total minus authoritative locked-count derivation, including overlap, underflow, partial/stale evidence, same-family siblings, reload determinism, and source immutability.
