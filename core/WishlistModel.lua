@@ -65,6 +65,35 @@ local function Family(spellId, catalog)
     return "s:" .. tostring(spellId or 0)
 end
 
+-- Ordinary draft identity is exact whenever the represented spell ID is a
+-- trustworthy positive integer. Family remains presentation/grouping
+-- metadata and is only a deterministic compatibility fallback for malformed
+-- callers that cannot enter a representable ordinary draft row.
+local function DraftKey(spellId, catalog)
+    local id = PositiveInteger(spellId)
+    if id then return "exact:" .. tostring(id) end
+    return "compat:" .. Family(spellId, catalog)
+end
+
+-- Preserve compatibility for older single-tier callers that still pass a
+-- family handle. It is authoritative only when that family selects exactly
+-- one ordinary row; sibling ambiguity fails closed.
+local function ResolveDraftKey(pending, rowKey)
+    pending = type(pending) == "table" and pending or {}
+    if rowKey ~= nil and pending[rowKey] ~= nil then return rowKey end
+    local wantedId = PositiveInteger(rowKey)
+    local found
+    for key, row in pairs(pending) do
+        if type(row) == "table"
+            and (row.family == rowKey
+                or (wantedId and PositiveInteger(row.spellId) == wantedId)) then
+            if found ~= nil then return nil end
+            found = key
+        end
+    end
+    return found
+end
+
 local function MaxStack(spellId, catalog)
     local row = catalog and catalog.rows and catalog.rows[tonumber(spellId)]
     return math.max(1, tonumber(row and row.maxStack) or 1)
@@ -171,10 +200,11 @@ local function NormalizeDraft(echoes, options)
         elseif id and echo.locked and lockDesignCount < MAX_LOCK_SLOTS and remaining > 0 then
             local catalogRow = catalog and catalog.rows and catalog.rows[id]
             local family = Family(id, catalog)
+            local rowKey = DraftKey(id, catalog)
             local maxStack = MaxStack(id, catalog)
             local swap = swapCandidates[swapIndex]
             if swap then swapIndex = swapIndex + 1 end
-            pending[family] = {
+            pending[rowKey] = {
                 spellId = id,
                 family = family,
                 quality = tonumber(catalogRow and catalogRow.quality) or tonumber(echo.quality) or 0,
@@ -241,14 +271,15 @@ local function NormalizeDraft(echoes, options)
         elseif id then
             local catalogRow = catalog and catalog.rows and catalog.rows[id]
             local family = Family(id, catalog)
+            local rowKey = DraftKey(id, catalog)
             local quality = tonumber(catalogRow and catalogRow.quality) or tonumber(echo.quality) or 0
             local maxStack = MaxStack(id, catalog)
             local stacks = math.min(maxStack, math.max(1, tonumber(echo.stacks) or 1), remaining)
-            local current = pending[family]
+            local current = pending[rowKey]
             if not current or quality > (tonumber(current.quality) or 0) then
                 local oldStacks = current and math.max(1, tonumber(current.stacks) or 1) or 0
                 local keepStacks = math.min(maxStack, math.max(stacks, oldStacks))
-                pending[family] = {
+                pending[rowKey] = {
                     spellId = id,
                     family = family,
                     quality = quality,
@@ -416,7 +447,8 @@ local function ApplyCommittedTargets(prepared, committedTargets, options)
             if id and (tonumber(lockedBySpell[id]) or 0) <= 0 then
                 local catalogRow = catalog and catalog.rows and catalog.rows[id]
                 local family = Family(id, catalog)
-                if family and not pending[family] and not pendingLock[family] then
+                local rowKey = DraftKey(id, catalog)
+                if family and not pending[rowKey] and not pendingLock[family] then
                     pendingLock[family] = {
                         spellId = id,
                         family = family,
@@ -444,12 +476,13 @@ local function AddPending(pending, row, options)
     local lockedBySpell = type(options.lockedBySpell) == "table" and options.lockedBySpell or {}
     if (tonumber(lockedBySpell[spellId]) or 0) > 0 then return pending, "already_locked" end
     local family = Family(spellId, options.catalog)
+    local rowKey = DraftKey(spellId, options.catalog)
     local maxStack = math.max(1, tonumber(row.maxStack) or 1)
-    local old = type(pending) == "table" and pending[family]
+    local old = type(pending) == "table" and pending[rowKey]
     if old and tonumber(old.spellId) == spellId then return pending, "unchanged" end
     if not old and PendingTotal(pending) >= MAX_WISHLIST_ECHOES then return pending, "full" end
     local nextPending = CopyMap(pending)
-    nextPending[family] = {
+    nextPending[rowKey] = {
         spellId = spellId,
         family = family,
         quality = tonumber(row.quality) or 0,
@@ -459,40 +492,42 @@ local function AddPending(pending, row, options)
     return nextPending, "added"
 end
 
-local function RemovePending(pending, pendingLock, family)
-    if not family then return pending, pendingLock, "invalid" end
-    if type(pendingLock) == "table" and pendingLock[family] then
+local function RemovePending(pending, pendingLock, rowKey)
+    if not rowKey then return pending, pendingLock, "invalid" end
+    if type(pendingLock) == "table" and pendingLock[rowKey] then
         local nextLock = CopyMap(pendingLock)
-        nextLock[family] = nil
+        nextLock[rowKey] = nil
         return pending, nextLock, "removed_lock"
     end
     for key, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
-        if row and row.family == family then
+        if row and row.family == rowKey then
             local nextLock = CopyMap(pendingLock)
             nextLock[key] = nil
             return pending, nextLock, "removed_lock"
         end
     end
-    if type(pending) == "table" and pending[family] then
+    local resolved = ResolveDraftKey(pending, rowKey)
+    if resolved then
         local nextPending = CopyMap(pending)
-        nextPending[family] = nil
+        nextPending[resolved] = nil
         return nextPending, pendingLock, "removed"
     end
     return pending, pendingLock, "unchanged"
 end
 
-local function ToggleDesignLock(pending, pendingLock, family, options)
+local function ToggleDesignLock(pending, pendingLock, rowKey, options)
     options = options or {}
-    if not family then return pending, pendingLock, options.replacingSpellId, "invalid" end
-    if type(pendingLock) == "table" and pendingLock[family] then
+    if not rowKey then return pending, pendingLock, options.replacingSpellId, "invalid" end
+    if type(pendingLock) == "table" and pendingLock[rowKey] then
         local nextLock = CopyMap(pendingLock)
-        nextLock[family] = nil
+        nextLock[rowKey] = nil
         return pending, nextLock, options.replacingSpellId, "untagged_lock"
     end
-    local row = type(pending) == "table" and pending[family]
+    local resolved = ResolveDraftKey(pending, rowKey)
+    local row = resolved and pending[resolved]
     if not row then return pending, pendingLock, options.replacingSpellId, "unchanged" end
     local nextPending = CopyMap(pending)
-    local nextRow = nextPending[family]
+    local nextRow = nextPending[resolved]
     if nextRow.lockIntent then
         if PendingTotal(pending) + math.max(1, tonumber(nextRow.stacks) or 1)
             > MAX_WISHLIST_ECHOES then
@@ -511,8 +546,9 @@ local function ToggleDesignLock(pending, pendingLock, family, options)
     return nextPending, pendingLock, nil, "tagged"
 end
 
-local function AdjustStacks(pending, family, delta)
-    local row = type(pending) == "table" and pending[family]
+local function AdjustStacks(pending, rowKey, delta)
+    local resolved = ResolveDraftKey(pending, rowKey)
+    local row = resolved and pending[resolved]
     if not row then return pending, "unchanged" end
     local maxStack = math.max(1, tonumber(row.maxStack) or 1)
     local current = math.max(1, tonumber(row.stacks) or 1)
@@ -523,7 +559,7 @@ local function AdjustStacks(pending, family, delta)
     local nextValue = current + delta
     if delta > 0 then nextValue = math.min(nextValue, current + room) end
     local nextPending = CopyMap(pending)
-    nextPending[family].stacks = math.max(1, math.min(maxStack, nextValue))
+    nextPending[resolved].stacks = math.max(1, math.min(maxStack, nextValue))
     return nextPending, "adjusted"
 end
 
@@ -535,7 +571,8 @@ local function AssignLockSlot(pending, pendingLock, data, options)
     local id = tonumber(data.spellId)
     local catalog = options.catalog
     local family = Family(id, catalog)
-    local row = type(pending) == "table" and pending[family]
+    local rowKey = DraftKey(id, catalog)
+    local row = type(pending) == "table" and pending[rowKey]
     if row then
         local nextPending = pending
         if not row.lockIntent then
@@ -544,9 +581,9 @@ local function AssignLockSlot(pending, pendingLock, data, options)
                 return pending, pendingLock, nil, "lock_full"
             end
             nextPending = CopyMap(pending)
-            nextPending[family].lockIntent = true
-            nextPending[family].replaces = options.replacingSpellId
-            nextPending[family].stacks = 1
+            nextPending[rowKey].lockIntent = true
+            nextPending[rowKey].replaces = options.replacingSpellId
+            nextPending[rowKey].stacks = 1
         end
         return nextPending, pendingLock, nil, "tagged"
     end
@@ -669,22 +706,22 @@ end
 local function ReconcileLocked(pending, pendingLock, fulfilledTargets, lockedBySpell)
     lockedBySpell = type(lockedBySpell) == "table" and lockedBySpell or {}
     local nextPending, nextLock, nextFulfilled = pending, pendingLock, fulfilledTargets
-    for family, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+    for rowKey, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
         if (tonumber(lockedBySpell[row.spellId]) or 0) > 0 then
             if nextLock == pendingLock then nextLock = CopyMap(pendingLock) end
             if nextFulfilled == fulfilledTargets then nextFulfilled = CopyMap(fulfilledTargets) end
             nextFulfilled[tonumber(row.spellId)] = row.replaces or true
-            nextLock[family] = nil
+            nextLock[rowKey] = nil
         end
     end
-    for family, row in pairs(type(pending) == "table" and pending or {}) do
+    for rowKey, row in pairs(type(pending) == "table" and pending or {}) do
         if (tonumber(lockedBySpell[row.spellId]) or 0) > 0 then
             if nextPending == pending then nextPending = CopyMap(pending) end
             if row.lockIntent then
                 if nextFulfilled == fulfilledTargets then nextFulfilled = CopyMap(fulfilledTargets) end
                 nextFulfilled[tonumber(row.spellId)] = row.replaces or true
             end
-            nextPending[family] = nil
+            nextPending[rowKey] = nil
         end
     end
     return nextPending, nextLock, nextFulfilled
@@ -699,6 +736,8 @@ function Factory.New()
     local Model = {}
     Model.NormalizeEchoName = NormalizeEchoName
     Model.Family = Family
+    Model.DraftKey = DraftKey
+    Model.ResolveDraftKey = ResolveDraftKey
     Model.MaxStack = MaxStack
     Model.EchoListTotal = EchoListTotal
     Model.PendingTotal = PendingTotal

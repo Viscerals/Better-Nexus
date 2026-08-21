@@ -497,20 +497,21 @@ function Controller.New(options)
         return outcome
     end
 
-    function M.RemovePending(family)
+    function M.RemovePending(rowKey)
         state.pending, state.pendingLock =
-            DraftModel.RemovePending(state.pending, state.pendingLock, family)
+            DraftModel.RemovePending(state.pending, state.pendingLock, rowKey)
         TouchPresentation()
     end
 
-    function M.ToggleDesignLock(family)
-        if not family then return "invalid" end
-        local localOnly = state.pendingLock[family]
-            or (state.pending[family] and state.pending[family].lockIntent)
-        if not localOnly and not state.pending[family] then return "unchanged" end
+    function M.ToggleDesignLock(rowKey)
+        if not rowKey then return "invalid" end
+        local resolved = DraftModel.ResolveDraftKey(state.pending, rowKey)
+        local localOnly = state.pendingLock[rowKey]
+            or (resolved and state.pending[resolved].lockIntent)
+        if not localOnly and not resolved then return "unchanged" end
         local lockedBySpell = localOnly and {} or LockedBySpell()
         local nextPending, nextLock, nextReplacing, outcome =
-            DraftModel.ToggleDesignLock(state.pending, state.pendingLock, family, {
+            DraftModel.ToggleDesignLock(state.pending, state.pendingLock, rowKey, {
                 lockedBySpell = lockedBySpell,
                 replacingSpellId = state.replacingSpellId,
             })
@@ -529,8 +530,8 @@ function Controller.New(options)
         return outcome
     end
 
-    function M.AdjustStacks(family, delta)
-        local nextPending, outcome = DraftModel.AdjustStacks(state.pending, family, delta)
+    function M.AdjustStacks(rowKey, delta)
+        local nextPending, outcome = DraftModel.AdjustStacks(state.pending, rowKey, delta)
         if outcome == "full" then
             notify("|cffff6060Nexus:|r wishlist is full (79 / 79 Echoes).")
             return outcome
@@ -544,7 +545,8 @@ function Controller.New(options)
         if not data or not tonumber(data.spellId) then return "invalid" end
         local catalog = Catalog()
         local family = DraftModel.Family(data.spellId, catalog)
-        local localOnly = (state.pending[family] and state.pending[family].lockIntent)
+        local rowKey = DraftModel.DraftKey(data.spellId, catalog)
+        local localOnly = (state.pending[rowKey] and state.pending[rowKey].lockIntent)
             or state.pendingLock[family]
         local lockedBySpell = localOnly and {} or LockedBySpell()
         local nextPending, nextLock, nextReplacing, outcome =

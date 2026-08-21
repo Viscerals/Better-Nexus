@@ -12,9 +12,9 @@
 - Objective:
   - Make editor open/edit/save and row actions round-trip every ordinary quality tier independently.
 - Deliverables:
-  - Exact-tier draft/model identity with deterministic fallback for compatibility rows lacking trustworthy `spellId`.
+  - Exact-tier draft/model identity with deterministic fail-closed resolution for compatibility callers lacking an exact row handle.
   - Exact-row `+`, `-`, selection, and remove behavior.
-  - Multi-tier family round-trip and 79-copy total coverage.
+  - Multi-tier family save/reload and supported import/export round-trip with 79-copy total coverage.
 - Acceptance:
   - [ ] Common, Uncommon, and Rare rows in one family survive a no-op round-trip unchanged.
   - [ ] Editing or removing one exact tier cannot modify a sibling tier.
@@ -25,7 +25,7 @@
 - Demo commands:
   - `luajit tests/run_wishlist_editor.lua && luajit tests/run_wishlist_model_parity.lua`
   - `luajit tests/run_wishlist_tier_roundtrip.lua`
-  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef 03870e75254848c941dcd3534a9c79a90a644fe3`
+  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef e674f033cc51494a382191b987c9a99cb6827f4a`
 - Evidence:
   - Multi-tier expected-red/green matrix, compact gates, and independent review receipt.
 
@@ -38,7 +38,7 @@ depends_on: [48.1]
   - Validate locked evidence by copy total and preserve valid stack counts through candidate, draft, and export boundaries.
 - Deliverables:
   - One locked-role copy-total owner enforcing `sum(stacks) <= 6` without row-count shortcuts.
-  - Candidate-to-draft-to-export stack preservation.
+  - Candidate-to-draft-to-export stack, exact-tier, provenance, and unknown-field preservation.
   - Focused valid duplicate, six-copy, seven-copy, malformed, overflow, and ordinary/locked-role coverage.
 - Acceptance:
   - [ ] Six locked copies are accepted whether represented by one or several exact rows.
@@ -49,31 +49,32 @@ depends_on: [48.1]
 - Demo commands:
   - `luajit tests/run_stage35_candidate_evidence.lua && luajit tests/run_locked_only_loadout_characterization.lua`
   - `luajit tests/run_locked_copy_totals.lua`
-  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef 03870e75254848c941dcd3534a9c79a90a644fe3`
+  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef e674f033cc51494a382191b987c9a99cb6827f4a`
 - Evidence:
   - Copy-total expected-red/green matrix, focused gate summaries, and independent review receipt.
 
-### 48.3 — Bridge only verified active locks into the designed mirror (#20)
+### 48.3 — Derive exact ordinary and locked roles at read time (#20)
 
 depends_on: [48.2]
 
 - Status: `NOT_STARTED`
 - Objective:
-  - Mirror locked intent only from an exact verified active-loadout association, without treating current resemblance as historical or designed authority.
+  - Derive ordinary and locked roles from an exact verified active-loadout total and authoritative active locked counts without rewriting the loadout mirror.
 - Deliverables:
-  - One exact active-to-designed association bridge consuming checkpoint 48.2 locked evidence.
-  - Focused exact-match, subset/collision, stale association, cross-owner, reload, and no-authority coverage.
-  - Preservation of independent Snapshot and Designed roles.
+  - One exact multiset subtraction boundary consuming checkpoint 48.2 locked evidence.
+  - Focused mixed-role, multi-copy, same-family sibling, underflow, partial, stale, reload, and no-authority coverage.
+  - Read-only preservation of active, Snapshot, and Designed evidence.
 - Acceptance:
-  - [ ] Only an exact verified active-loadout association can update the designed mirror's locked role.
-  - [ ] Short-name, family, subset, title, and stale-ID resemblance never authorizes the bridge.
-  - [ ] Cross-owner and unverified associations preserve existing data without promotion.
-  - [ ] Exact verified updates preserve every locked stack and the six-copy limit.
+  - [ ] Exact active totals minus exact authoritative locked counts produce exact ordinary counts and preserve both roles.
+  - [ ] One spell/tier may carry both ordinary and locked copies without collapsing either role.
+  - [ ] Partial totals, stale/unproven locks, sibling-tier ambiguity, and locked-total underflow fail closed.
+  - [ ] Short-name, family, subset, title, slot proximity, and stale-ID resemblance never authorize derivation.
+  - [ ] Derivation is order-independent, deterministic across reload, and does not mutate source evidence.
   - [ ] Focused association tests, mapped tests, Fast, required review/Full, and diff checks pass.
 - Demo commands:
   - `luajit tests/run_snapshot_wishlist_association.lua && luajit tests/run_locked_evidence_resolver.lua`
   - `luajit tests/run_active_wishlist_lock_bridge.lua`
-  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef 03870e75254848c941dcd3534a9c79a90a644fe3`
+  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef e674f033cc51494a382191b987c9a99cb6827f4a`
 - Evidence:
   - Authority/collision expected-red matrix, focused green, and independent review receipt.
 
@@ -85,7 +86,7 @@ depends_on: [48.1, 48.2, 48.3]
 - Objective:
   - Make overlay, HUD, model, and editor progress consume the same exact tier and role evidence.
 - Deliverables:
-  - Exact-spell/tier ownership projection in `ui/WishlistOverlay.lua` and its shared model boundary.
+  - One exact-spell/tier progress boundary shared by `ui/WishlistOverlay.lua`, the model, editor, and automation consumers.
   - Focused sibling-tier, per-tier quota, locked-role, refresh, and parity coverage.
   - Removal of family-level satisfaction as an authority decision.
 - Acceptance:
@@ -97,7 +98,7 @@ depends_on: [48.1, 48.2, 48.3]
 - Demo commands:
   - `luajit tests/run_wishlist_overlay.lua && luajit tests/run_wishlist_renderer_parity.lua`
   - `luajit tests/run_wishlist_exact_progress.lua`
-  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef 03870e75254848c941dcd3534a9c79a90a644fe3`
+  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef e674f033cc51494a382191b987c9a99cb6827f4a`
 - Evidence:
   - Sibling-tier expected-red/green matrix, parity gates, and independent review receipt.
 

@@ -93,13 +93,16 @@ local prepared = W.ApplyCommittedTargets(basePrepared, {[1007]=true}, {
 })
 Same(imported, importedBefore, "imported input")
 Same(basePrepared, baseBeforeCommit, "base draft before committed-target application")
-local alpha = prepared.pending[W.Family(1002, catalog)]
-Check(alpha and alpha.spellId == 1002 and alpha.quality == 3 and alpha.stacks == 3,
-    "quality-family canonicalization changed")
-Check(prepared.pending[W.Family(1003, catalog)]
-    and prepared.pending[W.Family(1004, catalog)],
+local alphaLow = prepared.pending[W.DraftKey(1001, catalog)]
+local alphaHigh = prepared.pending[W.DraftKey(1002, catalog)]
+Check(alphaLow and alphaLow.spellId == 1001 and alphaLow.quality == 1
+    and alphaLow.stacks == 2 and alphaHigh and alphaHigh.spellId == 1002
+    and alphaHigh.quality == 3 and alphaHigh.stacks == 3,
+    "exact quality siblings collapsed during normalization")
+Check(prepared.pending[W.DraftKey(1003, catalog)]
+    and prepared.pending[W.DraftKey(1004, catalog)],
     "same-name distinct groups were lost")
-local beta = prepared.pending[W.Family(1005, catalog)]
+local beta = prepared.pending[W.DraftKey(1005, catalog)]
 Check(beta and beta.lockIntent and beta.replaces == 1010 and beta.stacks == 1,
     "explicit locked target or deterministic replacement pairing changed")
 Check(prepared.fulfilledTargets[1006] == true,
@@ -152,8 +155,8 @@ local typedOrdinaryBefore, typedLockedBefore = Clone(typedOrdinary), Clone(typed
 local typed = assert(W.NormalizeCandidateEvidence(typedOrdinary, typedLocked, {
     catalog=catalog,lockedBySpell={[1001]=1,[1010]=1},
 }))
-Check(typed.pending[W.Family(1001,catalog)]
-    and typed.pending[W.Family(1001,catalog)].stacks == 2
+Check(typed.pending[W.DraftKey(1001,catalog)]
+    and typed.pending[W.DraftKey(1001,catalog)].stacks == 2
     and typed.fulfilledTargets[1001] == true,
     "typed ordinary/locked overlap lost one role")
 Check(Count(typed.pendingLock) == 1

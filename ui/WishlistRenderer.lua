@@ -130,18 +130,18 @@ function Renderer.New(options)
         return Controller.AddPending(row)
     end
 
-    local function RemovePending(family)
-        return Controller.RemovePending(family)
+    local function RemovePending(rowKey)
+        return Controller.RemovePending(rowKey)
     end
 
-    local function ToggleDesignLock(family)
-        local outcome = Controller.ToggleDesignLock(family)
+    local function ToggleDesignLock(rowKey)
+        local outcome = Controller.ToggleDesignLock(rowKey)
         SyncFulfilledDraftTargets()
         return outcome
     end
 
-    local function AdjustStacks(family, delta)
-        return Controller.AdjustStacks(family, delta)
+    local function AdjustStacks(rowKey, delta)
+        return Controller.AdjustStacks(rowKey, delta)
     end
 
     local function AssignLockSlotFromData(data)
@@ -946,7 +946,7 @@ local function EnsureFrame()
                 return
             end
             if self.slotState == "designed" then
-                if self.family then ToggleDesignLock(self.family); requestRefresh() end
+                if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
                 return
             end
             if not self.spellId then return end
@@ -982,7 +982,7 @@ local function EnsureFrame()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         btn:SetScript("OnClick", function(self)
-            if self.family then ToggleDesignLock(self.family); requestRefresh() end
+            if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
         end)
         btn:Hide()
         lockedNeedIcons[i] = btn
@@ -1218,11 +1218,11 @@ local function EnsureFrame()
         row.remove:SetSize(22, 22); row.remove:SetPoint("RIGHT", 0, 0)
         row.minus:SetScript("OnClick", function(self)
             local d = self:GetParent().data
-            if d and not d.ghost then AdjustStacks(d.family, -1); requestRefresh() end
+            if d and not d.ghost then AdjustStacks(d.draftKey, -1); requestRefresh() end
         end)
         row.plus:SetScript("OnClick", function(self)
             local d = self:GetParent().data
-            if d and not d.ghost then AdjustStacks(d.family, 1); requestRefresh() end
+            if d and not d.ghost then AdjustStacks(d.draftKey, 1); requestRefresh() end
         end)
         row.remove:SetScript("OnClick", function(self)
             local d = self:GetParent().data
@@ -1383,11 +1383,11 @@ local function RefreshView(catalogRevision)
         -- AssignLockSlotFromData) -- no separate committed-store lookup
         -- needed for what's still just being designed in this session.
         local designed = {}
-        for fam, p in pairs(pending) do
+        for rowKey, p in pairs(pending) do
             if p.lockIntent then
                 local row = catalog and catalog.rows and catalog.rows[p.spellId]
-                designed[#designed + 1] = { spellId = p.spellId, family = fam,
-                    draftKey = fam,
+                designed[#designed + 1] = { spellId = p.spellId, family = p.family,
+                    draftKey = rowKey,
                     name = (row and row.name) or ("spell " .. tostring(p.spellId)), replaces = p.replaces }
             end
         end
@@ -1424,7 +1424,7 @@ local function RefreshView(catalogRevision)
                 local row = catalog and catalog.rows and catalog.rows[id]
                 local replacement = replacementFor[id]
                 btn.spellId = id
-                btn.family = nil
+                btn.draftKey = nil
                 btn.slotState = "locked"
                 btn.beingReplaced = replacement and true or nil
                 btn.icon:SetTexture(SpellIcon(id))
@@ -1432,7 +1432,7 @@ local function RefreshView(catalogRevision)
                     -- Dimmed: a replacement is already designed, directly above.
                     btn.icon:SetVertexColor(0.42, 0.42, 0.42)
                     needBtn.spellId = replacement.spellId
-                    needBtn.family = replacement.draftKey or replacement.family
+                    needBtn.draftKey = replacement.draftKey
                     needBtn.icon:SetTexture(SpellIcon(replacement.spellId))
                     needBtn:Show()
                 else
@@ -1443,6 +1443,7 @@ local function RefreshView(catalogRevision)
                         btn.icon:SetVertexColor(1, 1, 1)
                     end
                     needBtn.spellId = nil
+                    needBtn.draftKey = nil
                     needBtn:Hide()
                 end
                 btn:Show()
@@ -1450,25 +1451,27 @@ local function RefreshView(catalogRevision)
                 local d = freshDesigned[fi]
                 fi = fi + 1
                 btn.spellId = d.spellId
-                btn.family = d.draftKey or d.family
+                btn.draftKey = d.draftKey
                 btn.slotState = "designed"
                 btn.beingReplaced = nil
                 btn.icon:SetTexture(SpellIcon(d.spellId))
                 btn.icon:SetVertexColor(1, 0.85, 0.3)
                 btn:Show()
                 needBtn.spellId = nil
+                needBtn.draftKey = nil
                 needBtn:Hide()
             else
                 -- An open, unused locked slot -- shown as an empty outline
                 -- and directly clickable to assign a pursuit target.
                 btn.spellId = nil
-                btn.family = nil
+                btn.draftKey = nil
                 btn.slotState = "empty"
                 btn.beingReplaced = nil
                 btn.icon:SetTexture("Interface\\PaperDollInfoFrame\\UI-GearManager-LeaveItem-Transparent")
                 btn.icon:SetVertexColor(1, 1, 1)
                 btn:Show()
                 needBtn.spellId = nil
+                needBtn.draftKey = nil
                 needBtn:Hide()
             end
         end
@@ -1673,10 +1676,10 @@ local function RefreshView(catalogRevision)
 
     local list = {}
     local designedCount = 0
-    for _, p in pairs(pending) do
+    for rowKey, p in pairs(pending) do
         local row = catalog and catalog.rows and catalog.rows[p.spellId]
         list[#list + 1] = { spellId = p.spellId, family = p.family, stacks = p.stacks,
-            draftKey = p.family,
+            draftKey = rowKey,
             maxStack = p.maxStack, quality = p.quality, lockIntent = p.lockIntent,
             name = (row and row.name) or ("spell " .. p.spellId), replaces = p.replaces }
         if p.lockIntent then designedCount = designedCount + 1 end

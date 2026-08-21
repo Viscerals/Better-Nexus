@@ -151,6 +151,44 @@ wishlistButton:GetScript("OnClick")(wishlistButton)
 assert(#created == createdAfterMenus,
     "switch menus rebuilt their row pools on reuse")
 
+-- Same-family exact tiers must bind independent renderer action handles. A
+-- plus/remove click on one visible row may not target either sibling.
+for offset = 1, 3 do
+    local spellId = 762000 + offset
+    catalog.rows[spellId] = {
+        spellId=spellId,groupId=880,name="Renderer Shared Echo",
+        quality=offset,maxStack=3,classMask=1,
+    }
+end
+Editor.OpenForCandidate({title="Renderer exact tiers",echoes={
+    {spellId=762001,quality=1,stacks=1},
+    {spellId=762002,quality=2,stacks=1},
+    {spellId=762003,quality=3,stacks=1},
+}})
+Editor.Refresh()
+local function PendingRow(spellId)
+    for _, row in ipairs(pendingRows) do
+        if row.data and tonumber(row.data.spellId) == spellId then return row end
+    end
+end
+local low = assert(PendingRow(762001), "renderer lost the low exact tier")
+local middle = assert(PendingRow(762002), "renderer lost the middle exact tier")
+local high = assert(PendingRow(762003), "renderer lost the high exact tier")
+assert(low.data.draftKey ~= middle.data.draftKey
+    and middle.data.draftKey ~= high.data.draftKey
+    and low.data.draftKey ~= high.data.draftKey,
+    "renderer gave same-family tiers a shared action handle")
+middle.plus:GetScript("OnClick")({GetParent=function() return middle end})
+Editor.Refresh()
+low, middle, high = PendingRow(762001), PendingRow(762002), PendingRow(762003)
+assert(low.data.stacks == 1 and middle.data.stacks == 2
+    and high.data.stacks == 1,
+    "renderer plus action modified a sibling exact tier")
+low.remove:GetScript("OnClick")({GetParent=function() return low end})
+Editor.Refresh()
+assert(not PendingRow(762001) and PendingRow(762002) and PendingRow(762003),
+    "renderer remove action modified or lost a sibling exact tier")
+
 local function Read(path)
     local handle = assert(io.open(path, "rb"))
     local source = handle:read("*a")
