@@ -552,3 +552,9 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Acceptance: the active numbered slot alone supplies a verified exact total; complete active role booleans, exact independent locked counts, and exact `(spellId, quality)` identity derive a defensive 79 ordinary + six locked projection without mutating active, Designed, Snapshot, or durable association evidence. Same-tier overlap and same-family sibling qualities remain distinct.
 - Adversarial probes: fully coherent 78 ordinary + seven locked and 80 ordinary + five locked fixtures each keep the total at 85, match the designed identity, and match `LockedOwned.bySpell`; both fail closed at their respective copy envelope, while restoring 79+6 recovers. The public runner now passes 16 checks.
 - Review verification: the eight focused association/GameAdapter/Wishlist/evidence runners pass; exact-base Fast passes `26/26` with integration `70/70` and zero failed, unavailable, or skipped checks; strict Vibe and diff checks pass. No correctness, security, scope, or checkpoint-hygiene signal remains. Stage 48 auto-advances to 48.4; cumulative review/Full remain final-stage gates.
+
+# 2026-08-21 — Checkpoint 48.3 hygiene CLEAN
+
+- Bounded surface: the exact active-role bridge in `GameAdapter`, its public 16-check runner, and the adjacent contract/characterization text delivered by checkpoint 48.3.
+- Hot spots, quick wins, debt, and recommendations: none. The one private bridge is intentionally reused at the three public read surfaces; extracting its small local arithmetic tables or merging identity/count authority would obscure the fail-closed proof without removing duplication.
+- No product/test byte changed during hygiene, so the passing focused matrix and Fast receipt remain applicable. Strict Vibe validation and `git diff --check` pass; checkpoint 48.4 remains `NOT_STARTED`.

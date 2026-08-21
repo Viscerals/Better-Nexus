@@ -52,6 +52,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Work log
 
+- Checkpoint 48.3 hygiene was clean across the private active-role bridge, its three public read call sites, public boundary fixture, and adjacent contract text; no behavior-preserving quick win or evidence-backed debt justified churn.
 - Checkpoint 48.3 review passed with no product repair: the exact active-slot bridge remains read-only, active-only, exact-tier/count-bound, and fail-closed at both coherent envelope boundaries. Stage 48 auto-advanced to 48.4.
 - Checkpoint 48.3 implements a read-only exact active-total/locked-count bridge across `Wishlist`, `GetLoadoutWishlist`, and `GetLoadoutWishlistState`; no association, server mirror, Snapshot, Designed, or historical evidence is rewritten.
 - Checkpoint 48.2 hygiene was clean across CandidateEvidence normalization/snapshot binding, Wishlist counted budgeting/export, Codec locked-role decoding, and the focused runner; no redundant owner, stale marker, or behavior-preserving quick win justified churn.
