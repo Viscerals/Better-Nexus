@@ -119,8 +119,9 @@ end
 
 local function LockBudgetUsed(pending, pendingLock, lockedBySpell, excludeRealLockedId)
     local realLocked = {}
-    for spellId in pairs(type(lockedBySpell) == "table" and lockedBySpell or {}) do
-        realLocked[tonumber(spellId)] = true
+    for spellId, count in pairs(type(lockedBySpell) == "table" and lockedBySpell or {}) do
+        local id, copies = tonumber(spellId), PositiveInteger(count)
+        if id and copies then realLocked[id] = copies end
     end
     if excludeRealLockedId then realLocked[tonumber(excludeRealLockedId)] = nil end
 
@@ -136,12 +137,12 @@ local function LockBudgetUsed(pending, pendingLock, lockedBySpell, excludeRealLo
     end
 
     local used = 0
-    for _ in pairs(realLocked) do used = used + 1 end
+    for _, copies in pairs(realLocked) do used = used + copies end
     for _, row in pairs(type(pending) == "table" and pending or {}) do
         if row and row.lockIntent then used = used + 1 end
     end
-    for _ in pairs(type(pendingLock) == "table" and pendingLock or {}) do
-        used = used + 1
+    for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        used = used + (PositiveInteger(row and row.stacks) or 1)
     end
     return used
 end
@@ -338,26 +339,28 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
         end
     end
 
-    local explicitIds, explicitCount = {}, 0
-    for _, echo in ipairs(lockedEchoes) do
-        if type(echo) ~= "table" then
-            return nil, "locked Echo evidence is invalid"
+    local evidence = Nexus and Nexus.CandidateEvidence
+    if type(evidence) ~= "table"
+        or type(evidence.NormalizeLockedEchoes) ~= "function" then
+        return nil, "locked Echo evidence validator is unavailable"
+    end
+    local normalizedLocked, lockedReason = evidence.NormalizeLockedEchoes(
+        lockedEchoes)
+    if not normalizedLocked then
+        if tostring(lockedReason):find("six-copy", 1, true) then
+            return nil, lockedReason
         end
-        local id = PositiveInteger(echo.spellId)
-        local stacks = PositiveInteger(echo.stacks or 1)
-        local quality = echo.quality
-        if not id or not stacks
-            or (quality ~= nil and not NonNegativeInteger(quality)) then
-            return nil, "locked Echo evidence is invalid"
-        end
-        if explicitIds[id] then
-            return nil, "locked Echo evidence contains a duplicate identity"
-        end
+        return nil, "locked Echo evidence is invalid"
+    end
+
+    local explicitIds, explicitCounts, identityRows = {}, {}, {}
+    local explicitCount = 0
+    for _, echo in ipairs(normalizedLocked) do
+        local id, stacks = echo.spellId, echo.stacks
         explicitIds[id] = true
-        explicitCount = explicitCount + 1
-        if explicitCount > MAX_LOCK_SLOTS then
-            return nil, "locked Echo evidence exceeds the six-slot limit"
-        end
+        explicitCounts[id] = (explicitCounts[id] or 0) + stacks
+        identityRows[id] = (identityRows[id] or 0) + 1
+        explicitCount = explicitCount + stacks
     end
 
     -- Local locked ownership must not consume or suppress an ordinary role
@@ -387,9 +390,11 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
     prepared.pendingLock = {}
     prepared.fulfilledTargets = {}
     local replacementIndex = 1
-    for _, echo in ipairs(lockedEchoes) do
-        local id = tonumber(echo.spellId)
-        if (tonumber(lockedBySpell[id]) or 0) > 0 then
+    local identityOrdinals = {}
+    for _, echo in ipairs(normalizedLocked) do
+        local id = echo.spellId
+        identityOrdinals[id] = (identityOrdinals[id] or 0) + 1
+        if (PositiveInteger(lockedBySpell[id]) or 0) == explicitCounts[id] then
             prepared.fulfilledTargets[id] = true
         else
             local catalogRow = options.catalog and options.catalog.rows
@@ -399,16 +404,23 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
             -- Key by explicit identity, not family.  Two authoritative locked
             -- picks may share a catalog family/quality collision and both must
             -- remain visible and committable.
-            prepared.pendingLock["explicit:" .. tostring(id)] = {
-                spellId=id,
-                family=Family(id, options.catalog),
-                quality=tonumber(echo.quality)
-                    or tonumber(catalogRow and catalogRow.quality) or 0,
-                name=(catalogRow and catalogRow.name) or ("spell " .. tostring(id)),
-                stacks=math.max(1, tonumber(echo.stacks) or 1),
-                replaces=replacement,
-                explicitEvidence=true,
-            }
+            local key = "explicit:" .. tostring(id)
+            if identityRows[id] > 1 then
+                key = key .. ":" .. tostring(identityOrdinals[id])
+            end
+            local draftRow = CopyEntry(echo)
+            draftRow.spellId = id
+            draftRow.family = Family(id, options.catalog)
+            draftRow.quality = tonumber(echo.quality)
+                or tonumber(catalogRow and catalogRow.quality) or 0
+            draftRow.name = (catalogRow and catalogRow.name)
+                or ("spell " .. tostring(id))
+            draftRow.stacks = echo.stacks
+            draftRow.replaces = replacement
+            draftRow.explicitEvidence = true
+            draftRow.locked = true
+            draftRow.sourceRole = "locked"
+            prepared.pendingLock[key] = draftRow
         end
     end
     prepared.metrics.explicitLocked = explicitCount
@@ -640,15 +652,14 @@ local function ExportEntries(pending, pendingLock, lockedBySpell, catalog)
     end
     for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
         local identity = LockIdentity(row.spellId)
-        if not seenLocked[identity] then
-            entries[#entries + 1] = {
-                spellId = row.spellId,
-                quality = row.quality,
-                stacks = 1,
-                locked = true,
-            }
-            seenLocked[identity] = true
-        end
+        local exported = CopyEntry(row)
+        exported.spellId = row.spellId
+        exported.quality = row.quality
+        exported.stacks = PositiveInteger(row.stacks) or 1
+        exported.locked = true
+        exported.sourceRole = row.sourceRole or "locked"
+        entries[#entries + 1] = exported
+        seenLocked[identity] = true
     end
     for id, count in pairs(type(lockedBySpell) == "table" and lockedBySpell or {}) do
         local identity = LockIdentity(id)

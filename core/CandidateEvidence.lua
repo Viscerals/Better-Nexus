@@ -65,11 +65,7 @@ local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
     if not lockedRole and entries == 0 then
         return nil, "ordinary Echo evidence is still syncing"
     end
-    if lockedRole and entries > MAX_LOCKED then
-        return nil, "locked Echo evidence exceeds the six-slot limit"
-    end
-
-    local out, total, identities = {}, 0, {}
+    local out, total = {}, 0
     for index = 1, entries do
         local row = source[index]
         if not lockedRole and (row.locked
@@ -87,11 +83,10 @@ local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
             return nil, (lockedRole and "locked" or "ordinary")
                 .. " Echo evidence is invalid"
         end
-        if lockedRole and identities[id] then
-            return nil, "locked Echo evidence contains a duplicate identity"
-        end
-        identities[id] = true
         total = total + stacks
+        if lockedRole and total > MAX_LOCKED then
+            return nil, "locked Echo evidence exceeds the six-copy limit"
+        end
         if not lockedRole and not allowOrdinaryOverflow
             and total > MAX_ORDINARY then
             return nil, "ordinary Echo evidence exceeds 79 copies"
@@ -99,7 +94,10 @@ local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
         local copy = DeepCopy(row)
         copy.spellId, copy.stacks = id, stacks
         copy.quality = quality ~= nil and NonNegativeInteger(quality) or nil
-        if lockedRole and markLockedRole then copy.locked = true end
+        if lockedRole and markLockedRole then
+            copy.locked = true
+            copy.sourceRole = "locked"
+        end
         out[index] = copy
     end
     return out, nil, total
@@ -561,4 +559,11 @@ end
 
 function Evidence.CurrentKind()
     return CURRENT_KIND
+end
+
+-- Public normalization seam for consumers that need to materialize the same
+-- locked-role envelope. CandidateEvidence remains the single owner of the
+-- six-copy limit and returns defensive rows with explicit provenance.
+function Evidence.NormalizeLockedEchoes(source)
+    return NormalizePool(source, true, false, true)
 end

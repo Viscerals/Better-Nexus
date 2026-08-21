@@ -182,10 +182,11 @@ Cross-module edges that later extraction must retain:
 
 | Surface | Responsibility | Called by | Reads -> writes | Failure | Coverage/gap |
 | --- | --- | --- | --- | --- | --- |
-| `Evidence.Build` | Normalize and bind immutable typed ordinary/locked candidate evidence | Community/Leaderboard/tests | copied arrays + scalar identity/selected-evidence token -> candidate-local snapshot | bounded fail closed above 79 ordinary copies, six locks, or invalid/dense evidence | W-C/W-UI |
+| `Evidence.Build` | Normalize and bind immutable typed ordinary/locked candidate evidence | Community/Leaderboard/tests | copied arrays + scalar identity/selected-evidence token -> candidate-local snapshot | bounded fail closed above 79 ordinary copies, six locked copies, or invalid/dense evidence | W-C/W-UI |
 | `Evidence.Validate` | Revalidate supported current/legacy candidate contracts immediately before use | Community/Leaderboard/WishlistController/tests | candidate-local snapshot + selected-evidence or legacy revision callback -> defensive snapshot | unsupported, mutated, stale, malformed, or unavailable evidence rejected | W-C/W-UI |
 | `Evidence.ResolveLocked` | Resolve one exact category-aware locked-Echo authority without global reads | Community/Leaderboard/Wishlist/Peer Debug/tests | selected ordinary/build identity + bounded category or inline records -> defensive locked result + scalar diagnostics | incomplete ordinary data, malformed claims, identity mismatch, or category disagreement fail closed | W-C/W-UI |
 | `Evidence.CurrentKind` | Publish the current typed candidate contract identifier | tests/diagnostics | constant -> string | none | W-C |
+| `Evidence.NormalizeLockedEchoes` | Normalize one typed locked-role pool and enforce the six-copy envelope | Wishlist/tests | dense locked rows -> defensive exact rows with counts, future fields, and provenance | malformed rows or more than six total copies fail closed | W-C/W-UI |
 
 ## `Nexus.WishlistModel` inventory
 

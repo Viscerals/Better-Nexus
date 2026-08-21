@@ -2,6 +2,7 @@
 -- grouping metadata and must never collapse or retarget a sibling row.
 Nexus = {}
 dofile("core/Codec.lua")
+dofile("core/CandidateEvidence.lua")
 dofile("core/WishlistModel.lua")
 
 local Model = assert(Nexus.WishlistModel and Nexus.WishlistModel.New)()

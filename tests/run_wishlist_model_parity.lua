@@ -1,6 +1,7 @@
 -- Golden and authority-isolation coverage for the pure Wishlist model.
 Nexus = {}
 dofile("core/Codec.lua")
+dofile("core/CandidateEvidence.lua")
 dofile("core/WishlistModel.lua")
 
 local W = assert(Nexus.WishlistModel and Nexus.WishlistModel.New)()
@@ -153,7 +154,7 @@ local typedLocked = {
 }
 local typedOrdinaryBefore, typedLockedBefore = Clone(typedOrdinary), Clone(typedLocked)
 local typed = assert(W.NormalizeCandidateEvidence(typedOrdinary, typedLocked, {
-    catalog=catalog,lockedBySpell={[1001]=1,[1010]=1},
+    catalog=catalog,lockedBySpell={[1001]=2,[1010]=1},
 }))
 Check(typed.pending[W.DraftKey(1001,catalog)]
     and typed.pending[W.DraftKey(1001,catalog)].stacks == 2
@@ -163,7 +164,7 @@ Check(Count(typed.pendingLock) == 1
     and typed.pendingLock["explicit:1002"]
     and typed.pendingLock["explicit:1002"].spellId == 1002,
     "typed locked family collision lost an explicit identity")
-Check(typed.metrics.explicitLocked == 2
+Check(typed.metrics.explicitLocked == 3
     and typed.metrics.explicitFulfilled == 1,
     "typed evidence metrics changed")
 Same(typedOrdinary, typedOrdinaryBefore, "typed ordinary input")

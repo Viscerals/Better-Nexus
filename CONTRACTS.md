@@ -340,7 +340,8 @@ it returns new draft maps, canonical upload/export entries, reconciliation
 results, and lock-commit plans without mutating caller inputs.
 
 The model owns Echo name/family identity, max-stack and 79-copy totals, the
-six-slot replacement budget, trusted/untrusted import normalization, quality
+six-copy explicit-evidence envelope, the six-slot replacement budget,
+trusted/untrusted import normalization, quality
 and family collision handling, immutable add/remove/stack/lock transitions,
 canonical upload ordering, export-entry construction, fulfilled-target
 reconciliation, name trimming, and the exact desired lock-target map. It does

@@ -494,7 +494,7 @@ function Codec.DecodeEBH1(str)
         or body:sub(1, 1) == "," or body:sub(-1) == ","
         or body:find(",,", 1, true) then return nil end
 
-    local entries, ordinarySeen, lockedSeen = {}, {}, {}
+    local entries, ordinarySeen = {}, {}
     local ordinaryTotal, lockedCount = 0, 0
     for chunk in body:gmatch("[^,]+") do
         local id, quality, stacks, marker =
@@ -508,13 +508,12 @@ function Codec.DecodeEBH1(str)
         if not id or id < 1 or id > 2147483647
             or not quality or quality < 0 or quality > 255
             or not stacks or stacks < 1 or stacks > 120 then return nil end
-        local seen = locked and lockedSeen or ordinarySeen
-        if seen[id] then return nil end
-        seen[id] = true
         if locked then
-            lockedCount = lockedCount + 1
+            lockedCount = lockedCount + stacks
             if lockedCount > 6 then return nil end
         else
+            if ordinarySeen[id] then return nil end
+            ordinarySeen[id] = true
             ordinaryTotal = ordinaryTotal + stacks
             if ordinaryTotal > 79 then return nil end
         end

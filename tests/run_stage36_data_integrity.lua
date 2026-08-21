@@ -832,11 +832,21 @@ do
     Control(lockedSix and #lockedSix.entries == 6
             and lockedSix.entries[1].locked == true
             and lockedSix.entries[6].locked == true,
-        "EBH1 accepts the exact six-entry locked budget")
+        "EBH1 accepts the exact six-copy locked budget")
     lockedSixParts[7] = "631107.2.1.1"
     Desired("ebh1", Codec.DecodeEBH1("EBH1:"
             .. table.concat(lockedSixParts, ",") .. ":MAGE:Locked 7") == nil,
-        "EBH1 accepted a seventh locked entry")
+        "EBH1 accepted a seventh locked copy")
+
+    local countedLocked = Codec.DecodeEBH1(
+        "EBH1:631110.2.2.1,631110.2.2.1,631110.2.2.1:MAGE:Counted")
+    Control(countedLocked and #countedLocked.entries == 3
+            and countedLocked.entries[1].stacks == 2
+            and countedLocked.entries[3].locked == true,
+        "EBH1 preserves duplicate exact locked rows totaling six copies")
+    Desired("ebh1", Codec.DecodeEBH1(
+            "EBH1:631110.2.2.1,631110.2.2.1,631110.2.2.1,631111.2.1.1:MAGE:Seven") == nil,
+        "EBH1 accepted seven locked copies across four rows")
 
     local typedOverlap = Codec.DecodeEBH1(
         "EBH1:631200.3.2,631200.2.1.1:MAGE:Typed Overlap")
@@ -847,10 +857,8 @@ do
             and typedOverlap.entries[2].locked == true,
         "EBH1 keeps same-ID ordinary and locked roles distinct")
     Desired("ebh1", Codec.DecodeEBH1(
-            "EBH1:631200.3.1,631200.2.1:MAGE:Duplicate Ordinary") == nil
-            and Codec.DecodeEBH1(
-                "EBH1:631200.3.1.1,631200.2.1.1:MAGE:Duplicate Locked") == nil,
-        "EBH1 accepted a duplicate within one typed role")
+            "EBH1:631200.3.1,631200.2.1:MAGE:Duplicate Ordinary") == nil,
+        "EBH1 accepted a duplicate ordinary identity")
 end
 
 do

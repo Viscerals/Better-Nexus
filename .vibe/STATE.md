@@ -8,7 +8,7 @@
 
 - Stage: 48
 - Checkpoint: 48.2
-- Status: NOT_STARTED
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp4-exact-wishlist-evidence`
 - Starting head: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
 - Worktree: `.test19-wp4-worktree`
@@ -26,15 +26,18 @@ Validate locked evidence by copy total and preserve valid stack counts through c
 
 ## Acceptance (current checkpoint)
 
-- [ ] Six locked copies are accepted whether represented by one or several exact rows.
-- [ ] Seven locked copies and malformed/overflow stacks are rejected rather than clamped.
-- [ ] A valid `stacks=N` value never silently becomes one during conversion or export.
-- [ ] Ordinary copies and locked copies retain separate roles and limits.
+- [x] Six locked copies are accepted whether represented by one or several exact rows.
+- [x] Seven locked copies and malformed/overflow stacks are rejected rather than clamped.
+- [x] A valid `stacks=N` value never silently becomes one during conversion or export.
+- [x] Ordinary copies and locked copies retain separate roles and limits.
 - [ ] Focused CandidateEvidence/Wishlist tests, mapped tests, Fast, required review/Full, and diff checks pass.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- #44 expected-red failed twice at `valid duplicate exact rows did not survive candidate normalization`; the green public runner passes 16 checks across 2+2+2, one-by-six, seven-copy, malformed, provenance/future-field, draft-budget, and EBH1 round-trip cases.
+- CandidateEvidence now owns the six-copy envelope; Wishlist draft budgeting and EBH1 locked-role import/export consume exact stack totals without changing the separate ordinary 79-copy contract.
+- Focused CandidateEvidence, locked-only, assembled Leaderboard/editor, Wishlist model/controller/tier, EBH1 integrity, and module-contract runners pass. Exact-base Fast passes `24/24` with zero failed, unavailable, or skipped checks.
 - #43 review PASS at implementation head `6ab0eff`: public model/controller/renderer action probes, exact transfer/reload, ambiguous compatibility, exact 79-copy boundary, Fast `17/17`, integration `70/70`, strict Vibe, and clean diff all passed.
 - #43 expected-red failed twice at `same-family exact tiers collided during draft normalization`; the green public model/controller/renderer runner passes 13 checks including no-op, action isolation, transfer/reload, ambiguous compatibility, and 79-copy limits.
 - All 20 Wishlist/model/controller/renderer/import/association mapped runners pass; integration remains `70/70` through Fast.
@@ -89,8 +92,8 @@ Validate locked evidence by copy total and preserve valid stack counts through c
 
 ## Last completed loop
 
-- Checkpoint 48.1 review and bounded hygiene passed at product head `6ab0eff` / receipt head `c049e71`; Stage 48 remains at 48.2 `NOT_STARTED` without product/test/workflow drift.
+- Checkpoint 48.2 implementation is ready for review after deterministic expected-red, public counted-evidence round-trip coverage, affected compatibility runners, exact-base Fast `24/24`, and clean diff checks.
 
 ## Recommended next action
 
-- Start checkpoint 48.2 with public CandidateEvidence/Wishlist expected-red coverage for counted locked stacks: totals exactly six, over six with six-or-fewer rows, malformed counts, duplicate exact rows, unknown fields, and export preservation.
+- Review checkpoint 48.2 against copy-total authority, duplicate exact rows, malformed/nonfinite rejection, ordinary/locked separation, future-field/provenance preservation, EBH1 parity, and the six-copy budget before advancing to #20.

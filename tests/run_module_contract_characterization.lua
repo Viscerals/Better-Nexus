@@ -141,7 +141,7 @@ for _, module in ipairs(manifest.modules) do
     totalCallbacks = totalCallbacks + callbackCount
 end
 
-assert(totalSymbols == 208, "unexpected eleven-module public-surface total")
+assert(totalSymbols == 209, "unexpected eleven-module public-surface total")
 assert(totalAssigned == 14, "unexpected assigned namespace-member total")
 assert(totalCallbacks == 162, "unexpected eleven-module callback-site total")
 

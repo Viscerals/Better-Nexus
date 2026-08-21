@@ -125,7 +125,7 @@ for index = 1, 79 do
     }
 end
 
-local lockedIds = {201382,201388,201398,201410,201416,201420}
+local lockedIds = {201382,201388,201398,201410,201416}
 local locked = {}
 for index, id in ipairs(lockedIds) do
     locked[index] = {spellId=id,stacks=index == 2 and 2 or 1,
@@ -283,7 +283,7 @@ end
 local detail = RenderCurrent()
 local displayed = DisplayedLocked(detail)
 Check(SameSet(displayed, expected),
-    "Leaderboard did not display its six authoritative locked Echoes")
+    "Leaderboard did not display its six authoritative locked copies")
 Check(detail.copy:IsEnabled(),
     "valid 79-copy ordinary evidence was not actionable")
 
