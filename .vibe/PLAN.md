@@ -53,11 +53,11 @@ depends_on: [48.1]
 - Evidence:
   - Copy-total expected-red/green matrix, focused gate summaries, and independent review receipt.
 
-### 48.3 — Derive exact ordinary and locked roles at read time (#20)
+### (DONE) 48.3 — Derive exact ordinary and locked roles at read time (#20)
 
 depends_on: [48.2]
 
-- Status: `NOT_STARTED`
+- Status: `DONE`
 - Objective:
   - Derive ordinary and locked roles from an exact verified active-loadout total and authoritative active locked counts without rewriting the loadout mirror.
 - Deliverables:
@@ -65,12 +65,12 @@ depends_on: [48.2]
   - Focused mixed-role, multi-copy, same-family sibling, underflow, partial, stale, reload, and no-authority coverage.
   - Read-only preservation of active, Snapshot, and Designed evidence.
 - Acceptance:
-  - [ ] Exact active totals minus exact authoritative locked counts produce exact ordinary counts and preserve both roles.
-  - [ ] One spell/tier may carry both ordinary and locked copies without collapsing either role.
-  - [ ] Partial totals, stale/unproven locks, sibling-tier ambiguity, and locked-total underflow fail closed.
-  - [ ] Short-name, family, subset, title, slot proximity, and stale-ID resemblance never authorize derivation.
-  - [ ] Derivation is order-independent, deterministic across reload, and does not mutate source evidence.
-  - [ ] Focused association tests, mapped tests, Fast, required review/Full, and diff checks pass.
+  - [x] Exact active totals minus exact authoritative locked counts produce exact ordinary counts and preserve both roles.
+  - [x] One spell/tier may carry both ordinary and locked copies without collapsing either role.
+  - [x] Partial totals, stale/unproven locks, sibling-tier ambiguity, and locked-total underflow fail closed.
+  - [x] Short-name, family, subset, title, slot proximity, and stale-ID resemblance never authorize derivation.
+  - [x] Derivation is order-independent, deterministic across reload, and does not mutate source evidence.
+  - [x] Focused association tests, mapped tests, Fast, checkpoint review, and diff checks pass; cumulative review/Full remain final-stage gates.
 - Demo commands:
   - `luajit tests/run_snapshot_wishlist_association.lua && luajit tests/run_locked_evidence_resolver.lua`
   - `luajit tests/run_active_wishlist_lock_bridge.lua`

@@ -138,6 +138,44 @@ activeLock.locked = true
 Check(A.Wishlist() ~= nil,
     "exact bridge did not recover after authoritative evidence returned")
 
+-- Coherent evidence at either side of the 79 ordinary / six locked envelope
+-- must still fail closed. These probes keep the active total at exactly 85 and
+-- make the designed identity plus independent locked counts agree, so the
+-- rejection cannot be attributed to a stale or partial authority source.
+local function SetCoherentEnvelope(ordinaryCopies, firstLockedCopies)
+    local active = {
+        {spellId=200110,quality=0,stacks=ordinaryCopies,locked=false},
+        {spellId=200112,quality=2,stacks=39,locked=false},
+        {spellId=200110,quality=0,stacks=firstLockedCopies,locked=true},
+        {spellId=200100,quality=3,stacks=2,locked=true},
+        {spellId=200104,quality=2,stacks=2,locked=true},
+    }
+    local designed = H.CloneValue(active)
+    for _, row in ipairs(designed) do row.locked = false end
+    H.Perks.serverBuildSlots[1].echoes = active
+    H.Perks.serverBuildSlots[102].echoes = designed
+    H.locked = {
+        {spellId=200110,quality=0,stacks=firstLockedCopies},
+        {spellId=200100,quality=3,stacks=2},
+        {spellId=200104,quality=2,stacks=2},
+    }
+    saved.key = assert(A.WishlistKey(designed))
+end
+
+SetCoherentEnvelope(39, 3) -- 78 ordinary + 7 locked = 85 total.
+Check(A.Wishlist() == nil,
+    "coherent seven-copy locked evidence bypassed the six-copy envelope")
+SetCoherentEnvelope(41, 1) -- 80 ordinary + 5 locked = 85 total.
+Check(A.Wishlist() == nil,
+    "coherent 80-copy ordinary evidence bypassed the 79-copy envelope")
+
+H.Perks.serverBuildSlots[1].echoes = H.CloneValue(activeEchoes)
+H.Perks.serverBuildSlots[102].echoes = H.CloneValue(designedEchoes)
+H.locked = lockedBefore
+saved.key = designedKey
+Check(A.Wishlist() ~= nil,
+    "exact bridge did not recover after coherent boundary probes")
+
 print(string.format(
     "active Wishlist lock bridge: ordinary=79 locked=6 overlap=yes mismatch/partial/underflow=closed checks=%d -- OK",
     checks))
