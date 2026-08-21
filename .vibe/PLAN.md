@@ -6,9 +6,9 @@
 - Decision: exact `spellId` is the ordinary row identity when trustworthy; family remains grouping metadata and never satisfies or edits a sibling tier.
 - Decision: ordinary, locked, and active-loadout evidence remain separate roles with separate limits and authority.
 
-### 48.1 — Preserve exact ordinary tier rows (#43)
+### 48.1 — Preserve exact ordinary tier rows (#43) (DONE)
 
-- Status: `NOT_STARTED`
+- Status: `DONE`
 - Objective:
   - Make editor open/edit/save and row actions round-trip every ordinary quality tier independently.
 - Deliverables:

@@ -7,8 +7,8 @@
 ## Current focus
 
 - Stage: 48
-- Checkpoint: 48.1
-- Status: IN_REVIEW
+- Checkpoint: 48.2
+- Status: NOT_STARTED
 - Branch: `bugfix/test19-wp4-exact-wishlist-evidence`
 - Starting head: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
 - Worktree: `.test19-wp4-worktree`
@@ -16,26 +16,26 @@
 
 ## Objective (current checkpoint)
 
-Make editor open/edit/save and row actions round-trip every ordinary quality tier independently.
+Validate locked evidence by copy total and preserve valid stack counts through candidate, draft, and export boundaries.
 
 ## Deliverables (current checkpoint)
 
-- Exact-tier draft/model identity with deterministic fail-closed resolution for compatibility callers lacking an exact row handle.
-- Exact-row `+`, `-`, selection, and remove behavior.
-- Multi-tier family round-trip and 79-copy total coverage.
+- One locked-role copy-total owner enforcing `sum(stacks) <= 6` without row-count shortcuts.
+- Candidate-to-draft-to-export stack, exact-tier, provenance, and unknown-field preservation.
+- Focused valid duplicate, six-copy, seven-copy, malformed, overflow, and ordinary/locked-role coverage.
 
 ## Acceptance (current checkpoint)
 
-- [x] Common, Uncommon, and Rare rows in one family survive a no-op round-trip unchanged.
-- [x] Editing or removing one exact tier cannot modify a sibling tier.
-- [x] Ordinary total validation counts stack copies across every exact row and enforces 79.
-- [x] Locked intent remains outside the ordinary editor-row identity.
-- [x] Existing single-tier and compatibility-row behavior remains deterministic.
-- [ ] Focused Wishlist model/editor tests, mapped tests, Fast, required review/Full, and diff checks pass.
+- [ ] Six locked copies are accepted whether represented by one or several exact rows.
+- [ ] Seven locked copies and malformed/overflow stacks are rejected rather than clamped.
+- [ ] A valid `stacks=N` value never silently becomes one during conversion or export.
+- [ ] Ordinary copies and locked copies retain separate roles and limits.
+- [ ] Focused CandidateEvidence/Wishlist tests, mapped tests, Fast, required review/Full, and diff checks pass.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- #43 review PASS at implementation head `6ab0eff`: public model/controller/renderer action probes, exact transfer/reload, ambiguous compatibility, exact 79-copy boundary, Fast `17/17`, integration `70/70`, strict Vibe, and clean diff all passed.
 - #43 expected-red failed twice at `same-family exact tiers collided during draft normalization`; the green public model/controller/renderer runner passes 13 checks including no-op, action isolation, transfer/reload, ambiguous compatibility, and 79-copy limits.
 - All 20 Wishlist/model/controller/renderer/import/association mapped runners pass; integration remains `70/70` through Fast.
 - Exact-base Fast passes `17/17` with zero failed, unavailable, or skipped checks after advancing the enumerated normal Lua runner guard from `215` to `216`.
@@ -45,6 +45,7 @@ Make editor open/edit/save and row actions round-trip every ordinary quality tie
 
 ## Work log
 
+- Checkpoint 48.1 review passed with no actionable correctness, security, scope, or hygiene finding and auto-advanced within Stage 48 to checkpoint 48.2 `NOT_STARTED`.
 - Checkpoint 48.1 implements exact ordinary draft keys from trustworthy spell IDs, collision-safe single-tier compatibility resolution, exact controller/renderer action handles, same-family tier transfer/reload coverage, and the preserved 79-copy budget.
 - Stage 48 maintenance-scan hygiene was clean: no product surface was delivered, the selected precursor is already the single high-ROI bounded action, and adding further helpers or debt entries before its implementation would be speculative churn.
 - Stage 48 maintenance scan review passed: the selected row-key precursor is bounded and behavior-preserving, downstream semantic candidates remain in dependency order, and no product acceptance was claimed. Per repository routing rules, the product pointer remains 48.1 `NOT_STARTED`.
@@ -87,8 +88,8 @@ Make editor open/edit/save and row actions round-trip every ordinary quality tie
 
 ## Last completed loop
 
-- Checkpoint 48.1 implementation is ready for review after deterministic expected-red, 20/20 mapped Wishlist runners, Lua 5.1 changed-file parsing, integration 70/70, workflow policy, release policy, diff checks, and exact-base Fast 17/17.
+- Checkpoint 48.1 review passed at `6ab0eff` and auto-advanced to 48.2 without changing product/test/workflow bytes.
 
 ## Recommended next action
 
-- Review checkpoint 48.1 against exact sibling-tier round-trip, action isolation, compatibility ambiguity, transfer/reload, UI projection, and the 79-copy budget before advancing to #44.
+- Start checkpoint 48.2 with public CandidateEvidence/Wishlist expected-red coverage for counted locked stacks: totals exactly six, over six with six-or-fewer rows, malformed counts, duplicate exact rows, unknown fields, and export preservation.
