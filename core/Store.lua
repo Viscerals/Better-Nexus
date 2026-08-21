@@ -83,6 +83,16 @@ local function HasFutureSettingsOwner(db)
         and NormalizeVersion(rawget(db, "settingsVersion")) > SETTINGS_VERSION
 end
 
+local function AccountWritesAllowed(database)
+    if HasFutureSettingsOwner(database) then return false end
+    local migration = Nexus and Nexus.LegacyDataMigration
+    if migration and type(migration.AccountWritesAllowed) == "function" then
+        local ok, allowed = pcall(migration.AccountWritesAllowed, database)
+        return ok and allowed == true
+    end
+    return true
+end
+
 local function ReadLegacyMigrationMarker(db)
     local migrations = rawget(db, LEGACY_MIGRATION_NAMESPACE)
     if migrations == nil then return nil, nil end
@@ -249,13 +259,15 @@ function Store.Init()
     if Nexus.BuildCatalog and Nexus.BuildCatalog.Init then
         catalogSummary = Nexus.BuildCatalog.Init(db, Nexus.BundledBuilds)
     end
-    if not (catalogSummary and catalogSummary.readOnly) then
+    if AccountWritesAllowed(db)
+        and not (catalogSummary and catalogSummary.readOnly) then
         db.accountCharacters = type(db.accountCharacters) == "table"
             and db.accountCharacters or {}
         Store.RegisterCurrentCharacter()
     end
     local migrationSummary
     if Nexus.LegacyDataMigration and Nexus.LegacyDataMigration.Init
+        and not futureSettingsOwner
         and not (catalogSummary and catalogSummary.readOnly) then
         migrationSummary = Nexus.LegacyDataMigration.Init(db)
     end
@@ -299,17 +311,42 @@ function Store.CurrentOwnerKey()
     return CurrentIdentity()
 end
 
+local function AccountRowMatchesCurrent(row, ownerKey, name)
+    if row == nil then return true end
+    if type(row) ~= "table" then return false end
+    if row.ownerKey ~= nil
+        and Identity.CanonicalOwnerKey(row.ownerKey) ~= ownerKey then return false end
+    if row.name ~= nil then
+        if type(row.name) ~= "string"
+            or not Identity.OwnerKeyMatchesAuthor(ownerKey, row.name) then
+            return false
+        end
+        if row.name:find("-", 1, true)
+            and Identity.CanonicalOwnerFromTransport(row.name) ~= ownerKey then
+            return false
+        end
+    end
+    if row.realm ~= nil then
+        if type(row.realm) ~= "string" then return false end
+        local rowRealm = row.realm:lower()
+        if rowRealm ~= "" and rowRealm ~= "unknown"
+            and Identity.CanonicalOwnerKey(Identity.OwnerKey(name, row.realm))
+                ~= ownerKey then return false end
+    end
+    return true
+end
+
 function Store.RegisterCurrentCharacter()
     local ownerKey, name, realm = CurrentIdentity()
     local database = NexusDB
-    if not ownerKey or type(database) ~= "table" then return nil end
+    if not ownerKey or type(database) ~= "table"
+        or not AccountWritesAllowed(database) then return nil end
     local characters = type(database.accountCharacters) == "table"
         and database.accountCharacters or {}
     database.accountCharacters = characters
-    local playerKey = ownerKey:match("^([^@]+)@")
-    if playerKey then characters[playerKey .. "@unknown"] = nil end
-    local row = type(characters[ownerKey]) == "table"
-        and characters[ownerKey] or {}
+    local row = characters[ownerKey]
+    if not AccountRowMatchesCurrent(row, ownerKey, name) then return nil end
+    row = type(row) == "table" and row or {}
     row.name, row.realm = name, realm
     local class = UnitClass and select(2, UnitClass("player")) or nil
     if class and class ~= "" then row.class = tostring(class):upper() end
@@ -361,22 +398,20 @@ function Store.Settings()
     return transientSettings
 end
 
--- Per-char live subtable. The key is re-read from UnitName on EVERY
--- call: while it reads nil/"Unknown" (login order) a transient table is
--- returned instead, and the first call with a real name switches to the
--- persisted one -- a bad key is never latched (addendum B5).
+-- Per-character live subtable. The full local identity is re-read on every
+-- call. Until both name and realm are proven, callers share only the transient
+-- session table; transient or ambiguous short-key state is never promoted.
 function Store.State()
-    local name = UnitName and UnitName("player") or nil
+    local ownerKey = CurrentIdentity()
     local db = NexusDB
-    if not name or name == "" or name == "Unknown"
-        or not db or HasFutureSettingsOwner(db)
+    if not ownerKey or not db or HasFutureSettingsOwner(db)
         or type(db.chars) ~= "table" then
         transientState = transientState or FreshState()
         return transientState
     end
-    local state = db.chars[name]
+    local state = db.chars[ownerKey]
     state = EnsureStateShape(state)
-    db.chars[name] = state
+    db.chars[ownerKey] = state
     Store.RegisterCurrentCharacter()
     return state
 end

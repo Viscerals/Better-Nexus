@@ -10,7 +10,7 @@ UnitName = function() return "Hero" end
 NexusDB = {
     settingsVersion=2,
     settings={autoPick=false, autoActivate=false},
-    chars={Hero={futureSafety={keep=true}}},
+    chars={["hero@ebonhold"]={futureSafety={keep=true}}},
     futureRoot={keep=true},
 }
 Store.Init()

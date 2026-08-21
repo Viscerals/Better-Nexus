@@ -1283,7 +1283,7 @@ local function RefreshDetailPanel(buildId)
     if detailPanel.classIcon then
         detailPanel.classIcon:SetTexture(CLASS_ICON[(build.class or ""):upper()] or "Interface\\Icons\\INV_Misc_QuestionMark")
     end
-    detailPanel.author:SetText("by "..(build.author or "?"))
+    detailPanel.author:SetText("by "..(build.displayAuthor or build.author or "?"))
     detailPanel.desc:SetText((build.description ~= "" and build.description) or "|cff666666(no description)|r")
 
     -- Link field: always show the box so anyone can copy; only show Save
@@ -2653,6 +2653,9 @@ function M.Refresh()
     for index = virtual.first, virtual.last do
         local projected = builds[index]
         local b = LoadBuild(projected.id) or projected
+        b.displayAuthor = projected.displayAuthor
+        b.publicIdentityKey = projected.publicIdentityKey
+        b.publicIdentityVerified = projected.publicIdentityVerified
         b._nexusDps = projected._nexusDps
         b._nexusBestDps = projected._nexusBestDps
         b._nexusQualified = projected._nexusQualified
@@ -2721,7 +2724,7 @@ function M.Refresh()
             if bClass == "UNKNOWN" then
                 qualityTag = qualityTag .. "  |cffaaaaaaUnknown class|r"
             end
-            card.author:SetText("by "..(b.author or "?")..ownerTag..qualityTag)
+            card.author:SetText("by "..(b.displayAuthor or b.author or "?")..ownerTag..qualityTag)
         end
         if IsSavedMirror(b) then
             if b.destinationWishlistName then
@@ -2778,7 +2781,7 @@ function M.Refresh()
             card.echoCount:SetText("|cffffd200Syncing full loadout...|r")
             card.dpsBreakdown:SetText("")
             card.title:SetTextColor(0.65,0.65,0.65)
-            card.author:SetText("by "..(b.author or "?").."  |cff777777- waiting for Echoes|r")
+            card.author:SetText("by "..(b.displayAuthor or b.author or "?").."  |cff777777- waiting for Echoes|r")
         end
 
         card.mineBadge:Hide()

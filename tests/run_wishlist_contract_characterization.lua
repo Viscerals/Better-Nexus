@@ -15,6 +15,8 @@ dofile("ui/WishlistRenderer.lua")
 dofile("ui/WishlistEditor.lua")
 
 UnitName = function() return "Editor" end
+GetNormalizedRealmName = function() return "Ebonhold" end
+GetRealmName = GetNormalizedRealmName
 H.playerLevel = 80
 local designed = {
     {spellId=200100, quality=3, stacks=1},
@@ -22,7 +24,8 @@ local designed = {
 }
 UISpecialFrames = {}
 NexusDB = {
-    settingsVersion=2, settings={}, chars={Editor={futureSafety={keep=true}}},
+    settingsVersion=2, settings={},
+    chars={["editor@ebonhold"]={futureSafety={keep=true}}},
     communityBuilds={}, editorSearch="alpha", editorClassOnly=false,
     futureRoot={keep=true},
 }

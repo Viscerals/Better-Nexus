@@ -118,8 +118,12 @@ assert(type(NexusDB.chars.Partial.tomeTogglePending) == "table"
 
 local originalUnitName = UnitName
 UnitName = function() return "Hero" end
-assert(Store.State() == state and Store.Settings() == settings,
-    "Store accessors stopped returning the preserved live tables")
+local canonicalState = Store.State()
+assert(canonicalState ~= state
+    and NexusDB.chars["hero@ebonhold"] == canonicalState
+    and NexusDB.chars.Hero == state and state.futureSafetyState.token == "keep"
+    and Store.Settings() == settings,
+    "Store accessors claimed ambiguous short state or lost canonical persistence")
 UnitName = originalUnitName
 
 local converted = pending[17]

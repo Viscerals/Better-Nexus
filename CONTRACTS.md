@@ -165,6 +165,26 @@ duplicate=-5, filler=-15, rerollCost=8, rerollHoldThreshold=25), `defaultSetting
 anchorSpellId=nil, leverOptOut={}), `defaultFlags` (DISABLE_SUPPRESSES_GUARANTEE=true
 -- user-confirmed 2026-07-23, runtime-demotable; REROLL_HOLDS_GUARANTEED=nil).
 
+## core/Identity.lua — canonical authority and public presentation identity
+
+`Identity.PublicRecordKey(record, field)`, the synchronous
+`Identity.PresentPublicRecords(rows, field, options)`, and the incremental
+`NewPublicPresentation`/`IndexPublicRecord`/`PresentPublicRecord` path are
+presentation-only
+consumers of the established `VerifiedOwnerKey` authority. Verified identities
+are keyed and labeled by exact canonical `name@realm`; ambiguous records retain
+their typed raw player/realm/claim/relay evidence tuple and never gain authority
+through short-name similarity. Labels use a stable typed discriminator, reject
+unsafe durable presentation text, and never depend on traversal order or a
+Community list page. A public character batch may shadow an ambiguous
+same-short-name row when a verified representative is visible, but it does not
+mutate or delete the durable source. Community build batches retain distinct
+build records while applying realm-qualified verified author labels and explicit
+collision-safe `legacy/unverified` labels. Async callers index/present one owned
+row per normal bounded acquisition step; no completion callback rescans the full
+result set. This policy does not call or broaden `SamePlayer()` and owns no score,
+loadout, persistence, transport, or paging rule.
+
 ## core/Store.lua — `Nexus.Store` (SavedVariables: `NexusDB`)
 
 `Store.Init()` owns a two-phase legacy-name decision before its existing
@@ -185,10 +205,31 @@ scheduled Changelog likewise remains persistence-passive
 until `NexusDB` is a table. `Nexus.toc` continues declaring both SavedVariables
 names pending a separate compatibility decision.
 
-`Store.Settings()`,
-`Store.State()` (per-char keyed subtable: tomeTogglePending per lever w/ timestamps,
-priorAutoAccept, flagDemotions, recordedPicks for the current session). Char key from
-`UnitName("player")` guarded — if unavailable, defer (never latch "Unknown").
+`Store.Settings()`, `Store.State()`, `Store.CurrentOwnerKey()`,
+`Store.RegisterCurrentCharacter()`, `Store.IsAccountOwnerKey(ownerKey)`, and
+`Store.AccountCharacters()`. Durable mutable character state is keyed only by a
+canonical local `name@realm`. Until both name and realm are available, `State()`
+returns one session-only transient table and creates no durable short-name or
+`name@unknown` key; that transient table and preserved legacy short-key rows are
+never promoted into canonical state. Existing canonical state remains authoritative
+and is filled only for missing owned shape fields. Registration writes only a
+coherent exact current-character row, preserves contradictory and `@unknown`
+evidence, and stands down before allocating account storage when Store settings,
+legacy-migration metadata, or a downstream read-only owner is future/active.
+
+## core/LegacyDataMigration.lua — `Nexus.LegacyDataMigration`
+
+The ordered bounded converter stages account and DPS data before one atomic table
+swap. Canonical account map keys are authoritative only when their row evidence is
+coherent. An unresolved/short source may move to a canonical owner only through one
+explicit coherent `source.ownerKey` bridge, only when no canonical source row or
+competing bridge already owns that destination. Existing canonical fields always
+win; distinct ambiguous sources remain under deterministic collision-safe recovery
+keys with unknown nested fields retained. The exact account-table owner is rechecked
+before commit, so source replacement restarts staging without an unbounded whole-save
+copy or comparison. `AccountWritesAllowed(database)` is checked before Store allocates
+account storage and rejects active/incompatible migration metadata plus every settings
+schema newer than `Store.SettingsVersion()`.
 
 ## core/Errors.lua — `Nexus.Errors`
 

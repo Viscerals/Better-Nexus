@@ -114,8 +114,19 @@ local allocationDb = {
         opaque="future-owned-row",
         booleanOpaque=false,
         opaqueBundled="future-owned-bundled-row",
-        malformed={title="Missing durable identity",future={keep=true}},
+        malformed={title="Missing durable identity",author="Twin",
+            future={keep=true}},
+        malformedTwin={title="Second missing identity",author="Twin",
+            future={keep=true}},
         mismatched={id="different-id",future={keep=true}},
+        slotA={id="shared",title="Contradictory A",author="Ghost",
+            ownerKey="twin@realma",realm="realma",ownerVerified=true,
+            class="MAGE",fingerprint="96x1",
+            echoes={{spellId=96,stacks=1}}},
+        slotB={id="shared",title="Contradictory B",author="Phantom",
+            ownerKey="twin@realma",realm="realma",ownerVerified=true,
+            class="MAGE",fingerprint="97x1",
+            echoes={{spellId=97,stacks=1}}},
         visible={id="visible",title="Visible",echoes={{spellId=91,stacks=1}}},
         shadowed={id="shadowed",title="Overlay on bundled ID",
             echoes={{spellId=93,stacks=2}}},
@@ -137,7 +148,7 @@ local allocationBundle = {
             echoes={{spellId=95,stacks=1}}},
     },
 }
-Nexus.BuildCatalog.Init(allocationDb, allocationBundle)
+local allocationSummary = Nexus.BuildCatalog.Init(allocationDb, allocationBundle)
 local occupancy, represented =
     Nexus.BuildCatalog.AllocationOccupancy("absent")
 assert(occupancy == "absent" and represented == nil,
@@ -201,5 +212,69 @@ assert(occupancy == "tombstone" and represented == nil
     and allocationDb.syncTombstones.tombstoned.future.keep == true
     and allocationBundle.builds.tombstoned.title == "Tombstone target",
     "tombstone evidence was exposed, cleared, or reported free")
+
+-- A malformed historical row can be retained under a durable typed map key
+-- without carrying an id field.  The resumable public summary restores that
+-- key so distinct records cannot receive the same presentation identity.
+local cursor = Nexus.BuildCatalog.BeginSummaryCursor()
+local summaries = {}
+while true do
+    local item, done, err = Nexus.BuildCatalog.SummaryCursorNext(cursor)
+    assert(not err, err)
+    if item then summaries[item.id] = item end
+    if done then break end
+end
+assert(summaries.malformed and summaries.malformed.title
+        == "Missing durable identity"
+        and summaries.malformedTwin
+        and summaries.malformedTwin.title == "Second missing identity"
+        and Nexus.Identity.PublicRecordKey(summaries.malformed, "author")
+            ~= Nexus.Identity.PublicRecordKey(summaries.malformedTwin, "author"),
+    "summary cursor did not restore the durable map key as a missing id")
+local syncSummaries = Nexus.BuildCatalog.Summaries()
+local exactMalformed = Nexus.BuildCatalog.Get("malformed")
+local exactSummary = Nexus.BuildCatalog.GetSummary("malformedTwin")
+assert(syncSummaries.malformed.id == "malformed"
+        and syncSummaries.malformedTwin.id == "malformedTwin"
+        and exactMalformed.id == "malformed"
+        and exactSummary.id == "malformedTwin"
+        and Nexus.Identity.PublicRecordKey(syncSummaries.malformed, "author")
+            ~= Nexus.Identity.PublicRecordKey(
+                syncSummaries.malformedTwin, "author"),
+    "sync summary or exact hydration lost durable missing-id identity")
+assert(syncSummaries.slotA == nil and syncSummaries.slotB == nil
+        and Nexus.BuildCatalog.Get("slotA") == nil
+        and Nexus.BuildCatalog.GetSummary("slotB") == nil,
+    "contradictory embedded IDs escaped opaque public quarantine")
+assert(Nexus.BuildCatalog.FindExactFingerprintId("96x1") == nil
+        and Nexus.BuildCatalog.ResolveFingerprintIdentity(nil, "96x1") == nil
+        and Nexus.BuildCatalog.ResolveOwnerClass({player="Twin",
+            ownerKey="twin@realma",realm="realma",ownerVerified=true}) == nil,
+    "opaque contradictory IDs entered exact or owner authority indexes")
+local slotAVerdict = Nexus.LoadoutEvidence.OrdinaryCompleteness(
+    allocationDb.communityBuilds.slotA)
+local slotAHash = Nexus.LoadoutEvidence.CompatibilityHash(
+    slotAVerdict and slotAVerdict.fingerprint)
+assert(slotAHash and Nexus.BuildCatalog.ResolveFingerprintIdentity(
+        "slotA", "@" .. slotAHash, {legacyRecord={
+            buildId="shared",fingerprint="@" .. slotAHash,
+            loadoutHash=slotAHash,echoes={{spellId=96,stacks=1}},
+        }}) == nil,
+    "opaque contradictory ID supplied legacy fingerprint authority")
+assert(Nexus.BuildCatalog.IsAuthor("Twin") == true
+        and Nexus.BuildCatalog.IsAuthor("Ghost") == false
+        and Nexus.BuildCatalog.IsAuthor("Phantom") == false,
+    "opaque contradictory IDs entered the public author index")
+local publicCount = 0
+for _ in pairs(syncSummaries) do publicCount = publicCount + 1 end
+local allocationStatus = Nexus.BuildCatalog.Status()
+assert(Nexus.BuildCatalog.Count() == publicCount
+        and allocationSummary.merged == publicCount
+        and allocationStatus.availableCount == publicCount,
+    "opaque catalog rows inflated public availability counts: summaries="
+        .. tostring(publicCount) .. ", count="
+        .. tostring(Nexus.BuildCatalog.Count()) .. ", init="
+        .. tostring(allocationSummary.merged) .. ", status="
+        .. tostring(allocationStatus.availableCount))
 
 print("BuildCatalog precedence and defensive copies -- OK")

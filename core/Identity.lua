@@ -266,6 +266,180 @@ function Identity.VerifiedOwnerKey(record)
     return Identity.CoherentRecordOwnerKey(record)
 end
 
+local function PublicScalarText(value, maxBytes)
+    local kind = type(value)
+    if value == nil then return "nil", "", true end
+    if kind ~= "string" and kind ~= "number" and kind ~= "boolean" then
+        return kind, nil, false
+    end
+    local text = kind == "number" and value ~= value and "nan"
+        or tostring(value)
+    return kind, text, #text <= (maxBytes or 177)
+end
+
+local function HexBytes(text)
+    local out = {}
+    for index=1,#text do
+        out[index] = string.format("%02x", text:byte(index))
+    end
+    return table.concat(out)
+end
+
+local function PublicTyped(value, maxBytes)
+    local kind, text, bounded = PublicScalarText(value, maxBytes)
+    if text == nil then return kind .. ":7:invalid" end
+    if not bounded then
+        return kind .. ":" .. tostring(#text) .. ":oversized"
+    end
+    -- Public identity is computed inside bounded projection work.  Retain the
+    -- exact scalar when safe, and an injective bounded hex form otherwise.
+    -- Oversized/unsupported shapes are rejected from public projection below.
+    if not Identity.ValidDisplayText(text, maxBytes or 177, true) then
+        return kind .. ":" .. tostring(#text) .. ":invalid:" .. HexBytes(text)
+    end
+    return kind .. ":" .. tostring(#text) .. ":" .. text
+end
+
+local function PublicRecordShape(record, field)
+    local fields = {{field,80},{"realm",96},{"ownerKey",177},
+        {"claimedOwnerKey",177},{"relaySender",80}}
+    if field == "author" then
+        fields[#fields + 1] = {"id",96}
+        fields[#fields + 1] = {"buildId",96}
+    end
+    for _, item in ipairs(fields) do
+        local _, text, bounded = PublicScalarText(record[item[1]], item[2])
+        if text == nil or not bounded then return false end
+    end
+    return true
+end
+
+local function PublicBaseName(record, field)
+    local raw = type(record) == "table" and record[field] or nil
+    return Identity.DisplayPlayer(raw) or "Unknown"
+end
+
+local function PublicPlayerKey(record, field)
+    return Identity.PlayerKey(type(record) == "table" and record[field] or nil)
+end
+
+-- Stable public identity for presentation snapshots. Unlike SamePlayer(), this
+-- never grants authority: verified owners are exact name@realm identities and
+-- all other rows retain their complete ambiguity/provenance tuple.
+function Identity.PublicRecordKey(record, field)
+    if type(record) ~= "table" then return "invalid" end
+    local verified = Identity.VerifiedOwnerKey(record)
+    if verified then return "verified:" .. verified end
+    local parts = {"legacy",PublicTyped(record[field], 80),
+        PublicTyped(record.realm, 96),PublicTyped(record.ownerKey, 177),
+        PublicTyped(record.claimedOwnerKey, 177),
+        PublicTyped(record.relaySender, 80)}
+    -- Community rows are records rather than per-character aggregates.  Their
+    -- durable catalog identity must remain part of the public key even when
+    -- author/provenance fields are otherwise identical.
+    if field == "author" then
+        parts[#parts + 1] = PublicTyped(record.id, 96)
+        parts[#parts + 1] = PublicTyped(record.buildId, 96)
+    end
+    return table.concat(parts, "|")
+end
+
+local function VerifiedPublicLabel(record, field, ownerKey)
+    local realm = ownerKey and ownerKey:match("@(.+)$") or nil
+    return PublicBaseName(record, field) .. "-" .. tostring(realm or "unknown")
+end
+
+local function SafePublicToken(value, maxBytes)
+    return PublicTyped(value, maxBytes)
+end
+
+local function AmbiguousPublicLabel(record, field)
+    local base = PublicBaseName(record, field)
+    local raw = record[field]
+    local fullPlayer = Identity.PlayerKey(raw, true)
+    if fullPlayer and fullPlayer:find("-", 1, true) then
+        base = raw
+    else
+        local realm = type(record.realm) == "string"
+            and Identity.OwnerKey(base, record.realm) and record.realm or nil
+        if realm and realm:lower() ~= "unknown" then base = base .. "-" .. realm end
+    end
+    local discriminator = table.concat({
+        SafePublicToken(record.id, 96),
+        SafePublicToken(record.buildId, 96),
+        SafePublicToken(raw, 80),
+        SafePublicToken(record.realm, 96),
+        SafePublicToken(record.ownerKey, 177),
+        SafePublicToken(record.claimedOwnerKey, 177),
+        SafePublicToken(record.relaySender, 80),
+    }, "|")
+    return base .. " (legacy/unverified " .. discriminator .. ")"
+end
+
+function Identity.NewPublicPresentation(field, options)
+    return {field=field,options=type(options) == "table" and options or {},
+        verifiedNames={},indexed=0,shadowed=0,visible=0,invalid=0}
+end
+
+function Identity.IndexPublicRecord(context, record)
+    if type(context) ~= "table" or type(record) ~= "table" then
+        if type(context) == "table" then context.invalid = context.invalid + 1 end
+        return false
+    end
+    if not PublicRecordShape(record, context.field) then
+        context.invalid = context.invalid + 1
+        return false
+    end
+    local name = PublicPlayerKey(record, context.field)
+    if name and Identity.VerifiedOwnerKey(record) then
+        context.verifiedNames[name] = true
+    end
+    context.indexed = context.indexed + 1
+    return true
+end
+
+function Identity.PresentPublicRecord(context, record)
+    if type(context) ~= "table" or type(record) ~= "table" then return nil end
+    local field, options = context.field, context.options
+    if not PublicRecordShape(record, field) then return nil end
+    local name = PublicPlayerKey(record, field)
+    local ownerKey = Identity.VerifiedOwnerKey(record)
+    local hidden = options.shadowAmbiguous == true and ownerKey == nil
+        and name ~= nil and context.verifiedNames[name] == true
+    if hidden then context.shadowed = context.shadowed + 1; return nil end
+    record.publicIdentityKey = Identity.PublicRecordKey(record, field)
+    record.publicIdentityVerified = ownerKey ~= nil
+    if type(record[field]) == "string" then
+        local label = ownerKey and VerifiedPublicLabel(record, field, ownerKey)
+            or AmbiguousPublicLabel(record, field)
+        if field == "author" then record.displayAuthor = label
+        else record.displayPlayer = label end
+    end
+    context.visible = context.visible + 1
+    return record
+end
+
+-- Apply one shared public presentation policy to an owned batch of snapshots.
+-- Ambiguous evidence is only shadowed from ordinary public rows when an exact
+-- verified owner with the same short name is already visible; the durable
+-- source remains untouched. Distinct builds can opt out of shadowing while
+-- still receiving collision-safe author labels.
+function Identity.PresentPublicRecords(rows, field, options)
+    rows = type(rows) == "table" and rows or {}
+    local context = Identity.NewPublicPresentation(field, options)
+    for _, record in ipairs(rows) do
+        Identity.IndexPublicRecord(context, record)
+    end
+
+    local out = {}
+    for _, record in ipairs(rows) do
+        local presented = Identity.PresentPublicRecord(context, record)
+        if presented then out[#out + 1] = presented end
+    end
+    return out, {shadowed=context.shadowed,visible=context.visible,
+        invalid=context.invalid}
+end
+
 -- Keep Saved-mirror marker interpretation type-stable across mutation,
 -- projection, relation, and renderer boundaries. Explicit false retains
 -- ordinary-build compatibility; any other non-boolean value is malformed.

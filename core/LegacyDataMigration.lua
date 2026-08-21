@@ -256,47 +256,118 @@ end
 
 local function MergeAccount(target, incoming)
     if not target then return ShallowCopy(incoming) end
-    local leftSeen = tonumber(target.lastSeen) or 0
-    local rightSeen = tonumber(incoming.lastSeen) or 0
-    local winner, fallback = target, incoming
-    if rightSeen > leftSeen then winner, fallback = ShallowCopy(incoming), target end
-    for key, value in pairs(fallback) do
-        if winner[key] == nil then winner[key] = value end
+    for key, value in pairs(incoming) do
+        if target[key] == nil then target[key] = value end
     end
-    return winner
+    return target
 end
 
-local function NormalizeAccount(meta, sourceKey, source)
+local function AccountName(sourceKey, source, declaredOwner, indexedOwner)
+    local name = Identity.DisplayPlayer(source.name)
+    if not name and declaredOwner then name = declaredOwner:match("^([^@]+)@") end
+    if not name and indexedOwner then name = indexedOwner:match("^([^@]+)@") end
+    if not name then name = Identity.DisplayPlayer(sourceKey) end
+    return name
+end
+
+local function AccountEvidenceMatches(ownerKey, source, name)
+    if not ownerKey or ownerKey:match("@unknown$") or not name
+        or not Identity.OwnerKeyMatchesAuthor(ownerKey, name) then return false end
+
+    if source.ownerKey ~= nil then
+        local declared = Identity.CanonicalOwnerKey(source.ownerKey)
+        if not declared or declared:match("@unknown$")
+            or declared ~= ownerKey then return false end
+    end
+    if source.name ~= nil then
+        if type(source.name) ~= "string"
+            or not Identity.OwnerKeyMatchesAuthor(ownerKey, source.name) then
+            return false
+        end
+        if source.name:find("-", 1, true)
+            and Identity.CanonicalOwnerFromTransport(source.name) ~= ownerKey then
+            return false
+        end
+    end
+    if source.realm ~= nil then
+        if type(source.realm) ~= "string" then return false end
+        local realm = source.realm:lower()
+        if realm ~= "" and realm ~= "unknown"
+            and Identity.CanonicalOwnerKey(Identity.OwnerKey(name, source.realm))
+                ~= ownerKey then return false end
+    end
+    return true
+end
+
+local function ProvenAccountOwner(sourceKey, source)
+    if type(source) ~= "table" then return nil end
+    local declaredOwner = Identity.CanonicalOwnerKey(source.ownerKey)
+    local indexedOwner = Identity.CanonicalOwnerKey(sourceKey)
+    local name = AccountName(sourceKey, source, declaredOwner, indexedOwner)
+    local indexedExact = indexedOwner and not indexedOwner:match("@unknown$")
+    local declaredExact = declaredOwner and not declaredOwner:match("@unknown$")
+
+    if indexedExact and sourceKey == indexedOwner
+        and (not declaredExact or declaredOwner == indexedOwner)
+        and AccountEvidenceMatches(indexedOwner, source, name) then
+        return indexedOwner, "canonical", name
+    end
+    if declaredExact and not indexedExact
+        and AccountEvidenceMatches(declaredOwner, source, name) then
+        return declaredOwner, "bridge", name
+    end
+    return nil, nil, name
+end
+
+local function AmbiguousAccountKey(sourceKey)
+    local indexedOwner = Identity.CanonicalOwnerKey(sourceKey)
+    if indexedOwner and indexedOwner:match("@unknown$")
+        and sourceKey == indexedOwner then return indexedOwner end
+    if type(sourceKey) == "string" then
+        return "legacy:string:" .. tostring(#sourceKey) .. ":" .. sourceKey
+    end
+    if type(sourceKey) == "number" and Finite(sourceKey) then
+        return "legacy:number:" .. string.format("%.17g", sourceKey)
+    end
+    if type(sourceKey) == "boolean" then
+        return "legacy:boolean:" .. tostring(sourceKey)
+    end
+    return nil
+end
+
+local function NormalizeAccount(job, sourceKey, source)
+    local meta = job.meta
     if type(source) ~= "table" then
         Quarantine(meta, "account", sourceKey, "malformed account row")
         return nil
     end
-    local ownerKey = Identity.CanonicalOwnerKey(source.ownerKey)
-        or Identity.CanonicalOwnerKey(sourceKey)
-    local name = Identity.DisplayPlayer(source.name)
-    if not name and ownerKey then name = ownerKey:match("^([^@]+)@") end
-    if not ownerKey and name and type(source.realm) == "string" then
-        ownerKey = Identity.OwnerKey(name, source.realm)
+    local ownerKey, proof, name = ProvenAccountOwner(sourceKey, source)
+    if proof == "bridge" and (job.canonicalAccountOwners[ownerKey]
+        or (job.accountBridgeCounts[ownerKey] or 0) ~= 1) then
+        ownerKey, proof = nil, nil
     end
-    local localOwner = CurrentOwnerKey()
-    if ownerKey and ownerKey:match("@unknown$") then
-        if localOwner and Identity.PlayerKey(name or sourceKey)
-            == localOwner:match("^([^@]+)@") then
-            ownerKey = localOwner
-        else
-            ownerKey = nil
-        end
+
+    if ownerKey then
+        local out = ShallowCopy(source)
+        out.ownerKey = nil -- the canonical map key is the sole identity index
+        out.name = source.name or name
+        out.realm = ownerKey:match("@(.+)$")
+        return ownerKey, out
     end
-    if not ownerKey or not name
-        or not Identity.OwnerKeyMatchesAuthor(ownerKey, name) then
+
+    -- Realm-less, @unknown, or contradictory account evidence remains in the
+    -- staged map under a non-authoritative key. Login identity is deliberately
+    -- absent from this decision, so restart and login order cannot claim it.
+    local ambiguousKey = AmbiguousAccountKey(sourceKey)
+    if not ambiguousKey or not name then
         Quarantine(meta, "account", sourceKey, "unresolved account identity")
         return nil
     end
+
     local out = ShallowCopy(source)
-    out.ownerKey = nil -- the canonical map key is the sole identity index
     out.name = source.name or name
-    out.realm = ownerKey:match("@(.+)$")
-    return ownerKey, out
+    AddStat(meta, "accountRowsPreservedAmbiguous", 1)
+    return ambiguousKey, out
 end
 
 local function NeedsMigration(database)
@@ -345,8 +416,9 @@ local function Begin(database, meta, reason, restarting)
         database.dpsCapture = {}
         dps = database.dpsCapture
     end
-    if not restarting and meta.state == "staging"
-        and ValidStaging(meta.staging) and VALID_PHASE[meta.phase] then
+    local canResume = not restarting and meta.state == "staging"
+        and ValidStaging(meta.staging) and VALID_PHASE[meta.phase]
+    if canResume then
         -- A reload has no trustworthy Lua cursor. Replaying only the durable
         -- current phase is safe because every staging write is a max/merge.
     else
@@ -367,6 +439,7 @@ local function Begin(database, meta, reason, restarting)
     return {
         database=database,meta=meta,dps=dps,phase=meta.phase,
         items=nil,index=1,dpsRevision=CurrentDpsRevision(),
+        canonicalAccountOwners={},accountBridgeCounts={},
         source={
             accountCharacters=database.accountCharacters,
             communityBuilds=database.communityBuilds,
@@ -385,6 +458,13 @@ local function SnapshotAccounts(job)
     for key, row in pairs(type(job.source.accountCharacters) == "table"
         and job.source.accountCharacters or {}) do
         out[#out + 1] = {key=key,row=row}
+        local ownerKey, proof = ProvenAccountOwner(key, row)
+        if proof == "canonical" then
+            job.canonicalAccountOwners[ownerKey] = true
+        elseif proof == "bridge" then
+            job.accountBridgeCounts[ownerKey] =
+                (job.accountBridgeCounts[ownerKey] or 0) + 1
+        end
     end
     table.sort(out, function(left, right)
         return type(left.key) .. ":" .. tostring(left.key)
@@ -561,7 +641,7 @@ local function Process(job, item)
     if job.phase == "classHints" then
         ProcessClassHint(job, item)
     elseif job.phase == "accounts" then
-        local key, row = NormalizeAccount(job.meta, item.key, item.row)
+        local key, row = NormalizeAccount(job, item.key, item.row)
         if key then
             local staging = job.meta.staging.accountCharacters
             staging[key] = MergeAccount(staging[key], row)
@@ -576,7 +656,13 @@ end
 local function SourceChanged(job)
     if job.dpsRevision ~= CurrentDpsRevision() then return true end
     local dps = DpsStore(job.database)
+    -- Store registration is refused while this transaction is active. Account
+    -- normalization shallow-copies only the row shell and never mutates nested
+    -- unknown values, so exact table replacement is the bounded ownership
+    -- signal; recursively walking the whole SavedVariables graph here would
+    -- escape the Pump budget and can never be made safe for arbitrary graphs.
     return dps ~= job.dps
+        or job.source.accountCharacters ~= job.database.accountCharacters
         or job.source.communityBuilds ~= job.database.communityBuilds
         or job.source.personalBest ~= dps.personalBest
         or job.source.characterBest ~= dps.characterBest
@@ -758,6 +844,28 @@ function Migration.Init(database)
         return {complete=false,needed=true,reason=why or "scheduler unavailable"}
     end
     return {complete=false,pending=true,needed=true,reason="scheduled"}
+end
+
+-- Store registration runs before a new migration starts so the exact current
+-- character is part of the staged snapshot. It must stand down for active or
+-- future-owned migration state and for an unknown future settings owner.
+function Migration.AccountWritesAllowed(database)
+    database = type(database) == "table" and database
+        or type(NexusDB) == "table" and NexusDB or nil
+    if not database then return false, "database unavailable" end
+    local store = Nexus and Nexus.Store
+    local currentSettingsVersion = store
+        and type(store.SettingsVersion) == "function"
+        and tonumber(store.SettingsVersion()) or 2
+    if (tonumber(database.settingsVersion) or 0) > currentSettingsVersion then
+        return false, "future settings schema is read-only"
+    end
+    local existing, metaError = Meta(database, false)
+    if metaError then return false, metaError end
+    if existing and existing.state ~= "complete" then
+        return false, "legacy migration is active"
+    end
+    return true
 end
 
 function Migration.BlocksDpsMigration(database)

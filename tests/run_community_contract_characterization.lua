@@ -11,6 +11,8 @@ dofile("core/GameAdapter.lua")
 dofile("ui/CommunityBuilds.lua")
 
 UnitName = function() return "Owner" end
+GetNormalizedRealmName = function() return "Ebonhold" end
+GetRealmName = GetNormalizedRealmName
 H.playerLevel = 80
 H.wishlist = {name="Active Wishlist", class="MAGE", echoes={
     {spellId=200100, quality=3, stacks=1},
@@ -18,7 +20,8 @@ H.wishlist = {name="Active Wishlist", class="MAGE", echoes={
 }}
 UISpecialFrames = {}
 NexusDB = {
-    settingsVersion=2, settings={}, chars={Owner={futureSafety={keep=true}}},
+    settingsVersion=2, settings={},
+    chars={["owner@ebonhold"]={futureSafety={keep=true}}},
     communityBuilds={
         ["saved-owner-1"]={
             id="saved-owner-1", title="Server Mirror", serverTitle="Server Mirror",

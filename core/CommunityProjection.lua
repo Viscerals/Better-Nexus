@@ -343,6 +343,9 @@ function Projection.New(options)
         if savedKind == "saved" then
             publicBuild.class = NormalizeClass(build.class) or "UNKNOWN"
         end
+        local presented = Identity.PresentPublicRecords({publicBuild}, "author")
+        publicBuild = presented[1]
+        if not publicBuild then return nil end
 
         local dummy, lk, dummyPersonal, lkPersonal = {}, {}, nil, nil
         if recordId ~= nil then

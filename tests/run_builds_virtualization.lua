@@ -108,14 +108,25 @@ C.ScrollTo(0)
 local original = Nexus.BuildCatalog.Get("virtual-0001")
 local broken = {}
 for key, value in pairs(original) do broken[key] = value end
-broken.author = {}
+broken.title = original.title.." changed"
 assert(Nexus.BuildCatalog.Put(broken))
+local catalogGet = Nexus.BuildCatalog.Get
+Nexus.BuildCatalog.Get = function(id)
+    local row, source = catalogGet(id)
+    if id == "virtual-0001" and row then
+        row.title = setmetatable({}, {__tostring=function()
+            error("hostile row title")
+        end})
+    end
+    return row, source
+end
 local beforeFailure = C.VirtualStats().created
 local badOk = pcall(C.Refresh)
+Nexus.BuildCatalog.Get = catalogGet
 assert(not badOk and C.VirtualStats().active == 0
     and C.VirtualStats().created == beforeFailure,
     "failed row binding leaked or retained a checked-out card")
-broken.author = "Peer"
+broken.title = original.title
 assert(Nexus.BuildCatalog.Put(broken))
 C.Refresh()
 local recovered = C.VirtualStats()

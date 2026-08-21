@@ -378,13 +378,18 @@ local rows = DPS.GetDpsBoard("dummy")
 local byFingerprint = {}
 for _, row in ipairs(rows) do byFingerprint[row.fingerprint] = row end
 local exactDps = byFingerprint[DPS.GetEchoKey({{spellId=200200,stacks=1}})]
-local mismatchDps = byFingerprint[DPS.GetEchoKey({{spellId=200201,stacks=1}})]
-assert(#rows == 2 and exactDps and exactDps.ownerVerified == true
+assert(#rows == 1 and exactDps and exactDps.ownerVerified == true
         and exactDps.ownerKey == "twin@realma",
     "cross-realm DPS input displaced the exact RealmA owner record")
+local mismatchDps
+for _, candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
+    if candidate.fingerprint == DPS.GetEchoKey({{spellId=200201,stacks=1}}) then
+        mismatchDps = candidate
+    end
+end
 assert(mismatchDps and mismatchDps.ownerVerified == false
         and mismatchDps.ownerKey == nil and mismatchDps.realm == "realmb",
-    "cross-realm DPS input gained authority or borrowed RealmA storage")
+    "shadowed cross-realm evidence was erased, authorized, or reassigned")
 
 assert(DeliverDps("Twin-RealmB", "dps-b-exact",
     DpsRecord(200201, "twin@realmb", "realmb", 26000000, 31)),
@@ -403,10 +408,15 @@ assert(DeliverDps("Twin", "dps-short",
 rows = DPS.GetDpsBoard("dummy")
 byFingerprint = {}
 for _, row in ipairs(rows) do byFingerprint[row.fingerprint] = row end
-local shortDps = byFingerprint[DPS.GetEchoKey({{spellId=200202,stacks=1}})]
+local shortDps
+for _, candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
+    if candidate.fingerprint == DPS.GetEchoKey({{spellId=200202,stacks=1}}) then
+        shortDps = candidate
+    end
+end
 assert(shortDps and shortDps.ownerVerified == false
         and shortDps.ownerKey == nil and shortDps.realm == nil,
-    "realm-less DPS transport borrowed payload realm authority")
+    "shadowed realm-less evidence was erased or borrowed payload realm authority")
 
 Sync.Init(Codec, {})
 DPS.Init({}, Sync)
@@ -415,14 +425,21 @@ assert(NexusDB.communityBuilds["twin-a"].ownerVerified == true
         and NexusDB.communityBuilds["twin-short"].ownerVerified == false,
     "reload recomputed build ownership from short-name resemblance")
 rows = DPS.GetDpsBoard("dummy")
-local verifiedRealms, unverified = {}, 0
+local verifiedRealms = {}
 for _, row in ipairs(rows) do
-    if row.ownerVerified == true then verifiedRealms[row.ownerKey] = true
-    else unverified = unverified + 1 end
+    if row.ownerVerified == true then verifiedRealms[row.ownerKey] = true end
 end
 assert(verifiedRealms["twin@realma"] and verifiedRealms["twin@realmb"]
-        and unverified == 1,
+        and #rows == 2,
     "reload collapsed or re-authorized realm-qualified DPS evidence")
+local retainedUnverified = 0
+for _, candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
+    if candidate.ownerVerified ~= true then
+        retainedUnverified = retainedUnverified + 1
+    end
+end
+assert(retainedUnverified >= 1,
+    "reload erased shadowed ambiguous DPS evidence")
 
 local nilAuthority = {
     id="nil-authority",title="Unverified",author="Twin",
@@ -712,10 +729,14 @@ for _, message in ipairs(H.sentChatMessages) do
         "payload-supplied DPS authority was automatically re-broadcast")
 end
 
+local shortBroadcast = {}
+for key, value in pairs(shortDps) do shortBroadcast[key] = value end
+shortBroadcast.category = "dummy"
 local sentUnverifiedDps, unverifiedDpsWhy =
-    Sync.BroadcastDpsRecord(shortDps)
+    Sync.BroadcastDpsRecord(shortBroadcast)
 assert(sentUnverifiedDps == false and unverifiedDpsWhy == "owner_sender",
-    "realm-less unverified DPS row remained owner-broadcast eligible")
+    "realm-less unverified DPS row remained owner-broadcast eligible: "
+        ..tostring(sentUnverifiedDps).."/"..tostring(unverifiedDpsWhy))
 local sentExactDps = Sync.BroadcastDpsRecord(exactDps)
 assert(sentExactDps == true,
     "exact verified local-realm DPS row lost owner-broadcast authority")

@@ -433,9 +433,8 @@ end
 -- whenever two characters happened to have a wishlist at the same server
 -- slot number (reported live: a design from "my other character" showing up
 -- on a brand-new wishlist here). Store.State() is this codebase's existing,
--- already-battle-tested per-character subtable (NexusDB.chars[UnitName()],
--- with the same "never latch a bad key before UnitName is ready" handling
--- Store.lua already does for everything else) -- nesting the per-slot
+-- realm-qualified per-character subtable (NexusDB.chars[name@realm], with
+-- transient-only handling until both identity parts are ready) -- nesting the per-slot
 -- buckets inside it, instead of at NexusDB's own top level, makes this
 -- correctly per-character for free.
 --

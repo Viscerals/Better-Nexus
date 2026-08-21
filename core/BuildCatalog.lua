@@ -276,6 +276,20 @@ local function SelectedRaw(id)
     return nil, nil
 end
 
+local function ScalarRecordId(id)
+    local kind = type(id)
+    if kind == "string" or kind == "number" or kind == "boolean" then
+        return id
+    end
+end
+
+local function RecordIdCoherent(record, id)
+    if type(record) ~= "table" then return false end
+    local durableId = ScalarRecordId(id)
+    return durableId ~= nil and (record.id == nil
+        or type(record.id) == type(durableId) and record.id == durableId)
+end
+
 local function StatusState(id)
     local overlay = db and type(db.communityBuilds) == "table"
         and db.communityBuilds or {}
@@ -284,7 +298,7 @@ local function StatusState(id)
     return {
         overlay=overlay[id] ~= nil,
         tombstone=tombstones[id] ~= nil,
-        available=SelectedRaw(id) ~= nil,
+        available=RecordIdCoherent(SelectedRaw(id), id),
     }
 end
 
@@ -315,15 +329,24 @@ local function Selected(id)
     return SelectedRaw(id)
 end
 
-local function PublicRecord(record, source)
+local function RestoreRecordId(record, id)
+    if not RecordIdCoherent(record, id) then return nil end
+    local durableId = ScalarRecordId(id)
+    if record.id == nil then record.id = durableId end
+    return record
+end
+
+local function PublicRecord(record, source, id)
     if type(record) ~= "table" then return nil end
     local evidence = Nexus and Nexus.LoadoutEvidence
     if source == "overlay" and evidence
         and type(evidence.ResolveBuildRow) == "function" then
         local ok, resolved = pcall(evidence.ResolveBuildRow, record)
-        if ok and type(resolved) == "table" then return resolved end
+        if ok and type(resolved) == "table" then
+            return RestoreRecordId(resolved, id)
+        end
     end
-    return DeepCopy(record)
+    return RestoreRecordId(DeepCopy(record), id)
 end
 
 local function RevisionRecord(id)
@@ -331,9 +354,9 @@ local function RevisionRecord(id)
     local tombstones = db and type(db.syncTombstones) == "table"
         and db.syncTombstones or {}
     return {
-        visible=PublicRecord(record, source),
+        visible=PublicRecord(record, source, id),
         source=source,
-        delta=source == "overlay" and PublicRecord(record, source) or nil,
+        delta=source == "overlay" and PublicRecord(record, source, id) or nil,
         tombstone=DeepCopy(tombstones[id]),
     }
 end
@@ -384,7 +407,7 @@ local SUMMARY_FIELDS = {
 -- Browser/hash consumers need identity and display metadata, not tens of
 -- thousands of nested Echo rows. Keep this projection defensive while
 -- deliberately excluding `echoes`; visible cards hydrate exact rows via Get.
-local function SummaryRecord(record)
+local function SummaryRecord(record, id)
     if type(record) ~= "table" then return nil end
     local out = {}
     for _, key in ipairs(SUMMARY_FIELDS) do
@@ -396,7 +419,7 @@ local function SummaryRecord(record)
     out.ordinaryComplete = complete
     out.ordinaryCompletenessReason = type(verdict) == "table"
         and verdict.reason or "unavailable"
-    return out
+    return RestoreRecordId(out, id)
 end
 
 local function SummarySnapshot(deltaOnly)
@@ -407,7 +430,7 @@ local function SummarySnapshot(deltaOnly)
         for id in pairs(baseline) do
             seen[id] = true
             local record = SelectedRaw(id)
-            if record then out[id] = SummaryRecord(record) end
+            if record then out[id] = SummaryRecord(record, id) end
         end
     end
     local overlay = db and type(db.communityBuilds) == "table"
@@ -417,7 +440,7 @@ local function SummarySnapshot(deltaOnly)
             local record, source = SelectedRaw(id)
             if record and (not deltaOnly or source == "overlay")
                 and (not deltaOnly or SyncEligible(record)) then
-                out[id] = SummaryRecord(record)
+                out[id] = SummaryRecord(record, id)
             end
         end
     end
@@ -428,12 +451,16 @@ local function MergedCountRaw()
     local count, seen = 0, {}
     for id in pairs(baseline) do
         seen[id] = true
-        if SelectedRaw(id) then count = count + 1 end
+        local record = SelectedRaw(id)
+        if RecordIdCoherent(record, id) then count = count + 1 end
     end
     local overlay = db and type(db.communityBuilds) == "table"
         and db.communityBuilds or {}
     for id in pairs(overlay) do
-        if not seen[id] and SelectedRaw(id) then count = count + 1 end
+        if not seen[id] then
+            local record = SelectedRaw(id)
+            if RecordIdCoherent(record, id) then count = count + 1 end
+        end
     end
     return count
 end
@@ -601,7 +628,9 @@ local function RecomputeExactWinner(bucket)
     bucket.winnerId, bucket.winnerRecord, bucket.winnerSource = nil, nil, nil
     for id in pairs(bucket.ids or {}) do
         local record, source = SelectedRaw(id)
-        ConsiderExactWinner(bucket, id, record, source)
+        if RecordIdCoherent(record, id) then
+            ConsiderExactWinner(bucket, id, record, source)
+        end
     end
 end
 
@@ -630,7 +659,7 @@ local function RemoveRelatedRow(id)
 end
 
 local function AddRelatedRow(id, record)
-    if type(record) ~= "table" then return end
+    if not RecordIdCoherent(record, id) then return end
     local savedKind = Identity.SavedMirrorKind(record)
     if savedKind == "invalid" then return end
     -- The exact-content resolver is a public-build relationship seam. Saved
@@ -821,7 +850,7 @@ end
 function Catalog.Get(id)
     EnsureBound()
     local record, source = Selected(id)
-    return PublicRecord(record, source), source
+    return PublicRecord(record, source, id), source
 end
 
 -- Return absent, visible, bundled, tombstone, or opaque plus an optional
@@ -841,13 +870,13 @@ function Catalog.AllocationOccupancy(id)
     end
     if baseline[id] ~= nil then
         local record, source = SelectedRaw(id)
-        local represented = PublicRecord(record, source)
+        local represented = PublicRecord(record, source, id)
         return "bundled", type(represented) == "table"
             and DeepCopy(represented) or nil
     end
     if raw ~= nil then
         local record, source = SelectedRaw(id)
-        local represented = PublicRecord(record, source)
+        local represented = PublicRecord(record, source, id)
         if type(represented) ~= "table" then return "opaque", nil end
         return "visible", DeepCopy(represented)
     end
@@ -859,12 +888,12 @@ function Catalog.All()
     local out = {}
     for id in pairs(baseline) do
         local record, source = Selected(id)
-        if record then out[id] = PublicRecord(record, source) end
+        if record then out[id] = PublicRecord(record, source, id) end
     end
     for id in pairs(Overlay()) do
         if out[id] == nil then
             local record, source = Selected(id)
-            if record then out[id] = PublicRecord(record, source) end
+            if record then out[id] = PublicRecord(record, source, id) end
         end
     end
     return out
@@ -877,7 +906,7 @@ end
 function Catalog.GetSummary(id)
     EnsureBound()
     local record, source = SelectedRaw(id)
-    return record and SummaryRecord(record) or nil, source
+    return record and SummaryRecord(record, id) or nil, source
 end
 
 -- Allocation-free revision tokens for one selected record and one exact Echo
@@ -912,9 +941,10 @@ local function FindExactFingerprintId(fingerprint)
     debugStats.exactCandidates = debugStats.exactCandidates + candidates
     debugStats.maxExactCandidates = math.max(
         debugStats.maxExactCandidates, candidates)
-    return bucket and bucket.winnerId or nil,
-        bucket and bucket.winnerRecord or nil,
-        bucket and bucket.winnerSource or nil
+    local id = bucket and bucket.winnerId or nil
+    local record = bucket and bucket.winnerRecord or nil
+    if not RecordIdCoherent(record, id) then return nil, nil end
+    return id, record, bucket and bucket.winnerSource or nil
 end
 
 function Catalog.FindExactFingerprintId(fingerprint)
@@ -924,7 +954,7 @@ end
 
 function Catalog.FindExactFingerprint(fingerprint)
     local id, record, source = FindExactFingerprintId(fingerprint)
-    return id, PublicRecord(record, source), source
+    return id, PublicRecord(record, source, id), source
 end
 
 -- Resolve and validate a protocol-v6 @hash claim only through its exact typed
@@ -942,6 +972,9 @@ function Catalog.ValidateLegacyFingerprintClaim(rawId, record)
     end
     if type(raw) ~= "table" then
         return nil, "exact represented build is unavailable"
+    end
+    if not RecordIdCoherent(raw, rawId) then
+        return nil, "exact represented build identity is contradictory"
     end
     if Identity.SavedMirrorKind(raw) ~= "ordinary" then
         return nil, "historical build identity is private"
@@ -1004,7 +1037,8 @@ function Catalog.ResolveFingerprintIdentity(rawId, fingerprint, options)
                 debugStats.identityResolutionFailures + 1
             return nil, "historical build identity is tombstoned"
         end
-        if raw and Identity.SavedMirrorKind(raw) == "ordinary"
+        if RecordIdCoherent(raw, rawId)
+            and Identity.SavedMirrorKind(raw) == "ordinary"
             and ExactFingerprint(raw) == fingerprint
             and (OrdinaryComplete(raw) or
                 (allowClassOnly and HasStringClass(raw))) then
@@ -1144,7 +1178,7 @@ function Catalog.RelatedCursorNext(cursor)
                 debugStats.relatedCandidates = debugStats.relatedCandidates + 1
                 debugStats.maxRelatedCandidates = math.max(
                     debugStats.maxRelatedCandidates, cursor.returned)
-                return PublicRecord(record, source), false
+                return PublicRecord(record, source, id), false
             end
             return nil, false
         else
@@ -1222,7 +1256,8 @@ function Catalog.SummaryCursorNext(cursor)
         fromOverlay = true
     end
     local record = id ~= nil and SelectedRaw(id) or nil
-    return record and SummaryRecord(record) or nil, false, nil,
+    local summary = record and SummaryRecord(record, id) or nil
+    return summary, false, nil,
         fromBaseline, fromOverlay
 end
 
@@ -1241,13 +1276,15 @@ local function RebuildAuthorIndex()
     for id in pairs(baseline) do
         seen[id] = true
         local record = SelectedRaw(id)
-        local key = record and AuthorKey(record.author)
+        local key = RecordIdCoherent(record, id)
+            and AuthorKey(record.author) or nil
         if key then nextIndex[key] = true end
     end
     for id in pairs(db and db.communityBuilds or {}) do
         if not seen[id] then
             local record = SelectedRaw(id)
-            local key = record and AuthorKey(record.author)
+            local key = RecordIdCoherent(record, id)
+                and AuthorKey(record.author) or nil
             if key then nextIndex[key] = true end
         end
     end
@@ -1524,7 +1561,7 @@ end
 function Catalog.OverlaySnapshot()
     local out = {}
     for id, record in pairs(Overlay()) do
-        out[id] = PublicRecord(record, "overlay")
+        out[id] = PublicRecord(record, "overlay", id)
     end
     return out
 end
@@ -1538,7 +1575,7 @@ function Catalog.DeltaSnapshot()
     for id in pairs(Overlay()) do
         local record, source = Selected(id)
         if source == "overlay" and record and SyncEligible(record) then
-            out[id] = PublicRecord(record, source)
+            out[id] = PublicRecord(record, source, id)
         end
     end
     return out
@@ -1554,7 +1591,7 @@ function Catalog.SyncDeltaNext(cursor)
     if id == nil then return nil, nil, true end
     local record, source = Selected(id)
     if source == "overlay" and record and SyncEligible(record) then
-        return id, PublicRecord(record, source), false
+        return id, PublicRecord(record, source, id), false
     end
     return id, nil, false
 end
@@ -1570,9 +1607,9 @@ function Catalog.SyncState(id)
     local record, source = Selected(id)
     return {
         id=id,
-        visible=PublicRecord(record, source),
+        visible=PublicRecord(record, source, id),
         delta=source == "overlay" and SyncEligible(record)
-            and PublicRecord(record, source) or nil,
+            and PublicRecord(record, source, id) or nil,
         tombstone=DeepCopy(Tombstones()[id]),
         catalogVersion=tostring(bundled.catalogVersion or "unversioned"),
     }

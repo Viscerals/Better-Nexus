@@ -22,4 +22,48 @@ Nexus.Leaderboard.Refresh()
 assert(not H.frames.NexusCommunityBuildsFrame or not H.frames.NexusCommunityBuildsFrame:IsShown(),"build browser should not be required for leaderboard")
 Nexus.CommunityBuilds.SetViewMode("lk")
 assert(Nexus.Leaderboard.IsShown(),"legacy leaderboard route did not open dedicated window")
+
+-- The projection-free Combined compatibility path carries the same public
+-- identity presentation and deterministic equal-score tie used by the normal
+-- ViewProjections owner.
+local function Upvalue(fn, wanted)
+    for index=1,40 do
+        local name, value = debug.getupvalue(fn, index)
+        if not name then break end
+        if name == wanted then return value end
+    end
+end
+local rowsReader = assert(Upvalue(Nexus.Leaderboard.RefreshData, "Rows"),
+    "projection-free Rows reader was not inspectable")
+local combinedReader = assert(Upvalue(rowsReader, "CombinedRows"),
+    "projection-free Combined reader was not inspectable")
+local function PublicRow(ownerKey, category, spellId)
+    return {
+        player="Twin",displayPlayer="Twin-"..ownerKey:match("@(.+)$"),
+        publicIdentityKey="verified:"..ownerKey,
+        publicIdentityVerified=true,ownerKey=ownerKey,ownerVerified=true,
+        realm=ownerKey:match("@(.+)$"),category=category,
+        dps=20000000,ts=200,duration=65,level=80,class="MAGE",
+        fingerprint=tostring(spellId).."x1",
+        echoes={{spellId=spellId,count=1}},protocolVersion=7,
+    }
+end
+local fallback = {dummy={},lk={}}
+for _, realm in ipairs({"realmb","realma"}) do
+    local owner = "twin@"..realm
+    local spellId = realm == "realma" and 840001 or 840002
+    fallback.dummy[#fallback.dummy+1] = PublicRow(owner,"dummy",spellId)
+    fallback.lk[#fallback.lk+1] = PublicRow(owner,"lk",spellId)
+end
+local originalBoard = DPS.GetDpsBoard
+DPS.GetDpsBoard = function(category) return fallback[category] or {} end
+local fallbackCombined = combinedReader()
+DPS.GetDpsBoard = originalBoard
+assert(#fallbackCombined == 2
+        and fallbackCombined[1].displayPlayer == "Twin-realma"
+        and fallbackCombined[2].displayPlayer == "Twin-realmb"
+        and fallbackCombined[1].publicIdentityVerified == true
+        and fallbackCombined[1].publicIdentityKey
+            < fallbackCombined[2].publicIdentityKey,
+    "projection-free Combined lost identity presentation or stable realm order")
 print("dedicated dense leaderboard window and legacy routing -- OK")

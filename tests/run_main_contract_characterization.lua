@@ -18,6 +18,8 @@ dofile("ui/Panel.lua")
 
 local Store, Adapter = Nexus.Store, Nexus.GameAdapter
 UnitName = function() return "Hero" end
+GetNormalizedRealmName = function() return "Ebonhold" end
+GetRealmName = GetNormalizedRealmName
 H.playerLevel = 5
 local targetEchoes = {{spellId=200100, quality=3, stacks=1}}
 NexusDB = {
@@ -26,7 +28,7 @@ NexusDB = {
         autoPick=true, autoActivate=false, autoDisable=false,
         autoBanish=true, autoSave=false,
     },
-    chars={Hero={
+    chars={["hero@ebonhold"]={
         loadoutWishlists={
             [1]={slot=6, name="Main Contract",
                 key=Adapter.WishlistKey(targetEchoes)},

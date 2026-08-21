@@ -350,7 +350,13 @@ local function BuildProjection(filters)
     if type(all) ~= "table" then error("BuildCatalog projection reader returned invalid data") end
     local eligibility = CommunityEligibility()
     local out = {}
+    local presentation = Identity.NewPublicPresentation("author")
     for _, build in pairs(all) do
+        if type(build) == "table" and IsLoaded(build) then
+            local indexed = Identity.IndexPublicRecord(presentation, build)
+            build = indexed and Identity.PresentPublicRecord(
+                presentation, build) or nil
+        end
         if type(build) == "table" and IsLoaded(build) then
             local savedKind = Identity.SavedMirrorKind(build)
             summary.total = summary.total + 1
@@ -539,7 +545,10 @@ local function CombinedRows()
                 lrow.resolvedFingerprintRevision)
             local ownerKey = Identity.VerifiedOwnerKey(lrow)
             out[#out + 1] = {
-                player=lrow.player, dps=average, average=average,
+                player=lrow.player,displayPlayer=lrow.displayPlayer,
+                publicIdentityKey=lrow.publicIdentityKey,
+                publicIdentityVerified=lrow.publicIdentityVerified,
+                dps=average, average=average,
                 dummyDps=drow.dps, lkDps=lrow.dps,
                 dummyDuration=drow.duration, lkDuration=lrow.duration,
                 level=math.max(tonumber(drow.level) or 0,
@@ -586,7 +595,11 @@ local function CombinedRows()
     counters.leaderboard.sorts = counters.leaderboard.sorts + 1
     table.sort(out, function(left, right)
         if left.average ~= right.average then return left.average > right.average end
-        return tostring(left.player):lower() < tostring(right.player):lower()
+        local leftPlayer, rightPlayer = tostring(left.player):lower(),
+            tostring(right.player):lower()
+        if leftPlayer ~= rightPlayer then return leftPlayer < rightPlayer end
+        return tostring(left.publicIdentityKey or "")
+            < tostring(right.publicIdentityKey or "")
     end)
     return out
 end
@@ -633,11 +646,19 @@ local function LeaderboardBefore(left, right, combined, countComparison)
     if countComparison then countComparison() end
     if combined then
         if left.average ~= right.average then return left.average > right.average end
-        return tostring(left.player):lower() < tostring(right.player):lower()
+        local leftPlayer, rightPlayer = tostring(left.player):lower(),
+            tostring(right.player):lower()
+        if leftPlayer ~= rightPlayer then return leftPlayer < rightPlayer end
+        return tostring(left.publicIdentityKey or "")
+            < tostring(right.publicIdentityKey or "")
     end
     if left.dps ~= right.dps then return left.dps > right.dps end
     if left.ts ~= right.ts then return left.ts < right.ts end
-    return tostring(left.player):lower() < tostring(right.player):lower()
+    local leftPlayer, rightPlayer = tostring(left.player):lower(),
+        tostring(right.player):lower()
+    if leftPlayer ~= rightPlayer then return leftPlayer < rightPlayer end
+    return tostring(left.publicIdentityKey or "")
+        < tostring(right.publicIdentityKey or "")
 end
 
 local function InsertOrdered(rows, row, before, limit, countComparison)
@@ -676,6 +697,7 @@ local function NewBuildJob(filters, key)
     return {
         key=key,filters=filters,state="eligibility",eligibilityCursor=cursor,
         rows={},summary=summary,
+        presentation=Identity.NewPublicPresentation("author"),
     }
 end
 
@@ -761,14 +783,20 @@ local function PumpBuildJob(job, unit)
                 job.sortSource, job.sortTarget, job.merge = job.rows, {}, nil
                 break
             end
+            if fromBaseline then
+                job.summary.bundledCount = job.summary.bundledCount + 1
+            end
+            if fromOverlay then
+                job.summary.overlayCount = job.summary.overlayCount + 1
+            end
+            if type(build) == "table" and IsLoaded(build) then
+                local indexed = Identity.IndexPublicRecord(
+                    job.presentation, build)
+                build = indexed and Identity.PresentPublicRecord(
+                    job.presentation, build) or nil
+            end
             if type(build) == "table" and IsLoaded(build) then
                 local filters, summary = job.filters, job.summary
-                if fromBaseline then
-                    summary.bundledCount = summary.bundledCount + 1
-                end
-                if fromOverlay then
-                    summary.overlayCount = summary.overlayCount + 1
-                end
                 summary.total = summary.total + 1
                 summary.availableCount = summary.availableCount + 1
                 summary.ready = summary.ready + 1
@@ -889,7 +917,10 @@ local function CombinedRow(drow, lrow)
     local classConflict = dummyClass and lkClass and dummyClass ~= lkClass
     local ownerKey = Identity.VerifiedOwnerKey(lrow)
     return {
-        player=lrow.player,dps=average,average=average,
+        player=lrow.player,displayPlayer=lrow.displayPlayer,
+        publicIdentityKey=lrow.publicIdentityKey,
+        publicIdentityVerified=lrow.publicIdentityVerified,
+        dps=average,average=average,
         dummyDps=drow.dps,lkDps=lrow.dps,
         dummyDuration=drow.duration,lkDuration=lrow.duration,
         level=math.max(tonumber(drow.level) or 0,tonumber(lrow.level) or 0),

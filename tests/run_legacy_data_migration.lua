@@ -50,6 +50,8 @@ NexusDB = {
     },
     accountCharacters={
         ["localhero@unknown"]={name="Localhero",realm="unknown",lastSeen=1},
+        ["localhero@ebonhold"]={name="Localhero",realm="ebonhold",lastSeen=4,
+            futureCanonical={keep=true}},
         ["same@alpha"]={name="Same",realm="alpha",lastSeen=2},
         ["orphan@unknown"]={name="Orphan",realm="unknown",lastSeen=3},
     },
@@ -119,11 +121,13 @@ assert(migration.state == "complete" and migration.version == 2
     and migration.staging == nil and dps.leaderboard == nil,
     "migration did not commit and retire staging/legacy ownership")
 assert(NexusDB.accountCharacters["localhero@ebonhold"]
+    and NexusDB.accountCharacters["localhero@ebonhold"].futureCanonical.keep
+    and NexusDB.accountCharacters["localhero@unknown"]
     and NexusDB.accountCharacters["same@alpha"]
-    and NexusDB.accountCharacters["orphan@unknown"] == nil,
+    and NexusDB.accountCharacters["orphan@unknown"],
     "account ledger was not canonicalized conservatively")
-assert((migration.lastResult.quarantined or 0) >= 1,
-    "unresolved account identity was not reported")
+assert((migration.stats.accountRowsPreservedAmbiguous or 0) >= 2,
+    "ambiguous account identity was not retained and reported")
 assert(dps.characterBest.dummy["same@alpha"] == peerA
     or dps.characterBest.dummy["same@alpha"].dps == 200,
     "first same-name realm was lost")
