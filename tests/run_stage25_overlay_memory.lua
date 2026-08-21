@@ -116,7 +116,7 @@ local revisions = {
 local calls = {wishlist=0,owned=0,catalog=0,revisions=0}
 local wishlist = {name="Generated Goal",entries={}}
 local initialWishlist = wishlist
-local owned = {byFamily={},synced=true}
+local owned = {bySpell={},byFamily={},synced=true}
 local catalog = {rows={}}
 for index = 1, 79 do
     local spellId = 220000 + index
@@ -193,7 +193,7 @@ assert(styleCalls == identicalStyles,
 -- Owned-only revision refreshes only ownership and updates affected rows.
 local beforeOwned = CopyCounts(calls)
 local beforeOwnedMutations = lineMutations
-owned.byFamily["generated-family-1"] = 1
+owned.bySpell[220001] = 1
 revisions.owned = revisions.owned + 1
 Overlay.Refresh()
 assert(calls.owned == beforeOwned.owned + 1
@@ -216,7 +216,7 @@ assert(lineMutations == equivalentMutations,
 Overlay.Hide()
 local hiddenCalls = CopyCounts(calls)
 local hiddenMutations, hiddenStyles = lineMutations, styleCalls
-owned.byFamily["generated-family-2"] = 1
+owned.bySpell[220002] = 1
 revisions.owned = revisions.owned + 1
 for _ = 1, 200 do Overlay.Refresh() end
 H.Advance(200, 1)

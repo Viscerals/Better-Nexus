@@ -65,6 +65,10 @@ local function EnsureWishlistRenderer()
             return Model and Model.MaskMatch
                 and Model.MaskMatch(classMask, playerMask)
         end,
+        entryProgress = function(entries, owned, locked)
+            return Model and Model.WishlistEntryProgress
+                and Model.WishlistEntryProgress(entries, owned, locked) or nil
+        end,
         syncFulfilled = SyncFulfilledDraftTargets,
         hideServerEchoUI = function()
             if HideServerEchoUI then HideServerEchoUI() end

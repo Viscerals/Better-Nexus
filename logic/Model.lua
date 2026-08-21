@@ -349,6 +349,92 @@ function Model.TargetProgress(plan, catalog, family, owned)
     return math.min(have, want), want
 end
 
+-- Exact presentation progress for represented Wishlist rows. Duplicate rows
+-- share one aggregate (role, spellId) quota, so reload ordering cannot decide
+-- which indistinguishable row looks complete. Ordinary run ownership and
+-- permanent locked ownership remain separate even when both roles request the
+-- same exact tier.
+function Model.WishlistEntryProgress(entries, owned, lockedOwned)
+    entries = type(entries) == "table" and entries or {}
+    local ordinaryBySpell = type(owned) == "table"
+        and type(owned.bySpell) == "table" and owned.bySpell or {}
+    local lockedBySpell = type(lockedOwned) == "table"
+        and type(lockedOwned.bySpell) == "table" and lockedOwned.bySpell or {}
+    if type(owned) == "table" and owned.synced == false then
+        ordinaryBySpell = {}
+    end
+    if type(lockedOwned) == "table" and lockedOwned.synced == false then
+        lockedBySpell = {}
+    end
+
+    local out = {
+        rows={}, ordinaryHave=0, ordinaryWant=0,
+        lockedHave=0, lockedWant=0,
+    }
+    local groups = {}
+    local function NonNegativeCount(value)
+        value = tonumber(value)
+        if not value or value ~= value or value < 0 or value >= math.huge then
+            return 0
+        end
+        if value ~= math.floor(value) then return 0 end
+        return value
+    end
+
+    for index = 1, #entries do
+        local entry = entries[index]
+        local id = type(entry) == "table" and tonumber(entry.spellId) or nil
+        if id and (id <= 0 or id ~= math.floor(id)) then id = nil end
+        local want = type(entry) == "table"
+            and tonumber(entry.stacks or entry.count) or 1
+        if not want or want ~= want or want < 1 or want >= math.huge
+            or want ~= math.floor(want) then want = 1 end
+        local locked = type(entry) == "table"
+            and (entry.locked == true or entry.sourceRole == "locked") or false
+        local role = locked and "locked" or "ordinary"
+        local key = role .. ":" .. tostring(id or "invalid")
+        local group = groups[key]
+        if not group then
+            group = {role=role,locked=locked,spellId=id,want=0,rows={}}
+            groups[key] = group
+        end
+        group.want = group.want + want
+        group.rows[#group.rows + 1] = index
+        local row = {
+            index=index,spellId=id,
+            quality=type(entry) == "table" and tonumber(entry.quality) or nil,
+            locked=locked,role=role,rowWant=want,groupKey=key,
+        }
+        out.rows[index] = row
+    end
+    for _, group in pairs(groups) do
+        local source = group.locked and lockedBySpell or ordinaryBySpell
+        local available = group.spellId and NonNegativeCount(
+            source[group.spellId] ~= nil and source[group.spellId]
+                or source[tostring(group.spellId)]) or 0
+        local have = math.min(group.want, available)
+        for ordinal, index in ipairs(group.rows) do
+            local row = out.rows[index]
+            row.have, row.want = have, group.want
+            row.remaining = group.want - have
+            row.complete = have >= group.want
+            row.groupOrdinal = ordinal
+            row.primary = ordinal == 1
+        end
+        if group.locked then
+            out.lockedHave = out.lockedHave + have
+            out.lockedWant = out.lockedWant + group.want
+        else
+            out.ordinaryHave = out.ordinaryHave + have
+            out.ordinaryWant = out.ordinaryWant + group.want
+        end
+    end
+    out.have = out.ordinaryHave + out.lockedHave
+    out.want = out.ordinaryWant + out.lockedWant
+    out.complete = out.have >= out.want
+    return out
+end
+
 -- True while this exact offered quality can satisfy an unmet target quota.
 function Model.QualityOfferNeeded(plan, catalog, family, quality, owned)
     local progress, want = Model.TargetProgress(plan, catalog, family, owned)

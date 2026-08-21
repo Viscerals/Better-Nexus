@@ -8,7 +8,7 @@
 
 - Stage: 48
 - Checkpoint: 48.4
-- Status: NOT_STARTED
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp4-exact-wishlist-evidence`
 - Starting head: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
 - Worktree: `.test19-wp4-worktree`
@@ -35,6 +35,8 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- #35 expected-red failed twice at `wrong-quality family ownership marked the exact Rare overlay row complete`; the green public runner proves exact Common/Rare separation, duplicate locked quota grouping, role-specific ownership, locked-only refresh, HUD/automation parity, and exact recovery.
+- `Model.WishlistEntryProgress` is the pure exact `(role, spellId)` progress owner. Overlay and editor consume it directly; MainViewModel consumes it for explicit-role Wishlists while retaining deterministic legacy behavior for role-unrepresented inputs. Exact-base Fast passes `34/34` with zero failed/unavailable/skipped checks.
 - #20 checkpoint review passed with two coherent envelope probes: exact 78 ordinary + seven locked and exact 80 ordinary + five locked both remain unavailable, while restored 79+6 recovers. The strengthened runner passes 16 checks and exact-base Fast remains `26/26` with zero failed/unavailable/skipped checks.
 - #20 expected-red failed twice at `exact active/associated mirror remained evidence-pending`; the green public GameAdapter runner passes 13 checks across exact 79+6 derivation, same-tier overlap, sibling quality preservation, mismatch/partial/underflow refusal, reload convergence, and source/SavedVariables immutability.
 - The bridge is active-slot-only and requires verified/complete active booleans, exact sorted spell/stack identity, CandidateEvidence's six-copy envelope, and exact `LockedOwned.bySpell` agreement. Exact-base Fast passes `26/26` with integration `70/70` and zero failed/unavailable/skipped checks.
@@ -52,6 +54,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Work log
 
+- Checkpoint 48.4 implements exact role-qualified Wishlist progress across Model, overlay, editor status, MainViewModel, and AutomationRuntime; duplicate exact rows share an order-independent quota and locked revisions participate in overlay invalidation.
 - Checkpoint 48.3 hygiene was clean across the private active-role bridge, its three public read call sites, public boundary fixture, and adjacent contract text; no behavior-preserving quick win or evidence-backed debt justified churn.
 - Checkpoint 48.3 review passed with no product repair: the exact active-slot bridge remains read-only, active-only, exact-tier/count-bound, and fail-closed at both coherent envelope boundaries. Stage 48 auto-advanced to 48.4.
 - Checkpoint 48.3 implements a read-only exact active-total/locked-count bridge across `Wishlist`, `GetLoadoutWishlist`, and `GetLoadoutWishlistState`; no association, server mirror, Snapshot, Designed, or historical evidence is rewritten.
@@ -101,8 +104,8 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Checkpoint 48.3 review passed after adding coherent seven-locked and 80-ordinary boundary probes; the public runner passes 16 checks, all mapped runners pass, and exact-base Fast remains `26/26`.
+- Checkpoint 48.4 implementation is ready for review after deterministic expected-red, exact tier/role/duplicate/revision coverage, 13 affected presentation/automation runners, exact-base Fast `34/34`, strict Vibe, and clean diff checks.
 
 ## Recommended next action
 
-- Start checkpoint 48.4 with a public expected-red proving that family ownership cannot satisfy a missing exact quality and that model/overlay/editor/automation progress agree by exact role.
+- Review checkpoint 48.4 against wrong-quality siblings, per-tier quotas, duplicate exact rows, ordinary/locked separation, locked-only refresh, legacy compatibility, UI/HUD/automation parity, and bounded revision-keyed work.

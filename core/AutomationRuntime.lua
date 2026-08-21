@@ -489,7 +489,7 @@ local function WishlistProgress(plan, owned, catalog, lockOnlyFamilies, wishlist
         end
     end
     return ViewModel.WishlistProgress(plan, owned, catalog, lockOnlyFamilies,
-        lockedOwned, designTargets)
+        lockedOwned, designTargets, wishlist)
 end
 
 local function FamilyCountsFromEchoes(echoes, catalog)

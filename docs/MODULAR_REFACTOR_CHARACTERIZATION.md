@@ -157,7 +157,7 @@ Cross-module edges that later extraction must retain:
 | Main | GameAdapter | Explicit established slash-command reads/actions remain coordinated by Main. |
 | Main | MainCommands | Main retains the three slash globals and injects existing command actions; Commands owns normalization, aliases, prefix arguments, and exactly-one callback dispatch with no product authority. |
 | Main | MainDiagnostics | Main delegates retained audit formatting, page text, selective clear routing, and incremental export construction through unchanged public facades; Diagnostics receives only the required GameAdapter reads and owns no gameplay or transport path. |
-| Main | MainViewModel | Main captures live adapter/status/update/DPS values, then delegates exact progress math, defensive copying, value-keyed HUD reuse, and immutable display projection; ViewModel receives no service or gameplay callback. |
+| Main | MainViewModel | Main captures live adapter/status/update/DPS values, then delegates exact role-qualified progress math through Model, defensive copying, value-keyed HUD reuse, and immutable display projection; ViewModel receives no service or gameplay callback. |
 | WishlistEditor | WishlistController | Editor assembles one model/controller/renderer chain, retains confirmation/import/export popup intentions, and delegates every draft/session/filter/scroll/association/apply/retry transition while preserving public facade identities. |
 | WishlistEditor | WishlistRenderer | Facade injects controller projections, overlay access, and presentation intentions; Renderer alone owns the main editor frame, display popup, switch menus, tooltips, scrolling, and fixed visible-row binding. |
 | WishlistController | WishlistModel/Store/GameAdapter | Controller delegates pure calculations to one model, persists lock designs only through Store-owned state, and performs uploads/associations only through the injected GameAdapter facade at mutation time. |
@@ -380,7 +380,7 @@ Sync extraction parity is complete.
 | `A.ConsumeDirty` | Consume represented dirty set | Main direct loop | GA session -> GA session | empty set | A-C/A-I/A-X |
 | `A.RecordLevelBurstPump` | Acknowledge fixed scalar recompute/render/action work for one consumed level burst | AutomationRuntime direct loop | AUT scalar deltas -> GA session counters | false without events | A-I/A-X |
 | `A.LevelBurstStats` | Defensive fixed-field level-event/coalescing/pump/work totals and authoritative last level | Main diagnostics/tests | GA session scalars -> defensive row | zero before observation | A-I/A-X |
-| `A.PresentationRevisions` | Allocation-free Wishlist/Owned/Catalog scalar generations for revision-keyed overlay acquisition | WishlistOverlay/tests | GA semantic generations -> - | zero generations before observation | A-C/A-X |
+| `A.PresentationRevisions` | Allocation-free Wishlist/Owned/Locked/Catalog scalar generations for revision-keyed overlay acquisition | WishlistOverlay/tests | GA semantic generations -> - | zero generations before observation | A-C/A-X |
 | `A.ConsumeUserAction` | Consume user-action latch | Main direct loop | GA session -> GA session | false none | A-X |
 | `A.Init` | Bind callbacks/Store and install hooks | Main/tests | facades/GA -> adapter session | idempotent hooks | BOOT/A-C/A-X |
 | `A.OnEvent` | Adapter event router | Main event loop | event/GA -> adapter session | noop irrelevant | A-I/A-X |

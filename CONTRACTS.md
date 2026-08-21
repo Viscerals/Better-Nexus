@@ -30,7 +30,8 @@ catalog = {
 
 wishlist = nil | {           -- nil => advisor-only mode
   name = s,
-  entries  = { { spellId=n, quality=n, stacks=n, family=s } , ... },  -- stacks >= 1
+  entries  = { { spellId=n, quality=n, stacks=n, family=s,
+                 locked=b|nil, sourceRole="ordinary"|"locked"|nil } , ... },
   byFamily = { [familyKey] = { targetStacks=n, wishedQuality=n, spellId=n } },
 }
 
@@ -102,8 +103,15 @@ Fork from EchoOptimizer/logic/Model.lua VERBATIM: `NormName`, `StripRaritySuffix
       skippedNonConformant = { leverId, ... },  -- NEVER toggled (e.g. requiredSpell=9)
     },
     advisorOnly = (wishlist == nil),
-  }
-  ```
+}
+```
+
+Presentation progress is exact-spell/tier aware. `Model.WishlistEntryProgress`
+groups duplicate rows by `(sourceRole, spellId)`, applies each owned copy once,
+and reads ordinary progress only from `Owned().bySpell` and locked progress only
+from `LockedOwned().bySpell`. Family totals remain grouping/planning metadata;
+they never complete a sibling tier. Explicit ordinary and locked roles remain
+independent even when both request the same exact spell ID.
   Lever conformance comes from `catalog.levers[l].conformant` (adapter computes via the
   name-exact "Tome of <member name>" rule); Strategy only partitions. Deterministic
   ordering (sort lever ids ascending).

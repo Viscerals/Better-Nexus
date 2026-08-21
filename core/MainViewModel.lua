@@ -64,6 +64,7 @@ end
 function ViewModel.New(options)
     options = options or {}
     local Ratchet = assert(options.ratchet, "MainViewModel requires Ratchet")
+    local Model = options.model or Nexus.Model
     local stats = {builds=0,refreshes=0,rebuilds=0,skipped=0}
     local lastHudInput, lastHudModel = nil, nil
     local M = {}
@@ -77,7 +78,7 @@ function ViewModel.New(options)
     end
 
     function M.WishlistProgress(plan, owned, catalog, lockOnlyFamilies,
-        lockedOwned, designTargets)
+        lockedOwned, designTargets, wishlist)
         local stackTotal, stackCount, missing, toLock = 0, 0, {}, {}
         if type(plan) ~= "table" or type(plan.wishedFamilies) ~= "table" then
             return 0, 0, missing, toLock
@@ -104,6 +105,60 @@ function ViewModel.New(options)
                     seenToLock[id] = true
                 end
             end
+        end
+
+        local explicitRoles = false
+        local entries = type(wishlist) == "table" and wishlist.entries or nil
+        for _, entry in ipairs(type(entries) == "table" and entries or {}) do
+            if type(entry) == "table" and (type(entry.locked) == "boolean"
+                or entry.sourceRole == "ordinary"
+                or entry.sourceRole == "locked") then
+                explicitRoles = true
+                break
+            end
+        end
+        if explicitRoles and Model
+            and type(Model.WishlistEntryProgress) == "function" then
+            local exact = Model.WishlistEntryProgress(entries, owned, lockedOwned)
+            local missingBySpell, lockMissingBySpell = {}, {}
+            for _, row in ipairs(exact.rows) do
+                if row.primary and row.locked then
+                    if row.remaining > 0 and row.spellId then
+                        lockMissingBySpell[row.spellId] =
+                            (lockMissingBySpell[row.spellId] or 0) + row.remaining
+                    end
+                elseif row.primary then
+                    if row.remaining > 0 and row.spellId then
+                        missingBySpell[row.spellId] =
+                            (missingBySpell[row.spellId] or 0) + row.remaining
+                    end
+                end
+            end
+            stackTotal = exact.ordinaryWant
+            stackCount = exact.ordinaryHave
+            local function ExactLabel(id, remaining)
+                local row = catalog and catalog.rows and catalog.rows[id]
+                local label = tostring((row and row.name)
+                    or ("spell " .. tostring(id)))
+                local quality = row and tonumber(row.quality)
+                if quality ~= nil then
+                    label = label .. " (" .. QualityName(quality) .. ")"
+                end
+                if remaining > 1 then label = label .. " ×" .. remaining end
+                return label
+            end
+            for id, remaining in pairs(missingBySpell) do
+                missing[#missing + 1] = ExactLabel(id, remaining)
+            end
+            for id, remaining in pairs(lockMissingBySpell) do
+                if not seenToLock[id] then
+                    toLock[#toLock + 1] = ExactLabel(id, remaining)
+                    seenToLock[id] = true
+                end
+            end
+            table.sort(missing)
+            table.sort(toLock)
+            return stackCount, stackTotal, missing, toLock, exact
         end
 
         for family in pairs(plan.wishedFamilies) do
@@ -220,9 +275,9 @@ function ViewModel.New(options)
             input.slots, input.catalog
         local wishlist = input.wishlist
         local lockOnly = LockOnlyFamilies(plan, wishlist)
-        local runStacks, total, missing, toLock = M.WishlistProgress(
+        local runStacks, total, missing, toLock, exactProgress = M.WishlistProgress(
             plan, owned, catalog, lockOnly, input.lockedOwned,
-            input.designTargets)
+            input.designTargets, wishlist)
         local activeRow = ActiveSlotRow(slots)
         local loadoutMissing, loadoutStacks, locked = M.LoadoutCoverage(
             activeRow, plan, catalog)
@@ -260,6 +315,9 @@ function ViewModel.New(options)
         local echoes = wishlist and (wishlist.echoes or wishlist.entries) or nil
         return {
             owned=runStacks,total=total,missing=missing,
+            lockedOwned=exactProgress and exactProgress.lockedHave or nil,
+            lockedTotal=exactProgress and exactProgress.lockedWant or nil,
+            wishlistRows=exactProgress and Copy(exactProgress.rows) or nil,
             unknownTomes=Copy(type(input.unknownTomes) == "table"
                 and input.unknownTomes or {}),
             loadoutMissing=loadoutMissing,loadoutStacks=loadoutStacks,

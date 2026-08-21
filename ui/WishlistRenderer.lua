@@ -17,6 +17,8 @@ function Renderer.New(options)
         "WishlistRenderer requires Echo totals")
     local MaskMatch = type(options.maskMatch) == "function"
         and options.maskMatch or function() return true end
+    local EntryProgress = type(options.entryProgress) == "function"
+        and options.entryProgress or nil
 
     local syncFulfilled = type(options.syncFulfilled) == "function"
         and options.syncFulfilled or function() end
@@ -1646,7 +1648,12 @@ local function RefreshView(catalogRevision)
                 suffix = "  |cffffd200(replaces selected quality)|r"
             end
             row.text:SetText(data.name .. suffix)
-            local ownedCount = ownedBySpell[data.spellId] or 0
+            local exactProgress = EntryProgress and EntryProgress({{
+                spellId=data.spellId,quality=data.quality,stacks=1,locked=false,
+            }}, owned, nil) or nil
+            local ownedCount = exactProgress and exactProgress.rows
+                and exactProgress.rows[1] and exactProgress.rows[1].have
+                or ownedBySpell[data.spellId] or 0
             local isLocked = (tonumber(lockedBySpell[data.spellId]) or 0) > 0
             local qualityName = ({ [0] = "Common", [1] = "Uncommon", [2] = "Rare", [3] = "Epic", [4] = "Legendary" })[tonumber(data.quality) or 0] or "Echo"
             if isLocked then
