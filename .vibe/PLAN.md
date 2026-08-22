@@ -85,3 +85,34 @@ depends_on: [49.2]
   - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Full -BaseRef 8f5d28008935cef2d973b800167695ab50e0f70b`
 - Evidence:
   - Expected-red typed-collision receipt, focused green compatibility matrix, and exact-head gate/diff receipt.
+
+## Stage 51 — HUD progress quality-label presentation
+
+- Goal: make HUD progress render the authoritative human-readable quality names, including quality `4` as `Legendary`, without changing progress selection or ordering.
+- Decision: keep the repair at the HUD presentation mapping boundary; numeric qualities remain inputs to existing progress math, and unknown future numeric values render through an explicit safe fallback.
+- Decision: cover both direct quality-label rendering and missing multi-tier text, because the reported defect is visible when HUD chooses a missing target among multiple qualities.
+
+### 51.1 — Repair quality 4 HUD progress label (#38)
+
+depends_on: [50.1]
+
+- Status: `IN_REVIEW`
+- Objective:
+  - Render quality `4` as `Legendary` in deterministic HUD progress text while preserving quality `0`–`3` labels and an explicit fallback for unknown numeric qualities.
+- Deliverables:
+  - Focused expected-red and regression coverage at the HUD progress display seam, including a missing multi-quality quality-4 target.
+  - One scoped HUD quality-label mapping repair with no selection-math or quality-ordering change.
+  - Explicit safe fallback for future numeric qualities and assertions for existing labels.
+- Acceptance:
+  - [ ] Before the repair, the focused oracle reproduces the quality-4 label defect and missing multi-quality text renders `q4` rather than `Legendary`.
+  - [ ] After the repair, qualities `0`–`4` render `Common`, `Uncommon`, `Rare`, `Epic`, and `Legendary` respectively.
+  - [ ] Unknown future numeric qualities use an explicit safe fallback.
+  - [ ] Missing multi-tier HUD progress text remains deterministic.
+  - [ ] Focused HUD regressions and all available required Fast/Full/Lua/parse/integration/policy checks pass; nonblocking native validation remains unverified.
+  - [ ] Test 18 and unrelated product surfaces remain unchanged.
+- Demo commands:
+  - `node tools/run-lua.js tests/run_hud_progress.lua`
+  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc`
+  - `pwsh -NoProfile -File tools/Invoke-QualityGate.ps1 -Mode Full -BaseRef cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc`
+- Evidence:
+  - Expected-red quality-4/multi-tier receipt, focused green HUD matrix, Fast/Full summary, exact diff, and controller-owned review receipt.

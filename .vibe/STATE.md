@@ -6,39 +6,36 @@
 
 ## Current focus
 
-- Stage: 50
-- Checkpoint: 50.1
+- Stage: 51
+- Checkpoint: 51.1
 - Status: IN_REVIEW
-- Branch: `bugfix/test19-wp6-build-hash-buckets-erase-build-id-type-and-can-r`
-- Starting head: exact accepted WP5 handoff head `8f5d28008935cef2d973b800167695ab50e0f70b`
+- Branch: `bugfix/test19-wp7-hud-progress-labels-quality-4-as-q4-instead-of-l`
+- Starting head: exact accepted WP6 handoff head `cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc`
 - Worktree: `.test19-wp4-worktree`
-- Base: exact accepted WP5 handoff head `8f5d28008935cef2d973b800167695ab50e0f70b`
+- Base: exact accepted WP6 handoff head `cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc`
 
 ## Objective (current checkpoint)
 
-Preserve typed build identity in Sync's canonical build and tombstone bucket-hash material without changing the deterministic eight-bucket reconciliation design.
+Render quality `4` as `Legendary` in deterministic HUD progress text while preserving quality `0`–`3` labels and an explicit fallback for unknown numeric qualities.
 
 ## Deliverables (current checkpoint)
 
-- Focused expected-red typed build/tombstone, reconciliation, delta/legacy, invalidation, and ordering coverage.
-- Typed canonical build and tombstone entry material in `core/BuildHashCache.lua`.
-- Explicit mixed old/new digest compatibility behavior preventing permanent false equality.
+- Focused expected-red and regression coverage at the HUD progress display seam, including a missing multi-quality quality-4 target.
+- One scoped HUD quality-label mapping repair with no selection-math or quality-ordering change.
+- Explicit safe fallback for future numeric qualities and assertions for existing labels.
 
 ## Acceptance (current checkpoint)
 
-- [ ] Numeric `1` and string `"1"` hash differently for builds and tombstones; equal typed states remain equal.
-- [ ] Numeric/string peer mismatch cannot skip reconciliation.
-- [ ] Both typed IDs hash deterministically across iteration order and rebuild paths.
-- [ ] Delta and legacy modes preserve typed identity and ordinary strings remain deterministic.
-- [ ] Mixed old/new behavior prevents permanent protocol-compatible false equality.
-- [ ] Blocking focused, mapped, Fast, Full, Lua, parse, integration, policy, and diff checks pass.
-- [ ] Nonblocking manual SavedVariables/native validation remains explicitly unverified.
+- [ ] Before the repair, focused coverage reproduces the quality-4 label defect and missing multi-quality text renders `q4` rather than `Legendary`.
+- [ ] Qualities `0`–`4` render Common, Uncommon, Rare, Epic, and Legendary; unknown future numeric qualities use an explicit safe fallback.
+- [ ] Missing multi-tier HUD progress text remains deterministic without changing selection or ordering.
+- [ ] Focused, Fast, Full, Lua, parse, integration, policy, and exact-diff checks pass when available; nonblocking native validation remains unverified.
+- [ ] Test 18 and unrelated product surfaces remain unchanged.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
-- Issue #40 expected red failed at `numeric and string build IDs share one bucket hash`; typed build/tombstone, mixed old/new, ordering, candidate-token, cache invalidation, and baseline-delta focused runners now pass.
-- Fast passed `20/20` blocking checks with Lua 5.1 parse, Sync mapped tests, integration `70/70`, policy, metadata, release, security, and diff checks; zero failed, skipped, or unavailable checks.
+- WP7 is a controller-selected presentation-only issue #38 package on accepted WP6 head `cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc`; product/test commit `1d397ed` adds the quality-4 `Legendary` mapping and focused deterministic/fallback regression coverage.
 - Controller repair excludes labels, category, resemblance, and temporal metadata from equal-DPS ties through an explicit projection allowlist; retention resolves the accepted pair through preserved source references. Expected-red reproduced both findings, focused paired/retention/board/Leaderboard/view tests pass, and Fast passes `43/43`.
 - WP5 implementation candidate separates historical locked snapshots from exact current/build copy authority and centralizes verified-owner + ordinary + locked/full-combat real-pair metrics across Community eligibility/averages, Leaderboard sync/resumable projections, retention, and DPS sorting. Focused authority/pairing matrices pass; Fast passes `37/37`; final Full passes `18` blocking checks with Lua `221/221`, parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit manual SavedVariables skip.
 - Stage 49 test-gap analysis prioritized five risk-backed matrices: `[MAJOR]` immutable historical snapshots versus exact later copy authority; `[MAJOR]` verified-owner + ordinary + locked/full-combat pair compatibility; `[MAJOR]` Community/Leaderboard/sort parity from one metric; `[MODERATE]` category/timestamp permutation invariance; `[MODERATE]` reload/restart/Sync convergence with preserved conflict evidence.
@@ -185,6 +182,15 @@ Preserve typed build identity in Sync's canonical build and tombstone bucket-has
 
 
 ## Work log (current session)
+- Reconciled WP7 PLAN/STATE truth; final exact-head focused, Fast, and Full validation follows the lifecycle commit.
+- Review FAIL: VALIDATION-EXACT-HEAD-MISMATCH and VIBE-CHECKPOINT-CONTRADICTION require exact-head validation and truthful checkpoint metadata.
+- WP7 quality-4 label repair committed at 1d397ed; exact-head HUD parity, Fast 13/13, and Full 18 blocking checks pass.
+- Controller retired ISSUE-WP7-NODE-RUNTIME after isolated expected-red, focused green, Fast 13/13, and Full 18/18 proved its unblock condition.
+- Node runtime blocker resolved: isolated expected-red, focused green, Fast 13/13, and Full 18 blocking checks passed; return 51.1 to IN_PROGRESS.
+- WP7 implementation is blocked pending a Node.js runtime: the scoped MainViewModel quality-4 mapping and focused expected-red/green oracle are ready, but focused, Fast, and Full execution cannot start and neither gate can write its required summary.
+- Stage 51 design adds bounded WP7 issue #38 HUD quality-label coverage and presentation-only repair after accepted WP6 hygiene.
+- Checkpoint 50.1 hygiene CLEAN: bounded typed BuildHashCache/SyncCompatibility and focused regression surface has no safe high-ROI cleanup or actionable debt; no product/test byte changed and Full was not repeated.
+- Checkpoint 50.1 review PASS: exact head 5e1a6e20 passed focused typed-identity checks and Full 18 blocking checks; no checkpoint-hygiene signals identified; native WoW remains unverified.
 - Typed cache sibling oracle and targeted invalidation repair pass focused, Fast 22/22, and exact-head Full 18 blocking checks
 - Controller review repair: SPEC-TYPED-CACHE-KEY-ALIAS; VALIDATION-TYPED-COEXISTENCE-ORACLE
 - WP6 typed cache matrix and exact-head Fast/Full validation pass; native WoW remains unverified

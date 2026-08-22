@@ -703,3 +703,20 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Expected red: `node tools/run-lua.js tests/run_sync_compatibility_parity.lua` exited 1 at `EXPECTED RED: numeric and string build IDs share one bucket hash` before product changes.
 - Focused green: compatibility parity, hash cache, and baseline delta runners pass with typed build/tombstone separation, deterministic dual-ID ordering, mixed old/new inequality, distinct resumable candidate tokens, and cached/fallback delta/legacy parity.
 - Fast: `tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef 8f5d28008935cef2d973b800167695ab50e0f70b` passed 20/20 blocking checks in 194.852s with zero failed, skipped, or unavailable checks; integration passed 70/70. Native WoW and SavedVariables remain unverified.
+
+# 2026-08-22 — Checkpoint 50.1 hygiene CLEAN
+
+- Bounded inspection covered typed canonical material, cache entry/invalidation identity, Sync compatibility parity, and their direct typed-ID regressions. No correctness/security signal, safe high-ROI cleanup, or actionable debt remained.
+- No product or test byte changed after exact-head Full; Full was not repeated. Strict Vibe validation passed with only the installed-prompt-catalog provenance warning.
+
+# 2026-08-22 — WP7 issue #38 HUD quality-label implementation BLOCKED
+
+- Added the focused HUD oracle in `tests/run_main_viewmodel_parity.lua`: a missing multi-tier target asserts labels `Common`, `Uncommon`, `Rare`, `Epic`, `Legendary`, and explicit future fallback `q5` across repeated projections. Against the pre-fix map, the asserted quality-4 term is the expected-red `q4` versus `Legendary` defect.
+- Scoped repair: `core/MainViewModel.lua` now maps quality `4` to `Legendary`; qualities `0`–`3`, selection/order logic, and `QualityName`'s `q<quality>` fallback are unchanged. `git diff --check` passed.
+- Validation is unavailable, not passed: the focused Node runner failed to start in sandbox and normal-user routes because `node` is not recognized. Both Fast and Full each abort with `Node.js is required to write the compact validation summary`; no `summary.json`, Lua, parse, integration, or policy result exists. Native WoW/SavedVariables remains unverified.
+
+# 2026-08-22 — WP7 Node-runtime recovery validation
+
+- Recovery: Node v24.19.0 is now on PATH. An isolated temporary pre-fix checkout at `34dae2feafcd0b2ae000fa3fe1533bed90213e71`, with only the focused oracle applied, exited 1 at `HUD quality labels or deterministic multi-tier progress text regressed`; this is the expected-red quality-4 `q4` versus `Legendary` result.
+- Green: `node tools/run-lua.js tests/run_main_viewmodel_parity.lua` passes with the scoped quality-4 mapping, all existing quality labels, explicit `q5` fallback, and repeated deterministic multi-tier text assertion.
+- Fast: `tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc` passes 13/13, with zero failed, unavailable, or skipped checks. Full: the same base-ref Full gate passes 18 blocking checks: Lua 221/221, parse 294/294, integration 70/70, zero failed/unavailable; its one manual SavedVariables backup smoke is nonblocking `SKIPPED` and native WoW remains unverified.
