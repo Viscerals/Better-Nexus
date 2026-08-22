@@ -674,3 +674,13 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Full at `032864f` passed `17` checks but failed Lua `219/221`: canonical row-key sorting leaked `30306` comparisons into one live projection callback, and the assembled exact-empty fixture lacked its explicit proof marker. Lua 5.1 parse `294/294` and integration `70/70` passed; the manual SavedVariables check remained skipped and unverified.
 - Canonical row evidence now uses its own budget-capped deterministic heap ordering instead of consuming ranked view comparisons. The exact-empty assembled fixture now states `lockedAuthorityProven=true`.
 - Both Full-discovered runners, paired summary `18`, historical authority `13`, and Fast `43/43` pass with zero failed, unavailable, or skipped checks.
+
+# 2026-08-22 — Checkpoint 49.2 repaired review PASS
+
+- Exact product/test head `d5b8cc046433ab62cce0367dd1974d29085c73c7` passes Full: `18` blocking checks, Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip.
+- The three controller findings are closed by explicit exact-empty proof, overflow-safe finite means, and deterministic bounded output-relevant ties. No checkpoint-hygiene signal was identified in the repaired surface. Native WoW and the manual SavedVariables check remain unverified.
+
+# 2026-08-22 — Checkpoint 49.2 repaired hygiene CLEAN
+
+- Bounded inspection covered only the repaired authority branch, finite pair mean, canonical tie, and four directly affected fixtures. No correctness/security issue, safe high-ROI cleanup, or actionable debt remained.
+- No product or test byte changed after exact-head Full; Full was not repeated during hygiene.
