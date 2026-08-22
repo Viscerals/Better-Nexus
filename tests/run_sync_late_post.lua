@@ -97,8 +97,8 @@ H.sentChatMessages={}
 -- Compute the same hash the answering side would compute
 local function bucketHash(builds)
     local buckets={}; for i=1,8 do buckets[i]={} end
-    local function bucket(id) local h=5381; for i=1,#id do h=((h*33)+id:byte(i))%2147483648 end; return (h%8)+1 end
-    for id,b in pairs(builds) do local n=bucket(id); local complete=(type(b.echoes)=="table" and #b.echoes>0) and "F" or "S"; local fp=tostring(b.fingerprintHash or b.fingerprint or "0"); buckets[n][#buckets[n]+1]=id..":"..tostring(b.lastModified or b.postedAt or 0)..":"..complete..":"..fp end
+    local function bucket(id) local text=tostring(id); local h=5381; for i=1,#text do h=((h*33)+text:byte(i))%2147483648 end; return (h%8)+1 end
+    for id,b in pairs(builds) do local n=bucket(id); local complete=(type(b.echoes)=="table" and #b.echoes>0) and "F" or "S"; local fp=tostring(b.fingerprintHash or b.fingerprint or "0"); buckets[n][#buckets[n]+1]=type(id)..":"..tostring(id)..":"..tostring(b.lastModified or b.postedAt or 0)..":"..complete..":"..fp end
     local out={}
     for n=1,8 do
         table.sort(buckets[n]); local h=5381
