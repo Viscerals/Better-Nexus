@@ -54,4 +54,14 @@ Check(first.average == 650 and second.average == 650
         and first.pair.lkDps == second.pair.lkDps,
     "record or timestamp order changed deterministic pair selection")
 
+for _, invalid in ipairs({0/0, math.huge, -math.huge, 0, -1, "bad"}) do
+    local invalidSummary = Evidence.DpsSummary(
+        {Row("dummy", invalid, "alice@realm", "820001x1", lockA)},
+        {Row("lk", 700, "alice@realm", "820001x1", lockA)})
+    Check(invalidSummary.dummy == 0 and invalidSummary.average == 0
+            and invalidSummary.pair == nil,
+        "invalid Dummy DPS entered category or paired summary: "
+            .. tostring(invalid))
+end
+
 print("Paired DPS summary tests passed: " .. checks)

@@ -79,6 +79,16 @@ Nexus.DpsCapture = {
         return DeepCopy(boards[category] or {})
     end,
 }
+function Nexus.DpsCapture.BeginDpsBoardCursor(category)
+    return {rows=DeepCopy(boards[category] or {}),index=0}
+end
+function Nexus.DpsCapture.DpsBoardCursorNext(cursor)
+    cursor.index = cursor.index + 1
+    return cursor.index > #cursor.rows
+end
+function Nexus.DpsCapture.DpsBoardCursorResult(cursor)
+    return cursor.rows
+end
 
 P.Reset()
 local first, firstSummary = P.Builds({scope="all",classFilter="MAGE",sortMode="recent"})
@@ -184,6 +194,37 @@ assert(#combinedAgain == #combined and boardReads == boardReadsAfter,
 combinedAgain[1].player = "mutated"
 assert(P.Leaderboard("combined", {classFilter="MAGE",search="player"})[1].player ~= "mutated",
     "caller mutated cached leaderboard projection")
+
+local duplicateLk = DeepCopy(boards.lk[1])
+duplicateLk.dps = duplicateLk.dps + 5000000
+duplicateLk.ts = 999999
+boards.lk[#boards.lk + 1] = duplicateLk
+local nonfiniteLk = DeepCopy(duplicateLk)
+nonfiniteLk.dps = math.huge
+boards.lk[#boards.lk + 1] = nonfiniteLk
+Revisions.Advance(Revisions.DPS_CHANGED, {scope="multi-pair-parity"})
+local asyncRows, asyncSummary, asyncReason = P.RequestLeaderboard(
+    "combined", {classFilter="MAGE",search=""})
+for _ = 1, 1000 do
+    if asyncRows then break end
+    local _, pumpError = P.PumpLeaderboard()
+    assert(pumpError == nil, "resumable multi-pair projection failed")
+    asyncRows, asyncSummary, asyncReason = P.RequestLeaderboard(
+        "combined", {classFilter="MAGE",search=""})
+end
+assert(type(asyncRows) == "table" and #asyncRows == 50,
+    "resumable projection diverged from one-pair-per-identity selection: "
+        .. tostring(asyncReason))
+local selectedPair
+for _, row in ipairs(asyncRows) do
+    if row.ownerKey == duplicateLk.ownerKey then selectedPair = row end
+end
+assert(selectedPair and selectedPair.lkDps == duplicateLk.dps,
+    "resumable projection selected a non-best compatible pair: got="
+        .. tostring(selectedPair and selectedPair.lkDps)
+        .. " expected=" .. tostring(duplicateLk.dps))
+boards.lk[#boards.lk] = nil
+boards.lk[#boards.lk] = nil
 
 local healthySummaries = Nexus.BuildCatalog.Summaries
 Nexus.BuildCatalog.Summaries = function() error("forced catalog failure") end

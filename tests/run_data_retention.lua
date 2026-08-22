@@ -316,6 +316,22 @@ local crossSummary = Nexus.DataRetention.Enforce(crossRealm, "realm identity")
 assert(crossSummary.selectedAverage == 0,
     "same-name players from different realms were cross-paired for Average")
 
+local nonfinitePair = {
+    settings=crossRealm.settings,communityBuilds={},syncTombstones={},
+    dpsCapture={personalBest={},buildBest={},characterBest={
+        dummy={a={player="Hostile",ownerKey="hostile@realma",
+            ownerVerified=true,realm="realma",buildId="same",
+            fingerprint="same",lockedEchoes={},dps=math.huge}},
+        lk={b={player="Hostile",ownerKey="hostile@realma",
+            ownerVerified=true,realm="realma",buildId="same",
+            fingerprint="same",lockedEchoes={},dps=20}},
+    }},
+}
+local nonfiniteSummary = Nexus.DataRetention.Enforce(
+    nonfinitePair, "nonfinite pair")
+assert(nonfiniteSummary.selectedAverage == 0,
+    "nonfinite DPS influenced Average retention")
+
 local function TypedReferenceFixture(referenceId)
     local database = {
         settings={communityRetentionEnabled=true,

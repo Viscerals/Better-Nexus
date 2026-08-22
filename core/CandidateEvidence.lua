@@ -389,8 +389,7 @@ function Evidence.ResolveLocked(options)
     -- independently supplied build can do so because TargetIdentity above has
     -- already bound its ordinary fingerprint and typed ID to this request.
     if options.copyAuthorityRequired == true
-        and type(options.build) == "table" and type(buildLocked) == "table"
-        and #buildLocked > 0 then
+        and type(options.build) == "table" and type(buildLocked) == "table" then
         local current, currentReason = NormalizePool(buildLocked, true)
         if not current then
             return LockedOutcome("invalid", currentReason)
@@ -401,7 +400,7 @@ function Evidence.ResolveLocked(options)
             and tostring(currentClaim) ~= currentFingerprint then
             return LockedOutcome("invalid", LOCKED_CLAIM_MISMATCH)
         end
-        return LockedOutcome("ok", nil, "build",
+        return LockedOutcome(#current > 0 and "ok" or "none", nil, "build",
             currentFingerprint, current)
     end
 
@@ -650,13 +649,20 @@ local function PairTie(row)
         .. type(row.buildId) .. ":" .. tostring(row.buildId or "")
 end
 
+local function PositiveFiniteDps(value)
+    value = tonumber(value)
+    if not value or value ~= value or value == math.huge
+        or value == -math.huge or value <= 0 then return nil end
+    return value
+end
+
 function Evidence.DpsPairIdentity(record)
     return PairIdentity(record)
 end
 
 function Evidence.DpsRowBefore(left, right)
-    local leftDps, rightDps = tonumber(left and left.dps) or 0,
-        tonumber(right and right.dps) or 0
+    local leftDps, rightDps = PositiveFiniteDps(left and left.dps) or 0,
+        PositiveFiniteDps(right and right.dps) or 0
     if leftDps ~= rightDps then return leftDps > rightDps end
     return PairTie(left or {}) < PairTie(right or {})
 end
@@ -675,9 +681,9 @@ function Evidence.RealDpsPairs(dummyRows, lkRows)
     for _, lk in ipairs(type(lkRows) == "table" and lkRows or {}) do
         local key = PairIdentity(lk)
         for _, dummy in ipairs(key and dummyByIdentity[key] or {}) do
-            local dummyDps, lkDps = tonumber(dummy.dps) or 0,
-                tonumber(lk.dps) or 0
-            if dummyDps > 0 and lkDps > 0 then
+            local dummyDps, lkDps = PositiveFiniteDps(dummy.dps),
+                PositiveFiniteDps(lk.dps)
+            if dummyDps and lkDps then
                 local candidate = {identity=key,dummy=dummy,lk=lk,
                     dummyDps=dummyDps,lkDps=lkDps,
                     average=(dummyDps + lkDps) / 2,
@@ -705,10 +711,12 @@ end
 function Evidence.DpsSummary(dummyRows, lkRows)
     local summary = {dummy=0,lk=0,best=0,average=0,count=0,pair=nil}
     for _, row in ipairs(type(dummyRows) == "table" and dummyRows or {}) do
-        summary.dummy = math.max(summary.dummy, tonumber(row.dps) or 0)
+        summary.dummy = math.max(summary.dummy,
+            PositiveFiniteDps(row.dps) or 0)
     end
     for _, row in ipairs(type(lkRows) == "table" and lkRows or {}) do
-        summary.lk = math.max(summary.lk, tonumber(row.dps) or 0)
+        summary.lk = math.max(summary.lk,
+            PositiveFiniteDps(row.dps) or 0)
     end
     if summary.dummy > 0 then summary.count = summary.count + 1 end
     if summary.lk > 0 then summary.count = summary.count + 1 end

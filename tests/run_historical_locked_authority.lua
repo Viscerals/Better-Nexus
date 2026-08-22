@@ -56,6 +56,33 @@ Check(exactCurrent.status == "ok" and exactCurrent.source == "build"
 Check(Signature(dummy) == dummyBefore and Signature(lk) == lkBefore,
     "copy resolution mutated historical DPS snapshots")
 
+local exactEmpty = Evidence.ResolveLocked({
+    build={id="build-49",fingerprint="810001x1",echoes=ordinary,
+        lockedEchoes={},lockedAuthorityProven=true},
+    dummyRecord=dummy,lkRecord=lk,copyAuthorityRequired=true,
+})
+Check(exactEmpty.status == "none" and exactEmpty.source == "build"
+        and #exactEmpty.lockedEchoes == 0,
+    "exact proven empty current authority fell through to historical conflict")
+Check(Signature(dummy) == dummyBefore and Signature(lk) == lkBefore,
+    "empty current authority mutated historical DPS snapshots")
+
+-- Simulate restart/reload before a later Sync supplies the same exact current
+-- state. Historical category bytes remain immutable across module ownership.
+dofile("core/CandidateEvidence.lua")
+Evidence = assert(Nexus.CandidateEvidence)
+local afterRestartSync = Evidence.ResolveLocked({
+    build={id="build-49",fingerprint="810001x1",echoes={
+        ordinary[1],currentLocked[1],
+    }},dummyRecord=dummy,lkRecord=lk,copyAuthorityRequired=true,
+})
+Check(afterRestartSync.status == "ok"
+        and afterRestartSync.source == "build"
+        and afterRestartSync.lockedEchoes[1].spellId == 810010,
+    "later exact Sync state did not converge after restart/reload")
+Check(Signature(dummy) == dummyBefore and Signature(lk) == lkBefore,
+    "restart/reload/Sync convergence mutated historical snapshots")
+
 local matchingDummy = {category="dummy",buildId="build-49",
     fingerprint="810001x1",echoes=ordinary,lockedEchoes=currentLocked}
 local matchingLk = {category="lk",buildId="build-49",

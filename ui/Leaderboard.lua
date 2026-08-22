@@ -201,17 +201,9 @@ end
 
 local function CombinedRows()
     local dummy, lk = Board("dummy"), Board("lk")
-    local dummyByKey = {}
-    for _, row in ipairs(dummy) do
-        local key = CombinedRecordKey(row)
-        if key then dummyByKey[key] = row end
-    end
     local out = {}
-    for _, lrow in ipairs(lk) do
-        local key = CombinedRecordKey(lrow)
-        local drow = key and dummyByKey[key]
-        if drow then
-            local avg = ((tonumber(drow.dps) or 0) + (tonumber(lrow.dps) or 0)) / 2
+    for _, pair in ipairs(CandidateEvidence.RealDpsPairs(dummy, lk)) do
+        local drow, lrow, avg = pair.dummy, pair.lk, pair.average
             local ordinary = lrow.echoes or drow.echoes
             local locked = CandidateEvidence.ResolveLocked({
                 ordinaryEchoes=ordinary,
@@ -262,7 +254,6 @@ local function CombinedRows()
                     or drow.recordIdentityMismatch or nil,
                 lockedEvidenceMismatch=locked.status=="conflict" or nil,
             }
-        end
     end
     table.sort(out,function(a,b)
         if a.average ~= b.average then return a.average > b.average end

@@ -8,7 +8,7 @@
 
 - Stage: 49
 - Checkpoint: 49.1
-- Status: IN_REVIEW
+- Status: IN_PROGRESS
 - Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
 - Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 - Worktree: `.test19-wp4-worktree`
@@ -135,3 +135,7 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 ## Recommended next action
 
 - Implement checkpoint 49.1 test-first under the dispatcher-selected role, preserving historical DPS snapshots and failing closed without exact current/build copy authority.
+
+
+## Work log (current session)
+- Controller review repair: SPEC-PAIR-ASYNC-DIVERGENCE; SPEC-EMPTY-COPY-AUTHORITY; ADV-NONFINITE-PAIR; VALIDATION-MIXED-STATE-GAP; VIBE-CHECKPOINT-CONTRADICTION

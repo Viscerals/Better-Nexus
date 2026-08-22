@@ -1213,31 +1213,15 @@ local function PumpLeaderboardJob(job, unit)
                 if nextCategory then
                     job.boardCursor = dps.BeginDpsBoardCursor(nextCategory)
                 elseif job.filters.category == "combined" then
-                    job.state, job.sourceIndex = "index", 1
-                    job.dummyByKey = {}
+                    job.state, job.sourceIndex = "rank", 1
+                    job.source = CandidateEvidence.RealDpsPairs(
+                        job.boards.dummy or {}, job.boards.lk or {})
                 else
                     job.state, job.sourceIndex = "rank", 1
                     job.source = job.boards[job.filters.category] or {}
                 end
                 break
             end
-        end
-    elseif job.state == "index" then
-        local dummy = job.boards.dummy or {}
-        while sourceRows < MAX_SOURCE_PER_PUMP and job.sourceIndex <= #dummy do
-            local row = dummy[job.sourceIndex]
-            job.sourceIndex = job.sourceIndex + 1
-            sourceRows = sourceRows + 1
-            local key = CandidateEvidence.DpsPairIdentity(row)
-            local current = key and job.dummyByKey[key]
-            if key and (not current
-                or CandidateEvidence.DpsRowBefore(row, current)) then
-                job.dummyByKey[key] = row
-            end
-        end
-        if job.sourceIndex > #dummy then
-            job.state, job.sourceIndex = "rank", 1
-            job.source = job.boards.lk or {}
         end
     elseif job.state == "rank" then
         local combined = job.filters.category == "combined"
@@ -1248,13 +1232,9 @@ local function PumpLeaderboardJob(job, unit)
             sourceRows = sourceRows + 1
             local row = raw
             if combined then
-                local key = CandidateEvidence.DpsPairIdentity(raw)
-                local drow = key and job.dummyByKey[key]
-                if drow then
-                    row = CombinedRow(drow, raw)
-                    workStats.joins = workStats.joins + 1
-                    unit.joins = (unit.joins or 0) + 1
-                else row = nil end
+                row = CombinedRow(raw.dummy, raw.lk)
+                workStats.joins = workStats.joins + 1
+                unit.joins = (unit.joins or 0) + 1
             end
             if row then
                 local copied = PrepareLeaderboardRow(row, job.filters)

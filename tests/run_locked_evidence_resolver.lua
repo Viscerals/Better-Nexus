@@ -294,8 +294,8 @@ Control(projection.Detail(build.id, {}) == detail
     "warm Community detail repeated locked-evidence record reads")
 
 -- Exercise the assembled Community Copy button as a second Wishlist entry
--- point. A conflict must stop before the editor opens, with the same bounded
--- reason that the Leaderboard already presents.
+-- point. The exact current build proves an empty locked state, so conflicting
+-- historical snapshots remain visible but cannot override current authority.
 dofile("ui/CommunityBuilds.lua")
 local communityOpened
 Nexus.WishlistEditor = {
@@ -319,14 +319,11 @@ print = function(...)
 end
 communityDetail.lockBtn:GetScript("OnClick")()
 print = originalPrint
-local communityRefusal = false
-for _, message in ipairs(messages) do
-    if message:find(disagreeReason,1,true) then communityRefusal = true end
-end
-Desired("community", communityOpened == nil,
-    "Community Copy opened Wishlist Editor with conflicting locked evidence")
-Desired("community", communityRefusal,
-    "Community Copy did not present the shared bounded conflict reason")
+Desired("community", communityOpened ~= nil,
+    "exact empty current authority did not open Community Copy")
+Desired("community", type(communityOpened.lockedEchoes) == "table"
+        and #communityOpened.lockedEchoes == 0,
+    "Community Copy did not preserve the exact empty locked state")
 
 ------------------------------------------------------------------------
 -- Claimed locked fingerprints are untrusted. The shared owner must recompute
