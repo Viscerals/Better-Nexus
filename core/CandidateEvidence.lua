@@ -667,38 +667,28 @@ function Evidence.DpsRowBefore(left, right)
     return PairTie(left or {}) < PairTie(right or {})
 end
 
-function Evidence.RealDpsPairs(dummyRows, lkRows)
-    local dummyByIdentity = {}
-    for _, row in ipairs(type(dummyRows) == "table" and dummyRows or {}) do
+function Evidence.BeginRealDpsPairs(dummyRows, lkRows)
+    local dummy = type(dummyRows) == "table" and dummyRows or {}
+    local byIdentity = {}
+    for _, row in ipairs(dummy) do
         local key = PairIdentity(row)
         if key then
-            local bucket = dummyByIdentity[key] or {}
+            local bucket = byIdentity[key] or {}
             bucket[#bucket + 1] = row
-            dummyByIdentity[key] = bucket
+            byIdentity[key] = bucket
         end
     end
-    local best = {}
-    for _, lk in ipairs(type(lkRows) == "table" and lkRows or {}) do
-        local key = PairIdentity(lk)
-        for _, dummy in ipairs(key and dummyByIdentity[key] or {}) do
-            local dummyDps, lkDps = PositiveFiniteDps(dummy.dps),
-                PositiveFiniteDps(lk.dps)
-            if dummyDps and lkDps then
-                local candidate = {identity=key,dummy=dummy,lk=lk,
-                    dummyDps=dummyDps,lkDps=lkDps,
-                    average=(dummyDps + lkDps) / 2,
-                    tie=PairTie(dummy) .. "|" .. PairTie(lk)}
-                local current = best[key]
-                if not current or candidate.average > current.average
-                    or candidate.average == current.average
-                        and candidate.tie < current.tie then
-                    best[key] = candidate
-                end
-            end
-        end
-    end
+    return {lk=type(lkRows) == "table" and lkRows or {},lkIndex=1,
+        matchIndex=1,dummyByIdentity=byIdentity,best={},result=nil}
+end
+
+local function FinishRealDpsPairs(cursor)
     local out = {}
-    for _, pair in pairs(best) do out[#out + 1] = pair end
+    for _, pair in pairs(cursor.best) do out[#out + 1] = pair end
+    cursor.result = out
+end
+
+local function SortRealDpsPairs(out)
     table.sort(out, function(left, right)
         if left.average ~= right.average then
             return left.average > right.average
@@ -706,6 +696,57 @@ function Evidence.RealDpsPairs(dummyRows, lkRows)
         return left.identity < right.identity
     end)
     return out
+end
+
+function Evidence.PumpRealDpsPairs(cursor, limit)
+    if type(cursor) ~= "table" or cursor.result then return true end
+    limit = PositiveInteger(limit) or 1
+    local work = 0
+    while work < limit and not cursor.result do
+        work = work + 1
+        if cursor.lkIndex > #cursor.lk then
+            FinishRealDpsPairs(cursor)
+        else
+            local lk = cursor.lk[cursor.lkIndex]
+            local lkKey = PairIdentity(lk)
+            local matches = lkKey and cursor.dummyByIdentity[lkKey] or {}
+            local dummy = matches[cursor.matchIndex]
+            if not dummy then
+                cursor.lkIndex = cursor.lkIndex + 1
+                cursor.matchIndex = 1
+            else
+                local dummyDps, lkDps = PositiveFiniteDps(dummy.dps),
+                    PositiveFiniteDps(lk.dps)
+                if dummyDps and lkDps then
+                    local candidate = {identity=lkKey,dummy=dummy,lk=lk,
+                        dummyDps=dummyDps,lkDps=lkDps,
+                        average=(dummyDps + lkDps) / 2,
+                        tie=PairTie(dummy) .. "|" .. PairTie(lk)}
+                    local current = cursor.best[lkKey]
+                    if not current or candidate.average > current.average
+                        or candidate.average == current.average
+                            and candidate.tie < current.tie then
+                        cursor.best[lkKey] = candidate
+                    end
+                end
+                cursor.matchIndex = cursor.matchIndex + 1
+            end
+        end
+    end
+    if not cursor.result and cursor.lkIndex > #cursor.lk then
+        FinishRealDpsPairs(cursor)
+    end
+    return cursor.result ~= nil, work
+end
+
+function Evidence.RealDpsPairsResult(cursor)
+    return type(cursor) == "table" and cursor.result or nil
+end
+
+function Evidence.RealDpsPairs(dummyRows, lkRows)
+    local cursor = Evidence.BeginRealDpsPairs(dummyRows, lkRows)
+    while not Evidence.PumpRealDpsPairs(cursor, 1000) do end
+    return SortRealDpsPairs(cursor.result)
 end
 
 function Evidence.DpsSummary(dummyRows, lkRows)

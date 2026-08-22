@@ -1213,8 +1213,8 @@ local function PumpLeaderboardJob(job, unit)
                 if nextCategory then
                     job.boardCursor = dps.BeginDpsBoardCursor(nextCategory)
                 elseif job.filters.category == "combined" then
-                    job.state, job.sourceIndex = "rank", 1
-                    job.source = CandidateEvidence.RealDpsPairs(
+                    job.state = "pair"
+                    job.pairCursor = CandidateEvidence.BeginRealDpsPairs(
                         job.boards.dummy or {}, job.boards.lk or {})
                 else
                     job.state, job.sourceIndex = "rank", 1
@@ -1222,6 +1222,15 @@ local function PumpLeaderboardJob(job, unit)
                 end
                 break
             end
+        end
+    elseif job.state == "pair" then
+        local done, pairWork = CandidateEvidence.PumpRealDpsPairs(
+            job.pairCursor, MAX_COMPARISONS_PER_PUMP)
+        comparisons = comparisons + (pairWork or 0)
+        workStats.comparisons = workStats.comparisons + (pairWork or 0)
+        if done then
+            job.state, job.sourceIndex = "rank", 1
+            job.source = CandidateEvidence.RealDpsPairsResult(job.pairCursor)
         end
     elseif job.state == "rank" then
         local combined = job.filters.category == "combined"
