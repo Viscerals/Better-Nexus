@@ -104,6 +104,18 @@ Check(not leakedPartial,
     "unsynced partial lock evidence leaked into public EBH1 export entries")
 lockedProjection = {bySpell={},synced=true}
 
+lockedProjection = {bySpell={[math.huge]=1},synced=true}
+Check(controller.LockedProjection() == nil,
+    "controller trusted a nonfinite locked spell identity")
+local infiniteExport = controller.ExportEntries()
+local leakedInfinite = false
+for _, row in ipairs(infiniteExport) do
+    if row.locked and row.spellId == math.huge then leakedInfinite = true end
+end
+Check(not leakedInfinite,
+    "nonfinite locked spell identity leaked into public export entries")
+lockedProjection = {bySpell={},synced=true}
+
 -- Filters and large draft views stay controller-owned without replacing
 -- future preferences or creating frames/actions.
 local filter = controller.FilterState()

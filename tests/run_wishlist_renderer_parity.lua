@@ -253,6 +253,18 @@ exactSearch:GetScript("OnTextChanged")(exactSearch)
 Editor.Refresh()
 assert(not HasRenderedText("6 locked"),
     "renderer displayed unsynced partial lock evidence as capacity")
+lockedProjection = {synced=true,bySpell={[math.huge]=1}}
+exactSearch:SetText("Renderer Shared")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+local nonfiniteLockedSlots = 0
+for _, candidate in ipairs(created) do
+    if candidate.slotState == "locked" then
+        nonfiniteLockedSlots = nonfiniteLockedSlots + 1
+    end
+end
+assert(nonfiniteLockedSlots == 0 and not HasRenderedText("1 locked"),
+    "renderer trusted a nonfinite locked spell identity")
 
 local function Read(path)
     local handle = assert(io.open(path, "rb"))

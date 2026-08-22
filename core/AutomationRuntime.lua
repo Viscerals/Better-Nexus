@@ -1180,21 +1180,22 @@ local function AutoLockDescriptors(targets, wishlistKey)
     local out, seen = {}, {}
     for spellIdKey, replacementValue in pairs(targets) do
         local spellId = AutoLockInteger(spellIdKey)
+        if not spellId then
+            return nil, nil, "invalid persisted lock target key"
+        end
         local replaces = LockTargetReplacement(replacementValue, spellId)
         local copies = LockTargetCopies(replacementValue, spellId)
-        if spellId and not copies then
+        if not copies then
             return nil, nil, "invalid persisted lock target"
         end
-        if spellId then
-            local baseKey = AutoLockBaseKey(
-                wishlistKey, spellId, replaces, copies)
-            if not seen[baseKey] then
-                seen[baseKey] = true
-                out[#out + 1] = {
-                    spellId=spellId,replaces=replaces,copies=copies,
-                    baseKey=baseKey,
-                }
-            end
+        local baseKey = AutoLockBaseKey(
+            wishlistKey, spellId, replaces, copies)
+        if not seen[baseKey] then
+            seen[baseKey] = true
+            out[#out + 1] = {
+                spellId=spellId,replaces=replaces,copies=copies,
+                baseKey=baseKey,
+            }
         end
     end
     table.sort(out, function(left, right)

@@ -88,7 +88,8 @@ function Controller.New(options)
                 local bySpell = {}
                 for spellId, count in pairs(locked.bySpell) do
                     local id, copies = tonumber(spellId), tonumber(count)
-                    if not id or id <= 0 or id ~= math.floor(id)
+                    if not id or id <= 0 or id >= math.huge
+                        or id ~= math.floor(id)
                         or not copies or copies <= 0 or copies >= math.huge
                         or copies ~= math.floor(copies) then
                         return nil

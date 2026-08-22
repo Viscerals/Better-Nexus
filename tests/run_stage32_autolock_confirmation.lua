@@ -128,6 +128,7 @@ for label, scalar in pairs({
         "unsupported scalar target authorized LockPerk: " .. label)
 end
 state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]=true,
     [1.5]=true,
     [math.huge]={version=1,copies=1,
         rows={{spellId=200100,quality=3,stacks=1}}},
@@ -135,8 +136,8 @@ state.lockDesignTargetsBySlot[wishlistKey] = {
 }
 Check(Nexus.RequestRecompute(), "invalid target-key recompute was refused")
 H.Advance(0.4, 0.2)
-Check(#lockCalls == 0,
-    "invalid containing target key reached LockPerk")
+Check(#lockCalls == 0 and #unlockCalls == 0,
+    "mixed valid/invalid target map reached LockPerk or UnlockPerk")
 state.lockDesignTargetsBySlot[wishlistKey] = {
     [200100]={version=2,copies=1,
         rows={{spellId=200100,quality=3,stacks=1}}},

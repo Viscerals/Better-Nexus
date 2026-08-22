@@ -389,7 +389,8 @@ function Policy.Decide(state)
             or type(value.byFamily) ~= "table" then return false end
         for id, count in pairs(value.bySpell) do
             id, count = tonumber(id), tonumber(count)
-            if not id or id <= 0 or id ~= math.floor(id)
+            if not id or id <= 0 or id >= math.huge
+                or id ~= math.floor(id)
                 or not count or count < 0 or count >= math.huge
                 or count ~= math.floor(count) then return false end
         end

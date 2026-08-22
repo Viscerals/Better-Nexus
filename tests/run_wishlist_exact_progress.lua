@@ -223,7 +223,9 @@ local policy = Nexus.Policy.Decide({
     owned={bySpell={},byFamily={},synced=true,distinct=0},
     locked={bySpell={[101]=1},byFamily={[10]=1},synced=false},
     charges={banish=0,reroll=0,trustworthy=true},
-    plan=lowOnlyPlan,catalog={
+    plan={wishedFamilies={[10]=true},targets={
+        [10]={targetStacks=1,wishedQuality=0},
+    }},catalog={
         rows={
             [101]={name="Quick Hands Common",quality=0,maxStack=1},
             [999]={name="Filler",quality=0,maxStack=1},
@@ -235,5 +237,28 @@ local policy = Nexus.Policy.Decide({
 })
 assert(policy.type == "take" and policy.spellId == 101,
     "Policy consumed partial unsynced locked evidence as authority")
+
+local nonfinitePolicy = Nexus.Policy.Decide({
+    board={cards={
+        {spellId=101,quality=0,family=10},
+        {spellId=999,quality=0,family=99},
+    },signature="nonfinite-lock"},
+    owned={bySpell={},byFamily={},synced=true,distinct=0},
+    locked={bySpell={[math.huge]=1},byFamily={[10]=1},synced=true},
+    charges={banish=0,reroll=0,trustworthy=true},
+    plan={wishedFamilies={[10]=true},targets={
+        [10]={targetStacks=1,wishedQuality=0},
+    }},catalog={
+        rows={
+            [101]={name="Quick Hands Common",quality=0,maxStack=1},
+            [999]={name="Filler",quality=0,maxStack=1},
+        },
+        familyOf={[101]=10,[999]=99},
+        familyMembers={[10]={101},[99]={999}},
+    },
+    level=40,params=Nexus.DefaultProfile.params,
+})
+assert(nonfinitePolicy.type == "take" and nonfinitePolicy.spellId == 101,
+    "Policy consumed a nonfinite locked spell identity as authority")
 
 print("exact Wishlist progress: tiers=independent roles=independent duplicates=allocated -- OK")
