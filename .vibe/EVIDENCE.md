@@ -657,3 +657,9 @@ Record concise command/result receipts here. A skipped or unavailable command is
 
 - Bounded inspection of `CandidateEvidence`, `DpsCapture`, `CommunityController`, `DataRetention`, `ViewProjections`, `Leaderboard`, and their focused WP5 fixtures found no redundant owner, unsafe branch, actionable debt, or behavior-preserving quick win worth post-review churn.
 - No product or test byte changed. Focused review tests, Fast `43/43`, strict Vibe validation, exact-head Full receipt, and clean range/working diff evidence remain the validation boundary; Full was not repeated.
+
+# 2026-08-22 — WP5 independent-review repair PASS
+
+- Exact reviewed product/test head `47c3a3be` derives ordinary pair identity from bounded canonical Echo evidence, uses a total non-temporal authority tie, and advances indexing, matching, collection, sorting, and Community eligibility through bounded cursor units.
+- Focused authority, Sync/restart, retention, duration, startup, and adversarial work-budget runners pass. Fast passes `43/43`; Full passes `18` blocking checks with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable, and one explicit nonblocking manual SavedVariables skip.
+- Checkpoint hygiene found no safe high-ROI cleanup, actionable debt, correctness, or security signal. Native WoW and the manual SavedVariables check remain unverified.
