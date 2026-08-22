@@ -26,6 +26,12 @@ local function Bucket(id)
     return (hash % BUCKETS) + 1
 end
 
+-- BuildCatalog keys are typed identities. Keep the bucket assignment stable
+-- for wire compatibility, but preserve that type in canonical hash material.
+local function TypedId(id)
+    return type(id) .. ":" .. tostring(id)
+end
+
 local function TombStamp(value)
     if type(value) == "table" then return tonumber(value.stamp) or 0 end
     return tonumber(value) or 0
@@ -45,13 +51,13 @@ local function BuildEntry(id, build)
     end
     complete = complete and "F" or "S"
     local fingerprint = tostring(build.fingerprintHash or build.fingerprint or "0")
-    return tostring(id) .. ":" .. tostring(build.lastModified or build.postedAt or 0)
+    return TypedId(id) .. ":" .. tostring(build.lastModified or build.postedAt or 0)
         .. ":" .. complete .. ":" .. fingerprint
 end
 
 local function TombstoneEntry(id, tombstone)
     if tombstone == nil then return nil end
-    return "!" .. tostring(id) .. ":" .. tostring(TombStamp(tombstone))
+    return "!" .. TypedId(id) .. ":" .. tostring(TombStamp(tombstone))
         .. ":" .. TombAuthor(tombstone)
 end
 

@@ -1,5 +1,11 @@
 # HISTORY
 
+## Stage 49 — Historical DPS authority and real paired summaries (completed)
+
+- WP5 issues #23/#26 separated immutable historical locked snapshots from exact current/build copy authority and centralized one deterministic real Dummy/LK pair metric across Community, Leaderboard, retention, and sorting.
+- Accepted receipt head `8f5d28008935cef2d973b800167695ab50e0f70b`; Full passed 18 blocking checks with Lua `221/221`, parse `294/294`, integration `70/70`, and one explicit nonblocking manual SavedVariables skip.
+- Independent review and hygiene completed; native WoW remained unverified.
+
 This file is non-authoritative. Archive completed checkpoints, resolved issues, and consolidation notes here.
 
 ## Completed checkpoints
