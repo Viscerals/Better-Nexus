@@ -386,17 +386,17 @@ function Policy.Decide(state)
     local function TrustedLocked(value)
         local projection = type(GetModel().LockedProjection) == "function"
             and GetModel().LockedProjection(value, catalog, 6) or nil
-        return projection and projection.byFamily or false
+        return projection or false
     end
-    local trustedLockedFamilies = TrustedLocked(state.locked)
-    if trustedLockedFamilies then
+    local trustedLocked = TrustedLocked(state.locked)
+    if trustedLocked then
         local merged = { synced = ownedSafe.synced, bySpell = {}, byFamily = {} }
         for id, n in pairs(ownedSafe.bySpell or {}) do merged.bySpell[id] = n end
         for fam, n in pairs(ownedSafe.byFamily or {}) do merged.byFamily[fam] = n end
-        for id, n in pairs(state.locked.bySpell or {}) do
+        for id, n in pairs(trustedLocked.bySpell) do
             merged.bySpell[id] = (merged.bySpell[id] or 0) + (tonumber(n) or 0)
         end
-        for fam, n in pairs(trustedLockedFamilies) do
+        for fam, n in pairs(trustedLocked.byFamily) do
             merged.byFamily[fam] = (merged.byFamily[fam] or 0) + (tonumber(n) or 0)
         end
         ownedSafe = merged

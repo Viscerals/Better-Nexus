@@ -37,6 +37,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 - path: .vibe/EVIDENCE.md
 - Exact-head review of `432e2ed` found and repaired catalog-owner drift, semantic target-cache staleness, row-order replacement identity, malformed/overflow locked evidence in Main/HUD and other consumers, and nested provenance aliasing. The affected matrix passes with locked totals `65`, controller `54`, AutoLock `105`, active bridge `19`, and exact-base Fast `45/45`; strict Vibe and diff checks pass.
 - Standards re-review of `94610e3` found and repaired direct admission-output aliasing plus duplicated/drifted Policy locked validation. `logic/Model.lua` is now the single pure locked-evidence admission owner, TargetMapEntries returns defensive values/catalog rows, locked totals pass `66`, Policy scenarios pass `54`, and exact-base Fast remains `45/45`.
+- Standards review of `04729be` found and repaired Policy's final raw-versus-normalized spell-map merge. Policy now consumes the full shared projection; lone string keys normalize to numeric exact authority, aliases still fail closed, and exact-base Fast remains `45/45`.
 - Cumulative independent review rejected `7cff7e7` and drove five focused WP4 repairs: true total-minus-locked derivation, counted lock-target continuity, exact-spell automation matching, synced-only Policy authority, and exact renderer selection keys. All deterministic red probes are now green; 19 focused runners and exact-base Fast `39/39` pass on the repaired working candidate.
 - #35 checkpoint review found and repaired a same-family automation omission: locked sibling tiers and extra locked copies now extend an automation-only exact target without mutating the server Wishlist. The expected-red failed twice, the repaired Stage 32 fixture passes 65 checks, and exact-base Fast passes `35/35` with zero failed/unavailable/skipped checks.
 - #35 expected-red failed twice at `wrong-quality family ownership marked the exact Rare overlay row complete`; the green public runner proves exact Common/Rare separation, duplicate locked quota grouping, role-specific ownership, locked-only refresh, HUD/automation parity, and exact recovery.
@@ -120,7 +121,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Standards follow-up repairs after `94610e3` are locally green in the affected matrix and exact-base Fast `45/45`. The candidate awaits a local commit and all three repeated independent reviews.
+- The normalized Policy-consumer repair after `04729be` is locally green in exact progress, Policy scenarios `54`, and exact-base Fast `45/45`. The candidate awaits a local commit and all three repeated independent reviews.
 
 ## Recommended next action
 

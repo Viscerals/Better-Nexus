@@ -352,6 +352,15 @@ end
 local sixCopyPolicy = Nexus.Policy.Decide(capacityState)
 assert(sixCopyPolicy.type == "take" and observedLocked[1] == 1,
     "Policy rejected coherent six-copy locked evidence")
+capacityState.board.signature = "string-key-locks"
+capacityState.locked.bySpell["101"] = capacityState.locked.bySpell[101]
+capacityState.locked.bySpell[101] = nil
+observedLocked = {}
+local stringKeyPolicy = Nexus.Policy.Decide(capacityState)
+assert(stringKeyPolicy.type == "take" and observedLocked[1] == 1,
+    "Policy discarded the shared owner's normalized numeric spell key")
+capacityState.locked.bySpell[101] = capacityState.locked.bySpell["101"]
+capacityState.locked.bySpell["101"] = nil
 capacityState.board.signature = "seven-locks"
 capacityState.locked.bySpell[996] = 1
 capacityState.locked.byFamily[96] = 1
