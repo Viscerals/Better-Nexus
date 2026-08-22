@@ -35,7 +35,7 @@ Render quality `4` as `Legendary` in deterministic HUD progress text while prese
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
-- WP7 is a controller-selected presentation-only issue #38 package on accepted WP6 head `cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc`; no product/test byte has been changed for it.
+- WP7 is a controller-selected presentation-only issue #38 package on accepted WP6 head `cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc`; product/test commit `1d397ed` adds the quality-4 `Legendary` mapping and focused deterministic/fallback regression coverage.
 - Controller repair excludes labels, category, resemblance, and temporal metadata from equal-DPS ties through an explicit projection allowlist; retention resolves the accepted pair through preserved source references. Expected-red reproduced both findings, focused paired/retention/board/Leaderboard/view tests pass, and Fast passes `43/43`.
 - WP5 implementation candidate separates historical locked snapshots from exact current/build copy authority and centralizes verified-owner + ordinary + locked/full-combat real-pair metrics across Community eligibility/averages, Leaderboard sync/resumable projections, retention, and DPS sorting. Focused authority/pairing matrices pass; Fast passes `37/37`; final Full passes `18` blocking checks with Lua `221/221`, parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit manual SavedVariables skip.
 - Stage 49 test-gap analysis prioritized five risk-backed matrices: `[MAJOR]` immutable historical snapshots versus exact later copy authority; `[MAJOR]` verified-owner + ordinary + locked/full-combat pair compatibility; `[MAJOR]` Community/Leaderboard/sort parity from one metric; `[MODERATE]` category/timestamp permutation invariance; `[MODERATE]` reload/restart/Sync convergence with preserved conflict evidence.
@@ -182,6 +182,8 @@ Render quality `4` as `Legendary` in deterministic HUD progress text while prese
 
 
 ## Work log (current session)
+- Reconciled WP7 PLAN/STATE truth; final exact-head focused, Fast, and Full validation follows the lifecycle commit.
+- Review FAIL: VALIDATION-EXACT-HEAD-MISMATCH and VIBE-CHECKPOINT-CONTRADICTION require exact-head validation and truthful checkpoint metadata.
 - WP7 quality-4 label repair committed at 1d397ed; exact-head HUD parity, Fast 13/13, and Full 18 blocking checks pass.
 - Controller retired ISSUE-WP7-NODE-RUNTIME after isolated expected-red, focused green, Fast 13/13, and Full 18/18 proved its unblock condition.
 - Node runtime blocker resolved: isolated expected-red, focused green, Fast 13/13, and Full 18 blocking checks passed; return 51.1 to IN_PROGRESS.

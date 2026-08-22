@@ -96,7 +96,7 @@ depends_on: [49.2]
 
 depends_on: [50.1]
 
-- Status: `NOT_STARTED`
+- Status: `IN_REVIEW`
 - Objective:
   - Render quality `4` as `Legendary` in deterministic HUD progress text while preserving quality `0`–`3` labels and an explicit fallback for unknown numeric qualities.
 - Deliverables:
