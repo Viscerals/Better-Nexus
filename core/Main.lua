@@ -57,7 +57,9 @@ EnsureMainViewModel = function()
     if not (factory and type(factory.New) == "function") then return nil end
     local ratchet = Ratchet or Nexus.Ratchet
     if not ratchet then return nil end
-    MainViewModel = factory.New({ratchet=ratchet,model=Model or Nexus.Model})
+    MainViewModel = factory.New({ratchet=ratchet,model=Model or Nexus.Model,
+        wishlistModel=assert(Nexus.WishlistModel,
+            "WishlistModel unavailable").New()})
     return MainViewModel
 end
 

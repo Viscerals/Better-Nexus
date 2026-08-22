@@ -2,12 +2,14 @@
 -- defensive snapshots, value-keyed cache reuse, and zero service authority.
 Nexus = {}
 dofile("logic/Ratchet.lua")
+dofile("core/WishlistModel.lua")
 dofile("core/MainViewModel.lua")
 
 local factory = Nexus.MainInternals and Nexus.MainInternals.ViewModel
 assert(factory and type(factory.New) == "function",
     "MainViewModel internal constructor is unavailable")
-local view = factory.New({ratchet=Nexus.Ratchet})
+local view = factory.New({ratchet=Nexus.Ratchet,
+    wishlistModel=Nexus.WishlistModel.New()})
 
 local catalog = {
     rows={

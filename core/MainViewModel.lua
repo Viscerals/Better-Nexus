@@ -65,6 +65,8 @@ function ViewModel.New(options)
     options = options or {}
     local Ratchet = assert(options.ratchet, "MainViewModel requires Ratchet")
     local Model = options.model or Nexus.Model
+    local WishlistModel = assert(options.wishlistModel,
+        "MainViewModel requires WishlistModel")
     local stats = {builds=0,refreshes=0,rebuilds=0,skipped=0}
     local lastHudInput, lastHudModel = nil, nil
     local M = {}
@@ -97,15 +99,11 @@ function ViewModel.New(options)
             local rows = catalog and catalog.rows or {}
             for spellIdKey, target in pairs(designTargets) do
                 local id = tonumber(spellIdKey)
-                local want = type(target) == "table"
-                    and tonumber(target.copies or target.count or target.stacks)
-                    or 1
-                if not want or want < 1 or want >= math.huge
-                    or want ~= math.floor(want) then want = 1 end
+                local want = id and WishlistModel.TargetCopies(target, id)
                 local have = type(lockedOwned) == "table"
                     and lockedOwned.synced == true
                     and (tonumber(lockedBySpell[id]) or 0) or 0
-                if id and not seenToLock[id]
+                if id and want and not seenToLock[id]
                     and have < want then
                     local row = rows[id]
                     local remaining = want - have
@@ -268,9 +266,10 @@ function ViewModel.New(options)
             if id then seen[id] = true end
         end
         if type(designTargets) == "table" then
-            for spellIdKey in pairs(designTargets) do
+            for spellIdKey, target in pairs(designTargets) do
                 local id = tonumber(spellIdKey)
-                if id and not seen[id] then
+                local copies = id and WishlistModel.TargetCopies(target, id)
+                if id and copies and not seen[id] then
                     out[#out + 1] = {spellId=id}
                     seen[id] = true
                 end

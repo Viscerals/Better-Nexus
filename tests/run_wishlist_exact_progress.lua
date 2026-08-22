@@ -6,6 +6,7 @@ dofile("logic/Model.lua")
 dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua")
 dofile("logic/Policy.lua")
+dofile("core/WishlistModel.lua")
 dofile("core/MainViewModel.lua")
 
 local catalog = {
@@ -128,6 +129,7 @@ assert(exact.ordinaryHave == 2 and exact.ordinaryWant == 3
 
 local view = Nexus.MainInternals.ViewModel.New({
     ratchet=Nexus.Ratchet,model=Nexus.Model,
+    wishlistModel=Nexus.WishlistModel.New(),
 })
 local plan = {wishedFamilies={[10]=true,[20]=true},targets=wishlist.byFamily}
 local progress = view.BuildProgress({
@@ -141,6 +143,33 @@ assert(progress.owned == 2 and progress.total == 3
     and #progress.toLock == 1
     and progress.toLock[1]:find("Iron Constitution Epic",1,true),
     "HUD/automation progress disagreed with exact overlay tier and role progress")
+
+local projectionTargets = {
+    [101]=true,
+    [102]=103,
+    [103]={version=2,copies=1,rows={{spellId=103,stacks=1}}},
+    [104]={version=1,copies=1,rows={{spellId=103,stacks=1}}},
+    [105]={version=1,copies=2,rows={{spellId=105,stacks=1}}},
+    [106]="future",
+}
+local projectedTomes = view.TomeEchoes({}, projectionTargets)
+local projectedTomeIds = {}
+for _, row in ipairs(projectedTomes) do projectedTomeIds[row.spellId] = true end
+assert(#projectedTomes == 2
+        and projectedTomeIds[101] and projectedTomeIds[102],
+    "HUD Tome projection admitted malformed/future/wrong-key targets")
+local _, _, _, projectedLocks = view.WishlistProgress(
+    {wishedFamilies={},targets={}},
+    {bySpell={},byFamily={},synced=true}, catalog, {},
+    {bySpell={},byFamily={},synced=true}, projectionTargets, nil)
+local projectedText = table.concat(projectedLocks, "|")
+assert(#projectedLocks == 2
+        and projectedText:find("Quick Hands Common",1,true)
+        and projectedText:find("Quick Hands Rare",1,true)
+    and not projectedText:find("Iron Constitution",1,true)
+        and not projectedText:find("spell 104",1,true),
+    "HUD progress admitted invalid targets or dropped supported legacy targets: "
+        .. projectedText)
 
 -- An exact Rare copy completes only the Rare ordinary row; surplus Common
 -- copies still cannot be borrowed by either the Rare or locked role.

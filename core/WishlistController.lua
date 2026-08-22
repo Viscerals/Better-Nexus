@@ -171,7 +171,7 @@ function Controller.New(options)
             if id and copies then
                 locked[id] = {
                     copies=copies,
-                    replaces=DraftModel.TargetReplacement(replacement),
+                    replaces=DraftModel.TargetReplacement(replacement, id),
                 }
             end
         end

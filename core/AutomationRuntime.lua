@@ -498,8 +498,8 @@ local function LockTargetCopies(value, expectedSpellId)
     return options.wishlistModel.TargetCopies(value, expectedSpellId)
 end
 
-local function LockTargetReplacement(value)
-    return options.wishlistModel.TargetReplacement(value)
+local function LockTargetReplacement(value, expectedSpellId)
+    return options.wishlistModel.TargetReplacement(value, expectedSpellId)
 end
 
 local function FamilyCountsFromEchoes(echoes, catalog)
@@ -1180,7 +1180,7 @@ local function AutoLockDescriptors(targets, wishlistKey)
     local out, seen = {}, {}
     for spellIdKey, replacementValue in pairs(targets) do
         local spellId = AutoLockInteger(spellIdKey)
-        local replaces = LockTargetReplacement(replacementValue)
+        local replaces = LockTargetReplacement(replacementValue, spellId)
         local copies = LockTargetCopies(replacementValue, spellId)
         if spellId and not copies then
             return nil, nil, "invalid persisted lock target"

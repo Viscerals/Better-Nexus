@@ -237,10 +237,23 @@ for label, record in pairs({
     mixedSpell={version=1,copies=2,rows={
         {spellId=720099,stacks=1},{spellId=720098,stacks=1},
     }},
+    stringReplacement={version=1,copies=1,replaces="720098",
+        rows={{spellId=720099,stacks=1}}},
 }) do
     Check(Model.TargetCopies(record) == nil,
         "malformed/future persisted target failed open: " .. label)
 end
+
+local validRetained = {version=1,copies=1,
+    rows={{spellId=740003,stacks=1}}}
+local wrongKeyReplacement = {version=1,copies=1,replaces=740003,
+    rows={{spellId=740002,stacks=1}}}
+local replacementPlan = Model.PlanLockCommit({}, {},
+    {[740001]=wrongKeyReplacement}, {[740003]=validRetained},
+    {[740003]=1})
+Check(replacementPlan[740001] == nil
+        and replacementPlan[740003] == validRetained,
+    "wrong-key fulfilled target suppressed a valid replacement target")
 
 print(string.format(
     "locked copy totals: duplicate=2+2+2 one=6 rejected=7/malformed roles=separate checks=%d -- OK",

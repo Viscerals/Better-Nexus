@@ -96,15 +96,16 @@ local function TargetCopies(value, expectedSpellId)
     if rowCount < 1 or highest ~= rowCount or total ~= copies then return nil end
     expectedSpellId = expectedSpellId and PositiveInteger(expectedSpellId) or nil
     if expectedSpellId and representedSpellId ~= expectedSpellId then return nil end
-    if value.replaces ~= nil and not PositiveInteger(value.replaces) then
-        return nil
+    if value.replaces ~= nil then
+        if type(value.replaces) ~= "number"
+            or not PositiveInteger(value.replaces) then return nil end
     end
     return copies
 end
 
-local function TargetReplacement(value)
+local function TargetReplacement(value, expectedSpellId)
     if type(value) == "table" then
-        if TargetCopies(value) == nil then return nil end
+        if TargetCopies(value, expectedSpellId) == nil then return nil end
         return type(value.replaces) == "number" and value.replaces or nil
     end
     return type(value) == "number" and PositiveInteger(value) or nil
@@ -532,7 +533,7 @@ local function ApplyCommittedTargets(prepared, committedTargets, options)
                                 or ("spell " .. tostring(id))
                             row.stacks = PositiveInteger(row.stacks) or 1
                             row.replaces = row.replaces
-                                or TargetReplacement(replaces)
+                                or TargetReplacement(replaces, id)
                             row.locked = true
                             row.sourceRole = row.sourceRole or "locked"
                             pendingLock[lockKey] = row
@@ -548,7 +549,7 @@ local function ApplyCommittedTargets(prepared, committedTargets, options)
                             name = (catalogRow and catalogRow.name)
                                 or ("spell " .. tostring(id)),
                             stacks = copies,
-                            replaces = TargetReplacement(replaces),
+                            replaces = TargetReplacement(replaces, id),
                         }
                     end
                 end
@@ -783,8 +784,9 @@ local function PlanLockCommit(pending, pendingLock, fulfilledTargets, existingTa
     for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
         if type(row.replaces) == "number" then replaced[row.replaces] = true end
     end
-    for _, replacementValue in pairs(type(fulfilledTargets) == "table" and fulfilledTargets or {}) do
-        local replacement = TargetReplacement(replacementValue)
+    for spellIdKey, replacementValue in pairs(type(fulfilledTargets) == "table" and fulfilledTargets or {}) do
+        local id = tonumber(spellIdKey)
+        local replacement = id and TargetReplacement(replacementValue, id)
         if replacement then replaced[replacement] = true end
     end
 
