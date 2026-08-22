@@ -248,6 +248,75 @@ for label, record in pairs({
         "malformed/future persisted target failed open: " .. label)
 end
 
+local validTargetEntries, validTargetTotal = Model.TargetMapEntries({
+    [750001]={version=1,copies=3,rows={{spellId=750001,stacks=3}}},
+    [750002]={version=1,copies=3,rows={{spellId=750002,stacks=3}}},
+})
+Check(validTargetEntries and #validTargetEntries == 2
+        and validTargetTotal == 6,
+    "valid six-copy target map failed shared admission")
+Check(Model.TargetMapEntries({
+    [750001]={version=1,copies=4,rows={{spellId=750001,stacks=4}}},
+    [750002]={version=1,copies=3,rows={{spellId=750002,stacks=3}}},
+}) == nil, "seven-copy target map escaped shared admission")
+Check(Model.TargetMapEntries({[750001]=true,["750001"]=true}) == nil,
+    "canonical target-key aliases escaped shared admission")
+Check(Model.TargetCopies(750001, 750001) == nil
+        and Model.TargetCopies({version=1,copies=1,replaces=750001,
+            rows={{spellId=750001,stacks=1}}}, 750001) == nil,
+    "self replacement escaped target validation")
+for label, replacement in pairs({
+    stringValue="750010",fraction=1.5,nan=0/0,
+    infinite=math.huge,zero=0,negative=-1,
+}) do
+    Check(Model.TargetCopies({version=1,copies=1,replaces=750010,
+        rows={{spellId=750001,stacks=1,replaces=replacement}}}, 750001) == nil,
+        "invalid row replacement escaped validation: " .. label)
+end
+Check(Model.TargetCopies({version=1,copies=1,replaces=750010,
+        rows={{spellId=750001,stacks=1,replaces=750011}}}, 750001) == nil,
+    "top-level and first-row replacement disagreement escaped validation")
+
+local multiReplacement = {version=1,copies=3,replaces=750010,rows={
+    {spellId=750001,stacks=1,replaces=750010},
+    {spellId=750001,stacks=1,replaces=750011},
+    {spellId=750001,stacks=1,replaces=750012},
+}}
+local replacementList = Model.TargetReplacements(multiReplacement, 750001)
+Check(replacementList and #replacementList == 3
+        and replacementList[1] == 750010
+        and replacementList[2] == 750011
+        and replacementList[3] == 750012,
+    "counted target lost its ordered replacement set: "
+        .. tostring(replacementList and #replacementList) .. "/"
+        .. tostring(replacementList and replacementList[1]) .. "/"
+        .. tostring(replacementList and replacementList[2]) .. "/"
+        .. tostring(replacementList and replacementList[3]))
+local multiPlan = Model.PlanLockCommit({}, {}, {[750001]=multiReplacement}, {
+    [750010]=true,[750011]=true,[750012]=true,
+}, {[750001]=3,[750010]=1,[750011]=1,[750012]=1})
+Check(multiPlan[750001] == multiReplacement
+        and multiPlan[750010] == nil and multiPlan[750011] == nil
+        and multiPlan[750012] == nil,
+    "commit suppression retained a per-copy replacement as desired")
+
+local futureEnvelope = {version=1,copies=2,futureOwner={keep=true},rows={
+    {spellId=750020,stacks=2,futureRow={keep=true}},
+}}
+local appliedEnvelope = Model.ApplyCommittedTargets({
+    pending={},pendingLock={},fulfilledTargets={},metrics={},
+}, {[750020]=futureEnvelope}, {lockedBySpell={}})
+local reconciledPending, reconciledLock, reconciledTargets =
+    Model.ReconcileLocked(appliedEnvelope.pending, appliedEnvelope.pendingLock,
+        appliedEnvelope.fulfilledTargets, {[750020]=2})
+Model.ExportEntries(reconciledPending, reconciledLock, {[750020]=2},
+    {rows={}}, reconciledTargets)
+local envelopePlan = Model.PlanLockCommit(reconciledPending, reconciledLock,
+    reconciledTargets, {}, {[750020]=2})
+Check(envelopePlan[750020] and envelopePlan[750020].futureOwner.keep
+        and envelopePlan[750020].rows[1].futureRow.keep,
+    "reconcile/commit/export dropped unknown counted-target envelope fields")
+
 local validRetained = {version=1,copies=1,
     rows={{spellId=740003,stacks=1}}}
 local wrongKeyReplacement = {version=1,copies=1,replaces=740003,

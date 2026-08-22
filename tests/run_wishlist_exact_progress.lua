@@ -156,23 +156,27 @@ local projectionTargets = {
     [-1]=true,
 }
 local projectedTomes = view.TomeEchoes({}, projectionTargets)
-local projectedTomeIds = {}
-for _, row in ipairs(projectedTomes) do projectedTomeIds[row.spellId] = true end
-assert(#projectedTomes == 2
-        and projectedTomeIds[101] and projectedTomeIds[102],
-    "HUD Tome projection admitted malformed/future/wrong-key targets")
+assert(#projectedTomes == 0,
+    "HUD Tome projection partially admitted a malformed target map")
 local _, _, _, projectedLocks = view.WishlistProgress(
     {wishedFamilies={},targets={}},
     {bySpell={},byFamily={},synced=true}, catalog, {},
     {bySpell={},byFamily={},synced=true}, projectionTargets, nil)
 local projectedText = table.concat(projectedLocks, "|")
-assert(#projectedLocks == 2
-        and projectedText:find("Quick Hands Common",1,true)
-        and projectedText:find("Quick Hands Rare",1,true)
-    and not projectedText:find("Iron Constitution",1,true)
-        and not projectedText:find("spell 104",1,true),
-    "HUD progress admitted invalid targets or dropped supported legacy targets: "
+assert(#projectedLocks == 0,
+    "HUD progress partially admitted a malformed target map: "
         .. projectedText)
+local validProjectionTargets = {[101]=true,[102]=103}
+projectedTomes = view.TomeEchoes({}, validProjectionTargets)
+local projectedTomeIds = {}
+for _, row in ipairs(projectedTomes) do projectedTomeIds[row.spellId] = true end
+local _, _, _, validProjectedLocks = view.WishlistProgress(
+    {wishedFamilies={},targets={}},
+    {bySpell={},byFamily={},synced=true}, catalog, {},
+    {bySpell={},byFamily={},synced=true}, validProjectionTargets, nil)
+assert(#projectedTomes == 2 and projectedTomeIds[101]
+        and projectedTomeIds[102] and #validProjectedLocks == 2,
+    "HUD projection dropped a fully valid legacy target map")
 
 -- An exact Rare copy completes only the Rare ordinary row; surplus Common
 -- copies still cannot be borrowed by either the Rare or locked role.
@@ -260,5 +264,52 @@ local nonfinitePolicy = Nexus.Policy.Decide({
 })
 assert(nonfinitePolicy.type == "take" and nonfinitePolicy.spellId == 101,
     "Policy consumed a nonfinite locked spell identity as authority")
+
+local contradictoryPolicy = Nexus.Policy.Decide({
+    board={cards={
+        {spellId=101,quality=0,family=10},
+        {spellId=999,quality=0,family=99},
+    },signature="contradictory-lock"},
+    owned={bySpell={},byFamily={},synced=true,distinct=0},
+    locked={bySpell={[999]=1},byFamily={[10]=1},synced=true},
+    charges={banish=0,reroll=0,trustworthy=true},
+    plan={wishedFamilies={[10]=true},targets={
+        [10]={targetStacks=1,wishedQuality=0},
+    }},catalog={
+        rows={
+            [101]={name="Quick Hands Common",quality=0,maxStack=1},
+            [999]={name="Filler",quality=0,maxStack=1},
+        },
+        familyOf={[101]=10,[999]=99},
+        familyMembers={[10]={101},[99]={999}},
+    },
+    level=40,params=Nexus.DefaultProfile.params,
+})
+assert(contradictoryPolicy.type == "take"
+        and contradictoryPolicy.spellId == 101,
+    "Policy consumed contradictory locked family evidence as authority")
+
+local aliasedPolicy = Nexus.Policy.Decide({
+    board={cards={
+        {spellId=101,quality=0,family=10},
+        {spellId=999,quality=0,family=99},
+    },signature="aliased-lock"},
+    owned={bySpell={},byFamily={},synced=true,distinct=0},
+    locked={bySpell={[101]=1,["101"]=1},byFamily={[10]=2},synced=true},
+    charges={banish=0,reroll=0,trustworthy=true},
+    plan={wishedFamilies={[10]=true},targets={
+        [10]={targetStacks=1,wishedQuality=0},
+    }},catalog={
+        rows={
+            [101]={name="Quick Hands Common",quality=0,maxStack=1},
+            [999]={name="Filler",quality=0,maxStack=1},
+        },
+        familyOf={[101]=10,[999]=99},
+        familyMembers={[10]={101},[99]={999}},
+    },
+    level=40,params=Nexus.DefaultProfile.params,
+})
+assert(aliasedPolicy.type == "take" and aliasedPolicy.spellId == 101,
+    "Policy merged canonical aliases in locked evidence")
 
 print("exact Wishlist progress: tiers=independent roles=independent duplicates=allocated -- OK")

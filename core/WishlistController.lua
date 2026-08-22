@@ -94,6 +94,7 @@ function Controller.New(options)
                         or copies ~= math.floor(copies) then
                         return nil
                     end
+                    if bySpell[id] ~= nil then return nil end
                     bySpell[id] = copies
                 end
                 return {synced=true,bySpell=bySpell}
@@ -486,11 +487,33 @@ function Controller.New(options)
 
         local catalog = Catalog()
         local lockedBySpell = LockedBySpell()
-        local prepared = DraftModel.NormalizeDraft(echoes, {
-            trustOrder = trustOrder,
-            catalog = catalog,
-            lockedBySpell = lockedBySpell,
-        })
+        local ordinaryEchoes, lockedEchoes = {}, {}
+        local typedRoles = type(echoes) == "table" and #echoes > 0
+        for _, echo in ipairs(type(echoes) == "table" and echoes or {}) do
+            if type(echo) ~= "table" or type(echo.locked) ~= "boolean" then
+                typedRoles = false
+                break
+            end
+            local target = echo.locked and lockedEchoes or ordinaryEchoes
+            target[#target + 1] = echo
+        end
+        local prepared, prepareError
+        if typedRoles then
+            prepared, prepareError = DraftModel.NormalizeCandidateEvidence(
+                ordinaryEchoes, lockedEchoes, {
+                    catalog=catalog,lockedBySpell=lockedBySpell,
+                })
+        else
+            prepared = DraftModel.NormalizeDraft(echoes, {
+                trustOrder = trustOrder,
+                catalog = catalog,
+                lockedBySpell = lockedBySpell,
+            })
+        end
+        if not prepared then
+            TouchPresentation()
+            return false, prepareError or "Wishlist evidence is invalid"
+        end
         state.pending = prepared.pending
         state.pendingLock = prepared.pendingLock
         state.fulfilledDraftTargets = prepared.fulfilledTargets

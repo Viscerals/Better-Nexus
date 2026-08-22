@@ -4,6 +4,9 @@ local H = dofile("tests/harness.lua")
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
 dofile("core/GameAdapter.lua")
+dofile("core/CandidateEvidence.lua")
+dofile("core/WishlistModel.lua")
+dofile("core/WishlistController.lua")
 
 NexusDB = {}
 Nexus.Store.Init()
@@ -95,6 +98,38 @@ Check(rolesBySpell[200110].ordinary and rolesBySpell[200110].locked,
     "one exact tier could not retain both ordinary and locked roles")
 Check(wishlist.entries[1].quality == 0 and wishlist.entries[2].quality == 2,
     "same-family exact quality siblings were collapsed during derivation")
+
+local editorController = Nexus.WishlistInternals.Controller.New({
+    model=Nexus.WishlistModel.New(),store=Nexus.Store,
+    accountRoot=function() return NexusDB end,notify=function() end,
+})
+editorController.Initialize(A)
+local reopenedOk, reopenedError = editorController.LoadPendingEchoes(
+    wishlist.entries, false)
+Check(reopenedOk,
+    "authoritative role bridge could not reopen in the editor: "
+        .. tostring(reopenedError))
+local reopened = editorController.ExportEntries()
+local reopenedOrdinary, reopenedLocked, reopenedRoles = 0, 0, {}
+for _, row in ipairs(reopened) do
+    if row.locked then
+        reopenedLocked = reopenedLocked + row.stacks
+    else
+        reopenedOrdinary = reopenedOrdinary + row.stacks
+    end
+    reopenedRoles[row.spellId] = reopenedRoles[row.spellId] or {}
+    reopenedRoles[row.spellId][row.locked and "locked" or "ordinary"] = true
+end
+Check(reopenedOrdinary == 79 and reopenedLocked == 6
+        and reopenedRoles[200110].ordinary
+        and reopenedRoles[200110].locked,
+    "editor reopen lost exact 79+6 role overlap or copy totals")
+local reopenedLockedIds = {}
+for _, row in ipairs(reopened) do
+    if row.locked then reopenedLockedIds[row.spellId] = true end
+end
+Check(reopenedLockedIds[200100] and reopenedLockedIds[200104],
+    "editor reopen collapsed same-family locked exact tiers")
 
 local diagnosed, evidenceState = A.GetLoadoutWishlistState(1)
 Check(diagnosed and evidenceState == "actionable",

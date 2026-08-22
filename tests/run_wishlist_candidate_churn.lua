@@ -90,6 +90,18 @@ assert(A.SetLoadoutWishlistIdentity(1, "Over Budget Identity", {
     {spellId=200102,quality=2,stacks=40},
 }) == false and Nexus.Store.State().loadoutWishlists[1] == preserved,
     "invalid exact-identity write replaced the prior association")
+for label, echo in pairs({
+    infiniteId={spellId=math.huge,quality=3,stacks=1},
+    infiniteStacks={spellId=200100,quality=3,stacks=math.huge},
+    infiniteQuality={spellId=200100,quality=math.huge,stacks=1},
+    nanQuality={spellId=200100,quality=0/0,stacks=1},
+}) do
+    assert(A.WishlistKey({echo}) == nil,
+        "nonfinite Wishlist row received an identity: " .. label)
+    assert(A.SetLoadoutWishlistIdentity(1, label, {echo}) == false
+            and Nexus.Store.State().loadoutWishlists[1] == preserved,
+        "nonfinite Wishlist row replaced the saved association: " .. label)
+end
 ok, err = controller.AssociateCandidate({
     slot=7,name="Exact Budget",key="200100:79",
     echoes={{spellId=200100,quality=3,stacks=79}},

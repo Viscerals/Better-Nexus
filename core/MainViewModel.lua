@@ -95,11 +95,12 @@ function ViewModel.New(options)
             and type(lockedOwned.bySpell) == "table" and lockedOwned.bySpell or {}
 
         local seenToLock = {}
-        if type(designTargets) == "table" then
+        local targetEntries = type(designTargets) == "table"
+            and WishlistModel.TargetMapEntries(designTargets) or nil
+        if targetEntries then
             local rows = catalog and catalog.rows or {}
-            for spellIdKey, target in pairs(designTargets) do
-                local id = tonumber(spellIdKey)
-                local want = id and WishlistModel.TargetCopies(target, id)
+            for _, target in ipairs(targetEntries) do
+                local id, want = target.spellId, target.copies
                 local have = type(lockedOwned) == "table"
                     and lockedOwned.synced == true
                     and (tonumber(lockedBySpell[id]) or 0) or 0
@@ -265,10 +266,11 @@ function ViewModel.New(options)
             local id = tonumber(echo and (echo.spellId or echo.id))
             if id then seen[id] = true end
         end
-        if type(designTargets) == "table" then
-            for spellIdKey, target in pairs(designTargets) do
-                local id = tonumber(spellIdKey)
-                local copies = id and WishlistModel.TargetCopies(target, id)
+        local targetEntries = type(designTargets) == "table"
+            and WishlistModel.TargetMapEntries(designTargets) or nil
+        if targetEntries then
+            for _, target in ipairs(targetEntries) do
+                local id, copies = target.spellId, target.copies
                 if id and copies and not seen[id] then
                     out[#out + 1] = {spellId=id}
                     seen[id] = true

@@ -66,6 +66,29 @@ Check(exactWishlist.byFamily[9100].targetStacks == 2
         and #exactWishlist.byFamily[9100].qualityTiers == 1
         and #exactWishlist.entries == 1,
     "automation augmentation mutated the authoritative server Wishlist")
+state.lockDesignTargetsBySlot[exactKey] = {
+    [910001]=true,
+    [1.5]=true,
+}
+Check(F.runtime.WishlistWithLockTargets(exactWishlist, exactCatalog)
+        == exactWishlist,
+    "mixed valid/invalid target map augmented the automation plan")
+state.lockDesignTargetsBySlot[exactKey] = {
+    [910001]=true,
+    [919999]=true,
+}
+Check(F.runtime.WishlistWithLockTargets(exactWishlist, exactCatalog)
+        == exactWishlist,
+    "mixed catalog-known/unknown target map augmented the automation plan")
+state.lockDesignTargetsBySlot[exactKey] = {
+    [910001]={version=1,copies=4,
+        rows={{spellId=910001,quality=0,stacks=4}}},
+    [910002]={version=1,copies=3,
+        rows={{spellId=910002,quality=2,stacks=3}}},
+}
+Check(F.runtime.WishlistWithLockTargets(exactWishlist, exactCatalog)
+        == exactWishlist,
+    "seven-copy target map augmented the automation plan")
 state.lockDesignTargetsBySlot[exactKey] = nil
 
 local wishlistEchoes = {}
@@ -139,6 +162,35 @@ H.Advance(0.4, 0.2)
 Check(#lockCalls == 0 and #unlockCalls == 0,
     "mixed valid/invalid target map reached LockPerk or UnlockPerk")
 state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]=true,["200100"]=true,
+}
+Check(Nexus.RequestRecompute(), "aliased target recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == 0 and #unlockCalls == 0,
+    "canonical target aliases reached LockPerk or UnlockPerk")
+state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]=true,[299999]=true,
+}
+Check(Nexus.RequestRecompute(), "catalog-unknown target recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == 0 and #unlockCalls == 0,
+    "mixed catalog-known/unknown targets reached LockPerk or UnlockPerk")
+state.lockDesignTargetsBySlot[wishlistKey] = {[200100]=200100}
+Check(Nexus.RequestRecompute(), "self-replacement recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == 0 and #unlockCalls == 0,
+    "self replacement reached LockPerk or UnlockPerk")
+state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]={version=1,copies=4,
+        rows={{spellId=200100,quality=3,stacks=4}}},
+    [200102]={version=1,copies=3,
+        rows={{spellId=200102,quality=2,stacks=3}}},
+}
+Check(Nexus.RequestRecompute(), "seven-copy target recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == 0 and #unlockCalls == 0,
+    "seven-copy target map reached LockPerk or UnlockPerk")
+state.lockDesignTargetsBySlot[wishlistKey] = {
     [200100]={version=2,copies=1,
         rows={{spellId=200100,quality=3,stacks=1}}},
 }
@@ -159,7 +211,95 @@ H.Advance(0.4, 0.2)
 Check(#lockCalls == 0,
     "malformed/future/wrong-identity counted target authorized LockPerk")
 
+-- A counted exact target can pair each retained row with a distinct old lock.
+-- At full capacity the runtime sheds one still-locked, non-target pair per
+-- authoritative revision until the complete deficit fits, then locks X.
+local lifecycleBeforeScenario = Stats().autoLockLifecycle
+local originalGranted = H.granted
+H.granted = {Target={
+    {spellId=200100,quality=3},{spellId=200100,quality=3},
+    {spellId=200100,quality=3},
+}}
+state.autoLockAttempts = nil
+state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]={version=1,copies=3,replaces=200104,rows={
+        {spellId=200100,quality=3,stacks=1,replaces=200104},
+        {spellId=200100,quality=3,stacks=1,replaces=200102},
+        {spellId=200100,quality=3,stacks=1,replaces=200999},
+    }},
+}
+H.service.GetMaximumPermanentEchoes = function() return 3 end
+H.locked = {
+    {spellId=200104,quality=2,stack=1},
+    {spellId=200102,quality=2,stack=1},
+    {spellId=200999,quality=1,stack=1},
+}
+H.NotifyEchoDataChanged()
+Check(Nexus.RequestRecompute(), "multi-replacement recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#unlockCalls == 1 and unlockCalls[1].spellId == 200104,
+    "first counted replacement pair did not unlock")
+H.Advance(3.2, 0.2)
+H.locked = {
+    {spellId=200102,quality=2,stack=1},
+    {spellId=200999,quality=1,stack=1},
+}
+H.NotifyEchoDataChanged()
+H.Advance(0.4, 0.2)
+if #unlockCalls ~= 2 and Nexus.GetDiagnosticPageText then
+    print(Nexus.GetDiagnosticPageText("autolock"))
+end
+Check(#unlockCalls == 2 and unlockCalls[2].spellId == 200102,
+    "second counted replacement pair did not unlock: calls="
+        .. tostring(#unlockCalls) .. " last="
+        .. tostring(unlockCalls[#unlockCalls] and unlockCalls[#unlockCalls].spellId))
+H.Advance(3.2, 0.2)
+H.locked = {{spellId=200999,quality=1,stack=1}}
+H.NotifyEchoDataChanged()
+H.Advance(0.4, 0.2)
+Check(#unlockCalls == 3 and unlockCalls[3].spellId == 200999,
+    "third counted replacement pair did not unlock: calls="
+        .. tostring(#unlockCalls) .. " last="
+        .. tostring(unlockCalls[#unlockCalls] and unlockCalls[#unlockCalls].spellId))
+H.Advance(3.2, 0.2)
+H.locked = {}
+H.NotifyEchoDataChanged()
+H.Advance(0.4, 0.2)
+Check(#lockCalls == 1 and lockCalls[1].spellId == 200100,
+    "counted target did not lock after its full deficit fit")
+
+-- A replacement that remains a separate desired target is never shed; the
+-- runtime skips it and uses the next explicit pair.
+lockCalls, unlockCalls = {}, {}
+state.autoLockAttempts = nil
+H.Advance(3.2, 0.2)
+state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]={version=1,copies=2,replaces=200104,rows={
+        {spellId=200100,quality=3,stacks=1,replaces=200104},
+        {spellId=200100,quality=3,stacks=1,replaces=200102},
+    }},
+    [200104]=true,
+}
+H.locked = {
+    {spellId=200104,quality=2,stack=1},
+    {spellId=200102,quality=2,stack=1},
+    {spellId=200999,quality=1,stack=1},
+}
+H.NotifyEchoDataChanged()
+Check(Nexus.RequestRecompute(), "desired-sibling recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#unlockCalls == 1 and unlockCalls[1].spellId == 200102,
+    "counted replacement unlocked a separately desired sibling")
+H.Advance(3.2, 0.2)
+local lifecycleAfterScenario = Stats().autoLockLifecycle
+local scenarioLifecycle = {}
+for key, value in pairs(lifecycleAfterScenario) do
+    scenarioLifecycle[key] = value - (lifecycleBeforeScenario[key] or 0)
+end
+
 -- Restore the original one-of-three fixture for the lifecycle assertions.
+H.granted = originalGranted
+lockCalls, unlockCalls = {}, {}
 state.autoLockAttempts = nil
 state.lockDesignTargetsBySlot[wishlistKey] = {[200100]=true}
 H.service.GetMaximumPermanentEchoes = function() return 3 end
@@ -197,10 +337,14 @@ Check(#lockCalls == 1,
 
 local first = Stats()
 Check(type(first.autoLockLifecycle) == "table"
-        and first.autoLockLifecycle.prepared == 1
-        and first.autoLockLifecycle.submitted == 1
-        and first.autoLockLifecycle.awaitingConfirmation == 1
-        and first.autoLockLifecycle.expired == 1,
+        and first.autoLockLifecycle.prepared
+            - (scenarioLifecycle.prepared or 0) == 1
+        and first.autoLockLifecycle.submitted
+            - (scenarioLifecycle.submitted or 0) == 1
+        and first.autoLockLifecycle.awaitingConfirmation
+            - (scenarioLifecycle.awaitingConfirmation or 0) == 1
+        and first.autoLockLifecycle.expired
+            - (scenarioLifecycle.expired or 0) == 1,
     "prepared/submitted/awaiting/expired lifecycle totals drifted")
 Check(first.lastAutoLockLifecycle.state == "expired"
         and first.lastAutoLockLifecycle.reason == "confirmation_timeout"
@@ -209,7 +353,8 @@ Check(first.lastAutoLockLifecycle.state == "expired"
 first.autoLockLifecycle.expired = 999
 first.lastAutoLockLifecycle.state = "mutated"
 first.autoLockCapacity.maximum = 999
-Check(Stats().autoLockLifecycle.expired == 1
+Check(Stats().autoLockLifecycle.expired
+        - (scenarioLifecycle.expired or 0) == 1
         and Stats().lastAutoLockLifecycle.state == "expired"
         and Stats().autoLockCapacity.maximum == 3,
     "AutoLock lifecycle diagnostics leaked mutable internal state")
@@ -257,7 +402,8 @@ H.Advance(0.4, 0.2)
 local confirmed = Stats()
 Check(#lockCalls == callsAtExpiry + 1
         and confirmed.lastAutoLockLifecycle.state == "confirmed"
-        and confirmed.autoLockLifecycle.confirmed == 1,
+        and confirmed.autoLockLifecycle.confirmed
+            - (scenarioLifecycle.confirmed or 0) == 1,
     "authoritative locked evidence did not confirm exactly once")
 
 -- A new target safely supersedes the fulfilled identity. A refusal is
@@ -281,8 +427,10 @@ H.Advance(0.4, 0.2)
 local rejected = Stats()
 Check(rejected.lastAutoLockLifecycle.state == "rejected"
         and rejected.lastAutoLockLifecycle.reason == "refused"
-        and rejected.autoLockLifecycle.rejected == 1
-        and rejected.autoLockLifecycle.superseded >= 1,
+        and rejected.autoLockLifecycle.rejected
+            - (scenarioLifecycle.rejected or 0) == 1
+        and rejected.autoLockLifecycle.superseded
+            - (scenarioLifecycle.superseded or 0) >= 1,
     string.format("target change did not supersede then retain adapter rejection: state=%s reason=%s rejected=%s superseded=%s calls=%s",
         tostring(rejected.lastAutoLockLifecycle.state),
         tostring(rejected.lastAutoLockLifecycle.reason),
@@ -306,7 +454,8 @@ H.NotifyEchoDataChanged()
 H.Advance(0.4, 0.2)
 Check(#lockCalls == callsAtReject
         and Stats().lastAutoLockLifecycle.state == "confirmed"
-        and Stats().autoLockLifecycle.confirmed == 2,
+        and Stats().autoLockLifecycle.confirmed
+            - (scenarioLifecycle.confirmed or 0) == 2,
     string.format("late authoritative locked evidence did not confirm without resubmission: calls=%s state=%s confirmed=%s",
         tostring(#lockCalls),tostring(Stats().lastAutoLockLifecycle.state),
         tostring(Stats().autoLockLifecycle.confirmed)))
@@ -349,7 +498,8 @@ H.NotifyEchoDataChanged()
 H.Advance(0.4, 0.2)
 local revised = Stats()
 Check(#lockCalls == callsAtReject + 1 and #unlockCalls == 0
-        and revised.autoLockLifecycle.superseded >= 2,
+        and revised.autoLockLifecycle.superseded
+            - (scenarioLifecycle.superseded or 0) >= 2,
     "locked-state revision bypassed capacity or destructive-unlock safety")
 
 -- Capacity is server evidence, not the editor's six design cells. This live
@@ -459,23 +609,27 @@ Check(#lockCalls == callsBeforeMalformed and #unlockCalls == 0
 state.autoLockAttempts = validAttempts
 
 local final = Stats()
-Check(final.autoLockLifecycle.prepared == 4
-        and final.autoLockLifecycle.submitted == 3
-        and final.autoLockLifecycle.awaitingConfirmation == 3
-        and final.autoLockLifecycle.confirmed == 2
-        and final.autoLockLifecycle.rejected == 1
-        and final.autoLockLifecycle.expired == 1
-        and final.autoLockLifecycle.superseded == 4
-        and final.autoLockLifecycle.spacingRetries == 1
-        and final.autoLockLifecycle.explicitRetries == 1
-        and final.autoLockLifecycle.postExpiryBlocked == 3,
+local boundedLifecycle = {}
+for key, value in pairs(final.autoLockLifecycle) do
+    boundedLifecycle[key] = value - (scenarioLifecycle[key] or 0)
+end
+Check(boundedLifecycle.prepared == 4
+        and boundedLifecycle.submitted == 3
+        and boundedLifecycle.awaitingConfirmation == 3
+        and boundedLifecycle.confirmed == 2
+        and boundedLifecycle.rejected == 1
+        and boundedLifecycle.expired == 1
+        and boundedLifecycle.superseded == 4
+        and boundedLifecycle.spacingRetries == 1
+        and boundedLifecycle.explicitRetries == 1
+        and boundedLifecycle.postExpiryBlocked == 3,
     "final AutoLock lifecycle totals were not exact and bounded")
 print(string.format(
     "stage32 AutoLock confirmation: checks=%d calls=%d prepared=%d submitted=%d awaiting=%d confirmed=%d rejected=%d expired=%d superseded=%d postExpiry=%d capacity=1/%d",
-    checks,#lockCalls,final.autoLockLifecycle.prepared,
-    final.autoLockLifecycle.submitted,
-    final.autoLockLifecycle.awaitingConfirmation,
-    final.autoLockLifecycle.confirmed,final.autoLockLifecycle.rejected,
-    final.autoLockLifecycle.expired,final.autoLockLifecycle.superseded,
-    final.autoLockLifecycle.postExpiryBlocked,maximum))
+    checks,#lockCalls,boundedLifecycle.prepared,
+    boundedLifecycle.submitted,
+    boundedLifecycle.awaitingConfirmation,
+    boundedLifecycle.confirmed,boundedLifecycle.rejected,
+    boundedLifecycle.expired,boundedLifecycle.superseded,
+    boundedLifecycle.postExpiryBlocked,maximum))
 print("bounded AutoLock submission and authoritative confirmation -- OK")

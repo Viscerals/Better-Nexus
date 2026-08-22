@@ -816,11 +816,12 @@ local function WishlistIdentity(echoes)
     local totals = {}
     for i = 1, #echoes do
         local e = echoes[i]
-        local id = type(e) == "table" and tonumber(e.spellId)
-        if id then
-            totals[id] = (totals[id] or 0)
-                + math.max(1, tonumber(e.stacks) or 1)
-        end
+        if type(e) ~= "table" then return nil end
+        local id = PositiveInteger(e.spellId)
+        local stacks = e.stacks == nil and 1 or PositiveInteger(e.stacks)
+        local quality = e.quality == nil and 0 or NonNegativeInteger(e.quality)
+        if not id or not stacks or quality == nil then return nil end
+        totals[id] = (totals[id] or 0) + stacks
     end
     local parts = {}
     for id, stacks in pairs(totals) do
@@ -894,10 +895,13 @@ local function NormalizeWishlistEchoes(echoes, evidenceVersion, allowInlineEvide
     local ordinaryStacks, lockedStacks, totalStacks = 0, 0, 0
     for i = 1, maxIndex do
         local entry = echoes[i]
-        local spellId = type(entry) == "table" and tonumber(entry.spellId)
-        local stacks = type(entry) == "table" and tonumber(entry.stacks) or nil
-        if not spellId or spellId <= 0 or spellId ~= math.floor(spellId)
-            or not stacks or stacks < 1 or stacks ~= math.floor(stacks) then
+        local spellId = type(entry) == "table"
+            and PositiveInteger(entry.spellId) or nil
+        local stacks = type(entry) == "table"
+            and PositiveInteger(entry.stacks) or nil
+        local quality = type(entry) == "table" and (entry.quality == nil
+            and 0 or NonNegativeInteger(entry.quality)) or nil
+        if not spellId or not stacks or quality == nil then
             return nil
         end
         totalStacks = totalStacks + stacks
@@ -910,7 +914,7 @@ local function NormalizeWishlistEchoes(echoes, evidenceVersion, allowInlineEvide
             or lockedStacks > MAX_WISHLIST_LOCKED_TARGETS
             or totalStacks > MAX_COMPLETE_WISHLIST_ECHOES then return nil end
         out[i] = {
-            spellId=spellId, quality=tonumber(entry.quality) or 0,
+            spellId=spellId, quality=quality,
             stacks=stacks,
             locked=LockState(entry.locked),
         }

@@ -1,5 +1,6 @@
 -- Frame-free Wishlist controller transition, association, and retry parity.
 Nexus = {}
+dofile("core/CandidateEvidence.lua")
 dofile("core/WishlistModel.lua")
 dofile("core/WishlistController.lua")
 
@@ -102,6 +103,11 @@ for _, row in ipairs(partialExport) do
 end
 Check(not leakedPartial,
     "unsynced partial lock evidence leaked into public EBH1 export entries")
+lockedProjection = {bySpell={},synced=true}
+
+lockedProjection = {bySpell={[1001]=1,["1001"]=1},synced=true}
+Check(controller.LockedProjection() == nil,
+    "controller merged canonical aliases in locked evidence")
 lockedProjection = {bySpell={},synced=true}
 
 lockedProjection = {bySpell={[math.huge]=1},synced=true}
