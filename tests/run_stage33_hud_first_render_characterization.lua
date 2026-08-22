@@ -362,6 +362,7 @@ Nexus.MainInternals.AutomationRuntime.New = function(options)
 end
 dofile("core/MainLifecycle.lua")
 dofile("core/MainCommands.lua")
+dofile("core/WishlistModel.lua")
 dofile("core/MainViewModel.lua")
 dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")

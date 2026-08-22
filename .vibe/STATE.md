@@ -125,8 +125,8 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Final independent Spec/Standards/adversarial review PASS is recorded for product/test head `38d148e`. Only the final exact-candidate Full gate and local receipt/stop commits remain; do not enter Stage 49/WP5.
+- Final Full on receipt head `11b5795` exposed and repaired legacy fixture dependency/contract drift without changing product bytes. All `24` previously failing runners and exact-base Fast `68/68` pass; fresh exact-head independent reviews and repeated Full remain before local completion. Do not enter Stage 49/WP5.
 
 ## Recommended next action
 
-- Commit the review receipt without changing product/test bytes, run the final Full gate on that exact candidate, record the receipt, and stop without dispatching consolidation or entering Stage 49/WP5.
+- Commit the fixture-only Full repair, repeat all three independent reviews on the new exact head, then run Full on the frozen candidate, record the receipt, and stop without dispatching consolidation or entering Stage 49/WP5.
