@@ -1,0 +1,229 @@
+-- Stage 48.3: a verified active total may authorize roles for only its exact
+-- associated designed mirror, using authoritative locked-count agreement.
+local H = dofile("tests/harness.lua")
+dofile("data/DefaultProfile.lua")
+dofile("core/Store.lua")
+dofile("core/GameAdapter.lua")
+dofile("core/CandidateEvidence.lua")
+dofile("core/WishlistModel.lua")
+dofile("core/WishlistController.lua")
+
+NexusDB = {}
+Nexus.Store.Init()
+local A = Nexus.GameAdapter
+A.Init({}, Nexus.Store)
+
+local checks = 0
+local function Check(value, message)
+    checks = checks + 1
+    assert(value, message)
+end
+
+local function Signature(value, seen)
+    if type(value) ~= "table" then return type(value) .. ":" .. tostring(value) end
+    seen = seen or {}
+    if seen[value] then return "cycle" end
+    seen[value] = true
+    local keys = {}
+    for key in pairs(value) do keys[#keys + 1] = key end
+    table.sort(keys, function(left, right)
+        return type(left) .. ":" .. tostring(left)
+            < type(right) .. ":" .. tostring(right)
+    end)
+    local out = {"{"}
+    for _, key in ipairs(keys) do
+        out[#out + 1] = Signature(key, seen)
+        out[#out + 1] = "="
+        out[#out + 1] = Signature(value[key], seen)
+        out[#out + 1] = ";"
+    end
+    out[#out + 1] = "}"
+    seen[value] = nil
+    return table.concat(out)
+end
+
+local activeEchoes = {
+    {spellId=200110,quality=0,stacks=40,locked=false},
+    {spellId=200112,quality=2,stacks=39,locked=false},
+    -- The active total is authoritative for identity/count, but its role
+    -- booleans are the lossy all-false representation that #20 must not trust.
+    {spellId=200110,quality=0,stacks=2,locked=false},
+    {spellId=200100,quality=3,stacks=2,locked=false},
+    {spellId=200104,quality=2,stacks=2,locked=false},
+}
+local designedEchoes = H.CloneValue(activeEchoes)
+for _, row in ipairs(designedEchoes) do row.locked = false end
+local mismatchEchoes = H.CloneValue(designedEchoes)
+mismatchEchoes[1].stacks = 39
+mismatchEchoes[#mismatchEchoes + 1] = {
+    spellId=200200,quality=1,stacks=1,locked=false,
+}
+
+H.DeliverSlots({
+    [1]={slot=1,name="Exact",verified=true,echoes=activeEchoes},
+    -- Another verified copy with the same title is never the authority for
+    -- active slot 1.
+    [2]={slot=2,name="Exact",verified=true,echoes=mismatchEchoes},
+    [102]={slot=102,name="Exact",verified=false,echoes=designedEchoes},
+    [103]={slot=103,name="Exact",verified=false,echoes=mismatchEchoes},
+}, 1)
+H.locked = {
+    {spellId=200110,quality=0,stacks=2},
+    {spellId=200100,quality=3,stacks=2},
+    {spellId=200104,quality=2,stacks=2},
+}
+
+local designedKey = assert(A.WishlistKey(designedEchoes))
+local state = Nexus.Store.State()
+state.loadoutWishlists = {
+    [1]={slot=102,name="Exact",key=designedKey,future={keep=true}},
+}
+local saved = state.loadoutWishlists[1]
+local before = Signature({slots=H.Perks.serverBuildSlots,locked=H.locked,saved=saved})
+
+local wishlist = A.Wishlist()
+Check(wishlist and wishlist.source == "loadout-association"
+        and #wishlist.entries == 5,
+    "exact active/associated mirror remained evidence-pending")
+local ordinary, locked = 0, 0
+local rolesBySpell = {}
+for _, row in ipairs(wishlist.entries) do
+    if row.locked then locked = locked + row.stacks else ordinary = ordinary + row.stacks end
+    rolesBySpell[row.spellId] = rolesBySpell[row.spellId] or {}
+    rolesBySpell[row.spellId][row.locked and "locked" or "ordinary"] = true
+end
+Check(ordinary == 79 and locked == 6,
+    "exact active total did not derive 79 ordinary plus six locked copies")
+Check(rolesBySpell[200110].ordinary and rolesBySpell[200110].locked,
+    "one exact tier could not retain both ordinary and locked roles")
+Check(wishlist.entries[1].quality == 0 and wishlist.entries[2].quality == 2,
+    "same-family exact quality siblings were collapsed during derivation")
+
+local editorController = Nexus.WishlistInternals.Controller.New({
+    model=Nexus.WishlistModel.New(),store=Nexus.Store,
+    accountRoot=function() return NexusDB end,notify=function() end,
+})
+editorController.Initialize(A)
+local reopenedOk, reopenedError = editorController.LoadPendingEchoes(
+    wishlist.entries, false)
+Check(reopenedOk,
+    "authoritative role bridge could not reopen in the editor: "
+        .. tostring(reopenedError))
+local reopened = editorController.ExportEntries()
+local reopenedOrdinary, reopenedLocked, reopenedRoles = 0, 0, {}
+for _, row in ipairs(reopened) do
+    if row.locked then
+        reopenedLocked = reopenedLocked + row.stacks
+    else
+        reopenedOrdinary = reopenedOrdinary + row.stacks
+    end
+    reopenedRoles[row.spellId] = reopenedRoles[row.spellId] or {}
+    reopenedRoles[row.spellId][row.locked and "locked" or "ordinary"] = true
+end
+Check(reopenedOrdinary == 79 and reopenedLocked == 6
+        and reopenedRoles[200110].ordinary
+        and reopenedRoles[200110].locked,
+    "editor reopen lost exact 79+6 role overlap or copy totals")
+local reopenedLockedIds = {}
+for _, row in ipairs(reopened) do
+    if row.locked then reopenedLockedIds[row.spellId] = true end
+end
+Check(reopenedLockedIds[200100] and reopenedLockedIds[200104],
+    "editor reopen collapsed same-family locked exact tiers")
+
+local diagnosed, evidenceState = A.GetLoadoutWishlistState(1)
+Check(diagnosed and evidenceState == "actionable",
+    "read-only association diagnosis disagreed with Wishlist resolution")
+Check(A.GetLoadoutWishlist(1) ~= nil,
+    "exact loadout Wishlist reader remained unavailable")
+Check(Signature({slots=H.Perks.serverBuildSlots,locked=H.locked,saved=saved}) == before
+        and state.loadoutWishlists[1] == saved and saved.future.keep,
+    "role derivation mutated server mirrors or SavedVariables evidence")
+
+-- Reload/re-init converges from the same durable exact association.
+Nexus.Store.Init()
+Check(A.Wishlist() and Nexus.Store.State().loadoutWishlists[1] == saved,
+    "exact bridge did not converge across Store reload")
+
+-- A one-copy identity mismatch, despite equal title and nearby slots, cannot
+-- receive active authority.
+saved.slot, saved.key = 103, assert(A.WishlistKey(mismatchEchoes))
+local mismatchBefore = Signature(saved)
+Check(A.Wishlist() == nil and Signature(saved) == mismatchBefore,
+    "title/slot proximity or approximate identity authorized a mismatch")
+
+saved.slot, saved.key = 102, designedKey
+local lockedBefore = H.locked
+H.locked = {
+    {spellId=200110,stacks=2}, {spellId=200100,stacks=2},
+}
+Check(A.Wishlist() == nil,
+    "partial authoritative locked counts authorized the active mirror")
+H.locked = {
+    {spellId=200110,stacks=3}, {spellId=200100,stacks=2},
+    {spellId=200104,stacks=2},
+}
+Check(A.Wishlist() == nil,
+    "seven/underflowing locked copies authorized the active mirror")
+H.locked = lockedBefore
+
+local activeLock = H.Perks.serverBuildSlots[1].echoes[3]
+activeLock.locked = nil
+Check(A.Wishlist() ~= nil,
+    "lossy active role flags overrode exact total-minus-locked authority")
+activeLock.locked = false
+
+-- Exact identity is a spell/copy multiset, not a row-boundary encoding.  A
+-- reload may coalesce duplicate rows without changing the represented build.
+local segmentedDesigned = H.CloneValue(designedEchoes)
+segmentedDesigned[1].stacks = segmentedDesigned[1].stacks
+    + segmentedDesigned[3].stacks
+table.remove(segmentedDesigned, 3)
+H.Perks.serverBuildSlots[102].echoes = segmentedDesigned
+saved.key = assert(A.WishlistKey(segmentedDesigned))
+Check(A.Wishlist() ~= nil,
+    "equivalent exact totals changed identity when duplicate rows coalesced")
+H.Perks.serverBuildSlots[102].echoes = H.CloneValue(designedEchoes)
+saved.key = designedKey
+
+-- Coherent evidence at either side of the 79 ordinary / six locked envelope
+-- must still fail closed. These probes keep the active total at exactly 85 and
+-- make the designed identity plus independent locked counts agree, so the
+-- rejection cannot be attributed to a stale or partial authority source.
+local function SetCoherentEnvelope(ordinaryCopies, firstLockedCopies)
+    local active = {
+        {spellId=200110,quality=0,stacks=ordinaryCopies,locked=false},
+        {spellId=200112,quality=2,stacks=39,locked=false},
+        {spellId=200110,quality=0,stacks=firstLockedCopies,locked=true},
+        {spellId=200100,quality=3,stacks=2,locked=true},
+        {spellId=200104,quality=2,stacks=2,locked=true},
+    }
+    local designed = H.CloneValue(active)
+    for _, row in ipairs(designed) do row.locked = false end
+    H.Perks.serverBuildSlots[1].echoes = active
+    H.Perks.serverBuildSlots[102].echoes = designed
+    H.locked = {
+        {spellId=200110,quality=0,stacks=firstLockedCopies},
+        {spellId=200100,quality=3,stacks=2},
+        {spellId=200104,quality=2,stacks=2},
+    }
+    saved.key = assert(A.WishlistKey(designed))
+end
+
+SetCoherentEnvelope(39, 3) -- 78 ordinary + 7 locked = 85 total.
+Check(A.Wishlist() == nil,
+    "coherent seven-copy locked evidence bypassed the six-copy envelope")
+SetCoherentEnvelope(41, 1) -- 80 ordinary + 5 locked = 85 total.
+Check(A.Wishlist() == nil,
+    "coherent 80-copy ordinary evidence bypassed the 79-copy envelope")
+
+H.Perks.serverBuildSlots[1].echoes = H.CloneValue(activeEchoes)
+H.Perks.serverBuildSlots[102].echoes = H.CloneValue(designedEchoes)
+H.locked = lockedBefore
+saved.key = designedKey
+Check(A.Wishlist() ~= nil,
+    "exact bridge did not recover after coherent boundary probes")
+
+print(string.format(
+    "active Wishlist lock bridge: ordinary=79 locked=6 overlap=yes mismatch/partial/underflow=closed checks=%d -- OK",
+    checks))

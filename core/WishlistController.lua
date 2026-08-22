@@ -80,14 +80,20 @@ function Controller.New(options)
         return AccountRoot()
     end
 
-    local function LockedBySpell()
+    local function TrustedLockedProjection()
         if Adapter and Adapter.LockedOwned then
             local locked = Adapter.LockedOwned()
-            if locked and type(locked.bySpell) == "table" then
-                return locked.bySpell
+            local bySpell = DraftModel.LockedSpellCounts(locked)
+            if bySpell then
+                return {synced=true,bySpell=bySpell}
             end
         end
-        return {}
+        return nil
+    end
+
+    local function LockedBySpell()
+        local locked = TrustedLockedProjection()
+        return locked and locked.bySpell or {}
     end
 
     local function Catalog()
@@ -125,24 +131,45 @@ function Controller.New(options)
                 tostring(echo.stacks or 1),
             }, ":")
         end
+        local function AddLockedToken(id, copies, replaces)
+            id = tonumber(id)
+            copies = tonumber(copies)
+            if not id or not copies or copies < 1
+                or copies >= math.huge or copies ~= math.floor(copies) then
+                return
+            end
+            local current = locked[id] or {copies=0}
+            current.copies = current.copies + copies
+            if current.replaces == nil and type(replaces) == "number" then
+                current.replaces = replaces
+            end
+            locked[id] = current
+        end
         for _, row in pairs(state.pending) do
             if row and row.lockIntent and tonumber(row.spellId) then
-                locked[tonumber(row.spellId)] = row.replaces or true
+                AddLockedToken(row.spellId, 1, row.replaces)
             end
         end
         for _, row in pairs(state.pendingLock) do
             if row and tonumber(row.spellId) then
-                locked[tonumber(row.spellId)] = row.replaces or true
+                AddLockedToken(row.spellId, row.stacks, row.replaces)
             end
         end
         for spellId, replacement in pairs(state.fulfilledDraftTargets) do
             local id = tonumber(spellId)
-            if id then locked[id] = replacement or true end
+            local copies = DraftModel.TargetCopies(replacement, id)
+            if id and copies then
+                locked[id] = {
+                    copies=copies,
+                    replaces=DraftModel.TargetReplacement(replacement, id),
+                }
+            end
         end
         local lockedIds = {}
         for id, replacement in pairs(locked) do
             lockedIds[#lockedIds + 1] = {
-                id=id,replacement=tostring(replacement),
+                id=id,replacement=tostring(replacement.copies) .. ":"
+                    .. tostring(replacement.replaces or ""),
             }
         end
         table.sort(lockedIds,function(left,right) return left.id<right.id end)
@@ -282,7 +309,7 @@ function Controller.New(options)
     end
 
     function M.LockedProjection()
-        return Adapter and Adapter.LockedOwned and Adapter.LockedOwned() or nil
+        return TrustedLockedProjection()
     end
 
     function M.WishlistProjection()
@@ -448,11 +475,33 @@ function Controller.New(options)
 
         local catalog = Catalog()
         local lockedBySpell = LockedBySpell()
-        local prepared = DraftModel.NormalizeDraft(echoes, {
-            trustOrder = trustOrder,
-            catalog = catalog,
-            lockedBySpell = lockedBySpell,
-        })
+        local ordinaryEchoes, lockedEchoes = {}, {}
+        local typedRoles = type(echoes) == "table" and #echoes > 0
+        for _, echo in ipairs(type(echoes) == "table" and echoes or {}) do
+            if type(echo) ~= "table" or type(echo.locked) ~= "boolean" then
+                typedRoles = false
+                break
+            end
+            local target = echo.locked and lockedEchoes or ordinaryEchoes
+            target[#target + 1] = echo
+        end
+        local prepared, prepareError
+        if typedRoles then
+            prepared, prepareError = DraftModel.NormalizeCandidateEvidence(
+                ordinaryEchoes, lockedEchoes, {
+                    catalog=catalog,lockedBySpell=lockedBySpell,
+                })
+        else
+            prepared = DraftModel.NormalizeDraft(echoes, {
+                trustOrder = trustOrder,
+                catalog = catalog,
+                lockedBySpell = lockedBySpell,
+            })
+        end
+        if not prepared then
+            TouchPresentation()
+            return false, prepareError or "Wishlist evidence is invalid"
+        end
         state.pending = prepared.pending
         state.pendingLock = prepared.pendingLock
         state.fulfilledDraftTargets = prepared.fulfilledTargets
@@ -497,20 +546,21 @@ function Controller.New(options)
         return outcome
     end
 
-    function M.RemovePending(family)
+    function M.RemovePending(rowKey)
         state.pending, state.pendingLock =
-            DraftModel.RemovePending(state.pending, state.pendingLock, family)
+            DraftModel.RemovePending(state.pending, state.pendingLock, rowKey)
         TouchPresentation()
     end
 
-    function M.ToggleDesignLock(family)
-        if not family then return "invalid" end
-        local localOnly = state.pendingLock[family]
-            or (state.pending[family] and state.pending[family].lockIntent)
-        if not localOnly and not state.pending[family] then return "unchanged" end
+    function M.ToggleDesignLock(rowKey)
+        if not rowKey then return "invalid" end
+        local resolved = DraftModel.ResolveDraftKey(state.pending, rowKey)
+        local localOnly = state.pendingLock[rowKey]
+            or (resolved and state.pending[resolved].lockIntent)
+        if not localOnly and not resolved then return "unchanged" end
         local lockedBySpell = localOnly and {} or LockedBySpell()
         local nextPending, nextLock, nextReplacing, outcome =
-            DraftModel.ToggleDesignLock(state.pending, state.pendingLock, family, {
+            DraftModel.ToggleDesignLock(state.pending, state.pendingLock, rowKey, {
                 lockedBySpell = lockedBySpell,
                 replacingSpellId = state.replacingSpellId,
             })
@@ -529,8 +579,8 @@ function Controller.New(options)
         return outcome
     end
 
-    function M.AdjustStacks(family, delta)
-        local nextPending, outcome = DraftModel.AdjustStacks(state.pending, family, delta)
+    function M.AdjustStacks(rowKey, delta)
+        local nextPending, outcome = DraftModel.AdjustStacks(state.pending, rowKey, delta)
         if outcome == "full" then
             notify("|cffff6060Nexus:|r wishlist is full (79 / 79 Echoes).")
             return outcome
@@ -544,7 +594,8 @@ function Controller.New(options)
         if not data or not tonumber(data.spellId) then return "invalid" end
         local catalog = Catalog()
         local family = DraftModel.Family(data.spellId, catalog)
-        local localOnly = (state.pending[family] and state.pending[family].lockIntent)
+        local rowKey = DraftModel.DraftKey(data.spellId, catalog)
+        local localOnly = (state.pending[rowKey] and state.pending[rowKey].lockIntent)
             or state.pendingLock[family]
         local lockedBySpell = localOnly and {} or LockedBySpell()
         local nextPending, nextLock, nextReplacing, outcome =
@@ -899,16 +950,12 @@ function Controller.New(options)
     end
 
     function M.ExportEntries()
-        local lockedBySpell, catalog = {}, nil
-        if Adapter and Adapter.LockedOwned then
-            local locked = Adapter.LockedOwned()
-            catalog = Adapter.Catalog and Adapter.Catalog()
-            if locked and type(locked.bySpell) == "table" then
-                lockedBySpell = locked.bySpell
-            end
-        end
+        local locked = TrustedLockedProjection()
+        local lockedBySpell = locked and locked.bySpell or {}
+        local catalog = Adapter and Adapter.LockedOwned
+            and Adapter.Catalog and Adapter.Catalog() or nil
         return DraftModel.ExportEntries(state.pending, state.pendingLock,
-            lockedBySpell, catalog)
+            lockedBySpell, catalog, state.fulfilledDraftTargets)
     end
 
     function M.ExportName(nameText)
@@ -926,7 +973,7 @@ function Controller.New(options)
         local lockedBySpell = LockedBySpell()
         local fresh = DraftModel.PlanLockCommit(state.pending, state.pendingLock,
             state.fulfilledDraftTargets,
-            state.candidateContext and {} or existing, lockedBySpell)
+            state.candidateContext and {} or existing, lockedBySpell, Catalog())
         local nextKey = (Adapter and Adapter.WishlistKey
             and Adapter.WishlistKey(M.CanonicalEchoes())) or 0
         local character = Store.State()
@@ -939,7 +986,8 @@ function Controller.New(options)
         state.currentLockKey = nextKey
         state.fulfilledDraftTargets = {}
         for id, value in pairs(fresh) do
-            if (tonumber(lockedBySpell[id]) or 0) > 0 then
+            local copies = DraftModel.TargetCopies(value, id)
+            if copies and (tonumber(lockedBySpell[id]) or 0) >= copies then
                 state.fulfilledDraftTargets[id] = value
             end
         end

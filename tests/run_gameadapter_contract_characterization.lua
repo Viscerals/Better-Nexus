@@ -130,6 +130,20 @@ local validLocked = H.locked
 H.locked = {malformed=1}
 assert(A.LockedOwned().synced == false,
     "malformed locked evidence remained authoritative")
+H.locked = {
+    {spellId=200100,quality=3,stack=2},
+    {spellId=200102,quality=2,stack=2},
+    {spellId=200104,quality=2,stack=2},
+}
+local sixLocked = A.LockedOwned()
+assert(sixLocked.synced == true
+        and sixLocked.bySpell[200100] == 2
+        and sixLocked.bySpell[200102] == 2
+        and sixLocked.bySpell[200104] == 2,
+    "valid six-copy locked evidence was rejected")
+H.locked[#H.locked + 1] = {spellId=200999,quality=1,stack=1}
+assert(A.LockedOwned().synced == false,
+    "seven-copy locked evidence remained authoritative")
 H.locked = validLocked
 board.cards[1].spellId = -1
 slots.bySlot[1].name = "mutated"

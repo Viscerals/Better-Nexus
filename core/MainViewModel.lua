@@ -64,6 +64,9 @@ end
 function ViewModel.New(options)
     options = options or {}
     local Ratchet = assert(options.ratchet, "MainViewModel requires Ratchet")
+    local Model = options.model or Nexus.Model
+    local WishlistModel = assert(options.wishlistModel,
+        "MainViewModel requires WishlistModel")
     local stats = {builds=0,refreshes=0,rebuilds=0,skipped=0}
     local lastHudInput, lastHudModel = nil, nil
     local M = {}
@@ -77,7 +80,7 @@ function ViewModel.New(options)
     end
 
     function M.WishlistProgress(plan, owned, catalog, lockOnlyFamilies,
-        lockedOwned, designTargets)
+        lockedOwned, designTargets, wishlist)
         local stackTotal, stackCount, missing, toLock = 0, 0, {}, {}
         if type(plan) ~= "table" or type(plan.wishedFamilies) ~= "table" then
             return 0, 0, missing, toLock
@@ -86,24 +89,84 @@ function ViewModel.New(options)
         local targets = type(plan.targets) == "table" and plan.targets or {}
         local byFamily = (type(owned) == "table" and owned.byFamily) or {}
         local bySpell = (type(owned) == "table" and owned.bySpell) or {}
-        local lockedByFamily = type(lockedOwned) == "table"
-            and type(lockedOwned.byFamily) == "table" and lockedOwned.byFamily or {}
-        local lockedBySpell = type(lockedOwned) == "table"
-            and type(lockedOwned.bySpell) == "table" and lockedOwned.bySpell or {}
+        local trustedLocked = WishlistModel.LockedProjection(lockedOwned, catalog)
+            or {synced=false,bySpell={},byFamily={}}
+        local lockedByFamily = trustedLocked.byFamily
+        local lockedBySpell = trustedLocked.bySpell
 
         local seenToLock = {}
-        if type(designTargets) == "table" then
+        local targetEntries = type(designTargets) == "table"
+            and WishlistModel.TargetMapEntries(designTargets, catalog) or nil
+        if targetEntries then
             local rows = catalog and catalog.rows or {}
-            for spellIdKey in pairs(designTargets) do
-                local id = tonumber(spellIdKey)
-                if id and not seenToLock[id]
-                    and (tonumber(lockedBySpell[id]) or 0) <= 0 then
+            for _, target in ipairs(targetEntries) do
+                local id, want = target.spellId, target.copies
+                local have = trustedLocked.synced
+                    and (tonumber(lockedBySpell[id]) or 0) or 0
+                if id and want and not seenToLock[id]
+                    and have < want then
                     local row = rows[id]
+                    local remaining = want - have
                     toLock[#toLock + 1] = tostring((row and row.name)
                         or ("spell " .. tostring(id)))
+                        .. (remaining > 1 and (" ×" .. remaining) or "")
                     seenToLock[id] = true
                 end
             end
+        end
+
+        local explicitRoles = false
+        local entries = type(wishlist) == "table" and wishlist.entries or nil
+        for _, entry in ipairs(type(entries) == "table" and entries or {}) do
+            if type(entry) == "table" and (type(entry.locked) == "boolean"
+                or entry.sourceRole == "ordinary"
+                or entry.sourceRole == "locked") then
+                explicitRoles = true
+                break
+            end
+        end
+        if explicitRoles and Model
+            and type(Model.WishlistEntryProgress) == "function" then
+            local exact = Model.WishlistEntryProgress(entries, owned, trustedLocked)
+            local missingBySpell, lockMissingBySpell = {}, {}
+            for _, row in ipairs(exact.rows) do
+                if row.primary and row.locked then
+                    if row.remaining > 0 and row.spellId then
+                        lockMissingBySpell[row.spellId] =
+                            (lockMissingBySpell[row.spellId] or 0) + row.remaining
+                    end
+                elseif row.primary then
+                    if row.remaining > 0 and row.spellId then
+                        missingBySpell[row.spellId] =
+                            (missingBySpell[row.spellId] or 0) + row.remaining
+                    end
+                end
+            end
+            stackTotal = exact.ordinaryWant
+            stackCount = exact.ordinaryHave
+            local function ExactLabel(id, remaining)
+                local row = catalog and catalog.rows and catalog.rows[id]
+                local label = tostring((row and row.name)
+                    or ("spell " .. tostring(id)))
+                local quality = row and tonumber(row.quality)
+                if quality ~= nil then
+                    label = label .. " (" .. QualityName(quality) .. ")"
+                end
+                if remaining > 1 then label = label .. " ×" .. remaining end
+                return label
+            end
+            for id, remaining in pairs(missingBySpell) do
+                missing[#missing + 1] = ExactLabel(id, remaining)
+            end
+            for id, remaining in pairs(lockMissingBySpell) do
+                if not seenToLock[id] then
+                    toLock[#toLock + 1] = ExactLabel(id, remaining)
+                    seenToLock[id] = true
+                end
+            end
+            table.sort(missing)
+            table.sort(toLock)
+            return stackCount, stackTotal, missing, toLock, exact
         end
 
         for family in pairs(plan.wishedFamilies) do
@@ -195,17 +258,19 @@ function ViewModel.New(options)
         return missing, {stackCount=stackCount,stackTotal=stackTotal}, locked
     end
 
-    function M.TomeEchoes(wishlistEchoes, designTargets)
+    function M.TomeEchoes(wishlistEchoes, designTargets, catalog)
         local out, seen = {}, {}
         for _, echo in ipairs(wishlistEchoes or {}) do
             out[#out + 1] = echo
             local id = tonumber(echo and (echo.spellId or echo.id))
             if id then seen[id] = true end
         end
-        if type(designTargets) == "table" then
-            for spellIdKey in pairs(designTargets) do
-                local id = tonumber(spellIdKey)
-                if id and not seen[id] then
+        local targetEntries = type(designTargets) == "table"
+            and WishlistModel.TargetMapEntries(designTargets, catalog) or nil
+        if targetEntries then
+            for _, target in ipairs(targetEntries) do
+                local id, copies = target.spellId, target.copies
+                if id and copies and not seen[id] then
                     out[#out + 1] = {spellId=id}
                     seen[id] = true
                 end
@@ -220,9 +285,9 @@ function ViewModel.New(options)
             input.slots, input.catalog
         local wishlist = input.wishlist
         local lockOnly = LockOnlyFamilies(plan, wishlist)
-        local runStacks, total, missing, toLock = M.WishlistProgress(
+        local runStacks, total, missing, toLock, exactProgress = M.WishlistProgress(
             plan, owned, catalog, lockOnly, input.lockedOwned,
-            input.designTargets)
+            input.designTargets, wishlist)
         local activeRow = ActiveSlotRow(slots)
         local loadoutMissing, loadoutStacks, locked = M.LoadoutCoverage(
             activeRow, plan, catalog)
@@ -260,6 +325,9 @@ function ViewModel.New(options)
         local echoes = wishlist and (wishlist.echoes or wishlist.entries) or nil
         return {
             owned=runStacks,total=total,missing=missing,
+            lockedOwned=exactProgress and exactProgress.lockedHave or nil,
+            lockedTotal=exactProgress and exactProgress.lockedWant or nil,
+            wishlistRows=exactProgress and Copy(exactProgress.rows) or nil,
             unknownTomes=Copy(type(input.unknownTomes) == "table"
                 and input.unknownTomes or {}),
             loadoutMissing=loadoutMissing,loadoutStacks=loadoutStacks,

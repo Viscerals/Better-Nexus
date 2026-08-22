@@ -7,50 +7,97 @@
 ## Current focus
 
 - Stage: 48
-- Checkpoint: 48.1
-- Status: NOT_STARTED
-- Branch: `bugfix/test19-wp3-realm-persistence`
-- Starting head: exact reviewed WP2 receipt head `7c95911a7d8584d46a62f2aca20268affef4cfcf`; WP2 product/test/workflow head `1fe8e7f2c0461b92ab1543cbd0b29f31d888950a`
-- Worktree: `.test19-wp3-worktree`
-- Base: exact reviewed WP2 receipt head `7c95911a7d8584d46a62f2aca20268affef4cfcf`
+- Checkpoint: 48.4
+- Status: DONE
+- Branch: `bugfix/test19-wp4-exact-wishlist-evidence`
+- Starting head: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
+- Worktree: `.test19-wp4-worktree`
+- Base: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
 
 ## Objective (current checkpoint)
 
-Make editor open/edit/save and row actions round-trip every ordinary quality tier independently.
+Make overlay, HUD, model, editor, and automation progress consume the same exact tier and role evidence.
 
 ## Deliverables (current checkpoint)
 
-- Exact-tier draft/model identity with deterministic fallback for compatibility rows lacking trustworthy `spellId`.
-- Exact-row `+`, `-`, selection, and remove behavior.
-- Multi-tier family round-trip and 79-copy total coverage.
+- One exact-spell/tier progress boundary shared by `ui/WishlistOverlay.lua`, the model, editor, and automation consumers.
+- Focused sibling-tier, per-tier quota, locked-role, refresh, and parity coverage.
+- Removal of family-level satisfaction as an authority decision.
 
 ## Acceptance (current checkpoint)
 
-- [ ] Common, Uncommon, and Rare rows in one family survive a no-op round-trip unchanged.
-- [ ] Editing or removing one exact tier cannot modify a sibling tier.
-- [ ] Ordinary total validation counts stack copies across every exact row and enforces 79.
-- [ ] Locked intent remains outside the ordinary editor-row identity.
-- [ ] Existing single-tier and compatibility-row behavior remains deterministic.
-- [ ] Focused Wishlist model/editor tests, mapped tests, Fast, required review/Full, and diff checks pass.
+- [x] A lower-quality sibling never satisfies a higher-quality target.
+- [x] Each exact tier reports its own owned copies, target quota, and completion state.
+- [x] Ordinary and locked progress consume their correct evidence roles.
+- [x] Overlay, HUD, model, and editor agree before and after refresh/reload.
+- [x] Focused overlay/parity tests, mapped tests, Fast, checkpoint review, and diff checks pass; cumulative independent review and Full remain the frozen WP4 gates.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- Exact-head review of `432e2ed` found and repaired catalog-owner drift, semantic target-cache staleness, row-order replacement identity, malformed/overflow locked evidence in Main/HUD and other consumers, and nested provenance aliasing. The affected matrix passes with locked totals `65`, controller `54`, AutoLock `105`, active bridge `19`, and exact-base Fast `45/45`; strict Vibe and diff checks pass.
+- Standards re-review of `94610e3` found and repaired direct admission-output aliasing plus duplicated/drifted Policy locked validation. `logic/Model.lua` is now the single pure locked-evidence admission owner, TargetMapEntries returns defensive values/catalog rows, locked totals pass `66`, Policy scenarios pass `54`, and exact-base Fast remains `45/45`.
+- Standards review of `04729be` found and repaired Policy's final raw-versus-normalized spell-map merge. Policy now consumes the full shared projection; lone string keys normalize to numeric exact authority, aliases still fail closed, and exact-base Fast remains `45/45`.
+- Adversarial review of `ade58ba` found and repaired the last catalog-admission bypass in persisted editor reopen/commit planning. Mixed known/unknown maps now reopen and commit nothing; locked totals pass `68`, controller `55`, and exact-base Fast remains `45/45`.
+- Adversarial review of `cb3f875` found and repaired malformed/catalog-disagreeing target-row quality plus EBH1 nonfinite formatting. Reopen, fulfilled export, and encode probes pass; locked totals advance to `80` and exact-base Fast remains `45/45`.
+- Review of `16df8d8` aligned EBH1 encode/decode tuple and aggregate bounds and repaired the assembled Stage 32 fixture's missing family projection. Locked totals pass `85`, assembled Stage 32 passes `47`, integration remains `70/70`, and exact-base Fast remains `45/45`.
+- Final independent Spec, Standards, and adversarial reviews PASS on exact clean product/test head `38d148e4034efde735ea346f7a6c3cc72b074560`. The combined focused matrices cover `21`/`9`/`17` runners; no actionable WP4 finding remains. Native WoW remains unverified.
+- Cumulative independent review rejected `7cff7e7` and drove five focused WP4 repairs: true total-minus-locked derivation, counted lock-target continuity, exact-spell automation matching, synced-only Policy authority, and exact renderer selection keys. All deterministic red probes are now green; 19 focused runners and exact-base Fast `39/39` pass on the repaired working candidate.
+- #35 checkpoint review found and repaired a same-family automation omission: locked sibling tiers and extra locked copies now extend an automation-only exact target without mutating the server Wishlist. The expected-red failed twice, the repaired Stage 32 fixture passes 65 checks, and exact-base Fast passes `35/35` with zero failed/unavailable/skipped checks.
+- #35 expected-red failed twice at `wrong-quality family ownership marked the exact Rare overlay row complete`; the green public runner proves exact Common/Rare separation, duplicate locked quota grouping, role-specific ownership, locked-only refresh, HUD/automation parity, and exact recovery.
+- `Model.WishlistEntryProgress` is the pure exact `(role, spellId)` progress owner. Overlay and editor consume it directly; MainViewModel consumes it for explicit-role Wishlists while retaining deterministic legacy behavior for role-unrepresented inputs. Exact-base Fast passes `34/34` with zero failed/unavailable/skipped checks.
+- #20 checkpoint review passed with two coherent envelope probes: exact 78 ordinary + seven locked and exact 80 ordinary + five locked both remain unavailable, while restored 79+6 recovers. The strengthened runner passes 16 checks and exact-base Fast remains `26/26` with zero failed/unavailable/skipped checks.
+- #20 expected-red failed twice at `exact active/associated mirror remained evidence-pending`; the green public GameAdapter runner passes 13 checks across exact 79+6 derivation, same-tier overlap, sibling quality preservation, mismatch/partial/underflow refusal, reload convergence, and source/SavedVariables immutability.
+- The bridge is active-slot-only and requires a verified active total, aggregated exact spell/copy identity, CandidateEvidence's six-copy envelope, and synchronized exact `LockedOwned.bySpell` agreement; inline role booleans are not authority.
+- #44 checkpoint review passed at repaired product/test head `b23259d`: immutable bound future/provenance evidence and exact Dummy/LK quality disagreement are now covered in addition to the original copy-total matrix; focused runners and exact-base Fast `24/24` pass.
+- #44 expected-red failed twice at `valid duplicate exact rows did not survive candidate normalization`; the green public runner passes 16 checks across 2+2+2, one-by-six, seven-copy, malformed, provenance/future-field, draft-budget, and EBH1 round-trip cases.
+- CandidateEvidence now owns the six-copy envelope; Wishlist draft budgeting and EBH1 locked-role import/export consume exact stack totals without changing the separate ordinary 79-copy contract.
+- Focused CandidateEvidence, locked-only, assembled Leaderboard/editor, Wishlist model/controller/tier, EBH1 integrity, and module-contract runners pass. Exact-base Fast passes `24/24` with zero failed, unavailable, or skipped checks.
+- #43 review PASS at implementation head `6ab0eff`: public model/controller/renderer action probes, exact transfer/reload, ambiguous compatibility, exact 79-copy boundary, Fast `17/17`, integration `70/70`, strict Vibe, and clean diff all passed.
+- #43 expected-red failed twice at `same-family exact tiers collided during draft normalization`; the green public model/controller/renderer runner passes 13 checks including no-op, action isolation, transfer/reload, ambiguous compatibility, and 79-copy limits.
+- All 20 Wishlist/model/controller/renderer/import/association mapped runners pass; integration remains `70/70` through Fast.
+- Exact-base Fast passes `17/17` with zero failed, unavailable, or skipped checks after advancing the enumerated normal Lua runner guard from `215` to `216`.
 - Stage 47 / WP3 completed at frozen product-test candidate `915a313`: cumulative Spec, Standards, and adversarial review passed; final Full passed all `18` blocking checks with Lua `215/215`, parse `288/288`, integration `70/70`, and one explicit nonblocking manual SavedVariables skip.
 - Stage 47 hygiene was CLEAN across the bounded 30-path WP3 surface; product/test/workflow/contract bytes did not change after Full.
 - Stage 48.1 is pointer-only and `NOT_STARTED`; no WP4 design or implementation occurred during consolidation.
 
 ## Work log
 
+- Review wave 2 at `432e2ed` centralized catalog-bound target admission, canonicalized semantic target identity, made target/provenance results cycle-safe defensive copies, and atomically rejected malformed or seven-copy locked evidence across GameAdapter, controller/export/renderer, Main/HUD, Policy, and AutoLock. Focused probes and exact-base Fast `45/45` pass; a new exact local commit and three fresh independent reviews remain before Full.
+- Standards review at `94610e3` closed the prior catalog boundary and exposed the last two owner-consistency gaps. Direct admitted values/catalog rows are now defensive, and Policy plus every Wishlist consumer shares `Model.LockedProjection`; focused tests and Fast `45/45` pass. A new exact local commit and all three fresh reviews remain before Full.
+- Independent re-review closed the prior five repairs and found six further exactness gaps at `1afec7d`. Versioned counted-target validation, copy-based capacity/deficit admission, aggregation-stable identity, synced defensive renderer/export projections, and exact guaranteed-queue matching now pass 20 focused runners and exact-base Fast `41/41`.
+- Exact-head audit before accepting `72355cb` found and repaired one remaining persisted-record identity mismatch plus duplicate-validator drift: WishlistModel now solely validates finite version-1 records and requires every dense row to name the containing exact spell. All 20 focused runners pass, including locked totals 29 checks, AutoLock 71, and integration `70/70`; exact-base Fast passes `43/43` with zero failed/unavailable/skipped checks.
+- Paused review at `ce6433f` found and repaired unsupported scalar target authority and distinct-ID Locked-strip occupancy. Only legacy `true` and positive finite integer replacement IDs remain compatible; six physical UI slots now represent six copies, not spell identities. Locked totals pass 36 checks, AutoLock 85, all 20 focused runners and exact-base Fast `43/43` pass.
+- Paused review at `64a27ee` found and repaired two final validator-consumer leaks: MainViewModel progress/Tome projections now omit invalid persisted targets, and exact-key/type validation precedes every replacement side effect. Locked totals pass 38 checks, exact projection probes pass, all 20 focused runners and exact-base Fast `43/43` pass.
+- Paused review at `826d3a9` found and repaired invalid containing map-key coercion. The validator now rejects fractional, nonfinite, zero, and negative expected spell IDs before every scalar/table branch; commit, progress/Tome, and AutoLock probes pass. Locked totals pass 43 checks, AutoLock 87, the affected matrix and exact-base Fast `43/43` pass.
+- Paused review at `55804dd` found and repaired mixed-map AutoLock admission plus nonfinite locked-evidence IDs. Any invalid target key rejects the whole AutoLock descriptor map; controller/export/renderer and Policy reject nonfinite locked spell IDs. AutoLock 87, controller 50, renderer/Policy probes, the affected matrix, and exact-base Fast `43/43` pass.
+- Final review of `f7c8c45` found and repaired atomic target-map admission, the six-copy aggregate envelope, coherent locked family derivation, canonical aliases, exact multi-replacement convergence, nonfinite ordinary identity, exact typed editor reopen, and unknown target-envelope continuity. Locked totals 57, controller 51, active bridge 19, AutoLock 105, the complete affected matrix, integration `70/70`, module contracts with zero unmapped surfaces, and exact-base Fast `44/44` pass. A new local commit and three exact-head independent re-reviews remain before Full.
+- Cumulative WP4 independent review found five valid Spec/Standards/adversarial gaps at `7cff7e7`; all were repaired with public counterexamples and focused/Fast revalidation. The repaired candidate is ready for all three independent reviews to repeat before Full.
+- Checkpoint 48.4 hygiene was clean across the exact progress projection, its presentation consumers, and automation-only locked-target merger; no safe quick win or evidence-backed debt justified churn.
+- Checkpoint 48.4 review repaired same-family locked-target augmentation, then passed exact tier/role presentation and automation acceptance without entering Stage 49.
+- Checkpoint 48.4 implements exact role-qualified Wishlist progress across Model, overlay, editor status, MainViewModel, and AutomationRuntime; duplicate exact rows share an order-independent quota and locked revisions participate in overlay invalidation.
+- Checkpoint 48.3 hygiene was clean across the private active-role bridge, its three public read call sites, public boundary fixture, and adjacent contract text; no behavior-preserving quick win or evidence-backed debt justified churn.
+- Checkpoint 48.3 review passed with no product repair: the exact active-slot bridge remains read-only, active-only, exact-tier/count-bound, and fail-closed at both coherent envelope boundaries. Stage 48 auto-advanced to 48.4.
+- Checkpoint 48.3 implements a read-only exact active-total/locked-count bridge across `Wishlist`, `GetLoadoutWishlist`, and `GetLoadoutWishlistState`; no association, server mirror, Snapshot, Designed, or historical evidence is rewritten.
+- Checkpoint 48.2 hygiene was clean across CandidateEvidence normalization/snapshot binding, Wishlist counted budgeting/export, Codec locked-role decoding, and the focused runner; no redundant owner, stale marker, or behavior-preserving quick win justified churn.
+- Checkpoint 48.2 review initially falsified bound-snapshot immutability and exact category-quality agreement, repaired both at CandidateEvidence, reran focused checks and Fast, then passed and auto-advanced to 48.3.
+- Checkpoint 48.1 hygiene was clean across the exact-key model/controller/renderer surface; no redundant branch, correctness defect, safe quick win, or evidence-backed debt item justified post-review churn.
+- Checkpoint 48.1 review passed with no actionable correctness, security, scope, or hygiene finding and auto-advanced within Stage 48 to checkpoint 48.2 `NOT_STARTED`.
+- Checkpoint 48.1 implements exact ordinary draft keys from trustworthy spell IDs, collision-safe single-tier compatibility resolution, exact controller/renderer action handles, same-family tier transfer/reload coverage, and the preserved 79-copy budget.
+- Stage 48 maintenance-scan hygiene was clean: no product surface was delivered, the selected precursor is already the single high-ROI bounded action, and adding further helpers or debt entries before its implementation would be speculative churn.
+- Stage 48 maintenance scan review passed: the selected row-key precursor is bounded and behavior-preserving, downstream semantic candidates remain in dependency order, and no product acceptance was claimed. Per repository routing rules, the product pointer remains 48.1 `NOT_STARTED`.
+- Stage 48 maintenance scan selected one behavior-preserving precursor: `[MODERATE]` make the ordinary draft row key explicit across WishlistModel/controller actions before #43 changes its authority from family to exact spell identity. Existing public model/editor tests prove equivalence; exact-tier expected-red remains the next product step.
+- Stage 48 design reconciled #43 -> #44 -> #20 -> #35 against the accepted issue comments and corrected checkpoint 48.3 to read-time exact multiset subtraction without source mutation.
+- Stage 47 retrospective completed with five lessons on compatibility inventory, shared authority normalization, adversarial preservation coverage, public-surface parity, and reserving Full for accepted bytes.
 - Stage 47 consolidation archived the completed WP3 plan surface, moved the pointer from 47.5 `DONE` to 48.1 `NOT_STARTED`, and retained the exact review/Full/hygiene receipt without starting WP4.
 
 ## Workflow state
 
 - [x] RUN_STOPPED
-- [x] RUN_CONTEXT_CAPTURE
-- [ ] STAGE_DESIGNED
-- [ ] MAINTENANCE_CYCLE_DONE
-- [ ] RETROSPECTIVE_DONE
+- [ ] RUN_CONTEXT_CAPTURE
+- [x] STAGE_DESIGNED
+- [x] MAINTENANCE_CYCLE_DONE
+- [x] RETROSPECTIVE_DONE
 - [x] PROCESS_IMPROVEMENTS_DONE
 
 ## Active issues
@@ -70,15 +117,16 @@ Make editor open/edit/save and row actions round-trip every ordinary quality tie
 
 ## Decisions
 
-- WP3 is complete locally; Stage 48.1 is a pointer-only handoff and no WP4 design or implementation is authorized in this run.
+- WP3 remains frozen; WP4 is authorized only in `.test19-wp4-worktree` through a validated local checkpoint, with no push, PR/issue mutation, publication, install, native WoW, live SavedVariables, or WP5 work.
 - Treat the master-chat order as authoritative: WP2 is #28/#41/#42, WP3 is #30/#37 then #19 acceptance, WP4 is #43/#44/#20/#35, and WP5 is #23/#26.
-- Preserve every independently owned worktree and the frozen WP2/PR #53 boundary; only `.test19-wp3-worktree` owns this local WP3 range.
+- Preserve every independently owned worktree and the frozen WP2/PR #53 and WP3/PR #54 boundaries; only `.test19-wp4-worktree` owns this local WP4 range.
 - Exact canonical identity owns durable authority; ambiguous and future-owned evidence remains preserved, non-authoritative, and fail-closed.
+- Exact `spellId` owns ordinary Wishlist row identity when trustworthy; family is grouping metadata only. Locked roles require exact counted authority and ordinary roles are derived read-only by exact total-minus-locked subtraction.
 
 ## Last completed loop
 
-- Checkpoint 47.5 final cumulative review, Full, and bounded hygiene completed at product-test candidate `915a313` / reviewed receipt `c841937`; every required local gate passed.
+- WP4 local completion PASS is recorded for exact frozen candidate `de76d9c`: independent Spec/Standards/adversarial review passed on product/test head `c28f3c9`, and Full passed `18` blocking checks with Lua `219/219`, parse `292/292`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip. Stage 49/WP5 was not entered.
 
 ## Recommended next action
 
-- Stop Vibe at the completed WP3 boundary. The only recommended follow-up is bounded WP3 publication/review after master-chat audit; do not start WP4 here.
+- Stop locally without dispatching consolidation or entering Stage 49/WP5. Any later action should be a separately authorized bounded WP4 publication/review step only.

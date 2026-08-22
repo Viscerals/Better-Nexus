@@ -95,6 +95,7 @@ Nexus.MainInternals.AutomationRuntime.New = function(options)
 end
 dofile("core/MainLifecycle.lua")
 dofile("core/MainCommands.lua")
+dofile("core/WishlistModel.lua")
 dofile("core/MainViewModel.lua")
 dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
@@ -327,7 +328,7 @@ ObserveRevision("owned", function()
     H.NotifyEchoDataChanged()
 end)
 ObserveRevision("locked", function()
-    H.locked[#H.locked + 1] = {
+    H.locked[1] = {
         spellId=210210,quality=0,stack=1,
     }
     H.NotifyEchoDataChanged()

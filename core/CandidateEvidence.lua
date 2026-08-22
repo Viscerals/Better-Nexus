@@ -10,6 +10,7 @@ local CURRENT_KIND = "candidate-typed-v1"
 local LEGACY_KIND = "leaderboard-typed-v1"
 local MAX_ORDINARY = 79
 local MAX_LOCKED = 6
+local validationSnapshots = setmetatable({}, {__mode="k"})
 
 local LOCKED_DISAGREEMENT =
     "record categories disagree on locked Echo evidence"
@@ -65,11 +66,7 @@ local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
     if not lockedRole and entries == 0 then
         return nil, "ordinary Echo evidence is still syncing"
     end
-    if lockedRole and entries > MAX_LOCKED then
-        return nil, "locked Echo evidence exceeds the six-slot limit"
-    end
-
-    local out, total, identities = {}, 0, {}
+    local out, total = {}, 0
     for index = 1, entries do
         local row = source[index]
         if not lockedRole and (row.locked
@@ -87,11 +84,10 @@ local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
             return nil, (lockedRole and "locked" or "ordinary")
                 .. " Echo evidence is invalid"
         end
-        if lockedRole and identities[id] then
-            return nil, "locked Echo evidence contains a duplicate identity"
-        end
-        identities[id] = true
         total = total + stacks
+        if lockedRole and total > MAX_LOCKED then
+            return nil, "locked Echo evidence exceeds the six-copy limit"
+        end
         if not lockedRole and not allowOrdinaryOverflow
             and total > MAX_ORDINARY then
             return nil, "ordinary Echo evidence exceeds 79 copies"
@@ -99,7 +95,10 @@ local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
         local copy = DeepCopy(row)
         copy.spellId, copy.stacks = id, stacks
         copy.quality = quality ~= nil and NonNegativeInteger(quality) or nil
-        if lockedRole and markLockedRole then copy.locked = true end
+        if lockedRole and markLockedRole then
+            copy.locked = true
+            copy.sourceRole = "locked"
+        end
         out[index] = copy
     end
     return out, nil, total
@@ -135,6 +134,27 @@ local function CanonicalFingerprint(rows)
         parts[#parts + 1] = tostring(id) .. "x" .. tostring(counts[id])
     end
     return #parts > 0 and table.concat(parts, ",") or "0"
+end
+
+-- Locked claims historically fingerprint spell-copy totals only. Category
+-- agreement is stronger: every represented exact quality bucket must also
+-- carry the same copy total, while equivalent duplicate segmentation remains
+-- compatible.
+local function ExactLockedIdentity(rows)
+    local counts, keys = {}, {}
+    for _, row in ipairs(rows or {}) do
+        local quality = row.quality ~= nil and ("q" .. tostring(row.quality))
+            or "unknown"
+        local key = tostring(row.spellId) .. ":" .. quality
+        if counts[key] == nil then keys[#keys + 1] = key end
+        counts[key] = (counts[key] or 0) + row.stacks
+    end
+    table.sort(keys)
+    local parts = {}
+    for _, key in ipairs(keys) do
+        parts[#parts + 1] = key .. "x" .. tostring(counts[key])
+    end
+    return table.concat(parts, ",")
 end
 
 local function SameTypedIdentity(left, right)
@@ -374,7 +394,8 @@ function Evidence.ResolveLocked(options)
     if lkReason then return LockedOutcome("invalid", lkReason) end
 
     if dummyRecord ~= nil and lkRecord ~= nil then
-        if dummyFingerprint ~= lkFingerprint then
+        if dummyFingerprint ~= lkFingerprint
+            or ExactLockedIdentity(dummy) ~= ExactLockedIdentity(lk) then
             return LockedOutcome("conflict", LOCKED_DISAGREEMENT)
         end
         if buildId == nil and dummyIdentity ~= nil and lkIdentity ~= nil
@@ -513,6 +534,7 @@ function Evidence.Build(options)
         return ValidateBound(bound, expectedIdentity, expectedRevision,
             expectedToken, currentOrdinary, currentLocked)
     end
+    validationSnapshots[candidate.validate] = bound
     return candidate
 end
 
@@ -539,11 +561,14 @@ function Evidence.Validate(candidate)
     if not ok or current ~= true then
         return nil, tostring(ok and reason or "record validation failed")
     end
+    local bound = validationSnapshots[candidate.validate]
     local ordinary, ordinaryReason = NormalizePool(
-        candidate.ordinaryEchoes, false)
+        type(bound) == "table" and bound.ordinary
+            or candidate.ordinaryEchoes, false)
     if not ordinary then return nil, ordinaryReason end
     local locked, lockedReason = NormalizePool(
-        candidate.lockedEchoes, true, false, true)
+        type(bound) == "table" and bound.locked
+            or candidate.lockedEchoes, true, false, true)
     if not locked then return nil, lockedReason end
     return {
         evidenceKind=candidate.evidenceKind,
@@ -561,4 +586,11 @@ end
 
 function Evidence.CurrentKind()
     return CURRENT_KIND
+end
+
+-- Public normalization seam for consumers that need to materialize the same
+-- locked-role envelope. CandidateEvidence remains the single owner of the
+-- six-copy limit and returns defensive rows with explicit provenance.
+function Evidence.NormalizeLockedEchoes(source)
+    return NormalizePool(source, true, false, true)
 end

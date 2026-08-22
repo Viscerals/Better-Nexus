@@ -34,10 +34,11 @@ for index = 1, 79 do
 end
 
 local mutations = {upload=0, association=0}
+local lockedProjection = {bySpell={},synced=true}
 local Adapter = Nexus.GameAdapter
 Adapter.Catalog = function() return catalog end
 Adapter.Owned = function() return {bySpell={}} end
-Adapter.LockedOwned = function() return {bySpell={}} end
+Adapter.LockedOwned = function() return lockedProjection end
 Adapter.Wishlist = function() return nil end
 Adapter.GetWishlistCandidates = function() return {} end
 Adapter.Slots = function()
@@ -54,11 +55,17 @@ Adapter.SetLoadoutWishlist = function()
 end
 
 local realCreateFrame = CreateFrame
-local created = {}
+local created, createdFonts = {}, {}
 CreateFrame = function(kind, name, parent, template)
     local frame = realCreateFrame(kind, name, parent, template)
     frame._kind, frame._name = kind, name
     frame._parent, frame._template = parent, template
+    local realCreateFontString = frame.CreateFontString
+    frame.CreateFontString = function(self, ...)
+        local font = realCreateFontString(self, ...)
+        createdFonts[#createdFonts + 1] = font
+        return font
+    end
     created[#created + 1] = frame
     return frame
 end
@@ -150,6 +157,128 @@ wishlistButton:GetScript("OnClick")(wishlistButton)
 wishlistButton:GetScript("OnClick")(wishlistButton)
 assert(#created == createdAfterMenus,
     "switch menus rebuilt their row pools on reuse")
+
+-- Same-family exact tiers must bind independent renderer action handles. A
+-- plus/remove click on one visible row may not target either sibling.
+for offset = 1, 3 do
+    local spellId = 762000 + offset
+    catalog.rows[spellId] = {
+        spellId=spellId,groupId=880,name="Renderer Shared Echo",
+        quality=offset,maxStack=3,classMask=1,
+    }
+end
+Editor.OpenForCandidate({title="Renderer exact tiers",echoes={
+    {spellId=762001,quality=1,stacks=1},
+    {spellId=762002,quality=2,stacks=1},
+    {spellId=762003,quality=3,stacks=1},
+}})
+local exactSearch = assert(H.frames.NexusEditorSearch,
+    "renderer search control unavailable")
+exactSearch:SetText("Renderer Shared Echo")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+local function AvailableRow(spellId)
+    for _, row in ipairs(availableRows) do
+        if row.data and tonumber(row.data.spellId) == spellId then return row end
+    end
+end
+for _, spellId in ipairs({762001,762002,762003}) do
+    local row = assert(AvailableRow(spellId),
+        "renderer lost an available exact-tier row")
+    assert(tostring(row.text.text):find("(selected)", 1, true),
+        "renderer did not project selected state through the exact draft key")
+    assert(not tostring(row.text.text):find("replaces selected quality", 1, true),
+        "renderer retained the obsolete family replacement state")
+end
+local function PendingRow(spellId)
+    for _, row in ipairs(pendingRows) do
+        if row.data and tonumber(row.data.spellId) == spellId then return row end
+    end
+end
+local low = assert(PendingRow(762001), "renderer lost the low exact tier")
+local middle = assert(PendingRow(762002), "renderer lost the middle exact tier")
+local high = assert(PendingRow(762003), "renderer lost the high exact tier")
+assert(low.data.draftKey ~= middle.data.draftKey
+    and middle.data.draftKey ~= high.data.draftKey
+    and low.data.draftKey ~= high.data.draftKey,
+    "renderer gave same-family tiers a shared action handle")
+middle.plus:GetScript("OnClick")({GetParent=function() return middle end})
+Editor.Refresh()
+low, middle, high = PendingRow(762001), PendingRow(762002), PendingRow(762003)
+assert(low.data.stacks == 1 and middle.data.stacks == 2
+    and high.data.stacks == 1,
+    "renderer plus action modified a sibling exact tier")
+low.remove:GetScript("OnClick")({GetParent=function() return low end})
+Editor.Refresh()
+assert(not PendingRow(762001) and PendingRow(762002) and PendingRow(762003),
+    "renderer remove action modified or lost a sibling exact tier")
+
+-- Permanent-slot capacity is rendered by copies, and only a synchronized
+-- validated projection may populate it.
+lockedProjection = {synced=true,bySpell={
+    [762001]=2,[762002]=2,[762003]=2,
+}}
+exactSearch:SetText("Renderer Shared")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+local function HasRenderedText(needle)
+    for _, font in ipairs(createdFonts) do
+        if tostring(font.text or ""):find(needle, 1, true) then return true end
+    end
+    return false
+end
+local renderedLockedTexts = {}
+for _, font in ipairs(createdFonts) do
+    local text = tostring(font.text or "")
+    if text:lower():find("lock", 1, true) then
+        renderedLockedTexts[#renderedLockedTexts + 1] = text
+    end
+end
+assert(HasRenderedText("6 locked"),
+    "renderer displayed three identities instead of six locked copies: "
+        .. table.concat(renderedLockedTexts, " || "))
+assert(HasRenderedText("Locked (6/6):"),
+    "Locked strip header counted identities instead of occupied copies")
+local lockedSlotCount, emptySlotCount = 0, 0
+for _, candidate in ipairs(created) do
+    if candidate.slotState == "locked" then lockedSlotCount = lockedSlotCount + 1 end
+    if candidate.slotState == "empty" then emptySlotCount = emptySlotCount + 1 end
+end
+assert(lockedSlotCount == 6 and emptySlotCount == 0,
+    string.format("Locked strip represented %d occupied and %d empty slots for six copies",
+        lockedSlotCount,emptySlotCount))
+lockedProjection = {synced=true,bySpell={
+    [762001]=2,[762002]=2,[762003]=2,[762004]=1,
+}}
+exactSearch:SetText("Renderer Shared Echo")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+local overflowLockedSlots = 0
+for _, candidate in ipairs(created) do
+    if candidate.slotState == "locked" then
+        overflowLockedSlots = overflowLockedSlots + 1
+    end
+end
+assert(overflowLockedSlots == 0 and not HasRenderedText("7 locked"),
+    "renderer trusted seven locked copies as capacity authority")
+lockedProjection = {synced=false,bySpell={[762001]=6}}
+exactSearch:SetText("Renderer Shared")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+assert(not HasRenderedText("6 locked"),
+    "renderer displayed unsynced partial lock evidence as capacity")
+lockedProjection = {synced=true,bySpell={[math.huge]=1}}
+exactSearch:SetText("Renderer Shared")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+local nonfiniteLockedSlots = 0
+for _, candidate in ipairs(created) do
+    if candidate.slotState == "locked" then
+        nonfiniteLockedSlots = nonfiniteLockedSlots + 1
+    end
+end
+assert(nonfiniteLockedSlots == 0 and not HasRenderedText("1 locked"),
+    "renderer trusted a nonfinite locked spell identity")
 
 local function Read(path)
     local handle = assert(io.open(path, "rb"))

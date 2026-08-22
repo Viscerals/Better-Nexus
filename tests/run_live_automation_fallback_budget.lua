@@ -93,6 +93,7 @@ H.DeliverSlots(slots, 1)
 dofile("core/AutomationRuntime.lua")
 dofile("core/MainLifecycle.lua")
 dofile("core/MainCommands.lua")
+dofile("core/WishlistModel.lua")
 dofile("core/MainViewModel.lua")
 local viewFactory = assert(Nexus.MainInternals
     and Nexus.MainInternals.ViewModel

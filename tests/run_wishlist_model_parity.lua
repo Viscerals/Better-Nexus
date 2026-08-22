@@ -1,6 +1,7 @@
 -- Golden and authority-isolation coverage for the pure Wishlist model.
 Nexus = {}
 dofile("core/Codec.lua")
+dofile("core/CandidateEvidence.lua")
 dofile("core/WishlistModel.lua")
 
 local W = assert(Nexus.WishlistModel and Nexus.WishlistModel.New)()
@@ -46,12 +47,13 @@ local function Same(a, b, path, seen)
     end
 end
 
-local catalog = {rows={}}
+local catalog = {rows={},familyOf={}}
 local function Row(id, name, quality, groupId, maxStack)
     catalog.rows[id] = {
         spellId=id, name=name, quality=quality, groupId=groupId,
         maxStack=maxStack or 1,
     }
+    catalog.familyOf[id] = W.Family(id, catalog)
 end
 Row(1001, "|cff00ff00Alpha|r", 1, 10, 2)
 Row(1002, "Alpha", 3, 10, 3)
@@ -93,19 +95,22 @@ local prepared = W.ApplyCommittedTargets(basePrepared, {[1007]=true}, {
 })
 Same(imported, importedBefore, "imported input")
 Same(basePrepared, baseBeforeCommit, "base draft before committed-target application")
-local alpha = prepared.pending[W.Family(1002, catalog)]
-Check(alpha and alpha.spellId == 1002 and alpha.quality == 3 and alpha.stacks == 3,
-    "quality-family canonicalization changed")
-Check(prepared.pending[W.Family(1003, catalog)]
-    and prepared.pending[W.Family(1004, catalog)],
+local alphaLow = prepared.pending[W.DraftKey(1001, catalog)]
+local alphaHigh = prepared.pending[W.DraftKey(1002, catalog)]
+Check(alphaLow and alphaLow.spellId == 1001 and alphaLow.quality == 1
+    and alphaLow.stacks == 2 and alphaHigh and alphaHigh.spellId == 1002
+    and alphaHigh.quality == 3 and alphaHigh.stacks == 3,
+    "exact quality siblings collapsed during normalization")
+Check(prepared.pending[W.DraftKey(1003, catalog)]
+    and prepared.pending[W.DraftKey(1004, catalog)],
     "same-name distinct groups were lost")
-local beta = prepared.pending[W.Family(1005, catalog)]
+local beta = prepared.pending[W.DraftKey(1005, catalog)]
 Check(beta and beta.lockIntent and beta.replaces == 1010 and beta.stacks == 1,
     "explicit locked target or deterministic replacement pairing changed")
 Check(prepared.fulfilledTargets[1006] == true,
     "fulfilled explicit lock target was lost")
-Check(prepared.pendingLock[W.Family(1007, catalog)]
-    and prepared.pendingLock[W.Family(1007, catalog)].spellId == 1007,
+Check(prepared.pendingLock["committed:1007"]
+    and prepared.pendingLock["committed:1007"].spellId == 1007,
     "committed queued target was not reconstructed")
 Check(prepared.metrics.lockedSkipped == 1 and prepared.metrics.swapPairs == 1,
     "normalization metrics changed")
@@ -150,17 +155,19 @@ local typedLocked = {
 }
 local typedOrdinaryBefore, typedLockedBefore = Clone(typedOrdinary), Clone(typedLocked)
 local typed = assert(W.NormalizeCandidateEvidence(typedOrdinary, typedLocked, {
-    catalog=catalog,lockedBySpell={[1001]=1,[1010]=1},
+    catalog=catalog,lockedBySpell={[1001]=2,[1010]=1},
 }))
-Check(typed.pending[W.Family(1001,catalog)]
-    and typed.pending[W.Family(1001,catalog)].stacks == 2
-    and typed.fulfilledTargets[1001] == true,
+Check(typed.pending[W.DraftKey(1001,catalog)]
+    and typed.pending[W.DraftKey(1001,catalog)].stacks == 2
+    and type(typed.fulfilledTargets[1001]) == "table"
+    and typed.fulfilledTargets[1001].copies == 2
+    and #typed.fulfilledTargets[1001].rows == 1,
     "typed ordinary/locked overlap lost one role")
 Check(Count(typed.pendingLock) == 1
     and typed.pendingLock["explicit:1002"]
     and typed.pendingLock["explicit:1002"].spellId == 1002,
     "typed locked family collision lost an explicit identity")
-Check(typed.metrics.explicitLocked == 2
+Check(typed.metrics.explicitLocked == 3
     and typed.metrics.explicitFulfilled == 1,
     "typed evidence metrics changed")
 Same(typedOrdinary, typedOrdinaryBefore, "typed ordinary input")
@@ -265,14 +272,19 @@ local commitPending = {
 local commitLock = {b={spellId=3002}}
 local commitFresh = W.PlanLockCommit(commitPending, commitLock,
     {[4003]=true}, {[4001]=true,[4002]=true}, {[4001]=1,[4002]=1,[4003]=1})
-Same(commitFresh, {[3001]=4001,[3002]=true,[4002]=true,[4003]=true}, "lock commit plan")
+Check(type(commitFresh[3001]) == "table" and commitFresh[3001].copies == 1
+        and commitFresh[3001].replaces == 4001
+        and type(commitFresh[3002]) == "table" and commitFresh[3002].copies == 1
+        and commitFresh[4002] == true and commitFresh[4003] == true,
+    "lock commit plan")
 Check(not commitFresh[4001], "replaced fulfilled target survived commit planning")
 
 local reconciledPending, reconciledLock, reconciledFulfilled = W.ReconcileLocked(
     {a={spellId=3001,lockIntent=true,replaces=4001},z={spellId=3999}},
     {b={spellId=3002,replaces=4002}}, {}, {[3001]=1,[3002]=1})
 Check(not reconciledPending.a and reconciledPending.z and not reconciledLock.b
-    and reconciledFulfilled[3001] == 4001 and reconciledFulfilled[3002] == 4002,
+    and reconciledFulfilled[3001].replaces == 4001
+    and reconciledFulfilled[3002].replaces == 4002,
     "fulfilled lock reconciliation changed")
 
 Check(W.TrimName("  Imported Golden  ") == "Imported Golden",

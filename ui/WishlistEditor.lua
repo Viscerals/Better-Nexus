@@ -60,10 +60,15 @@ local function EnsureWishlistRenderer()
     wishlistRenderer = WishlistRendererFactory.New({
         controller = wishlistController,
         family = DraftModel.Family,
+        draftKey = DraftModel.DraftKey,
         echoListTotal = DraftModel.EchoListTotal,
         maskMatch = function(classMask, playerMask)
             return Model and Model.MaskMatch
                 and Model.MaskMatch(classMask, playerMask)
+        end,
+        entryProgress = function(entries, owned, locked)
+            return Model and Model.WishlistEntryProgress
+                and Model.WishlistEntryProgress(entries, owned, locked) or nil
         end,
         syncFulfilled = SyncFulfilledDraftTargets,
         hideServerEchoUI = function()

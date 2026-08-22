@@ -463,16 +463,42 @@ end
 -- that the server's native importer understands that Nexus-only extension.
 ------------------------------------------------------------------------
 
+local function EBH1Tuple(id, quality, stacks)
+    id, quality, stacks = tonumber(id), tonumber(quality), tonumber(stacks)
+    if not id or id ~= id or id < 1 or id > 2147483647
+        or id ~= math.floor(id)
+        or not quality or quality ~= quality or quality < 0 or quality > 255
+        or quality ~= math.floor(quality)
+        or not stacks or stacks ~= stacks or stacks < 1 or stacks > 120
+        or stacks ~= math.floor(stacks) then return nil end
+    return id, quality, stacks
+end
+
 function Codec.EncodeEBH1(entries, classToken, name)
-    local parts = {}
+    local parts, ordinarySeen = {}, {}
+    local ordinaryTotal, lockedCount, invalid = 0, 0, false
     for _, e in ipairs(entries or {}) do
-        local id = tonumber(e and e.spellId)
+        local id, quality, stacks = EBH1Tuple(e and e.spellId,
+            e and e.quality, e and e.stacks)
+        local locked = e and e.locked and true or false
         if id then
-            local base = string.format("%d.%d.%d", id,
-                tonumber(e.quality) or 0, math.max(1, tonumber(e.stacks) or 1))
-            parts[#parts + 1] = e.locked and (base .. ".1") or base
+            if locked then
+                lockedCount = lockedCount + stacks
+                if lockedCount > 6 then invalid = true end
+            else
+                if ordinarySeen[id] then invalid = true end
+                ordinarySeen[id] = true
+                ordinaryTotal = ordinaryTotal + stacks
+                if ordinaryTotal > 79 then invalid = true end
+            end
+            if #parts >= 85 then invalid = true end
+            local base = string.format("%d.%d.%d", id, quality, stacks)
+            parts[#parts + 1] = locked and (base .. ".1") or base
+        else
+            invalid = true
         end
     end
+    if invalid then parts = {} end
     return "EBH1:" .. table.concat(parts, ",") .. ":" .. tostring(classToken or "")
         .. ":" .. tostring(name or "")
 end
@@ -494,7 +520,7 @@ function Codec.DecodeEBH1(str)
         or body:sub(1, 1) == "," or body:sub(-1) == ","
         or body:find(",,", 1, true) then return nil end
 
-    local entries, ordinarySeen, lockedSeen = {}, {}, {}
+    local entries, ordinarySeen = {}, {}
     local ordinaryTotal, lockedCount = 0, 0
     for chunk in body:gmatch("[^,]+") do
         local id, quality, stacks, marker =
@@ -504,17 +530,14 @@ function Codec.DecodeEBH1(str)
             id, quality, stacks = chunk:match("^(%d+)%.(%d+)%.(%d+)$")
         end
         if not id or (locked and marker ~= "1") then return nil end
-        id, quality, stacks = tonumber(id), tonumber(quality), tonumber(stacks)
-        if not id or id < 1 or id > 2147483647
-            or not quality or quality < 0 or quality > 255
-            or not stacks or stacks < 1 or stacks > 120 then return nil end
-        local seen = locked and lockedSeen or ordinarySeen
-        if seen[id] then return nil end
-        seen[id] = true
+        id, quality, stacks = EBH1Tuple(id, quality, stacks)
+        if not id then return nil end
         if locked then
-            lockedCount = lockedCount + 1
+            lockedCount = lockedCount + stacks
             if lockedCount > 6 then return nil end
         else
+            if ordinarySeen[id] then return nil end
+            ordinarySeen[id] = true
             ordinaryTotal = ordinaryTotal + stacks
             if ordinaryTotal > 79 then return nil end
         end

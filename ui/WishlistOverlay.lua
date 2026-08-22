@@ -33,10 +33,10 @@ local QUALITY_COLORS = {
 local frame, lines, lockBtn, controlsFrame, hideBtn
 local Adapter, Model
 local ticker = 0
-local cachedWishlist, cachedOwned, cachedCatalog
+local cachedWishlist, cachedOwned, cachedLocked, cachedCatalog
 local revisionsKnown = false
 local lastSlotsRevision, lastActiveRevision, lastGrantedRevision
-local lastOwnedRevision
+local lastOwnedRevision, lastLockedRevision, lastLockedProjectionRevision
 local lastWishlistRevision, lastCatalogRevision
 local lineState = {}
 local lastStyleTree
@@ -45,7 +45,7 @@ local stats = {
     projectionBuilds=0,identicalModels=0,rowUpdates=0,
     rowShows=0,rowHides=0,stylePasses=0,
     framesCreated=0,linesCreated=0,cachedLineStates=0,
-    wishlistReads=0,ownedReads=0,catalogReads=0,
+    wishlistReads=0,ownedReads=0,lockedReads=0,catalogReads=0,
 }
 
 local function IsLocked()
@@ -195,7 +195,8 @@ local function ReadRevisions()
     if type(reader) ~= "function" then return false end
     stats.revisionReads = stats.revisionReads + 1
     local ok, slotsRevision, activeRevision, grantedRevision,
-        ownedRevision, wishlistRevision, catalogRevision = pcall(reader)
+        ownedRevision, wishlistRevision, catalogRevision,
+        lockedRevision, lockedProjectionRevision = pcall(reader)
     if not ok or slotsRevision == nil or activeRevision == nil
         or grantedRevision == nil or ownedRevision == nil
         or wishlistRevision == nil
@@ -203,28 +204,35 @@ local function ReadRevisions()
         return false
     end
     return true,slotsRevision,activeRevision,grantedRevision,ownedRevision,
-        wishlistRevision,catalogRevision
+        wishlistRevision,catalogRevision,lockedRevision or 0,
+        lockedProjectionRevision or 0
 end
 
 local function StoreRevisions(slotsRevision, activeRevision, grantedRevision,
-    ownedRevision, wishlistRevision, catalogRevision)
+    ownedRevision, wishlistRevision, catalogRevision, lockedRevision,
+    lockedProjectionRevision)
     revisionsKnown = true
     lastSlotsRevision, lastActiveRevision = slotsRevision, activeRevision
     lastGrantedRevision, lastOwnedRevision = grantedRevision, ownedRevision
     lastWishlistRevision = wishlistRevision
     lastCatalogRevision = catalogRevision
+    lastLockedRevision = lockedRevision
+    lastLockedProjectionRevision = lockedProjectionRevision
 end
 
 local function AcquirePresentation()
     local known, slotsRevision, activeRevision, grantedRevision, ownedRevision,
-        wishlistRevision, catalogRevision = ReadRevisions()
+        wishlistRevision, catalogRevision, lockedRevision,
+        lockedProjectionRevision = ReadRevisions()
     if known and revisionsKnown
         and slotsRevision == lastSlotsRevision
         and activeRevision == lastActiveRevision
         and grantedRevision == lastGrantedRevision
         and ownedRevision == lastOwnedRevision
         and wishlistRevision == lastWishlistRevision
-        and catalogRevision == lastCatalogRevision then
+        and catalogRevision == lastCatalogRevision
+        and lockedRevision == lastLockedRevision
+        and lockedProjectionRevision == lastLockedProjectionRevision then
         stats.revisionSkips = stats.revisionSkips + 1
         return false
     end
@@ -238,6 +246,9 @@ local function AcquirePresentation()
         or ownedRevision ~= lastOwnedRevision
     local refreshCatalog = not known or not revisionsKnown
         or catalogRevision ~= lastCatalogRevision
+    local refreshLocked = not known or not revisionsKnown
+        or lockedRevision ~= lastLockedRevision
+        or lockedProjectionRevision ~= lastLockedProjectionRevision
     if refreshWishlist then
         cachedWishlist = Adapter and Adapter.Wishlist and Adapter.Wishlist()
         stats.wishlistReads = stats.wishlistReads + 1
@@ -245,6 +256,11 @@ local function AcquirePresentation()
     if refreshOwned then
         cachedOwned = Adapter and Adapter.Owned and Adapter.Owned()
         stats.ownedReads = stats.ownedReads + 1
+    end
+    if refreshLocked then
+        cachedLocked = Adapter and Adapter.LockedOwned
+            and Adapter.LockedOwned() or nil
+        stats.lockedReads = stats.lockedReads + 1
     end
     if refreshCatalog then
         cachedCatalog = Adapter and Adapter.Catalog and Adapter.Catalog()
@@ -256,10 +272,12 @@ local function AcquirePresentation()
         -- A Wishlist read may promote the first-run association. Capture the
         -- resulting revision so the next identical tick stays zero-work.
         local finalKnown, finalSlots, finalActive, finalGranted,
-            finalOwned, finalWishlist, finalCatalog = ReadRevisions()
+            finalOwned, finalWishlist, finalCatalog, finalLocked,
+            finalLockedProjection = ReadRevisions()
         if finalKnown then
             StoreRevisions(finalSlots, finalActive, finalGranted, finalOwned,
-                finalWishlist, finalCatalog)
+                finalWishlist, finalCatalog, finalLocked,
+                finalLockedProjection)
         else
             revisionsKnown = false
         end
@@ -312,8 +330,8 @@ function M.Refresh()
     end
     ApplyTheme()
     if not AcquirePresentation() then return end
-    local wl, owned, catalog = cachedWishlist, cachedOwned, cachedCatalog
-    local byFamily = (owned and owned.byFamily) or {}
+    local wl, owned, locked, catalog = cachedWishlist, cachedOwned,
+        cachedLocked, cachedCatalog
     local changed = false
     if not wl then
         local text = "|cff888888No wishlist set|r"
@@ -325,10 +343,16 @@ function M.Refresh()
     end
 
     local list = {}
-    for _, e in ipairs(wl.entries or {}) do
+    local progress
+    if Model and type(Model.WishlistEntryProgress) == "function" then
+        progress = Model.WishlistEntryProgress(wl.entries, owned, locked)
+    end
+    for index, e in ipairs(wl.entries or {}) do
         local row = catalog and catalog.rows and catalog.rows[e.spellId]
         list[#list + 1] = { spellId = e.spellId, quality = e.quality,
             stacks = e.stacks, family = e.family,
+            locked = e.locked == true or e.sourceRole == "locked",
+            progress = progress and progress.rows[index],
             name = (row and row.name) or ("spell " .. tostring(e.spellId)) }
     end
     table.sort(list, function(a, b)
@@ -341,10 +365,17 @@ function M.Refresh()
     for i = 1, MAX_LINES do
         local e = list[i]
         if e then
-            local have = tonumber(byFamily[e.family]) or 0
-            local want = tonumber(e.stacks) or 1
+            local want = e.progress and tonumber(e.progress.want)
+                or tonumber(e.stacks) or 1
+            local fallbackOwner = e.locked and locked or owned
+            local have = e.progress and tonumber(e.progress.have)
+                or tonumber(fallbackOwner and fallbackOwner.bySpell
+                    and (fallbackOwner.bySpell[e.spellId]
+                        or fallbackOwner.bySpell[tostring(e.spellId)])) or 0
             local nm = e.name or ("spell " .. tostring(e.spellId))
-            local suffix = want > 1 and string.format(" (%d/%d)", math.min(have, want), want) or ""
+            if e.locked then nm = nm .. " |cffb266ff(locked)|r" end
+            local suffix = (want > 1 or e.locked)
+                and string.format(" (%d/%d)", math.min(have, want), want) or ""
             local text, red, green, blue
             if have >= want then
                 local c = QUALITY_COLORS[e.quality] or QUALITY_COLORS[0]
@@ -369,7 +400,7 @@ end
 
 function M.Init(adapter, model)
     Adapter, Model = adapter, model
-    cachedWishlist, cachedOwned, cachedCatalog = nil, nil, nil
+    cachedWishlist, cachedOwned, cachedLocked, cachedCatalog = nil, nil, nil, nil
     revisionsKnown = false
 end
 

@@ -70,6 +70,54 @@ function Model.MaskMatch(a, b)
 end
 
 ------------------------------------------------------------------------
+-- Permanent locked-Echo evidence
+------------------------------------------------------------------------
+
+-- One pure admission boundary for every consumer of GetLockedPerks-derived
+-- authority. With a catalog, the supplied family projection must exactly
+-- equal the family totals derived from canonical spell IDs. Without one,
+-- callers receive only the validated defensive spell totals.
+function Model.LockedProjection(locked, catalog, maximumCopies)
+    if type(locked) ~= "table" or locked.synced ~= true
+        or type(locked.bySpell) ~= "table" then return nil end
+    maximumCopies = tonumber(maximumCopies) or 6
+    local bySpell, seen, total = {}, {}, 0
+    for spellIdKey, countValue in pairs(locked.bySpell) do
+        local spellId, copies = tonumber(spellIdKey), tonumber(countValue)
+        if not spellId or spellId ~= spellId or spellId <= 0
+            or spellId >= math.huge or spellId ~= math.floor(spellId)
+            or not copies or copies ~= copies or copies <= 0
+            or copies >= math.huge or copies ~= math.floor(copies)
+            or seen[spellId] then return nil end
+        seen[spellId] = true
+        total = total + copies
+        if total > maximumCopies then return nil end
+        bySpell[spellId] = copies
+    end
+
+    local byFamily = {}
+    if catalog ~= nil then
+        if type(catalog) ~= "table" or type(catalog.familyOf) ~= "table"
+            or type(locked.byFamily) ~= "table" then return nil end
+        for spellId, copies in pairs(bySpell) do
+            local family = catalog.familyOf[spellId]
+            if family == nil then return nil end
+            byFamily[family] = (byFamily[family] or 0) + copies
+        end
+        for family, countValue in pairs(locked.byFamily) do
+            local copies = tonumber(countValue)
+            if not copies or copies ~= copies or copies < 0
+                or copies >= math.huge or copies ~= math.floor(copies)
+                or (byFamily[family] or 0) ~= copies then return nil end
+        end
+        for family, copies in pairs(byFamily) do
+            if tonumber(locked.byFamily[family]) ~= copies then return nil end
+        end
+    end
+    return {synced=true,bySpell=bySpell,byFamily=byFamily,total=total}
+end
+
+------------------------------------------------------------------------
 -- Marginal value Delta (ordinal, calibration-free)
 ------------------------------------------------------------------------
 
@@ -127,7 +175,7 @@ function Model.Delta(plan, owned, spellId, catalog, params)
         qualifiedOwned, targetTotal = Model.TargetProgress(
             plan, catalog, family, owned)
         offeredNeeded = Model.QualityOfferNeeded(
-            plan, catalog, family, tonumber(row.quality) or 0, owned)
+            plan, catalog, family, tonumber(row.quality) or 0, owned, spellId)
     end
 
     -- Duplicate: family full at maxStack, this exact spellId exhausted,
@@ -265,6 +313,22 @@ local function MultiTierTarget(target)
         and #target.qualityTiers > 1
 end
 
+local function ExactTierTarget(target)
+    if type(target) ~= "table" or type(target.qualityTiers) ~= "table"
+        or #target.qualityTiers < 1 then return false end
+    for _, tier in ipairs(target.qualityTiers) do
+        local id = tonumber(type(tier) == "table" and tier.spellId)
+        if not id or id <= 0 or id ~= math.floor(id) then return false end
+    end
+    return true
+end
+
+local function ExactOwned(ownedBySpell, spellId)
+    if type(ownedBySpell) ~= "table" then return 0 end
+    return tonumber(ownedBySpell[spellId])
+        or tonumber(ownedBySpell[tostring(spellId)]) or 0
+end
+
 function Model.EffectiveWishedQuality(plan, catalog, family, ownedFamCount, ownedBySpell)
     local stored = 0
     local targets = type(plan) == "table" and plan.targets or nil
@@ -278,8 +342,11 @@ function Model.EffectiveWishedQuality(plan, catalog, family, ownedFamCount, owne
     if MultiTierTarget(t) then
         for _, tier in ipairs(t.qualityTiers) do
             local need = math.max(0, tonumber(tier.n) or 0)
-            if CountFamilyAtQuality(
-                catalog, family, ownedBySpell, tonumber(tier.q) or 0) < need then
+            local have = ExactTierTarget(t)
+                and ExactOwned(ownedBySpell, tonumber(tier.spellId))
+                or CountFamilyAtQuality(
+                    catalog, family, ownedBySpell, tonumber(tier.q) or 0)
+            if have < need then
                 return tonumber(tier.q) or stored
             end
         end
@@ -312,7 +379,20 @@ function Model.TargetProgress(plan, catalog, family, owned)
     local byFamily = type(owned) == "table"
         and type(owned.byFamily) == "table" and owned.byFamily or {}
 
-    if MultiTierTarget(target) then
+    if ExactTierTarget(target) then
+        local needs = {}
+        for _, tier in ipairs(target.qualityTiers) do
+            local id = tonumber(tier.spellId)
+            needs[id] = (needs[id] or 0)
+                + math.max(0, tonumber(tier.n) or 0)
+        end
+        local have, total = 0, 0
+        for id, need in pairs(needs) do
+            have = have + math.min(ExactOwned(bySpell, id), need)
+            total = total + need
+        end
+        if total > 0 then return have, total end
+    elseif MultiTierTarget(target) then
         local have, total = 0, 0
         for _, tier in ipairs(target.qualityTiers) do
             local need = math.max(0, tonumber(tier.n) or 0)
@@ -349,8 +429,94 @@ function Model.TargetProgress(plan, catalog, family, owned)
     return math.min(have, want), want
 end
 
+-- Exact presentation progress for represented Wishlist rows. Duplicate rows
+-- share one aggregate (role, spellId) quota, so reload ordering cannot decide
+-- which indistinguishable row looks complete. Ordinary run ownership and
+-- permanent locked ownership remain separate even when both roles request the
+-- same exact tier.
+function Model.WishlistEntryProgress(entries, owned, lockedOwned)
+    entries = type(entries) == "table" and entries or {}
+    local ordinaryBySpell = type(owned) == "table"
+        and type(owned.bySpell) == "table" and owned.bySpell or {}
+    local lockedBySpell = type(lockedOwned) == "table"
+        and type(lockedOwned.bySpell) == "table" and lockedOwned.bySpell or {}
+    if type(owned) == "table" and owned.synced == false then
+        ordinaryBySpell = {}
+    end
+    if type(lockedOwned) == "table" and lockedOwned.synced == false then
+        lockedBySpell = {}
+    end
+
+    local out = {
+        rows={}, ordinaryHave=0, ordinaryWant=0,
+        lockedHave=0, lockedWant=0,
+    }
+    local groups = {}
+    local function NonNegativeCount(value)
+        value = tonumber(value)
+        if not value or value ~= value or value < 0 or value >= math.huge then
+            return 0
+        end
+        if value ~= math.floor(value) then return 0 end
+        return value
+    end
+
+    for index = 1, #entries do
+        local entry = entries[index]
+        local id = type(entry) == "table" and tonumber(entry.spellId) or nil
+        if id and (id <= 0 or id ~= math.floor(id)) then id = nil end
+        local want = type(entry) == "table"
+            and tonumber(entry.stacks or entry.count) or 1
+        if not want or want ~= want or want < 1 or want >= math.huge
+            or want ~= math.floor(want) then want = 1 end
+        local locked = type(entry) == "table"
+            and (entry.locked == true or entry.sourceRole == "locked") or false
+        local role = locked and "locked" or "ordinary"
+        local key = role .. ":" .. tostring(id or "invalid")
+        local group = groups[key]
+        if not group then
+            group = {role=role,locked=locked,spellId=id,want=0,rows={}}
+            groups[key] = group
+        end
+        group.want = group.want + want
+        group.rows[#group.rows + 1] = index
+        local row = {
+            index=index,spellId=id,
+            quality=type(entry) == "table" and tonumber(entry.quality) or nil,
+            locked=locked,role=role,rowWant=want,groupKey=key,
+        }
+        out.rows[index] = row
+    end
+    for _, group in pairs(groups) do
+        local source = group.locked and lockedBySpell or ordinaryBySpell
+        local available = group.spellId and NonNegativeCount(
+            source[group.spellId] ~= nil and source[group.spellId]
+                or source[tostring(group.spellId)]) or 0
+        local have = math.min(group.want, available)
+        for ordinal, index in ipairs(group.rows) do
+            local row = out.rows[index]
+            row.have, row.want = have, group.want
+            row.remaining = group.want - have
+            row.complete = have >= group.want
+            row.groupOrdinal = ordinal
+            row.primary = ordinal == 1
+        end
+        if group.locked then
+            out.lockedHave = out.lockedHave + have
+            out.lockedWant = out.lockedWant + group.want
+        else
+            out.ordinaryHave = out.ordinaryHave + have
+            out.ordinaryWant = out.ordinaryWant + group.want
+        end
+    end
+    out.have = out.ordinaryHave + out.lockedHave
+    out.want = out.ordinaryWant + out.lockedWant
+    out.complete = out.have >= out.want
+    return out
+end
+
 -- True while this exact offered quality can satisfy an unmet target quota.
-function Model.QualityOfferNeeded(plan, catalog, family, quality, owned)
+function Model.QualityOfferNeeded(plan, catalog, family, quality, owned, spellId)
     local progress, want = Model.TargetProgress(plan, catalog, family, owned)
     if progress >= want then return false end
 
@@ -360,7 +526,17 @@ function Model.QualityOfferNeeded(plan, catalog, family, quality, owned)
         and type(owned.bySpell) == "table" and owned.bySpell or {}
     quality = tonumber(quality) or 0
 
-    if MultiTierTarget(target) then
+    if ExactTierTarget(target) then
+        spellId = tonumber(spellId)
+        if not spellId then return false end
+        local need = 0
+        for _, tier in ipairs(target.qualityTiers) do
+            if tonumber(tier.spellId) == spellId then
+                need = need + math.max(0, tonumber(tier.n) or 0)
+            end
+        end
+        return need > 0 and ExactOwned(bySpell, spellId) < need
+    elseif MultiTierTarget(target) then
         for _, tier in ipairs(target.qualityTiers) do
             if (tonumber(tier.q) or 0) == quality then
                 local need = math.max(0, tonumber(tier.n) or 0)

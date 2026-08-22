@@ -85,11 +85,16 @@ local function LogText_AutoLock()
             local lockedNow = Adapter.LockedOwned and Adapter.LockedOwned()
             local lockedBySpellNow = (lockedNow and lockedNow.bySpell) or {}
             for _, id in ipairs(ids) do
-                local replaces = targets[id]
+                local target = targets[id]
+                local copies = type(target) == "table"
+                    and (tonumber(target.copies) or 1) or 1
+                local replaces = type(target) == "table"
+                    and target.replaces or target
                 local row = catalog and catalog.rows and catalog.rows[id]
                 local name = (row and row.name) or ("spell " .. tostring(id))
-                local fulfilled = (tonumber(lockedBySpellNow[id]) or 0) > 0
-                local suffix = fulfilled and " [FULFILLED -- already locked]" or ""
+                local fulfilled = (tonumber(lockedBySpellNow[id]) or 0) >= copies
+                local suffix = fulfilled and " [FULFILLED -- already locked]"
+                    or string.format(" [copies %d]", copies)
                 if type(replaces) == "number" then
                     local rrow = catalog and catalog.rows and catalog.rows[replaces]
                     out[#out + 1] = string.format("  %s (id=%d) -- replaces %s (id=%d)%s",

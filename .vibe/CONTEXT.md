@@ -2,64 +2,50 @@
 
 ## Architecture
 
-- Repository `Viscerals/Better-Nexus`; isolated infrastructure worktree `.infra-viberun-quality-gate-worktree` on `infra/viberun-quality-gate`.
-- Integration base is `origin/refactor/nexus-1.20-test17` at `d0681b6a885db447c94a75f40df7e81f60b74c55`; draft PR #13 targets draft PR #10's branch.
-- Runtime addon identity is `Nexus`, WoW target is 3.3.5a, and sources/tests parse as Lua 5.1.
-- `Invoke-QualityGate.ps1` owns Fast, Full, Package, and Security; successful summaries are compact and detailed logs remain ignored.
-- Production Lua, runtime-test Lua, `Nexus.toc`, schemas, wire/gameplay/UI behavior, bundled data, version/protocol/author, and test.17 are immutable in this infrastructure workflow.
+- WP4 is isolated in `.test19-wp4-worktree` on `bugfix/test19-wp4-exact-wishlist-evidence`, based exactly on frozen WP3 head `e674f033cc51494a382191b987c9a99cb6827f4a`.
+- Wishlist draft flow is `core/WishlistModel.lua` -> `core/WishlistController.lua` -> `ui/WishlistEditor.lua` / `ui/WishlistRenderer.lua`; EBH1 transfer passes through `core/Codec.lua`.
+- Typed record evidence is owned by `core/CandidateEvidence.lua`; live active/locked reads and Wishlist association are behind `core/GameAdapter.lua` and `core/LoadoutEvidence.lua`.
+- Progress and automation decisions flow through `logic/Model.lua` -> `logic/Policy.lua` -> `logic/Ratchet.lua` -> GameAdapter; `ui/WishlistOverlay.lua` must consume the same exact progress authority.
+- Runtime targets WoW 3.3.5a and Lua 5.1. `tools/Invoke-QualityGate.ps1` owns Fast/Full/Package/Security validation.
 
-## Key Decisions (2026-08-16)
+## Key Decisions (2026-08-21)
 
-- Git change discovery uses one raw NUL-delimited record model; rename/copy source and destination ownership are unioned.
-- Fast and staged/all-tracked scans share one fail-closed artifact path/content policy.
-- Only blocking `pass` succeeds; Package is a required exact-base, non-publishing CI job with failure-log-only evidence.
-- PSScriptAnalyzer inherits only six reviewed owner/rule/message records; the current four findings are inherited and two removals report as improvements.
-- Security bootstrap validates ZIP/tar entries and exact executable paths before extraction, accepts only hash-locked wheels, and removes bootstrap/download/extraction roots on success or failure.
-- Stage 43 commits the formal candidate before Full, runs Full locally exactly once, proves a disposable fresh checkout, then refreshes PR #13/issue #12 and stops without merge.
-
-## Key Decisions (2026-08-20)
-
-- WP1 treats inline and referenced locked evidence as content integrity only, because current-state backfill can attach both after the historical pull; the durable schema has no provenance bridge that authorizes subtraction or completed-v1 reversal.
-- A surviving `lockedMigrationSource` is restored and retired before readiness gating or legacy reconciliation. The v1 completion stamp still waits for authoritative locked readiness; represented restoration alone owns its revision advance.
+- Execute WP4 in order: #43 exact ordinary draft identity -> #44 counted locked evidence -> #20 read-time role derivation -> #35 exact progress.
+- Trustworthy exact `spellId` owns ordinary draft rows. Family is display/search grouping only; compatibility rows need deterministic collision-safe fallback identity.
+- Locked validation uses total copies `sum(stacks) <= 6`, preserving exact tier, count, provenance, and unknown fields; ordinary and locked limits remain separate.
+- #20 derives `exact active total - authoritative exact locked counts = exact ordinary counts` without rewriting active, Snapshot, Designed, or historical evidence. Partial, stale, ambiguous, or underflow inputs fail closed.
+- #35 must share one exact-tier progress boundary across model, policy/ratchet, editor, HUD, and overlay; family possession never satisfies a sibling tier.
+- Freeze product/test/workflow bytes, complete independent Spec/Standards/adversarial review, then run one final Full. Any governed-byte repair after Full requires another Full.
 
 ## Gotchas
 
-- Windows Git cannot represent tab/newline index names; use raw-byte parser fixtures locally and real disposable index fixtures on supporting platforms.
-- LuaLS, Luacheck, and StyLua may remain advisory-unavailable; never report unavailable checks as passing.
-- Use the exact PR #10 BaseRef for full-branch gates and the checkpoint parent for bounded checkpoint review.
-- Vibe flags and routing are dispatcher-owned; maintenance scans must not move the product checkpoint pointer.
-- Schema-valid state can still be semantically stale; verify status beneath the exact checkpoint heading and confirm fresh-checkout dispatcher truth at Stage 43.
-- A commit cannot contain its own SHA; terminal Vibe truth names branch `HEAD` plus the exact base, then a fresh checkout verifies the resolved SHA and stop route without an ignored receipt.
-- Do not mutate the formal candidate's code/tooling bytes after its single local Full; later Vibe/GitHub receipts must remain documentation/state-only and receive their own exact-head CI.
-- For locked migration, checking readiness before rollback restoration exposes partial rows to later init/getter work even if the migration function itself returns. Source-first means before readiness and before any legacy/evidence/hash/backfill path.
+- Root and `.lag-hotfix-worktree` contain unrelated user changes. Earlier WP2/WP3 worktrees are frozen and must not be edited, rebased, cleaned, stashed, or deleted.
+- Vibe flags and routing are dispatcher-owned. The Stage 48 maintenance scan/review/hygiene is complete and deliberately left product checkpoint 48.1 `NOT_STARTED`.
+- Current draft code repeatedly uses `family` as the map/action handle; change the handle explicitly before switching ordinary identity so sibling actions cannot alias.
+- CandidateEvidence currently limits locked row count and rejects duplicate spell identities; WP4 must validate counted copies and preserve legitimate exact counted evidence instead.
+- GameAdapter locked reads already produce `bySpell` counts. Do not infer count one from row presence or derive roles from title, short hash/name, family, slot proximity, or approximate similarity.
+- LuaLS, Luacheck, and StyLua may remain advisory-unavailable and must not be reported as passes. Offline checks do not prove native WoW behavior.
 
 ## Hot Files
 
-- Completed formal candidate: `tools/Invoke-QualityGate.ps1`, `tools/Bootstrap-QualityTools.ps1`, validation/security/package tests, `.pre-commit-config.yaml`, and exact-base Git scope commands.
-- Terminal review boundary: `.vibe/STATE.md`, `.vibe/PLAN.md`, `.vibe/CONTEXT.md`, `.vibe/EVIDENCE.md`, PR #13, issue #12, and exact-head workflow/review state.
-- Workflow/gate: `.github/workflows/quality-gate.yml`, `tools/Invoke-QualityGate.ps1`, `tools/Write-ValidationSummary.js`.
-- Path policy: `tools/GitPathRecords.ps1`, `tools/ArtifactPathPolicy.ps1`, `tools/Get-ChangedTestPlan.ps1`, `tools/Test-StagedArtifacts.ps1`.
-- Vibe authority: `AGENTS.md`, `.vibe/STATE.md`, active `.vibe/PLAN.md`, this file, and append-only `.vibe/EVIDENCE.md`.
-- Stage 46 WP1: `core/DpsCapture.lua`, `tests/run_locked_migration_authority.lua`, and `tests/run_migration_owned_lifecycle.lua`.
+- #43: `core/WishlistModel.lua`, `core/WishlistController.lua`, `ui/WishlistEditor.lua`, `ui/WishlistRenderer.lua`, `core/Codec.lua`, and Wishlist model/editor/controller/import tests.
+- #44: `core/CandidateEvidence.lua`, `core/WishlistModel.lua`, `core/GameAdapter.lua`, `core/LoadoutEvidence.lua`, and CandidateEvidence/locked-loadout tests.
+- #20: `core/GameAdapter.lua`, `core/LoadoutEvidence.lua`, association fixtures, and exact active/locked evidence tests.
+- #35: `logic/Model.lua`, `logic/Policy.lua`, `logic/Ratchet.lua`, `core/MainViewModel.lua`, `ui/WishlistOverlay.lua`, and Wishlist progress/parity tests.
+- Workflow: `AGENTS.md`, `.vibe/STATE.md`, `.vibe/PLAN.md`, this file, and append-only `.vibe/EVIDENCE.md`.
 
 ## Agent Notes
 
-- Root, `.lag-hotfix-worktree`, and authoritative product worktree are independently owned and read-only for this task; preserve their existing status.
-- PR #13 and issue #12 remain open; do not submit another `@codex review` because the prior request hit the account usage limit.
-- Expected red must demonstrate the actual missing capability; use disposable repositories/archives and never place hostile fixtures in the real worktree.
-- No addon install, WoW launch, live SavedVariables access, package retention/upload, rebase, force-push, merge, tag, release, publication, deployment, or settings change is authorized.
-- Final offline/CI evidence does not prove native WoW behavior; stop at the refreshed independent-review boundary.
-- Formal candidate `4c1002e` passed the single local Full; later receipt-only heads received exact-head CI. Do not repeat local Full or mutate candidate code/tooling bytes.
+- Current state: Stage 48 checkpoint 48.1 `NOT_STARTED`; Stage design and scheduled maintenance cycle are complete. No WP4 product/test byte or commit exists yet.
+- Next action: apply the selected behavior-preserving explicit `rowKey` precursor, prove existing public Wishlist model/editor equivalence, then add the required public expected-red for same-family sibling tiers.
+- Use public seams for TDD: WishlistModel/controller/editor round-trip and actions, CandidateEvidence envelope, GameAdapter Wishlist resolution, and public progress projections. Do not test private helpers directly.
+- Preserve the 79 ordinary-copy budget and the existing policy that overflow does not automatically become locked intent unless current trusted rules authorize it.
+- No push, PR/issue mutation, merge, package/install, live SavedVariables access, native WoW, history rewrite, earlier-worktree mutation, or WP5 work is authorized.
 
 ## Stage Retrospective Notes
 
-- Keep checkpoint-range and current-base Fast evidence separate; preserve a base-wide failure as the next checkpoint's red boundary when ownership is explicit.
-- Pair raw-byte path fixtures with real disposable Git index fixtures where the platform supports hostile names.
-- Centralize a shared security policy before updating callers so false positives and bypasses cannot drift.
-- Test local summary semantics and GitHub aggregate conditions in the same fail-closed checkpoint.
-- After each Vibe transition, verify the status beneath the exact checkpoint heading rather than relying only on schema validation.
-- Stage 42 took 10 loops from design through consolidation, with one implementation/review/hygiene cycle per checkpoint and no repeat review, split, skip, blocker, or decision-required issue.
-- For baseline migrations like 42.1, reconstruct the reviewed head's exact findings before editing and retain resolved entries as improvements; never bless the current output wholesale.
-- For archive bootstrap like 42.2, encode the real Windows and Linux layouts in metadata, then test both synthetic hostile archives and the pinned cross-platform assets through the same resolver.
-- Treat the first real bootstrap failure as cleanup evidence too: verify the outer temporary root disappears before repairing the parsing defect.
-- Completed PLAN markers are parser contracts: place `(DONE)` before the checkpoint ID and inspect both the dispatcher role and auxiliary ready list after transition.
+- Build the complete compatibility-positive inventory before freezing an authority migration; late Full-only fixture discovery is avoidable.
+- Define one typed authority verdict and cross-surface alias matrix before updating ingress, summary, projection, and export callers.
+- Expected-red preservation matrices must include collisions, malformed values, future-owned data, and restart/reload ordering.
+- Public quarantine rules require sync/async/detail/fallback/count/sort/page parity.
+- Reserve Full until all independent review axes accept the exact frozen bytes.

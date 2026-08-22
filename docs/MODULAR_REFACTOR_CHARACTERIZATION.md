@@ -157,7 +157,7 @@ Cross-module edges that later extraction must retain:
 | Main | GameAdapter | Explicit established slash-command reads/actions remain coordinated by Main. |
 | Main | MainCommands | Main retains the three slash globals and injects existing command actions; Commands owns normalization, aliases, prefix arguments, and exactly-one callback dispatch with no product authority. |
 | Main | MainDiagnostics | Main delegates retained audit formatting, page text, selective clear routing, and incremental export construction through unchanged public facades; Diagnostics receives only the required GameAdapter reads and owns no gameplay or transport path. |
-| Main | MainViewModel | Main captures live adapter/status/update/DPS values, then delegates exact progress math, defensive copying, value-keyed HUD reuse, and immutable display projection; ViewModel receives no service or gameplay callback. |
+| Main | MainViewModel | Main captures live adapter/status/update/DPS values, then delegates exact role-qualified progress math through Model, defensive copying, value-keyed HUD reuse, and immutable display projection; ViewModel receives no service or gameplay callback. |
 | WishlistEditor | WishlistController | Editor assembles one model/controller/renderer chain, retains confirmation/import/export popup intentions, and delegates every draft/session/filter/scroll/association/apply/retry transition while preserving public facade identities. |
 | WishlistEditor | WishlistRenderer | Facade injects controller projections, overlay access, and presentation intentions; Renderer alone owns the main editor frame, display popup, switch menus, tooltips, scrolling, and fixed visible-row binding. |
 | WishlistController | WishlistModel/Store/GameAdapter | Controller delegates pure calculations to one model, persists lock designs only through Store-owned state, and performs uploads/associations only through the injected GameAdapter facade at mutation time. |
@@ -182,16 +182,17 @@ Cross-module edges that later extraction must retain:
 
 | Surface | Responsibility | Called by | Reads -> writes | Failure | Coverage/gap |
 | --- | --- | --- | --- | --- | --- |
-| `Evidence.Build` | Normalize and bind immutable typed ordinary/locked candidate evidence | Community/Leaderboard/tests | copied arrays + scalar identity/selected-evidence token -> candidate-local snapshot | bounded fail closed above 79 ordinary copies, six locks, or invalid/dense evidence | W-C/W-UI |
+| `Evidence.Build` | Normalize and bind immutable typed ordinary/locked candidate evidence | Community/Leaderboard/tests | copied arrays + scalar identity/selected-evidence token -> candidate-local snapshot | bounded fail closed above 79 ordinary copies, six locked copies, or invalid/dense evidence | W-C/W-UI |
 | `Evidence.Validate` | Revalidate supported current/legacy candidate contracts immediately before use | Community/Leaderboard/WishlistController/tests | candidate-local snapshot + selected-evidence or legacy revision callback -> defensive snapshot | unsupported, mutated, stale, malformed, or unavailable evidence rejected | W-C/W-UI |
 | `Evidence.ResolveLocked` | Resolve one exact category-aware locked-Echo authority without global reads | Community/Leaderboard/Wishlist/Peer Debug/tests | selected ordinary/build identity + bounded category or inline records -> defensive locked result + scalar diagnostics | incomplete ordinary data, malformed claims, identity mismatch, or category disagreement fail closed | W-C/W-UI |
 | `Evidence.CurrentKind` | Publish the current typed candidate contract identifier | tests/diagnostics | constant -> string | none | W-C |
+| `Evidence.NormalizeLockedEchoes` | Normalize one typed locked-role pool and enforce the six-copy envelope | Wishlist/tests | dense locked rows -> defensive exact rows with counts, future fields, and provenance | malformed rows or more than six total copies fail closed | W-C/W-UI |
 
 ## `Nexus.WishlistModel` inventory
 
 | Surface | Responsibility | Called by | Reads -> writes | Failure | Coverage/gap |
 | --- | --- | --- | --- | --- | --- |
-| `Factory.New` | Construct one stateless Wishlist calculation owner | WishlistEditor/tests | captured plain values -> immutable draft/export/commit plans | defensive empty/no-op | W-C/W-UI |
+| `Factory.New` | Construct one stateless Wishlist calculation owner with counted exact lock-target records | WishlistEditor/tests | captured plain values -> immutable draft/export/commit plans preserving copies, duplicate rows, and provenance | defensive empty/no-op | W-C/W-UI |
 
 ## `Nexus.WishlistInternals.Controller` inventory
 
@@ -335,15 +336,15 @@ Sync extraction parity is complete.
 | `A.SetFirstRunWishlist` | First-run slot association | Main/UI | GA/SV -> SV | reject invalid slot | A-W/A-X |
 | `A.SetFirstRunWishlistIdentity` | First-run exact association | Main/UI | identity/SV -> SV | reject invalid | A-W |
 | `A.ClearFirstRunWishlist` | Clear first-run association | Main/UI | SV -> SV | idempotent | A-X |
-| `A.GetLoadoutWishlist` | Loadout association read | UI/Main | SV/GA -> defensive row | nil absent/ambiguous | A-W |
-| `A.GetLoadoutWishlistState` | Read-only exact association evidence diagnosis and bounded transition observation | WishlistController/tests | SV/GA -> defensive row/fixed state | identity unavailable, pending, mismatch, or invalid without mutation | A-W/A-X |
+| `A.GetLoadoutWishlist` | Loadout association read with exact verified-active role bridging | UI/Main | SV/GA -> defensive row | nil absent, ambiguous, stale, or identity/count mismatch | A-W |
+| `A.GetLoadoutWishlistState` | Read-only exact association evidence diagnosis, verified-active role bridge, and bounded transition observation | WishlistController/tests | SV/GA -> defensive row/fixed state | identity unavailable, pending, mismatch, stale counts, or invalid without mutation | A-W/A-X |
 | `A.GetLoadoutWishlistSlot` | Association slot read | UI/Main | SV -> - | nil absent | A-W/A-X |
 | `A.SetLoadoutWishlistIdentity` | Exact per-loadout association | UI/Main | identity/SV -> SV | reject invalid | A-W |
 | `A.SetFirstLoadoutWishlistIdentity` | First active loadout association | UI/Main | GA/identity/SV -> SV | reject no loadout | A-W/A-X |
 | `A.SetLoadoutWishlist` | Slot-to-slot association | UI/Main | GA/SV -> SV | reject invalid/ambiguous | A-W |
 | `A.UpdateWishlistAssociationAfterSave` | Reconcile saved association | UI/Main | GA/identity/SV -> SV | preserves prior on failure | A-W/A-X |
 | `A.ClearLoadoutWishlist` | Remove one association | UI/Main | SV -> SV | idempotent | A-W |
-| `A.Wishlist` | Active exact wishlist | Main/Model/UI | GA/SV -> defensive row | nil ambiguous | A-W |
+| `A.Wishlist` | Active exact wishlist with verified active-total minus authoritative locked-count roles | Main/Model/UI | GA/SV -> defensive row | nil ambiguous, partial, stale, or mismatched | A-W |
 | `A.WishlistNote` | Ambiguity/status note | UI/Main | adapter session -> - | nil none | A-X |
 | `A.GetLoadoutCandidates` | Active-loadout candidate list | UI | GA/SV -> defensive list | empty none | A-X |
 | `A.Slots` | Saved loadouts | Main/UI | GA -> defensive list | empty/not-ready | A-I/A-W |
@@ -379,7 +380,7 @@ Sync extraction parity is complete.
 | `A.ConsumeDirty` | Consume represented dirty set | Main direct loop | GA session -> GA session | empty set | A-C/A-I/A-X |
 | `A.RecordLevelBurstPump` | Acknowledge fixed scalar recompute/render/action work for one consumed level burst | AutomationRuntime direct loop | AUT scalar deltas -> GA session counters | false without events | A-I/A-X |
 | `A.LevelBurstStats` | Defensive fixed-field level-event/coalescing/pump/work totals and authoritative last level | Main diagnostics/tests | GA session scalars -> defensive row | zero before observation | A-I/A-X |
-| `A.PresentationRevisions` | Allocation-free Wishlist/Owned/Catalog scalar generations for revision-keyed overlay acquisition | WishlistOverlay/tests | GA semantic generations -> - | zero generations before observation | A-C/A-X |
+| `A.PresentationRevisions` | Allocation-free Wishlist/Owned/Locked/Catalog scalar generations for revision-keyed overlay acquisition | WishlistOverlay/tests | GA semantic generations -> - | zero generations before observation | A-C/A-X |
 | `A.ConsumeUserAction` | Consume user-action latch | Main direct loop | GA session -> GA session | false none | A-X |
 | `A.Init` | Bind callbacks/Store and install hooks | Main/tests | facades/GA -> adapter session | idempotent hooks | BOOT/A-C/A-X |
 | `A.OnEvent` | Adapter event router | Main event loop | event/GA -> adapter session | noop irrelevant | A-I/A-X |

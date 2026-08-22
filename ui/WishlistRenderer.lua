@@ -13,10 +13,14 @@ function Renderer.New(options)
         "WishlistRenderer requires controller projections and intentions")
     local PendingFamily = assert(options.family,
         "WishlistRenderer requires Wishlist family identity")
+    local DraftKey = assert(options.draftKey,
+        "WishlistRenderer requires exact draft identity")
     local EchoListTotal = assert(options.echoListTotal,
         "WishlistRenderer requires Echo totals")
     local MaskMatch = type(options.maskMatch) == "function"
         and options.maskMatch or function() return true end
+    local EntryProgress = type(options.entryProgress) == "function"
+        and options.entryProgress or nil
 
     local syncFulfilled = type(options.syncFulfilled) == "function"
         and options.syncFulfilled or function() end
@@ -130,18 +134,18 @@ function Renderer.New(options)
         return Controller.AddPending(row)
     end
 
-    local function RemovePending(family)
-        return Controller.RemovePending(family)
+    local function RemovePending(rowKey)
+        return Controller.RemovePending(rowKey)
     end
 
-    local function ToggleDesignLock(family)
-        local outcome = Controller.ToggleDesignLock(family)
+    local function ToggleDesignLock(rowKey)
+        local outcome = Controller.ToggleDesignLock(rowKey)
         SyncFulfilledDraftTargets()
         return outcome
     end
 
-    local function AdjustStacks(family, delta)
-        return Controller.AdjustStacks(family, delta)
+    local function AdjustStacks(rowKey, delta)
+        return Controller.AdjustStacks(rowKey, delta)
     end
 
     local function AssignLockSlotFromData(data)
@@ -946,7 +950,7 @@ local function EnsureFrame()
                 return
             end
             if self.slotState == "designed" then
-                if self.family then ToggleDesignLock(self.family); requestRefresh() end
+                if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
                 return
             end
             if not self.spellId then return end
@@ -982,7 +986,7 @@ local function EnsureFrame()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         btn:SetScript("OnClick", function(self)
-            if self.family then ToggleDesignLock(self.family); requestRefresh() end
+            if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
         end)
         btn:Hide()
         lockedNeedIcons[i] = btn
@@ -1218,11 +1222,11 @@ local function EnsureFrame()
         row.remove:SetSize(22, 22); row.remove:SetPoint("RIGHT", 0, 0)
         row.minus:SetScript("OnClick", function(self)
             local d = self:GetParent().data
-            if d and not d.ghost then AdjustStacks(d.family, -1); requestRefresh() end
+            if d and not d.ghost then AdjustStacks(d.draftKey, -1); requestRefresh() end
         end)
         row.plus:SetScript("OnClick", function(self)
             local d = self:GetParent().data
-            if d and not d.ghost then AdjustStacks(d.family, 1); requestRefresh() end
+            if d and not d.ghost then AdjustStacks(d.draftKey, 1); requestRefresh() end
         end)
         row.remove:SetScript("OnClick", function(self)
             local d = self:GetParent().data
@@ -1323,10 +1327,22 @@ local function RefreshView(catalogRevision)
     local lockedBySpell = {}
     if View and View.LockedOwned then
         local locked = View.LockedOwned()
-        if locked and type(locked.bySpell) == "table" then lockedBySpell = locked.bySpell end
+        if locked and locked.synced == true
+            and type(locked.bySpell) == "table" then
+            lockedBySpell = locked.bySpell
+        end
     end
     local lockedCount = 0
-    for _ in pairs(lockedBySpell) do lockedCount = lockedCount + 1 end
+    for _, count in pairs(lockedBySpell) do
+        count = tonumber(count)
+        if not count or count <= 0 or count >= math.huge
+            or count ~= math.floor(count) then
+            lockedBySpell = {}
+            lockedCount = 0
+            break
+        end
+        lockedCount = lockedCount + count
+    end
 
     -- Reconcile "awaiting lock" against reality: the moment LockedOwned()
     -- confirms one of these is actually locked, it belongs in the strip
@@ -1374,27 +1390,39 @@ local function RefreshView(catalogRevision)
     -- replacing anything (bound for a genuinely open slot) fills the next
     -- open column in the bottom row instead.
     if lockedLabel and lockedIcons then
-        local realIds = {}
+        local realIds, realSlots = {}, {}
         for id in pairs(lockedBySpell) do realIds[#realIds + 1] = id end
         table.sort(realIds)
+        for _, id in ipairs(realIds) do
+            for _ = 1, lockedBySpell[id] do
+                realSlots[#realSlots + 1] = id
+            end
+        end
 
         -- Replacement pairing reads straight off each draft entry's own
         -- .replaces field now (set by LoadPendingEchoes/ToggleDesignLock/
         -- AssignLockSlotFromData) -- no separate committed-store lookup
         -- needed for what's still just being designed in this session.
         local designed = {}
-        for fam, p in pairs(pending) do
-            if p.lockIntent then
+        local function AddDesigned(p, rowKey, copies)
+            copies = math.max(1, tonumber(copies) or 1)
+            for copyIndex = 1, copies do
                 local row = catalog and catalog.rows and catalog.rows[p.spellId]
-                designed[#designed + 1] = { spellId = p.spellId, family = fam,
-                    draftKey = fam,
-                    name = (row and row.name) or ("spell " .. tostring(p.spellId)), replaces = p.replaces }
+                designed[#designed + 1] = {
+                    spellId=p.spellId,family=p.family,draftKey=rowKey,
+                    name=(row and row.name) or p.name
+                        or ("spell " .. tostring(p.spellId)),
+                    replaces=copyIndex == 1 and p.replaces or nil,
+                }
+            end
+        end
+        for rowKey, p in pairs(pending) do
+            if p.lockIntent then
+                AddDesigned(p, rowKey, 1)
             end
         end
         for fam, p in pairs(pendingLock) do
-            designed[#designed + 1] = { spellId = p.spellId,
-                family = p.family, draftKey = fam, name = p.name,
-                replaces = p.replaces }
+            AddDesigned(p, fam, p.stacks)
         end
         table.sort(designed, function(a, b)
             local left, right = tostring(a.name), tostring(b.name)
@@ -1414,17 +1442,18 @@ local function RefreshView(catalogRevision)
         -- Always show all MAX_LOCK_SLOTS slots, not just however many are
         -- currently locked -- an account with 5/6 locked was rendering as
         -- "Locked (5):" with no visible hint a 6th slot even existed.
-        lockedLabel:SetText(string.format("Locked (%d/%d):", #realIds, MAX_LOCK_SLOTS))
+        lockedLabel:SetText(string.format("Locked (%d/%d):", lockedCount, MAX_LOCK_SLOTS))
         lockedLabel:Show()
         local fi = 1
         for i = 1, MAX_LOCK_SLOTS do
             local btn, needBtn = lockedIcons[i], lockedNeedIcons[i]
-            local id = realIds[i]
+            local id = realSlots[i]
             if id then
                 local row = catalog and catalog.rows and catalog.rows[id]
                 local replacement = replacementFor[id]
+                replacementFor[id] = nil
                 btn.spellId = id
-                btn.family = nil
+                btn.draftKey = nil
                 btn.slotState = "locked"
                 btn.beingReplaced = replacement and true or nil
                 btn.icon:SetTexture(SpellIcon(id))
@@ -1432,7 +1461,7 @@ local function RefreshView(catalogRevision)
                     -- Dimmed: a replacement is already designed, directly above.
                     btn.icon:SetVertexColor(0.42, 0.42, 0.42)
                     needBtn.spellId = replacement.spellId
-                    needBtn.family = replacement.draftKey or replacement.family
+                    needBtn.draftKey = replacement.draftKey
                     needBtn.icon:SetTexture(SpellIcon(replacement.spellId))
                     needBtn:Show()
                 else
@@ -1443,6 +1472,7 @@ local function RefreshView(catalogRevision)
                         btn.icon:SetVertexColor(1, 1, 1)
                     end
                     needBtn.spellId = nil
+                    needBtn.draftKey = nil
                     needBtn:Hide()
                 end
                 btn:Show()
@@ -1450,25 +1480,27 @@ local function RefreshView(catalogRevision)
                 local d = freshDesigned[fi]
                 fi = fi + 1
                 btn.spellId = d.spellId
-                btn.family = d.draftKey or d.family
+                btn.draftKey = d.draftKey
                 btn.slotState = "designed"
                 btn.beingReplaced = nil
                 btn.icon:SetTexture(SpellIcon(d.spellId))
                 btn.icon:SetVertexColor(1, 0.85, 0.3)
                 btn:Show()
                 needBtn.spellId = nil
+                needBtn.draftKey = nil
                 needBtn:Hide()
             else
                 -- An open, unused locked slot -- shown as an empty outline
                 -- and directly clickable to assign a pursuit target.
                 btn.spellId = nil
-                btn.family = nil
+                btn.draftKey = nil
                 btn.slotState = "empty"
                 btn.beingReplaced = nil
                 btn.icon:SetTexture("Interface\\PaperDollInfoFrame\\UI-GearManager-LeaveItem-Transparent")
                 btn.icon:SetVertexColor(1, 1, 1)
                 btn:Show()
                 needBtn.spellId = nil
+                needBtn.draftKey = nil
                 needBtn:Hide()
             end
         end
@@ -1634,16 +1666,18 @@ local function RefreshView(catalogRevision)
             row.icon:SetTexture(SpellIcon(data.spellId))
             local c = QUALITY_COLORS[data.quality] or QUALITY_COLORS[0]
             row.text:SetTextColor(c[1], c[2], c[3])
-            local fam = PendingFamily(data.spellId, catalog)
-            local chosen = pending[fam]
+            local chosen = pending[DraftKey(data.spellId, catalog)]
             local suffix = ""
             if chosen and tonumber(chosen.spellId) == tonumber(data.spellId) then
                 suffix = "  |cff4dff80(selected)|r"
-            elseif chosen then
-                suffix = "  |cffffd200(replaces selected quality)|r"
             end
             row.text:SetText(data.name .. suffix)
-            local ownedCount = ownedBySpell[data.spellId] or 0
+            local exactProgress = EntryProgress and EntryProgress({{
+                spellId=data.spellId,quality=data.quality,stacks=1,locked=false,
+            }}, owned, nil) or nil
+            local ownedCount = exactProgress and exactProgress.rows
+                and exactProgress.rows[1] and exactProgress.rows[1].have
+                or ownedBySpell[data.spellId] or 0
             local isLocked = (tonumber(lockedBySpell[data.spellId]) or 0) > 0
             local qualityName = ({ [0] = "Common", [1] = "Uncommon", [2] = "Rare", [3] = "Epic", [4] = "Legendary" })[tonumber(data.quality) or 0] or "Echo"
             if isLocked then
@@ -1673,10 +1707,10 @@ local function RefreshView(catalogRevision)
 
     local list = {}
     local designedCount = 0
-    for _, p in pairs(pending) do
+    for rowKey, p in pairs(pending) do
         local row = catalog and catalog.rows and catalog.rows[p.spellId]
         list[#list + 1] = { spellId = p.spellId, family = p.family, stacks = p.stacks,
-            draftKey = p.family,
+            draftKey = rowKey,
             maxStack = p.maxStack, quality = p.quality, lockIntent = p.lockIntent,
             name = (row and row.name) or ("spell " .. p.spellId), replaces = p.replaces }
         if p.lockIntent then designedCount = designedCount + 1 end
@@ -1685,19 +1719,20 @@ local function RefreshView(catalogRevision)
     -- Locked-slot designs are listed separately after the ordinary 79-copy
     -- wishlist. They are committed locally and injected into automation, not
     -- uploaded as ordinary server-wishlist entries.
-    local toLockList = {}
+    local toLockList, toLockCount = {}, 0
     for key, p in pairs(pendingLock) do
+        local copies = math.max(1, tonumber(p.stacks) or 1)
         toLockList[#toLockList + 1] = { spellId = p.spellId, family = p.family,
             draftKey = key,
-            stacks = 1, maxStack = 1, quality = p.quality, name = p.name, toLock = true,
+            stacks = copies, maxStack = copies, quality = p.quality, name = p.name, toLock = true,
             replaces = p.replaces }
+        toLockCount = toLockCount + copies
     end
     table.sort(toLockList, function(a, b)
         local left, right = tostring(a.name), tostring(b.name)
         if left ~= right then return left < right end
         return (tonumber(a.spellId) or 0) < (tonumber(b.spellId) or 0)
     end)
-    local toLockCount = #toLockList
     for _, e in ipairs(toLockList) do list[#list + 1] = e end
     local realEntryCount = #list
     -- An entry designed to REPLACE a specific currently-real-locked Echo

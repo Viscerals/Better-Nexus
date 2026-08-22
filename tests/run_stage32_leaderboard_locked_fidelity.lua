@@ -110,7 +110,7 @@ NexusDB = {settings={},chars={},futureRoot={keep=true}}
 Nexus.Store.Init()
 Nexus.LoadoutEvidence.Init(NexusDB)
 
-local catalog = {rows={}}
+local catalog = {rows={},familyOf={}}
 local overflowOrdinary = {}
 for index = 1, 79 do
     local id = 210000 + index
@@ -125,7 +125,7 @@ for index = 1, 79 do
     }
 end
 
-local lockedIds = {201382,201388,201398,201410,201416,201420}
+local lockedIds = {201382,201388,201398,201410,201416}
 local locked = {}
 for index, id in ipairs(lockedIds) do
     locked[index] = {spellId=id,stacks=index == 2 and 2 or 1,
@@ -142,6 +142,10 @@ catalog.rows[lockedIds[2]].name = "Collision"
 catalog.rows[lockedIds[2]].groupId = 9999
 catalog.rows[lockedIds[3]].name = "Collision"
 catalog.rows[lockedIds[3]].groupId = 9999
+local wishlistModel = Nexus.WishlistModel.New()
+for id in pairs(catalog.rows) do
+    catalog.familyOf[id] = wishlistModel.Family(id, catalog)
+end
 
 local validOrdinary = {}
 for index, echo in ipairs(overflowOrdinary) do
@@ -283,7 +287,7 @@ end
 local detail = RenderCurrent()
 local displayed = DisplayedLocked(detail)
 Check(SameSet(displayed, expected),
-    "Leaderboard did not display its six authoritative locked Echoes")
+    "Leaderboard did not display its six authoritative locked copies")
 Check(detail.copy:IsEnabled(),
     "valid 79-copy ordinary evidence was not actionable")
 

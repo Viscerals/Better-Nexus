@@ -1,5 +1,7 @@
 -- Frame-free Wishlist controller transition, association, and retry parity.
 Nexus = {}
+dofile("logic/Model.lua")
+dofile("core/CandidateEvidence.lua")
 dofile("core/WishlistModel.lua")
 dofile("core/WishlistController.lua")
 
@@ -30,15 +32,16 @@ local catalog = {rows={
     [1002]={spellId=1002,name="Beta",quality=2,groupId=2,maxStack=1},
     [1003]={spellId=1003,name="Gamma",quality=3,groupId=3,maxStack=2},
     [1999]={spellId=1999,name="Old Lock",quality=2,groupId=9,maxStack=1},
-}}
+},familyOf={[1001]=1,[1002]=2,[1003]=3,[1999]=9}}
 local activeSlot = 1
 local linked = {}
 local uploadMode, uploadCalls = "success", {}
 local createdAssociations, updatedAssociations, directAssociations = {}, {}, {}
 local firstAssociations = {}
+local lockedProjection = {bySpell={},synced=true}
 local Adapter = {
     Catalog=function() return catalog end,
-    LockedOwned=function() return {bySpell={}} end,
+    LockedOwned=function() return lockedProjection end,
     WishlistKey=function(echoes) return "key:" .. tostring(#(echoes or {})) end,
     Wishlist=function() return {name="Seed",entries={{spellId=1001,quality=1,stacks=1}}} end,
     Slots=function()
@@ -87,6 +90,54 @@ local controller = Controller.New({
 })
 controller.Initialize(Adapter)
 
+-- Partial lock reads are diagnostic only: they cannot reach the renderer as
+-- authority or append an unseen locked row to the public export.
+catalog.rows[1777] = {spellId=1777,name="Partial Lock",quality=2,
+    groupId=17,maxStack=1}
+lockedProjection = {bySpell={[1777]=6},synced=false}
+Check(controller.LockedProjection() == nil,
+    "controller exposed unsynced partial lock evidence to the renderer")
+local partialExport = controller.ExportEntries()
+local leakedPartial = false
+for _, row in ipairs(partialExport) do
+    if tonumber(row.spellId) == 1777 and row.locked then leakedPartial = true end
+end
+Check(not leakedPartial,
+    "unsynced partial lock evidence leaked into public EBH1 export entries")
+lockedProjection = {bySpell={},synced=true}
+
+lockedProjection = {bySpell={[1001]=2,[1002]=2,[1003]=2},synced=true}
+Check(controller.LockedProjection() ~= nil,
+    "controller rejected a valid six-copy locked projection")
+lockedProjection.bySpell[1777] = 1
+Check(controller.LockedProjection() == nil,
+    "controller trusted seven locked copies")
+local overflowExport = controller.ExportEntries()
+local leakedOverflow = false
+for _, row in ipairs(overflowExport) do
+    if row.locked and (tonumber(row.spellId) == 1777) then leakedOverflow = true end
+end
+Check(not leakedOverflow,
+    "seven-copy locked evidence leaked into public export entries")
+lockedProjection = {bySpell={},synced=true}
+
+lockedProjection = {bySpell={[1001]=1,["1001"]=1},synced=true}
+Check(controller.LockedProjection() == nil,
+    "controller merged canonical aliases in locked evidence")
+lockedProjection = {bySpell={},synced=true}
+
+lockedProjection = {bySpell={[math.huge]=1},synced=true}
+Check(controller.LockedProjection() == nil,
+    "controller trusted a nonfinite locked spell identity")
+local infiniteExport = controller.ExportEntries()
+local leakedInfinite = false
+for _, row in ipairs(infiniteExport) do
+    if row.locked and row.spellId == math.huge then leakedInfinite = true end
+end
+Check(not leakedInfinite,
+    "nonfinite locked spell identity leaked into public export entries")
+lockedProjection = {bySpell={},synced=true}
+
 -- Filters and large draft views stay controller-owned without replacing
 -- future preferences or creating frames/actions.
 local filter = controller.FilterState()
@@ -104,6 +155,27 @@ Check(controller.DebugDraftState().pending == 2
     and character.lockDesignTargetsBySlot["key:2"] == legacyTargets
     and root.lockDesignTargets == nil and character.futureCharacter.keep,
     "candidate load lost draft or legacy lock-target identity")
+character.lockDesignTargetsBySlot["key:2"] = {
+    [1003]=true,[999999]=true,
+}
+controller.LoadPendingEchoes({
+    {spellId=1001,quality=1,stacks=2},
+    {spellId=1002,quality=2,stacks=1},
+})
+local rejectedDraft, rejectedExport = controller.DebugDraftState(),
+    controller.ExportEntries()
+local leakedRejectedTarget = false
+for _, row in ipairs(rejectedExport) do
+    if row.locked and (tonumber(row.spellId) == 1003
+        or tonumber(row.spellId) == 999999) then leakedRejectedTarget = true end
+end
+Check(rejectedDraft.pendingLock == 0 and not leakedRejectedTarget,
+    "controller reopened or exported part of a catalog-invalid target map")
+character.lockDesignTargetsBySlot["key:2"] = legacyTargets
+controller.LoadPendingEchoes({
+    {spellId=1001,quality=1,stacks=2},
+    {spellId=1002,quality=2,stacks=1},
+})
 local beforeInit = controller.PendingRows()
 controller.Initialize(Adapter)
 Check(controller.PendingRows() == beforeInit

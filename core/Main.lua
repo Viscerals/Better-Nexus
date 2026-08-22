@@ -57,7 +57,9 @@ EnsureMainViewModel = function()
     if not (factory and type(factory.New) == "function") then return nil end
     local ratchet = Ratchet or Nexus.Ratchet
     if not ratchet then return nil end
-    MainViewModel = factory.New({ratchet=ratchet})
+    MainViewModel = factory.New({ratchet=ratchet,model=Model or Nexus.Model,
+        wishlistModel=assert(Nexus.WishlistModel,
+            "WishlistModel unavailable").New()})
     return MainViewModel
 end
 
@@ -189,7 +191,7 @@ local function BuildProgress(plan, owned, slots, catalog, wishlistOverride,
         matchedBuildId = capture.FindMatchingBuildPublic(wishlist)
     end
     local wishlistEchoes = wishlist and (wishlist.echoes or wishlist.entries) or nil
-    local tomeEchoes = viewModel.TomeEchoes(wishlistEchoes, designTargets)
+    local tomeEchoes = viewModel.TomeEchoes(wishlistEchoes, designTargets, catalog)
     local unknownTomes = Adapter.UnknownTomesForEchoes
         and Adapter.UnknownTomesForEchoes(tomeEchoes) or {}
     return viewModel.BuildProgress({
@@ -583,6 +585,8 @@ EnsureAutomationRuntime = function()
         store=Store or Nexus.Store,adapter=Adapter or Nexus.GameAdapter,
         readout=Readout or Nexus.Readout,
         defaultProfile=DefaultProfile or Nexus.DefaultProfile,
+        wishlistModel=assert(Nexus.WishlistModel,
+            "WishlistModel unavailable").New(),
         viewModel=viewModel,renderPanel=RenderPanel,renderIdlePanel=RenderIdlePanel,
         buildProgress=BuildProgress,buildPanelProgress=BuildPanelProgress,
         appendAudit=AppendAudit,appendAutoLockEvent=AppendAutoLockEvent,

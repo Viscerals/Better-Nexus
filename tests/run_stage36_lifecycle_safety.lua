@@ -317,6 +317,8 @@ Check("real_adapter_lower_reload_no_boundary",
 -- must not count as complete and receives one, and only one, cadence retry.
 ------------------------------------------------------------------------
 Nexus = {MainInternals={}}
+dofile("logic/Model.lua")
+dofile("core/WishlistModel.lua")
 dofile("core/AutomationRuntime.lua")
 local runtimeFactory = assert(Nexus.MainInternals.AutomationRuntime)
 
@@ -346,6 +348,7 @@ local function NewPassiveBoundaryRuntime(initialLevel)
     local runtime = runtimeFactory.New({
         nexus=Nexus,model={},policy={},ratchet={},strategy={},store={},
         adapter=adapter,readout={},defaultProfile={},viewModel={},
+        wishlistModel=Nexus.WishlistModel.New(),
         renderPanel=function() end,renderIdlePanel=function() end,
         buildProgress=function() end,buildPanelProgress=function() end,
         appendAudit=function() end,appendAutoLockEvent=function() end,
@@ -409,6 +412,7 @@ local function NewDeadlineRetryRuntime()
     local runtime = runtimeFactory.New({
         nexus=Nexus,model={},policy={},ratchet={},strategy={},store={},
         adapter=adapter,readout={},defaultProfile={},viewModel={},
+        wishlistModel=Nexus.WishlistModel.New(),
         renderPanel=function() end,
         renderIdlePanel=function()
             if failRender then error("stage36 deadline render failure") end
@@ -523,6 +527,7 @@ local function NewFailingRuntime(alwaysFail, freshDirty)
     local runtime = runtimeFactory.New({
         nexus=Nexus,model={},policy={},ratchet={},strategy={},store={},
         adapter=adapter,readout={},defaultProfile={},viewModel={},
+        wishlistModel=Nexus.WishlistModel.New(),
         renderPanel=function() end,renderIdlePanel=function() end,
         buildProgress=function() end,buildPanelProgress=function() end,
         appendAudit=function() end,appendAutoLockEvent=function() end,

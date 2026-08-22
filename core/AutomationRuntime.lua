@@ -21,6 +21,8 @@ function AutomationRuntime.New(options)
         "AutomationRuntime requires DefaultProfile")
     local ViewModel = assert(options.viewModel,
         "AutomationRuntime requires MainViewModel")
+    assert(options.wishlistModel,
+        "AutomationRuntime requires WishlistModel")
     local RenderPanel = assert(options.renderPanel,
         "AutomationRuntime requires renderPanel")
     local RenderIdlePanel = assert(options.renderIdlePanel,
@@ -489,7 +491,15 @@ local function WishlistProgress(plan, owned, catalog, lockOnlyFamilies, wishlist
         end
     end
     return ViewModel.WishlistProgress(plan, owned, catalog, lockOnlyFamilies,
-        lockedOwned, designTargets)
+        lockedOwned, designTargets, wishlist)
+end
+
+local function LockTargetCopies(value, expectedSpellId)
+    return options.wishlistModel.TargetCopies(value, expectedSpellId)
+end
+
+local function LockTargetReplacement(value, expectedSpellId)
+    return options.wishlistModel.TargetReplacement(value, expectedSpellId)
 end
 
 local function FamilyCountsFromEchoes(echoes, catalog)
@@ -833,36 +843,87 @@ end
 -- freeze, held-echo preference, least-harmful-select) already keys off
 -- plan.wishedFamilies, so a lock-designated family is automatically
 -- treated exactly like any other wished family with zero changes to that
--- carefully-tuned decision logic itself. A family already covered by the
--- real wishlist is left alone -- this only ADDS families the real
--- wishlist doesn't already ask for.
+-- carefully-tuned decision logic itself. A locked target remains an
+-- additional exact quota when the ordinary Wishlist already represents its
+-- family (or even the same exact spell), so this builds an automation-only
+-- merged target without mutating the server Wishlist projection.
 local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets)
     local targets = knownTargets or LockDesignTargetsFor(wishlist, knownKey)
     if type(targets) ~= "table" or not next(targets) then return wishlist end
+    local targetEntries = options.wishlistModel.TargetMapEntries(targets, catalog)
+    if not targetEntries then return wishlist end
     local rows = catalog and catalog.rows
     local familyOf = catalog and catalog.familyOf
     if type(rows) ~= "table" or type(familyOf) ~= "table" then return wishlist end
 
-    local entries, byFamily, existingIds = {}, {}, {}
+    local entries, byFamily = {}, {}
     if wishlist then
         for fam, t in pairs(wishlist.byFamily or {}) do byFamily[fam] = t end
         for _, e in ipairs(wishlist.entries or {}) do
             entries[#entries + 1] = e
-            if e and e.spellId then existingIds[tonumber(e.spellId)] = true end
         end
     end
 
+    local copiedFamilies = {}
+    local function WritableTarget(fam)
+        if copiedFamilies[fam] then return byFamily[fam] end
+        local source = byFamily[fam]
+        if type(source) ~= "table" then return nil end
+        local copy = {}
+        for key, value in pairs(source) do copy[key] = value end
+        copy.qualityTiers = {}
+        for index, tier in ipairs(source.qualityTiers or {}) do
+            local tierCopy = {}
+            for key, value in pairs(tier) do tierCopy[key] = value end
+            copy.qualityTiers[index] = tierCopy
+        end
+        byFamily[fam] = copy
+        copiedFamilies[fam] = true
+        return copy
+    end
+
     local changed = false
-    for spellIdKey in pairs(targets) do
-        local id = tonumber(spellIdKey)
-        local row = id and rows[id]
-        local fam = id and familyOf[id]
-        if id and row and fam and not existingIds[id] and not byFamily[fam] then
+    for _, targetEntry in ipairs(targetEntries) do
+        local id = targetEntry.spellId
+        local row = targetEntry.row
+        local fam = targetEntry.family
+        local copies = targetEntry.copies
+        if id and row and fam and copies then
             local q = tonumber(row.quality) or 0
-            entries[#entries + 1] = { spellId = id, quality = q, stacks = 1, family = fam }
-            byFamily[fam] = { targetStacks = 1, wishedQuality = q, spellId = id,
-                qualityTiers = { { q = q, n = 1, spellId = id } } }
-            existingIds[id] = true
+            entries[#entries + 1] = {
+                spellId=id,quality=q,stacks=copies,family=fam,locked=true,
+            }
+            local target = WritableTarget(fam)
+            if target then
+                target.targetStacks = math.max(0,
+                    tonumber(target.targetStacks) or 0) + copies
+                local exactTier
+                for _, tier in ipairs(target.qualityTiers) do
+                    if tonumber(tier.spellId) == id then
+                        exactTier = tier
+                        break
+                    end
+                end
+                if exactTier then
+                    exactTier.n = math.max(0,
+                        tonumber(exactTier.n) or 0) + copies
+                else
+                    target.qualityTiers[#target.qualityTiers + 1] = {
+                        q=q,n=copies,spellId=id,
+                    }
+                end
+                table.sort(target.qualityTiers, function(a, b)
+                    local aq, bq = tonumber(a.q) or 0, tonumber(b.q) or 0
+                    if aq ~= bq then return aq < bq end
+                    return (tonumber(a.spellId) or 0)
+                        < (tonumber(b.spellId) or 0)
+                end)
+            else
+                byFamily[fam] = {
+                    targetStacks=copies,wishedQuality=q,spellId=id,
+                    qualityTiers={{q=q,n=copies,spellId=id}},
+                }
+            end
             changed = true
         end
     end
@@ -970,10 +1031,14 @@ local function AutoLockTime(value)
     return value
 end
 
-local function AutoLockBaseKey(wishlistKey, spellId, replaces)
-    return table.concat({
-        KeyPart(wishlistKey),KeyPart(spellId),KeyPart(replaces or false),
-    }, "|")
+local function AutoLockBaseKey(wishlistKey, spellId, replacementToken, copies)
+    local parts = {
+        KeyPart(wishlistKey),KeyPart(spellId),KeyPart(replacementToken or false),
+    }
+    if tonumber(copies) and tonumber(copies) > 1 then
+        parts[#parts + 1] = KeyPart(tonumber(copies))
+    end
+    return table.concat(parts, "|")
 end
 
 local function AutoLockIdentity(baseKey, lockedRevision, lockedToken)
@@ -1009,6 +1074,12 @@ local function AutoLockBucket(create)
             and AutoLockInteger(record.lockedRevision, true) or nil
         local replaces = type(record) == "table" and record.replaces ~= nil
             and AutoLockInteger(record.replaces) or nil
+        local replacementToken = type(record) == "table"
+            and record.replacementToken or nil
+        local replacementIdentity = replacementToken ~= nil
+            and replacementToken or replaces
+        local copies = type(record) == "table" and record.copies ~= nil
+            and AutoLockInteger(record.copies) or 1
         local submittedAt = type(record) == "table"
             and AutoLockTime(record.submittedAt) or nil
         local resolvedAt = type(record) == "table"
@@ -1025,8 +1096,11 @@ local function AutoLockBucket(create)
             or type(record.lockedToken) ~= "string"
             or spellId == nil or lockedRevision == nil
             or (record.replaces ~= nil and replaces == nil)
+            or (record.replacementToken ~= nil
+                and type(replacementToken) ~= "string")
+            or copies == nil
             or record.baseKey ~= AutoLockBaseKey(record.wishlistKey,
-                spellId,replaces)
+                spellId,replacementIdentity,copies)
             or record.identity ~= AutoLockIdentity(record.baseKey,
                 lockedRevision,record.lockedToken)
             or adapterAttempts == nil
@@ -1090,7 +1164,8 @@ local function AutoLockRecordMatches(record, descriptor)
     return type(record) == "table"
         and record.baseKey == descriptor.baseKey
         and tonumber(record.spellId) == descriptor.spellId
-        and tonumber(record.replaces) == descriptor.replaces
+        and record.replacementToken == descriptor.replacementToken
+        and (tonumber(record.copies) or 1) == descriptor.copies
         and record.identity == AutoLockIdentity(descriptor.baseKey,
             tonumber(record.lockedRevision),record.lockedToken)
 end
@@ -1098,38 +1173,50 @@ end
 local function AutoLockLockedToken(locked)
     if type(locked) ~= "table" or locked.synced ~= true
         or type(locked.bySpell) ~= "table" then return nil end
-    local parts = {}
+    local parts, seen = {}, {}
     for spellId, count in pairs(locked.bySpell) do
         spellId = AutoLockInteger(spellId)
         count = AutoLockInteger(count)
-        if not spellId or not count then return nil end
+        if not spellId or not count or seen[spellId] then return nil end
+        seen[spellId] = true
         parts[#parts + 1] = tostring(spellId) .. "x" .. tostring(count)
     end
     table.sort(parts)
     return #parts > 0 and table.concat(parts, ",") or "0"
 end
 
-local function AutoLockDescriptors(targets, wishlistKey)
+local function AutoLockDescriptors(targets, wishlistKey, catalog)
     local out, seen = {}, {}
-    for spellIdKey, replacementValue in pairs(targets) do
-        local spellId = AutoLockInteger(spellIdKey)
-        local replaces = type(replacementValue) == "number"
-            and AutoLockInteger(replacementValue) or nil
-        if spellId then
-            local baseKey = AutoLockBaseKey(wishlistKey, spellId, replaces)
-            if not seen[baseKey] then
-                seen[baseKey] = true
-                out[#out + 1] = {
-                    spellId=spellId,replaces=replaces,baseKey=baseKey,
-                }
-            end
+    local targetEntries = options.wishlistModel.TargetMapEntries(targets, catalog)
+    if not targetEntries then
+        return nil, nil, "invalid persisted lock target map"
+    end
+    for _, targetEntry in ipairs(targetEntries) do
+        local spellId = targetEntry.spellId
+        local replaces = targetEntry.replaces
+        local copies = targetEntry.copies
+        local replacementParts = {}
+        for _, replacement in ipairs(targetEntry.replacements) do
+            replacementParts[#replacementParts + 1] = tostring(replacement)
+        end
+        local replacementToken = table.concat(replacementParts, ",")
+        local baseKey = AutoLockBaseKey(
+            wishlistKey, spellId, replacementToken, copies)
+        if not seen[baseKey] then
+            seen[baseKey] = true
+            out[#out + 1] = {
+                spellId=spellId,replaces=replaces,copies=copies,
+                replacements=targetEntry.replacements,
+                replacementToken=replacementToken,
+                baseKey=baseKey,
+            }
         end
     end
     table.sort(out, function(left, right)
         if left.spellId ~= right.spellId then
             return left.spellId < right.spellId
         end
-        return (left.replaces or 0) < (right.replaces or 0)
+        return left.replacementToken < right.replacementToken
     end)
     return out, seen
 end
@@ -1152,7 +1239,9 @@ local function NewAutoLockRecord(descriptor, wishlistKey, lockedRevision,
             lockedToken),
         baseKey=descriptor.baseKey,
         wishlistKey=wishlistKey,spellId=descriptor.spellId,
-        replaces=descriptor.replaces,lockedRevision=lockedRevision,
+        replaces=descriptor.replaces,copies=descriptor.copies,
+        replacementToken=descriptor.replacementToken,
+        lockedRevision=lockedRevision,
         lockedToken=lockedToken,
         state="idle",reason="none",adapterAttempts=0,
         preparedAt=now,submittedAt=0,
@@ -1393,10 +1482,11 @@ local function StaticContext(probe, forceCompile)
     local wishlistSnapshot = CopyStatic(wishlist)
     local augmented = WishlistWithLockTargets(
         wishlistSnapshot, catalog, wishlistKey, targets)
+    local targetToken = options.wishlistModel.TargetMapToken(targets, catalog)
     local key = table.concat({
         KeyPart(CatalogRevision()),StrategyWishlistKey(wishlist),
         KeyPart(wishlistKey),
-        SortedMapKey(targets),SettingsKey(settings),
+        KeyPart(targetToken or "invalid"),SettingsKey(settings),
     }, "|")
     local plan
     if forceCompile or not staticCache or staticCache.key ~= key then
@@ -1480,7 +1570,13 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         trace[#trace + 1] = "Adapter.LockPerk/UnlockPerk/LockedOwned: missing on this build"
         return
     end
-    local descriptors, seen = AutoLockDescriptors(targets, wishlistKey)
+    local descriptors, seen, descriptorError = AutoLockDescriptors(
+        targets, wishlistKey, catalog)
+    if not descriptors then
+        trace[#trace + 1] = "AutoLock target state: "
+            .. tostring(descriptorError or "invalid")
+        return
+    end
     local bucket, bucketError = AutoLockBucket(true)
     if not bucket then
         trace[#trace + 1] = "AutoLock attempt state: " .. tostring(bucketError)
@@ -1492,9 +1588,12 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         tostring(LockSlotKey(wishlist, wishlistKey)), targetCount)
     if targetCount == 0 then return end
 
-    local lockedBySpell = (locked and locked.bySpell) or {}
-    local lockedCount = 0
-    for _ in pairs(lockedBySpell) do lockedCount = lockedCount + 1 end
+    local lockedBySpell, lockedCount =
+        options.wishlistModel.LockedSpellCounts(locked)
+    if not lockedBySpell then
+        trace[#trace + 1] = "authoritative locked-state counts are invalid"
+        return
+    end
     lockedRevision = AutoLockInteger(lockedRevision, true)
     local lockedToken = AutoLockLockedToken(locked)
     local maxSlots, capacitySource = Adapter.MaxPermanentEchoes
@@ -1617,8 +1716,9 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
             Print(string.format(
                 "|cff4dff80Nexus:|r unlocked %s -- %s is acquired and ready to replace it.",
                 EchoName(oldId), EchoName(newId)))
+            local removedCopies = tonumber(lockedBySpell[oldId]) or 0
             lockedBySpell[oldId] = nil
-            lockedCount = math.max(0, lockedCount - 1)
+            lockedCount = math.max(0, lockedCount - removedCopies)
             return true
         elseif err ~= "spacing" then
             Print(string.format("|cffff6060Nexus:|r couldn't unlock %s: %s",
@@ -1641,7 +1741,8 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         end
         if record then
             record = RefreshAutoLockRecord(record, lockedRevision, lockedToken,
-                (tonumber(lockedBySpell[descriptor.spellId]) or 0) > 0, now)
+                (tonumber(lockedBySpell[descriptor.spellId]) or 0)
+                    >= descriptor.copies, now)
             bucket.records[descriptor.baseKey] = record
         end
         currentRecords[descriptor.baseKey] = record
@@ -1657,14 +1758,24 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
     -- one AutoLock mutation crosses the adapter boundary per evaluation.
     local mutationAttempted = false
     for _, descriptor in ipairs(descriptors) do
-        local id, replaces = descriptor.spellId, descriptor.replaces
+        local id = descriptor.spellId
+        local replaces
+        for _, replacement in ipairs(descriptor.replacements) do
+            if replacement ~= id and not IsStillTarget(replacement)
+                and (tonumber(lockedBySpell[replacement]) or 0) > 0 then
+                replaces = replacement
+                break
+            end
+        end
+        local targetCopies = descriptor.copies
         local haveN = tonumber(ownedBySpell[id]) or 0
-        local isLocked = (tonumber(lockedBySpell[id]) or 0) > 0
+        local isLocked = (tonumber(lockedBySpell[id]) or 0) >= targetCopies
         local record = currentRecords[descriptor.baseKey]
         trace[#trace + 1] = string.format(
-            "target %s (%s): locked=%s owned=%s replaces=%s lifecycle=%s",
+            "target %s (%s): locked=%s owned=%s/%s replaces=%s lifecycle=%s",
             tostring(id), EchoName(id or 0), tostring(isLocked), tostring(haveN),
-            tostring(replaces),tostring(record and record.state or "none"))
+            tostring(targetCopies),tostring(descriptor.replacementToken),
+            tostring(record and record.state or "none"))
         if isLocked then
             -- Fulfilled targets stay in the committed set permanently. They
             -- are desired lock-slot state, not a temporary work queue. If this
@@ -1676,8 +1787,10 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
                 UnlockReplacement(replaces, id)
                 mutationAttempted = true
             end
-        elseif haveN > 0 then
-            if lockedCount < maxSlots then
+        elseif haveN >= targetCopies then
+            local currentCopies = tonumber(lockedBySpell[id]) or 0
+            local neededCopies = math.max(0, targetCopies - currentCopies)
+            if lockedCount + neededCopies <= maxSlots then
                 if not record and not outstanding and not uncertainTerminal
                     and not mutationAttempted then
                     record = NewAutoLockRecord(descriptor, wishlistKey,
@@ -1756,14 +1869,13 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
                     trace[#trace + 1] =
                         "  -> rejected identity retained; explicit retry or authoritative change required"
                 end
-            elseif replaces and replaces ~= id
-                and (tonumber(lockedBySpell[replaces]) or 0) > 0 then
+            elseif replaces then
                 if not outstanding and not uncertainTerminal
                     and not mutationAttempted then
                     UnlockReplacement(replaces, id)
                     mutationAttempted = true
                 end
-            elseif replaces and (tonumber(lockedBySpell[replaces]) or 0) <= 0 then
+            elseif #descriptor.replacements > 0 then
                 trace[#trace + 1] =
                     "  -> paired old Echo is no longer locked; waiting for a free slot/server refresh"
             else
