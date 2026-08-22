@@ -41,6 +41,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 - Adversarial review of `ade58ba` found and repaired the last catalog-admission bypass in persisted editor reopen/commit planning. Mixed known/unknown maps now reopen and commit nothing; locked totals pass `68`, controller `55`, and exact-base Fast remains `45/45`.
 - Adversarial review of `cb3f875` found and repaired malformed/catalog-disagreeing target-row quality plus EBH1 nonfinite formatting. Reopen, fulfilled export, and encode probes pass; locked totals advance to `80` and exact-base Fast remains `45/45`.
 - Review of `16df8d8` aligned EBH1 encode/decode tuple and aggregate bounds and repaired the assembled Stage 32 fixture's missing family projection. Locked totals pass `85`, assembled Stage 32 passes `47`, integration remains `70/70`, and exact-base Fast remains `45/45`.
+- Final independent Spec, Standards, and adversarial reviews PASS on exact clean product/test head `38d148e4034efde735ea346f7a6c3cc72b074560`. The combined focused matrices cover `21`/`9`/`17` runners; no actionable WP4 finding remains. Native WoW remains unverified.
 - Cumulative independent review rejected `7cff7e7` and drove five focused WP4 repairs: true total-minus-locked derivation, counted lock-target continuity, exact-spell automation matching, synced-only Policy authority, and exact renderer selection keys. All deterministic red probes are now green; 19 focused runners and exact-base Fast `39/39` pass on the repaired working candidate.
 - #35 checkpoint review found and repaired a same-family automation omission: locked sibling tiers and extra locked copies now extend an automation-only exact target without mutating the server Wishlist. The expected-red failed twice, the repaired Stage 32 fixture passes 65 checks, and exact-base Fast passes `35/35` with zero failed/unavailable/skipped checks.
 - #35 expected-red failed twice at `wrong-quality family ownership marked the exact Rare overlay row complete`; the green public runner proves exact Common/Rare separation, duplicate locked quota grouping, role-specific ownership, locked-only refresh, HUD/automation parity, and exact recovery.
@@ -124,8 +125,8 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- The shared EBH1 bounds and production-shaped assembled catalog repair after `16df8d8` is locally green in locked totals `85`, Stage 32 `47`, Stage 36 data integrity, integration `70/70`, and exact-base Fast `45/45`. The candidate awaits a local commit and all three repeated independent reviews.
+- Final independent Spec/Standards/adversarial review PASS is recorded for product/test head `38d148e`. Only the final exact-candidate Full gate and local receipt/stop commits remain; do not enter Stage 49/WP5.
 
 ## Recommended next action
 
-- Commit the repaired WP4 candidate locally, repeat independent Spec/Standards/adversarial reviews on that exact head, then run one final Full gate only if all three pass. Do not dispatch consolidation or enter Stage 49/WP5.
+- Commit the review receipt without changing product/test bytes, run the final Full gate on that exact candidate, record the receipt, and stop without dispatching consolidation or entering Stage 49/WP5.
