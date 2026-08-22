@@ -49,11 +49,13 @@ assert(eligibleBuild,
     "bundled startup fixture has no complete, unique Mage identity")
 NexusDB.dpsCapture.characterBest = {
     dummy={startupdummy={
-        player="StartupDummy",dps=100000,duration=60,ts=1,class="MAGE",
+        player="Startup",ownerKey="startup@ebonhold",ownerVerified=true,
+        realm="ebonhold",lockedEchoes={},dps=100000,duration=60,ts=1,class="MAGE",
         buildId=eligibleBuild.id,fingerprint=eligibleBuild.fingerprint,
     }},
     lk={startuplk={
-        player="StartupLk",dps=200000,duration=60,ts=1,class="MAGE",
+        player="Startup",ownerKey="startup@ebonhold",ownerVerified=true,
+        realm="ebonhold",lockedEchoes={},dps=200000,duration=60,ts=1,class="MAGE",
         buildId=eligibleBuild.id,fingerprint=eligibleBuild.fingerprint,
     }},
 }

@@ -94,6 +94,7 @@ local build = {
     id="stage36-candidate",title="Scoped Candidate",author="Fixture",
     ownerKey="fixture@ebonhold",ownerVerified=true,class="MAGE",
     fingerprint=EchoKey(ordinary),echoes=ordinary,
+    lockedEchoes=Copy(locked),
     postedAt=1,lastModified=1,loadoutAvailable=true,
 }
 
@@ -289,9 +290,10 @@ Revisions.Advance(Revisions.DPS_CHANGED, {
     scope="record",reason="selected locked fingerprint changed",
 })
 local lockedData, lockedReason = lockedController.PrepareApply("Locked")
-Check(lockedData == nil and lockedReason == "stale_candidate"
+Check(lockedData ~= nil and lockedReason == "create"
         and lockedWrites.upload == 0 and lockedWrites.association == 0,
-    "selected locked fingerprint change reached the Wishlist write boundary")
+    "historical DPS mutation invalidated exact current build authority: "
+        .. tostring(lockedReason))
 RestoreDps()
 
 -- Relevant owner authority change after preview preparation must be refused at
@@ -311,7 +313,8 @@ Check(ownerOk == false and ownerReason == "stale_candidate"
     "selected ownership change crossed immediate pre-write authorization")
 RestoreBuild()
 
--- Relevant DPS-to-build association change after preview preparation.
+-- Historical DPS-to-build association churn cannot replace or invalidate the
+-- exact current build authority captured by the candidate.
 local associationCandidate = OpenCandidate()
 local associationController, associationWrites = NewSession(associationCandidate)
 local associationData = assert(associationController.PrepareApply("Association"))
@@ -322,10 +325,10 @@ Revisions.Advance(Revisions.DPS_CHANGED, {
 })
 local associationOk, associationReason =
     associationController.AcceptApply(associationData)
-Check(associationOk == false and associationReason == "stale_candidate"
-        and associationWrites.upload == 0
-        and associationWrites.association == 0,
-    "selected build association change crossed immediate pre-write authorization")
+Check(associationOk == true and associationReason == nil
+        and associationWrites.upload == 1
+        and associationWrites.association == 1,
+    "historical association churn invalidated exact current build authority")
 RestoreDps()
 
 local expectedRed = {}
@@ -375,7 +378,7 @@ RecordUnrelatedResult("unrelated_dps", unrelatedDpsController,
     unrelatedDpsWrites)
 
 print(string.format(
-    "candidate revision scope: relevant=record/locked/owner/association refused-before-write defensive=yes legacy=yes expected_red=%d checks=%d",
+    "candidate revision scope: current=record/owner guarded historical=locked/association isolated defensive=yes legacy=yes expected_red=%d checks=%d",
     #expectedRed, checks))
 Check(#expectedRed == 0,
     "EXPECTED RED: unrelated represented revisions invalidated the selected candidate: "

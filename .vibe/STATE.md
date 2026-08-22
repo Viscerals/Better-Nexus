@@ -6,35 +6,37 @@
 
 ## Current focus
 
-- Stage: 48
-- Checkpoint: 48.4
-- Status: DONE
-- Branch: `bugfix/test19-wp4-exact-wishlist-evidence`
-- Starting head: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
+- Stage: 49
+- Checkpoint: 49.1
+- Status: IN_REVIEW
+- Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
+- Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 - Worktree: `.test19-wp4-worktree`
-- Base: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
+- Base: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 
 ## Objective (current checkpoint)
 
-Make overlay, HUD, model, editor, and automation progress consume the same exact tier and role evidence.
+Preserve capture-time locked DPS evidence while resolving current/build copy authority only through a stronger exact association.
 
 ## Deliverables (current checkpoint)
 
-- One exact-spell/tier progress boundary shared by `ui/WishlistOverlay.lua`, the model, editor, and automation consumers.
-- Focused sibling-tier, per-tier quota, locked-role, refresh, and parity coverage.
-- Removal of family-level satisfaction as an authority decision.
+- Explicit historical-snapshot versus current/build-authority roles in locked evidence resolution.
+- Focused later-current-state, category-order, timestamp-order, exact-authority, conflict, reload, and Sync coverage.
+- Immutable historical DPS rows when exact copy authority is absent.
 
 ## Acceptance (current checkpoint)
 
-- [x] A lower-quality sibling never satisfies a higher-quality target.
-- [x] Each exact tier reports its own owned copies, target quota, and completion state.
-- [x] Ordinary and locked progress consume their correct evidence roles.
-- [x] Overlay, HUD, model, and editor agree before and after refresh/reload.
-- [x] Focused overlay/parity tests, mapped tests, Fast, checkpoint review, and diff checks pass; cumulative independent review and Full remain the frozen WP4 gates.
+- [ ] Later current/build state cannot rewrite a historical locked snapshot by resemblance or recency.
+- [ ] Category winner and timestamp order never select copy authority by themselves.
+- [ ] Stronger exact current authority may resolve a copy operation without mutating historical evidence.
+- [ ] Conflicting or incomplete authority preserves history and reports unavailable/conflict explicitly.
+- [ ] Focused locked-evidence/DPS tests, mapped tests, Fast, required review/Full, and diff checks pass.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- WP5 implementation candidate separates historical locked snapshots from exact current/build copy authority and centralizes verified-owner + ordinary + locked/full-combat real-pair metrics across Community eligibility/averages, Leaderboard sync/resumable projections, retention, and DPS sorting. Focused authority/pairing matrices pass; Fast passes `37/37`; final Full passes `18` blocking checks with Lua `221/221`, parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit manual SavedVariables skip.
+- Stage 49 test-gap analysis prioritized five risk-backed matrices: `[MAJOR]` immutable historical snapshots versus exact later copy authority; `[MAJOR]` verified-owner + ordinary + locked/full-combat pair compatibility; `[MAJOR]` Community/Leaderboard/sort parity from one metric; `[MODERATE]` category/timestamp permutation invariance; `[MODERATE]` reload/restart/Sync convergence with preserved conflict evidence.
 - Exact-head review of `432e2ed` found and repaired catalog-owner drift, semantic target-cache staleness, row-order replacement identity, malformed/overflow locked evidence in Main/HUD and other consumers, and nested provenance aliasing. The affected matrix passes with locked totals `65`, controller `54`, AutoLock `105`, active bridge `19`, and exact-base Fast `45/45`; strict Vibe and diff checks pass.
 - Standards re-review of `94610e3` found and repaired direct admission-output aliasing plus duplicated/drifted Policy locked validation. `logic/Model.lua` is now the single pure locked-evidence admission owner, TargetMapEntries returns defensive values/catalog rows, locked totals pass `66`, Policy scenarios pass `54`, and exact-base Fast remains `45/45`.
 - Standards review of `04729be` found and repaired Policy's final raw-versus-normalized spell-map merge. Policy now consumes the full shared projection; lone string keys normalize to numeric exact authority, aliases still fail closed, and exact-base Fast remains `45/45`.
@@ -63,6 +65,9 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Work log
 
+- WP5 implementation completed issues #23/#26 on one coherent candidate: copy paths require exact build-bound locked authority; historical category rows remain preserved for display; one deterministic real-pair owner feeds qualification, Community averages, Leaderboard, retention, and sorting. Final Fast `37/37` and Full `18/18` pass.
+- Stage 49 maintenance test-gap analysis selected five non-duplicative expected-red matrices covering immutable history, exact copy authority, real-pair identity, cross-surface parity, ordering, and persistence/Sync convergence.
+- Stage 48 retrospective completed with five WP5 actions: one DPS authority verdict, adversarial immutable-history coverage, read-only copy resolution, shared projection parity, and pre-Full reload/Sync matrices.
 - Review wave 2 at `432e2ed` centralized catalog-bound target admission, canonicalized semantic target identity, made target/provenance results cycle-safe defensive copies, and atomically rejected malformed or seven-copy locked evidence across GameAdapter, controller/export/renderer, Main/HUD, Policy, and AutoLock. Focused probes and exact-base Fast `45/45` pass; a new exact local commit and three fresh independent reviews remain before Full.
 - Standards review at `94610e3` closed the prior catalog boundary and exposed the last two owner-consistency gaps. Direct admitted values/catalog rows are now defensive, and Policy plus every Wishlist consumer shares `Model.LockedProjection`; focused tests and Fast `45/45` pass. A new exact local commit and all three fresh reviews remain before Full.
 - Independent re-review closed the prior five repairs and found six further exactness gaps at `1afec7d`. Versioned counted-target validation, copy-based capacity/deficit admission, aggregation-stable identity, synced defensive renderer/export projections, and exact guaranteed-queue matching now pass 20 focused runners and exact-base Fast `41/41`.
@@ -93,7 +98,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Workflow state
 
-- [x] RUN_STOPPED
+- [ ] RUN_STOPPED
 - [ ] RUN_CONTEXT_CAPTURE
 - [x] STAGE_DESIGNED
 - [x] MAINTENANCE_CYCLE_DONE
@@ -117,7 +122,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Decisions
 
-- WP3 remains frozen; WP4 is authorized only in `.test19-wp4-worktree` through a validated local checkpoint, with no push, PR/issue mutation, publication, install, native WoW, live SavedVariables, or WP5 work.
+- WP4 remains frozen; WP5 is authorized only in `.test19-wp4-worktree` on the reconciled WP5 branch, with no push, PR/issue mutation, publication, install, native WoW, or live SavedVariables work.
 - Treat the master-chat order as authoritative: WP2 is #28/#41/#42, WP3 is #30/#37 then #19 acceptance, WP4 is #43/#44/#20/#35, and WP5 is #23/#26.
 - Preserve every independently owned worktree and the frozen WP2/PR #53 and WP3/PR #54 boundaries; only `.test19-wp4-worktree` owns this local WP4 range.
 - Exact canonical identity owns durable authority; ambiguous and future-owned evidence remains preserved, non-authoritative, and fail-closed.
@@ -125,8 +130,8 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- WP4 local completion PASS is recorded for exact frozen candidate `de76d9c`: independent Spec/Standards/adversarial review passed on product/test head `c28f3c9`, and Full passed `18` blocking checks with Lua `219/219`, parse `292/292`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip. Stage 49/WP5 was not entered.
+- WP4 local completion PASS is recorded at handoff head `e70de8a`; Stage 48 is archived and the Stage 49/WP5 pointer is ready at checkpoint 49.1.
 
 ## Recommended next action
 
-- Stop locally without dispatching consolidation or entering Stage 49/WP5. Any later action should be a separately authorized bounded WP4 publication/review step only.
+- Implement checkpoint 49.1 test-first under the dispatcher-selected role, preserving historical DPS snapshots and failing closed without exact current/build copy authority.

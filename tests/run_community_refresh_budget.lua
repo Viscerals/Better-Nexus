@@ -23,7 +23,9 @@ for index = 1, 1000 do
         for _, category in ipairs({"dummy", "lk"}) do
             NexusDB.dpsCapture.characterBest[category]
                 [category.."player"..index] = {
-                player=category.."Player"..index,
+                player="Player"..index,
+                ownerKey="player"..index.."@ebonhold",
+                ownerVerified=true,realm="ebonhold",lockedEchoes={},
                 dps=(category == "dummy" and 100000 or 200000)+index,
                 level=80,ts=index,duration=60,class="MAGE",
                 buildId=id,fingerprint=fingerprint,

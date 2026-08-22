@@ -518,18 +518,9 @@ end
 
 local function CombinedRows()
     local dummy, lk = Board("dummy"), Board("lk")
-    local dummyByKey = {}
-    for _, row in ipairs(dummy) do
-        local key = CombinedRecordKey(row)
-        if key then dummyByKey[key] = row end
-    end
     local out = {}
-    for _, lrow in ipairs(lk) do
-        local key = CombinedRecordKey(lrow)
-        local drow = key and dummyByKey[key]
-        if drow then
-            local average = ((tonumber(drow.dps) or 0)
-                + (tonumber(lrow.dps) or 0)) / 2
+    for _, pair in ipairs(CandidateEvidence.RealDpsPairs(dummy, lk)) do
+        local drow, lrow, average = pair.dummy, pair.lk, pair.average
             local ordinary = lrow.echoes or drow.echoes
             local locked = CombinedLockedEvidence(drow, lrow, ordinary)
             local dummyClass = NormalizeClass(drow.resolvedClass or drow.class)
@@ -590,7 +581,6 @@ local function CombinedRows()
                     or drow.recordIdentityMismatch or nil,
                 lockedEvidenceMismatch=locked.status == "conflict" or nil,
             }
-        end
     end
     counters.leaderboard.sorts = counters.leaderboard.sorts + 1
     table.sort(out, function(left, right)
@@ -1238,8 +1228,12 @@ local function PumpLeaderboardJob(job, unit)
             local row = dummy[job.sourceIndex]
             job.sourceIndex = job.sourceIndex + 1
             sourceRows = sourceRows + 1
-            local key = CombinedRecordKey(row)
-            if key then job.dummyByKey[key] = row end
+            local key = CandidateEvidence.DpsPairIdentity(row)
+            local current = key and job.dummyByKey[key]
+            if key and (not current
+                or CandidateEvidence.DpsRowBefore(row, current)) then
+                job.dummyByKey[key] = row
+            end
         end
         if job.sourceIndex > #dummy then
             job.state, job.sourceIndex = "rank", 1
@@ -1254,7 +1248,7 @@ local function PumpLeaderboardJob(job, unit)
             sourceRows = sourceRows + 1
             local row = raw
             if combined then
-                local key = CombinedRecordKey(raw)
+                local key = CandidateEvidence.DpsPairIdentity(raw)
                 local drow = key and job.dummyByKey[key]
                 if drow then
                     row = CombinedRow(drow, raw)

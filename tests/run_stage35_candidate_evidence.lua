@@ -77,7 +77,8 @@ local build = {
     id="stage35-community", title="Stage 35 Community Candidate",
     author="Fixture", ownerKey="fixture@ebonhold", class="MAGE",
     fingerprint=EchoKey(ordinary),
-    echoes=ordinary, postedAt=1, lastModified=1,
+    echoes=ordinary,lockedEchoes=Copy(locked),
+    postedAt=1,lastModified=1,
 }
 NexusDB = {
     settingsVersion=2, settings={}, chars={}, buildFilters={}, dpsCapture={},

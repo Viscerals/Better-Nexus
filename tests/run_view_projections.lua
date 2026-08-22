@@ -280,8 +280,8 @@ collisionBoards.dummy[1].lockedEchoes = {{spellId=810001,count=1}}
 collisionBoards.lk[1].lockedEchoes = {{spellId=810002,count=1}}
 Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})
 local lockedConflict = P.Leaderboard("combined", {classFilter="ALL"})
-assert(#lockedConflict == 1 and lockedConflict[1].lockedEvidenceMismatch == true,
-    "combined record silently selected conflicting locked evidence")
+assert(#lockedConflict == 0,
+    "incompatible locked full-combat identities produced an Average")
 collisionBoards.lk[1].lockedEchoes = {{spellId=810001,count=1}}
 Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})
 local lockedExact = P.Leaderboard("combined", {classFilter="ALL"})

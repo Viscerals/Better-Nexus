@@ -226,13 +226,8 @@ Nexus.Leaderboard.Init({})
 Nexus.Leaderboard.Show("combined")
 Nexus.Leaderboard.RefreshData()
 local combinedKey = "fixture@ebonhold|string:" .. build.fingerprint
-Control(Nexus.Leaderboard.SelectKey(combinedKey),
-    "real combined Leaderboard row was not selectable")
-local leaderboardDetail = assert(NexusLeaderboardFrame._leaderboardDetail,
-    "real Leaderboard detail panel was not assembled")
-Control(not leaderboardDetail.copy:IsEnabled()
-        and leaderboardDetail.more:GetText():find(disagreeReason,1,true),
-    "Leaderboard/Wishlist Copy did not refuse conflicting locked evidence")
+Control(not Nexus.Leaderboard.SelectKey(combinedKey),
+    "conflicting locked identities remained selectable as a combined pair")
 
 local recoveredDummy = Record("dummy", dummyLocked, {
     buildId="historical-dummy-stage36",resolvedBuildId=build.id,build=nil,
@@ -253,9 +248,9 @@ Nexus.ViewProjections.Reset()
 Nexus.Leaderboard.Show("combined")
 Nexus.Leaderboard.RefreshData()
 local recoveredSelected = Nexus.Leaderboard.SelectKey(combinedKey)
-Control(recoveredSelected
-        and NexusLeaderboardFrame._leaderboardDetail.copy:IsEnabled(),
-    "matching recovered category records did not remain copyable")
+local recoveredCopy = controller.LockedEchoesForBuild(build, true)
+Control(recoveredCopy == nil,
+    "historical category agreement granted current copy authority")
 Nexus.DpsCapture.GetCharacterBest = nil
 InstallRecords(dummy, lk)
 

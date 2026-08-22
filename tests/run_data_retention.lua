@@ -91,7 +91,8 @@ end
 local dummy = NexusDB.dpsCapture.characterBest.dummy
 dummy.boganic = {
     player="Boganic", ownerKey="boganic@ebonhold", buildId="local-leader",
-    fingerprint="fp-local", dps=999999, ts=now,
+    ownerVerified=true,realm="ebonhold",fingerprint="fp-local",
+    lockedEchoes={},dps=999999,ts=now,
 }
 for i = 1, 300 do
     local id = string.format("remote-char-%03d", i)
@@ -101,12 +102,16 @@ for i = 1, 300 do
         lastModified=10000 + i, loadoutAvailable=true,
     }
     dummy[string.format("player-%03d", i)] = {
-        player="Player" .. tostring(i), buildId=id,
+        player="Player" .. tostring(i),
+        ownerKey="player" .. tostring(i) .. "@ebonhold",
+        ownerVerified=true,realm="ebonhold",buildId=id,lockedEchoes={},
         fingerprint="fp-char-" .. tostring(i), dps=100000 + i, ts=10000 + i,
     }
     if i <= 180 then
         NexusDB.dpsCapture.characterBest.lk[string.format("player-%03d", i)] = {
-            player="Player" .. tostring(i), buildId=id,
+            player="Player" .. tostring(i),
+            ownerKey="player" .. tostring(i) .. "@ebonhold",
+            ownerVerified=true,realm="ebonhold",buildId=id,lockedEchoes={},
             fingerprint="fp-char-" .. tostring(i),
             dps=(i <= 40 and 900000 + i or 200000 + i), ts=10000 + i,
         }

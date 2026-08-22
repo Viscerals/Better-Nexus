@@ -187,6 +187,10 @@ Cross-module edges that later extraction must retain:
 | `Evidence.ResolveLocked` | Resolve one exact category-aware locked-Echo authority without global reads | Community/Leaderboard/Wishlist/Peer Debug/tests | selected ordinary/build identity + bounded category or inline records -> defensive locked result + scalar diagnostics | incomplete ordinary data, malformed claims, identity mismatch, or category disagreement fail closed | W-C/W-UI |
 | `Evidence.CurrentKind` | Publish the current typed candidate contract identifier | tests/diagnostics | constant -> string | none | W-C |
 | `Evidence.NormalizeLockedEchoes` | Normalize one typed locked-role pool and enforce the six-copy envelope | Wishlist/tests | dense locked rows -> defensive exact rows with counts, future fields, and provenance | malformed rows or more than six total copies fail closed | W-C/W-UI |
+| `Evidence.RealDpsPairs` | Select deterministic real Dummy/LK pairs | Community/Leaderboard/retention/tests | immutable category rows -> best pair per verified owner + ordinary + locked/full-combat identity | missing, conflicting, or unverified identity produces no pair | W-C/W-UI |
+| `Evidence.DpsSummary` | Project independent category bests and one compatible Average | Community/sorting/tests | Dummy/LK row sets -> category maxima + optional pair | Average remains unavailable when no real pair exists | W-C/W-UI |
+| `Evidence.DpsPairIdentity` | Expose the verified owner + ordinary + locked/full-combat join key | resumable Leaderboard/tests | one immutable DPS row -> pair key or nil | incomplete or unverified identity fails closed | W-C |
+| `Evidence.DpsRowBefore` | Select a deterministic category representative without timestamp preference | resumable Leaderboard/tests | two compatible-category rows -> strict order | invalid DPS falls behind valid positive DPS | W-C |
 
 ## `Nexus.WishlistModel` inventory
 

@@ -442,11 +442,10 @@ local pageTwelve, pageTwelveSummary = Nexus.ViewProjections.Builds({
     scope="all",currentClassOnly=true,qualifiedOnly=true,
     search="Historical Record Loadout",sortMode="title",page=12,
 })
-assert(#pageOne == 20 and #pageTwelve == 4
-        and pageOneSummary.filteredTotal == RECOVERY_COUNT - 1
-        and pageTwelveSummary.first == 221
-        and pageTwelveSummary.last == RECOVERY_COUNT - 1,
-    "recovered identities did not qualify through normal 20-row paging")
+assert(#pageOne == 1 and #pageTwelve == 1
+        and pageOneSummary.filteredTotal == 1,
+    string.format("unverified recovered identities qualified without canonical owner authority: page1=%d page12=%d total=%s",
+        #pageOne,#pageTwelve,tostring(pageOneSummary.filteredTotal)))
 Nexus.ViewProjections.Reset()
 local allClasses, allClassSummary = Nexus.ViewProjections.Builds({
     scope="all",currentClassOnly=false,qualifiedOnly=true,
@@ -467,7 +466,7 @@ local qualifiedCollisions, qualifiedCollisionSummary = Nexus.ViewProjections.Bui
     scope="all",currentClassOnly=false,qualifiedOnly=true,
     search="Current collision",sortMode="title",page=1,
 })
-assert(#allClasses == 5 and allClassSummary.filteredTotal == RECOVERY_COUNT
+assert(#allClasses == 1 and allClassSummary.filteredTotal == 1
         and #mine == 0 and mineSummary.filteredTotal == 0
         and #unqualifiedCollisions == 20
         and collisionSummary.filteredTotal == collisionLibraryBefore

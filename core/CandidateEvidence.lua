@@ -384,6 +384,27 @@ function Evidence.ResolveLocked(options)
         options, ordinaryFingerprint)
     if targetReason then return LockedOutcome("invalid", targetReason) end
 
+    -- Category rows are immutable capture-time evidence. They may diagnose a
+    -- historical conflict, but never grant current copy authority. An exact
+    -- independently supplied build can do so because TargetIdentity above has
+    -- already bound its ordinary fingerprint and typed ID to this request.
+    if options.copyAuthorityRequired == true
+        and type(options.build) == "table" and type(buildLocked) == "table"
+        and #buildLocked > 0 then
+        local current, currentReason = NormalizePool(buildLocked, true)
+        if not current then
+            return LockedOutcome("invalid", currentReason)
+        end
+        local currentFingerprint = CanonicalFingerprint(current)
+        local currentClaim = options.build.lockedFingerprint
+        if currentClaim ~= nil
+            and tostring(currentClaim) ~= currentFingerprint then
+            return LockedOutcome("invalid", LOCKED_CLAIM_MISMATCH)
+        end
+        return LockedOutcome("ok", nil, "build",
+            currentFingerprint, current)
+    end
+
     local dummy, dummyFingerprint, dummyIdentity, dummyReason = LockedRecord(
         dummyRecord, "dummy", buildId, expectedFingerprint,
         allowOrdinaryOverflow)
@@ -403,15 +424,30 @@ function Evidence.ResolveLocked(options)
             return LockedOutcome("conflict",
                 "record categories disagree on resolved build identity")
         end
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", dummyFingerprint)
+        end
         local status = #dummy > 0 and "ok" or "none"
         return LockedOutcome(status, nil, "dummy+lk",
             dummyFingerprint, dummy)
     end
     if dummyRecord ~= nil then
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", dummyFingerprint)
+        end
         local status = #dummy > 0 and "ok" or "none"
         return LockedOutcome(status, nil, "dummy", dummyFingerprint, dummy)
     end
     if lkRecord ~= nil then
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", lkFingerprint)
+        end
         local status = #lk > 0 and "ok" or "none"
         return LockedOutcome(status, nil, "lk", lkFingerprint, lk)
     end
@@ -586,6 +622,103 @@ end
 
 function Evidence.CurrentKind()
     return CURRENT_KIND
+end
+
+-- DPS pairing is a projection over immutable category records. One real pair
+-- must share independently verified canonical owner, ordinary fingerprint,
+-- and the full locked combat identity (exact spell, quality, and copy total).
+local function PairIdentity(record)
+    if type(record) ~= "table" or type(record.fingerprint) ~= "string"
+        or record.fingerprint == "" then return nil end
+    local identity = Nexus and Nexus.Identity
+    local owner = identity and type(identity.VerifiedOwnerKey) == "function"
+        and identity.VerifiedOwnerKey(record) or nil
+    if not owner then return nil end
+    local rows, reason = NormalizePool(record.lockedEchoes or {}, true)
+    if not rows or reason then return nil end
+    local lockedFingerprint = CanonicalFingerprint(rows)
+    if record.lockedFingerprint ~= nil
+        and tostring(record.lockedFingerprint) ~= lockedFingerprint then
+        return nil
+    end
+    return owner .. "|" .. record.fingerprint .. "|"
+        .. ExactLockedIdentity(rows)
+end
+
+local function PairTie(row)
+    return tostring(row.player or "") .. "|"
+        .. type(row.buildId) .. ":" .. tostring(row.buildId or "")
+end
+
+function Evidence.DpsPairIdentity(record)
+    return PairIdentity(record)
+end
+
+function Evidence.DpsRowBefore(left, right)
+    local leftDps, rightDps = tonumber(left and left.dps) or 0,
+        tonumber(right and right.dps) or 0
+    if leftDps ~= rightDps then return leftDps > rightDps end
+    return PairTie(left or {}) < PairTie(right or {})
+end
+
+function Evidence.RealDpsPairs(dummyRows, lkRows)
+    local dummyByIdentity = {}
+    for _, row in ipairs(type(dummyRows) == "table" and dummyRows or {}) do
+        local key = PairIdentity(row)
+        if key then
+            local bucket = dummyByIdentity[key] or {}
+            bucket[#bucket + 1] = row
+            dummyByIdentity[key] = bucket
+        end
+    end
+    local best = {}
+    for _, lk in ipairs(type(lkRows) == "table" and lkRows or {}) do
+        local key = PairIdentity(lk)
+        for _, dummy in ipairs(key and dummyByIdentity[key] or {}) do
+            local dummyDps, lkDps = tonumber(dummy.dps) or 0,
+                tonumber(lk.dps) or 0
+            if dummyDps > 0 and lkDps > 0 then
+                local candidate = {identity=key,dummy=dummy,lk=lk,
+                    dummyDps=dummyDps,lkDps=lkDps,
+                    average=(dummyDps + lkDps) / 2,
+                    tie=PairTie(dummy) .. "|" .. PairTie(lk)}
+                local current = best[key]
+                if not current or candidate.average > current.average
+                    or candidate.average == current.average
+                        and candidate.tie < current.tie then
+                    best[key] = candidate
+                end
+            end
+        end
+    end
+    local out = {}
+    for _, pair in pairs(best) do out[#out + 1] = pair end
+    table.sort(out, function(left, right)
+        if left.average ~= right.average then
+            return left.average > right.average
+        end
+        return left.identity < right.identity
+    end)
+    return out
+end
+
+function Evidence.DpsSummary(dummyRows, lkRows)
+    local summary = {dummy=0,lk=0,best=0,average=0,count=0,pair=nil}
+    for _, row in ipairs(type(dummyRows) == "table" and dummyRows or {}) do
+        summary.dummy = math.max(summary.dummy, tonumber(row.dps) or 0)
+    end
+    for _, row in ipairs(type(lkRows) == "table" and lkRows or {}) do
+        summary.lk = math.max(summary.lk, tonumber(row.dps) or 0)
+    end
+    if summary.dummy > 0 then summary.count = summary.count + 1 end
+    if summary.lk > 0 then summary.count = summary.count + 1 end
+    summary.best = math.max(summary.dummy, summary.lk)
+    local pairs = Evidence.RealDpsPairs(dummyRows, lkRows)
+    if pairs[1] then
+        summary.average = pairs[1].average
+        summary.pair = pairs[1]
+    end
+    return summary
 end
 
 -- Public normalization seam for consumers that need to materialize the same

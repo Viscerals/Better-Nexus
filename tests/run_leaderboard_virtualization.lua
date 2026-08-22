@@ -26,7 +26,8 @@ for index=1,150 do
     local fingerprint=EchoKey(echoes)
     local locked=index==80 and {{spellId=740080,stacks=1}} or nil
     local build={id=buildId,title=string.format("Ranked Build %03d",index),
-        author=player,class=class,fingerprint=fingerprint}
+        author=player,class=class,fingerprint=fingerprint,
+        echoes=echoes,lockedEchoes=locked}
     boards.dummy[index]={player=player,dps=30000000-index*1000,duration=60,level=80,ts=index,
         ownerKey=player:lower().."@ebonhold",ownerVerified=true,realm="ebonhold",
         category="dummy",fingerprint=fingerprint,buildId=buildId,echoes=echoes,
@@ -180,16 +181,11 @@ boards.lk[80].lockedEchoes={{spellId=740081,stacks=1}}
 Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,
     {source="combined locked conflict"})
 L.SetCategory("combined")
-assert(L.VirtualStats().results==150 and L.VirtualStats().category=="combined")
-assert(L.SelectKey(selectedKey))
-detail=NexusLeaderboardFrame._leaderboardDetail
-copied=nil
-assert(not detail.copy:IsEnabled()
-    and detail.more:GetText():find("disagree on locked Echo evidence",1,true),
-    "combined locked-evidence conflict did not remain visible and fail closed")
-detail.copy:GetScript("OnClick")()
-assert(copied==nil,"combined locked-evidence conflict opened the editor")
+assert(L.VirtualStats().results==149 and L.VirtualStats().category=="combined")
+assert(not L.SelectKey(selectedKey),
+    "incompatible locked full-combat identities remained a combined pair")
 boards.lk[80].lockedEchoes={{spellId=740080,stacks=1}}
+boards.dummy[80].build.lockedEchoes={{spellId=740080,stacks=1}}
 Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,
     {source="combined locked recovery"})
 L.RefreshData()

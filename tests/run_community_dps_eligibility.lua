@@ -3,17 +3,18 @@
 local H = dofile("tests/harness.lua")
 dofile("core/Revisions.lua")
 
-local function Row(fingerprint, dps, player, buildId, loadoutHash)
+local function Row(fingerprint, dps, player, buildId, loadoutHash, owner)
+    owner = owner or player:lower() .. "@ebonhold"
     return {
         fingerprint=fingerprint,dps=dps,player=player,
+        ownerKey=owner,ownerVerified=true,realm="ebonhold",lockedEchoes={},
         buildId=buildId or player,loadoutHash=loadoutHash,
         class="MAGE",level=80,ts=100,duration=60,
     }
 end
 
 local dummy = {
-    exactlow=Row("exact-full", 100, "ExactLow"),
-    exacthigh=Row("exact-full", 150, "ExactHigh"),
+    exacthigh=Row("exact-full", 150, "Exact", nil, nil, "exact@ebonhold"),
     onesided=Row("one-sided", 300, "OneSided"),
     collisiondummy=Row("collision-a", 400, "CollisionDummy", "shared-id", "same-short"),
     zero=Row("zero-pair", 0, "Zero"),
@@ -23,7 +24,7 @@ local dummy = {
     badfingerprint=Row({}, 500, "BadFingerprint"),
 }
 local lk = {
-    exactlk=Row("exact-full", 200, "ExactLk"),
+    exactlk=Row("exact-full", 200, "Exact", nil, nil, "exact@ebonhold"),
     collisionlk=Row("collision-b", 500, "CollisionLk", "shared-id", "same-short"),
     zerolk=Row("zero-pair", 250, "ZeroLk"),
     negativelk=Row("negative-pair", 250, "NegativeLk"),
@@ -81,9 +82,10 @@ assert(cachedStats.rebuilds == 1
     and cachedStats.intersections == 1,
     "unchanged eligibility reads rebuilt or rescanned DPS storage")
 
-lk.onesidedlk = Row("one-sided", 350, "OneSidedLk")
+lk.onesidedlk = Row("one-sided", 350, "OneSided", nil, nil,
+    "onesided@ebonhold")
 local advancedRevision = R.Advance(R.DPS_CHANGED, "eligibility fixture")
-assert(advancedRevision == 1, "unexpected prior DPS revision: "
+assert(advancedRevision >= 1, "DPS revision did not advance: "
     .. tostring(advancedRevision))
 local stale, staleWhy = DPS.GetCachedCommunityQualification(
     "one-id", "one-sided", nil)

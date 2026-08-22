@@ -155,18 +155,18 @@ local function StoredRow(category, duration, player, fp)
         fingerprint=fp,loadoutHash=hash,echoes=echoes,category=category,
         dps=250000,duration=duration,ts=30000,player=player,
         level=80,class="MAGE",ownerKey=player:lower() .. "@ebonhold",
-        realm="ebonhold",ownerVerified=true,
+        realm="ebonhold",ownerVerified=true,lockedEchoes={},
     }
 end
 NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={
     characterBest={
         dummy={
-            valid=StoredRow("dummy",30,"ValidDummy","valid-pair"),
+            valid=StoredRow("dummy",30,"Valid","valid-pair"),
             shortdummy=StoredRow("dummy",29,"ShortDummy","short-dummy"),
             shortlk=StoredRow("dummy",30,"ShortLkDummy","short-lk"),
         },
         lk={
-            valid=StoredRow("lk",20,"ValidLk","valid-pair"),
+            valid=StoredRow("lk",20,"Valid","valid-pair"),
             shortdummy=StoredRow("lk",30,"ShortDummyLk","short-dummy"),
             shortlk=StoredRow("lk",19,"ShortLk","short-lk"),
         },
