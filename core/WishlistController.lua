@@ -167,7 +167,7 @@ function Controller.New(options)
         end
         for spellId, replacement in pairs(state.fulfilledDraftTargets) do
             local id = tonumber(spellId)
-            local copies = DraftModel.TargetCopies(replacement)
+            local copies = DraftModel.TargetCopies(replacement, id)
             if id and copies then
                 locked[id] = {
                     copies=copies,
@@ -974,7 +974,7 @@ function Controller.New(options)
         state.currentLockKey = nextKey
         state.fulfilledDraftTargets = {}
         for id, value in pairs(fresh) do
-            local copies = DraftModel.TargetCopies(value)
+            local copies = DraftModel.TargetCopies(value, id)
             if copies and (tonumber(lockedBySpell[id]) or 0) >= copies then
                 state.fulfilledDraftTargets[id] = value
             end

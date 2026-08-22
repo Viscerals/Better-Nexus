@@ -57,6 +57,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 ## Work log
 
 - Independent re-review closed the prior five repairs and found six further exactness gaps at `1afec7d`. Versioned counted-target validation, copy-based capacity/deficit admission, aggregation-stable identity, synced defensive renderer/export projections, and exact guaranteed-queue matching now pass 20 focused runners and exact-base Fast `41/41`.
+- Exact-head audit before accepting `72355cb` found and repaired one remaining persisted-record identity mismatch plus duplicate-validator drift: WishlistModel now solely validates finite version-1 records and requires every dense row to name the containing exact spell. All 20 focused runners pass, including locked totals 29 checks, AutoLock 71, and integration `70/70`; exact-base Fast passes `43/43` with zero failed/unavailable/skipped checks.
 - Cumulative WP4 independent review found five valid Spec/Standards/adversarial gaps at `7cff7e7`; all were repaired with public counterexamples and focused/Fast revalidation. The repaired candidate is ready for all three independent reviews to repeat before Full.
 - Checkpoint 48.4 hygiene was clean across the exact progress projection, its presentation consumers, and automation-only locked-target merger; no safe quick win or evidence-backed debt justified churn.
 - Checkpoint 48.4 review repaired same-family locked-target augmentation, then passed exact tier/role presentation and automation acceptance without entering Stage 49.
@@ -110,7 +111,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Cumulative re-review repair is locally green: 20 focused runners, integration `70/70`, module contracts, exact-base Fast `41/41`, strict Vibe validation, and diff checks pass. The repaired product/test/docs bytes await a local commit and all three repeated independent reviews.
+- Cumulative re-review repair plus exact target-key binding is locally green in 20 focused runners and exact-base Fast `43/43`. The candidate awaits a local commit and all three repeated independent reviews.
 
 ## Recommended next action
 

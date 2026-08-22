@@ -129,8 +129,14 @@ state.lockDesignTargetsBySlot[wishlistKey] = {
 }
 Check(Nexus.RequestRecompute(), "inconsistent-target recompute was refused")
 H.Advance(0.4, 0.2)
+state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]={version=1,copies=1,
+        rows={{spellId=200102,quality=2,stacks=1}}},
+}
+Check(Nexus.RequestRecompute(), "wrong-identity target recompute was refused")
+H.Advance(0.4, 0.2)
 Check(#lockCalls == 0,
-    "malformed/future counted target authorized a one-copy LockPerk")
+    "malformed/future/wrong-identity counted target authorized LockPerk")
 
 -- Restore the original one-of-three fixture for the lifecycle assertions.
 state.autoLockAttempts = nil

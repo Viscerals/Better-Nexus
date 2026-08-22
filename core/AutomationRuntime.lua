@@ -21,6 +21,8 @@ function AutomationRuntime.New(options)
         "AutomationRuntime requires DefaultProfile")
     local ViewModel = assert(options.viewModel,
         "AutomationRuntime requires MainViewModel")
+    assert(options.wishlistModel,
+        "AutomationRuntime requires WishlistModel")
     local RenderPanel = assert(options.renderPanel,
         "AutomationRuntime requires renderPanel")
     local RenderIdlePanel = assert(options.renderIdlePanel,
@@ -492,32 +494,8 @@ local function WishlistProgress(plan, owned, catalog, lockOnlyFamilies, wishlist
         lockedOwned, designTargets, wishlist)
 end
 
-local function LockTargetCopies(value)
-    if type(value) ~= "table" then return 1 end
-    if value.version ~= 1 or type(value.rows) ~= "table" then return nil end
-    local copies = tonumber(value.copies)
-    if not copies or copies < 1 or copies >= math.huge
-        or copies ~= math.floor(copies) then return nil end
-    local rowCount, highest, total = 0, 0, 0
-    for index, row in pairs(value.rows) do
-        local stacks = type(row) == "table" and tonumber(row.stacks) or nil
-        local spellId = type(row) == "table" and tonumber(row.spellId) or nil
-        if type(index) ~= "number" or index < 1 or index ~= math.floor(index)
-            or not spellId or spellId < 1 or spellId ~= math.floor(spellId)
-            or not stacks or stacks < 1 or stacks >= math.huge
-            or stacks ~= math.floor(stacks) then return nil end
-        rowCount = rowCount + 1
-        highest = math.max(highest, index)
-        total = total + stacks
-    end
-    if rowCount < 1 or highest ~= rowCount or total ~= copies then return nil end
-    if value.replaces ~= nil then
-        local replaces = tonumber(value.replaces)
-        if not replaces or replaces < 1 or replaces ~= math.floor(replaces) then
-            return nil
-        end
-    end
-    return copies
+local function LockTargetCopies(value, expectedSpellId)
+    return options.wishlistModel.TargetCopies(value, expectedSpellId)
 end
 
 local function LockTargetReplacement(value)
@@ -910,7 +888,7 @@ local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets
         local id = tonumber(spellIdKey)
         local row = id and rows[id]
         local fam = id and familyOf[id]
-        local copies = LockTargetCopies(targetValue)
+        local copies = LockTargetCopies(targetValue, id)
         if id and row and fam and copies then
             local q = tonumber(row.quality) or 0
             entries[#entries + 1] = {
@@ -1206,7 +1184,7 @@ local function AutoLockDescriptors(targets, wishlistKey)
     for spellIdKey, replacementValue in pairs(targets) do
         local spellId = AutoLockInteger(spellIdKey)
         local replaces = LockTargetReplacement(replacementValue)
-        local copies = LockTargetCopies(replacementValue)
+        local copies = LockTargetCopies(replacementValue, spellId)
         if spellId and not copies then
             return nil, nil, "invalid persisted lock target"
         end

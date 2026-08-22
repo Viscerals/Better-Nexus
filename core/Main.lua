@@ -583,6 +583,8 @@ EnsureAutomationRuntime = function()
         store=Store or Nexus.Store,adapter=Adapter or Nexus.GameAdapter,
         readout=Readout or Nexus.Readout,
         defaultProfile=DefaultProfile or Nexus.DefaultProfile,
+        wishlistModel=assert(Nexus.WishlistModel,
+            "WishlistModel unavailable").New(),
         viewModel=viewModel,renderPanel=RenderPanel,renderIdlePanel=RenderIdlePanel,
         buildProgress=BuildProgress,buildPanelProgress=BuildPanelProgress,
         appendAudit=AppendAudit,appendAutoLockEvent=AppendAutoLockEvent,

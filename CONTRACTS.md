@@ -360,7 +360,7 @@ reconciliation, name trimming, and the exact desired lock-target map. Counted
 lock-target records retain `{ version=1, copies, replaces, rows }`, including duplicate
 exact rows and unknown/provenance fields, across reconcile, commit, reopen,
 export, progress, and automation planning. Current-schema tables require dense
-positive rows whose stack total equals `copies`; malformed and future table
+positive rows for the containing exact spell whose stack total equals `copies`; malformed and future table
 contracts fail closed, while legacy scalar one-copy targets remain compatible. It does
 not parse or encode EBH1 bytes: `core/Codec.lua` remains the sole wire owner.
 It does not read production lock intent: `AutomationRuntime.LockDesignTargetsFor`

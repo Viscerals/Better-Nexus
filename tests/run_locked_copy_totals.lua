@@ -227,6 +227,9 @@ for label, record in pairs({
     fractional={version=1,copies=1.5,rows={{spellId=720099,stacks=1}}},
     sparse={version=1,copies=1,rows={[2]={spellId=720099,stacks=1}}},
     mismatched={version=1,copies=2,rows={{spellId=720099,stacks=1}}},
+    mixedSpell={version=1,copies=2,rows={
+        {spellId=720099,stacks=1},{spellId=720098,stacks=1},
+    }},
 }) do
     Check(Model.TargetCopies(record) == nil,
         "malformed/future persisted target failed open: " .. label)

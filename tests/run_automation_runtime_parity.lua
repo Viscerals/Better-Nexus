@@ -6,6 +6,7 @@
 Nexus = {}
 dofile("core/Performance.lua")
 dofile("core/Revisions.lua")
+dofile("core/WishlistModel.lua")
 dofile("core/AutomationRuntime.lua")
 
 local factory = Nexus.MainInternals and Nexus.MainInternals.AutomationRuntime
@@ -27,6 +28,7 @@ local function NewRuntime(overrides)
         nexus=Nexus,
         model={}, policy={}, ratchet={}, strategy={}, store={}, adapter={},
         readout={}, defaultProfile={}, viewModel={},
+        wishlistModel=Nexus.WishlistModel.New(),
         renderPanel=function() end,
         renderIdlePanel=function() end,
         buildProgress=function() end,
