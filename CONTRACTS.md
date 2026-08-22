@@ -366,7 +366,9 @@ reconciliation, name trimming, and the exact desired lock-target map. Counted
 lock-target records retain `{ version=1, copies, replaces, rows }`, including duplicate
 exact rows and unknown/provenance fields, across reconcile, commit, reopen,
 export, progress, and automation planning. Current-schema tables require dense
-positive rows for the containing exact spell whose stack total equals `copies`; malformed and future table
+positive rows for the containing exact spell whose stack total equals `copies`;
+when present, row quality is a finite nonnegative integer, and catalog-bound
+admission requires or projects the exact catalog quality. Malformed and future table
 contracts fail closed, while legacy `true` and positive-integer replacement-ID
 one-copy targets remain compatible; other scalar types/ranges are invalid. The
 complete target map is admitted atomically: canonical key aliases, unknown catalog

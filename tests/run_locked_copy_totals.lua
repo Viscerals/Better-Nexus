@@ -320,7 +320,8 @@ Check(segmentedToken == consolidatedToken,
 Check(Model.TargetMapToken({[750001]=multiReplacement})
         == Model.TargetMapToken({[750001]=permutedReplacement}),
     "semantic target token changed across replacement-row permutation")
-local targetCatalog = {rows={[750001]={name="Known"}},familyOf={[750001]=75}}
+local targetCatalog = {rows={[750001]={name="Known",quality=2}},
+    familyOf={[750001]=75}}
 Check(Model.TargetMapEntries({[750001]=true,[759999]=true},targetCatalog) == nil,
     "catalog-aware target admission partially accepted an unknown identity")
 local admissionSource = {[750001]={version=1,copies=1,future={keep=true},
@@ -344,6 +345,34 @@ local rejectedCommit = Model.PlanLockCommit({}, {}, {},
     {[750001]=true,[759999]=true}, {[750001]=1,[759999]=1}, targetCatalog)
 Check(next(rejectedCommit) == nil,
     "catalog-unknown sibling survived persisted target commit planning")
+for label, quality in pairs({
+    stringValue="2",fraction=1.5,nan=0/0,infinite=math.huge,negative=-1,
+}) do
+    local malformedQuality = {[750001]={version=1,copies=1,
+        rows={{spellId=750001,stacks=1,quality=quality}}}}
+    Check(Model.TargetMapEntries(malformedQuality, targetCatalog) == nil,
+        "malformed target quality escaped admission: " .. label)
+    local rejectedQuality = Model.ApplyCommittedTargets({
+        pending={},pendingLock={},fulfilledTargets={},metrics={},
+    }, malformedQuality, {catalog=targetCatalog,lockedBySpell={[750001]=1}})
+    local qualityExport = Model.ExportEntries({}, rejectedQuality.pendingLock,
+        {[750001]=1}, targetCatalog, rejectedQuality.fulfilledTargets)
+    local leakedQuality = false
+    for _, row in ipairs(qualityExport) do
+        if row.locked and tonumber(row.spellId) == 750001
+            and row.quality == quality then leakedQuality = true end
+    end
+    Check(not leakedQuality,
+        "malformed fulfilled target quality leaked into export: " .. label)
+end
+Check(Model.TargetMapEntries({[750001]={version=1,copies=1,
+        rows={{spellId=750001,stacks=1,quality=1}}}},targetCatalog) == nil,
+    "catalog-disagreeing target quality escaped exact admission")
+local encodedMalformedOk, encodedMalformed = pcall(Nexus.Codec.EncodeEBH1, {
+    {spellId=750001,quality=math.huge,stacks=1,locked=true},
+}, "MAGE", "Malformed")
+Check(encodedMalformedOk and encodedMalformed == "EBH1::MAGE:Malformed",
+    "EBH1 encoder raised or emitted a malformed numeric row")
 local multiPlan = Model.PlanLockCommit({}, {}, {[750001]=multiReplacement}, {
     [750010]=true,[750011]=true,[750012]=true,
 }, {[750001]=3,[750010]=1,[750011]=1,[750012]=1})

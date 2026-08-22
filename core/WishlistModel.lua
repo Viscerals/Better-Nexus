@@ -112,6 +112,8 @@ local function TargetCopies(value, expectedSpellId)
         representedSpellId = spellId
         local stacks = PositiveInteger(row.stacks)
         if not stacks then return nil end
+        if row.quality ~= nil and (type(row.quality) ~= "number"
+            or NonNegativeInteger(row.quality) == nil) then return nil end
         if row.replaces ~= nil then
             if type(row.replaces) ~= "number" then return nil end
             local rowReplacement = PositiveInteger(row.replaces)
@@ -169,6 +171,19 @@ local function TargetMapEntries(targets, catalog)
         local family = catalog and catalog.familyOf and catalog.familyOf[spellId]
         if catalog and (not catalogRow or family == nil) then return nil end
         local admittedValue = CopyEntry(value)
+        if catalog then
+            local catalogQuality = type(catalogRow.quality) == "number"
+                and NonNegativeInteger(catalogRow.quality) or nil
+            if catalogQuality == nil then return nil end
+            if type(admittedValue) == "table" then
+                for _, row in ipairs(admittedValue.rows) do
+                    if row.quality ~= nil and row.quality ~= catalogQuality then
+                        return nil
+                    end
+                    row.quality = catalogQuality
+                end
+            end
+        end
         seenSpellIds[spellId] = true
         total = total + copies
         if total > 6 then return nil end

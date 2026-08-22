@@ -467,9 +467,16 @@ function Codec.EncodeEBH1(entries, classToken, name)
     local parts = {}
     for _, e in ipairs(entries or {}) do
         local id = tonumber(e and e.spellId)
-        if id then
-            local base = string.format("%d.%d.%d", id,
-                tonumber(e.quality) or 0, math.max(1, tonumber(e.stacks) or 1))
+        local quality = tonumber(e and e.quality)
+        local stacks = tonumber(e and e.stacks)
+        local valid = id and id == id and id > 0 and id < math.huge
+            and id == math.floor(id)
+            and quality and quality == quality and quality >= 0
+            and quality < math.huge and quality == math.floor(quality)
+            and stacks and stacks == stacks and stacks > 0
+            and stacks < math.huge and stacks == math.floor(stacks)
+        if valid then
+            local base = string.format("%d.%d.%d", id, quality, stacks)
             parts[#parts + 1] = e.locked and (base .. ".1") or base
         end
     end
