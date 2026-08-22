@@ -43,9 +43,8 @@ depends_on: [49.1]
 - Acceptance:
   - [x] Every displayed Average comes from two actual records with the same verified canonical owner.
   - [x] The pair shares the same ordinary fingerprint and locked fingerprint/full-combat identity.
-  - [x] Mixed owners or incompatible builds never produce an Average even when each is a category best.
+  - [x] Mixed owners or incompatible builds never produce an Average, while independent category bests remain available.
   - [x] Multiple valid pairs choose the deterministic best real pair; no valid pair reports Average unavailable.
-  - [x] Dummy and LK category bests remain independently available without implying a pair.
   - [x] Blocking DPS/board/UI, mapped, Fast, review/Full, and diff checks pass.
   - [ ] Nonblocking manual SavedVariables/native validation remains explicitly unverified.
 - Demo commands:
