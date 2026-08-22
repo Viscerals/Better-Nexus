@@ -8,7 +8,7 @@
 
 - Stage: 50
 - Checkpoint: 50.1
-- Status: IN_REVIEW
+- Status: IN_PROGRESS
 - Branch: `bugfix/test19-wp6-build-hash-buckets-erase-build-id-type-and-can-r`
 - Starting head: exact accepted WP5 handoff head `8f5d28008935cef2d973b800167695ab50e0f70b`
 - Worktree: `.test19-wp4-worktree`
@@ -182,3 +182,7 @@ Preserve typed build identity in Sync's canonical build and tombstone bucket-has
 - Full found unbounded real-pair selector work in active Sync projection pump
 - WP5 review repairs validated: async parity, empty authority, finite DPS, and mixed-state coverage
 - Controller review repair: SPEC-PAIR-ASYNC-DIVERGENCE; SPEC-EMPTY-COPY-AUTHORITY; ADV-NONFINITE-PAIR; VALIDATION-MIXED-STATE-GAP; VIBE-CHECKPOINT-CONTRADICTION
+
+
+## Work log (current session)
+- Controller review repair: VALIDATION-EXACT-HEAD-AND-FULL-MISSING; SPEC-TYPED-CACHE-INVALIDATION-COVERAGE
