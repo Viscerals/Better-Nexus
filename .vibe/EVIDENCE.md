@@ -703,3 +703,8 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Expected red: `node tools/run-lua.js tests/run_sync_compatibility_parity.lua` exited 1 at `EXPECTED RED: numeric and string build IDs share one bucket hash` before product changes.
 - Focused green: compatibility parity, hash cache, and baseline delta runners pass with typed build/tombstone separation, deterministic dual-ID ordering, mixed old/new inequality, distinct resumable candidate tokens, and cached/fallback delta/legacy parity.
 - Fast: `tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef 8f5d28008935cef2d973b800167695ab50e0f70b` passed 20/20 blocking checks in 194.852s with zero failed, skipped, or unavailable checks; integration passed 70/70. Native WoW and SavedVariables remain unverified.
+
+# 2026-08-22 — Checkpoint 50.1 hygiene CLEAN
+
+- Bounded inspection covered typed canonical material, cache entry/invalidation identity, Sync compatibility parity, and their direct typed-ID regressions. No correctness/security signal, safe high-ROI cleanup, or actionable debt remained.
+- No product or test byte changed after exact-head Full; Full was not repeated. Strict Vibe validation passed with only the installed-prompt-catalog provenance warning.

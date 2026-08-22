@@ -185,6 +185,7 @@ Preserve typed build identity in Sync's canonical build and tombstone bucket-has
 
 
 ## Work log (current session)
+- Checkpoint 50.1 hygiene CLEAN: bounded typed BuildHashCache/SyncCompatibility and focused regression surface has no safe high-ROI cleanup or actionable debt; no product/test byte changed and Full was not repeated.
 - Checkpoint 50.1 review PASS: exact head 5e1a6e20 passed focused typed-identity checks and Full 18 blocking checks; no checkpoint-hygiene signals identified; native WoW remains unverified.
 - Typed cache sibling oracle and targeted invalidation repair pass focused, Fast 22/22, and exact-head Full 18 blocking checks
 - Controller review repair: SPEC-TYPED-CACHE-KEY-ALIAS; VALIDATION-TYPED-COEXISTENCE-ORACLE
