@@ -8,7 +8,7 @@
 
 - Stage: 51
 - Checkpoint: 51.1
-- Status: NOT_STARTED
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp7-hud-progress-labels-quality-4-as-q4-instead-of-l`
 - Starting head: exact accepted WP6 handoff head `cdbfef98f7079b7f6e13ee79fd3044bd3683e0dc`
 - Worktree: `.test19-wp4-worktree`
@@ -182,6 +182,10 @@ Render quality `4` as `Legendary` in deterministic HUD progress text while prese
 
 
 ## Work log (current session)
+- WP7 quality-4 label repair committed at 1d397ed; exact-head HUD parity, Fast 13/13, and Full 18 blocking checks pass.
+- Controller retired ISSUE-WP7-NODE-RUNTIME after isolated expected-red, focused green, Fast 13/13, and Full 18/18 proved its unblock condition.
+- Node runtime blocker resolved: isolated expected-red, focused green, Fast 13/13, and Full 18 blocking checks passed; return 51.1 to IN_PROGRESS.
+- WP7 implementation is blocked pending a Node.js runtime: the scoped MainViewModel quality-4 mapping and focused expected-red/green oracle are ready, but focused, Fast, and Full execution cannot start and neither gate can write its required summary.
 - Stage 51 design adds bounded WP7 issue #38 HUD quality-label coverage and presentation-only repair after accepted WP6 hygiene.
 - Checkpoint 50.1 hygiene CLEAN: bounded typed BuildHashCache/SyncCompatibility and focused regression surface has no safe high-ROI cleanup or actionable debt; no product/test byte changed and Full was not repeated.
 - Checkpoint 50.1 review PASS: exact head 5e1a6e20 passed focused typed-identity checks and Full 18 blocking checks; no checkpoint-hygiene signals identified; native WoW remains unverified.
