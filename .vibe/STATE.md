@@ -60,6 +60,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 - Exact-head audit before accepting `72355cb` found and repaired one remaining persisted-record identity mismatch plus duplicate-validator drift: WishlistModel now solely validates finite version-1 records and requires every dense row to name the containing exact spell. All 20 focused runners pass, including locked totals 29 checks, AutoLock 71, and integration `70/70`; exact-base Fast passes `43/43` with zero failed/unavailable/skipped checks.
 - Paused review at `ce6433f` found and repaired unsupported scalar target authority and distinct-ID Locked-strip occupancy. Only legacy `true` and positive finite integer replacement IDs remain compatible; six physical UI slots now represent six copies, not spell identities. Locked totals pass 36 checks, AutoLock 85, all 20 focused runners and exact-base Fast `43/43` pass.
 - Paused review at `64a27ee` found and repaired two final validator-consumer leaks: MainViewModel progress/Tome projections now omit invalid persisted targets, and exact-key/type validation precedes every replacement side effect. Locked totals pass 38 checks, exact projection probes pass, all 20 focused runners and exact-base Fast `43/43` pass.
+- Paused review at `826d3a9` found and repaired invalid containing map-key coercion. The validator now rejects fractional, nonfinite, zero, and negative expected spell IDs before every scalar/table branch; commit, progress/Tome, and AutoLock probes pass. Locked totals pass 43 checks, AutoLock 87, the affected matrix and exact-base Fast `43/43` pass.
 - Cumulative WP4 independent review found five valid Spec/Standards/adversarial gaps at `7cff7e7`; all were repaired with public counterexamples and focused/Fast revalidation. The repaired candidate is ready for all three independent reviews to repeat before Full.
 - Checkpoint 48.4 hygiene was clean across the exact progress projection, its presentation consumers, and automation-only locked-target merger; no safe quick win or evidence-backed debt justified churn.
 - Checkpoint 48.4 review repaired same-family locked-target augmentation, then passed exact tier/role presentation and automation acceptance without entering Stage 49.
@@ -113,7 +114,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Cumulative re-review repair and validator-consumer closure are locally green in 20 focused runners and exact-base Fast `43/43`. The candidate awaits a local commit and all three repeated independent reviews.
+- Cumulative re-review repair and full persisted-key/value validation are locally green in the affected matrix and exact-base Fast `43/43`. The candidate awaits a local commit and all three repeated independent reviews.
 
 ## Recommended next action
 

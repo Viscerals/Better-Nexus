@@ -69,6 +69,11 @@ local function TargetCopies(value, expectedSpellId)
     -- Legacy booleans/numbers represent one exact copy (numbers optionally
     -- name the replacement).  Counted table records are persisted authority,
     -- so unknown or internally inconsistent contracts must fail closed.
+    local expectedId
+    if expectedSpellId ~= nil then
+        expectedId = PositiveInteger(expectedSpellId)
+        if not expectedId then return nil end
+    end
     if value == true then return 1 end
     if type(value) == "number" then
         return PositiveInteger(value) and 1 or nil
@@ -94,8 +99,7 @@ local function TargetCopies(value, expectedSpellId)
         total = total + stacks
     end
     if rowCount < 1 or highest ~= rowCount or total ~= copies then return nil end
-    expectedSpellId = expectedSpellId and PositiveInteger(expectedSpellId) or nil
-    if expectedSpellId and representedSpellId ~= expectedSpellId then return nil end
+    if expectedId and representedSpellId ~= expectedId then return nil end
     if value.replaces ~= nil then
         if type(value.replaces) ~= "number"
             or not PositiveInteger(value.replaces) then return nil end
@@ -104,8 +108,8 @@ local function TargetCopies(value, expectedSpellId)
 end
 
 local function TargetReplacement(value, expectedSpellId)
+    if TargetCopies(value, expectedSpellId) == nil then return nil end
     if type(value) == "table" then
-        if TargetCopies(value, expectedSpellId) == nil then return nil end
         return type(value.replaces) == "number" and value.replaces or nil
     end
     return type(value) == "number" and PositiveInteger(value) or nil

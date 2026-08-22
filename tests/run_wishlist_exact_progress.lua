@@ -151,6 +151,9 @@ local projectionTargets = {
     [104]={version=1,copies=1,rows={{spellId=103,stacks=1}}},
     [105]={version=1,copies=2,rows={{spellId=105,stacks=1}}},
     [106]="future",
+    [1.5]=true,
+    [math.huge]=true,
+    [-1]=true,
 }
 local projectedTomes = view.TomeEchoes({}, projectionTargets)
 local projectedTomeIds = {}

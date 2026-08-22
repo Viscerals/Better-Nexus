@@ -221,6 +221,10 @@ Check(budget == 6,
 -- schema exactly rather than degrading to a one-copy action.
 Check(Model.TargetCopies(true) == 1 and Model.TargetCopies(720099) == 1,
     "legacy scalar lock targets lost one-copy compatibility")
+for label, key in pairs({fractional=1.5,infinite=math.huge,zero=0,negative=-1}) do
+    Check(Model.TargetCopies(true, key) == nil,
+        "invalid containing target key authorized legacy value: " .. label)
+end
 for label, scalar in pairs({
     falseValue=false,stringValue="future",fraction=1.5,
     nan=0/0,infinite=math.huge,negative=-1,zero=0,
@@ -254,6 +258,12 @@ local replacementPlan = Model.PlanLockCommit({}, {},
 Check(replacementPlan[740001] == nil
         and replacementPlan[740003] == validRetained,
     "wrong-key fulfilled target suppressed a valid replacement target")
+local invalidKeyPlan = Model.PlanLockCommit({}, {}, {}, {
+    [1.5]=true,
+    [math.huge]={version=1,copies=1,rows={{spellId=740003,stacks=1}}},
+}, {[1.5]=1,[math.huge]=1})
+Check(next(invalidKeyPlan) == nil,
+    "invalid containing map key entered the committed target plan")
 
 print(string.format(
     "locked copy totals: duplicate=2+2+2 one=6 rejected=7/malformed roles=separate checks=%d -- OK",
