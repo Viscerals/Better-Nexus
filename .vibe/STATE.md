@@ -8,7 +8,7 @@
 
 - Stage: 49
 - Checkpoint: 49.2
-- Status: NOT_STARTED
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
 - Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 - Worktree: `.test19-wp4-worktree`
@@ -138,6 +138,8 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 
 
 ## Work log (current session)
+- Fast 43/43 confirms deterministic real-pair authority and projection parity
+- Controller repair alignment: SPEC-PAIR-ASYNC-DIVERGENCE; SPEC-EMPTY-COPY-AUTHORITY; ADV-NONFINITE-PAIR; VALIDATION-MIXED-STATE-GAP; VIBE-CHECKPOINT-CONTRADICTION
 - Mechanical PASS recovery advanced the reviewed 49.1 pointer to 49.2.
 - Exact-head Full passed 18 checks; bounded real-pair and copy-authority repairs accepted
 - Bounded shared real-pair cursor passes focused work-budget and Fast 43/43
