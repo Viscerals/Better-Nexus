@@ -988,6 +988,16 @@ local function CurrentDpsRevision()
     return revisions, revision
 end
 
+local function PairRecord(row)
+    if type(row) ~= "table" then return row end
+    local projected = DeepCopy(row)
+    projected.echoes = StoredEchoes(row, false)
+    projected.lockedEchoes = StoredEchoes(row, true) or {}
+    return projected
+end
+
+local CachedLockedRecord
+
 local function RebuildIdentityIndex()
     MigrateLegacyLeaderboard()
     local categories = {dummy=NewIdentityCategory(),lk=NewIdentityCategory()}
@@ -1010,7 +1020,7 @@ local function RebuildIdentityIndex()
                 if type(fingerprint) == "string" and fingerprint ~= ""
                     and value == value and value < math.huge and value > 0 then
                     local rows = rowsByFingerprint[category][fingerprint] or {}
-                    rows[#rows + 1] = row
+                    rows[#rows + 1] = PairRecord(row)
                     rowsByFingerprint[category][fingerprint] = rows
                 end
                 indexed = indexed + 1
@@ -1138,8 +1148,6 @@ function DPS.GetLeaderboardForIdentity(buildId, fingerprint, fingerprintHash, ca
     return SortedEntries(GlobalForIdentity(buildId, key, hash, category))
 end
 
-local CachedLockedRecord
-
 function DPS.GetRecordForIdentity(buildId, fingerprint, fingerprintHash, category)
     local key = type(fingerprint) == "string" and fingerprint or nil
     local hash = fingerprintHash ~= nil and tostring(fingerprintHash) or nil
@@ -1220,7 +1228,7 @@ function DPS.CommunityEligibilityCursorNext(cursor)
             if type(fingerprint) == "string" and fingerprint ~= ""
                 and value == value and value < math.huge and value > 0 then
                 local rows = cursor.best[category][fingerprint] or {}
-                rows[#rows + 1] = row
+                rows[#rows + 1] = PairRecord(row)
                 cursor.best[category][fingerprint] = rows
             end
             cursor.indexed = cursor.indexed + 1

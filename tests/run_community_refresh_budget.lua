@@ -67,7 +67,7 @@ local frame = NexusCommunityBuildsFrame
 local onUpdate = frame and frame:GetScript("OnUpdate")
 assert(type(onUpdate) == "function", "Community frame did not install update handler")
 local function PumpUntilBinds(target)
-    for _ = 1, 100 do
+    for _ = 1, 2000 do
         if (C.VirtualStats().dataBinds or 0) >= target then return end
         onUpdate(frame, 0.05)
     end

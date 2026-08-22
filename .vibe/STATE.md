@@ -138,6 +138,8 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 
 
 ## Work log (current session)
+- Full-discovered durable ordinary-evidence fixtures repaired; five focused runners and Fast 43/43 pass.
+- Review FAIL: Full exact head f615b78 exposed five legacy fixtures without verified ordinary Echo evidence.
 - WP5 review repairs validate ordinary evidence, total pair ties, and fully bounded pair pumps; focused and Fast 43/43 pass.
 - Controller review repair: VALIDATION-EXACT-HEAD-MISMATCH; VIBE-CHECKPOINT-CONTRADICTION; SPEC-ORDINARY-FINGERPRINT-CLAIM; SPEC-PAIR-TIE-NONDETERMINISM; STANDARDS-UNBOUNDED-PAIR-PUMP
 - Checkpoint 49.2 hygiene CLEAN: bounded product/test surface had no safe high-ROI cleanup, actionable debt, or correctness/security finding; no product/test byte changed and Full was not repeated.

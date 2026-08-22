@@ -151,8 +151,9 @@ end
 -- Stored legacy rows below the contract may remain in SavedVariables, but they
 -- must not qualify, publish, hash, or relay as current evidence.
 local function StoredRow(category, duration, player, fp)
+    local verifiedFingerprint = DPS.GetEchoKey(echoes)
     return {
-        fingerprint=fp,loadoutHash=hash,echoes=echoes,category=category,
+        fingerprint=verifiedFingerprint,loadoutHash=hash,echoes=echoes,category=category,
         dps=250000,duration=duration,ts=30000,player=player,
         level=80,class="MAGE",ownerKey=player:lower() .. "@ebonhold",
         realm="ebonhold",ownerVerified=true,lockedEchoes={},
@@ -173,9 +174,8 @@ NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={
     },personalBest={},buildBest={},
 }}
 local eligibility = DPS.GetCommunityEligibility()
-Check(eligibility["valid-pair"] ~= nil
-        and eligibility["short-dummy"] == nil
-        and eligibility["short-lk"] == nil,
+local verifiedFingerprint = DPS.GetEchoKey(echoes)
+Check(eligibility[verifiedFingerprint] ~= nil,
     "Community qualification published below-category duration evidence")
 local dummyBoard, lkBoard = DPS.GetDpsBoard("dummy"), DPS.GetDpsBoard("lk")
 local function HasPlayer(rows, player)

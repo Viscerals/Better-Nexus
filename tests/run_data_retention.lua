@@ -91,11 +91,14 @@ end
 local dummy = NexusDB.dpsCapture.characterBest.dummy
 dummy.boganic = {
     player="Boganic", ownerKey="boganic@ebonhold", buildId="local-leader",
-    ownerVerified=true,realm="ebonhold",fingerprint="fp-local",
+    ownerVerified=true,realm="ebonhold",fingerprint="910000x1",
+    echoes={{spellId=910000,stacks=1}},
     lockedEchoes={},dps=999999,ts=now,
 }
 for i = 1, 300 do
     local id = string.format("remote-char-%03d", i)
+    local fingerprint = tostring(910000 + i) .. "x1"
+    local echoes = {{spellId=910000 + i,stacks=1}}
     overlay[id] = {
         id=id, title=id, author="DpsPeer" .. tostring(i), autoDps=true,
         class=classes[(i - 1) % #classes + 1],
@@ -105,14 +108,14 @@ for i = 1, 300 do
         player="Player" .. tostring(i),
         ownerKey="player" .. tostring(i) .. "@ebonhold",
         ownerVerified=true,realm="ebonhold",buildId=id,lockedEchoes={},
-        fingerprint="fp-char-" .. tostring(i), dps=100000 + i, ts=10000 + i,
+        fingerprint=fingerprint,echoes=echoes,dps=100000 + i,ts=10000 + i,
     }
     if i <= 180 then
         NexusDB.dpsCapture.characterBest.lk[string.format("player-%03d", i)] = {
             player="Player" .. tostring(i),
             ownerKey="player" .. tostring(i) .. "@ebonhold",
             ownerVerified=true,realm="ebonhold",buildId=id,lockedEchoes={},
-            fingerprint="fp-char-" .. tostring(i),
+            fingerprint=fingerprint,echoes=echoes,
             dps=(i <= 40 and 900000 + i or 200000 + i), ts=10000 + i,
         }
     end
