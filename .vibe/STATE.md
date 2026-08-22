@@ -133,7 +133,7 @@ Project Community DPS only from deterministic real Dummy/LK pairs with verified 
 
 ## Last completed loop
 
-- Checkpoint 49.2 review PASS at exact product/test head `9c1da4c`: focused paired DPS and historical-authority tests pass, Fast passes `43/43`, the exact-head Full receipt remains `18` blocking passes with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, and one explicit nonblocking manual SavedVariables skip. No checkpoint-hygiene signals were identified; native WoW remains unverified.
+- Checkpoint 49.2 hygiene CLEAN at receipt head `fd4b6f6` for reviewed product/test head `de04122`: the prohibited tie-input and retention-source repairs pass focused paired DPS, retention, board, Leaderboard, and view tests; Fast passes `43/43`; the exact-head Full receipt remains `18` blocking passes with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, and one explicit nonblocking manual SavedVariables skip. No checkpoint-hygiene signal was identified; native WoW remains unverified.
 
 ## Recommended next action
 

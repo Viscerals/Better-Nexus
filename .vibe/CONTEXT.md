@@ -47,11 +47,12 @@
 
 ## Agent Notes
 
-- Current state: Stage 49 checkpoint 49.1 `NOT_STARTED`; design, retrospective, maintenance test-gap analysis, and context capture are complete. No WP5 product/test byte exists yet.
-- Next action: use Caveman `observe -> isolate -> hypothesize -> expected red`; add public issue #23 tests for conflicting historical snapshots and later exact current/build authority before editing product code.
-- After 49.1 review/hygiene advances the pointer, implement 49.2 with one deterministic pair selector and cross-surface Community/Leaderboard/sort parity coverage.
+- Current state: Stage 49 checkpoints 49.1 and 49.2 are `DONE`; WP5 issues #23/#26 are implemented, reviewed, and hygiene-complete on the reconciled WP5 branch.
+- Historical Dummy/LK snapshots remain immutable capture-time evidence. Exact independently proven current/build association alone grants copy authority, and unresolved or conflicting authority fails closed without rewriting history.
+- One clock-neutral deterministic real-pair selector now feeds Community qualification/averages, Leaderboard projection, retention, and DPS sorting; incompatible rows retain independent category bests while Average remains unavailable.
+- Next action: return the clean local WP5 receipt head to the controller-owned independent review. Do not start another product checkpoint or redesign cycle in this worker.
 - Preserve the 79 ordinary-copy budget and the existing policy that overflow does not automatically become locked intent unless current trusted rules authorize it.
-- No push, PR/issue mutation, merge, package/install, live SavedVariables access, native WoW, history rewrite, earlier-worktree mutation, or WP5 work is authorized.
+- Completed WP5 repository and Vibe receipt bytes are authorized in this worktree. No further product/test work, push, PR/issue mutation, merge, package/install, live SavedVariables access, native WoW, history rewrite, or earlier-worktree mutation is authorized.
 
 ## Stage Retrospective Notes
 
