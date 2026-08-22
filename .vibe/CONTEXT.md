@@ -2,6 +2,9 @@
 
 ## Architecture
 
+- WP5 runs on `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari` from accepted WP4 handoff `e70de8a7582d0146cc6746677084b3f4a270290b`; Stage 48 product/test bytes are frozen.
+- Historical DPS capture and locked evidence flow through `core/DpsCapture.lua` and `core/CandidateEvidence.lua`; current/build relation and copy decisions cross `core/CommunityController.lua` and Community/Sync ingress.
+- DPS qualification and summary consumers span `core/CommunityController.lua`, `core/CommunityProjection.lua`, `core/DataRetention.lua`, `ui/Leaderboard.lua`, and view/DPS-board runners. WP5 must centralize the real-pair metric.
 - WP4 is isolated in `.test19-wp4-worktree` on `bugfix/test19-wp4-exact-wishlist-evidence`, based exactly on frozen WP3 head `e674f033cc51494a382191b987c9a99cb6827f4a`.
 - Wishlist draft flow is `core/WishlistModel.lua` -> `core/WishlistController.lua` -> `ui/WishlistEditor.lua` / `ui/WishlistRenderer.lua`; EBH1 transfer passes through `core/Codec.lua`.
 - Typed record evidence is owned by `core/CandidateEvidence.lua`; live active/locked reads and Wishlist association are behind `core/GameAdapter.lua` and `core/LoadoutEvidence.lua`.
@@ -10,6 +13,9 @@
 
 ## Key Decisions (2026-08-21)
 
+- WP5 decision (2026-08-22): capture-time Dummy/LK locked snapshots are immutable history; exact independently proven current/build association alone grants copy authority.
+- WP5 decision (2026-08-22): a paired Average requires verified canonical owner, ordinary fingerprint, and locked full-combat identity equality; independent category bests remain available without a pair.
+- WP5 decision (2026-08-22): category, timestamp, recency, title, short name, and resemblance are never authority or tie-break inputs; one deterministic real-pair metric feeds Community, Leaderboard, retention, and sorting.
 - Execute WP4 in order: #43 exact ordinary draft identity -> #44 counted locked evidence -> #20 read-time role derivation -> #35 exact progress.
 - Trustworthy exact `spellId` owns ordinary draft rows. Family is display/search grouping only; compatibility rows need deterministic collision-safe fallback identity.
 - Locked validation uses total copies `sum(stacks) <= 6`, preserving exact tier, count, provenance, and unknown fields; ordinary and locked limits remain separate.
@@ -19,6 +25,9 @@
 
 ## Gotchas
 
+- Existing average semantics occur in `CommunityController`, `DataRetention`, and view projection paths; changing only the visible Leaderboard leaves qualification, retention, or sorting inconsistent.
+- WP5 must not globally change the ordinary fingerprint; pair identity adds verified owner and locked/full-combat equality at the DPS boundary.
+- Preserve original historical tables and nested locked rows across missing/conflicting authority, reload, restart, and Sync. Unavailable copy authority must not mark an uncertain Echo locked.
 - Root and `.lag-hotfix-worktree` contain unrelated user changes. Earlier WP2/WP3 worktrees are frozen and must not be edited, rebased, cleaned, stashed, or deleted.
 - Vibe flags and routing are dispatcher-owned. The Stage 48 maintenance scan/review/hygiene is complete and deliberately left product checkpoint 48.1 `NOT_STARTED`.
 - Current draft code repeatedly uses `family` as the map/action handle; change the handle explicitly before switching ordinary identity so sibling actions cannot alias.
@@ -28,6 +37,8 @@
 
 ## Hot Files
 
+- WP5 #23: `core/CandidateEvidence.lua`, `core/DpsCapture.lua`, `core/CommunityController.lua`, `core/CommunityProjection.lua`, Sync relation paths, `tests/run_locked_evidence_resolver.lua`, and `tests/run_stage32_leaderboard_locked_fidelity.lua`.
+- WP5 #26: the shared DPS projection owner, `core/CommunityController.lua`, `core/DataRetention.lua`, `ui/Leaderboard.lua`, `tests/run_dps_boards.lua`, `tests/run_view_projections.lua`, and `tests/run_leaderboard_ui.lua`.
 - #43: `core/WishlistModel.lua`, `core/WishlistController.lua`, `ui/WishlistEditor.lua`, `ui/WishlistRenderer.lua`, `core/Codec.lua`, and Wishlist model/editor/controller/import tests.
 - #44: `core/CandidateEvidence.lua`, `core/WishlistModel.lua`, `core/GameAdapter.lua`, `core/LoadoutEvidence.lua`, and CandidateEvidence/locked-loadout tests.
 - #20: `core/GameAdapter.lua`, `core/LoadoutEvidence.lua`, association fixtures, and exact active/locked evidence tests.
@@ -36,11 +47,12 @@
 
 ## Agent Notes
 
-- Current state: Stage 48 checkpoint 48.1 `NOT_STARTED`; Stage design and scheduled maintenance cycle are complete. No WP4 product/test byte or commit exists yet.
-- Next action: apply the selected behavior-preserving explicit `rowKey` precursor, prove existing public Wishlist model/editor equivalence, then add the required public expected-red for same-family sibling tiers.
-- Use public seams for TDD: WishlistModel/controller/editor round-trip and actions, CandidateEvidence envelope, GameAdapter Wishlist resolution, and public progress projections. Do not test private helpers directly.
+- Current state: Stage 49 checkpoints 49.1 and 49.2 are `DONE`; WP5 issues #23/#26 are implemented, reviewed, and hygiene-complete on the reconciled WP5 branch.
+- Historical Dummy/LK snapshots remain immutable capture-time evidence. Exact independently proven current/build association alone grants copy authority, and unresolved or conflicting authority fails closed without rewriting history.
+- One clock-neutral deterministic real-pair selector now feeds Community qualification/averages, Leaderboard projection, retention, and DPS sorting; incompatible rows retain independent category bests while Average remains unavailable.
+- Next action: return the clean local WP5 receipt head to the controller-owned independent review. Do not start another product checkpoint or redesign cycle in this worker.
 - Preserve the 79 ordinary-copy budget and the existing policy that overflow does not automatically become locked intent unless current trusted rules authorize it.
-- No push, PR/issue mutation, merge, package/install, live SavedVariables access, native WoW, history rewrite, earlier-worktree mutation, or WP5 work is authorized.
+- Completed WP5 repository and Vibe receipt bytes are authorized in this worktree. No further product/test work, push, PR/issue mutation, merge, package/install, live SavedVariables access, native WoW, history rewrite, or earlier-worktree mutation is authorized.
 
 ## Stage Retrospective Notes
 
@@ -49,3 +61,8 @@
 - Expected-red preservation matrices must include collisions, malformed values, future-owned data, and restart/reload ordering.
 - Public quarantine rules require sync/async/detail/fallback/count/sort/page parity.
 - Reserve Full until all independent review axes accept the exact frozen bytes.
+- Stage 48.1 needed repeated review repairs for catalog admission and defensive-copy drift; for Stage 49, define one public DPS authority verdict and make every projection consume it before widening callers.
+- Stage 48.2 exposed copy-count and bound-snapshot edge cases after the first implementation; issue #23 tests must cover immutable nested aliases, conflicting provenance, future fields, and copy totals before product edits.
+- Stage 48.3 succeeded with a narrow read-only derivation boundary; keep current/build copy resolution read-only over historical DPS rows and prove source immutability at every failure path.
+- Stage 48.4 found presentation and automation parity gaps across repeated review cycles; issue #26 must test Community, Leaderboard, sorting, and detail projections against the same paired-summary output from the start.
+- Stage 48 added no checkpoints but accumulated multiple implementation→review cycles; freeze Full only after focused adversarial matrices cover malformed identity, order changes, reload/restart, and Sync convergence.

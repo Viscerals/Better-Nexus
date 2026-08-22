@@ -278,7 +278,7 @@ function Renderer.New(options)
         local identity = CandidateIdentity(build)
         if not identity then return nil, "record identity is unavailable" end
         local authoritative, lockedReason, resolution =
-            ControllerInstance().LockedEchoesForBuild(build)
+            ControllerInstance().LockedEchoesForBuild(build, true)
         if lockedReason and lockedReason ~= "" then return nil,lockedReason end
         if type(resolution) ~= "table" then
             resolution = {

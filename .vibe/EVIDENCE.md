@@ -640,3 +640,60 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Full PASS: `18` blocking checks passed, `0` failed, `0` unavailable, `1` explicit nonblocking manual skip in `429.681s`. Lua suite `219/219`, Lua 5.1 parse `292/292`, integration `70/70`, hostile Sync, privacy, SavedVariables analyzer, StutterAlert integration, package metadata/source, release policy, upvalue boundary, artifact/changed-test plan, and range/staged/working diff checks all pass.
 - Module contracts: `11` modules, `209` surfaces, `162` callback sites, `0` unmapped. The sole skip is `tests/run_legacy_backup_smoke.lua`, which requires an explicitly authorized SavedVariables backup path; no live SavedVariables or native WoW testing was performed.
 - WP4 local candidate is complete. No push, PR/issue mutation, merge, package/install, live SavedVariables access, native WoW test, Test18 change, or WP5 work occurred. The only recommended next action is a separately authorized bounded WP4 publication/review step.
+
+# 2026-08-22 — WP5 implementation candidate
+
+- Issues #23/#26: capture-time Dummy/LK locked rows remain immutable historical evidence; Community Copy requires exact independently related current/build locked authority. Missing/conflicting history fails closed without mutating source rows or marking uncertain locks.
+- `CandidateEvidence` owns deterministic real-pair identity and selection: verified canonical owner + ordinary fingerprint + exact locked spell/quality/copy identity. Independent Dummy/LK bests remain available when Average is unavailable. `DpsCapture`, `CommunityController`, synchronous/resumable `ViewProjections`, and `DataRetention` consume the same metric; timestamp/category order is not authority or a pair tie-break.
+- Verification on frozen working bytes: focused historical authority `5/5`, paired summary `4/4`, mapped Fast `37/37`, Lua suite `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, and final Full `18` blocking checks pass with zero failed/unavailable and one explicit nonblocking manual SavedVariables skip. Native WoW remains unverified.
+
+# 2026-08-22 — Checkpoint 49.2 review PASS
+
+- Exact reviewed head `9c1da4c5279619fc9dc83f66f6807aec39619d78` preserves immutable historical Dummy/LK snapshots and requires exact independent current/build authority for copy. Deterministic real pairs require verified canonical owner, ordinary fingerprint, and exact locked spell/quality/copy identity; independent category bests remain available when Average is unavailable.
+- Focused DPS boards, Leaderboard UI, paired summary `10`, historical locked authority `10`, Fast `43/43`, strict Vibe validation, and range diff checks pass. The prior exact-head Full receipt is reused without rerun: `18` blocking passes, Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable, and one explicitly nonblocking manual SavedVariables skip. That skip and native WoW behavior remain unverified, not passed.
+- Adversarial/code-quality review found no correctness, security, scope, or checkpoint-hygiene signal. Test 18 and native SavedVariables were untouched.
+
+# 2026-08-22 — Checkpoint 49.2 hygiene CLEAN
+
+- Bounded inspection of `CandidateEvidence`, `DpsCapture`, `CommunityController`, `DataRetention`, `ViewProjections`, `Leaderboard`, and their focused WP5 fixtures found no redundant owner, unsafe branch, actionable debt, or behavior-preserving quick win worth post-review churn.
+- No product or test byte changed. Focused review tests, Fast `43/43`, strict Vibe validation, exact-head Full receipt, and clean range/working diff evidence remain the validation boundary; Full was not repeated.
+
+# 2026-08-22 — WP5 independent-review repair PASS
+
+- Exact reviewed product/test head `47c3a3be` derives ordinary pair identity from bounded canonical Echo evidence, uses a total non-temporal authority tie, and advances indexing, matching, collection, sorting, and Community eligibility through bounded cursor units.
+- Focused authority, Sync/restart, retention, duration, startup, and adversarial work-budget runners pass. Fast passes `43/43`; Full passes `18` blocking checks with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable, and one explicit nonblocking manual SavedVariables skip.
+- Checkpoint hygiene found no safe high-ROI cleanup, actionable debt, correctness, or security signal. Native WoW and the manual SavedVariables check remain unverified.
+# 2026-08-22 — Checkpoint 49.2 controller review repair
+
+- Expected-red reproduced `SPEC-EMPTY-COPY-AUTHORITY` and `SPEC-PAIR-TIE-NOT-TOTAL`; the overflow assertion was added in the same focused runner and reached green after the tie repair.
+- Exact empty build-bound locked authority now requires `lockedAuthorityProven=true`; unproven empty state preserves conflicting history across reload/restart, while later proven current/Sync evidence resolves without historical mutation.
+- Real-pair selection uses an overflow-safe finite mean and a bounded non-temporal canonical tie over output-relevant row evidence. Historical authority `13`, paired summary `18`, and DataRetention focused runners pass; Fast passes `43/43` with zero failed, unavailable, or skipped checks.
+
+# 2026-08-22 — Checkpoint 49.2 Full-discovered repair
+
+- Full at `032864f` passed `17` checks but failed Lua `219/221`: canonical row-key sorting leaked `30306` comparisons into one live projection callback, and the assembled exact-empty fixture lacked its explicit proof marker. Lua 5.1 parse `294/294` and integration `70/70` passed; the manual SavedVariables check remained skipped and unverified.
+- Canonical row evidence now uses its own budget-capped deterministic heap ordering instead of consuming ranked view comparisons. The exact-empty assembled fixture now states `lockedAuthorityProven=true`.
+- Both Full-discovered runners, paired summary `18`, historical authority `13`, and Fast `43/43` pass with zero failed, unavailable, or skipped checks.
+
+# 2026-08-22 — Checkpoint 49.2 repaired review PASS
+
+- Exact product/test head `d5b8cc046433ab62cce0367dd1974d29085c73c7` passes Full: `18` blocking checks, Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip.
+- The three controller findings are closed by explicit exact-empty proof, overflow-safe finite means, and deterministic bounded output-relevant ties. No checkpoint-hygiene signal was identified in the repaired surface. Native WoW and the manual SavedVariables check remain unverified.
+
+# 2026-08-22 — Checkpoint 49.2 repaired hygiene CLEAN
+
+- Bounded inspection covered only the repaired authority branch, finite pair mean, canonical tie, and four directly affected fixtures. No correctness/security issue, safe high-ROI cleanup, or actionable debt remained.
+- No product or test byte changed after exact-head Full; Full was not repeated during hygiene.
+
+# 2026-08-22 — Checkpoint 49.2 recency-tie repair PASS
+
+- Exact product/test head `3c2c932fd90e183dfd284a3fb06c873d3aa67038` excludes top-level and nested clock metadata from equal-DPS pair authority while preserving immutable source rows and ordinary retention metadata.
+- Focused paired-summary, Community/view, Leaderboard, retention, sorting, and DPS Sync runners pass; Fast passes `43/43`.
+- Exact-head Full passes `18` blocking checks with zero failed/unavailable checks and one explicit nonblocking manual SavedVariables skip. Bounded hygiene found no safe quick win or actionable debt.
+
+# 2026-08-22 — Checkpoint 49.2 prohibited-tie and retention-source repair PASS
+
+- Expected-red reproduced `SPEC-PROHIBITED-TIE-INPUTS` and `SPEC-RETENTION-PAIR-REFERENCE-LOSS`; repaired focused paired-summary (`21` checks), retention, DPS boards, Leaderboard UI, and view-projection runners pass, and Fast passes `43/43`.
+- Exact product/test head `de04122620aa30b42113fe7fea30255b0fa8047f` uses an explicit authority/output tie allowlist and preserves original source references separately for deterministic retention.
+- Exact-head Full passes all `18` blocking checks with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip that remains unverified.
+- Bounded checkpoint hygiene inspected only the explicit pair tie/projection, preserved source arrays, deterministic retention resolver, and their regressions. No safe behavior-preserving cleanup or actionable debt remained; product/test bytes did not change after Full.

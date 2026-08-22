@@ -23,7 +23,9 @@ for index = 1, 1000 do
         for _, category in ipairs({"dummy", "lk"}) do
             NexusDB.dpsCapture.characterBest[category]
                 [category.."player"..index] = {
-                player=category.."Player"..index,
+                player="Player"..index,
+                ownerKey="player"..index.."@ebonhold",
+                ownerVerified=true,realm="ebonhold",lockedEchoes={},
                 dps=(category == "dummy" and 100000 or 200000)+index,
                 level=80,ts=index,duration=60,class="MAGE",
                 buildId=id,fingerprint=fingerprint,
@@ -65,7 +67,7 @@ local frame = NexusCommunityBuildsFrame
 local onUpdate = frame and frame:GetScript("OnUpdate")
 assert(type(onUpdate) == "function", "Community frame did not install update handler")
 local function PumpUntilBinds(target)
-    for _ = 1, 100 do
+    for _ = 1, 2000 do
         if (C.VirtualStats().dataBinds or 0) >= target then return end
         onUpdate(frame, 0.05)
     end

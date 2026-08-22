@@ -65,7 +65,10 @@ return {
             namespaces={Evidence="pure-evidence"},
             symbols=Symbols("Evidence", {
                 "Build", "Validate", "ResolveLocked", "CurrentKind",
-                "NormalizeLockedEchoes",
+                "NormalizeLockedEchoes", "BeginRealDpsPairs",
+                "PumpRealDpsPairs", "RealDpsPairsResult", "RealDpsPairs",
+                "DpsSummary",
+                "DpsPairIdentity", "DpsRowBefore",
             }),
             assignedMembers={}, callbackSites=0, callbackGroups={},
         },

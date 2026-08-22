@@ -79,6 +79,16 @@ Nexus.DpsCapture = {
         return DeepCopy(boards[category] or {})
     end,
 }
+function Nexus.DpsCapture.BeginDpsBoardCursor(category)
+    return {rows=DeepCopy(boards[category] or {}),index=0}
+end
+function Nexus.DpsCapture.DpsBoardCursorNext(cursor)
+    cursor.index = cursor.index + 1
+    return cursor.index > #cursor.rows
+end
+function Nexus.DpsCapture.DpsBoardCursorResult(cursor)
+    return cursor.rows
+end
 
 P.Reset()
 local first, firstSummary = P.Builds({scope="all",classFilter="MAGE",sortMode="recent"})
@@ -185,6 +195,75 @@ combinedAgain[1].player = "mutated"
 assert(P.Leaderboard("combined", {classFilter="MAGE",search="player"})[1].player ~= "mutated",
     "caller mutated cached leaderboard projection")
 
+local duplicateLk = DeepCopy(boards.lk[1])
+duplicateLk.dps = duplicateLk.dps + 5000000
+duplicateLk.ts = 999999
+boards.lk[#boards.lk + 1] = duplicateLk
+local nonfiniteLk = DeepCopy(duplicateLk)
+nonfiniteLk.dps = math.huge
+boards.lk[#boards.lk + 1] = nonfiniteLk
+Revisions.Advance(Revisions.DPS_CHANGED, {scope="multi-pair-parity"})
+local asyncRows, asyncSummary, asyncReason = P.RequestLeaderboard(
+    "combined", {classFilter="MAGE",search=""})
+for _ = 1, 1000 do
+    if asyncRows then break end
+    local _, pumpError = P.PumpLeaderboard()
+    assert(pumpError == nil, "resumable multi-pair projection failed")
+    asyncRows, asyncSummary, asyncReason = P.RequestLeaderboard(
+        "combined", {classFilter="MAGE",search=""})
+end
+assert(type(asyncRows) == "table" and #asyncRows == 50,
+    "resumable projection diverged from one-pair-per-identity selection: "
+        .. tostring(asyncReason))
+local selectedPair
+for _, row in ipairs(asyncRows) do
+    if row.ownerKey == duplicateLk.ownerKey then selectedPair = row end
+end
+assert(selectedPair and selectedPair.lkDps == duplicateLk.dps,
+    "resumable projection selected a non-best compatible pair: got="
+        .. tostring(selectedPair and selectedPair.lkDps)
+        .. " expected=" .. tostring(duplicateLk.dps))
+local synchronousRows = P.Leaderboard(
+    "combined", {classFilter="MAGE",search=""})
+assert(#synchronousRows == #asyncRows,
+    "synchronous/resumable pair counts diverged")
+for index, row in ipairs(synchronousRows) do
+    local async = asyncRows[index]
+    assert(async and row.ownerKey == async.ownerKey
+            and row.average == async.average
+            and row.dummyDps == async.dummyDps
+            and row.lkDps == async.lkDps,
+        "synchronous/resumable selected-record or sort parity diverged at "
+            .. tostring(index))
+end
+
+local function Reverse(rows)
+    local out = {}
+    for index = #rows, 1, -1 do out[#out + 1] = rows[index] end
+    return out
+end
+boards.dummy, boards.lk = Reverse(boards.dummy), Reverse(boards.lk)
+P.Reset()
+Revisions.Advance(Revisions.SYNC_CHANGED, {scope="wp5-sync-permutation"})
+local permutedRows = P.Leaderboard(
+    "combined", {classFilter="MAGE",search=""})
+assert(#permutedRows == #synchronousRows,
+    "Sync input permutation changed real-pair result count")
+for index, row in ipairs(permutedRows) do
+    local expected = synchronousRows[index]
+    assert(expected and row.ownerKey == expected.ownerKey
+            and row.average == expected.average
+            and row.dummyDps == expected.dummyDps
+            and row.lkDps == expected.lkDps,
+        "reload/Sync input permutation changed selected pair or sort at "
+            .. tostring(index))
+end
+local restoredLk = {}
+for _, row in ipairs(boards.lk) do
+    if row.ts ~= 999999 then restoredLk[#restoredLk + 1] = row end
+end
+boards.lk = restoredLk
+
 local healthySummaries = Nexus.BuildCatalog.Summaries
 Nexus.BuildCatalog.Summaries = function() error("forced catalog failure") end
 Revisions.Advance(Revisions.BUILD_LIBRARY_CHANGED, {scope="all"})
@@ -280,8 +359,8 @@ collisionBoards.dummy[1].lockedEchoes = {{spellId=810001,count=1}}
 collisionBoards.lk[1].lockedEchoes = {{spellId=810002,count=1}}
 Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})
 local lockedConflict = P.Leaderboard("combined", {classFilter="ALL"})
-assert(#lockedConflict == 1 and lockedConflict[1].lockedEvidenceMismatch == true,
-    "combined record silently selected conflicting locked evidence")
+assert(#lockedConflict == 0,
+    "incompatible locked full-combat identities produced an Average")
 collisionBoards.lk[1].lockedEchoes = {{spellId=810001,count=1}}
 Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})
 local lockedExact = P.Leaderboard("combined", {classFilter="ALL"})

@@ -49,12 +49,16 @@ assert(eligibleBuild,
     "bundled startup fixture has no complete, unique Mage identity")
 NexusDB.dpsCapture.characterBest = {
     dummy={startupdummy={
-        player="StartupDummy",dps=100000,duration=60,ts=1,class="MAGE",
+        player="Startup",ownerKey="startup@ebonhold",ownerVerified=true,
+        realm="ebonhold",lockedEchoes={},dps=100000,duration=60,ts=1,class="MAGE",
         buildId=eligibleBuild.id,fingerprint=eligibleBuild.fingerprint,
+        echoes=eligibleBuild.echoes,
     }},
     lk={startuplk={
-        player="StartupLk",dps=200000,duration=60,ts=1,class="MAGE",
+        player="Startup",ownerKey="startup@ebonhold",ownerVerified=true,
+        realm="ebonhold",lockedEchoes={},dps=200000,duration=60,ts=1,class="MAGE",
         buildId=eligibleBuild.id,fingerprint=eligibleBuild.fingerprint,
+        echoes=eligibleBuild.echoes,
     }},
 }
 NexusDB.dpsCapture.personalBest = {}
@@ -112,15 +116,27 @@ assert(type(buildHash) == "string" and buildHash ~= ""
 -- Community filtering/sorting likewise publishes defensive summaries. Exact
 -- Echo arrays are loaded later only for the bounded visible card window.
 Nexus.ViewProjections.Reset()
-local rows, projection = Nexus.ViewProjections.Builds({sortMode="recent"})
+local filters = {sortMode="recent",classFilter="MAGE",qualifiedOnly=false}
+local rows, projection = Nexus.ViewProjections.RequestBuilds(filters)
+for _ = 1, 20000 do
+    if type(rows) == "table" then break end
+    local _, pumpError = Nexus.ViewProjections.PumpBuilds()
+    assert(pumpError == nil, "bounded Community startup pump failed")
+    rows, projection = Nexus.ViewProjections.RequestBuilds(filters)
+end
 assert(type(rows) == "table" and #rows > 0
-    and #rows == 1
+    and #rows > 0 and #rows <= 20
     and projection.total == Nexus.BundledBuilds.generation.included
     and rows[1].echoes == nil and rows[1].loadoutAvailable == true,
-    "Community projection materialized full bundled Echo arrays")
-local originalTitle = rows[1].title
-rows[1].title = "caller mutation"
-assert(Nexus.ViewProjections.Builds({sortMode="recent"})[1].title == originalTitle,
+    string.format("Community projection materialized full bundled Echo arrays: rows=%s total=%s echoes=%s available=%s",
+        tostring(type(rows)=="table" and #rows or nil),
+        tostring(projection and projection.total),
+        tostring(type(rows)=="table" and rows[1] and rows[1].echoes),
+        tostring(type(rows)=="table" and rows[1] and rows[1].loadoutAvailable)))
+local defensiveRows = Nexus.ViewProjections.Builds(filters)
+local originalTitle = defensiveRows[1].title
+defensiveRows[1].title = "caller mutation"
+assert(Nexus.ViewProjections.Builds(filters)[1].title == originalTitle,
     "lightweight projection stopped defending its cache from callers")
 Catalog.All = realAll
 

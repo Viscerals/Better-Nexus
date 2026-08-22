@@ -384,6 +384,28 @@ function Evidence.ResolveLocked(options)
         options, ordinaryFingerprint)
     if targetReason then return LockedOutcome("invalid", targetReason) end
 
+    -- Category rows are immutable capture-time evidence. They may diagnose a
+    -- historical conflict, but never grant current copy authority. An exact
+    -- independently supplied build can do so because TargetIdentity above has
+    -- already bound its ordinary fingerprint and typed ID to this request.
+    if options.copyAuthorityRequired == true
+        and type(options.build) == "table" and type(buildLocked) == "table"
+        and (#buildLocked > 0
+            or options.build.lockedAuthorityProven == true) then
+        local current, currentReason = NormalizePool(buildLocked, true)
+        if not current then
+            return LockedOutcome("invalid", currentReason)
+        end
+        local currentFingerprint = CanonicalFingerprint(current)
+        local currentClaim = options.build.lockedFingerprint
+        if currentClaim ~= nil
+            and tostring(currentClaim) ~= currentFingerprint then
+            return LockedOutcome("invalid", LOCKED_CLAIM_MISMATCH)
+        end
+        return LockedOutcome(#current > 0 and "ok" or "none", nil, "build",
+            currentFingerprint, current)
+    end
+
     local dummy, dummyFingerprint, dummyIdentity, dummyReason = LockedRecord(
         dummyRecord, "dummy", buildId, expectedFingerprint,
         allowOrdinaryOverflow)
@@ -403,15 +425,30 @@ function Evidence.ResolveLocked(options)
             return LockedOutcome("conflict",
                 "record categories disagree on resolved build identity")
         end
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", dummyFingerprint)
+        end
         local status = #dummy > 0 and "ok" or "none"
         return LockedOutcome(status, nil, "dummy+lk",
             dummyFingerprint, dummy)
     end
     if dummyRecord ~= nil then
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", dummyFingerprint)
+        end
         local status = #dummy > 0 and "ok" or "none"
         return LockedOutcome(status, nil, "dummy", dummyFingerprint, dummy)
     end
     if lkRecord ~= nil then
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", lkFingerprint)
+        end
         local status = #lk > 0 and "ok" or "none"
         return LockedOutcome(status, nil, "lk", lkFingerprint, lk)
     end
@@ -586,6 +623,295 @@ end
 
 function Evidence.CurrentKind()
     return CURRENT_KIND
+end
+
+-- DPS pairing is a projection over immutable category records. One real pair
+-- must share independently verified canonical owner, ordinary fingerprint,
+-- and the full locked combat identity (exact spell, quality, and copy total).
+local function PairIdentity(record)
+    if type(record) ~= "table" or type(record.fingerprint) ~= "string"
+        or record.fingerprint == "" then return nil end
+    local identity = Nexus and Nexus.Identity
+    local owner = identity and type(identity.VerifiedOwnerKey) == "function"
+        and identity.VerifiedOwnerKey(record) or nil
+    if not owner then return nil end
+    if type(record.echoes) ~= "table" then return nil end
+    local ordinary, ordinaryReason = NormalizePool(record.echoes, false, true)
+    if not ordinary or ordinaryReason
+        or CanonicalFingerprint(ordinary) ~= record.fingerprint then
+        return nil
+    end
+    local rows, reason = NormalizePool(record.lockedEchoes or {}, true)
+    if not rows or reason then return nil end
+    local lockedFingerprint = CanonicalFingerprint(rows)
+    if record.lockedFingerprint ~= nil
+        and tostring(record.lockedFingerprint) ~= lockedFingerprint then
+        return nil
+    end
+    return owner .. "|" .. record.fingerprint .. "|"
+        .. ExactLockedIdentity(rows)
+end
+
+local PairRowKeys = {"ownerKey","ownerVerified","buildId","resolvedBuildId",
+    "sourceIdentity","protocolVersion","class","realm","fingerprint",
+    "lockedFingerprint","echoes","lockedEchoes","dps","duration"}
+
+local function PairProjectionRow(row)
+    local result = {}
+    for _, key in ipairs(PairRowKeys) do result[key] = DeepCopy(row[key]) end
+    -- Build detail is output-relevant, but only these structural values may
+    -- distinguish equal-DPS rows. Presentation labels never enter a pair tie.
+    if type(row.build) == "table" then
+        result.build = {variant=row.build.variant,rank=row.build.rank}
+        if type(row.build.nested) == "table" then
+            result.build.nested = {variant=row.build.nested.variant,
+                rank=row.build.nested.rank}
+        end
+    end
+    return result
+end
+
+local function PairTie(row)
+    local projected = PairProjectionRow(row)
+    local scalar = table.concat({
+        tostring(row.ownerKey or ""),
+        type(row.buildId) .. ":" .. tostring(row.buildId or ""),
+        type(row.resolvedBuildId) .. ":" .. tostring(row.resolvedBuildId or ""),
+        tostring(row.sourceIdentity or ""),
+        tostring(row.protocolVersion or ""),
+        tostring(row.class or ""),
+        tostring(row.realm or ""),
+        tostring(row.fingerprint or ""),
+        tostring(row.lockedFingerprint or ""),
+        tostring(row.dps or ""),
+    }, "|")
+
+    -- Only explicitly admitted output detail may break an equal authority/DPS
+    -- tie. Ordinary and locked pools are already canonicalized by PairIdentity;
+    -- labels, category, resemblance, clocks, and unknown nested metadata are
+    -- never selection inputs.
+    local seen, budget = {}, {left=4096,nextReference=0}
+    local function stable(value, depth)
+        if budget.left <= 0 then return "!limit" end
+        budget.left = budget.left - 1
+        local kind = type(value)
+        if kind == "nil" then return "n" end
+        if kind == "boolean" then return value and "b1" or "b0" end
+        if kind == "number" or kind == "string" then
+            return kind:sub(1, 1) .. #tostring(value) .. ":" .. tostring(value)
+        end
+        if kind ~= "table" then return "x:" .. kind end
+        if seen[value] then return "r:" .. tostring(seen[value]) end
+        if depth >= 12 then return "!depth" end
+        budget.nextReference = budget.nextReference + 1
+        seen[value] = budget.nextReference
+        local entries = {}
+        for key, child in pairs(value) do
+            entries[#entries + 1] = {key=stable(key, depth + 1),value=child}
+        end
+        -- Do not route this bounded per-record canonicalization through the
+        -- shared projection sort. It is already capped by `budget` and must
+        -- not consume a view's ranked-comparison allowance.
+        local function sift(root, last)
+            while root * 2 <= last do
+                local child = root * 2
+                if child < last
+                    and entries[child].key < entries[child + 1].key then
+                    child = child + 1
+                end
+                if entries[child].key <= entries[root].key then return end
+                entries[root], entries[child] = entries[child], entries[root]
+                root = child
+            end
+        end
+        for root = math.floor(#entries / 2), 1, -1 do
+            sift(root, #entries)
+        end
+        for last = #entries, 2, -1 do
+            entries[1], entries[last] = entries[last], entries[1]
+            sift(1, last - 1)
+        end
+        local out = {"{"}
+        for _, entry in ipairs(entries) do
+            out[#out + 1] = entry.key
+            out[#out + 1] = "="
+            out[#out + 1] = stable(entry.value, depth + 1)
+            out[#out + 1] = ";"
+        end
+        out[#out + 1] = "}"
+        return table.concat(out)
+    end
+    return scalar .. "|" .. stable({duration=projected.duration,
+        build=projected.build}, 0)
+end
+
+local function AddPairSource(sources, row)
+    for _, existing in ipairs(sources) do
+        if existing == row then return end
+    end
+    sources[#sources + 1] = row
+end
+
+local function PositiveFiniteDps(value)
+    value = tonumber(value)
+    if not value or value ~= value or value == math.huge
+        or value == -math.huge or value <= 0 then return nil end
+    return value
+end
+
+function Evidence.DpsPairIdentity(record)
+    return PairIdentity(record)
+end
+
+function Evidence.DpsRowBefore(left, right)
+    local leftDps, rightDps = PositiveFiniteDps(left and left.dps) or 0,
+        PositiveFiniteDps(right and right.dps) or 0
+    if leftDps ~= rightDps then return leftDps > rightDps end
+    return PairTie(left or {}) < PairTie(right or {})
+end
+
+function Evidence.BeginRealDpsPairs(dummyRows, lkRows)
+    return {dummy=type(dummyRows) == "table" and dummyRows or {},dummyIndex=1,
+        lk=type(lkRows) == "table" and lkRows or {},lkIndex=1,matchIndex=1,
+        dummyByIdentity={},best={},bestKeys={},collectIndex=1,result={},
+        sortIndex=2,sortScan=nil,phase="index"}
+end
+
+local function PairBefore(left, right)
+        if left.average ~= right.average then
+            return left.average > right.average
+        end
+        if left.identity ~= right.identity then
+            return left.identity < right.identity
+        end
+        return left.tie < right.tie
+end
+
+function Evidence.PumpRealDpsPairs(cursor, limit)
+    if type(cursor) ~= "table" or cursor.phase == "done" then return true, 0 end
+    limit = PositiveInteger(limit) or 1
+    local work = 0
+    while work < limit and cursor.phase ~= "done" do
+        work = work + 1
+        if cursor.phase == "index" then
+            local row = cursor.dummy[cursor.dummyIndex]
+            if row then
+                local key = PairIdentity(row)
+                if key then
+                    local bucket = cursor.dummyByIdentity[key] or {}
+                    bucket[#bucket + 1] = row
+                    cursor.dummyByIdentity[key] = bucket
+                end
+                cursor.dummyIndex = cursor.dummyIndex + 1
+            else
+                cursor.phase = "match"
+            end
+        elseif cursor.phase == "match" then
+            if cursor.lkIndex > #cursor.lk then
+                cursor.phase = "collect"
+            else
+            local lk = cursor.lk[cursor.lkIndex]
+            local lkKey = PairIdentity(lk)
+            local matches = lkKey and cursor.dummyByIdentity[lkKey] or {}
+            local dummy = matches[cursor.matchIndex]
+            if not dummy then
+                cursor.lkIndex = cursor.lkIndex + 1
+                cursor.matchIndex = 1
+            else
+                local dummyDps, lkDps = PositiveFiniteDps(dummy.dps),
+                    PositiveFiniteDps(lk.dps)
+                if dummyDps and lkDps then
+                    local average = PositiveFiniteDps(
+                        dummyDps / 2 + lkDps / 2)
+                    if average then
+                        local candidate = {identity=lkKey,dummy=dummy,lk=lk,
+                            dummySources={dummy},lkSources={lk},
+                            dummyDps=dummyDps,lkDps=lkDps,
+                            average=average,
+                            tie=PairTie(dummy) .. "|" .. PairTie(lk)}
+                        local current = cursor.best[lkKey]
+                        if not current
+                            or candidate.average > current.average
+                            or candidate.average == current.average
+                                and candidate.tie < current.tie then
+                            if not current then
+                                cursor.bestKeys[#cursor.bestKeys + 1] = lkKey
+                            end
+                            cursor.best[lkKey] = candidate
+                        elseif candidate.average == current.average
+                            and candidate.tie == current.tie then
+                            -- Rows that differ only by excluded clocks have
+                            -- equal authority and output. Project a neutral
+                            -- defensive copy so input order cannot leak one
+                            -- record's recency into the chosen pair.
+                            current.dummy = PairProjectionRow(current.dummy)
+                            current.lk = PairProjectionRow(current.lk)
+                            AddPairSource(current.dummySources, dummy)
+                            AddPairSource(current.lkSources, lk)
+                        end
+                    end
+                end
+                cursor.matchIndex = cursor.matchIndex + 1
+            end
+            end
+        elseif cursor.phase == "collect" then
+            local key = cursor.bestKeys[cursor.collectIndex]
+            if key then
+                cursor.result[#cursor.result + 1] = cursor.best[key]
+                cursor.collectIndex = cursor.collectIndex + 1
+            else
+                cursor.phase = "sort"
+            end
+        elseif cursor.phase == "sort" then
+            if cursor.sortIndex > #cursor.result then
+                cursor.phase = "done"
+            else
+                cursor.sortScan = cursor.sortScan or cursor.sortIndex
+                local scan = cursor.sortScan
+                if scan > 1 and PairBefore(cursor.result[scan], cursor.result[scan - 1]) then
+                    cursor.result[scan], cursor.result[scan - 1] =
+                        cursor.result[scan - 1], cursor.result[scan]
+                    cursor.sortScan = scan - 1
+                else
+                    cursor.sortIndex = cursor.sortIndex + 1
+                    cursor.sortScan = nil
+                end
+            end
+        end
+    end
+    return cursor.phase == "done", work
+end
+
+function Evidence.RealDpsPairsResult(cursor)
+    return type(cursor) == "table" and cursor.phase == "done"
+        and cursor.result or nil
+end
+
+function Evidence.RealDpsPairs(dummyRows, lkRows)
+    local cursor = Evidence.BeginRealDpsPairs(dummyRows, lkRows)
+    while not Evidence.PumpRealDpsPairs(cursor, 1000) do end
+    return cursor.result
+end
+
+function Evidence.DpsSummary(dummyRows, lkRows)
+    local summary = {dummy=0,lk=0,best=0,average=0,count=0,pair=nil}
+    for _, row in ipairs(type(dummyRows) == "table" and dummyRows or {}) do
+        summary.dummy = math.max(summary.dummy,
+            PositiveFiniteDps(row.dps) or 0)
+    end
+    for _, row in ipairs(type(lkRows) == "table" and lkRows or {}) do
+        summary.lk = math.max(summary.lk,
+            PositiveFiniteDps(row.dps) or 0)
+    end
+    if summary.dummy > 0 then summary.count = summary.count + 1 end
+    if summary.lk > 0 then summary.count = summary.count + 1 end
+    summary.best = math.max(summary.dummy, summary.lk)
+    local pairs = Evidence.RealDpsPairs(dummyRows, lkRows)
+    if pairs[1] then
+        summary.average = pairs[1].average
+        summary.pair = pairs[1]
+    end
+    return summary
 end
 
 -- Public normalization seam for consumers that need to materialize the same

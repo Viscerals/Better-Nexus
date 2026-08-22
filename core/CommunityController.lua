@@ -533,7 +533,7 @@ function Controller.New(options)
             and dps.GetPersonalBest(buildId, category) or nil
     end
 
-    function M.LockedEchoesForBuild(build)
+    function M.LockedEchoesForBuild(build, copyAuthorityRequired)
         if type(build) ~= "table" then
             return nil, "build evidence is unavailable"
         end
@@ -553,8 +553,14 @@ function Controller.New(options)
                 source="none",fingerprint="0",lockedEchoes={},
             }
         end
+        local authorityBuild = build
+        if copyAuthorityRequired == true then
+            local related, valid = RelatedBuild(build)
+            authorityBuild = valid and related or nil
+        end
         local ok, result = pcall(resolver.ResolveLocked, {
-            build=build,dummyRecord=dummy,lkRecord=lk,
+            build=authorityBuild,dummyRecord=dummy,lkRecord=lk,
+            copyAuthorityRequired=copyAuthorityRequired == true,
         })
         if not ok or type(result) ~= "table" then
             return nil, "locked Echo resolution failed"
@@ -2147,15 +2153,14 @@ function Controller.New(options)
 
     function M.DpsSummary(build)
         local dps = Nexus and Nexus.DpsCapture
-        local summary = {
-            dummy=0,lk=0,best=0,average=0,count=0,
-        }
+        local summary = {dummy=0,lk=0,best=0,average=0,count=0}
         if not (dps and build) then return summary end
         local savedKind = Identity.SavedMirrorKind(build)
         local related, valid = RelatedBuild(build)
         local recordId = (savedKind == "ordinary" or valid)
             and related and related.id or nil
         local allowEchoFallback = savedKind == "ordinary" or valid
+        local categoryRows = {dummy={},lk={}}
         for _, category in ipairs({"dummy", "lk"}) do
             local rows
             if recordId and dps.GetLeaderboard then
@@ -2170,6 +2175,7 @@ function Controller.New(options)
                 if ok then rows = result end
             end
             if type(rows) == "table" then
+                categoryRows[category] = rows
                 for _, row in ipairs(rows) do
                     local value = tonumber(
                         row.dps or row.value or row.amount) or 0
@@ -2179,14 +2185,13 @@ function Controller.New(options)
                 end
             end
         end
+        local evidence = Nexus and Nexus.CandidateEvidence
+        if evidence and type(evidence.DpsSummary) == "function" then
+            return evidence.DpsSummary(categoryRows.dummy, categoryRows.lk)
+        end
         if summary.dummy > 0 then summary.count = summary.count + 1 end
         if summary.lk > 0 then summary.count = summary.count + 1 end
         summary.best = math.max(summary.dummy, summary.lk)
-        if summary.count == 2 then
-            summary.average = (summary.dummy + summary.lk) / 2
-        elseif summary.count == 1 then
-            summary.average = summary.best
-        end
         return summary
     end
 

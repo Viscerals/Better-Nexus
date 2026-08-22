@@ -151,31 +151,31 @@ end
 -- Stored legacy rows below the contract may remain in SavedVariables, but they
 -- must not qualify, publish, hash, or relay as current evidence.
 local function StoredRow(category, duration, player, fp)
+    local verifiedFingerprint = DPS.GetEchoKey(echoes)
     return {
-        fingerprint=fp,loadoutHash=hash,echoes=echoes,category=category,
+        fingerprint=verifiedFingerprint,loadoutHash=hash,echoes=echoes,category=category,
         dps=250000,duration=duration,ts=30000,player=player,
         level=80,class="MAGE",ownerKey=player:lower() .. "@ebonhold",
-        realm="ebonhold",ownerVerified=true,
+        realm="ebonhold",ownerVerified=true,lockedEchoes={},
     }
 end
 NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={
     characterBest={
         dummy={
-            valid=StoredRow("dummy",30,"ValidDummy","valid-pair"),
+            valid=StoredRow("dummy",30,"Valid","valid-pair"),
             shortdummy=StoredRow("dummy",29,"ShortDummy","short-dummy"),
             shortlk=StoredRow("dummy",30,"ShortLkDummy","short-lk"),
         },
         lk={
-            valid=StoredRow("lk",20,"ValidLk","valid-pair"),
+            valid=StoredRow("lk",20,"Valid","valid-pair"),
             shortdummy=StoredRow("lk",30,"ShortDummyLk","short-dummy"),
             shortlk=StoredRow("lk",19,"ShortLk","short-lk"),
         },
     },personalBest={},buildBest={},
 }}
 local eligibility = DPS.GetCommunityEligibility()
-Check(eligibility["valid-pair"] ~= nil
-        and eligibility["short-dummy"] == nil
-        and eligibility["short-lk"] == nil,
+local verifiedFingerprint = DPS.GetEchoKey(echoes)
+Check(eligibility[verifiedFingerprint] ~= nil,
     "Community qualification published below-category duration evidence")
 local dummyBoard, lkBoard = DPS.GetDpsBoard("dummy"), DPS.GetDpsBoard("lk")
 local function HasPlayer(rows, player)

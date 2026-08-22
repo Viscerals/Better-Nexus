@@ -988,10 +988,20 @@ local function CurrentDpsRevision()
     return revisions, revision
 end
 
+local function PairRecord(row)
+    if type(row) ~= "table" then return row end
+    local projected = DeepCopy(row)
+    projected.echoes = StoredEchoes(row, false)
+    projected.lockedEchoes = StoredEchoes(row, true) or {}
+    return projected
+end
+
+local CachedLockedRecord
+
 local function RebuildIdentityIndex()
     MigrateLegacyLeaderboard()
     local categories = {dummy=NewIdentityCategory(),lk=NewIdentityCategory()}
-    local bestByFingerprint = {dummy={},lk={}}
+    local rowsByFingerprint = {dummy={},lk={}}
     local scanned, indexed = 0, 0
     local store = CharacterBestStore()
     for _, category in ipairs({"dummy", "lk"}) do
@@ -1009,23 +1019,23 @@ local function RebuildIdentityIndex()
                 local value = tonumber(row.dps) or 0
                 if type(fingerprint) == "string" and fingerprint ~= ""
                     and value == value and value < math.huge and value > 0 then
-                    local previous = bestByFingerprint[category][fingerprint] or 0
-                    if value > previous then
-                        bestByFingerprint[category][fingerprint] = value
-                    end
+                    local rows = rowsByFingerprint[category][fingerprint] or {}
+                    rows[#rows + 1] = PairRecord(row)
+                    rowsByFingerprint[category][fingerprint] = rows
                 end
                 indexed = indexed + 1
             end
         end
     end
     local eligibility = {}
-    for fingerprint, dummy in pairs(bestByFingerprint.dummy) do
-        local lk = bestByFingerprint.lk[fingerprint]
-        if lk and dummy > 0 and lk > 0 then
-            eligibility[fingerprint] = {
-                dummy=dummy,lk=lk,best=math.max(dummy,lk),
-                average=(dummy+lk)/2,count=2,
-            }
+    for fingerprint, dummyRows in pairs(rowsByFingerprint.dummy) do
+        local lkRows = rowsByFingerprint.lk[fingerprint]
+        local evidence = Nexus and Nexus.CandidateEvidence
+        local summary = lkRows and evidence
+            and evidence.DpsSummary(dummyRows, lkRows) or nil
+        if summary and summary.average > 0 then
+            summary.pair = nil
+            eligibility[fingerprint] = summary
         end
     end
     identityIndex.categories = categories
@@ -1138,8 +1148,6 @@ function DPS.GetLeaderboardForIdentity(buildId, fingerprint, fingerprintHash, ca
     return SortedEntries(GlobalForIdentity(buildId, key, hash, category))
 end
 
-local CachedLockedRecord
-
 function DPS.GetRecordForIdentity(buildId, fingerprint, fingerprintHash, category)
     local key = type(fingerprint) == "string" and fingerprint or nil
     local hash = fingerprintHash ~= nil and tostring(fingerprintHash) or nil
@@ -1219,23 +1227,43 @@ function DPS.CommunityEligibilityCursorNext(cursor)
             local value = tonumber(row.dps) or 0
             if type(fingerprint) == "string" and fingerprint ~= ""
                 and value == value and value < math.huge and value > 0 then
-                local previous = cursor.best[category][fingerprint] or 0
-                if value > previous then cursor.best[category][fingerprint] = value end
+                local rows = cursor.best[category][fingerprint] or {}
+                rows[#rows + 1] = PairRecord(row)
+                cursor.best[category][fingerprint] = rows
             end
             cursor.indexed = cursor.indexed + 1
         end
         return false
     end
 
-    local fingerprint, dummy = next(cursor.best.dummy, cursor.key)
-    cursor.key = fingerprint
+    if cursor.pairCursor then
+        local evidence = Nexus and Nexus.CandidateEvidence
+        local done = evidence.PumpRealDpsPairs(cursor.pairCursor, 1)
+        if done then
+            local pairs = evidence.RealDpsPairsResult(cursor.pairCursor)
+            local pair = pairs and pairs[1]
+            if pair then
+                cursor.eligibility[cursor.pairFingerprint] = {
+                    dummy=pair.dummyDps,lk=pair.lkDps,
+                    best=math.max(pair.dummyDps, pair.lkDps),
+                    average=pair.average,count=2,
+                }
+            end
+            cursor.key = cursor.pairFingerprint
+            cursor.pairCursor, cursor.pairFingerprint = nil, nil
+        end
+        return false
+    end
+
+    local fingerprint, dummyRows = next(cursor.best.dummy, cursor.key)
     if fingerprint ~= nil then
-        local lk = cursor.best.lk[fingerprint]
-        if lk and dummy > 0 and lk > 0 then
-            cursor.eligibility[fingerprint] = {
-                dummy=dummy,lk=lk,best=math.max(dummy,lk),
-                average=(dummy+lk)/2,count=2,
-            }
+        local lkRows = cursor.best.lk[fingerprint]
+        local evidence = Nexus and Nexus.CandidateEvidence
+        if lkRows and evidence and evidence.BeginRealDpsPairs then
+            cursor.pairFingerprint = fingerprint
+            cursor.pairCursor = evidence.BeginRealDpsPairs(dummyRows, lkRows)
+        else
+            cursor.key = fingerprint
         end
         return false
     end

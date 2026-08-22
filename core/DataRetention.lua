@@ -8,6 +8,8 @@
 Nexus = Nexus or {}
 local Identity = assert(Nexus.Identity,
     "Nexus Identity must load before DataRetention")
+local CandidateEvidence = assert(Nexus.CandidateEvidence,
+    "CandidateEvidence must load before DataRetention")
 local Retention = {}
 Nexus.DataRetention = Retention
 
@@ -254,29 +256,35 @@ local function SelectCharacterBest(dps, limits, overlay)
             end)
     end
 
-    -- Average is a projection, not a stored category. Match the same player +
-    -- loadout identity used by ViewProjections and reserve both raw rows.
-    local dummyByIdentity, dummyByBuild = {}, {}
+    -- Reserve Average inputs from the same deterministic real-pair owner used
+    -- by Community and Leaderboard. Category maxima remain independent.
+    local entryByRow, dummyRows, lkRows = {}, {}, {}
     for _, entry in ipairs(entries.dummy) do
-        local player = CharacterKey(entry.row, entry.key)
-        local identity = RowIdentity(entry.row)
-        if identity then dummyByIdentity[player .. "|" .. identity] = entry end
-        if entry.row.buildId ~= nil then
-            dummyByBuild[player .. "|" .. TypedIdentity(entry.row.buildId)] = entry
-        end
+        entryByRow[entry.row] = entry
+        dummyRows[#dummyRows + 1] = entry.row
+    end
+    for _, entry in ipairs(entries.lk) do
+        entryByRow[entry.row] = entry
+        lkRows[#lkRows + 1] = entry.row
     end
     local averages = {}
-    for _, lkEntry in ipairs(entries.lk) do
-        local player = CharacterKey(lkEntry.row, lkEntry.key)
-        local identity = RowIdentity(lkEntry.row)
-        local dummyEntry = identity and dummyByIdentity[player .. "|" .. identity] or nil
-        if not dummyEntry and lkEntry.row.buildId ~= nil then
-            dummyEntry = dummyByBuild[player .. "|" .. TypedIdentity(lkEntry.row.buildId)]
+    local function PairEntry(row, sources)
+        local best = entryByRow[row]
+        for _, sourceRow in ipairs(type(sources) == "table" and sources or {}) do
+            local candidate = entryByRow[sourceRow]
+            if candidate and (not best
+                or tostring(candidate.key) < tostring(best.key)) then
+                best = candidate
+            end
         end
-        if dummyEntry then
+        return best
+    end
+    for _, pair in ipairs(CandidateEvidence.RealDpsPairs(dummyRows, lkRows)) do
+        local dummyEntry = PairEntry(pair.dummy, pair.dummySources)
+        local lkEntry = PairEntry(pair.lk, pair.lkSources)
+        if dummyEntry and lkEntry then
             averages[#averages + 1] = {
-                key=player .. "|" .. tostring(identity or lkEntry.row.buildId),
-                dps=(dummyEntry.dps + lkEntry.dps) / 2,
+                key=pair.identity,dps=pair.average,
                 stamp=math.min(dummyEntry.stamp, lkEntry.stamp),
                 class=lkEntry.class ~= "UNKNOWN" and lkEntry.class or dummyEntry.class,
                 dummy=dummyEntry, lk=lkEntry,

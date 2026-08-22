@@ -104,6 +104,7 @@ local build = {
     id="stage36-locked-resolver", title="Locked Resolver Fixture",
     author="Fixture", ownerKey="fixture@ebonhold", class="MAGE",
     echoes=Clone(ordinary), fingerprint=EchoKey(ordinary),
+    lockedEchoes={},lockedAuthorityProven=true,
     postedAt=1, lastModified=1,
 }
 
@@ -226,13 +227,8 @@ Nexus.Leaderboard.Init({})
 Nexus.Leaderboard.Show("combined")
 Nexus.Leaderboard.RefreshData()
 local combinedKey = "fixture@ebonhold|string:" .. build.fingerprint
-Control(Nexus.Leaderboard.SelectKey(combinedKey),
-    "real combined Leaderboard row was not selectable")
-local leaderboardDetail = assert(NexusLeaderboardFrame._leaderboardDetail,
-    "real Leaderboard detail panel was not assembled")
-Control(not leaderboardDetail.copy:IsEnabled()
-        and leaderboardDetail.more:GetText():find(disagreeReason,1,true),
-    "Leaderboard/Wishlist Copy did not refuse conflicting locked evidence")
+Control(not Nexus.Leaderboard.SelectKey(combinedKey),
+    "conflicting locked identities remained selectable as a combined pair")
 
 local recoveredDummy = Record("dummy", dummyLocked, {
     buildId="historical-dummy-stage36",resolvedBuildId=build.id,build=nil,
@@ -253,9 +249,9 @@ Nexus.ViewProjections.Reset()
 Nexus.Leaderboard.Show("combined")
 Nexus.Leaderboard.RefreshData()
 local recoveredSelected = Nexus.Leaderboard.SelectKey(combinedKey)
-Control(recoveredSelected
-        and NexusLeaderboardFrame._leaderboardDetail.copy:IsEnabled(),
-    "matching recovered category records did not remain copyable")
+local recoveredCopy = controller.LockedEchoesForBuild(build, true)
+Control(recoveredCopy == nil,
+    "historical category agreement granted current copy authority")
 Nexus.DpsCapture.GetCharacterBest = nil
 InstallRecords(dummy, lk)
 
@@ -299,8 +295,8 @@ Control(projection.Detail(build.id, {}) == detail
     "warm Community detail repeated locked-evidence record reads")
 
 -- Exercise the assembled Community Copy button as a second Wishlist entry
--- point. A conflict must stop before the editor opens, with the same bounded
--- reason that the Leaderboard already presents.
+-- point. The exact current build proves an empty locked state, so conflicting
+-- historical snapshots remain visible but cannot override current authority.
 dofile("ui/CommunityBuilds.lua")
 local communityOpened
 Nexus.WishlistEditor = {
@@ -324,14 +320,11 @@ print = function(...)
 end
 communityDetail.lockBtn:GetScript("OnClick")()
 print = originalPrint
-local communityRefusal = false
-for _, message in ipairs(messages) do
-    if message:find(disagreeReason,1,true) then communityRefusal = true end
-end
-Desired("community", communityOpened == nil,
-    "Community Copy opened Wishlist Editor with conflicting locked evidence")
-Desired("community", communityRefusal,
-    "Community Copy did not present the shared bounded conflict reason")
+Desired("community", communityOpened ~= nil,
+    "exact empty current authority did not open Community Copy")
+Desired("community", type(communityOpened.lockedEchoes) == "table"
+        and #communityOpened.lockedEchoes == 0,
+    "Community Copy did not preserve the exact empty locked state")
 
 ------------------------------------------------------------------------
 -- Claimed locked fingerprints are untrusted. The shared owner must recompute

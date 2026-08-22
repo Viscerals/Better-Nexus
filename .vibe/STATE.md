@@ -6,35 +6,40 @@
 
 ## Current focus
 
-- Stage: 48
-- Checkpoint: 48.4
+- Stage: 49
+- Checkpoint: 49.2
 - Status: DONE
-- Branch: `bugfix/test19-wp4-exact-wishlist-evidence`
-- Starting head: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
+- Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
+- Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 - Worktree: `.test19-wp4-worktree`
-- Base: exact accepted WP3 publication head `e674f033cc51494a382191b987c9a99cb6827f4a`
+- Base: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 
 ## Objective (current checkpoint)
 
-Make overlay, HUD, model, editor, and automation progress consume the same exact tier and role evidence.
+Project Community DPS only from deterministic real Dummy/LK pairs with verified canonical owner, ordinary fingerprint, and locked full-combat identity.
 
 ## Deliverables (current checkpoint)
 
-- One exact-spell/tier progress boundary shared by `ui/WishlistOverlay.lua`, the model, editor, and automation consumers.
-- Focused sibling-tier, per-tier quota, locked-role, refresh, and parity coverage.
-- Removal of family-level satisfaction as an authority decision.
+- One clock-neutral pair-compatibility predicate and deterministic best-real-pair selector in CandidateEvidence.
+- Equal-DPS permutation, reload/Sync, Community, Leaderboard, retention, and sorting parity coverage.
+- Independent Dummy/LK category bests when no compatible real pair exists.
 
 ## Acceptance (current checkpoint)
 
-- [x] A lower-quality sibling never satisfies a higher-quality target.
-- [x] Each exact tier reports its own owned copies, target quota, and completion state.
-- [x] Ordinary and locked progress consume their correct evidence roles.
-- [x] Overlay, HUD, model, and editor agree before and after refresh/reload.
-- [x] Focused overlay/parity tests, mapped tests, Fast, checkpoint review, and diff checks pass; cumulative independent review and Full remain the frozen WP4 gates.
+- [x] Every Average comes from two actual records with the same verified canonical owner.
+- [x] The pair shares the same ordinary fingerprint and locked/full-combat identity.
+- [x] Timestamp and recency fields at every depth cannot select or change the projected pair.
+- [x] Mixed or incomplete authority leaves Average unavailable while preserving independent category bests.
+- [x] Community, Leaderboard, retention, and sorting consume the same deterministic real-pair metric.
+- [x] Blocking focused, mapped, Fast, exact-head review/Full, and diff checks pass.
+- [ ] Nonblocking manual SavedVariables/native validation remains explicitly unverified.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- Controller repair excludes labels, category, resemblance, and temporal metadata from equal-DPS ties through an explicit projection allowlist; retention resolves the accepted pair through preserved source references. Expected-red reproduced both findings, focused paired/retention/board/Leaderboard/view tests pass, and Fast passes `43/43`.
+- WP5 implementation candidate separates historical locked snapshots from exact current/build copy authority and centralizes verified-owner + ordinary + locked/full-combat real-pair metrics across Community eligibility/averages, Leaderboard sync/resumable projections, retention, and DPS sorting. Focused authority/pairing matrices pass; Fast passes `37/37`; final Full passes `18` blocking checks with Lua `221/221`, parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit manual SavedVariables skip.
+- Stage 49 test-gap analysis prioritized five risk-backed matrices: `[MAJOR]` immutable historical snapshots versus exact later copy authority; `[MAJOR]` verified-owner + ordinary + locked/full-combat pair compatibility; `[MAJOR]` Community/Leaderboard/sort parity from one metric; `[MODERATE]` category/timestamp permutation invariance; `[MODERATE]` reload/restart/Sync convergence with preserved conflict evidence.
 - Exact-head review of `432e2ed` found and repaired catalog-owner drift, semantic target-cache staleness, row-order replacement identity, malformed/overflow locked evidence in Main/HUD and other consumers, and nested provenance aliasing. The affected matrix passes with locked totals `65`, controller `54`, AutoLock `105`, active bridge `19`, and exact-base Fast `45/45`; strict Vibe and diff checks pass.
 - Standards re-review of `94610e3` found and repaired direct admission-output aliasing plus duplicated/drifted Policy locked validation. `logic/Model.lua` is now the single pure locked-evidence admission owner, TargetMapEntries returns defensive values/catalog rows, locked totals pass `66`, Policy scenarios pass `54`, and exact-base Fast remains `45/45`.
 - Standards review of `04729be` found and repaired Policy's final raw-versus-normalized spell-map merge. Policy now consumes the full shared projection; lone string keys normalize to numeric exact authority, aliases still fail closed, and exact-base Fast remains `45/45`.
@@ -63,6 +68,9 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Work log
 
+- WP5 implementation completed issues #23/#26 on one coherent candidate: copy paths require exact build-bound locked authority; historical category rows remain preserved for display; one deterministic real-pair owner feeds qualification, Community averages, Leaderboard, retention, and sorting. Final Fast `37/37` and Full `18/18` pass.
+- Stage 49 maintenance test-gap analysis selected five non-duplicative expected-red matrices covering immutable history, exact copy authority, real-pair identity, cross-surface parity, ordering, and persistence/Sync convergence.
+- Stage 48 retrospective completed with five WP5 actions: one DPS authority verdict, adversarial immutable-history coverage, read-only copy resolution, shared projection parity, and pre-Full reload/Sync matrices.
 - Review wave 2 at `432e2ed` centralized catalog-bound target admission, canonicalized semantic target identity, made target/provenance results cycle-safe defensive copies, and atomically rejected malformed or seven-copy locked evidence across GameAdapter, controller/export/renderer, Main/HUD, Policy, and AutoLock. Focused probes and exact-base Fast `45/45` pass; a new exact local commit and three fresh independent reviews remain before Full.
 - Standards review at `94610e3` closed the prior catalog boundary and exposed the last two owner-consistency gaps. Direct admitted values/catalog rows are now defensive, and Policy plus every Wishlist consumer shares `Model.LockedProjection`; focused tests and Fast `45/45` pass. A new exact local commit and all three fresh reviews remain before Full.
 - Independent re-review closed the prior five repairs and found six further exactness gaps at `1afec7d`. Versioned counted-target validation, copy-based capacity/deficit admission, aggregation-stable identity, synced defensive renderer/export projections, and exact guaranteed-queue matching now pass 20 focused runners and exact-base Fast `41/41`.
@@ -93,7 +101,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Workflow state
 
-- [x] RUN_STOPPED
+- [ ] RUN_STOPPED
 - [ ] RUN_CONTEXT_CAPTURE
 - [x] STAGE_DESIGNED
 - [x] MAINTENANCE_CYCLE_DONE
@@ -117,7 +125,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Decisions
 
-- WP3 remains frozen; WP4 is authorized only in `.test19-wp4-worktree` through a validated local checkpoint, with no push, PR/issue mutation, publication, install, native WoW, live SavedVariables, or WP5 work.
+- WP4 remains frozen; WP5 is authorized only in `.test19-wp4-worktree` on the reconciled WP5 branch, with no push, PR/issue mutation, publication, install, native WoW, or live SavedVariables work.
 - Treat the master-chat order as authoritative: WP2 is #28/#41/#42, WP3 is #30/#37 then #19 acceptance, WP4 is #43/#44/#20/#35, and WP5 is #23/#26.
 - Preserve every independently owned worktree and the frozen WP2/PR #53 and WP3/PR #54 boundaries; only `.test19-wp4-worktree` owns this local WP4 range.
 - Exact canonical identity owns durable authority; ambiguous and future-owned evidence remains preserved, non-authoritative, and fail-closed.
@@ -125,8 +133,40 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- WP4 local completion PASS is recorded for exact frozen candidate `de76d9c`: independent Spec/Standards/adversarial review passed on product/test head `c28f3c9`, and Full passed `18` blocking checks with Lua `219/219`, parse `292/292`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip. Stage 49/WP5 was not entered.
+- Checkpoint 49.2 hygiene CLEAN at receipt head `fd4b6f6` for reviewed product/test head `de04122`: the prohibited tie-input and retention-source repairs pass focused paired DPS, retention, board, Leaderboard, and view tests; Fast passes `43/43`; the exact-head Full receipt remains `18` blocking passes with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, and one explicit nonblocking manual SavedVariables skip. No checkpoint-hygiene signal was identified; native WoW remains unverified.
 
 ## Recommended next action
 
-- Stop locally without dispatching consolidation or entering Stage 49/WP5. Any later action should be a separately authorized bounded WP4 publication/review step only.
+- Return the clean local WP5 receipt commit to the controller-owned independent review; do not begin another design cycle or publish from this worker.
+
+
+## Work log (current session)
+- Checkpoint 49.2 prohibited-tie/retention-source hygiene CLEAN: bounded repaired surface has no correctness, security, duplication, or safe high-ROI cleanup signal; Full was not repeated.
+- Review PASS at exact head de04122: Full 18 blocking passes; Lua 221/221, parse 294/294, integration 70/70; one nonblocking manual SavedVariables skip remains unverified
+- Repair prohibited DPS tie inputs and preserve retention pair sources
+- Controller review repair: SPEC-PROHIBITED-TIE-INPUTS; SPEC-RETENTION-PAIR-REFERENCE-LOSS; VIBE-CHECKPOINT-CONTRADICTION
+- Checkpoint 49.2 recency-tie hygiene CLEAN: bounded CandidateEvidence/test/state surface has no safe high-ROI cleanup or actionable debt; Full was not repeated.
+- Review PASS at exact head 3c2c932: Full 18 blocking passes; one nonblocking manual SavedVariables skip remains unverified.
+- Clock-neutral equal-DPS pair ties preserve source history; focused parity and Fast 43/43 pass.
+- Controller review repair: SPEC-PAIR-TIE-RECENCY-LEAK; VIBE-CHECKPOINT-SEMANTIC-MISMATCH
+- Checkpoint 49.2 hygiene CLEAN: no product/test byte changed after Full; bounded repaired surface has no correctness, security, or high-ROI cleanup signal.
+- Review PASS at exact product/test head d5b8cc0: Full 18 blocking passes, Lua 221/221, parse 294/294, integration 70/70; one nonblocking manual skip remains unverified.
+- Full-discovered work-budget and exact-empty fixture repairs pass affected runners and Fast 43/43.
+- Review FAIL: live projection tie exceeded comparison budget; legacy exact-empty fixture lacked lockedAuthorityProven.
+- WP5 review repairs require explicit empty authority, finite overflow-safe pair averages, and deterministic output-relevant ties; focused and Fast 43/43 pass.
+- Controller review FAIL: SPEC-EMPTY-COPY-AUTHORITY; ADV-PAIR-AVERAGE-OVERFLOW; SPEC-PAIR-TIE-NOT-TOTAL
+- Controller receipt reconciliation aligned PLAN checkpoints 49.1 and 49.2 with verified review PASS and hygiene receipts.
+- Review PASS at exact product/test head 47c3a3b: Full 18 blocking passes, Lua 221/221, parse 294/294, integration 70/70; one nonblocking manual skip remains unverified.
+- Full-discovered durable ordinary-evidence fixtures repaired; five focused runners and Fast 43/43 pass.
+- Review FAIL: Full exact head f615b78 exposed five legacy fixtures without verified ordinary Echo evidence.
+- WP5 review repairs validate ordinary evidence, total pair ties, and fully bounded pair pumps; focused and Fast 43/43 pass.
+- Controller review repair: VALIDATION-EXACT-HEAD-MISMATCH; VIBE-CHECKPOINT-CONTRADICTION; SPEC-ORDINARY-FINGERPRINT-CLAIM; SPEC-PAIR-TIE-NONDETERMINISM; STANDARDS-UNBOUNDED-PAIR-PUMP
+- Checkpoint 49.2 hygiene CLEAN: bounded product/test surface had no safe high-ROI cleanup, actionable debt, or correctness/security finding; no product/test byte changed and Full was not repeated.
+- Fast 43/43 confirms deterministic real-pair authority and projection parity
+- Controller repair alignment: SPEC-PAIR-ASYNC-DIVERGENCE; SPEC-EMPTY-COPY-AUTHORITY; ADV-NONFINITE-PAIR; VALIDATION-MIXED-STATE-GAP; VIBE-CHECKPOINT-CONTRADICTION
+- Mechanical PASS recovery advanced the reviewed 49.1 pointer to 49.2.
+- Exact-head Full passed 18 checks; bounded real-pair and copy-authority repairs accepted
+- Bounded shared real-pair cursor passes focused work-budget and Fast 43/43
+- Full found unbounded real-pair selector work in active Sync projection pump
+- WP5 review repairs validated: async parity, empty authority, finite DPS, and mixed-state coverage
+- Controller review repair: SPEC-PAIR-ASYNC-DIVERGENCE; SPEC-EMPTY-COPY-AUTHORITY; ADV-NONFINITE-PAIR; VALIDATION-MIXED-STATE-GAP; VIBE-CHECKPOINT-CONTRADICTION

@@ -91,23 +91,31 @@ end
 local dummy = NexusDB.dpsCapture.characterBest.dummy
 dummy.boganic = {
     player="Boganic", ownerKey="boganic@ebonhold", buildId="local-leader",
-    fingerprint="fp-local", dps=999999, ts=now,
+    ownerVerified=true,realm="ebonhold",fingerprint="910000x1",
+    echoes={{spellId=910000,stacks=1}},
+    lockedEchoes={},dps=999999,ts=now,
 }
 for i = 1, 300 do
     local id = string.format("remote-char-%03d", i)
+    local fingerprint = tostring(910000 + i) .. "x1"
+    local echoes = {{spellId=910000 + i,stacks=1}}
     overlay[id] = {
         id=id, title=id, author="DpsPeer" .. tostring(i), autoDps=true,
         class=classes[(i - 1) % #classes + 1],
         lastModified=10000 + i, loadoutAvailable=true,
     }
     dummy[string.format("player-%03d", i)] = {
-        player="Player" .. tostring(i), buildId=id,
-        fingerprint="fp-char-" .. tostring(i), dps=100000 + i, ts=10000 + i,
+        player="Player" .. tostring(i),
+        ownerKey="player" .. tostring(i) .. "@ebonhold",
+        ownerVerified=true,realm="ebonhold",buildId=id,lockedEchoes={},
+        fingerprint=fingerprint,echoes=echoes,dps=100000 + i,ts=10000 + i,
     }
     if i <= 180 then
         NexusDB.dpsCapture.characterBest.lk[string.format("player-%03d", i)] = {
-            player="Player" .. tostring(i), buildId=id,
-            fingerprint="fp-char-" .. tostring(i),
+            player="Player" .. tostring(i),
+            ownerKey="player" .. tostring(i) .. "@ebonhold",
+            ownerVerified=true,realm="ebonhold",buildId=id,lockedEchoes={},
+            fingerprint=fingerprint,echoes=echoes,
             dps=(i <= 40 and 900000 + i or 200000 + i), ts=10000 + i,
         }
     end
@@ -310,6 +318,71 @@ local crossRealm = {
 local crossSummary = Nexus.DataRetention.Enforce(crossRealm, "realm identity")
 assert(crossSummary.selectedAverage == 0,
     "same-name players from different realms were cross-paired for Average")
+
+local nonfinitePair = {
+    settings=crossRealm.settings,communityBuilds={},syncTombstones={},
+    dpsCapture={personalBest={},buildBest={},characterBest={
+        dummy={a={player="Hostile",ownerKey="hostile@realma",
+            ownerVerified=true,realm="realma",buildId="same",
+            fingerprint="same",lockedEchoes={},dps=math.huge}},
+        lk={b={player="Hostile",ownerKey="hostile@realma",
+            ownerVerified=true,realm="realma",buildId="same",
+            fingerprint="same",lockedEchoes={},dps=20}},
+    }},
+}
+local nonfiniteSummary = Nexus.DataRetention.Enforce(
+    nonfinitePair, "nonfinite pair")
+assert(nonfiniteSummary.selectedAverage == 0,
+    "nonfinite DPS influenced Average retention")
+
+local hugeFinitePair = {
+    settings=crossRealm.settings,communityBuilds={},syncTombstones={},
+    dpsCapture={personalBest={},buildBest={},characterBest={
+        dummy={a={player="Huge",ownerKey="huge@realma",
+            ownerVerified=true,realm="realma",buildId="same",
+            fingerprint="1x1",echoes={{spellId=1,stacks=1}},
+            lockedEchoes={},dps=1e308}},
+        lk={b={player="Huge",ownerKey="huge@realma",
+            ownerVerified=true,realm="realma",buildId="same",
+            fingerprint="1x1",echoes={{spellId=1,stacks=1}},
+            lockedEchoes={},dps=1e308}},
+    }},
+}
+local hugeFiniteSummary = Nexus.DataRetention.Enforce(
+    hugeFinitePair, "overflow-safe finite pair")
+assert(hugeFiniteSummary.selectedAverage == 1
+        and hugeFinitePair.dpsCapture.characterBest.dummy.a ~= nil
+        and hugeFinitePair.dpsCapture.characterBest.lk.b ~= nil,
+    "finite overflow-sized pair was lost by Average retention")
+
+local clockDuplicatePair = {
+    settings={communityRetentionEnabled=true,
+        communityRetentionTopPerCategory=0,
+        communityRetentionMinPerClassPerCategory=0,
+        communityRetentionTopAverage=1,
+        communityRetentionMinAveragePerClass=0,
+        communityRetentionOtherRemoteBuilds=0,
+        communityRetentionMaxPerAuthor=1},
+    communityBuilds={},syncTombstones={},
+    dpsCapture={personalBest={},buildBest={},characterBest={
+        dummy={old={player="Clock",ownerKey="clock@realma",
+            ownerVerified=true,fingerprint="1x1",
+            echoes={{spellId=1,stacks=1}},lockedEchoes={},dps=100,ts=1},
+            new={player="Clock",ownerKey="clock@realma",
+            ownerVerified=true,fingerprint="1x1",
+            echoes={{spellId=1,stacks=1}},lockedEchoes={},dps=100,ts=2}},
+        lk={one={player="Clock",ownerKey="clock@realma",
+            ownerVerified=true,fingerprint="1x1",
+            echoes={{spellId=1,stacks=1}},lockedEchoes={},dps=200,ts=3}},
+    }},
+}
+local clockDuplicateSummary = Nexus.DataRetention.Enforce(
+    clockDuplicatePair, "clock-only duplicate pair")
+assert(clockDuplicateSummary.selectedAverage == 1
+        and clockDuplicatePair.dpsCapture.characterBest.lk.one ~= nil
+        and (clockDuplicatePair.dpsCapture.characterBest.dummy.old ~= nil
+            or clockDuplicatePair.dpsCapture.characterBest.dummy.new ~= nil),
+    "clock-neutral projection lost the accepted real pair during retention")
 
 local function TypedReferenceFixture(referenceId)
     local database = {
