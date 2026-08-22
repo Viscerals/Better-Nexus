@@ -389,7 +389,9 @@ function Evidence.ResolveLocked(options)
     -- independently supplied build can do so because TargetIdentity above has
     -- already bound its ordinary fingerprint and typed ID to this request.
     if options.copyAuthorityRequired == true
-        and type(options.build) == "table" and type(buildLocked) == "table" then
+        and type(options.build) == "table" and type(buildLocked) == "table"
+        and (#buildLocked > 0
+            or options.build.lockedAuthorityProven == true) then
         local current, currentReason = NormalizePool(buildLocked, true)
         if not current then
             return LockedOutcome("invalid", currentReason)
@@ -651,7 +653,7 @@ local function PairIdentity(record)
 end
 
 local function PairTie(row)
-    return table.concat({
+    local scalar = table.concat({
         tostring(row.player or ""),
         tostring(row.ownerKey or ""),
         type(row.buildId) .. ":" .. tostring(row.buildId or ""),
@@ -664,6 +666,47 @@ local function PairTie(row)
         tostring(row.lockedFingerprint or ""),
         tostring(row.dps or ""),
     }, "|")
+
+    -- Equal authority/DPS rows may still project different duration,
+    -- provenance, or nested build detail. Canonicalize every non-temporal
+    -- data field so input order cannot decide that observable output. Keep
+    -- capture/transport clocks out of the key: recency is never authority.
+    local temporal = {ts=true,timestamp=true,capturedAt=true,createdAt=true,
+        receivedAt=true,updatedAt=true}
+    local seen, budget = {}, {left=4096,nextReference=0}
+    local function stable(value, depth)
+        if budget.left <= 0 then return "!limit" end
+        budget.left = budget.left - 1
+        local kind = type(value)
+        if kind == "nil" then return "n" end
+        if kind == "boolean" then return value and "b1" or "b0" end
+        if kind == "number" or kind == "string" then
+            return kind:sub(1, 1) .. #tostring(value) .. ":" .. tostring(value)
+        end
+        if kind ~= "table" then return "x:" .. kind end
+        if seen[value] then return "r:" .. tostring(seen[value]) end
+        if depth >= 12 then return "!depth" end
+        budget.nextReference = budget.nextReference + 1
+        seen[value] = budget.nextReference
+        local entries = {}
+        for key, child in pairs(value) do
+            if not (depth == 0 and temporal[key] == true) then
+                entries[#entries + 1] = {key=stable(key, depth + 1),
+                    value=child}
+            end
+        end
+        table.sort(entries, function(left, right) return left.key < right.key end)
+        local out = {"{"}
+        for _, entry in ipairs(entries) do
+            out[#out + 1] = entry.key
+            out[#out + 1] = "="
+            out[#out + 1] = stable(entry.value, depth + 1)
+            out[#out + 1] = ";"
+        end
+        out[#out + 1] = "}"
+        return table.concat(out)
+    end
+    return scalar .. "|" .. stable(row, 0)
 end
 
 local function PositiveFiniteDps(value)
@@ -735,18 +778,23 @@ function Evidence.PumpRealDpsPairs(cursor, limit)
                 local dummyDps, lkDps = PositiveFiniteDps(dummy.dps),
                     PositiveFiniteDps(lk.dps)
                 if dummyDps and lkDps then
-                    local candidate = {identity=lkKey,dummy=dummy,lk=lk,
-                        dummyDps=dummyDps,lkDps=lkDps,
-                        average=(dummyDps + lkDps) / 2,
-                        tie=PairTie(dummy) .. "|" .. PairTie(lk)}
-                    local current = cursor.best[lkKey]
-                    if not current or candidate.average > current.average
-                        or candidate.average == current.average
-                            and candidate.tie < current.tie then
-                        if not current then
-                            cursor.bestKeys[#cursor.bestKeys + 1] = lkKey
+                    local average = PositiveFiniteDps(
+                        dummyDps / 2 + lkDps / 2)
+                    if average then
+                        local candidate = {identity=lkKey,dummy=dummy,lk=lk,
+                            dummyDps=dummyDps,lkDps=lkDps,
+                            average=average,
+                            tie=PairTie(dummy) .. "|" .. PairTie(lk)}
+                        local current = cursor.best[lkKey]
+                        if not current
+                            or candidate.average > current.average
+                            or candidate.average == current.average
+                                and candidate.tie < current.tie then
+                            if not current then
+                                cursor.bestKeys[#cursor.bestKeys + 1] = lkKey
+                            end
+                            cursor.best[lkKey] = candidate
                         end
-                        cursor.best[lkKey] = candidate
                     end
                 end
                 cursor.matchIndex = cursor.matchIndex + 1

@@ -663,3 +663,8 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Exact reviewed product/test head `47c3a3be` derives ordinary pair identity from bounded canonical Echo evidence, uses a total non-temporal authority tie, and advances indexing, matching, collection, sorting, and Community eligibility through bounded cursor units.
 - Focused authority, Sync/restart, retention, duration, startup, and adversarial work-budget runners pass. Fast passes `43/43`; Full passes `18` blocking checks with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable, and one explicit nonblocking manual SavedVariables skip.
 - Checkpoint hygiene found no safe high-ROI cleanup, actionable debt, correctness, or security signal. Native WoW and the manual SavedVariables check remain unverified.
+# 2026-08-22 — Checkpoint 49.2 controller review repair
+
+- Expected-red reproduced `SPEC-EMPTY-COPY-AUTHORITY` and `SPEC-PAIR-TIE-NOT-TOTAL`; the overflow assertion was added in the same focused runner and reached green after the tie repair.
+- Exact empty build-bound locked authority now requires `lockedAuthorityProven=true`; unproven empty state preserves conflicting history across reload/restart, while later proven current/Sync evidence resolves without historical mutation.
+- Real-pair selection uses an overflow-safe finite mean and a bounded non-temporal canonical tie over output-relevant row evidence. Historical authority `13`, paired summary `18`, and DataRetention focused runners pass; Fast passes `43/43` with zero failed, unavailable, or skipped checks.

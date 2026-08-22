@@ -79,6 +79,37 @@ Check(equalFirst.pair.dummy.sourceIdentity == "source-a"
         and equalSecond.pair.dummy.sourceIdentity == "source-a",
     "equal-DPS duplicate selection depended on input order")
 
+local outputDummyA = Row("dummy", 600, "alice@realm", "820001x1", lockA)
+outputDummyA.duration = 20
+outputDummyA.build = {variant="b", nested={rank=2}}
+local outputDummyB = Row("dummy", 600, "alice@realm", "820001x1", lockA)
+outputDummyB.duration = 10
+outputDummyB.build = {variant="a", nested={rank=1}}
+local outputFirst = Evidence.DpsSummary(
+    {outputDummyA,outputDummyB},{equalLk})
+local outputSecond = Evidence.DpsSummary(
+    {outputDummyB,outputDummyA},{equalLk})
+Check(outputFirst.pair.dummy.duration == outputSecond.pair.dummy.duration
+        and outputFirst.pair.dummy.build.variant
+            == outputSecond.pair.dummy.build.variant,
+    "output-relevant equal-DPS tie depended on input order")
+
+local huge = 1e308
+local overflowSummary = Evidence.DpsSummary(
+    {Row("dummy", huge, "alice@realm", "820001x1", lockA)},
+    {Row("lk", huge, "alice@realm", "820001x1", lockA)})
+Check(overflowSummary.average == huge
+        and overflowSummary.average < math.huge
+        and overflowSummary.pair.average == huge,
+    "finite operands synthesized a nonfinite paired average")
+local overflowPairs = Evidence.RealDpsPairs(
+    {Row("dummy", huge, "alice@realm", "820001x1", lockA)},
+    {Row("lk", huge, "alice@realm", "820001x1", lockA)})
+Check(#overflowPairs == 1 and overflowPairs[1].average == huge
+        and Evidence.DpsRowBefore(overflowPairs[1].dummy,
+            Row("dummy", 1, "alice@realm", "820001x1", lockA)),
+    "overflow-safe pair did not remain finite for ordering consumers")
+
 local manyDummy = {}
 for index = 1, 100 do
     manyDummy[index] = Row("dummy", 500 + index,

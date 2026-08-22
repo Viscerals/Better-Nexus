@@ -67,6 +67,17 @@ Check(exactEmpty.status == "none" and exactEmpty.source == "build"
 Check(Signature(dummy) == dummyBefore and Signature(lk) == lkBefore,
     "empty current authority mutated historical DPS snapshots")
 
+local unprovenEmpty = Evidence.ResolveLocked({
+    build={id="build-49",fingerprint="810001x1",echoes=ordinary,
+        lockedEchoes={}},
+    dummyRecord=dummy,lkRecord=lk,copyAuthorityRequired=true,
+})
+Check(unprovenEmpty.status ~= "none" and unprovenEmpty.status ~= "ok"
+        and #unprovenEmpty.lockedEchoes == 0,
+    "unproven empty locked pool overrode conflicting history")
+Check(Signature(dummy) == dummyBefore and Signature(lk) == lkBefore,
+    "unproven empty authority mutated historical snapshots")
+
 local exactEmptyOverMatchingHistory = Evidence.ResolveLocked({
     build={id="build-49",fingerprint="810001x1",echoes=ordinary,
         lockedEchoes={},lockedAuthorityProven=true},
@@ -85,6 +96,14 @@ Check(exactEmptyOverMatchingHistory.status == "none"
 -- state. Historical category bytes remain immutable across module ownership.
 dofile("core/CandidateEvidence.lua")
 Evidence = assert(Nexus.CandidateEvidence)
+local afterRestartUnproven = Evidence.ResolveLocked({
+    build={id="build-49",fingerprint="810001x1",echoes=ordinary,
+        lockedEchoes={}},
+    dummyRecord=dummy,lkRecord=lk,copyAuthorityRequired=true,
+})
+Check(afterRestartUnproven.status ~= "none"
+        and afterRestartUnproven.status ~= "ok",
+    "reload/restart promoted unproven empty authority")
 local afterRestartSync = Evidence.ResolveLocked({
     build={id="build-49",fingerprint="810001x1",echoes={
         ordinary[1],currentLocked[1],

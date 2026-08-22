@@ -335,6 +335,26 @@ local nonfiniteSummary = Nexus.DataRetention.Enforce(
 assert(nonfiniteSummary.selectedAverage == 0,
     "nonfinite DPS influenced Average retention")
 
+local hugeFinitePair = {
+    settings=crossRealm.settings,communityBuilds={},syncTombstones={},
+    dpsCapture={personalBest={},buildBest={},characterBest={
+        dummy={a={player="Huge",ownerKey="huge@realma",
+            ownerVerified=true,realm="realma",buildId="same",
+            fingerprint="1x1",echoes={{spellId=1,stacks=1}},
+            lockedEchoes={},dps=1e308}},
+        lk={b={player="Huge",ownerKey="huge@realma",
+            ownerVerified=true,realm="realma",buildId="same",
+            fingerprint="1x1",echoes={{spellId=1,stacks=1}},
+            lockedEchoes={},dps=1e308}},
+    }},
+}
+local hugeFiniteSummary = Nexus.DataRetention.Enforce(
+    hugeFinitePair, "overflow-safe finite pair")
+assert(hugeFiniteSummary.selectedAverage == 1
+        and hugeFinitePair.dpsCapture.characterBest.dummy.a ~= nil
+        and hugeFinitePair.dpsCapture.characterBest.lk.b ~= nil,
+    "finite overflow-sized pair was lost by Average retention")
+
 local function TypedReferenceFixture(referenceId)
     local database = {
         settings={communityRetentionEnabled=true,

@@ -8,7 +8,7 @@
 
 - Stage: 49
 - Checkpoint: 49.2
-- Status: DONE
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
 - Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 - Worktree: `.test19-wp4-worktree`
@@ -138,6 +138,8 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 
 
 ## Work log (current session)
+- WP5 review repairs require explicit empty authority, finite overflow-safe pair averages, and deterministic output-relevant ties; focused and Fast 43/43 pass.
+- Controller review FAIL: SPEC-EMPTY-COPY-AUTHORITY; ADV-PAIR-AVERAGE-OVERFLOW; SPEC-PAIR-TIE-NOT-TOTAL
 - Controller receipt reconciliation aligned PLAN checkpoints 49.1 and 49.2 with verified review PASS and hygiene receipts.
 - Review PASS at exact product/test head 47c3a3b: Full 18 blocking passes, Lua 221/221, parse 294/294, integration 70/70; one nonblocking manual skip remains unverified.
 - Full-discovered durable ordinary-evidence fixtures repaired; five focused runners and Fast 43/43 pass.
