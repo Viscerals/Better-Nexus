@@ -230,8 +230,31 @@ local function TypedCacheFixture(builds, tombstones)
     return cache, Hashes, Target, Rebuild
 end
 
+local function TypedOracle(builds, tombstones)
+    local compatibility = Nexus.SyncInternals.Compatibility.New({
+        buckets=8,
+        getCatalog=function() return {} end,
+        getBuildHashCache=function() return nil end,
+        getBuildRevision=function() return 0 end,
+        getDpsCapture=function() return nil end,
+        getTombstones=function() return tombstones end,
+        localOwnsTomb=function() return false end,
+        relayEligible=function() return false end,
+        myName=function() return "Local" end,
+        currentOwnerKey=function() return "local-ebonhold" end,
+        now=function() return 0 end,
+        getCodec=function() return Nexus.Codec end,
+        validIdentifier=function() return true end,
+        validHash=function() return true end,
+        escapedLen=function(value) return #tostring(value or "") end,
+        codeIndex="WLI2",maxBuildIdBytes=160,chatLimit=255,chatSafety=12,
+    })
+    return compatibility.LibraryHash(builds, tombstones)
+end
+
 local typedBuild = {
-    lastModified=77,fingerprintHash="typed",loadoutAvailable=true,
+    lastModified=77,fingerprintHash="typed",
+    loadoutAvailable=true,ordinaryComplete=true,
 }
 local typedTombstone = {stamp=88,author="Peer"}
 local _, NumericBuildHashes = TypedCacheFixture({[1]=typedBuild}, {})
@@ -259,17 +282,22 @@ local bothTombs = {
 local typedCache, TypedHashes, TargetTyped, RebuildTyped =
     TypedCacheFixture(bothBuilds, bothTombs)
 local bothDelta, bothLegacy = TypedHashes()
-assert(bothDelta == TypedHashes() and bothLegacy == select(2, TypedHashes()),
-    "equal typed cache state was not stable across unchanged reads")
+local bothOracle = TypedOracle(bothBuilds, bothTombs)
+assert(bothDelta == bothOracle and bothLegacy == bothOracle
+    and bothDelta == TypedHashes() and bothLegacy == select(2, TypedHashes()),
+    "combined typed cache lost a build/tombstone sibling or was unstable")
 
 bothBuilds[1] = {
-    lastModified=78,fingerprintHash="typed",loadoutAvailable=true,
+    lastModified=78,fingerprintHash="typed",
+    loadoutAvailable=true,ordinaryComplete=true,
 }
 local beforeTarget = typedCache.Stats()
 TargetTyped(1)
 local targetedDelta, targetedLegacy = TypedHashes()
 local afterTarget = typedCache.Stats()
-assert(targetedDelta ~= bothDelta and targetedLegacy ~= bothLegacy
+local targetedOracle = TypedOracle(bothBuilds, bothTombs)
+assert(targetedDelta == targetedOracle and targetedLegacy == targetedOracle
+    and targetedDelta ~= bothDelta and targetedLegacy ~= bothLegacy
     and afterTarget.targetedInvalidations
         == beforeTarget.targetedInvalidations + 1
     and afterTarget.fullRebuilds == beforeTarget.fullRebuilds
@@ -280,11 +308,39 @@ assert(targetedDelta ~= bothDelta and targetedLegacy ~= bothLegacy
         == beforeTarget.legacyBucketRebuilds + 1,
     "typed targeted invalidation did not rebuild exactly one cache bucket")
 
+local numericBuild, numericTombstone = bothBuilds[1], bothTombs[1]
+bothBuilds[1], bothTombs[1] = nil, nil
+TargetTyped(1)
+local stringOnlyDelta, stringOnlyLegacy = TypedHashes()
+local stringOnlyOracle = TypedOracle(bothBuilds, bothTombs)
+assert(stringOnlyDelta == stringOnlyOracle
+    and stringOnlyLegacy == stringOnlyOracle,
+    "invalidating numeric ID removed or replaced its string sibling")
+bothBuilds[1], bothTombs[1] = numericBuild, numericTombstone
+TargetTyped(1)
+assert(TypedHashes() == targetedOracle
+    and select(2, TypedHashes()) == targetedOracle,
+    "restoring numeric ID did not recover both typed siblings")
+
+local stringBuild, stringTombstone = bothBuilds["1"], bothTombs["1"]
+bothBuilds["1"], bothTombs["1"] = nil, nil
+TargetTyped("1")
+local numericOnlyDelta, numericOnlyLegacy = TypedHashes()
+local numericOnlyOracle = TypedOracle(bothBuilds, bothTombs)
+assert(numericOnlyDelta == numericOnlyOracle
+    and numericOnlyLegacy == numericOnlyOracle,
+    "invalidating string ID removed or replaced its numeric sibling")
+bothBuilds["1"], bothTombs["1"] = stringBuild, stringTombstone
+TargetTyped("1")
+local restoredDelta, restoredLegacy = TypedHashes()
+assert(restoredDelta == targetedOracle and restoredLegacy == targetedOracle,
+    "restoring string ID did not recover both typed siblings")
+
 local beforeFull = typedCache.Stats()
 RebuildTyped()
 local rebuiltDelta, rebuiltLegacy = TypedHashes()
 local afterFull = typedCache.Stats()
-assert(rebuiltDelta == targetedDelta and rebuiltLegacy == targetedLegacy
+assert(rebuiltDelta == restoredDelta and rebuiltLegacy == restoredLegacy
     and afterFull.fullRebuilds == beforeFull.fullRebuilds + 1
     and afterFull.collectionWalks == beforeFull.collectionWalks + 2,
     "typed full rebuild diverged from targeted cache state")
