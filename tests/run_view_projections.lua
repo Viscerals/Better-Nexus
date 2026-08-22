@@ -223,8 +223,46 @@ assert(selectedPair and selectedPair.lkDps == duplicateLk.dps,
     "resumable projection selected a non-best compatible pair: got="
         .. tostring(selectedPair and selectedPair.lkDps)
         .. " expected=" .. tostring(duplicateLk.dps))
-boards.lk[#boards.lk] = nil
-boards.lk[#boards.lk] = nil
+local synchronousRows = P.Leaderboard(
+    "combined", {classFilter="MAGE",search=""})
+assert(#synchronousRows == #asyncRows,
+    "synchronous/resumable pair counts diverged")
+for index, row in ipairs(synchronousRows) do
+    local async = asyncRows[index]
+    assert(async and row.ownerKey == async.ownerKey
+            and row.average == async.average
+            and row.dummyDps == async.dummyDps
+            and row.lkDps == async.lkDps,
+        "synchronous/resumable selected-record or sort parity diverged at "
+            .. tostring(index))
+end
+
+local function Reverse(rows)
+    local out = {}
+    for index = #rows, 1, -1 do out[#out + 1] = rows[index] end
+    return out
+end
+boards.dummy, boards.lk = Reverse(boards.dummy), Reverse(boards.lk)
+P.Reset()
+Revisions.Advance(Revisions.SYNC_CHANGED, {scope="wp5-sync-permutation"})
+local permutedRows = P.Leaderboard(
+    "combined", {classFilter="MAGE",search=""})
+assert(#permutedRows == #synchronousRows,
+    "Sync input permutation changed real-pair result count")
+for index, row in ipairs(permutedRows) do
+    local expected = synchronousRows[index]
+    assert(expected and row.ownerKey == expected.ownerKey
+            and row.average == expected.average
+            and row.dummyDps == expected.dummyDps
+            and row.lkDps == expected.lkDps,
+        "reload/Sync input permutation changed selected pair or sort at "
+            .. tostring(index))
+end
+local restoredLk = {}
+for _, row in ipairs(boards.lk) do
+    if row.ts ~= 999999 then restoredLk[#restoredLk + 1] = row end
+end
+boards.lk = restoredLk
 
 local healthySummaries = Nexus.BuildCatalog.Summaries
 Nexus.BuildCatalog.Summaries = function() error("forced catalog failure") end

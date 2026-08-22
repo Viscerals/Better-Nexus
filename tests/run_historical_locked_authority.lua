@@ -67,6 +67,20 @@ Check(exactEmpty.status == "none" and exactEmpty.source == "build"
 Check(Signature(dummy) == dummyBefore and Signature(lk) == lkBefore,
     "empty current authority mutated historical DPS snapshots")
 
+local exactEmptyOverMatchingHistory = Evidence.ResolveLocked({
+    build={id="build-49",fingerprint="810001x1",echoes=ordinary,
+        lockedEchoes={},lockedAuthorityProven=true},
+    dummyRecord={category="dummy",buildId="build-49",
+        fingerprint="810001x1",echoes=ordinary,lockedEchoes=currentLocked},
+    lkRecord={category="lk",buildId="build-49",
+        fingerprint="810001x1",echoes=ordinary,lockedEchoes=currentLocked},
+    copyAuthorityRequired=true,
+})
+Check(exactEmptyOverMatchingHistory.status == "none"
+        and exactEmptyOverMatchingHistory.source == "build"
+        and #exactEmptyOverMatchingHistory.lockedEchoes == 0,
+    "exact proven empty authority consulted matching historical snapshots")
+
 -- Simulate restart/reload before a later Sync supplies the same exact current
 -- state. Historical category bytes remain immutable across module ownership.
 dofile("core/CandidateEvidence.lua")
