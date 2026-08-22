@@ -26,14 +26,27 @@ Nexus.Store.Init()
 Nexus.Store.Init()
 Nexus.CommunityBuilds.Init({}, {})
 Nexus.Sync.Init(Nexus.Codec, {})
-local eligibleBuild
+local mageBuilds, fingerprintCounts = {}, {}
 for _, build in pairs(Nexus.BuildCatalog.Summaries()) do
     if build.class == "MAGE" and type(build.fingerprint) == "string" then
+        mageBuilds[#mageBuilds + 1] = build
+        fingerprintCounts[build.fingerprint] =
+            (fingerprintCounts[build.fingerprint] or 0) + 1
+    end
+end
+table.sort(mageBuilds, function(left, right)
+    return tostring(left.id) < tostring(right.id)
+end)
+local eligibleBuild
+for _, build in ipairs(mageBuilds) do
+    if build.loadoutAvailable == true
+        and fingerprintCounts[build.fingerprint] == 1 then
         eligibleBuild = build
         break
     end
 end
-assert(eligibleBuild, "bundled startup fixture has no eligible Mage identity")
+assert(eligibleBuild,
+    "bundled startup fixture has no complete, unique Mage identity")
 NexusDB.dpsCapture.characterBest = {
     dummy={startupdummy={
         player="StartupDummy",dps=100000,duration=60,ts=1,class="MAGE",
