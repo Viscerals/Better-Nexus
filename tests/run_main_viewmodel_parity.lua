@@ -72,6 +72,28 @@ assert(progress.dpsEchoes[1].stacks==2
     and progress.unknownTomes[1]=="Tome X",
     "progress model retained caller-owned wishlist or tome tables")
 
+-- HUD progress must expose every known quality by its human-readable name.
+-- Keep a future quality in this multi-tier missing target to prove the fallback
+-- remains explicit and the rendered text is stable across repeat projections.
+local qualityCatalog={familyName={[30]="Six"}}
+local qualityPlan={wishedFamilies={[30]=true},targets={[30]={targetStacks=6,
+    qualityTiers={
+        {spellId=301,q=0,n=1},{spellId=302,q=1,n=1},
+        {spellId=303,q=2,n=1},{spellId=304,q=3,n=1},
+        {spellId=305,q=4,n=1},{spellId=306,q=5,n=1},
+    },
+}}}
+local function MissingQualityText()
+    local _, _, missingRows=view.WishlistProgress(qualityPlan,
+        {byFamily={},bySpell={}},qualityCatalog,{},
+        {synced=true,byFamily={},bySpell={}}, {}, nil)
+    return assert(missingRows[1],"multi-tier quality fixture produced no HUD text")
+end
+local expectedQualityText="Six ×6 (Common:×1 Uncommon:×1 Rare:×1 Epic:×1 Legendary:×1 q5:×1)"
+assert(MissingQualityText()==expectedQualityText
+    and MissingQualityText()==expectedQualityText,
+    "HUD quality labels or deterministic multi-tier progress text regressed")
+
 local hidden=view.BuildProgress({
     plan=plan,owned=owned,slots=slots,catalog=catalog,wishlist=wishlist,
     lockedOwned={byFamily={[10]=3},bySpell={[101]=2,[102]=1},synced=true},
