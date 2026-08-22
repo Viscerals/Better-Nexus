@@ -646,3 +646,14 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Issues #23/#26: capture-time Dummy/LK locked rows remain immutable historical evidence; Community Copy requires exact independently related current/build locked authority. Missing/conflicting history fails closed without mutating source rows or marking uncertain locks.
 - `CandidateEvidence` owns deterministic real-pair identity and selection: verified canonical owner + ordinary fingerprint + exact locked spell/quality/copy identity. Independent Dummy/LK bests remain available when Average is unavailable. `DpsCapture`, `CommunityController`, synchronous/resumable `ViewProjections`, and `DataRetention` consume the same metric; timestamp/category order is not authority or a pair tie-break.
 - Verification on frozen working bytes: focused historical authority `5/5`, paired summary `4/4`, mapped Fast `37/37`, Lua suite `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, and final Full `18` blocking checks pass with zero failed/unavailable and one explicit nonblocking manual SavedVariables skip. Native WoW remains unverified.
+
+# 2026-08-22 — Checkpoint 49.2 review PASS
+
+- Exact reviewed head `9c1da4c5279619fc9dc83f66f6807aec39619d78` preserves immutable historical Dummy/LK snapshots and requires exact independent current/build authority for copy. Deterministic real pairs require verified canonical owner, ordinary fingerprint, and exact locked spell/quality/copy identity; independent category bests remain available when Average is unavailable.
+- Focused DPS boards, Leaderboard UI, paired summary `10`, historical locked authority `10`, Fast `43/43`, strict Vibe validation, and range diff checks pass. The prior exact-head Full receipt is reused without rerun: `18` blocking passes, Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable, and one explicitly nonblocking manual SavedVariables skip. That skip and native WoW behavior remain unverified, not passed.
+- Adversarial/code-quality review found no correctness, security, scope, or checkpoint-hygiene signal. Test 18 and native SavedVariables were untouched.
+
+# 2026-08-22 — Checkpoint 49.2 hygiene CLEAN
+
+- Bounded inspection of `CandidateEvidence`, `DpsCapture`, `CommunityController`, `DataRetention`, `ViewProjections`, `Leaderboard`, and their focused WP5 fixtures found no redundant owner, unsafe branch, actionable debt, or behavior-preserving quick win worth post-review churn.
+- No product or test byte changed. Focused review tests, Fast `43/43`, strict Vibe validation, exact-head Full receipt, and clean range/working diff evidence remain the validation boundary; Full was not repeated.

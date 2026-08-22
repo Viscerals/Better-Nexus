@@ -8,7 +8,7 @@
 
 - Stage: 49
 - Checkpoint: 49.2
-- Status: IN_REVIEW
+- Status: DONE
 - Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
 - Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 - Worktree: `.test19-wp4-worktree`
@@ -26,11 +26,11 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 
 ## Acceptance (current checkpoint)
 
-- [ ] Later current/build state cannot rewrite a historical locked snapshot by resemblance or recency.
-- [ ] Category winner and timestamp order never select copy authority by themselves.
-- [ ] Stronger exact current authority may resolve a copy operation without mutating historical evidence.
-- [ ] Conflicting or incomplete authority preserves history and reports unavailable/conflict explicitly.
-- [ ] Focused locked-evidence/DPS tests, mapped tests, Fast, required review/Full, and diff checks pass.
+- [x] Later current/build state cannot rewrite a historical locked snapshot by resemblance or recency.
+- [x] Category winner and timestamp order never select copy authority by themselves.
+- [x] Stronger exact current authority may resolve a copy operation without mutating historical evidence.
+- [x] Conflicting or incomplete authority preserves history and reports unavailable/conflict explicitly.
+- [x] Focused locked-evidence/DPS tests, mapped tests, Fast, required review/Full, and diff checks pass.
 
 ## Evidence
 
@@ -130,14 +130,15 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 
 ## Last completed loop
 
-- WP4 local completion PASS is recorded at handoff head `e70de8a`; Stage 48 is archived and the Stage 49/WP5 pointer is ready at checkpoint 49.1.
+- Checkpoint 49.2 review PASS at exact product/test head `9c1da4c`: focused paired DPS and historical-authority tests pass, Fast passes `43/43`, the exact-head Full receipt remains `18` blocking passes with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, and one explicit nonblocking manual SavedVariables skip. No checkpoint-hygiene signals were identified; native WoW remains unverified.
 
 ## Recommended next action
 
-- Implement checkpoint 49.1 test-first under the dispatcher-selected role, preserving historical DPS snapshots and failing closed without exact current/build copy authority.
+- Return the clean local WP5 receipt commit to the controller-owned independent review; do not begin another design cycle or publish from this worker.
 
 
 ## Work log (current session)
+- Checkpoint 49.2 hygiene CLEAN: bounded product/test surface had no safe high-ROI cleanup, actionable debt, or correctness/security finding; no product/test byte changed and Full was not repeated.
 - Fast 43/43 confirms deterministic real-pair authority and projection parity
 - Controller repair alignment: SPEC-PAIR-ASYNC-DIVERGENCE; SPEC-EMPTY-COPY-AUTHORITY; ADV-NONFINITE-PAIR; VALIDATION-MIXED-STATE-GAP; VIBE-CHECKPOINT-CONTRADICTION
 - Mechanical PASS recovery advanced the reviewed 49.1 pointer to 49.2.
