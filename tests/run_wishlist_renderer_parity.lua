@@ -34,10 +34,11 @@ for index = 1, 79 do
 end
 
 local mutations = {upload=0, association=0}
+local lockedProjection = {bySpell={},synced=true}
 local Adapter = Nexus.GameAdapter
 Adapter.Catalog = function() return catalog end
 Adapter.Owned = function() return {bySpell={}} end
-Adapter.LockedOwned = function() return {bySpell={}} end
+Adapter.LockedOwned = function() return lockedProjection end
 Adapter.Wishlist = function() return nil end
 Adapter.GetWishlistCandidates = function() return {} end
 Adapter.Slots = function()
@@ -54,11 +55,17 @@ Adapter.SetLoadoutWishlist = function()
 end
 
 local realCreateFrame = CreateFrame
-local created = {}
+local created, createdFonts = {}, {}
 CreateFrame = function(kind, name, parent, template)
     local frame = realCreateFrame(kind, name, parent, template)
     frame._kind, frame._name = kind, name
     frame._parent, frame._template = parent, template
+    local realCreateFontString = frame.CreateFontString
+    frame.CreateFontString = function(self, ...)
+        local font = realCreateFontString(self, ...)
+        createdFonts[#createdFonts + 1] = font
+        return font
+    end
     created[#created + 1] = frame
     return frame
 end
@@ -205,6 +212,37 @@ low.remove:GetScript("OnClick")({GetParent=function() return low end})
 Editor.Refresh()
 assert(not PendingRow(762001) and PendingRow(762002) and PendingRow(762003),
     "renderer remove action modified or lost a sibling exact tier")
+
+-- Permanent-slot capacity is rendered by copies, and only a synchronized
+-- validated projection may populate it.
+lockedProjection = {synced=true,bySpell={
+    [762001]=2,[762002]=2,[762003]=2,
+}}
+exactSearch:SetText("Renderer Shared")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+local function HasRenderedText(needle)
+    for _, font in ipairs(createdFonts) do
+        if tostring(font.text or ""):find(needle, 1, true) then return true end
+    end
+    return false
+end
+local renderedLockedTexts = {}
+for _, font in ipairs(createdFonts) do
+    local text = tostring(font.text or "")
+    if text:lower():find("lock", 1, true) then
+        renderedLockedTexts[#renderedLockedTexts + 1] = text
+    end
+end
+assert(HasRenderedText("6 locked"),
+    "renderer displayed three identities instead of six locked copies: "
+        .. table.concat(renderedLockedTexts, " || "))
+lockedProjection = {synced=false,bySpell={[762001]=6}}
+exactSearch:SetText("Renderer Shared Echo")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+assert(not HasRenderedText("6 locked"),
+    "renderer displayed unsynced partial lock evidence as capacity")
 
 local function Read(path)
     local handle = assert(io.open(path, "rb"))

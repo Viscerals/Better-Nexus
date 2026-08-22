@@ -357,9 +357,11 @@ trusted/untrusted import normalization, quality
 and family collision handling, immutable add/remove/stack/lock transitions,
 canonical upload ordering, export-entry construction, fulfilled-target
 reconciliation, name trimming, and the exact desired lock-target map. Counted
-lock-target records retain `{ copies, replaces, rows }`, including duplicate
+lock-target records retain `{ version=1, copies, replaces, rows }`, including duplicate
 exact rows and unknown/provenance fields, across reconcile, commit, reopen,
-export, progress, and automation planning. It does
+export, progress, and automation planning. Current-schema tables require dense
+positive rows whose stack total equals `copies`; malformed and future table
+contracts fail closed, while legacy scalar one-copy targets remain compatible. It does
 not parse or encode EBH1 bytes: `core/Codec.lua` remains the sole wire owner.
 It does not read production lock intent: `AutomationRuntime.LockDesignTargetsFor`
 remains the established automation reader.
@@ -586,7 +588,7 @@ ledger, gate v2 latch-polling, run-boundary, self-check demotion hook).
 
 An 80-85-copy designed Wishlist with unavailable lock roles gains read authority
 only from its associated active numbered loadout when that row is verified, its
-sorted spell/stack identity matches exactly, and fully synced `LockedOwned()`
+aggregated exact spell/copy identity matches, and fully synced `LockedOwned()`
 counts can be subtracted without underflow. Inline active lock booleans are not
 authority. The adapter derives a
 new 79-ordinary/six-locked projection without rewriting either server mirror or

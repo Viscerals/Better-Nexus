@@ -187,7 +187,8 @@ local function QueueCanDeliverWanted(model, state, card, plan, owned, catalog)
                 and tonumber(row.quality) or tonumber(entry.quality)
             if quality and type(model.QualityOfferNeeded) == "function"
                 and model.QualityOfferNeeded(
-                    plan, catalog, card.family, quality, owned) then
+                    plan, catalog, card.family, quality, owned,
+                    entry.spellId) then
                 return true
             end
         end

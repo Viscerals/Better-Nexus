@@ -494,9 +494,29 @@ end
 
 local function LockTargetCopies(value)
     if type(value) ~= "table" then return 1 end
-    local copies = tonumber(value.copies or value.count or value.stacks)
+    if value.version ~= 1 or type(value.rows) ~= "table" then return nil end
+    local copies = tonumber(value.copies)
     if not copies or copies < 1 or copies >= math.huge
-        or copies ~= math.floor(copies) then return 1 end
+        or copies ~= math.floor(copies) then return nil end
+    local rowCount, highest, total = 0, 0, 0
+    for index, row in pairs(value.rows) do
+        local stacks = type(row) == "table" and tonumber(row.stacks) or nil
+        local spellId = type(row) == "table" and tonumber(row.spellId) or nil
+        if type(index) ~= "number" or index < 1 or index ~= math.floor(index)
+            or not spellId or spellId < 1 or spellId ~= math.floor(spellId)
+            or not stacks or stacks < 1 or stacks >= math.huge
+            or stacks ~= math.floor(stacks) then return nil end
+        rowCount = rowCount + 1
+        highest = math.max(highest, index)
+        total = total + stacks
+    end
+    if rowCount < 1 or highest ~= rowCount or total ~= copies then return nil end
+    if value.replaces ~= nil then
+        local replaces = tonumber(value.replaces)
+        if not replaces or replaces < 1 or replaces ~= math.floor(replaces) then
+            return nil
+        end
+    end
     return copies
 end
 
@@ -890,9 +910,9 @@ local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets
         local id = tonumber(spellIdKey)
         local row = id and rows[id]
         local fam = id and familyOf[id]
-        if id and row and fam then
+        local copies = LockTargetCopies(targetValue)
+        if id and row and fam and copies then
             local q = tonumber(row.quality) or 0
-            local copies = LockTargetCopies(targetValue)
             entries[#entries + 1] = {
                 spellId=id,quality=q,stacks=copies,family=fam,locked=true,
             }
@@ -1187,6 +1207,9 @@ local function AutoLockDescriptors(targets, wishlistKey)
         local spellId = AutoLockInteger(spellIdKey)
         local replaces = LockTargetReplacement(replacementValue)
         local copies = LockTargetCopies(replacementValue)
+        if spellId and not copies then
+            return nil, nil, "invalid persisted lock target"
+        end
         if spellId then
             local baseKey = AutoLockBaseKey(
                 wishlistKey, spellId, replaces, copies)
@@ -1555,7 +1578,13 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         trace[#trace + 1] = "Adapter.LockPerk/UnlockPerk/LockedOwned: missing on this build"
         return
     end
-    local descriptors, seen = AutoLockDescriptors(targets, wishlistKey)
+    local descriptors, seen, descriptorError = AutoLockDescriptors(
+        targets, wishlistKey)
+    if not descriptors then
+        trace[#trace + 1] = "AutoLock target state: "
+            .. tostring(descriptorError or "invalid")
+        return
+    end
     local bucket, bucketError = AutoLockBucket(true)
     if not bucket then
         trace[#trace + 1] = "AutoLock attempt state: " .. tostring(bucketError)
@@ -1569,7 +1598,14 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
 
     local lockedBySpell = (locked and locked.bySpell) or {}
     local lockedCount = 0
-    for _ in pairs(lockedBySpell) do lockedCount = lockedCount + 1 end
+    for _, count in pairs(lockedBySpell) do
+        local copies = AutoLockInteger(count)
+        if not copies then
+            trace[#trace + 1] = "authoritative locked-state counts are invalid"
+            return
+        end
+        lockedCount = lockedCount + copies
+    end
     lockedRevision = AutoLockInteger(lockedRevision, true)
     local lockedToken = AutoLockLockedToken(locked)
     local maxSlots, capacitySource = Adapter.MaxPermanentEchoes
@@ -1692,8 +1728,9 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
             Print(string.format(
                 "|cff4dff80Nexus:|r unlocked %s -- %s is acquired and ready to replace it.",
                 EchoName(oldId), EchoName(newId)))
+            local removedCopies = tonumber(lockedBySpell[oldId]) or 0
             lockedBySpell[oldId] = nil
-            lockedCount = math.max(0, lockedCount - 1)
+            lockedCount = math.max(0, lockedCount - removedCopies)
             return true
         elseif err ~= "spacing" then
             Print(string.format("|cffff6060Nexus:|r couldn't unlock %s: %s",
@@ -1755,7 +1792,9 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
                 mutationAttempted = true
             end
         elseif haveN >= targetCopies then
-            if lockedCount < maxSlots then
+            local currentCopies = tonumber(lockedBySpell[id]) or 0
+            local neededCopies = math.max(0, targetCopies - currentCopies)
+            if lockedCount + neededCopies <= maxSlots then
                 if not record and not outstanding and not uncertainTerminal
                     and not mutationAttempted then
                     record = NewAutoLockRecord(descriptor, wishlistKey,

@@ -216,6 +216,22 @@ local budget = Model.LockBudgetUsed(
 Check(budget == 6,
     "locked budget counted identities instead of copies")
 
+-- Persisted counted targets are an authority boundary.  Scalar legacy values
+-- remain one-copy compatible, but table records must match the current dense
+-- schema exactly rather than degrading to a one-copy action.
+Check(Model.TargetCopies(true) == 1 and Model.TargetCopies(720099) == 1,
+    "legacy scalar lock targets lost one-copy compatibility")
+for label, record in pairs({
+    future={version=2,copies=1,rows={{spellId=720099,stacks=1}}},
+    missingVersion={copies=1,rows={{spellId=720099,stacks=1}}},
+    fractional={version=1,copies=1.5,rows={{spellId=720099,stacks=1}}},
+    sparse={version=1,copies=1,rows={[2]={spellId=720099,stacks=1}}},
+    mismatched={version=1,copies=2,rows={{spellId=720099,stacks=1}}},
+}) do
+    Check(Model.TargetCopies(record) == nil,
+        "malformed/future persisted target failed open: " .. label)
+end
+
 print(string.format(
     "locked copy totals: duplicate=2+2+2 one=6 rejected=7/malformed roles=separate checks=%d -- OK",
     checks))

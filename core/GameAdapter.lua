@@ -813,13 +813,18 @@ end
 --      several exist with none active.
 local function WishlistIdentity(echoes)
     if type(echoes) ~= "table" then return nil end
-    local parts = {}
+    local totals = {}
     for i = 1, #echoes do
         local e = echoes[i]
         local id = type(e) == "table" and tonumber(e.spellId)
         if id then
-            parts[#parts + 1] = tostring(id) .. ":" .. tostring(math.max(1, tonumber(e.stacks) or 1))
+            totals[id] = (totals[id] or 0)
+                + math.max(1, tonumber(e.stacks) or 1)
         end
+    end
+    local parts = {}
+    for id, stacks in pairs(totals) do
+        parts[#parts + 1] = tostring(id) .. ":" .. tostring(stacks)
     end
     if #parts == 0 then return nil end
     table.sort(parts)

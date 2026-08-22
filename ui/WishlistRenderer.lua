@@ -1327,10 +1327,22 @@ local function RefreshView(catalogRevision)
     local lockedBySpell = {}
     if View and View.LockedOwned then
         local locked = View.LockedOwned()
-        if locked and type(locked.bySpell) == "table" then lockedBySpell = locked.bySpell end
+        if locked and locked.synced == true
+            and type(locked.bySpell) == "table" then
+            lockedBySpell = locked.bySpell
+        end
     end
     local lockedCount = 0
-    for _ in pairs(lockedBySpell) do lockedCount = lockedCount + 1 end
+    for _, count in pairs(lockedBySpell) do
+        count = tonumber(count)
+        if not count or count <= 0 or count >= math.huge
+            or count ~= math.floor(count) then
+            lockedBySpell = {}
+            lockedCount = 0
+            break
+        end
+        lockedCount = lockedCount + count
+    end
 
     -- Reconcile "awaiting lock" against reality: the moment LockedOwned()
     -- confirms one of these is actually locked, it belongs in the strip

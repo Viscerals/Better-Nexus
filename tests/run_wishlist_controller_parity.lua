@@ -36,9 +36,10 @@ local linked = {}
 local uploadMode, uploadCalls = "success", {}
 local createdAssociations, updatedAssociations, directAssociations = {}, {}, {}
 local firstAssociations = {}
+local lockedProjection = {bySpell={},synced=true}
 local Adapter = {
     Catalog=function() return catalog end,
-    LockedOwned=function() return {bySpell={}} end,
+    LockedOwned=function() return lockedProjection end,
     WishlistKey=function(echoes) return "key:" .. tostring(#(echoes or {})) end,
     Wishlist=function() return {name="Seed",entries={{spellId=1001,quality=1,stacks=1}}} end,
     Slots=function()
@@ -86,6 +87,22 @@ local controller = Controller.New({
     openCommunity=function() communityOpens = communityOpens + 1; return true end,
 })
 controller.Initialize(Adapter)
+
+-- Partial lock reads are diagnostic only: they cannot reach the renderer as
+-- authority or append an unseen locked row to the public export.
+catalog.rows[1777] = {spellId=1777,name="Partial Lock",quality=2,
+    groupId=17,maxStack=1}
+lockedProjection = {bySpell={[1777]=6},synced=false}
+Check(controller.LockedProjection() == nil,
+    "controller exposed unsynced partial lock evidence to the renderer")
+local partialExport = controller.ExportEntries()
+local leakedPartial = false
+for _, row in ipairs(partialExport) do
+    if tonumber(row.spellId) == 1777 and row.locked then leakedPartial = true end
+end
+Check(not leakedPartial,
+    "unsynced partial lock evidence leaked into public EBH1 export entries")
+lockedProjection = {bySpell={},synced=true}
 
 -- Filters and large draft views stay controller-owned without replacing
 -- future preferences or creating frames/actions.

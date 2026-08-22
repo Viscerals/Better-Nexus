@@ -41,7 +41,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 - `Model.WishlistEntryProgress` is the pure exact `(role, spellId)` progress owner. Overlay and editor consume it directly; MainViewModel consumes it for explicit-role Wishlists while retaining deterministic legacy behavior for role-unrepresented inputs. Exact-base Fast passes `34/34` with zero failed/unavailable/skipped checks.
 - #20 checkpoint review passed with two coherent envelope probes: exact 78 ordinary + seven locked and exact 80 ordinary + five locked both remain unavailable, while restored 79+6 recovers. The strengthened runner passes 16 checks and exact-base Fast remains `26/26` with zero failed/unavailable/skipped checks.
 - #20 expected-red failed twice at `exact active/associated mirror remained evidence-pending`; the green public GameAdapter runner passes 13 checks across exact 79+6 derivation, same-tier overlap, sibling quality preservation, mismatch/partial/underflow refusal, reload convergence, and source/SavedVariables immutability.
-- The bridge is active-slot-only and requires verified/complete active booleans, exact sorted spell/stack identity, CandidateEvidence's six-copy envelope, and exact `LockedOwned.bySpell` agreement. Exact-base Fast passes `26/26` with integration `70/70` and zero failed/unavailable/skipped checks.
+- The bridge is active-slot-only and requires a verified active total, aggregated exact spell/copy identity, CandidateEvidence's six-copy envelope, and synchronized exact `LockedOwned.bySpell` agreement; inline role booleans are not authority.
 - #44 checkpoint review passed at repaired product/test head `b23259d`: immutable bound future/provenance evidence and exact Dummy/LK quality disagreement are now covered in addition to the original copy-total matrix; focused runners and exact-base Fast `24/24` pass.
 - #44 expected-red failed twice at `valid duplicate exact rows did not survive candidate normalization`; the green public runner passes 16 checks across 2+2+2, one-by-six, seven-copy, malformed, provenance/future-field, draft-budget, and EBH1 round-trip cases.
 - CandidateEvidence now owns the six-copy envelope; Wishlist draft budgeting and EBH1 locked-role import/export consume exact stack totals without changing the separate ordinary 79-copy contract.
@@ -56,6 +56,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Work log
 
+- Independent re-review closed the prior five repairs and found six further exactness gaps at `1afec7d`. Versioned counted-target validation, copy-based capacity/deficit admission, aggregation-stable identity, synced defensive renderer/export projections, and exact guaranteed-queue matching now pass 20 focused runners and exact-base Fast `41/41`.
 - Cumulative WP4 independent review found five valid Spec/Standards/adversarial gaps at `7cff7e7`; all were repaired with public counterexamples and focused/Fast revalidation. The repaired candidate is ready for all three independent reviews to repeat before Full.
 - Checkpoint 48.4 hygiene was clean across the exact progress projection, its presentation consumers, and automation-only locked-target merger; no safe quick win or evidence-backed debt justified churn.
 - Checkpoint 48.4 review repaired same-family locked-target augmentation, then passed exact tier/role presentation and automation acceptance without entering Stage 49.
@@ -109,7 +110,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Cumulative review repair is locally green: 19 focused runners, integration `70/70`, module contracts, exact-base Fast `39/39`, and diff checks pass. The repaired product/test/docs bytes await a local commit and repeated independent reviews.
+- Cumulative re-review repair is locally green: 20 focused runners, integration `70/70`, module contracts, exact-base Fast `41/41`, strict Vibe validation, and diff checks pass. The repaired product/test/docs bytes await a local commit and all three repeated independent reviews.
 
 ## Recommended next action
 

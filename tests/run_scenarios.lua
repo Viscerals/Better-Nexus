@@ -15,6 +15,7 @@ local rows = {
     [200] = { spellId=200, name="Ordinary Target", quality=1, maxStack=1 },
     [210] = { spellId=210, name="Quality Target", quality=0, maxStack=1 },
     [211] = { spellId=211, name="Quality Target", quality=2, maxStack=1 },
+    [212] = { spellId=212, name="Quality Target", quality=2, maxStack=1 },
     [220] = { spellId=220, name="Held Target", quality=1, maxStack=1 },
     [221] = { spellId=221, name="Equal Side Target", quality=1, maxStack=1 },
     [222] = { spellId=222, name="Another Target", quality=1, maxStack=1 },
@@ -25,12 +26,12 @@ local rows = {
 local catalog = {
     rows = rows,
     familyOf = {
-        [100]="stack", [200]="ordinary", [210]="quality", [211]="quality",
+        [100]="stack", [200]="ordinary", [210]="quality", [211]="quality", [212]="quality",
         [220]="held", [221]="side", [222]="another",
         [300]="guaranteed", [400]="fillerA", [401]="fillerB",
     },
     familyMembers = {
-        stack={100}, ordinary={200}, quality={210,211}, guaranteed={300},
+        stack={100}, ordinary={200}, quality={210,211,212}, guaranteed={300},
         held={220}, side={221}, another={222},
         fillerA={400}, fillerB={401},
     },
@@ -44,7 +45,8 @@ local plan = {
     targets = {
         stack={ targetStacks=3, wishedQuality=1 },
         ordinary={ targetStacks=1, wishedQuality=1 },
-        quality={ targetStacks=1, wishedQuality=2 },
+        quality={ targetStacks=1, wishedQuality=2,
+            qualityTiers={{spellId=211,q=2,n=1}} },
         held={ targetStacks=1, wishedQuality=1 },
         side={ targetStacks=1, wishedQuality=1 },
         another={ targetStacks=1, wishedQuality=1 },
@@ -85,6 +87,27 @@ local function decide(cards, guaranteedIndex, options)
         searchRefused=options.searchRefused,
         allowBanish=options.allowBanish,
     })
+end
+
+-- Exact queue promises protect only the same exact target.  A same-quality
+-- sibling cannot satisfy the promise merely because it shares the family.
+do
+    local exact = decide({
+        card(211), card(300, { isGuaranteed=true }), card(400),
+    }, 2, {queue={entries={
+        {spellId=211,family="quality",quality=2,wanted=true},
+    }}})
+    expect(exact.type == "take" and exact.index == 2
+        and exact.annotations[1] == "returns later",
+        "exact guaranteed queue promise did not protect its matching target")
+
+    local sibling = decide({
+        card(211), card(300, { isGuaranteed=true }), card(400),
+    }, 2, {queue={entries={
+        {spellId=212,family="quality",quality=2,wanted=true},
+    }}})
+    expect(sibling.type == "freeze" and sibling.index == 1,
+        "same-quality sibling queue promise protected the wrong exact target")
 end
 
 -- An unsynchronized owned snapshot is not safe for irreversible auto-play.

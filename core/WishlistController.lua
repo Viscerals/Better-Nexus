@@ -80,15 +80,30 @@ function Controller.New(options)
         return AccountRoot()
     end
 
-    local function LockedBySpell()
+    local function TrustedLockedProjection()
         if Adapter and Adapter.LockedOwned then
             local locked = Adapter.LockedOwned()
             if locked and locked.synced == true
                 and type(locked.bySpell) == "table" then
-                return locked.bySpell
+                local bySpell = {}
+                for spellId, count in pairs(locked.bySpell) do
+                    local id, copies = tonumber(spellId), tonumber(count)
+                    if not id or id <= 0 or id ~= math.floor(id)
+                        or not copies or copies <= 0 or copies >= math.huge
+                        or copies ~= math.floor(copies) then
+                        return nil
+                    end
+                    bySpell[id] = copies
+                end
+                return {synced=true,bySpell=bySpell}
             end
         end
-        return {}
+        return nil
+    end
+
+    local function LockedBySpell()
+        local locked = TrustedLockedProjection()
+        return locked and locked.bySpell or {}
     end
 
     local function Catalog()
@@ -128,9 +143,13 @@ function Controller.New(options)
         end
         local function AddLockedToken(id, copies, replaces)
             id = tonumber(id)
-            if not id then return end
+            copies = tonumber(copies)
+            if not id or not copies or copies < 1
+                or copies >= math.huge or copies ~= math.floor(copies) then
+                return
+            end
             local current = locked[id] or {copies=0}
-            current.copies = current.copies + (tonumber(copies) or 1)
+            current.copies = current.copies + copies
             if current.replaces == nil and type(replaces) == "number" then
                 current.replaces = replaces
             end
@@ -143,15 +162,15 @@ function Controller.New(options)
         end
         for _, row in pairs(state.pendingLock) do
             if row and tonumber(row.spellId) then
-                AddLockedToken(row.spellId,
-                    DraftModel.TargetCopies(row), row.replaces)
+                AddLockedToken(row.spellId, row.stacks, row.replaces)
             end
         end
         for spellId, replacement in pairs(state.fulfilledDraftTargets) do
             local id = tonumber(spellId)
-            if id then
+            local copies = DraftModel.TargetCopies(replacement)
+            if id and copies then
                 locked[id] = {
-                    copies=DraftModel.TargetCopies(replacement),
+                    copies=copies,
                     replaces=DraftModel.TargetReplacement(replacement),
                 }
             end
@@ -300,7 +319,7 @@ function Controller.New(options)
     end
 
     function M.LockedProjection()
-        return Adapter and Adapter.LockedOwned and Adapter.LockedOwned() or nil
+        return TrustedLockedProjection()
     end
 
     function M.WishlistProjection()
@@ -919,14 +938,10 @@ function Controller.New(options)
     end
 
     function M.ExportEntries()
-        local lockedBySpell, catalog = {}, nil
-        if Adapter and Adapter.LockedOwned then
-            local locked = Adapter.LockedOwned()
-            catalog = Adapter.Catalog and Adapter.Catalog()
-            if locked and type(locked.bySpell) == "table" then
-                lockedBySpell = locked.bySpell
-            end
-        end
+        local locked = TrustedLockedProjection()
+        local lockedBySpell = locked and locked.bySpell or {}
+        local catalog = Adapter and Adapter.LockedOwned
+            and Adapter.Catalog and Adapter.Catalog() or nil
         return DraftModel.ExportEntries(state.pending, state.pendingLock,
             lockedBySpell, catalog, state.fulfilledDraftTargets)
     end
@@ -959,8 +974,8 @@ function Controller.New(options)
         state.currentLockKey = nextKey
         state.fulfilledDraftTargets = {}
         for id, value in pairs(fresh) do
-            if (tonumber(lockedBySpell[id]) or 0)
-                >= DraftModel.TargetCopies(value) then
+            local copies = DraftModel.TargetCopies(value)
+            if copies and (tonumber(lockedBySpell[id]) or 0) >= copies then
                 state.fulfilledDraftTargets[id] = value
             end
         end

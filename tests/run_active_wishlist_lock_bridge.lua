@@ -138,6 +138,19 @@ Check(A.Wishlist() ~= nil,
     "lossy active role flags overrode exact total-minus-locked authority")
 activeLock.locked = false
 
+-- Exact identity is a spell/copy multiset, not a row-boundary encoding.  A
+-- reload may coalesce duplicate rows without changing the represented build.
+local segmentedDesigned = H.CloneValue(designedEchoes)
+segmentedDesigned[1].stacks = segmentedDesigned[1].stacks
+    + segmentedDesigned[3].stacks
+table.remove(segmentedDesigned, 3)
+H.Perks.serverBuildSlots[102].echoes = segmentedDesigned
+saved.key = assert(A.WishlistKey(segmentedDesigned))
+Check(A.Wishlist() ~= nil,
+    "equivalent exact totals changed identity when duplicate rows coalesced")
+H.Perks.serverBuildSlots[102].echoes = H.CloneValue(designedEchoes)
+saved.key = designedKey
+
 -- Coherent evidence at either side of the 79 ordinary / six locked envelope
 -- must still fail closed. These probes keep the active total at exactly 85 and
 -- make the designed identity plus independent locked counts agree, so the

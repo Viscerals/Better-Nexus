@@ -48,7 +48,8 @@ local exactKey = assert(Adapter.WishlistKey(exactWishlist.entries),
     "exact automation fixture identity unavailable")
 state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
 state.lockDesignTargetsBySlot[exactKey] = {
-    [910001]={copies=3,rows={{spellId=910001,quality=0,stacks=3}}},
+    [910001]={version=1,copies=3,
+        rows={{spellId=910001,quality=0,stacks=3}}},
     [910002]=true,
 }
 local augmented = F.runtime.WishlistWithLockTargets(exactWishlist, exactCatalog)
@@ -88,6 +89,55 @@ H.service.UnlockPerk = function(spellId)
     unlockCalls[#unlockCalls + 1] = {spellId=spellId, at=H.now}
     return true
 end
+
+if not Stats().autoEnabled then
+    SlashCmdList.NEXUS("auto")
+end
+
+-- Capacity is copy-based.  Three exact identities holding two permanent
+-- copies each fill all six slots and cannot authorize a seventh copy.
+H.service.GetMaximumPermanentEchoes = function() return 6 end
+H.locked = {
+    {spellId=200104,quality=2,stack=2},
+    {spellId=200102,quality=2,stack=2},
+    {spellId=200999,quality=1,stack=2},
+}
+state.lockDesignTargetsBySlot[wishlistKey] = {[200100]=true}
+H.NotifyEchoDataChanged()
+Check(Nexus.RequestRecompute(), "copy-capacity recompute was refused")
+H.Advance(0.4, 0.2)
+local fullCopyCapacity = Stats().autoLockCapacity
+Check(#lockCalls == 0 and fullCopyCapacity.used == 6
+        and fullCopyCapacity.maximum == 6,
+    string.format("2+2+2 locked copies were treated as free capacity: calls=%d used=%s maximum=%s synced=%s",
+        #lockCalls,tostring(fullCopyCapacity.used),
+        tostring(fullCopyCapacity.maximum),tostring(fullCopyCapacity.synced)))
+
+-- Unknown or internally inconsistent counted target tables are foreign
+-- persisted contracts.  They must not degrade to a one-copy LockPerk action.
+H.locked = {}
+H.NotifyEchoDataChanged()
+state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]={version=2,copies=1,
+        rows={{spellId=200100,quality=3,stacks=1}}},
+}
+Check(Nexus.RequestRecompute(), "future-target recompute was refused")
+H.Advance(0.4, 0.2)
+state.lockDesignTargetsBySlot[wishlistKey] = {
+    [200100]={version=1,copies=2,
+        rows={{spellId=200100,quality=3,stacks=1}}},
+}
+Check(Nexus.RequestRecompute(), "inconsistent-target recompute was refused")
+H.Advance(0.4, 0.2)
+Check(#lockCalls == 0,
+    "malformed/future counted target authorized a one-copy LockPerk")
+
+-- Restore the original one-of-three fixture for the lifecycle assertions.
+state.autoLockAttempts = nil
+state.lockDesignTargetsBySlot[wishlistKey] = {[200100]=true}
+H.service.GetMaximumPermanentEchoes = function() return 3 end
+H.locked = {{spellId=200104,quality=2,stack=1}}
+H.NotifyEchoDataChanged()
 
 -- Enable the existing master switch and rebuild the immutable target context.
 if not Stats().autoEnabled then

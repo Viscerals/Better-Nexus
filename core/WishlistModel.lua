@@ -66,14 +66,35 @@ local function Family(spellId, catalog)
 end
 
 local function TargetCopies(value)
-    if type(value) == "table" then
-        return PositiveInteger(value.copies or value.count or value.stacks) or 1
+    -- Legacy booleans/numbers represent one exact copy (numbers optionally
+    -- name the replacement).  Counted table records are persisted authority,
+    -- so unknown or internally inconsistent contracts must fail closed.
+    if type(value) ~= "table" then return 1 end
+    if value.version ~= 1 or type(value.rows) ~= "table" then return nil end
+    local copies = PositiveInteger(value.copies)
+    if not copies then return nil end
+    local rowCount, highest, total = 0, 0, 0
+    for index, row in pairs(value.rows) do
+        if type(index) ~= "number" or index < 1 or index ~= math.floor(index)
+            or type(row) ~= "table" or not PositiveInteger(row.spellId) then
+            return nil
+        end
+        local stacks = PositiveInteger(row.stacks)
+        if not stacks then return nil end
+        rowCount = rowCount + 1
+        highest = math.max(highest, index)
+        total = total + stacks
     end
-    return 1
+    if rowCount < 1 or highest ~= rowCount or total ~= copies then return nil end
+    if value.replaces ~= nil and not PositiveInteger(value.replaces) then
+        return nil
+    end
+    return copies
 end
 
 local function TargetReplacement(value)
     if type(value) == "table" then
+        if TargetCopies(value) == nil then return nil end
         return type(value.replaces) == "number" and value.replaces or nil
     end
     return type(value) == "number" and value or nil
@@ -472,14 +493,18 @@ local function ApplyCommittedTargets(prepared, committedTargets, options)
 
     for spellIdKey, replaces in pairs(committedTargets) do
         local id = tonumber(spellIdKey)
-        if id and (tonumber(lockedBySpell[id]) or 0) >= TargetCopies(replaces) then
+        local copies = TargetCopies(replaces)
+        if id and copies
+            and (tonumber(lockedBySpell[id]) or 0) >= copies then
             fulfilledTargets[id] = replaces
         end
     end
     if next(committedTargets) then
         for spellIdKey, replaces in pairs(committedTargets) do
             local id = tonumber(spellIdKey)
-            if id and (tonumber(lockedBySpell[id]) or 0) < TargetCopies(replaces) then
+            local copies = TargetCopies(replaces)
+            if id and copies
+                and (tonumber(lockedBySpell[id]) or 0) < copies then
                 local catalogRow = catalog and catalog.rows and catalog.rows[id]
                 local family = Family(id, catalog)
                 local targetRows = type(replaces) == "table" and replaces.rows
@@ -512,7 +537,7 @@ local function ApplyCommittedTargets(prepared, committedTargets, options)
                             quality = tonumber(catalogRow and catalogRow.quality) or 0,
                             name = (catalogRow and catalogRow.name)
                                 or ("spell " .. tostring(id)),
-                            stacks = TargetCopies(replaces),
+                            stacks = copies,
                             replaces = TargetReplacement(replaces),
                         }
                     end
@@ -756,14 +781,16 @@ local function PlanLockCommit(pending, pendingLock, fulfilledTargets, existingTa
     lockedBySpell = type(lockedBySpell) == "table" and lockedBySpell or {}
     for spellIdKey, value in pairs(type(existingTargets) == "table" and existingTargets or {}) do
         local id = tonumber(spellIdKey)
-        if id and (tonumber(lockedBySpell[id]) or 0) >= TargetCopies(value)
+        local copies = TargetCopies(value)
+        if id and copies and (tonumber(lockedBySpell[id]) or 0) >= copies
             and not replaced[id] then
             fresh[id] = value
         end
     end
     for spellIdKey, value in pairs(type(fulfilledTargets) == "table" and fulfilledTargets or {}) do
         local id = tonumber(spellIdKey)
-        if id and (tonumber(lockedBySpell[id]) or 0) >= TargetCopies(value)
+        local copies = TargetCopies(value)
+        if id and copies and (tonumber(lockedBySpell[id]) or 0) >= copies
             and not replaced[id] then
             fresh[id] = value
         end
