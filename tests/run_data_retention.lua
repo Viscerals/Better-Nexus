@@ -355,6 +355,35 @@ assert(hugeFiniteSummary.selectedAverage == 1
         and hugeFinitePair.dpsCapture.characterBest.lk.b ~= nil,
     "finite overflow-sized pair was lost by Average retention")
 
+local clockDuplicatePair = {
+    settings={communityRetentionEnabled=true,
+        communityRetentionTopPerCategory=0,
+        communityRetentionMinPerClassPerCategory=0,
+        communityRetentionTopAverage=1,
+        communityRetentionMinAveragePerClass=0,
+        communityRetentionOtherRemoteBuilds=0,
+        communityRetentionMaxPerAuthor=1},
+    communityBuilds={},syncTombstones={},
+    dpsCapture={personalBest={},buildBest={},characterBest={
+        dummy={old={player="Clock",ownerKey="clock@realma",
+            ownerVerified=true,fingerprint="1x1",
+            echoes={{spellId=1,stacks=1}},lockedEchoes={},dps=100,ts=1},
+            new={player="Clock",ownerKey="clock@realma",
+            ownerVerified=true,fingerprint="1x1",
+            echoes={{spellId=1,stacks=1}},lockedEchoes={},dps=100,ts=2}},
+        lk={one={player="Clock",ownerKey="clock@realma",
+            ownerVerified=true,fingerprint="1x1",
+            echoes={{spellId=1,stacks=1}},lockedEchoes={},dps=200,ts=3}},
+    }},
+}
+local clockDuplicateSummary = Nexus.DataRetention.Enforce(
+    clockDuplicatePair, "clock-only duplicate pair")
+assert(clockDuplicateSummary.selectedAverage == 1
+        and clockDuplicatePair.dpsCapture.characterBest.lk.one ~= nil
+        and (clockDuplicatePair.dpsCapture.characterBest.dummy.old ~= nil
+            or clockDuplicatePair.dpsCapture.characterBest.dummy.new ~= nil),
+    "clock-neutral projection lost the accepted real pair during retention")
+
 local function TypedReferenceFixture(referenceId)
     local database = {
         settings={communityRetentionEnabled=true,

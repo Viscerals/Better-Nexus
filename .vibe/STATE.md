@@ -8,7 +8,7 @@
 
 - Stage: 49
 - Checkpoint: 49.2
-- Status: DONE
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
 - Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 - Worktree: `.test19-wp4-worktree`
@@ -36,6 +36,7 @@ Project Community DPS only from deterministic real Dummy/LK pairs with verified 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- Controller repair excludes labels, category, resemblance, and temporal metadata from equal-DPS ties through an explicit projection allowlist; retention resolves the accepted pair through preserved source references. Expected-red reproduced both findings, focused paired/retention/board/Leaderboard/view tests pass, and Fast passes `43/43`.
 - WP5 implementation candidate separates historical locked snapshots from exact current/build copy authority and centralizes verified-owner + ordinary + locked/full-combat real-pair metrics across Community eligibility/averages, Leaderboard sync/resumable projections, retention, and DPS sorting. Focused authority/pairing matrices pass; Fast passes `37/37`; final Full passes `18` blocking checks with Lua `221/221`, parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit manual SavedVariables skip.
 - Stage 49 test-gap analysis prioritized five risk-backed matrices: `[MAJOR]` immutable historical snapshots versus exact later copy authority; `[MAJOR]` verified-owner + ordinary + locked/full-combat pair compatibility; `[MAJOR]` Community/Leaderboard/sort parity from one metric; `[MODERATE]` category/timestamp permutation invariance; `[MODERATE]` reload/restart/Sync convergence with preserved conflict evidence.
 - Exact-head review of `432e2ed` found and repaired catalog-owner drift, semantic target-cache staleness, row-order replacement identity, malformed/overflow locked evidence in Main/HUD and other consumers, and nested provenance aliasing. The affected matrix passes with locked totals `65`, controller `54`, AutoLock `105`, active bridge `19`, and exact-base Fast `45/45`; strict Vibe and diff checks pass.
@@ -99,7 +100,7 @@ Project Community DPS only from deterministic real Dummy/LK pairs with verified 
 
 ## Workflow state
 
-- [x] RUN_STOPPED
+- [ ] RUN_STOPPED
 - [ ] RUN_CONTEXT_CAPTURE
 - [x] STAGE_DESIGNED
 - [x] MAINTENANCE_CYCLE_DONE
@@ -139,6 +140,8 @@ Project Community DPS only from deterministic real Dummy/LK pairs with verified 
 
 
 ## Work log (current session)
+- Repair prohibited DPS tie inputs and preserve retention pair sources
+- Controller review repair: SPEC-PROHIBITED-TIE-INPUTS; SPEC-RETENTION-PAIR-REFERENCE-LOSS; VIBE-CHECKPOINT-CONTRADICTION
 - Checkpoint 49.2 recency-tie hygiene CLEAN: bounded CandidateEvidence/test/state surface has no safe high-ROI cleanup or actionable debt; Full was not repeated.
 - Review PASS at exact head 3c2c932: Full 18 blocking passes; one nonblocking manual SavedVariables skip remains unverified.
 - Clock-neutral equal-DPS pair ties preserve source history; focused parity and Fast 43/43 pass.

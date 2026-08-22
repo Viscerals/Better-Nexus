@@ -116,6 +116,31 @@ Check(clockDummyA.ts == 900 and clockDummyA.build.postedAt == 902
         and clockDummyA.build.nested.capturedAt == 903,
     "clock-neutral pair projection mutated historical source evidence")
 
+local labelDummyA = Row("dummy", 600, "alice@realm", "820001x1", lockA)
+labelDummyA.player = "Zulu"
+labelDummyA.title = "Newest Dummy"
+labelDummyA.shortName = "z"
+labelDummyA.resemblance = "close"
+labelDummyA.presentation = {displayName="Zulu", category="dummy", title="Z"}
+labelDummyA.echoes[1].title = "Nested Zulu"
+local labelDummyB = Row("dummy", 600, "alice@realm", "820001x1", lockA)
+labelDummyB.player = "Alpha"
+labelDummyB.title = "Old Dummy"
+labelDummyB.shortName = "a"
+labelDummyB.resemblance = "exact"
+labelDummyB.presentation = {displayName="Alpha", category="lk", title="A"}
+labelDummyB.echoes[1].title = "Nested Alpha"
+local labelFirst = Evidence.DpsSummary({labelDummyA,labelDummyB},{equalLk})
+local labelSecond = Evidence.DpsSummary({labelDummyB,labelDummyA},{equalLk})
+Check(labelFirst.pair.tie == labelSecond.pair.tie
+        and labelFirst.pair.dummy.player == nil
+        and labelSecond.pair.dummy.player == nil
+        and labelFirst.pair.dummy.title == nil
+        and labelFirst.pair.dummy.shortName == nil
+        and labelFirst.pair.dummy.resemblance == nil
+        and labelFirst.pair.dummy.presentation == nil,
+    "prohibited names, category, title, or resemblance changed pair selection")
+
 local huge = 1e308
 local overflowSummary = Evidence.DpsSummary(
     {Row("dummy", huge, "alice@realm", "820001x1", lockA)},

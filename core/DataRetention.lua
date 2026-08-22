@@ -268,8 +268,20 @@ local function SelectCharacterBest(dps, limits, overlay)
         lkRows[#lkRows + 1] = entry.row
     end
     local averages = {}
+    local function PairEntry(row, sources)
+        local best = entryByRow[row]
+        for _, sourceRow in ipairs(type(sources) == "table" and sources or {}) do
+            local candidate = entryByRow[sourceRow]
+            if candidate and (not best
+                or tostring(candidate.key) < tostring(best.key)) then
+                best = candidate
+            end
+        end
+        return best
+    end
     for _, pair in ipairs(CandidateEvidence.RealDpsPairs(dummyRows, lkRows)) do
-        local dummyEntry, lkEntry = entryByRow[pair.dummy], entryByRow[pair.lk]
+        local dummyEntry = PairEntry(pair.dummy, pair.dummySources)
+        local lkEntry = PairEntry(pair.lk, pair.lkSources)
         if dummyEntry and lkEntry then
             averages[#averages + 1] = {
                 key=pair.identity,dps=pair.average,

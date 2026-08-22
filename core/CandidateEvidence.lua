@@ -652,44 +652,28 @@ local function PairIdentity(record)
         .. ExactLockedIdentity(rows)
 end
 
-local function IsPairClockKey(key)
-    if type(key) ~= "string" then return false end
-    local normalized = key:lower()
-    if normalized == "ts" or normalized == "timestamp"
-        or normalized == "lastmodified" or normalized == "recency" then
-        return true
-    end
-    return normalized:match("timestamp$") ~= nil
-        or normalized:match("capturedat$") ~= nil
-        or normalized:match("createdat$") ~= nil
-        or normalized:match("receivedat$") ~= nil
-        or normalized:match("updatedat$") ~= nil
-        or normalized:match("postedat$") ~= nil
-        or normalized:match("modifiedat$") ~= nil
-end
+local PairRowKeys = {"ownerKey","ownerVerified","buildId","resolvedBuildId",
+    "sourceIdentity","protocolVersion","class","realm","fingerprint",
+    "lockedFingerprint","echoes","lockedEchoes","dps","duration"}
 
 local function PairProjectionRow(row)
-    local seen, budget = {}, {left=4096}
-    local function copy(value, depth)
-        if budget.left <= 0 or depth >= 12 then return nil end
-        budget.left = budget.left - 1
-        if type(value) ~= "table" then return value end
-        if seen[value] then return nil end
-        local result = {}
-        seen[value] = result
-        for key, child in pairs(value) do
-            if not IsPairClockKey(key) then
-                result[key] = copy(child, depth + 1)
-            end
+    local result = {}
+    for _, key in ipairs(PairRowKeys) do result[key] = DeepCopy(row[key]) end
+    -- Build detail is output-relevant, but only these structural values may
+    -- distinguish equal-DPS rows. Presentation labels never enter a pair tie.
+    if type(row.build) == "table" then
+        result.build = {variant=row.build.variant,rank=row.build.rank}
+        if type(row.build.nested) == "table" then
+            result.build.nested = {variant=row.build.nested.variant,
+                rank=row.build.nested.rank}
         end
-        return result
     end
-    return copy(row, 0) or {}
+    return result
 end
 
 local function PairTie(row)
+    local projected = PairProjectionRow(row)
     local scalar = table.concat({
-        tostring(row.player or ""),
         tostring(row.ownerKey or ""),
         type(row.buildId) .. ":" .. tostring(row.buildId or ""),
         type(row.resolvedBuildId) .. ":" .. tostring(row.resolvedBuildId or ""),
@@ -702,10 +686,10 @@ local function PairTie(row)
         tostring(row.dps or ""),
     }, "|")
 
-    -- Equal authority/DPS rows may still project different duration,
-    -- provenance, or nested build detail. Canonicalize every non-temporal
-    -- data field so input order cannot decide that observable output. Keep
-    -- capture/transport clocks out of the key: recency is never authority.
+    -- Only explicitly admitted output detail may break an equal authority/DPS
+    -- tie. Ordinary and locked pools are already canonicalized by PairIdentity;
+    -- labels, category, resemblance, clocks, and unknown nested metadata are
+    -- never selection inputs.
     local seen, budget = {}, {left=4096,nextReference=0}
     local function stable(value, depth)
         if budget.left <= 0 then return "!limit" end
@@ -723,10 +707,7 @@ local function PairTie(row)
         seen[value] = budget.nextReference
         local entries = {}
         for key, child in pairs(value) do
-            if not IsPairClockKey(key) then
-                entries[#entries + 1] = {key=stable(key, depth + 1),
-                    value=child}
-            end
+            entries[#entries + 1] = {key=stable(key, depth + 1),value=child}
         end
         -- Do not route this bounded per-record canonicalization through the
         -- shared projection sort. It is already capped by `budget` and must
@@ -760,7 +741,15 @@ local function PairTie(row)
         out[#out + 1] = "}"
         return table.concat(out)
     end
-    return scalar .. "|" .. stable(row, 0)
+    return scalar .. "|" .. stable({duration=projected.duration,
+        build=projected.build}, 0)
+end
+
+local function AddPairSource(sources, row)
+    for _, existing in ipairs(sources) do
+        if existing == row then return end
+    end
+    sources[#sources + 1] = row
 end
 
 local function PositiveFiniteDps(value)
@@ -836,6 +825,7 @@ function Evidence.PumpRealDpsPairs(cursor, limit)
                         dummyDps / 2 + lkDps / 2)
                     if average then
                         local candidate = {identity=lkKey,dummy=dummy,lk=lk,
+                            dummySources={dummy},lkSources={lk},
                             dummyDps=dummyDps,lkDps=lkDps,
                             average=average,
                             tie=PairTie(dummy) .. "|" .. PairTie(lk)}
@@ -856,6 +846,8 @@ function Evidence.PumpRealDpsPairs(cursor, limit)
                             -- record's recency into the chosen pair.
                             current.dummy = PairProjectionRow(current.dummy)
                             current.lk = PairProjectionRow(current.lk)
+                            AddPairSource(current.dummySources, dummy)
+                            AddPairSource(current.lkSources, lk)
                         end
                     end
                 end
