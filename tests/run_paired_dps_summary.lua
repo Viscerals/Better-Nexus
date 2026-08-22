@@ -94,6 +94,28 @@ Check(outputFirst.pair.dummy.duration == outputSecond.pair.dummy.duration
             == outputSecond.pair.dummy.build.variant,
     "output-relevant equal-DPS tie depended on input order")
 
+local clockDummyA = Row("dummy", 600, "alice@realm", "820001x1", lockA)
+clockDummyA.ts = 900
+clockDummyA.lastModified = 901
+clockDummyA.build = {postedAt=902,nested={capturedAt=903,variant="same"}}
+local clockDummyB = Row("dummy", 600, "alice@realm", "820001x1", lockA)
+clockDummyB.ts = 100
+clockDummyB.lastModified = 101
+clockDummyB.build = {postedAt=102,nested={capturedAt=103,variant="same"}}
+local clockFirst = Evidence.DpsSummary({clockDummyA,clockDummyB},{equalLk})
+local clockSecond = Evidence.DpsSummary({clockDummyB,clockDummyA},{equalLk})
+Check(clockFirst.pair.tie == clockSecond.pair.tie
+        and clockFirst.pair.dummy.ts == nil
+        and clockSecond.pair.dummy.ts == nil
+        and clockFirst.pair.dummy.lastModified == nil
+        and clockFirst.pair.dummy.build.postedAt == nil
+        and clockFirst.pair.dummy.build.nested.capturedAt == nil
+        and clockFirst.pair.dummy.build.nested.variant == "same",
+    "top-level or nested clocks changed equal-DPS pair output")
+Check(clockDummyA.ts == 900 and clockDummyA.build.postedAt == 902
+        and clockDummyA.build.nested.capturedAt == 903,
+    "clock-neutral pair projection mutated historical source evidence")
+
 local huge = 1e308
 local overflowSummary = Evidence.DpsSummary(
     {Row("dummy", huge, "alice@realm", "820001x1", lockA)},

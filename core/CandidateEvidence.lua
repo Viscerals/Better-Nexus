@@ -652,6 +652,41 @@ local function PairIdentity(record)
         .. ExactLockedIdentity(rows)
 end
 
+local function IsPairClockKey(key)
+    if type(key) ~= "string" then return false end
+    local normalized = key:lower()
+    if normalized == "ts" or normalized == "timestamp"
+        or normalized == "lastmodified" or normalized == "recency" then
+        return true
+    end
+    return normalized:match("timestamp$") ~= nil
+        or normalized:match("capturedat$") ~= nil
+        or normalized:match("createdat$") ~= nil
+        or normalized:match("receivedat$") ~= nil
+        or normalized:match("updatedat$") ~= nil
+        or normalized:match("postedat$") ~= nil
+        or normalized:match("modifiedat$") ~= nil
+end
+
+local function PairProjectionRow(row)
+    local seen, budget = {}, {left=4096}
+    local function copy(value, depth)
+        if budget.left <= 0 or depth >= 12 then return nil end
+        budget.left = budget.left - 1
+        if type(value) ~= "table" then return value end
+        if seen[value] then return nil end
+        local result = {}
+        seen[value] = result
+        for key, child in pairs(value) do
+            if not IsPairClockKey(key) then
+                result[key] = copy(child, depth + 1)
+            end
+        end
+        return result
+    end
+    return copy(row, 0) or {}
+end
+
 local function PairTie(row)
     local scalar = table.concat({
         tostring(row.player or ""),
@@ -671,8 +706,6 @@ local function PairTie(row)
     -- provenance, or nested build detail. Canonicalize every non-temporal
     -- data field so input order cannot decide that observable output. Keep
     -- capture/transport clocks out of the key: recency is never authority.
-    local temporal = {ts=true,timestamp=true,capturedAt=true,createdAt=true,
-        receivedAt=true,updatedAt=true}
     local seen, budget = {}, {left=4096,nextReference=0}
     local function stable(value, depth)
         if budget.left <= 0 then return "!limit" end
@@ -690,7 +723,7 @@ local function PairTie(row)
         seen[value] = budget.nextReference
         local entries = {}
         for key, child in pairs(value) do
-            if not (depth == 0 and temporal[key] == true) then
+            if not IsPairClockKey(key) then
                 entries[#entries + 1] = {key=stable(key, depth + 1),
                     value=child}
             end
@@ -815,6 +848,14 @@ function Evidence.PumpRealDpsPairs(cursor, limit)
                                 cursor.bestKeys[#cursor.bestKeys + 1] = lkKey
                             end
                             cursor.best[lkKey] = candidate
+                        elseif candidate.average == current.average
+                            and candidate.tie == current.tie then
+                            -- Rows that differ only by excluded clocks have
+                            -- equal authority and output. Project a neutral
+                            -- defensive copy so input order cannot leak one
+                            -- record's recency into the chosen pair.
+                            current.dummy = PairProjectionRow(current.dummy)
+                            current.lk = PairProjectionRow(current.lk)
                         end
                     end
                 end

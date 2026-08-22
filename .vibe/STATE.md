@@ -8,7 +8,7 @@
 
 - Stage: 49
 - Checkpoint: 49.2
-- Status: DONE
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
 - Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
 - Worktree: `.test19-wp4-worktree`
@@ -16,21 +16,22 @@
 
 ## Objective (current checkpoint)
 
-Preserve capture-time locked DPS evidence while resolving current/build copy authority only through a stronger exact association.
+Project Community DPS only from deterministic real Dummy/LK pairs with verified canonical owner, ordinary fingerprint, and locked full-combat identity.
 
 ## Deliverables (current checkpoint)
 
-- Explicit historical-snapshot versus current/build-authority roles in locked evidence resolution.
-- Focused later-current-state, category-order, timestamp-order, exact-authority, conflict, reload, and Sync coverage.
-- Immutable historical DPS rows when exact copy authority is absent.
+- One clock-neutral pair-compatibility predicate and deterministic best-real-pair selector in CandidateEvidence.
+- Equal-DPS permutation, reload/Sync, Community, Leaderboard, retention, and sorting parity coverage.
+- Independent Dummy/LK category bests when no compatible real pair exists.
 
 ## Acceptance (current checkpoint)
 
-- [x] Later current/build state cannot rewrite a historical locked snapshot by resemblance or recency.
-- [x] Category winner and timestamp order never select copy authority by themselves.
-- [x] Stronger exact current authority may resolve a copy operation without mutating historical evidence.
-- [x] Conflicting or incomplete authority preserves history and reports unavailable/conflict explicitly.
-- [x] Focused locked-evidence/DPS tests, mapped tests, Fast, required review/Full, and diff checks pass.
+- [x] Every Average comes from two actual records with the same verified canonical owner.
+- [x] The pair shares the same ordinary fingerprint and locked/full-combat identity.
+- [x] Timestamp and recency fields at every depth cannot select or change the projected pair.
+- [x] Mixed or incomplete authority leaves Average unavailable while preserving independent category bests.
+- [x] Community, Leaderboard, retention, and sorting consume the same deterministic real-pair metric.
+- [ ] Focused DPS tests, mapped tests, Fast, required exact-head review/Full, and diff checks pass.
 
 ## Evidence
 
@@ -138,6 +139,8 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 
 
 ## Work log (current session)
+- Clock-neutral equal-DPS pair ties preserve source history; focused parity and Fast 43/43 pass.
+- Controller review repair: SPEC-PAIR-TIE-RECENCY-LEAK; VIBE-CHECKPOINT-SEMANTIC-MISMATCH
 - Checkpoint 49.2 hygiene CLEAN: no product/test byte changed after Full; bounded repaired surface has no correctness, security, or high-ROI cleanup signal.
 - Review PASS at exact product/test head d5b8cc0: Full 18 blocking passes, Lua 221/221, parse 294/294, integration 70/70; one nonblocking manual skip remains unverified.
 - Full-discovered work-budget and exact-empty fixture repairs pass affected runners and Fast 43/43.
