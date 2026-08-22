@@ -15,6 +15,7 @@ end
 local function Row(category, dps, owner, ordinary, locked, stamp)
     return {category=category,dps=dps,player=owner,ownerKey=owner,
         ownerVerified=true,fingerprint=ordinary,lockedEchoes=locked,
+        echoes={{spellId=820001,quality=1,stacks=1}},
         ts=stamp or 1,buildId="shared-build"}
 end
 local lockA = {{spellId=820010,quality=3,stacks=1}}
@@ -39,6 +40,19 @@ local differentOrdinary = Evidence.DpsSummary(
 Check(differentOrdinary.average == 0,
     "different ordinary fingerprints synthesized an average")
 
+local contradictoryClaim = Row("lk", 700, "alice@realm", "820001x1", lockA)
+contradictoryClaim.echoes = {{spellId=820002,quality=1,stacks=1}}
+Check(Evidence.DpsSummary(
+        {Row("dummy", 500, "alice@realm", "820001x1", lockA)},
+        {contradictoryClaim}).average == 0,
+    "equal claimed fingerprints with different ordinary pools synthesized an average")
+local missingOrdinary = Row("lk", 700, "alice@realm", "820001x1", lockA)
+missingOrdinary.echoes = nil
+Check(Evidence.DpsSummary(
+        {Row("dummy", 500, "alice@realm", "820001x1", lockA)},
+        {missingOrdinary}).average == 0,
+    "missing ordinary evidence authorized a paired average")
+
 local dummy = {
     Row("dummy", 500, "alice@realm", "820001x1", lockA, 99),
     Row("dummy", 600, "alice@realm", "820001x1", lockA, 1),
@@ -53,6 +67,29 @@ Check(first.average == 650 and second.average == 650
         and first.pair.dummyDps == second.pair.dummyDps
         and first.pair.lkDps == second.pair.lkDps,
     "record or timestamp order changed deterministic pair selection")
+
+local equalDummyA = Row("dummy", 600, "alice@realm", "820001x1", lockA)
+equalDummyA.sourceIdentity = "source-b"
+local equalDummyB = Row("dummy", 600, "alice@realm", "820001x1", lockA)
+equalDummyB.sourceIdentity = "source-a"
+local equalLk = Row("lk", 700, "alice@realm", "820001x1", lockA)
+local equalFirst = Evidence.DpsSummary({equalDummyA,equalDummyB},{equalLk})
+local equalSecond = Evidence.DpsSummary({equalDummyB,equalDummyA},{equalLk})
+Check(equalFirst.pair.dummy.sourceIdentity == "source-a"
+        and equalSecond.pair.dummy.sourceIdentity == "source-a",
+    "equal-DPS duplicate selection depended on input order")
+
+local manyDummy = {}
+for index = 1, 100 do
+    manyDummy[index] = Row("dummy", 500 + index,
+        "alice@realm", "820001x1", lockA)
+end
+local cursor = Evidence.BeginRealDpsPairs(manyDummy, {equalLk})
+Check(cursor.dummyIndex == 1 and next(cursor.dummyByIdentity) == nil,
+    "real-pair cursor indexed the full Dummy bucket synchronously")
+local done, work = Evidence.PumpRealDpsPairs(cursor, 1)
+Check(done == false and work == 1 and cursor.dummyIndex == 2,
+    "real-pair cursor exceeded its one-unit indexing budget")
 
 for _, invalid in ipairs({0/0, math.huge, -math.huge, 0, -1, "bad"}) do
     local invalidSummary = Evidence.DpsSummary(

@@ -1228,16 +1228,34 @@ function DPS.CommunityEligibilityCursorNext(cursor)
         return false
     end
 
+    if cursor.pairCursor then
+        local evidence = Nexus and Nexus.CandidateEvidence
+        local done = evidence.PumpRealDpsPairs(cursor.pairCursor, 1)
+        if done then
+            local pairs = evidence.RealDpsPairsResult(cursor.pairCursor)
+            local pair = pairs and pairs[1]
+            if pair then
+                cursor.eligibility[cursor.pairFingerprint] = {
+                    dummy=pair.dummyDps,lk=pair.lkDps,
+                    best=math.max(pair.dummyDps, pair.lkDps),
+                    average=pair.average,count=2,
+                }
+            end
+            cursor.key = cursor.pairFingerprint
+            cursor.pairCursor, cursor.pairFingerprint = nil, nil
+        end
+        return false
+    end
+
     local fingerprint, dummyRows = next(cursor.best.dummy, cursor.key)
-    cursor.key = fingerprint
     if fingerprint ~= nil then
         local lkRows = cursor.best.lk[fingerprint]
         local evidence = Nexus and Nexus.CandidateEvidence
-        local summary = lkRows and evidence
-            and evidence.DpsSummary(dummyRows, lkRows) or nil
-        if summary and summary.average > 0 then
-            summary.pair = nil
-            cursor.eligibility[fingerprint] = summary
+        if lkRows and evidence and evidence.BeginRealDpsPairs then
+            cursor.pairFingerprint = fingerprint
+            cursor.pairCursor = evidence.BeginRealDpsPairs(dummyRows, lkRows)
+        else
+            cursor.key = fingerprint
         end
         return false
     end
