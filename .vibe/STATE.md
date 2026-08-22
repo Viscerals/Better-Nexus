@@ -93,7 +93,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Workflow state
 
-- [ ] RUN_STOPPED
+- [x] RUN_STOPPED
 - [ ] RUN_CONTEXT_CAPTURE
 - [x] STAGE_DESIGNED
 - [x] MAINTENANCE_CYCLE_DONE
@@ -125,8 +125,8 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Final independent Spec/Standards/adversarial re-review PASS is recorded for repaired product/test head `c28f3c9`. The repaired fixtures pass `23/23`, focused WP4 contracts pass `16/16`, exact-base Fast passes `68/68`, and product bytes remain unchanged. Only the repeated exact-candidate Full gate and local receipt/stop commit remain; do not enter Stage 49/WP5.
+- WP4 local completion PASS is recorded for exact frozen candidate `de76d9c`: independent Spec/Standards/adversarial review passed on product/test head `c28f3c9`, and Full passed `18` blocking checks with Lua `219/219`, parse `292/292`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip. Stage 49/WP5 was not entered.
 
 ## Recommended next action
 
-- Commit the independent-review receipt without changing product/test bytes, run Full on that exact frozen candidate, record the receipt, and stop without dispatching consolidation or entering Stage 49/WP5.
+- Stop locally without dispatching consolidation or entering Stage 49/WP5. Any later action should be a separately authorized bounded WP4 publication/review step only.
