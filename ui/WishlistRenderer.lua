@@ -1390,27 +1390,39 @@ local function RefreshView(catalogRevision)
     -- replacing anything (bound for a genuinely open slot) fills the next
     -- open column in the bottom row instead.
     if lockedLabel and lockedIcons then
-        local realIds = {}
+        local realIds, realSlots = {}, {}
         for id in pairs(lockedBySpell) do realIds[#realIds + 1] = id end
         table.sort(realIds)
+        for _, id in ipairs(realIds) do
+            for _ = 1, lockedBySpell[id] do
+                realSlots[#realSlots + 1] = id
+            end
+        end
 
         -- Replacement pairing reads straight off each draft entry's own
         -- .replaces field now (set by LoadPendingEchoes/ToggleDesignLock/
         -- AssignLockSlotFromData) -- no separate committed-store lookup
         -- needed for what's still just being designed in this session.
         local designed = {}
+        local function AddDesigned(p, rowKey, copies)
+            copies = math.max(1, tonumber(copies) or 1)
+            for copyIndex = 1, copies do
+                local row = catalog and catalog.rows and catalog.rows[p.spellId]
+                designed[#designed + 1] = {
+                    spellId=p.spellId,family=p.family,draftKey=rowKey,
+                    name=(row and row.name) or p.name
+                        or ("spell " .. tostring(p.spellId)),
+                    replaces=copyIndex == 1 and p.replaces or nil,
+                }
+            end
+        end
         for rowKey, p in pairs(pending) do
             if p.lockIntent then
-                local row = catalog and catalog.rows and catalog.rows[p.spellId]
-                designed[#designed + 1] = { spellId = p.spellId, family = p.family,
-                    draftKey = rowKey,
-                    name = (row and row.name) or ("spell " .. tostring(p.spellId)), replaces = p.replaces }
+                AddDesigned(p, rowKey, 1)
             end
         end
         for fam, p in pairs(pendingLock) do
-            designed[#designed + 1] = { spellId = p.spellId,
-                family = p.family, draftKey = fam, name = p.name,
-                replaces = p.replaces }
+            AddDesigned(p, fam, p.stacks)
         end
         table.sort(designed, function(a, b)
             local left, right = tostring(a.name), tostring(b.name)
@@ -1430,15 +1442,16 @@ local function RefreshView(catalogRevision)
         -- Always show all MAX_LOCK_SLOTS slots, not just however many are
         -- currently locked -- an account with 5/6 locked was rendering as
         -- "Locked (5):" with no visible hint a 6th slot even existed.
-        lockedLabel:SetText(string.format("Locked (%d/%d):", #realIds, MAX_LOCK_SLOTS))
+        lockedLabel:SetText(string.format("Locked (%d/%d):", lockedCount, MAX_LOCK_SLOTS))
         lockedLabel:Show()
         local fi = 1
         for i = 1, MAX_LOCK_SLOTS do
             local btn, needBtn = lockedIcons[i], lockedNeedIcons[i]
-            local id = realIds[i]
+            local id = realSlots[i]
             if id then
                 local row = catalog and catalog.rows and catalog.rows[id]
                 local replacement = replacementFor[id]
+                replacementFor[id] = nil
                 btn.spellId = id
                 btn.draftKey = nil
                 btn.slotState = "locked"
@@ -1706,19 +1719,20 @@ local function RefreshView(catalogRevision)
     -- Locked-slot designs are listed separately after the ordinary 79-copy
     -- wishlist. They are committed locally and injected into automation, not
     -- uploaded as ordinary server-wishlist entries.
-    local toLockList = {}
+    local toLockList, toLockCount = {}, 0
     for key, p in pairs(pendingLock) do
+        local copies = math.max(1, tonumber(p.stacks) or 1)
         toLockList[#toLockList + 1] = { spellId = p.spellId, family = p.family,
             draftKey = key,
-            stacks = 1, maxStack = 1, quality = p.quality, name = p.name, toLock = true,
+            stacks = copies, maxStack = copies, quality = p.quality, name = p.name, toLock = true,
             replaces = p.replaces }
+        toLockCount = toLockCount + copies
     end
     table.sort(toLockList, function(a, b)
         local left, right = tostring(a.name), tostring(b.name)
         if left ~= right then return left < right end
         return (tonumber(a.spellId) or 0) < (tonumber(b.spellId) or 0)
     end)
-    local toLockCount = #toLockList
     for _, e in ipairs(toLockList) do list[#list + 1] = e end
     local realEntryCount = #list
     -- An entry designed to REPLACE a specific currently-real-locked Echo

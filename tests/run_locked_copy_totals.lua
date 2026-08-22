@@ -221,6 +221,13 @@ Check(budget == 6,
 -- schema exactly rather than degrading to a one-copy action.
 Check(Model.TargetCopies(true) == 1 and Model.TargetCopies(720099) == 1,
     "legacy scalar lock targets lost one-copy compatibility")
+for label, scalar in pairs({
+    falseValue=false,stringValue="future",fraction=1.5,
+    nan=0/0,infinite=math.huge,negative=-1,zero=0,
+}) do
+    Check(Model.TargetCopies(scalar) == nil,
+        "unsupported legacy scalar target failed open: " .. label)
+end
 for label, record in pairs({
     future={version=2,copies=1,rows={{spellId=720099,stacks=1}}},
     missingVersion={copies=1,rows={{spellId=720099,stacks=1}}},

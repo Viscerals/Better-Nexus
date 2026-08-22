@@ -117,6 +117,16 @@ Check(#lockCalls == 0 and fullCopyCapacity.used == 6
 -- persisted contracts.  They must not degrade to a one-copy LockPerk action.
 H.locked = {}
 H.NotifyEchoDataChanged()
+for label, scalar in pairs({
+    falseValue=false,stringValue="future",fraction=1.5,
+    nan=0/0,infinite=math.huge,negative=-1,zero=0,
+}) do
+    state.lockDesignTargetsBySlot[wishlistKey] = {[200100]=scalar}
+    Check(Nexus.RequestRecompute(), label .. " scalar recompute was refused")
+    H.Advance(0.4, 0.2)
+    Check(#lockCalls == 0,
+        "unsupported scalar target authorized LockPerk: " .. label)
+end
 state.lockDesignTargetsBySlot[wishlistKey] = {
     [200100]={version=2,copies=1,
         rows={{spellId=200100,quality=3,stacks=1}}},

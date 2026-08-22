@@ -237,6 +237,16 @@ end
 assert(HasRenderedText("6 locked"),
     "renderer displayed three identities instead of six locked copies: "
         .. table.concat(renderedLockedTexts, " || "))
+assert(HasRenderedText("Locked (6/6):"),
+    "Locked strip header counted identities instead of occupied copies")
+local lockedSlotCount, emptySlotCount = 0, 0
+for _, candidate in ipairs(created) do
+    if candidate.slotState == "locked" then lockedSlotCount = lockedSlotCount + 1 end
+    if candidate.slotState == "empty" then emptySlotCount = emptySlotCount + 1 end
+end
+assert(lockedSlotCount == 6 and emptySlotCount == 0,
+    string.format("Locked strip represented %d occupied and %d empty slots for six copies",
+        lockedSlotCount,emptySlotCount))
 lockedProjection = {synced=false,bySpell={[762001]=6}}
 exactSearch:SetText("Renderer Shared Echo")
 exactSearch:GetScript("OnTextChanged")(exactSearch)

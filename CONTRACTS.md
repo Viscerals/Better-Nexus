@@ -361,7 +361,8 @@ lock-target records retain `{ version=1, copies, replaces, rows }`, including du
 exact rows and unknown/provenance fields, across reconcile, commit, reopen,
 export, progress, and automation planning. Current-schema tables require dense
 positive rows for the containing exact spell whose stack total equals `copies`; malformed and future table
-contracts fail closed, while legacy scalar one-copy targets remain compatible. It does
+contracts fail closed, while legacy `true` and positive-integer replacement-ID
+one-copy targets remain compatible; other scalar types/ranges are invalid. It does
 not parse or encode EBH1 bytes: `core/Codec.lua` remains the sole wire owner.
 It does not read production lock intent: `AutomationRuntime.LockDesignTargetsFor`
 remains the established automation reader.

@@ -499,10 +499,7 @@ local function LockTargetCopies(value, expectedSpellId)
 end
 
 local function LockTargetReplacement(value)
-    if type(value) == "table" then
-        return type(value.replaces) == "number" and value.replaces or nil
-    end
-    return type(value) == "number" and value or nil
+    return options.wishlistModel.TargetReplacement(value)
 end
 
 local function FamilyCountsFromEchoes(echoes, catalog)
