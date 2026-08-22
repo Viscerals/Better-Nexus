@@ -684,3 +684,9 @@ Record concise command/result receipts here. A skipped or unavailable command is
 
 - Bounded inspection covered only the repaired authority branch, finite pair mean, canonical tie, and four directly affected fixtures. No correctness/security issue, safe high-ROI cleanup, or actionable debt remained.
 - No product or test byte changed after exact-head Full; Full was not repeated during hygiene.
+
+# 2026-08-22 — Checkpoint 49.2 recency-tie repair PASS
+
+- Exact product/test head `3c2c932fd90e183dfd284a3fb06c873d3aa67038` excludes top-level and nested clock metadata from equal-DPS pair authority while preserving immutable source rows and ordinary retention metadata.
+- Focused paired-summary, Community/view, Leaderboard, retention, sorting, and DPS Sync runners pass; Fast passes `43/43`.
+- Exact-head Full passes `18` blocking checks with zero failed/unavailable checks and one explicit nonblocking manual SavedVariables skip. Bounded hygiene found no safe quick win or actionable debt.
