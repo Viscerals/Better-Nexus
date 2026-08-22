@@ -668,3 +668,9 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Expected-red reproduced `SPEC-EMPTY-COPY-AUTHORITY` and `SPEC-PAIR-TIE-NOT-TOTAL`; the overflow assertion was added in the same focused runner and reached green after the tie repair.
 - Exact empty build-bound locked authority now requires `lockedAuthorityProven=true`; unproven empty state preserves conflicting history across reload/restart, while later proven current/Sync evidence resolves without historical mutation.
 - Real-pair selection uses an overflow-safe finite mean and a bounded non-temporal canonical tie over output-relevant row evidence. Historical authority `13`, paired summary `18`, and DataRetention focused runners pass; Fast passes `43/43` with zero failed, unavailable, or skipped checks.
+
+# 2026-08-22 — Checkpoint 49.2 Full-discovered repair
+
+- Full at `032864f` passed `17` checks but failed Lua `219/221`: canonical row-key sorting leaked `30306` comparisons into one live projection callback, and the assembled exact-empty fixture lacked its explicit proof marker. Lua 5.1 parse `294/294` and integration `70/70` passed; the manual SavedVariables check remained skipped and unverified.
+- Canonical row evidence now uses its own budget-capped deterministic heap ordering instead of consuming ranked view comparisons. The exact-empty assembled fixture now states `lockedAuthorityProven=true`.
+- Both Full-discovered runners, paired summary `18`, historical authority `13`, and Fast `43/43` pass with zero failed, unavailable, or skipped checks.

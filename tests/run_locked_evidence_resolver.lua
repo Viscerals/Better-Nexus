@@ -104,6 +104,7 @@ local build = {
     id="stage36-locked-resolver", title="Locked Resolver Fixture",
     author="Fixture", ownerKey="fixture@ebonhold", class="MAGE",
     echoes=Clone(ordinary), fingerprint=EchoKey(ordinary),
+    lockedEchoes={},lockedAuthorityProven=true,
     postedAt=1, lastModified=1,
 }
 

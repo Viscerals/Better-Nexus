@@ -138,6 +138,8 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 
 
 ## Work log (current session)
+- Full-discovered work-budget and exact-empty fixture repairs pass affected runners and Fast 43/43.
+- Review FAIL: live projection tie exceeded comparison budget; legacy exact-empty fixture lacked lockedAuthorityProven.
 - WP5 review repairs require explicit empty authority, finite overflow-safe pair averages, and deterministic output-relevant ties; focused and Fast 43/43 pass.
 - Controller review FAIL: SPEC-EMPTY-COPY-AUTHORITY; ADV-PAIR-AVERAGE-OVERFLOW; SPEC-PAIR-TIE-NOT-TOTAL
 - Controller receipt reconciliation aligned PLAN checkpoints 49.1 and 49.2 with verified review PASS and hygiene receipts.

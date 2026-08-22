@@ -695,7 +695,28 @@ local function PairTie(row)
                     value=child}
             end
         end
-        table.sort(entries, function(left, right) return left.key < right.key end)
+        -- Do not route this bounded per-record canonicalization through the
+        -- shared projection sort. It is already capped by `budget` and must
+        -- not consume a view's ranked-comparison allowance.
+        local function sift(root, last)
+            while root * 2 <= last do
+                local child = root * 2
+                if child < last
+                    and entries[child].key < entries[child + 1].key then
+                    child = child + 1
+                end
+                if entries[child].key <= entries[root].key then return end
+                entries[root], entries[child] = entries[child], entries[root]
+                root = child
+            end
+        end
+        for root = math.floor(#entries / 2), 1, -1 do
+            sift(root, #entries)
+        end
+        for last = #entries, 2, -1 do
+            entries[1], entries[last] = entries[last], entries[1]
+            sift(1, last - 1)
+        end
         local out = {"{"}
         for _, entry in ipairs(entries) do
             out[#out + 1] = entry.key
