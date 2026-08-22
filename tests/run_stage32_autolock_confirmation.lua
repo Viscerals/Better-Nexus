@@ -237,11 +237,11 @@ H.locked = {
 H.NotifyEchoDataChanged()
 Check(Nexus.RequestRecompute(), "multi-replacement recompute was refused")
 H.Advance(0.4, 0.2)
-Check(#unlockCalls == 1 and unlockCalls[1].spellId == 200104,
+Check(#unlockCalls == 1 and unlockCalls[1].spellId == 200102,
     "first counted replacement pair did not unlock")
 H.Advance(3.2, 0.2)
 H.locked = {
-    {spellId=200102,quality=2,stack=1},
+    {spellId=200104,quality=2,stack=1},
     {spellId=200999,quality=1,stack=1},
 }
 H.NotifyEchoDataChanged()
@@ -249,7 +249,7 @@ H.Advance(0.4, 0.2)
 if #unlockCalls ~= 2 and Nexus.GetDiagnosticPageText then
     print(Nexus.GetDiagnosticPageText("autolock"))
 end
-Check(#unlockCalls == 2 and unlockCalls[2].spellId == 200102,
+Check(#unlockCalls == 2 and unlockCalls[2].spellId == 200104,
     "second counted replacement pair did not unlock: calls="
         .. tostring(#unlockCalls) .. " last="
         .. tostring(unlockCalls[#unlockCalls] and unlockCalls[#unlockCalls].spellId))

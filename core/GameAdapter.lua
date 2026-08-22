@@ -492,6 +492,7 @@ local function ReadLockedPerks(raw)
     local bySpell = {}
     local seenTables = {}
     local malformed = false
+    local totalCopies = 0
 
     local function RecognizedInteger(value, names)
         local found, selected = false, nil
@@ -527,6 +528,8 @@ local function ReadLockedPerks(raw)
         if hasId and idValid and countValid then
             local n = hasCount and count or 1
             bySpell[id] = (bySpell[id] or 0) + n
+            totalCopies = totalCopies + n
+            if totalCopies > 6 then malformed = true end
             -- Do not `return` here -- if this table ALSO nests further locked
             -- entries as children (an id field alongside a child array, rather
             -- than instead of one), those must still be walked, not skipped.

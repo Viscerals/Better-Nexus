@@ -387,7 +387,7 @@ function Policy.Decide(state)
         if type(value) ~= "table" or value.synced ~= true
             or type(value.bySpell) ~= "table"
             or type(value.byFamily) ~= "table" then return false end
-        local derivedFamilies, seenSpellIds = {}, {}
+        local derivedFamilies, seenSpellIds, totalCopies = {}, {}, 0
         for id, count in pairs(value.bySpell) do
             id, count = tonumber(id), tonumber(count)
             if not id or id <= 0 or id >= math.huge
@@ -396,6 +396,8 @@ function Policy.Decide(state)
                 or count ~= math.floor(count) then return false end
             if seenSpellIds[id] then return false end
             seenSpellIds[id] = true
+            totalCopies = totalCopies + count
+            if totalCopies > 6 then return false end
             local family = catalog and catalog.familyOf
                 and catalog.familyOf[id]
             if family == nil then return false end

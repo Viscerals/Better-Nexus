@@ -366,7 +366,12 @@ one-copy targets remain compatible; other scalar types/ranges are invalid. The
 complete target map is admitted atomically: canonical key aliases, unknown catalog
 identities, self/invalid replacement IDs, and aggregate totals above six fail closed.
 Counted rows retain every validated replacement pairing, while their top-level
-`replaces` field remains the first-row compatibility pointer. It does
+`replaces` field remains a compatibility pointer to one member of the canonical,
+numerically sorted replacement set. Catalog-bound consumers pass their captured
+catalog into the same atomic model admission; mixed known/unknown maps fail
+closed for automation, HUD progress, and Tome readiness. Admitted records,
+rows, and unknown provenance fields are cycle-safe defensive copies, so reopen,
+fulfillment, and commit results cannot mutate caller or historical evidence. It does
 not parse or encode EBH1 bytes: `core/Codec.lua` remains the sole wire owner.
 It does not read production lock intent: `AutomationRuntime.LockDesignTargetsFor`
 remains the established automation reader.

@@ -83,20 +83,8 @@ function Controller.New(options)
     local function TrustedLockedProjection()
         if Adapter and Adapter.LockedOwned then
             local locked = Adapter.LockedOwned()
-            if locked and locked.synced == true
-                and type(locked.bySpell) == "table" then
-                local bySpell = {}
-                for spellId, count in pairs(locked.bySpell) do
-                    local id, copies = tonumber(spellId), tonumber(count)
-                    if not id or id <= 0 or id >= math.huge
-                        or id ~= math.floor(id)
-                        or not copies or copies <= 0 or copies >= math.huge
-                        or copies ~= math.floor(copies) then
-                        return nil
-                    end
-                    if bySpell[id] ~= nil then return nil end
-                    bySpell[id] = copies
-                end
+            local bySpell = DraftModel.LockedSpellCounts(locked)
+            if bySpell then
                 return {synced=true,bySpell=bySpell}
             end
         end

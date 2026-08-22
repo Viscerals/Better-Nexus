@@ -89,20 +89,19 @@ function ViewModel.New(options)
         local targets = type(plan.targets) == "table" and plan.targets or {}
         local byFamily = (type(owned) == "table" and owned.byFamily) or {}
         local bySpell = (type(owned) == "table" and owned.bySpell) or {}
-        local lockedByFamily = type(lockedOwned) == "table"
-            and type(lockedOwned.byFamily) == "table" and lockedOwned.byFamily or {}
-        local lockedBySpell = type(lockedOwned) == "table"
-            and type(lockedOwned.bySpell) == "table" and lockedOwned.bySpell or {}
+        local trustedLocked = WishlistModel.LockedProjection(lockedOwned, catalog)
+            or {synced=false,bySpell={},byFamily={}}
+        local lockedByFamily = trustedLocked.byFamily
+        local lockedBySpell = trustedLocked.bySpell
 
         local seenToLock = {}
         local targetEntries = type(designTargets) == "table"
-            and WishlistModel.TargetMapEntries(designTargets) or nil
+            and WishlistModel.TargetMapEntries(designTargets, catalog) or nil
         if targetEntries then
             local rows = catalog and catalog.rows or {}
             for _, target in ipairs(targetEntries) do
                 local id, want = target.spellId, target.copies
-                local have = type(lockedOwned) == "table"
-                    and lockedOwned.synced == true
+                local have = trustedLocked.synced
                     and (tonumber(lockedBySpell[id]) or 0) or 0
                 if id and want and not seenToLock[id]
                     and have < want then
@@ -128,7 +127,7 @@ function ViewModel.New(options)
         end
         if explicitRoles and Model
             and type(Model.WishlistEntryProgress) == "function" then
-            local exact = Model.WishlistEntryProgress(entries, owned, lockedOwned)
+            local exact = Model.WishlistEntryProgress(entries, owned, trustedLocked)
             local missingBySpell, lockMissingBySpell = {}, {}
             for _, row in ipairs(exact.rows) do
                 if row.primary and row.locked then
@@ -259,7 +258,7 @@ function ViewModel.New(options)
         return missing, {stackCount=stackCount,stackTotal=stackTotal}, locked
     end
 
-    function M.TomeEchoes(wishlistEchoes, designTargets)
+    function M.TomeEchoes(wishlistEchoes, designTargets, catalog)
         local out, seen = {}, {}
         for _, echo in ipairs(wishlistEchoes or {}) do
             out[#out + 1] = echo
@@ -267,7 +266,7 @@ function ViewModel.New(options)
             if id then seen[id] = true end
         end
         local targetEntries = type(designTargets) == "table"
-            and WishlistModel.TargetMapEntries(designTargets) or nil
+            and WishlistModel.TargetMapEntries(designTargets, catalog) or nil
         if targetEntries then
             for _, target in ipairs(targetEntries) do
                 local id, copies = target.spellId, target.copies

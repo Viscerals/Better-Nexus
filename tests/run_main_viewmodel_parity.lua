@@ -16,9 +16,10 @@ local catalog = {
         [101]={name="Alpha",quality=3},
         [102]={name="Beta",quality=2},
         [201]={name="Gamma",quality=0},
+        [999]={name="Delta",quality=1},
     },
-    familyOf={[101]=10,[102]=10,[201]=20},
-    familyName={[10]="Ten",[20]="Twenty"},
+    familyOf={[101]=10,[102]=10,[201]=20,[999]=99},
+    familyName={[10]="Ten",[20]="Twenty",[99]="Ninety-nine"},
 }
 local plan = {
     wishedFamilies={[10]=true,[20]=true},
@@ -79,13 +80,31 @@ assert(hidden.total==1 and hidden.owned==1 and #hidden.missing==0
     and #hidden.toLock==0,
     "permanently locked exact coverage did not leave the rolled target")
 
+for label, invalidLocked in pairs({
+    unsynced={byFamily={[10]=3},bySpell={[101]=3},synced=false},
+    nonfinite={byFamily={[10]=1},bySpell={[math.huge]=1},synced=true},
+    alias={byFamily={[10]=2},bySpell={[101]=1,["101"]=1},synced=true},
+    contradiction={byFamily={[20]=1},bySpell={[101]=1},synced=true},
+    overflow={byFamily={[10]=6,[20]=1},
+        bySpell={[101]=3,[102]=3,[201]=1},synced=true},
+}) do
+    local have, total, missingRows = view.WishlistProgress(
+        plan, owned, catalog, {}, invalidLocked, {}, nil)
+    assert(have==2 and total==4 and #missingRows==1,
+        "HUD trusted invalid locked projection: " .. label)
+end
+
 assert(view.ActiveSlotRow({activeSlot=0,bySlot={}})==nil
     and view.ActiveSlotRow({activeSlot=1,bySlot={[1]={verified=true}}})==nil
     and view.ActiveSlotRow(slots)==slots.bySlot[1],
     "active-slot verification/suspect guard changed")
-local tomeEchoes=view.TomeEchoes(wishlist.entries,{[101]=true,[999]=true})
+local tomeEchoes=view.TomeEchoes(wishlist.entries,{[101]=true,[999]=true},catalog)
 assert(#tomeEchoes==4 and tomeEchoes[4].spellId==999,
     "designed lock targets were not deduplicated into tome readiness")
+local rejectedTomes=view.TomeEchoes(wishlist.entries,
+    {[101]=true,[999999]=true},catalog)
+assert(#rejectedTomes==3,
+    "mixed catalog-known/unknown target map augmented tome readiness")
 print("exact progress, loadout, lock, shed, and tome projection -- OK")
 
 local capture={

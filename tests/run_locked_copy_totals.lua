@@ -275,7 +275,7 @@ for label, replacement in pairs({
 end
 Check(Model.TargetCopies({version=1,copies=1,replaces=750010,
         rows={{spellId=750001,stacks=1,replaces=750011}}}, 750001) == nil,
-    "top-level and first-row replacement disagreement escaped validation")
+    "top-level replacement absent from row evidence escaped validation")
 
 local multiReplacement = {version=1,copies=3,replaces=750010,rows={
     {spellId=750001,stacks=1,replaces=750010},
@@ -292,10 +292,42 @@ Check(replacementList and #replacementList == 3
         .. tostring(replacementList and replacementList[1]) .. "/"
         .. tostring(replacementList and replacementList[2]) .. "/"
         .. tostring(replacementList and replacementList[3]))
+local permutedReplacement = {version=1,copies=3,replaces=750010,rows={
+    {spellId=750001,stacks=1,replaces=750012},
+    {spellId=750001,stacks=1,replaces=750010},
+    {spellId=750001,stacks=1,replaces=750011},
+}}
+local permutedList = Model.TargetReplacements(permutedReplacement, 750001)
+Check(Model.TargetCopies(permutedReplacement, 750001) == 3
+        and permutedList[1] == 750010 and permutedList[2] == 750011
+        and permutedList[3] == 750012,
+    "replacement identity depended on counted-row order")
+local tokenSource = {[750001]={version=1,copies=1,
+    rows={{spellId=750001,stacks=1}}}}
+local tokenOne = Model.TargetMapToken(tokenSource)
+tokenSource[750001].copies = 3
+tokenSource[750001].rows[1].stacks = 3
+local tokenThree = Model.TargetMapToken(tokenSource)
+Check(tokenOne and tokenThree and tokenOne ~= tokenThree,
+    "semantic target token missed an in-place copy mutation")
+local segmentedToken = Model.TargetMapToken({[750001]={version=1,copies=2,rows={
+    {spellId=750001,stacks=1},{spellId=750001,stacks=1},
+}}})
+local consolidatedToken = Model.TargetMapToken({[750001]={version=1,copies=2,
+    rows={{spellId=750001,stacks=2}}}})
+Check(segmentedToken == consolidatedToken,
+    "semantic target token changed across equivalent row segmentation")
+Check(Model.TargetMapToken({[750001]=multiReplacement})
+        == Model.TargetMapToken({[750001]=permutedReplacement}),
+    "semantic target token changed across replacement-row permutation")
+local targetCatalog = {rows={[750001]={name="Known"}},familyOf={[750001]=75}}
+Check(Model.TargetMapEntries({[750001]=true,[759999]=true},targetCatalog) == nil,
+    "catalog-aware target admission partially accepted an unknown identity")
 local multiPlan = Model.PlanLockCommit({}, {}, {[750001]=multiReplacement}, {
     [750010]=true,[750011]=true,[750012]=true,
 }, {[750001]=3,[750010]=1,[750011]=1,[750012]=1})
-Check(multiPlan[750001] == multiReplacement
+Check(multiPlan[750001] and multiPlan[750001] ~= multiReplacement
+        and multiPlan[750001].copies == 3
         and multiPlan[750010] == nil and multiPlan[750011] == nil
         and multiPlan[750012] == nil,
     "commit suppression retained a per-copy replacement as desired")
@@ -303,6 +335,23 @@ Check(multiPlan[750001] == multiReplacement
 local futureEnvelope = {version=1,copies=2,futureOwner={keep=true},rows={
     {spellId=750020,stacks=2,futureRow={keep=true}},
 }}
+local mutationApplied = Model.ApplyCommittedTargets({
+    pending={},pendingLock={},fulfilledTargets={},metrics={},
+}, {[750020]=futureEnvelope}, {lockedBySpell={}})
+local reopenedEnvelope = mutationApplied.pendingLock["committed:750020:1"]
+reopenedEnvelope.futureRow.keep = false
+reopenedEnvelope.__nexusTargetEnvelope.futureOwner.keep = false
+Check(futureEnvelope.futureOwner.keep == true
+        and futureEnvelope.rows[1].futureRow.keep == true,
+    "reopened counted target retained caller-owned provenance references")
+local fulfilledEnvelope = Model.ApplyCommittedTargets({
+    pending={},pendingLock={},fulfilledTargets={},metrics={},
+}, {[750020]=futureEnvelope}, {lockedBySpell={[750020]=2}})
+fulfilledEnvelope.fulfilledTargets[750020].futureOwner.keep = false
+fulfilledEnvelope.fulfilledTargets[750020].rows[1].futureRow.keep = false
+Check(futureEnvelope.futureOwner.keep == true
+        and futureEnvelope.rows[1].futureRow.keep == true,
+    "fulfilled counted target retained caller-owned provenance references")
 local appliedEnvelope = Model.ApplyCommittedTargets({
     pending={},pendingLock={},fulfilledTargets={},metrics={},
 }, {[750020]=futureEnvelope}, {lockedBySpell={}})
@@ -316,6 +365,12 @@ local envelopePlan = Model.PlanLockCommit(reconciledPending, reconciledLock,
 Check(envelopePlan[750020] and envelopePlan[750020].futureOwner.keep
         and envelopePlan[750020].rows[1].futureRow.keep,
     "reconcile/commit/export dropped unknown counted-target envelope fields")
+envelopePlan[750020].futureOwner.keep = false
+envelopePlan[750020].rows[1].futureRow.keep = false
+Check(reconciledTargets[750020].futureOwner.keep == true
+        and reconciledTargets[750020].rows[1].futureRow.keep == true
+        and futureEnvelope.futureOwner.keep == true,
+    "committed counted target retained historical provenance references")
 
 local validRetained = {version=1,copies=1,
     rows={{spellId=740003,stacks=1}}}
@@ -325,7 +380,8 @@ local replacementPlan = Model.PlanLockCommit({}, {},
     {[740001]=wrongKeyReplacement}, {[740003]=validRetained},
     {[740003]=1})
 Check(replacementPlan[740001] == nil
-        and replacementPlan[740003] == validRetained,
+        and replacementPlan[740003] ~= validRetained
+        and replacementPlan[740003].copies == 1,
     "wrong-key fulfilled target suppressed a valid replacement target")
 local invalidKeyPlan = Model.PlanLockCommit({}, {}, {}, {
     [1.5]=true,

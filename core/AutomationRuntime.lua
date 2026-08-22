@@ -850,15 +850,11 @@ end
 local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets)
     local targets = knownTargets or LockDesignTargetsFor(wishlist, knownKey)
     if type(targets) ~= "table" or not next(targets) then return wishlist end
-    local targetEntries = options.wishlistModel.TargetMapEntries(targets)
+    local targetEntries = options.wishlistModel.TargetMapEntries(targets, catalog)
     if not targetEntries then return wishlist end
     local rows = catalog and catalog.rows
     local familyOf = catalog and catalog.familyOf
     if type(rows) ~= "table" or type(familyOf) ~= "table" then return wishlist end
-    for _, targetEntry in ipairs(targetEntries) do
-        if not rows[targetEntry.spellId]
-            or familyOf[targetEntry.spellId] == nil then return wishlist end
-    end
 
     local entries, byFamily = {}, {}
     if wishlist then
@@ -889,8 +885,8 @@ local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets
     local changed = false
     for _, targetEntry in ipairs(targetEntries) do
         local id = targetEntry.spellId
-        local row = id and rows[id]
-        local fam = id and familyOf[id]
+        local row = targetEntry.row
+        local fam = targetEntry.family
         local copies = targetEntry.copies
         if id and row and fam and copies then
             local q = tonumber(row.quality) or 0
@@ -1168,7 +1164,6 @@ local function AutoLockRecordMatches(record, descriptor)
     return type(record) == "table"
         and record.baseKey == descriptor.baseKey
         and tonumber(record.spellId) == descriptor.spellId
-        and tonumber(record.replaces) == descriptor.replaces
         and record.replacementToken == descriptor.replacementToken
         and (tonumber(record.copies) or 1) == descriptor.copies
         and record.identity == AutoLockIdentity(descriptor.baseKey,
@@ -1192,16 +1187,12 @@ end
 
 local function AutoLockDescriptors(targets, wishlistKey, catalog)
     local out, seen = {}, {}
-    local targetEntries = options.wishlistModel.TargetMapEntries(targets)
+    local targetEntries = options.wishlistModel.TargetMapEntries(targets, catalog)
     if not targetEntries then
         return nil, nil, "invalid persisted lock target map"
     end
     for _, targetEntry in ipairs(targetEntries) do
         local spellId = targetEntry.spellId
-        if not (catalog and catalog.rows and catalog.rows[spellId]
-            and catalog.familyOf and catalog.familyOf[spellId] ~= nil) then
-            return nil, nil, "persisted lock target is absent from the catalog"
-        end
         local replaces = targetEntry.replaces
         local copies = targetEntry.copies
         local replacementParts = {}
@@ -1491,10 +1482,11 @@ local function StaticContext(probe, forceCompile)
     local wishlistSnapshot = CopyStatic(wishlist)
     local augmented = WishlistWithLockTargets(
         wishlistSnapshot, catalog, wishlistKey, targets)
+    local targetToken = options.wishlistModel.TargetMapToken(targets, catalog)
     local key = table.concat({
         KeyPart(CatalogRevision()),StrategyWishlistKey(wishlist),
         KeyPart(wishlistKey),
-        SortedMapKey(targets),SettingsKey(settings),
+        KeyPart(targetToken or "invalid"),SettingsKey(settings),
     }, "|")
     local plan
     if forceCompile or not staticCache or staticCache.key ~= key then
@@ -1596,15 +1588,11 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         tostring(LockSlotKey(wishlist, wishlistKey)), targetCount)
     if targetCount == 0 then return end
 
-    local lockedBySpell = (locked and locked.bySpell) or {}
-    local lockedCount = 0
-    for _, count in pairs(lockedBySpell) do
-        local copies = AutoLockInteger(count)
-        if not copies then
-            trace[#trace + 1] = "authoritative locked-state counts are invalid"
-            return
-        end
-        lockedCount = lockedCount + copies
+    local lockedBySpell, lockedCount =
+        options.wishlistModel.LockedSpellCounts(locked)
+    if not lockedBySpell then
+        trace[#trace + 1] = "authoritative locked-state counts are invalid"
+        return
     end
     lockedRevision = AutoLockInteger(lockedRevision, true)
     local lockedToken = AutoLockLockedToken(locked)

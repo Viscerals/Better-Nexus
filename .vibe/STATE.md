@@ -35,6 +35,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- Exact-head review of `432e2ed` found and repaired catalog-owner drift, semantic target-cache staleness, row-order replacement identity, malformed/overflow locked evidence in Main/HUD and other consumers, and nested provenance aliasing. The affected matrix passes with locked totals `65`, controller `54`, AutoLock `105`, active bridge `19`, and exact-base Fast `45/45`; strict Vibe and diff checks pass.
 - Cumulative independent review rejected `7cff7e7` and drove five focused WP4 repairs: true total-minus-locked derivation, counted lock-target continuity, exact-spell automation matching, synced-only Policy authority, and exact renderer selection keys. All deterministic red probes are now green; 19 focused runners and exact-base Fast `39/39` pass on the repaired working candidate.
 - #35 checkpoint review found and repaired a same-family automation omission: locked sibling tiers and extra locked copies now extend an automation-only exact target without mutating the server Wishlist. The expected-red failed twice, the repaired Stage 32 fixture passes 65 checks, and exact-base Fast passes `35/35` with zero failed/unavailable/skipped checks.
 - #35 expected-red failed twice at `wrong-quality family ownership marked the exact Rare overlay row complete`; the green public runner proves exact Common/Rare separation, duplicate locked quota grouping, role-specific ownership, locked-only refresh, HUD/automation parity, and exact recovery.
@@ -56,6 +57,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Work log
 
+- Review wave 2 at `432e2ed` centralized catalog-bound target admission, canonicalized semantic target identity, made target/provenance results cycle-safe defensive copies, and atomically rejected malformed or seven-copy locked evidence across GameAdapter, controller/export/renderer, Main/HUD, Policy, and AutoLock. Focused probes and exact-base Fast `45/45` pass; a new exact local commit and three fresh independent reviews remain before Full.
 - Independent re-review closed the prior five repairs and found six further exactness gaps at `1afec7d`. Versioned counted-target validation, copy-based capacity/deficit admission, aggregation-stable identity, synced defensive renderer/export projections, and exact guaranteed-queue matching now pass 20 focused runners and exact-base Fast `41/41`.
 - Exact-head audit before accepting `72355cb` found and repaired one remaining persisted-record identity mismatch plus duplicate-validator drift: WishlistModel now solely validates finite version-1 records and requires every dense row to name the containing exact spell. All 20 focused runners pass, including locked totals 29 checks, AutoLock 71, and integration `70/70`; exact-base Fast passes `43/43` with zero failed/unavailable/skipped checks.
 - Paused review at `ce6433f` found and repaired unsupported scalar target authority and distinct-ID Locked-strip occupancy. Only legacy `true` and positive finite integer replacement IDs remain compatible; six physical UI slots now represent six copies, not spell identities. Locked totals pass 36 checks, AutoLock 85, all 20 focused runners and exact-base Fast `43/43` pass.
@@ -116,7 +118,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Cumulative re-review repair, whole-map AutoLock refusal, and finite locked-evidence validation are locally green in the affected matrix and exact-base Fast `43/43`. The candidate awaits a local commit and all three repeated independent reviews.
+- Exact-head review wave 2 repairs are locally green in the affected matrix and exact-base Fast `45/45`; strict Vibe and diff validation pass. The candidate awaits a local commit and all three repeated independent reviews.
 
 ## Recommended next action
 

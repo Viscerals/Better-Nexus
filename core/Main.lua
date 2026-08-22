@@ -191,7 +191,7 @@ local function BuildProgress(plan, owned, slots, catalog, wishlistOverride,
         matchedBuildId = capture.FindMatchingBuildPublic(wishlist)
     end
     local wishlistEchoes = wishlist and (wishlist.echoes or wishlist.entries) or nil
-    local tomeEchoes = viewModel.TomeEchoes(wishlistEchoes, designTargets)
+    local tomeEchoes = viewModel.TomeEchoes(wishlistEchoes, designTargets, catalog)
     local unknownTomes = Adapter.UnknownTomesForEchoes
         and Adapter.UnknownTomesForEchoes(tomeEchoes) or {}
     return viewModel.BuildProgress({

@@ -247,8 +247,22 @@ end
 assert(lockedSlotCount == 6 and emptySlotCount == 0,
     string.format("Locked strip represented %d occupied and %d empty slots for six copies",
         lockedSlotCount,emptySlotCount))
-lockedProjection = {synced=false,bySpell={[762001]=6}}
+lockedProjection = {synced=true,bySpell={
+    [762001]=2,[762002]=2,[762003]=2,[762004]=1,
+}}
 exactSearch:SetText("Renderer Shared Echo")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
+Editor.Refresh()
+local overflowLockedSlots = 0
+for _, candidate in ipairs(created) do
+    if candidate.slotState == "locked" then
+        overflowLockedSlots = overflowLockedSlots + 1
+    end
+end
+assert(overflowLockedSlots == 0 and not HasRenderedText("7 locked"),
+    "renderer trusted seven locked copies as capacity authority")
+lockedProjection = {synced=false,bySpell={[762001]=6}}
+exactSearch:SetText("Renderer Shared")
 exactSearch:GetScript("OnTextChanged")(exactSearch)
 Editor.Refresh()
 assert(not HasRenderedText("6 locked"),

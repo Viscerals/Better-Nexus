@@ -154,8 +154,9 @@ local projectionTargets = {
     [1.5]=true,
     [math.huge]=true,
     [-1]=true,
+    [999999]=true,
 }
-local projectedTomes = view.TomeEchoes({}, projectionTargets)
+local projectedTomes = view.TomeEchoes({}, projectionTargets, catalog)
 assert(#projectedTomes == 0,
     "HUD Tome projection partially admitted a malformed target map")
 local _, _, _, projectedLocks = view.WishlistProgress(
@@ -167,7 +168,7 @@ assert(#projectedLocks == 0,
     "HUD progress partially admitted a malformed target map: "
         .. projectedText)
 local validProjectionTargets = {[101]=true,[102]=103}
-projectedTomes = view.TomeEchoes({}, validProjectionTargets)
+projectedTomes = view.TomeEchoes({}, validProjectionTargets, catalog)
 local projectedTomeIds = {}
 for _, row in ipairs(projectedTomes) do projectedTomeIds[row.spellId] = true end
 local _, _, _, validProjectedLocks = view.WishlistProgress(
@@ -311,5 +312,50 @@ local aliasedPolicy = Nexus.Policy.Decide({
 })
 assert(aliasedPolicy.type == "take" and aliasedPolicy.spellId == 101,
     "Policy merged canonical aliases in locked evidence")
+
+local capacityCatalog = {
+    rows={
+        [101]={name="Quick Hands Common",quality=0,maxStack=1},
+        [999]={name="Filler",quality=0,maxStack=1},
+        [997]={name="Other A",quality=0,maxStack=2},
+        [998]={name="Other B",quality=0,maxStack=2},
+        [996]={name="Overflow",quality=0,maxStack=1},
+    },
+    familyOf={[101]=10,[999]=99,[997]=97,[998]=98,[996]=96},
+    familyMembers={[10]={101},[99]={999},[97]={997},[98]={998},[96]={996}},
+}
+local capacityState = {
+    board={cards={
+        {spellId=101,quality=0,family=10},
+        {spellId=999,quality=0,family=99},
+    },signature="six-locks"},
+    owned={bySpell={},byFamily={},synced=true,distinct=0},
+    locked={bySpell={[101]=1,[999]=1,[997]=2,[998]=2},
+        byFamily={[10]=1,[99]=1,[97]=2,[98]=2},synced=true},
+    charges={banish=0,reroll=0,trustworthy=true},
+    plan={wishedFamilies={[10]=true},targets={
+        [10]={targetStacks=1,wishedQuality=0},
+    }},catalog=capacityCatalog,level=40,params=Nexus.DefaultProfile.params,
+}
+local realDelta, observedLocked = Nexus.Model.Delta, {}
+Nexus.Model.Delta = function(currentPlan, currentOwned, spellId,
+    currentCatalog, params)
+    observedLocked[#observedLocked + 1] =
+        tonumber(currentOwned and currentOwned.bySpell
+            and currentOwned.bySpell[101]) or 0
+    return realDelta(currentPlan, currentOwned, spellId, currentCatalog, params)
+end
+local sixCopyPolicy = Nexus.Policy.Decide(capacityState)
+assert(sixCopyPolicy.type == "take" and observedLocked[1] == 1,
+    "Policy rejected coherent six-copy locked evidence")
+capacityState.board.signature = "seven-locks"
+capacityState.locked.bySpell[996] = 1
+capacityState.locked.byFamily[96] = 1
+observedLocked = {}
+local sevenCopyPolicy = Nexus.Policy.Decide(capacityState)
+Nexus.Model.Delta = realDelta
+assert(sevenCopyPolicy.type == "take" and sevenCopyPolicy.spellId == 101
+        and observedLocked[1] == 0,
+    "Policy trusted seven-copy locked evidence")
 
 print("exact Wishlist progress: tiers=independent roles=independent duplicates=allocated -- OK")

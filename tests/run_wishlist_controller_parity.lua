@@ -105,6 +105,21 @@ Check(not leakedPartial,
     "unsynced partial lock evidence leaked into public EBH1 export entries")
 lockedProjection = {bySpell={},synced=true}
 
+lockedProjection = {bySpell={[1001]=2,[1002]=2,[1003]=2},synced=true}
+Check(controller.LockedProjection() ~= nil,
+    "controller rejected a valid six-copy locked projection")
+lockedProjection.bySpell[1777] = 1
+Check(controller.LockedProjection() == nil,
+    "controller trusted seven locked copies")
+local overflowExport = controller.ExportEntries()
+local leakedOverflow = false
+for _, row in ipairs(overflowExport) do
+    if row.locked and (tonumber(row.spellId) == 1777) then leakedOverflow = true end
+end
+Check(not leakedOverflow,
+    "seven-copy locked evidence leaked into public export entries")
+lockedProjection = {bySpell={},synced=true}
+
 lockedProjection = {bySpell={[1001]=1,["1001"]=1},synced=true}
 Check(controller.LockedProjection() == nil,
     "controller merged canonical aliases in locked evidence")
