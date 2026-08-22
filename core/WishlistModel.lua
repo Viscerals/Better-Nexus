@@ -168,14 +168,15 @@ local function TargetMapEntries(targets, catalog)
         local catalogRow = catalog and catalog.rows and catalog.rows[spellId]
         local family = catalog and catalog.familyOf and catalog.familyOf[spellId]
         if catalog and (not catalogRow or family == nil) then return nil end
+        local admittedValue = CopyEntry(value)
         seenSpellIds[spellId] = true
         total = total + copies
         if total > 6 then return nil end
         entries[#entries + 1] = {
-            spellId=spellId,value=value,copies=copies,
-            replaces=TargetReplacement(value, spellId),
-            replacements=TargetReplacements(value, spellId),
-            row=catalogRow,family=family,
+            spellId=spellId,value=admittedValue,copies=copies,
+            replaces=TargetReplacement(admittedValue, spellId),
+            replacements=TargetReplacements(admittedValue, spellId),
+            row=CopyEntry(catalogRow),family=family,
         }
     end
     table.sort(entries, function(left, right)
@@ -199,40 +200,15 @@ local function TargetMapToken(targets, catalog)
 end
 
 local function LockedSpellCounts(locked)
-    if type(locked) ~= "table" or locked.synced ~= true
-        or type(locked.bySpell) ~= "table" then return nil end
-    local out, seen, total = {}, {}, 0
-    for spellIdKey, countValue in pairs(locked.bySpell) do
-        local spellId, copies = PositiveInteger(spellIdKey),
-            PositiveInteger(countValue)
-        if not spellId or not copies or seen[spellId] then return nil end
-        seen[spellId] = true
-        total = total + copies
-        if total > MAX_LOCK_SLOTS then return nil end
-        out[spellId] = copies
-    end
-    return out, total
+    local owner = Nexus.Model and Nexus.Model.LockedProjection
+    local projection = owner and owner(locked, nil, MAX_LOCK_SLOTS) or nil
+    return projection and projection.bySpell or nil,
+        projection and projection.total or nil
 end
 
 local function LockedProjection(locked, catalog)
-    local bySpell, total = LockedSpellCounts(locked)
-    if not bySpell or type(catalog) ~= "table"
-        or type(catalog.familyOf) ~= "table"
-        or type(locked.byFamily) ~= "table" then return nil end
-    local byFamily = {}
-    for spellId, copies in pairs(bySpell) do
-        local family = catalog.familyOf[spellId]
-        if family == nil then return nil end
-        byFamily[family] = (byFamily[family] or 0) + copies
-    end
-    for family, countValue in pairs(locked.byFamily) do
-        local copies = NonNegativeInteger(countValue)
-        if copies == nil or (byFamily[family] or 0) ~= copies then return nil end
-    end
-    for family, copies in pairs(byFamily) do
-        if NonNegativeInteger(locked.byFamily[family]) ~= copies then return nil end
-    end
-    return {synced=true,bySpell=bySpell,byFamily=byFamily,total=total}
+    local owner = Nexus.Model and Nexus.Model.LockedProjection
+    return owner and owner(locked, catalog, MAX_LOCK_SLOTS) or nil
 end
 
 local function TargetEnvelopeFields(value)

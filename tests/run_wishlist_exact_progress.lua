@@ -324,6 +324,10 @@ local capacityCatalog = {
     familyOf={[101]=10,[999]=99,[997]=97,[998]=98,[996]=96},
     familyMembers={[10]={101},[99]={999},[97]={997},[98]={998},[96]={996}},
 }
+assert(Nexus.Model.LockedProjection({
+        synced=true,bySpell={[101]=0},byFamily={[10]=0},
+    },capacityCatalog,6) == nil,
+    "shared locked projection accepted a zero-count spell row")
 local capacityState = {
     board={cards={
         {spellId=101,quality=0,family=10},

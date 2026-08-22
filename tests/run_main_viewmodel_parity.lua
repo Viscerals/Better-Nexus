@@ -1,6 +1,7 @@
 -- Pure Main view-model extraction preserves exact progress/HUD projections,
 -- defensive snapshots, value-keyed cache reuse, and zero service authority.
 Nexus = {}
+dofile("logic/Model.lua")
 dofile("logic/Ratchet.lua")
 dofile("core/WishlistModel.lua")
 dofile("core/MainViewModel.lua")
@@ -83,6 +84,7 @@ assert(hidden.total==1 and hidden.owned==1 and #hidden.missing==0
 for label, invalidLocked in pairs({
     unsynced={byFamily={[10]=3},bySpell={[101]=3},synced=false},
     nonfinite={byFamily={[10]=1},bySpell={[math.huge]=1},synced=true},
+    zero={byFamily={[10]=0},bySpell={[101]=0},synced=true},
     alias={byFamily={[10]=2},bySpell={[101]=1,["101"]=1},synced=true},
     contradiction={byFamily={[20]=1},bySpell={[101]=1},synced=true},
     overflow={byFamily={[10]=6,[20]=1},

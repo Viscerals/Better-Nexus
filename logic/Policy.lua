@@ -384,35 +384,9 @@ function Policy.Decide(state)
     -- BANK checks, OwnedFam) sees it consistently.
     local ownedSafe = owned or {}
     local function TrustedLocked(value)
-        if type(value) ~= "table" or value.synced ~= true
-            or type(value.bySpell) ~= "table"
-            or type(value.byFamily) ~= "table" then return false end
-        local derivedFamilies, seenSpellIds, totalCopies = {}, {}, 0
-        for id, count in pairs(value.bySpell) do
-            id, count = tonumber(id), tonumber(count)
-            if not id or id <= 0 or id >= math.huge
-                or id ~= math.floor(id)
-                or not count or count < 0 or count >= math.huge
-                or count ~= math.floor(count) then return false end
-            if seenSpellIds[id] then return false end
-            seenSpellIds[id] = true
-            totalCopies = totalCopies + count
-            if totalCopies > 6 then return false end
-            local family = catalog and catalog.familyOf
-                and catalog.familyOf[id]
-            if family == nil then return false end
-            derivedFamilies[family] = (derivedFamilies[family] or 0) + count
-        end
-        for family, count in pairs(value.byFamily) do
-            count = tonumber(count)
-            if not count or count < 0 or count >= math.huge
-                or count ~= math.floor(count) then return false end
-            if (derivedFamilies[family] or 0) ~= count then return false end
-        end
-        for family, count in pairs(derivedFamilies) do
-            if tonumber(value.byFamily[family]) ~= count then return false end
-        end
-        return derivedFamilies
+        local projection = type(GetModel().LockedProjection) == "function"
+            and GetModel().LockedProjection(value, catalog, 6) or nil
+        return projection and projection.byFamily or false
     end
     local trustedLockedFamilies = TrustedLocked(state.locked)
     if trustedLockedFamilies then

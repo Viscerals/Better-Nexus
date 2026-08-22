@@ -70,6 +70,54 @@ function Model.MaskMatch(a, b)
 end
 
 ------------------------------------------------------------------------
+-- Permanent locked-Echo evidence
+------------------------------------------------------------------------
+
+-- One pure admission boundary for every consumer of GetLockedPerks-derived
+-- authority. With a catalog, the supplied family projection must exactly
+-- equal the family totals derived from canonical spell IDs. Without one,
+-- callers receive only the validated defensive spell totals.
+function Model.LockedProjection(locked, catalog, maximumCopies)
+    if type(locked) ~= "table" or locked.synced ~= true
+        or type(locked.bySpell) ~= "table" then return nil end
+    maximumCopies = tonumber(maximumCopies) or 6
+    local bySpell, seen, total = {}, {}, 0
+    for spellIdKey, countValue in pairs(locked.bySpell) do
+        local spellId, copies = tonumber(spellIdKey), tonumber(countValue)
+        if not spellId or spellId ~= spellId or spellId <= 0
+            or spellId >= math.huge or spellId ~= math.floor(spellId)
+            or not copies or copies ~= copies or copies <= 0
+            or copies >= math.huge or copies ~= math.floor(copies)
+            or seen[spellId] then return nil end
+        seen[spellId] = true
+        total = total + copies
+        if total > maximumCopies then return nil end
+        bySpell[spellId] = copies
+    end
+
+    local byFamily = {}
+    if catalog ~= nil then
+        if type(catalog) ~= "table" or type(catalog.familyOf) ~= "table"
+            or type(locked.byFamily) ~= "table" then return nil end
+        for spellId, copies in pairs(bySpell) do
+            local family = catalog.familyOf[spellId]
+            if family == nil then return nil end
+            byFamily[family] = (byFamily[family] or 0) + copies
+        end
+        for family, countValue in pairs(locked.byFamily) do
+            local copies = tonumber(countValue)
+            if not copies or copies ~= copies or copies < 0
+                or copies >= math.huge or copies ~= math.floor(copies)
+                or (byFamily[family] or 0) ~= copies then return nil end
+        end
+        for family, copies in pairs(byFamily) do
+            if tonumber(locked.byFamily[family]) ~= copies then return nil end
+        end
+    end
+    return {synced=true,bySpell=bySpell,byFamily=byFamily,total=total}
+end
+
+------------------------------------------------------------------------
 -- Marginal value Delta (ordinal, calibration-free)
 ------------------------------------------------------------------------
 

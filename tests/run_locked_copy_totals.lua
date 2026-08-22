@@ -323,6 +323,17 @@ Check(Model.TargetMapToken({[750001]=multiReplacement})
 local targetCatalog = {rows={[750001]={name="Known"}},familyOf={[750001]=75}}
 Check(Model.TargetMapEntries({[750001]=true,[759999]=true},targetCatalog) == nil,
     "catalog-aware target admission partially accepted an unknown identity")
+local admissionSource = {[750001]={version=1,copies=1,future={keep=true},
+    rows={{spellId=750001,stacks=1,futureRow={keep=true}}}}}
+targetCatalog.rows[750001].futureCatalog = {keep=true}
+local admitted = Model.TargetMapEntries(admissionSource, targetCatalog)
+admitted[1].value.future.keep = false
+admitted[1].value.rows[1].futureRow.keep = false
+admitted[1].row.futureCatalog.keep = false
+Check(admissionSource[750001].future.keep == true
+        and admissionSource[750001].rows[1].futureRow.keep == true
+        and targetCatalog.rows[750001].futureCatalog.keep == true,
+    "target admission exposed caller-owned record, row, or catalog references")
 local multiPlan = Model.PlanLockCommit({}, {}, {[750001]=multiReplacement}, {
     [750010]=true,[750011]=true,[750012]=true,
 }, {[750001]=3,[750010]=1,[750011]=1,[750012]=1})

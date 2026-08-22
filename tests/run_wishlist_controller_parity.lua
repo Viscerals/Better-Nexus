@@ -1,5 +1,6 @@
 -- Frame-free Wishlist controller transition, association, and retry parity.
 Nexus = {}
+dofile("logic/Model.lua")
 dofile("core/CandidateEvidence.lua")
 dofile("core/WishlistModel.lua")
 dofile("core/WishlistController.lua")

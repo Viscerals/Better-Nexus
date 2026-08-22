@@ -116,6 +116,12 @@ Automation targets that carry exact `qualityTiers[].spellId` use the same
 spell-qualified quotas in `TargetProgress`, `QualityOfferNeeded`, and Policy;
 quality-only targets retain the legacy compatibility path. Policy merges
 permanent ownership only when `LockedOwned()` is fully synced and count-valid.
+`Model.LockedProjection(locked, catalog?, maximumCopies?)` is the single pure
+admission owner for that evidence: spell IDs and counts are positive finite
+integers, canonical aliases and totals above six fail closed, and catalog-bound
+callers additionally require exact derived `byFamily` coherence. Policy consumes
+this owner directly; WishlistModel exposes thin spell-only/catalog-bound wrappers
+for controller, renderer/export, Main/HUD, and automation consumers.
   Lever conformance comes from `catalog.levers[l].conformant` (adapter computes via the
   name-exact "Tome of <member name>" rule); Strategy only partitions. Deterministic
   ordering (sort lever ids ascending).
@@ -369,8 +375,9 @@ Counted rows retain every validated replacement pairing, while their top-level
 `replaces` field remains a compatibility pointer to one member of the canonical,
 numerically sorted replacement set. Catalog-bound consumers pass their captured
 catalog into the same atomic model admission; mixed known/unknown maps fail
-closed for automation, HUD progress, and Tome readiness. Admitted records,
-rows, and unknown provenance fields are cycle-safe defensive copies, so reopen,
+closed for automation, HUD progress, and Tome readiness. Admitted values,
+catalog rows, counted records, nested rows, and unknown provenance fields are
+cycle-safe defensive copies, so admission, reopen,
 fulfillment, and commit results cannot mutate caller or historical evidence. It does
 not parse or encode EBH1 bytes: `core/Codec.lua` remains the sole wire owner.
 It does not read production lock intent: `AutomationRuntime.LockDesignTargetsFor`
