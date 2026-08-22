@@ -690,3 +690,9 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Exact product/test head `3c2c932fd90e183dfd284a3fb06c873d3aa67038` excludes top-level and nested clock metadata from equal-DPS pair authority while preserving immutable source rows and ordinary retention metadata.
 - Focused paired-summary, Community/view, Leaderboard, retention, sorting, and DPS Sync runners pass; Fast passes `43/43`.
 - Exact-head Full passes `18` blocking checks with zero failed/unavailable checks and one explicit nonblocking manual SavedVariables skip. Bounded hygiene found no safe quick win or actionable debt.
+
+# 2026-08-22 — Checkpoint 49.2 prohibited-tie and retention-source repair PASS
+
+- Expected-red reproduced `SPEC-PROHIBITED-TIE-INPUTS` and `SPEC-RETENTION-PAIR-REFERENCE-LOSS`; repaired focused paired-summary (`21` checks), retention, DPS boards, Leaderboard UI, and view-projection runners pass, and Fast passes `43/43`.
+- Exact product/test head `de04122620aa30b42113fe7fea30255b0fa8047f` uses an explicit authority/output tie allowlist and preserves original source references separately for deterministic retention.
+- Exact-head Full passes all `18` blocking checks with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip that remains unverified.
