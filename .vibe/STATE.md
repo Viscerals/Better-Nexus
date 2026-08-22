@@ -6,37 +6,39 @@
 
 ## Current focus
 
-- Stage: 49
-- Checkpoint: 49.2
-- Status: DONE
-- Branch: `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari`
-- Starting head: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
+- Stage: 50
+- Checkpoint: 50.1
+- Status: IN_REVIEW
+- Branch: `bugfix/test19-wp6-build-hash-buckets-erase-build-id-type-and-can-r`
+- Starting head: exact accepted WP5 handoff head `8f5d28008935cef2d973b800167695ab50e0f70b`
 - Worktree: `.test19-wp4-worktree`
-- Base: exact accepted WP4 handoff head `e70de8a7582d0146cc6746677084b3f4a270290b`
+- Base: exact accepted WP5 handoff head `8f5d28008935cef2d973b800167695ab50e0f70b`
 
 ## Objective (current checkpoint)
 
-Project Community DPS only from deterministic real Dummy/LK pairs with verified canonical owner, ordinary fingerprint, and locked full-combat identity.
+Preserve typed build identity in Sync's canonical build and tombstone bucket-hash material without changing the deterministic eight-bucket reconciliation design.
 
 ## Deliverables (current checkpoint)
 
-- One clock-neutral pair-compatibility predicate and deterministic best-real-pair selector in CandidateEvidence.
-- Equal-DPS permutation, reload/Sync, Community, Leaderboard, retention, and sorting parity coverage.
-- Independent Dummy/LK category bests when no compatible real pair exists.
+- Focused expected-red typed build/tombstone, reconciliation, delta/legacy, invalidation, and ordering coverage.
+- Typed canonical build and tombstone entry material in `core/BuildHashCache.lua`.
+- Explicit mixed old/new digest compatibility behavior preventing permanent false equality.
 
 ## Acceptance (current checkpoint)
 
-- [x] Every Average comes from two actual records with the same verified canonical owner.
-- [x] The pair shares the same ordinary fingerprint and locked/full-combat identity.
-- [x] Timestamp and recency fields at every depth cannot select or change the projected pair.
-- [x] Mixed or incomplete authority leaves Average unavailable while preserving independent category bests.
-- [x] Community, Leaderboard, retention, and sorting consume the same deterministic real-pair metric.
-- [x] Blocking focused, mapped, Fast, exact-head review/Full, and diff checks pass.
+- [ ] Numeric `1` and string `"1"` hash differently for builds and tombstones; equal typed states remain equal.
+- [ ] Numeric/string peer mismatch cannot skip reconciliation.
+- [ ] Both typed IDs hash deterministically across iteration order and rebuild paths.
+- [ ] Delta and legacy modes preserve typed identity and ordinary strings remain deterministic.
+- [ ] Mixed old/new behavior prevents permanent protocol-compatible false equality.
+- [ ] Blocking focused, mapped, Fast, Full, Lua, parse, integration, policy, and diff checks pass.
 - [ ] Nonblocking manual SavedVariables/native validation remains explicitly unverified.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- Issue #40 expected red failed at `numeric and string build IDs share one bucket hash`; typed build/tombstone, mixed old/new, ordering, candidate-token, cache invalidation, and baseline-delta focused runners now pass.
+- Fast passed `20/20` blocking checks with Lua 5.1 parse, Sync mapped tests, integration `70/70`, policy, metadata, release, security, and diff checks; zero failed, skipped, or unavailable checks.
 - Controller repair excludes labels, category, resemblance, and temporal metadata from equal-DPS ties through an explicit projection allowlist; retention resolves the accepted pair through preserved source references. Expected-red reproduced both findings, focused paired/retention/board/Leaderboard/view tests pass, and Fast passes `43/43`.
 - WP5 implementation candidate separates historical locked snapshots from exact current/build copy authority and centralizes verified-owner + ordinary + locked/full-combat real-pair metrics across Community eligibility/averages, Leaderboard sync/resumable projections, retention, and DPS sorting. Focused authority/pairing matrices pass; Fast passes `37/37`; final Full passes `18` blocking checks with Lua `221/221`, parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit manual SavedVariables skip.
 - Stage 49 test-gap analysis prioritized five risk-backed matrices: `[MAJOR]` immutable historical snapshots versus exact later copy authority; `[MAJOR]` verified-owner + ordinary + locked/full-combat pair compatibility; `[MAJOR]` Community/Leaderboard/sort parity from one metric; `[MODERATE]` category/timestamp permutation invariance; `[MODERATE]` reload/restart/Sync convergence with preserved conflict evidence.
@@ -66,7 +68,7 @@ Project Community DPS only from deterministic real Dummy/LK pairs with verified 
 - Stage 47 hygiene was CLEAN across the bounded 30-path WP3 surface; product/test/workflow/contract bytes did not change after Full.
 - Stage 48.1 is pointer-only and `NOT_STARTED`; no WP4 design or implementation occurred during consolidation.
 
-## Work log
+## Archived Stage 48/49 work detail
 
 - WP5 implementation completed issues #23/#26 on one coherent candidate: copy paths require exact build-bound locked authority; historical category rows remain preserved for display; one deterministic real-pair owner feeds qualification, Community averages, Leaderboard, retention, and sorting. Final Fast `37/37` and Full `18/18` pass.
 - Stage 49 maintenance test-gap analysis selected five non-duplicative expected-red matrices covering immutable history, exact copy authority, real-pair identity, cross-surface parity, ordering, and persistence/Sync convergence.
@@ -98,6 +100,15 @@ Project Community DPS only from deterministic real Dummy/LK pairs with verified 
 - Stage 48 design reconciled #43 -> #44 -> #20 -> #35 against the accepted issue comments and corrected checkpoint 48.3 to read-time exact multiset subtraction without source mutation.
 - Stage 47 retrospective completed with five lessons on compatibility inventory, shared authority normalization, adversarial preservation coverage, public-surface parity, and reserving Full for accepted bytes.
 - Stage 47 consolidation archived the completed WP3 plan surface, moved the pointer from 47.5 `DONE` to 48.1 `NOT_STARTED`, and retained the exact review/Full/hygiene receipt without starting WP4.
+
+## Work log
+
+- Checkpoint 50.1 preserves typed build/tombstone identity in cached and fallback delta/legacy digest material plus resumable reconciliation tokens; focused tests pass and Fast passes 20/20.
+- Stage 49 retrospective completed with five lessons on shared semantic projections, adversarial state matrices, bounded async work, source/display separation, and checkpoint scope.
+- Stage 50 design confirmed checkpoint 50.1 as the single bounded issue #40 implementation seam in BuildHashCache with focused Sync compatibility coverage.
+- Stage 50 documentation gap scan found no WP6-scoped documentation change; typed digest identity remains a source-and-regression-test contract.
+- Stage 50 designed one bounded issue #40 checkpoint and archived completed WP5 detail.
+- Stage 49 completed with accepted review, hygiene, Fast, and Full receipts.
 
 ## Workflow state
 
@@ -140,7 +151,8 @@ Project Community DPS only from deterministic real Dummy/LK pairs with verified 
 - Return the clean local WP5 receipt commit to the controller-owned independent review; do not begin another design cycle or publish from this worker.
 
 
-## Work log (current session)
+## Archived session detail
+- Stage 50 design added one bounded issue #40 checkpoint for typed build/tombstone hash identity, reconciliation, invalidation, delta/legacy determinism, and mixed-client compatibility.
 - Checkpoint 49.2 prohibited-tie/retention-source hygiene CLEAN: bounded repaired surface has no correctness, security, duplication, or safe high-ROI cleanup signal; Full was not repeated.
 - Review PASS at exact head de04122: Full 18 blocking passes; Lua 221/221, parse 294/294, integration 70/70; one nonblocking manual SavedVariables skip remains unverified
 - Repair prohibited DPS tie inputs and preserve retention pair sources

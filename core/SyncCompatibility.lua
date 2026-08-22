@@ -41,6 +41,10 @@ function Compatibility.New(options)
     local candidateCache
     local C = {}
 
+    local function TypedId(id)
+        return type(id) .. ":" .. tostring(id)
+    end
+
     local function HasCompleteOrdinary(build)
         if type(build) ~= "table" then return false end
         if build.ordinaryComplete ~= nil then
@@ -75,13 +79,13 @@ function Compatibility.New(options)
             local complete = HasCompleteOrdinary(build) and "F" or "S"
             local fingerprint = tostring(build.fingerprintHash
                 or build.fingerprint or "0")
-            grouped[bucket][#grouped[bucket] + 1] = id .. ":"
+            grouped[bucket][#grouped[bucket] + 1] = TypedId(id) .. ":"
                 .. tostring(build.lastModified or build.postedAt or 0)
                 .. ":" .. complete .. ":" .. fingerprint
         end
         for id, tombstone in pairs(tombstoneSource or getTombstones() or {}) do
             local bucket = C.BuildBucket(id)
-            grouped[bucket][#grouped[bucket] + 1] = "!" .. id .. ":"
+            grouped[bucket][#grouped[bucket] + 1] = "!" .. TypedId(id) .. ":"
                 .. tostring(C.TombStamp(tombstone)) .. ":"
                 .. C.TombAuthor(tombstone)
         end
@@ -304,7 +308,7 @@ function Compatibility.New(options)
             snapshot.cursor = id
             if build then
                 local complete = HasCompleteOrdinary(build) and "F" or "S"
-                local token = table.concat({"B", tostring(id),
+                local token = table.concat({"B", TypedId(id),
                     tostring(build.lastModified or build.postedAt or 0),
                     complete, tostring(build.fingerprintHash
                         or build.fingerprint or "0")}, ":")
@@ -336,7 +340,7 @@ function Compatibility.New(options)
             }
             snapshot.byBucket[bucket][#snapshot.byBucket[bucket] + 1] = {
                 kind="tomb", id=id, tomb=copy,
-                token=table.concat({"T", tostring(id),
+                token=table.concat({"T", TypedId(id),
                     tostring(C.TombStamp(copy)), C.TombAuthor(copy)}, ":"),
             }
         end

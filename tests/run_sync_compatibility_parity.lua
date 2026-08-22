@@ -123,7 +123,8 @@ local function RefLibraryHash(builds, tombstoneSource)
     for id, build in pairs(builds or {}) do
         local complete = type(build.echoes) == "table"
             and #build.echoes > 0 and "F" or "S"
-        grouped[RefBucket(id)][#grouped[RefBucket(id)] + 1] = id .. ":"
+        local typedId = type(id) .. ":" .. tostring(id)
+        grouped[RefBucket(id)][#grouped[RefBucket(id)] + 1] = typedId .. ":"
             .. tostring(build.lastModified or build.postedAt or 0) .. ":"
             .. complete .. ":"
             .. tostring(build.fingerprintHash or build.fingerprint or "0")
@@ -133,7 +134,8 @@ local function RefLibraryHash(builds, tombstoneSource)
             and (tonumber(tombstone.stamp) or 0) or (tonumber(tombstone) or 0)
         local author = type(tombstone) == "table"
             and tostring(tombstone.author or "") or ""
-        grouped[RefBucket(id)][#grouped[RefBucket(id)] + 1] = "!" .. id
+        local typedId = type(id) .. ":" .. tostring(id)
+        grouped[RefBucket(id)][#grouped[RefBucket(id)] + 1] = "!" .. typedId
             .. ":" .. tostring(stamp) .. ":" .. author
     end
     local hashes = {}
@@ -159,6 +161,54 @@ local function RefCatalogToken(value)
     end
     return table.concat(out)
 end
+
+-- Canonical material must preserve the same typed identity boundary as the
+-- catalog. Numeric and string IDs can occupy one Lua table simultaneously and
+-- must never collapse into equal build or tombstone bucket hashes.
+local typedBuild = {
+    id=1, lastModified=77, fingerprintHash="abc",
+    echoes={{spellId=200001,stacks=1}},
+}
+local numericBuildHash = C.LibraryHash({[1]=typedBuild}, {})
+typedBuild.id = "1"
+local stringBuildHash = C.LibraryHash({["1"]=typedBuild}, {})
+assert(numericBuildHash ~= stringBuildHash,
+    "EXPECTED RED: numeric and string build IDs share one bucket hash")
+
+local tombstone = {stamp=88,author="Peer"}
+local numericTombHash = C.LibraryHash({}, {[1]=tombstone})
+local stringTombHash = C.LibraryHash({}, {["1"]=tombstone})
+assert(numericTombHash ~= stringTombHash,
+    "EXPECTED RED: numeric and string tombstone IDs share one bucket hash")
+
+local function OldSingleHash(id, material)
+    local hashes = {"0","0","0","0","0","0","0","0"}
+    local hash = 5381
+    for index = 1, #material do
+        hash = ((hash * 33) + material:byte(index)) % 2147483648
+    end
+    hashes[RefBucket(id)] = string.format("%x", hash)
+    return table.concat(hashes, ",")
+end
+local oldBuildHash = OldSingleHash(1, "1:77:F:abc")
+local oldTombHash = OldSingleHash(1, "!1:88:Peer")
+assert(oldBuildHash == OldSingleHash("1", "1:77:F:abc")
+    and oldTombHash == OldSingleHash("1", "!1:88:Peer"),
+    "legacy collision fixture no longer represents the old digest")
+assert(numericBuildHash ~= oldBuildHash and stringBuildHash ~= oldBuildHash
+    and numericTombHash ~= oldTombHash and stringTombHash ~= oldTombHash,
+    "mixed old/new clients can retain a false typed-ID bucket equality")
+
+local bothTypedA = C.LibraryHash({
+    [1]={id=1,lastModified=77,fingerprintHash="abc",echoes={{spellId=1}}},
+    ["1"]={id="1",lastModified=77,fingerprintHash="abc",echoes={{spellId=1}}},
+}, {[1]=tombstone,["1"]={stamp=88,author="Peer"}})
+local bothTypedB = C.LibraryHash({
+    ["1"]={id="1",lastModified=77,fingerprintHash="abc",echoes={{spellId=1}}},
+    [1]={id=1,lastModified=77,fingerprintHash="abc",echoes={{spellId=1}}},
+}, {["1"]={stamp=88,author="Peer"},[1]=tombstone})
+assert(bothTypedA == bothTypedB,
+    "typed bucket material depends on Lua table iteration order")
 
 local expectedDelta = RefLibraryHash(delta, tombstones)
 local expectedLegacy = RefLibraryHash(all, tombstones)
@@ -270,6 +320,37 @@ C.Reset()
 assert(C.BuildCandidateSnapshot(cachedDelta) ~= hashReplacement
     and stats.candidateSnapshots == 6,
     "session reset retained derived candidate state")
+
+-- Resumable reconciliation progress uses the same typed identity boundary, so
+-- one peer can carry both legacy numeric and string IDs without aliasing work.
+local typedCandidate = {
+    lastModified=77,fingerprintHash="abc",echoes={{spellId=200001,stacks=1}},
+}
+delta = {[1]=typedCandidate,["1"]=typedCandidate}
+orderedIds, positions = {1,"1"}, {[1]=1,["1"]=2}
+tombstones = {
+    [1]={stamp=88,author="Local-Realm",ownerKey=currentOwner,ownerVerified=true},
+    ["1"]={stamp=88,author="Local-Realm",ownerKey=currentOwner,ownerVerified=true},
+}
+cachedDelta, buildRevision = "typed-candidate-delta", buildRevision + 1
+local typedSnapshot = C.BuildCandidateSnapshot(cachedDelta)
+local typedSteps = 0
+while not typedSnapshot.complete do
+    local _, typedWhy, typedProgress = C.AdvanceCandidateSnapshot(typedSnapshot)
+    assert(typedWhy == nil and typedProgress == true)
+    typedSteps = typedSteps + 1
+    assert(typedSteps <= 6, "typed candidate snapshot did not terminate")
+end
+local typedTokens, typedRows = {}, 0
+for bucket = 1, 8 do
+    for _, item in ipairs(typedSnapshot.byBucket[bucket]) do
+        assert(not typedTokens[item.token],
+            "numeric/string reconciliation candidates share a progress token")
+        typedTokens[item.token], typedRows = true, typedRows + 1
+    end
+end
+assert(typedRows == 4 and typedSteps == 6,
+    "typed build/tombstone candidates were lost during bounded reconciliation")
 
 -- Fingerprints and compact summaries preserve the established exact fields.
 local summaryBuild = {

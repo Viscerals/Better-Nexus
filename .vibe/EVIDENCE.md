@@ -697,3 +697,9 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Exact product/test head `de04122620aa30b42113fe7fea30255b0fa8047f` uses an explicit authority/output tie allowlist and preserves original source references separately for deterministic retention.
 - Exact-head Full passes all `18` blocking checks with Lua `221/221`, Lua 5.1 parse `294/294`, integration `70/70`, zero failed/unavailable checks, and one explicit nonblocking manual SavedVariables skip that remains unverified.
 - Bounded checkpoint hygiene inspected only the explicit pair tie/projection, preserved source arrays, deterministic retention resolver, and their regressions. No safe behavior-preserving cleanup or actionable debt remained; product/test bytes did not change after Full.
+
+# 2026-08-22 — Checkpoint 50.1 typed build identity implementation
+
+- Expected red: `node tools/run-lua.js tests/run_sync_compatibility_parity.lua` exited 1 at `EXPECTED RED: numeric and string build IDs share one bucket hash` before product changes.
+- Focused green: compatibility parity, hash cache, and baseline delta runners pass with typed build/tombstone separation, deterministic dual-ID ordering, mixed old/new inequality, distinct resumable candidate tokens, and cached/fallback delta/legacy parity.
+- Fast: `tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef 8f5d28008935cef2d973b800167695ab50e0f70b` passed 20/20 blocking checks in 194.852s with zero failed, skipped, or unavailable checks; integration passed 70/70. Native WoW and SavedVariables remain unverified.
