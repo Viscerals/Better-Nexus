@@ -28,7 +28,14 @@ function DiagnosticHistory.SafeText(value, maxBytes)
     local ok, text = pcall(tostring, value)
     if not ok then text = "<unprintable:" .. type(value) .. ">" end
     text = tostring(text or ""):gsub("[%c]", " ")
-    if #text > maxBytes then text = text:sub(1, maxBytes) end
+    if #text > maxBytes then
+        -- Preserve the established raw byte-prefix policy for already-invalid
+        -- input. Valid UTF-8 must never become invalid through truncation.
+        local Identity = Nexus.Identity
+        local prefix = Identity and Identity.TruncateUtf8Bytes
+            and Identity.TruncateUtf8Bytes(text, maxBytes)
+        text = prefix or text:sub(1, maxBytes)
+    end
     return text
 end
 

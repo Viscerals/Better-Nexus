@@ -44,6 +44,44 @@ assert(safe == "<unprintable:table>", "hostile tostring was not isolated")
 local bounded = DiagnosticHistory.SafeText("line\n" .. string.rep("x", 40), 16)
 assert(#bounded == 16 and not bounded:find("[%c]"),
     "diagnostic text was not control-safe and byte-bounded")
+
+local twoByte = string.char(0xC3, 0xA9)
+local threeByte = string.char(0xE2, 0x82, 0xAC)
+local fourByte = string.char(0xF0, 0x9F, 0x98, 0x80)
+local utf8Cases = {
+    {"ASCII below limit", "abc", 4, "abc"},
+    {"ASCII at limit", "abcd", 4, "abcd"},
+    {"ASCII above limit", "abcde", 4, "abcd"},
+    {"two-byte split", "A" .. twoByte, 2, "A"},
+    {"three-byte split", "A" .. threeByte, 3, "A"},
+    {"four-byte split", "A" .. fourByte, 4, "A"},
+    {"complete multibyte boundary", twoByte .. twoByte, 4,
+        twoByte .. twoByte},
+}
+for _, case in ipairs(utf8Cases) do
+    local actual = DiagnosticHistory.SafeText(case[2], case[3])
+    assert(actual == case[4], case[1] .. " truncation was wrong")
+    assert(#actual <= case[3], case[1] .. " exceeded its byte limit")
+    assert(Nexus.Identity.ValidUtf8(actual),
+        case[1] .. " produced invalid UTF-8 from valid input")
+end
+local controlUtf8 = DiagnosticHistory.SafeText("A\n" .. twoByte, 4)
+assert(controlUtf8 == "A " .. twoByte,
+    "UTF-8 truncation changed control-character replacement")
+assert(DiagnosticHistory.Format(3, "A%s", threeByte) == "A",
+    "DiagnosticHistory.Format did not inherit UTF-8-safe truncation")
+local invalidUtf8 = "A" .. string.char(0x80) .. "B"
+assert(DiagnosticHistory.SafeText(invalidUtf8, 2) == invalidUtf8:sub(1, 2),
+    "already-invalid diagnostic input changed its raw byte-prefix policy")
+local utf8History = DiagnosticHistory.New({cap=2, trimAt=4, maxTextBytes=4})
+utf8History.Append({text=threeByte .. threeByte})
+local firstUtf8Snapshot = utf8History.Snapshot()
+local secondUtf8Snapshot = utf8History.Snapshot()
+assert(firstUtf8Snapshot[1].text == threeByte
+    and secondUtf8Snapshot[1].text == threeByte
+    and #secondUtf8Snapshot[1].text <= 4
+    and Nexus.Identity.ValidUtf8(secondUtf8Snapshot[1].text),
+    "diagnostic snapshots were not UTF-8-safe, bounded, and deterministic")
 assert(DiagnosticHistory.Format(16, "%d", "not-a-number") == "%d",
     "failed diagnostic formatting was not isolated deterministically")
 history.Clear()

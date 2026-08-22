@@ -85,6 +85,21 @@ function Identity.ValidUtf8(value)
     return Decode(value)
 end
 
+function Identity.TruncateUtf8Bytes(text, maxBytes)
+    if type(text) ~= "string" or not Identity.ValidUtf8(text) then return nil end
+    local limit = tonumber(maxBytes) or #text
+    if #text <= limit then return text end
+    local start = limit
+    while start > 0 and text:byte(start) >= 0x80
+        and text:byte(start) <= 0xBF do start = start - 1 end
+    local width = text:byte(start) and (text:byte(start) < 0x80 and 1
+        or text:byte(start) < 0xE0 and 2
+        or text:byte(start) < 0xF0 and 3 or 4) or 0
+    local last = start + width - 1 <= limit and start + width - 1
+        or start - 1
+    return text:sub(1, math.max(0, last))
+end
+
 function Identity.ValidDisplayText(value, maxBytes, allowEmpty, allowLineBreaks)
     return type(value) == "string"
         and (allowEmpty or value ~= "")
@@ -528,14 +543,5 @@ function Identity.SanitizeText(value, maxBytes)
         :gsub("^%s+", ""):gsub("%s+$", "")
     if not SafeSequence(text, true) then return "invalid" end
     local limit = tonumber(maxBytes) or 96
-    if #text <= limit then return text end
-    local start = limit
-    while start > 0 and text:byte(start) >= 0x80
-        and text:byte(start) <= 0xBF do start = start - 1 end
-    local width = text:byte(start) and (text:byte(start) < 0x80 and 1
-        or text:byte(start) < 0xE0 and 2
-        or text:byte(start) < 0xF0 and 3 or 4) or 0
-    local last = start + width - 1 <= limit and start + width - 1
-        or start - 1
-    return text:sub(1, math.max(0, last))
+    return Identity.TruncateUtf8Bytes(text, limit)
 end
