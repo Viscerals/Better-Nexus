@@ -35,6 +35,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- Cumulative independent review rejected `7cff7e7` and drove five focused WP4 repairs: true total-minus-locked derivation, counted lock-target continuity, exact-spell automation matching, synced-only Policy authority, and exact renderer selection keys. All deterministic red probes are now green; 19 focused runners and exact-base Fast `39/39` pass on the repaired working candidate.
 - #35 checkpoint review found and repaired a same-family automation omission: locked sibling tiers and extra locked copies now extend an automation-only exact target without mutating the server Wishlist. The expected-red failed twice, the repaired Stage 32 fixture passes 65 checks, and exact-base Fast passes `35/35` with zero failed/unavailable/skipped checks.
 - #35 expected-red failed twice at `wrong-quality family ownership marked the exact Rare overlay row complete`; the green public runner proves exact Common/Rare separation, duplicate locked quota grouping, role-specific ownership, locked-only refresh, HUD/automation parity, and exact recovery.
 - `Model.WishlistEntryProgress` is the pure exact `(role, spellId)` progress owner. Overlay and editor consume it directly; MainViewModel consumes it for explicit-role Wishlists while retaining deterministic legacy behavior for role-unrepresented inputs. Exact-base Fast passes `34/34` with zero failed/unavailable/skipped checks.
@@ -55,6 +56,7 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Work log
 
+- Cumulative WP4 independent review found five valid Spec/Standards/adversarial gaps at `7cff7e7`; all were repaired with public counterexamples and focused/Fast revalidation. The repaired candidate is ready for all three independent reviews to repeat before Full.
 - Checkpoint 48.4 hygiene was clean across the exact progress projection, its presentation consumers, and automation-only locked-target merger; no safe quick win or evidence-backed debt justified churn.
 - Checkpoint 48.4 review repaired same-family locked-target augmentation, then passed exact tier/role presentation and automation acceptance without entering Stage 49.
 - Checkpoint 48.4 implements exact role-qualified Wishlist progress across Model, overlay, editor status, MainViewModel, and AutomationRuntime; duplicate exact rows share an order-independent quota and locked revisions participate in overlay invalidation.
@@ -107,8 +109,8 @@ Make overlay, HUD, model, editor, and automation progress consume the same exact
 
 ## Last completed loop
 
-- Checkpoint 48.4 hygiene was clean at repaired product/test head `0d3386d`; no product/test byte changed after focused checks and exact-base Fast `35/35` passed.
+- Cumulative review repair is locally green: 19 focused runners, integration `70/70`, module contracts, exact-base Fast `39/39`, and diff checks pass. The repaired product/test/docs bytes await a local commit and repeated independent reviews.
 
 ## Recommended next action
 
-- Freeze WP4 for the requested final independent Spec/Standards/adversarial reviews and one final Full gate; do not dispatch consolidation or enter Stage 49/WP5.
+- Commit the repaired WP4 candidate locally, repeat independent Spec/Standards/adversarial reviews on that exact head, then run one final Full gate only if all three pass. Do not dispatch consolidation or enter Stage 49/WP5.

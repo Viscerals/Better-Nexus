@@ -108,8 +108,8 @@ Check(beta and beta.lockIntent and beta.replaces == 1010 and beta.stacks == 1,
     "explicit locked target or deterministic replacement pairing changed")
 Check(prepared.fulfilledTargets[1006] == true,
     "fulfilled explicit lock target was lost")
-Check(prepared.pendingLock[W.Family(1007, catalog)]
-    and prepared.pendingLock[W.Family(1007, catalog)].spellId == 1007,
+Check(prepared.pendingLock["committed:1007"]
+    and prepared.pendingLock["committed:1007"].spellId == 1007,
     "committed queued target was not reconstructed")
 Check(prepared.metrics.lockedSkipped == 1 and prepared.metrics.swapPairs == 1,
     "normalization metrics changed")
@@ -158,7 +158,9 @@ local typed = assert(W.NormalizeCandidateEvidence(typedOrdinary, typedLocked, {
 }))
 Check(typed.pending[W.DraftKey(1001,catalog)]
     and typed.pending[W.DraftKey(1001,catalog)].stacks == 2
-    and typed.fulfilledTargets[1001] == true,
+    and type(typed.fulfilledTargets[1001]) == "table"
+    and typed.fulfilledTargets[1001].copies == 2
+    and #typed.fulfilledTargets[1001].rows == 1,
     "typed ordinary/locked overlap lost one role")
 Check(Count(typed.pendingLock) == 1
     and typed.pendingLock["explicit:1002"]
@@ -269,14 +271,19 @@ local commitPending = {
 local commitLock = {b={spellId=3002}}
 local commitFresh = W.PlanLockCommit(commitPending, commitLock,
     {[4003]=true}, {[4001]=true,[4002]=true}, {[4001]=1,[4002]=1,[4003]=1})
-Same(commitFresh, {[3001]=4001,[3002]=true,[4002]=true,[4003]=true}, "lock commit plan")
+Check(type(commitFresh[3001]) == "table" and commitFresh[3001].copies == 1
+        and commitFresh[3001].replaces == 4001
+        and type(commitFresh[3002]) == "table" and commitFresh[3002].copies == 1
+        and commitFresh[4002] == true and commitFresh[4003] == true,
+    "lock commit plan")
 Check(not commitFresh[4001], "replaced fulfilled target survived commit planning")
 
 local reconciledPending, reconciledLock, reconciledFulfilled = W.ReconcileLocked(
     {a={spellId=3001,lockIntent=true,replaces=4001},z={spellId=3999}},
     {b={spellId=3002,replaces=4002}}, {}, {[3001]=1,[3002]=1})
 Check(not reconciledPending.a and reconciledPending.z and not reconciledLock.b
-    and reconciledFulfilled[3001] == 4001 and reconciledFulfilled[3002] == 4002,
+    and reconciledFulfilled[3001].replaces == 4001
+    and reconciledFulfilled[3002].replaces == 4002,
     "fulfilled lock reconciliation changed")
 
 Check(W.TrimName("  Imported Golden  ") == "Imported Golden",

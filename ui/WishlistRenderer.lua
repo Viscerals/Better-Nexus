@@ -13,6 +13,8 @@ function Renderer.New(options)
         "WishlistRenderer requires controller projections and intentions")
     local PendingFamily = assert(options.family,
         "WishlistRenderer requires Wishlist family identity")
+    local DraftKey = assert(options.draftKey,
+        "WishlistRenderer requires exact draft identity")
     local EchoListTotal = assert(options.echoListTotal,
         "WishlistRenderer requires Echo totals")
     local MaskMatch = type(options.maskMatch) == "function"
@@ -1639,13 +1641,10 @@ local function RefreshView(catalogRevision)
             row.icon:SetTexture(SpellIcon(data.spellId))
             local c = QUALITY_COLORS[data.quality] or QUALITY_COLORS[0]
             row.text:SetTextColor(c[1], c[2], c[3])
-            local fam = PendingFamily(data.spellId, catalog)
-            local chosen = pending[fam]
+            local chosen = pending[DraftKey(data.spellId, catalog)]
             local suffix = ""
             if chosen and tonumber(chosen.spellId) == tonumber(data.spellId) then
                 suffix = "  |cff4dff80(selected)|r"
-            elseif chosen then
-                suffix = "  |cffffd200(replaces selected quality)|r"
             end
             row.text:SetText(data.name .. suffix)
             local exactProgress = EntryProgress and EntryProgress({{

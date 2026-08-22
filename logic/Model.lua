@@ -127,7 +127,7 @@ function Model.Delta(plan, owned, spellId, catalog, params)
         qualifiedOwned, targetTotal = Model.TargetProgress(
             plan, catalog, family, owned)
         offeredNeeded = Model.QualityOfferNeeded(
-            plan, catalog, family, tonumber(row.quality) or 0, owned)
+            plan, catalog, family, tonumber(row.quality) or 0, owned, spellId)
     end
 
     -- Duplicate: family full at maxStack, this exact spellId exhausted,
@@ -265,6 +265,22 @@ local function MultiTierTarget(target)
         and #target.qualityTiers > 1
 end
 
+local function ExactTierTarget(target)
+    if type(target) ~= "table" or type(target.qualityTiers) ~= "table"
+        or #target.qualityTiers < 1 then return false end
+    for _, tier in ipairs(target.qualityTiers) do
+        local id = tonumber(type(tier) == "table" and tier.spellId)
+        if not id or id <= 0 or id ~= math.floor(id) then return false end
+    end
+    return true
+end
+
+local function ExactOwned(ownedBySpell, spellId)
+    if type(ownedBySpell) ~= "table" then return 0 end
+    return tonumber(ownedBySpell[spellId])
+        or tonumber(ownedBySpell[tostring(spellId)]) or 0
+end
+
 function Model.EffectiveWishedQuality(plan, catalog, family, ownedFamCount, ownedBySpell)
     local stored = 0
     local targets = type(plan) == "table" and plan.targets or nil
@@ -278,8 +294,11 @@ function Model.EffectiveWishedQuality(plan, catalog, family, ownedFamCount, owne
     if MultiTierTarget(t) then
         for _, tier in ipairs(t.qualityTiers) do
             local need = math.max(0, tonumber(tier.n) or 0)
-            if CountFamilyAtQuality(
-                catalog, family, ownedBySpell, tonumber(tier.q) or 0) < need then
+            local have = ExactTierTarget(t)
+                and ExactOwned(ownedBySpell, tonumber(tier.spellId))
+                or CountFamilyAtQuality(
+                    catalog, family, ownedBySpell, tonumber(tier.q) or 0)
+            if have < need then
                 return tonumber(tier.q) or stored
             end
         end
@@ -312,7 +331,20 @@ function Model.TargetProgress(plan, catalog, family, owned)
     local byFamily = type(owned) == "table"
         and type(owned.byFamily) == "table" and owned.byFamily or {}
 
-    if MultiTierTarget(target) then
+    if ExactTierTarget(target) then
+        local needs = {}
+        for _, tier in ipairs(target.qualityTiers) do
+            local id = tonumber(tier.spellId)
+            needs[id] = (needs[id] or 0)
+                + math.max(0, tonumber(tier.n) or 0)
+        end
+        local have, total = 0, 0
+        for id, need in pairs(needs) do
+            have = have + math.min(ExactOwned(bySpell, id), need)
+            total = total + need
+        end
+        if total > 0 then return have, total end
+    elseif MultiTierTarget(target) then
         local have, total = 0, 0
         for _, tier in ipairs(target.qualityTiers) do
             local need = math.max(0, tonumber(tier.n) or 0)
@@ -436,7 +468,7 @@ function Model.WishlistEntryProgress(entries, owned, lockedOwned)
 end
 
 -- True while this exact offered quality can satisfy an unmet target quota.
-function Model.QualityOfferNeeded(plan, catalog, family, quality, owned)
+function Model.QualityOfferNeeded(plan, catalog, family, quality, owned, spellId)
     local progress, want = Model.TargetProgress(plan, catalog, family, owned)
     if progress >= want then return false end
 
@@ -446,7 +478,17 @@ function Model.QualityOfferNeeded(plan, catalog, family, quality, owned)
         and type(owned.bySpell) == "table" and owned.bySpell or {}
     quality = tonumber(quality) or 0
 
-    if MultiTierTarget(target) then
+    if ExactTierTarget(target) then
+        spellId = tonumber(spellId)
+        if not spellId then return false end
+        local need = 0
+        for _, tier in ipairs(target.qualityTiers) do
+            if tonumber(tier.spellId) == spellId then
+                need = need + math.max(0, tonumber(tier.n) or 0)
+            end
+        end
+        return need > 0 and ExactOwned(bySpell, spellId) < need
+    elseif MultiTierTarget(target) then
         for _, tier in ipairs(target.qualityTiers) do
             if (tonumber(tier.q) or 0) == quality then
                 local need = math.max(0, tonumber(tier.n) or 0)

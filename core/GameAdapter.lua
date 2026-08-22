@@ -1370,12 +1370,12 @@ local function IsPopulatedLoadout(loadoutSlot, slots)
     return row and type(row.echoes) == "table" and #row.echoes > 0 and true or false
 end
 
--- A designed 80-85-copy mirror may carry unusable all-false lock flags even
--- while the active numbered loadout has the exact same total plus complete
--- roles. Bridge only that active association: exact spell/stack identity,
--- verified active booleans, and the independent LockedOwned counts must all
--- agree. The result is a new projection; neither mirror nor SavedVariables is
--- rewritten.
+-- A designed 80-85-copy mirror and the verified active loadout carry the exact
+-- total, but their inline lock flags may be absent or unusably all-false.
+-- Bridge only that active association: prove exact spell/stack identity, then
+-- subtract the independent authoritative LockedOwned counts from the active
+-- totals. The result is a new projection; neither mirror nor SavedVariables
+-- is rewritten.
 local function ExactActiveWishlistRoles(slots, loadoutSlot, candidate)
     loadoutSlot = tonumber(loadoutSlot)
     if type(slots) ~= "table" or not loadoutSlot
@@ -1397,10 +1397,8 @@ local function ExactActiveWishlistRoles(slots, loadoutSlot, candidate)
     end
 
     local catalog = A.Catalog()
-    local ordinary, lockedRows = {}, {}
-    local activeLockedBySpell = {}
-    local totalByExact, lockedByExact, ordinaryByExact = {}, {}, {}
-    local totalCopies, lockedCopies = 0, 0
+    local totalBySpell, qualityBySpell = {}, {}
+    local totalCopies = 0
     for index = 1, #active.echoes do
         local echo = active.echoes[index]
         local id = type(echo) == "table" and PositiveInteger(echo.spellId)
@@ -1411,35 +1409,52 @@ local function ExactActiveWishlistRoles(slots, loadoutSlot, candidate)
             and catalog.rows[id] then
             quality = NonNegativeInteger(catalog.rows[id].quality)
         end
-        if not id or not stacks or quality == nil
-            or type(echo.locked) ~= "boolean" then return nil end
+        if not id or not stacks or quality == nil then return nil end
         totalCopies = totalCopies + stacks
-        local exactKey = tostring(id) .. ":" .. tostring(quality)
-        totalByExact[exactKey] = (totalByExact[exactKey] or 0) + stacks
-        local row = {
-            spellId=id, quality=quality, stacks=stacks,
-            locked=echo.locked, sourceRole=echo.locked and "locked" or "ordinary",
-            evidenceSource="verified-active",
-        }
-        if echo.locked then
-            lockedCopies = lockedCopies + stacks
-            activeLockedBySpell[id] = (activeLockedBySpell[id] or 0) + stacks
-            lockedByExact[exactKey] = (lockedByExact[exactKey] or 0) + stacks
-            lockedRows[#lockedRows + 1] = row
-        else
-            ordinaryByExact[exactKey] = (ordinaryByExact[exactKey] or 0) + stacks
-            ordinary[#ordinary + 1] = row
-        end
-    end
-    for exactKey, total in pairs(totalByExact) do
-        local remaining = total - (lockedByExact[exactKey] or 0)
-        if remaining < 0 or remaining ~= (ordinaryByExact[exactKey] or 0) then
+        if qualityBySpell[id] ~= nil and qualityBySpell[id] ~= quality then
             return nil
         end
+        qualityBySpell[id] = quality
+        totalBySpell[id] = (totalBySpell[id] or 0) + stacks
     end
-    if totalCopies > MAX_COMPLETE_WISHLIST_ECHOES
+    if totalCopies > MAX_COMPLETE_WISHLIST_ECHOES then return nil end
+
+    local owned = A.LockedOwned()
+    if type(owned) ~= "table" or owned.synced ~= true
+        or type(owned.bySpell) ~= "table" then return nil end
+    local represented, lockedCopies = {}, 0
+    for spellId, count in pairs(owned.bySpell) do
+        local id, copies = PositiveInteger(spellId), PositiveInteger(count)
+        if not id or not copies or copies > (totalBySpell[id] or 0) then
+            return nil
+        end
+        represented[id] = (represented[id] or 0) + copies
+        lockedCopies = lockedCopies + copies
+    end
+    if lockedCopies > MAX_WISHLIST_LOCKED_TARGETS
         or totalCopies - lockedCopies > MAX_WISHLIST_ECHOES then return nil end
 
+    local ids, ordinary, lockedRows = {}, {}, {}
+    for id in pairs(totalBySpell) do ids[#ids + 1] = id end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+        local lockedCount = represented[id] or 0
+        local ordinaryCount = totalBySpell[id] - lockedCount
+        if ordinaryCount > 0 then
+            ordinary[#ordinary + 1] = {
+                spellId=id,quality=qualityBySpell[id],stacks=ordinaryCount,
+                locked=false,sourceRole="ordinary",
+                evidenceSource="verified-active-minus-locked",
+            }
+        end
+        if lockedCount > 0 then
+            lockedRows[#lockedRows + 1] = {
+                spellId=id,quality=qualityBySpell[id],stacks=lockedCount,
+                locked=true,sourceRole="locked",
+                evidenceSource="authoritative-locked-owned",
+            }
+        end
+    end
     local evidence = Nexus and Nexus.CandidateEvidence
     if not (evidence
         and type(evidence.NormalizeLockedEchoes) == "function") then return nil end
@@ -1447,25 +1462,9 @@ local function ExactActiveWishlistRoles(slots, loadoutSlot, candidate)
         lockedRows)
     if not normalizedLocked or lockedReason ~= nil then return nil end
 
-    local owned = A.LockedOwned()
-    if type(owned) ~= "table" or owned.synced ~= true
-        or type(owned.bySpell) ~= "table" then return nil end
-    local represented = {}
-    for spellId, count in pairs(owned.bySpell) do
-        local id, copies = PositiveInteger(spellId), PositiveInteger(count)
-        if not id or not copies then return nil end
-        represented[id] = (represented[id] or 0) + copies
-    end
-    for id, copies in pairs(activeLockedBySpell) do
-        if represented[id] ~= copies then return nil end
-        represented[id] = nil
-    end
-    if next(represented) ~= nil then return nil end
-
     local echoes = {}
     for _, row in ipairs(ordinary) do echoes[#echoes + 1] = row end
     for _, row in ipairs(normalizedLocked) do echoes[#echoes + 1] = row end
-    if WishlistIdentity(echoes) ~= activeKey then return nil end
     return {
         slot=candidate.slot, name=candidate.name, count=#echoes,
         echoes=echoes, key=activeKey, active=candidate.active,

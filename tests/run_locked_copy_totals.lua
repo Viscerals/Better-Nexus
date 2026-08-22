@@ -109,6 +109,58 @@ Check(lockedRows == 3 and lockedTotal == 6
 Check(ordinaryTotal == 2,
     "ordinary and locked copy totals were not kept separate")
 
+local partialPending, partialLocks, partialFulfilled = Model.ReconcileLocked(
+    prepared.pending, prepared.pendingLock, prepared.fulfilledTargets,
+    {[720001]=1})
+local partialCopies = 0
+for _, row in pairs(partialLocks) do partialCopies = partialCopies + row.stacks end
+Check(partialPending and partialCopies == 6
+        and partialFulfilled[720001] == nil,
+    "one locked copy fulfilled a six-copy exact requirement")
+local countedCommit = Model.PlanLockCommit(
+    partialPending, partialLocks, partialFulfilled, {}, {[720001]=1})
+Check(type(countedCommit[720001]) == "table"
+        and countedCommit[720001].copies == 6
+        and #countedCommit[720001].rows == 3,
+    "committed lock target collapsed counted duplicate evidence")
+local reopened = Model.ApplyCommittedTargets({
+    pending={ordinary={spellId=720001,quality=3,stacks=1}},
+    pendingLock={},fulfilledTargets={},metrics={},
+}, countedCommit, {catalog={rows={
+    [720001]={name="Locked",quality=3,maxStack=6},
+}},lockedBySpell={[720001]=1}})
+local reopenedCopies, reopenedParts = 0, {}
+for _, row in pairs(reopened.pendingLock) do
+    reopenedCopies = reopenedCopies + row.stacks
+    reopenedParts[row.future and row.future.part] = true
+end
+Check(reopened.pending.ordinary and not reopened.pending.ordinary.lockIntent
+        and reopenedCopies == 6 and reopenedParts.a and reopenedParts.b
+        and reopenedParts.c,
+    "reopened counted target collapsed roles or provenance")
+
+local fulfilledPrepared = assert(Model.NormalizeCandidateEvidence(
+    validated.ordinaryEchoes, validated.lockedEchoes, {
+        catalog={rows={
+            [710001]={name="Ordinary",quality=1,maxStack=6},
+            [720001]={name="Locked",quality=3,maxStack=6},
+        }},
+        lockedBySpell={[720001]=6},
+    }))
+local fulfilledExport = Model.ExportEntries(
+    fulfilledPrepared.pending, fulfilledPrepared.pendingLock,
+    {[720001]=6}, {rows={}}, fulfilledPrepared.fulfilledTargets)
+local fulfilledRows, fulfilledParts = 0, {}
+for _, row in ipairs(fulfilledExport) do
+    if row.locked and row.spellId == 720001 then
+        fulfilledRows = fulfilledRows + 1
+        fulfilledParts[row.future and row.future.part] = true
+    end
+end
+Check(fulfilledRows == 3 and fulfilledParts.a and fulfilledParts.b
+        and fulfilledParts.c,
+    "fulfilled locked evidence lost duplicate provenance/future rows on export")
+
 local wire = Nexus.Codec.EncodeEBH1(exported, "MAGE", "Counted locks")
 local decoded = Nexus.Codec.DecodeEBH1(wire)
 local decodedLockedTotal, decodedLockedRows = 0, 0

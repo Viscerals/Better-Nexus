@@ -37,7 +37,7 @@ local slots={activeSlot=1,bySlot={[1]={slot=1,verified=true,
         {spellId=101,family=10,stacks=1,locked=true},
         {spellId=201,family=20,stacks=1},
     }}}}
-local lockedOwned={byFamily={},bySpell={}}
+local lockedOwned={byFamily={},bySpell={},synced=true}
 local designTargets={[101]=true}
 local unknownTomes={"Tome X"}
 
@@ -70,7 +70,7 @@ assert(progress.dpsEchoes[1].stacks==2
 
 local hidden=view.BuildProgress({
     plan=plan,owned=owned,slots=slots,catalog=catalog,wishlist=wishlist,
-    lockedOwned={byFamily={[10]=3},bySpell={[101]=2,[102]=1}},
+    lockedOwned={byFamily={[10]=3},bySpell={[101]=2,[102]=1},synced=true},
     designTargets=designTargets,unknownTomes={},
 })
 assert(hidden.total==1 and hidden.owned==1 and #hidden.missing==0

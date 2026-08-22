@@ -83,7 +83,8 @@ function Controller.New(options)
     local function LockedBySpell()
         if Adapter and Adapter.LockedOwned then
             local locked = Adapter.LockedOwned()
-            if locked and type(locked.bySpell) == "table" then
+            if locked and locked.synced == true
+                and type(locked.bySpell) == "table" then
                 return locked.bySpell
             end
         end
@@ -125,24 +126,41 @@ function Controller.New(options)
                 tostring(echo.stacks or 1),
             }, ":")
         end
+        local function AddLockedToken(id, copies, replaces)
+            id = tonumber(id)
+            if not id then return end
+            local current = locked[id] or {copies=0}
+            current.copies = current.copies + (tonumber(copies) or 1)
+            if current.replaces == nil and type(replaces) == "number" then
+                current.replaces = replaces
+            end
+            locked[id] = current
+        end
         for _, row in pairs(state.pending) do
             if row and row.lockIntent and tonumber(row.spellId) then
-                locked[tonumber(row.spellId)] = row.replaces or true
+                AddLockedToken(row.spellId, 1, row.replaces)
             end
         end
         for _, row in pairs(state.pendingLock) do
             if row and tonumber(row.spellId) then
-                locked[tonumber(row.spellId)] = row.replaces or true
+                AddLockedToken(row.spellId,
+                    DraftModel.TargetCopies(row), row.replaces)
             end
         end
         for spellId, replacement in pairs(state.fulfilledDraftTargets) do
             local id = tonumber(spellId)
-            if id then locked[id] = replacement or true end
+            if id then
+                locked[id] = {
+                    copies=DraftModel.TargetCopies(replacement),
+                    replaces=DraftModel.TargetReplacement(replacement),
+                }
+            end
         end
         local lockedIds = {}
         for id, replacement in pairs(locked) do
             lockedIds[#lockedIds + 1] = {
-                id=id,replacement=tostring(replacement),
+                id=id,replacement=tostring(replacement.copies) .. ":"
+                    .. tostring(replacement.replaces or ""),
             }
         end
         table.sort(lockedIds,function(left,right) return left.id<right.id end)
@@ -910,7 +928,7 @@ function Controller.New(options)
             end
         end
         return DraftModel.ExportEntries(state.pending, state.pendingLock,
-            lockedBySpell, catalog)
+            lockedBySpell, catalog, state.fulfilledDraftTargets)
     end
 
     function M.ExportName(nameText)
@@ -941,7 +959,8 @@ function Controller.New(options)
         state.currentLockKey = nextKey
         state.fulfilledDraftTargets = {}
         for id, value in pairs(fresh) do
-            if (tonumber(lockedBySpell[id]) or 0) > 0 then
+            if (tonumber(lockedBySpell[id]) or 0)
+                >= DraftModel.TargetCopies(value) then
                 state.fulfilledDraftTargets[id] = value
             end
         end

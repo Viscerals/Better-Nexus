@@ -95,13 +95,23 @@ function ViewModel.New(options)
         local seenToLock = {}
         if type(designTargets) == "table" then
             local rows = catalog and catalog.rows or {}
-            for spellIdKey in pairs(designTargets) do
+            for spellIdKey, target in pairs(designTargets) do
                 local id = tonumber(spellIdKey)
+                local want = type(target) == "table"
+                    and tonumber(target.copies or target.count or target.stacks)
+                    or 1
+                if not want or want < 1 or want >= math.huge
+                    or want ~= math.floor(want) then want = 1 end
+                local have = type(lockedOwned) == "table"
+                    and lockedOwned.synced == true
+                    and (tonumber(lockedBySpell[id]) or 0) or 0
                 if id and not seenToLock[id]
-                    and (tonumber(lockedBySpell[id]) or 0) <= 0 then
+                    and have < want then
                     local row = rows[id]
+                    local remaining = want - have
                     toLock[#toLock + 1] = tostring((row and row.name)
                         or ("spell " .. tostring(id)))
+                        .. (remaining > 1 and (" ×" .. remaining) or "")
                     seenToLock[id] = true
                 end
             end

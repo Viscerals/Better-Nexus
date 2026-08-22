@@ -192,7 +192,7 @@ Cross-module edges that later extraction must retain:
 
 | Surface | Responsibility | Called by | Reads -> writes | Failure | Coverage/gap |
 | --- | --- | --- | --- | --- | --- |
-| `Factory.New` | Construct one stateless Wishlist calculation owner | WishlistEditor/tests | captured plain values -> immutable draft/export/commit plans | defensive empty/no-op | W-C/W-UI |
+| `Factory.New` | Construct one stateless Wishlist calculation owner with counted exact lock-target records | WishlistEditor/tests | captured plain values -> immutable draft/export/commit plans preserving copies, duplicate rows, and provenance | defensive empty/no-op | W-C/W-UI |
 
 ## `Nexus.WishlistInternals.Controller` inventory
 

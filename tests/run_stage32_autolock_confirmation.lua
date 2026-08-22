@@ -48,7 +48,8 @@ local exactKey = assert(Adapter.WishlistKey(exactWishlist.entries),
     "exact automation fixture identity unavailable")
 state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
 state.lockDesignTargetsBySlot[exactKey] = {
-    [910001]=true,[910002]=true,
+    [910001]={copies=3,rows={{spellId=910001,quality=0,stacks=3}}},
+    [910002]=true,
 }
 local augmented = F.runtime.WishlistWithLockTargets(exactWishlist, exactCatalog)
 local augmentedTarget = augmented.byFamily[9100]
@@ -57,8 +58,8 @@ for _, tier in ipairs(augmentedTarget and augmentedTarget.qualityTiers or {}) do
     if tier.spellId == 910001 then commonNeed = tonumber(tier.n) or 0 end
     if tier.spellId == 910002 then rareNeed = tonumber(tier.n) or 0 end
 end
-Check(augmented ~= exactWishlist and augmentedTarget.targetStacks == 4
-        and commonNeed == 3 and rareNeed == 1,
+Check(augmented ~= exactWishlist and augmentedTarget.targetStacks == 6
+        and commonNeed == 5 and rareNeed == 1,
     "same-family locked exact quotas were dropped from automation planning")
 Check(exactWishlist.byFamily[9100].targetStacks == 2
         and #exactWishlist.byFamily[9100].qualityTiers == 1

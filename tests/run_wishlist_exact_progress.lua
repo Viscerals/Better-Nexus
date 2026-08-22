@@ -1,8 +1,11 @@
 -- Stage 48.4: every progress surface must consume exact spell/tier ownership
 -- and keep ordinary and permanently locked quotas independent.
 local H = dofile("tests/harness.lua")
+dofile("data/DefaultProfile.lua")
 dofile("logic/Model.lua")
+dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua")
+dofile("logic/Policy.lua")
 dofile("core/MainViewModel.lua")
 
 local catalog = {
@@ -12,6 +15,7 @@ local catalog = {
         [103]={name="Iron Constitution Epic",quality=3},
     },
     familyOf={[101]=10,[102]=10,[103]=20},
+    familyMembers={[10]={101,102},[20]={103}},
     familyName={[10]="Quick Hands",[20]="Iron Constitution"},
 }
 local entries = {
@@ -146,5 +150,58 @@ assert(refreshed.ordinaryHave == 3 and refreshed.ordinaryWant == 3
     and refreshed.rows[2].complete == true
     and refreshed.lockedHave == 1 and refreshed.lockedWant == 2,
     "exact refresh changed the independent locked quota")
+
+-- Exact automation authority uses spell ID, not a pooled quality bucket.
+-- Same-quality siblings cannot lend one owned copy to two exact quotas, and a
+-- represented one-tier low-quality target is not silently escalated to peak.
+local exactPlan = Nexus.Strategy.Compile(catalog, {
+    entries={
+        {spellId=101,quality=0,stacks=1,family=10},
+        {spellId=102,quality=2,stacks=1,family=10},
+    },
+    byFamily={[10]={targetStacks=2,qualityTiers={
+        {spellId=101,q=0,n=1},{spellId=102,q=2,n=1},
+    }}},
+}, {})
+local exactHave, exactWant = Nexus.Model.TargetProgress(
+    exactPlan, catalog, 10, {bySpell={[101]=2},byFamily={[10]=2}})
+assert(exactHave == 1 and exactWant == 2
+        and Nexus.Model.Delta(exactPlan,
+            {bySpell={[101]=2},byFamily={[10]=2}}, 102, catalog, {}) > 0,
+    "same-family ownership was reused across exact automation tiers")
+local lowOnlyPlan = Nexus.Strategy.Compile(catalog, {
+    entries={{spellId=101,quality=0,stacks=1,family=10}},
+    byFamily={[10]={targetStacks=1,qualityTiers={
+        {spellId=101,q=0,n=1},
+    }}},
+}, {})
+assert(Nexus.Model.TargetProgress(lowOnlyPlan, catalog, 10,
+        {bySpell={[101]=1},byFamily={[10]=1}}) == 1
+    and Nexus.Model.Delta(lowOnlyPlan,
+        {bySpell={},byFamily={}}, 101, catalog, {}) > 0,
+    "one-tier exact automation target fell back to peak-quality semantics")
+
+-- Partial locked evidence is diagnostic only. Policy must not merge it into
+-- authoritative owned state and skip the still-needed target offer.
+local policy = Nexus.Policy.Decide({
+    board={cards={
+        {spellId=101,quality=0,family=10},
+        {spellId=999,quality=0,family=99},
+    },signature="unsynced-lock"},
+    owned={bySpell={},byFamily={},synced=true,distinct=0},
+    locked={bySpell={[101]=1},byFamily={[10]=1},synced=false},
+    charges={banish=0,reroll=0,trustworthy=true},
+    plan=lowOnlyPlan,catalog={
+        rows={
+            [101]={name="Quick Hands Common",quality=0,maxStack=1},
+            [999]={name="Filler",quality=0,maxStack=1},
+        },
+        familyOf={[101]=10,[999]=99},
+        familyMembers={[10]={101},[99]={999}},
+    },
+    level=40,params=Nexus.DefaultProfile.params,
+})
+assert(policy.type == "take" and policy.spellId == 101,
+    "Policy consumed partial unsynced locked evidence as authority")
 
 print("exact Wishlist progress: tiers=independent roles=independent duplicates=allocated -- OK")

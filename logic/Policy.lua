@@ -122,7 +122,7 @@ local function IsWanted(model, card, delta, plan, owned, catalog)
         if type(model.QualityOfferNeeded) == "function" then
             return model.QualityOfferNeeded(
                 plan, catalog, card.family,
-                tonumber(card.quality) or 0, owned)
+                tonumber(card.quality) or 0, owned, card.spellId)
         end
         local bySpell = type(owned) == "table" and owned.bySpell or nil
         local required = type(model.EffectiveWishedQuality) == "function"
@@ -144,7 +144,7 @@ local function IsOneShot(model, card, plan, owned, catalog)
         and (type(model.QualityOfferNeeded) ~= "function"
             or model.QualityOfferNeeded(
                 plan, catalog, card.family,
-                tonumber(card.quality) or 0, owned))
+                tonumber(card.quality) or 0, owned, card.spellId))
 end
 
 local function WantedTier(model, card, plan, owned, catalog)
@@ -382,8 +382,24 @@ function Policy.Decide(state)
     -- every downstream read (Annotation, Model.Delta, the precious-catch and
     -- BANK checks, OwnedFam) sees it consistently.
     local ownedSafe = owned or {}
-    if type(state.locked) == "table"
-        and (type(state.locked.bySpell) == "table" or type(state.locked.byFamily) == "table") then
+    local function TrustedLocked(value)
+        if type(value) ~= "table" or value.synced ~= true
+            or type(value.bySpell) ~= "table"
+            or type(value.byFamily) ~= "table" then return false end
+        for id, count in pairs(value.bySpell) do
+            id, count = tonumber(id), tonumber(count)
+            if not id or id <= 0 or id ~= math.floor(id)
+                or not count or count < 0 or count >= math.huge
+                or count ~= math.floor(count) then return false end
+        end
+        for _, count in pairs(value.byFamily) do
+            count = tonumber(count)
+            if not count or count < 0 or count >= math.huge
+                or count ~= math.floor(count) then return false end
+        end
+        return true
+    end
+    if TrustedLocked(state.locked) then
         local merged = { synced = ownedSafe.synced, bySpell = {}, byFamily = {} }
         for id, n in pairs(ownedSafe.bySpell or {}) do merged.bySpell[id] = n end
         for fam, n in pairs(ownedSafe.byFamily or {}) do merged.byFamily[fam] = n end

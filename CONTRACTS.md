@@ -112,6 +112,10 @@ and reads ordinary progress only from `Owned().bySpell` and locked progress only
 from `LockedOwned().bySpell`. Family totals remain grouping/planning metadata;
 they never complete a sibling tier. Explicit ordinary and locked roles remain
 independent even when both request the same exact spell ID.
+Automation targets that carry exact `qualityTiers[].spellId` use the same
+spell-qualified quotas in `TargetProgress`, `QualityOfferNeeded`, and Policy;
+quality-only targets retain the legacy compatibility path. Policy merges
+permanent ownership only when `LockedOwned()` is fully synced and count-valid.
   Lever conformance comes from `catalog.levers[l].conformant` (adapter computes via the
   name-exact "Tome of <member name>" rule); Strategy only partitions. Deterministic
   ordering (sort lever ids ascending).
@@ -352,7 +356,10 @@ six-copy explicit-evidence envelope, the six-slot replacement budget,
 trusted/untrusted import normalization, quality
 and family collision handling, immutable add/remove/stack/lock transitions,
 canonical upload ordering, export-entry construction, fulfilled-target
-reconciliation, name trimming, and the exact desired lock-target map. It does
+reconciliation, name trimming, and the exact desired lock-target map. Counted
+lock-target records retain `{ copies, replaces, rows }`, including duplicate
+exact rows and unknown/provenance fields, across reconcile, commit, reopen,
+export, progress, and automation planning. It does
 not parse or encode EBH1 bytes: `core/Codec.lua` remains the sole wire owner.
 It does not read production lock intent: `AutomationRuntime.LockDesignTargetsFor`
 remains the established automation reader.
@@ -578,9 +585,10 @@ level, catalog, and settings invalidations. All per design doc §4 (deep copies,
 ledger, gate v2 latch-polling, run-boundary, self-check demotion hook).
 
 An 80-85-copy designed Wishlist with unavailable lock roles gains read authority
-only from its associated active numbered loadout when that row is verified, all
-active lock booleans are represented, the sorted spell/stack identity matches
-exactly, and `LockedOwned()` reports the same exact counts. The adapter derives a
+only from its associated active numbered loadout when that row is verified, its
+sorted spell/stack identity matches exactly, and fully synced `LockedOwned()`
+counts can be subtracted without underflow. Inline active lock booleans are not
+authority. The adapter derives a
 new 79-ordinary/six-locked projection without rewriting either server mirror or
 SavedVariables; mismatch, partial/stale counts, excess/underflow, or non-active
 same-name rows remain evidence-pending.

@@ -65,6 +65,35 @@ local function Family(spellId, catalog)
     return "s:" .. tostring(spellId or 0)
 end
 
+local function TargetCopies(value)
+    if type(value) == "table" then
+        return PositiveInteger(value.copies or value.count or value.stacks) or 1
+    end
+    return 1
+end
+
+local function TargetReplacement(value)
+    if type(value) == "table" then
+        return type(value.replaces) == "number" and value.replaces or nil
+    end
+    return type(value) == "number" and value or nil
+end
+
+local function TargetRecord(rows, replaces)
+    local record = {version=1,copies=0,rows={}}
+    if type(replaces) == "number" then record.replaces = replaces end
+    for _, source in ipairs(type(rows) == "table" and rows or {}) do
+        local row = CopyEntry(source)
+        row.stacks = PositiveInteger(row.stacks or row.count) or 1
+        row.locked = true
+        row.sourceRole = row.sourceRole or "locked"
+        record.copies = record.copies + row.stacks
+        record.rows[#record.rows + 1] = row
+    end
+    if record.copies < 1 then record.copies = 1 end
+    return record
+end
+
 -- Ordinary draft identity is exact whenever the represented spell ID is a
 -- trustworthy positive integer. Family remains presentation/grouping
 -- metadata and is only a deterministic compatibility fallback for malformed
@@ -353,13 +382,15 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
         return nil, "locked Echo evidence is invalid"
     end
 
-    local explicitIds, explicitCounts, identityRows = {}, {}, {}
+    local explicitIds, explicitCounts, identityRows, explicitRows = {}, {}, {}, {}
     local explicitCount = 0
     for _, echo in ipairs(normalizedLocked) do
         local id, stacks = echo.spellId, echo.stacks
         explicitIds[id] = true
         explicitCounts[id] = (explicitCounts[id] or 0) + stacks
         identityRows[id] = (identityRows[id] or 0) + 1
+        explicitRows[id] = explicitRows[id] or {}
+        explicitRows[id][#explicitRows[id] + 1] = CopyEntry(echo)
         explicitCount = explicitCount + stacks
     end
 
@@ -395,7 +426,7 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
         local id = echo.spellId
         identityOrdinals[id] = (identityOrdinals[id] or 0) + 1
         if (PositiveInteger(lockedBySpell[id]) or 0) == explicitCounts[id] then
-            prepared.fulfilledTargets[id] = true
+            prepared.fulfilledTargets[id] = TargetRecord(explicitRows[id])
         else
             local catalogRow = options.catalog and options.catalog.rows
                 and options.catalog.rows[id]
@@ -441,33 +472,50 @@ local function ApplyCommittedTargets(prepared, committedTargets, options)
 
     for spellIdKey, replaces in pairs(committedTargets) do
         local id = tonumber(spellIdKey)
-        if id and (tonumber(lockedBySpell[id]) or 0) > 0 then
+        if id and (tonumber(lockedBySpell[id]) or 0) >= TargetCopies(replaces) then
             fulfilledTargets[id] = replaces
         end
     end
     if next(committedTargets) then
-        for _, row in pairs(pending) do
-            local committed = committedTargets[tonumber(row.spellId)]
-            if not row.lockIntent and committed
-                and LockBudgetUsed(pending, pendingLock, lockedBySpell) < MAX_LOCK_SLOTS then
-                row.lockIntent = true
-                if type(committed) == "number" then row.replaces = committed end
-            end
-        end
         for spellIdKey, replaces in pairs(committedTargets) do
             local id = tonumber(spellIdKey)
-            if id and (tonumber(lockedBySpell[id]) or 0) <= 0 then
+            if id and (tonumber(lockedBySpell[id]) or 0) < TargetCopies(replaces) then
                 local catalogRow = catalog and catalog.rows and catalog.rows[id]
                 local family = Family(id, catalog)
-                local rowKey = DraftKey(id, catalog)
-                if family and not pending[rowKey] and not pendingLock[family] then
-                    pendingLock[family] = {
-                        spellId = id,
-                        family = family,
-                        quality = tonumber(catalogRow and catalogRow.quality) or 0,
-                        name = (catalogRow and catalogRow.name) or ("spell " .. tostring(id)),
-                        replaces = type(replaces) == "number" and replaces or nil,
-                    }
+                local targetRows = type(replaces) == "table" and replaces.rows
+                if type(targetRows) == "table" and #targetRows > 0 then
+                    for index, source in ipairs(targetRows) do
+                        local lockKey = "committed:" .. tostring(id)
+                            .. ":" .. tostring(index)
+                        if family and not pendingLock[lockKey] then
+                            local row = CopyEntry(source)
+                            row.spellId = id
+                            row.family = family
+                            row.quality = tonumber(row.quality)
+                                or tonumber(catalogRow and catalogRow.quality) or 0
+                            row.name = row.name or (catalogRow and catalogRow.name)
+                                or ("spell " .. tostring(id))
+                            row.stacks = PositiveInteger(row.stacks) or 1
+                            row.replaces = row.replaces
+                                or TargetReplacement(replaces)
+                            row.locked = true
+                            row.sourceRole = row.sourceRole or "locked"
+                            pendingLock[lockKey] = row
+                        end
+                    end
+                else
+                    local lockKey = "committed:" .. tostring(id)
+                    if family and not pendingLock[lockKey] then
+                        pendingLock[lockKey] = {
+                            spellId = id,
+                            family = family,
+                            quality = tonumber(catalogRow and catalogRow.quality) or 0,
+                            name = (catalogRow and catalogRow.name)
+                                or ("spell " .. tostring(id)),
+                            stacks = TargetCopies(replaces),
+                            replaces = TargetReplacement(replaces),
+                        }
+                    end
                 end
             end
         end
@@ -636,7 +684,8 @@ local function CanonicalEchoes(pending)
     return echoes
 end
 
-local function ExportEntries(pending, pendingLock, lockedBySpell, catalog)
+local function ExportEntries(pending, pendingLock, lockedBySpell, catalog,
+    fulfilledTargets)
     local entries, seenLocked = {}, {}
     local function LockIdentity(value)
         return tonumber(value) or tostring(value)
@@ -660,6 +709,19 @@ local function ExportEntries(pending, pendingLock, lockedBySpell, catalog)
         exported.sourceRole = row.sourceRole or "locked"
         entries[#entries + 1] = exported
         seenLocked[identity] = true
+    end
+    for id, target in pairs(type(fulfilledTargets) == "table"
+        and fulfilledTargets or {}) do
+        local rows = type(target) == "table" and target.rows or nil
+        for _, source in ipairs(type(rows) == "table" and rows or {}) do
+            local exported = CopyEntry(source)
+            exported.spellId = PositiveInteger(exported.spellId) or tonumber(id)
+            exported.stacks = PositiveInteger(exported.stacks) or 1
+            exported.locked = true
+            exported.sourceRole = exported.sourceRole or "locked"
+            entries[#entries + 1] = exported
+            seenLocked[LockIdentity(exported.spellId)] = true
+        end
     end
     for id, count in pairs(type(lockedBySpell) == "table" and lockedBySpell or {}) do
         local identity = LockIdentity(id)
@@ -687,29 +749,50 @@ local function PlanLockCommit(pending, pendingLock, fulfilledTargets, existingTa
         if type(row.replaces) == "number" then replaced[row.replaces] = true end
     end
     for _, replacementValue in pairs(type(fulfilledTargets) == "table" and fulfilledTargets or {}) do
-        if type(replacementValue) == "number" then replaced[replacementValue] = true end
+        local replacement = TargetReplacement(replacementValue)
+        if replacement then replaced[replacement] = true end
     end
 
     lockedBySpell = type(lockedBySpell) == "table" and lockedBySpell or {}
     for spellIdKey, value in pairs(type(existingTargets) == "table" and existingTargets or {}) do
         local id = tonumber(spellIdKey)
-        if id and (tonumber(lockedBySpell[id]) or 0) > 0 and not replaced[id] then
+        if id and (tonumber(lockedBySpell[id]) or 0) >= TargetCopies(value)
+            and not replaced[id] then
             fresh[id] = value
         end
     end
     for spellIdKey, value in pairs(type(fulfilledTargets) == "table" and fulfilledTargets or {}) do
         local id = tonumber(spellIdKey)
-        if id and (tonumber(lockedBySpell[id]) or 0) > 0 and not replaced[id] then
+        if id and (tonumber(lockedBySpell[id]) or 0) >= TargetCopies(value)
+            and not replaced[id] then
             fresh[id] = value
+        end
+    end
+    local plannedRows = {}
+    local plannedReplacements = {}
+    local function PlanRow(row, stacks)
+        local id = type(row) == "table" and tonumber(row.spellId)
+        if not id then return end
+        local copy = CopyEntry(row)
+        copy.stacks = PositiveInteger(stacks) or 1
+        copy.locked = true
+        copy.sourceRole = copy.sourceRole or "locked"
+        plannedRows[id] = plannedRows[id] or {}
+        plannedRows[id][#plannedRows[id] + 1] = copy
+        if plannedReplacements[id] == nil and type(row.replaces) == "number" then
+            plannedReplacements[id] = row.replaces
         end
     end
     for _, row in pairs(type(pending) == "table" and pending or {}) do
         if row.lockIntent and tonumber(row.spellId) then
-            fresh[tonumber(row.spellId)] = row.replaces or true
+            PlanRow(row, 1)
         end
     end
     for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
-        if tonumber(row.spellId) then fresh[tonumber(row.spellId)] = row.replaces or true end
+        PlanRow(row, row.stacks)
+    end
+    for id, rows in pairs(plannedRows) do
+        fresh[id] = TargetRecord(rows, plannedReplacements[id])
     end
     return fresh
 end
@@ -717,22 +800,48 @@ end
 local function ReconcileLocked(pending, pendingLock, fulfilledTargets, lockedBySpell)
     lockedBySpell = type(lockedBySpell) == "table" and lockedBySpell or {}
     local nextPending, nextLock, nextFulfilled = pending, pendingLock, fulfilledTargets
-    for rowKey, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
-        if (tonumber(lockedBySpell[row.spellId]) or 0) > 0 then
-            if nextLock == pendingLock then nextLock = CopyMap(pendingLock) end
-            if nextFulfilled == fulfilledTargets then nextFulfilled = CopyMap(fulfilledTargets) end
-            nextFulfilled[tonumber(row.spellId)] = row.replaces or true
-            nextLock[rowKey] = nil
+    local groups = {}
+    local function AddTarget(container, key, row, stacks)
+        if type(row) ~= "table" or not tonumber(row.spellId) then return end
+        local id = tonumber(row.spellId)
+        local group = groups[id]
+        if not group then
+            group = {copies=0,rows={},pendingKeys={},lockKeys={}}
+            groups[id] = group
+        end
+        local copy = CopyEntry(row)
+        copy.stacks = PositiveInteger(stacks) or 1
+        group.copies = group.copies + copy.stacks
+        group.rows[#group.rows + 1] = copy
+        if type(row.replaces) == "number" and group.replaces == nil then
+            group.replaces = row.replaces
+        end
+        if container == "pending" then
+            group.pendingKeys[#group.pendingKeys + 1] = key
+        else
+            group.lockKeys[#group.lockKeys + 1] = key
         end
     end
+    for rowKey, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
+        AddTarget("lock", rowKey, row, row.stacks)
+    end
     for rowKey, row in pairs(type(pending) == "table" and pending or {}) do
-        if (tonumber(lockedBySpell[row.spellId]) or 0) > 0 then
-            if nextPending == pending then nextPending = CopyMap(pending) end
-            if row.lockIntent then
-                if nextFulfilled == fulfilledTargets then nextFulfilled = CopyMap(fulfilledTargets) end
-                nextFulfilled[tonumber(row.spellId)] = row.replaces or true
+        if row.lockIntent then AddTarget("pending", rowKey, row, 1) end
+    end
+    for id, group in pairs(groups) do
+        if (tonumber(lockedBySpell[id]) or 0) >= group.copies then
+            if nextFulfilled == fulfilledTargets then
+                nextFulfilled = CopyMap(fulfilledTargets)
             end
-            nextPending[rowKey] = nil
+            nextFulfilled[id] = TargetRecord(group.rows, group.replaces)
+            if #group.pendingKeys > 0 then
+                if nextPending == pending then nextPending = CopyMap(pending) end
+                for _, key in ipairs(group.pendingKeys) do nextPending[key] = nil end
+            end
+            if #group.lockKeys > 0 then
+                if nextLock == pendingLock then nextLock = CopyMap(pendingLock) end
+                for _, key in ipairs(group.lockKeys) do nextLock[key] = nil end
+            end
         end
     end
     return nextPending, nextLock, nextFulfilled
@@ -753,6 +862,8 @@ function Factory.New()
     Model.EchoListTotal = EchoListTotal
     Model.PendingTotal = PendingTotal
     Model.LockBudgetUsed = LockBudgetUsed
+    Model.TargetCopies = TargetCopies
+    Model.TargetReplacement = TargetReplacement
     Model.NormalizeDraft = NormalizeDraft
     Model.NormalizeCandidateEvidence = NormalizeCandidateEvidence
     Model.ApplyCommittedTargets = ApplyCommittedTargets

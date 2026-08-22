@@ -42,9 +42,11 @@ end
 local activeEchoes = {
     {spellId=200110,quality=0,stacks=40,locked=false},
     {spellId=200112,quality=2,stacks=39,locked=false},
-    {spellId=200110,quality=0,stacks=2,locked=true},
-    {spellId=200100,quality=3,stacks=2,locked=true},
-    {spellId=200104,quality=2,stacks=2,locked=true},
+    -- The active total is authoritative for identity/count, but its role
+    -- booleans are the lossy all-false representation that #20 must not trust.
+    {spellId=200110,quality=0,stacks=2,locked=false},
+    {spellId=200100,quality=3,stacks=2,locked=false},
+    {spellId=200104,quality=2,stacks=2,locked=false},
 }
 local designedEchoes = H.CloneValue(activeEchoes)
 for _, row in ipairs(designedEchoes) do row.locked = false end
@@ -132,11 +134,9 @@ H.locked = lockedBefore
 
 local activeLock = H.Perks.serverBuildSlots[1].echoes[3]
 activeLock.locked = nil
-Check(A.Wishlist() == nil,
-    "partial active lock booleans authorized role derivation")
-activeLock.locked = true
 Check(A.Wishlist() ~= nil,
-    "exact bridge did not recover after authoritative evidence returned")
+    "lossy active role flags overrode exact total-minus-locked authority")
+activeLock.locked = false
 
 -- Coherent evidence at either side of the 79 ordinary / six locked envelope
 -- must still fail closed. These probes keep the active total at exactly 85 and

@@ -60,6 +60,7 @@ local function EnsureWishlistRenderer()
     wishlistRenderer = WishlistRendererFactory.New({
         controller = wishlistController,
         family = DraftModel.Family,
+        draftKey = DraftModel.DraftKey,
         echoListTotal = DraftModel.EchoListTotal,
         maskMatch = function(classMask, playerMask)
             return Model and Model.MaskMatch

@@ -165,7 +165,24 @@ Editor.OpenForCandidate({title="Renderer exact tiers",echoes={
     {spellId=762002,quality=2,stacks=1},
     {spellId=762003,quality=3,stacks=1},
 }})
+local exactSearch = assert(H.frames.NexusEditorSearch,
+    "renderer search control unavailable")
+exactSearch:SetText("Renderer Shared Echo")
+exactSearch:GetScript("OnTextChanged")(exactSearch)
 Editor.Refresh()
+local function AvailableRow(spellId)
+    for _, row in ipairs(availableRows) do
+        if row.data and tonumber(row.data.spellId) == spellId then return row end
+    end
+end
+for _, spellId in ipairs({762001,762002,762003}) do
+    local row = assert(AvailableRow(spellId),
+        "renderer lost an available exact-tier row")
+    assert(tostring(row.text.text):find("(selected)", 1, true),
+        "renderer did not project selected state through the exact draft key")
+    assert(not tostring(row.text.text):find("replaces selected quality", 1, true),
+        "renderer retained the obsolete family replacement state")
+end
 local function PendingRow(spellId)
     for _, row in ipairs(pendingRows) do
         if row.data and tonumber(row.data.spellId) == spellId then return row end

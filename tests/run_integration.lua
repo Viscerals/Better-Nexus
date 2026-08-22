@@ -458,6 +458,13 @@ H.PushRunData({ remainingBanishes = 2, totalFreezes = 2, usedFreezes = 0,
 -- selecting Alpha, so Alpha ownership must be granted explicitly for
 -- this scenario's "owned duplicate" premise to hold.
 H.granted = { ["Alpha Strike"] = { { spellId = 200100, stack = 1, maxStack = 1, quality = 3 } } }
+A.RequestGranted()
+H.NotifyEchoDataChanged()
+-- Earlier editor scenarios intentionally commit locked targets. Clear that
+-- unrelated fixture state so this scenario remains a pure search-policy test.
+Nexus.Store.State().lockDesignTargetsBySlot = {}
+Nexus.RequestRecompute()
+H.Advance(0.3)
 local banishesB4 = #H.banishCalls
 local selectsB4 = #H.selectCalls
 H.DeliverBoard({
