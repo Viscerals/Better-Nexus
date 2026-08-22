@@ -973,7 +973,7 @@ function Controller.New(options)
         local lockedBySpell = LockedBySpell()
         local fresh = DraftModel.PlanLockCommit(state.pending, state.pendingLock,
             state.fulfilledDraftTargets,
-            state.candidateContext and {} or existing, lockedBySpell)
+            state.candidateContext and {} or existing, lockedBySpell, Catalog())
         local nextKey = (Adapter and Adapter.WishlistKey
             and Adapter.WishlistKey(M.CanonicalEchoes())) or 0
         local character = Store.State()

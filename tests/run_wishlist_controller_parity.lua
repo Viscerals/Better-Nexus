@@ -32,7 +32,7 @@ local catalog = {rows={
     [1002]={spellId=1002,name="Beta",quality=2,groupId=2,maxStack=1},
     [1003]={spellId=1003,name="Gamma",quality=3,groupId=3,maxStack=2},
     [1999]={spellId=1999,name="Old Lock",quality=2,groupId=9,maxStack=1},
-}}
+},familyOf={[1001]=1,[1002]=2,[1003]=3,[1999]=9}}
 local activeSlot = 1
 local linked = {}
 local uploadMode, uploadCalls = "success", {}
@@ -155,6 +155,27 @@ Check(controller.DebugDraftState().pending == 2
     and character.lockDesignTargetsBySlot["key:2"] == legacyTargets
     and root.lockDesignTargets == nil and character.futureCharacter.keep,
     "candidate load lost draft or legacy lock-target identity")
+character.lockDesignTargetsBySlot["key:2"] = {
+    [1003]=true,[999999]=true,
+}
+controller.LoadPendingEchoes({
+    {spellId=1001,quality=1,stacks=2},
+    {spellId=1002,quality=2,stacks=1},
+})
+local rejectedDraft, rejectedExport = controller.DebugDraftState(),
+    controller.ExportEntries()
+local leakedRejectedTarget = false
+for _, row in ipairs(rejectedExport) do
+    if row.locked and (tonumber(row.spellId) == 1003
+        or tonumber(row.spellId) == 999999) then leakedRejectedTarget = true end
+end
+Check(rejectedDraft.pendingLock == 0 and not leakedRejectedTarget,
+    "controller reopened or exported part of a catalog-invalid target map")
+character.lockDesignTargetsBySlot["key:2"] = legacyTargets
+controller.LoadPendingEchoes({
+    {spellId=1001,quality=1,stacks=2},
+    {spellId=1002,quality=2,stacks=1},
+})
 local beforeInit = controller.PendingRows()
 controller.Initialize(Adapter)
 Check(controller.PendingRows() == beforeInit

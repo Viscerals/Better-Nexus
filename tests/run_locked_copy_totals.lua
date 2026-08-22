@@ -128,7 +128,7 @@ local reopened = Model.ApplyCommittedTargets({
     pendingLock={},fulfilledTargets={},metrics={},
 }, countedCommit, {catalog={rows={
     [720001]={name="Locked",quality=3,maxStack=6},
-}},lockedBySpell={[720001]=1}})
+},familyOf={[720001]=7200}},lockedBySpell={[720001]=1}})
 local reopenedCopies, reopenedParts = 0, {}
 for _, row in pairs(reopened.pendingLock) do
     reopenedCopies = reopenedCopies + row.stacks
@@ -334,6 +334,16 @@ Check(admissionSource[750001].future.keep == true
         and admissionSource[750001].rows[1].futureRow.keep == true
         and targetCatalog.rows[750001].futureCatalog.keep == true,
     "target admission exposed caller-owned record, row, or catalog references")
+local rejectedReopen = Model.ApplyCommittedTargets({
+    pending={},pendingLock={},fulfilledTargets={},metrics={},
+}, {[750001]=true,[759999]=true}, {catalog=targetCatalog,lockedBySpell={}})
+Check(next(rejectedReopen.pendingLock) == nil
+        and next(rejectedReopen.fulfilledTargets) == nil,
+    "catalog-unknown sibling reopened from an atomically invalid target map")
+local rejectedCommit = Model.PlanLockCommit({}, {}, {},
+    {[750001]=true,[759999]=true}, {[750001]=1,[759999]=1}, targetCatalog)
+Check(next(rejectedCommit) == nil,
+    "catalog-unknown sibling survived persisted target commit planning")
 local multiPlan = Model.PlanLockCommit({}, {}, {[750001]=multiReplacement}, {
     [750010]=true,[750011]=true,[750012]=true,
 }, {[750001]=3,[750010]=1,[750011]=1,[750012]=1})

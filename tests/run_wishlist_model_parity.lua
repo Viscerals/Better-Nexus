@@ -47,12 +47,13 @@ local function Same(a, b, path, seen)
     end
 end
 
-local catalog = {rows={}}
+local catalog = {rows={},familyOf={}}
 local function Row(id, name, quality, groupId, maxStack)
     catalog.rows[id] = {
         spellId=id, name=name, quality=quality, groupId=groupId,
         maxStack=maxStack or 1,
     }
+    catalog.familyOf[id] = W.Family(id, catalog)
 end
 Row(1001, "|cff00ff00Alpha|r", 1, 10, 2)
 Row(1002, "Alpha", 3, 10, 3)

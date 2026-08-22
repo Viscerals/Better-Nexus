@@ -639,9 +639,9 @@ end
 local function ApplyCommittedTargets(prepared, committedTargets, options)
     prepared = type(prepared) == "table" and prepared or {}
     committedTargets = type(committedTargets) == "table" and committedTargets or {}
-    local committedEntries = TargetMapEntries(committedTargets) or {}
     options = options or {}
     local catalog = options.catalog
+    local committedEntries = TargetMapEntries(committedTargets, catalog) or {}
     local lockedBySpell = type(options.lockedBySpell) == "table" and options.lockedBySpell or {}
     local pending = CopyMap(prepared.pending)
     local pendingLock = CopyMap(prepared.pendingLock)
@@ -924,7 +924,7 @@ local function ExportEntries(pending, pendingLock, lockedBySpell, catalog,
 end
 
 local function PlanLockCommit(pending, pendingLock, fulfilledTargets, existingTargets,
-    lockedBySpell)
+    lockedBySpell, catalog)
     local fresh, replaced = {}, {}
     for _, row in pairs(type(pending) == "table" and pending or {}) do
         if row.lockIntent and type(row.replaces) == "number" then replaced[row.replaces] = true end
@@ -933,9 +933,9 @@ local function PlanLockCommit(pending, pendingLock, fulfilledTargets, existingTa
         if type(row.replaces) == "number" then replaced[row.replaces] = true end
     end
     local fulfilledEntries = TargetMapEntries(type(fulfilledTargets) == "table"
-        and fulfilledTargets or {}) or {}
+        and fulfilledTargets or {}, catalog) or {}
     local existingEntries = TargetMapEntries(type(existingTargets) == "table"
-        and existingTargets or {}) or {}
+        and existingTargets or {}, catalog) or {}
     for _, target in ipairs(fulfilledEntries) do
         for _, replacement in ipairs(target.replacements) do
             replaced[replacement] = true
@@ -983,7 +983,7 @@ local function PlanLockCommit(pending, pendingLock, fulfilledTargets, existingTa
     for id, rows in pairs(plannedRows) do
         fresh[id] = TargetRecord(rows, plannedReplacements[id])
     end
-    return TargetMapEntries(fresh) and fresh or {}
+    return TargetMapEntries(fresh, catalog) and fresh or {}
 end
 
 local function ReconcileLocked(pending, pendingLock, fulfilledTargets, lockedBySpell)
