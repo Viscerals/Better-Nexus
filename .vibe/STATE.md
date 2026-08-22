@@ -8,7 +8,7 @@
 
 - Stage: 50
 - Checkpoint: 50.1
-- Status: IN_PROGRESS
+- Status: IN_REVIEW
 - Branch: `bugfix/test19-wp6-build-hash-buckets-erase-build-id-type-and-can-r`
 - Starting head: exact accepted WP5 handoff head `8f5d28008935cef2d973b800167695ab50e0f70b`
 - Worktree: `.test19-wp4-worktree`
@@ -185,4 +185,5 @@ Preserve typed build identity in Sync's canonical build and tombstone bucket-has
 
 
 ## Work log (current session)
+- WP6 typed cache matrix and exact-head Fast/Full validation pass; native WoW remains unverified
 - Controller review repair: VALIDATION-EXACT-HEAD-AND-FULL-MISSING; SPEC-TYPED-CACHE-INVALIDATION-COVERAGE
