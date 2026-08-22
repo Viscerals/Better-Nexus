@@ -141,6 +141,7 @@ Project Community DPS only from deterministic real Dummy/LK pairs with verified 
 
 
 ## Work log (current session)
+- Checkpoint 49.2 prohibited-tie/retention-source hygiene CLEAN: bounded repaired surface has no correctness, security, duplication, or safe high-ROI cleanup signal; Full was not repeated.
 - Review PASS at exact head de04122: Full 18 blocking passes; Lua 221/221, parse 294/294, integration 70/70; one nonblocking manual SavedVariables skip remains unverified
 - Repair prohibited DPS tie inputs and preserve retention pair sources
 - Controller review repair: SPEC-PROHIBITED-TIE-INPUTS; SPEC-RETENTION-PAIR-REFERENCE-LOSS; VIBE-CHECKPOINT-CONTRADICTION
