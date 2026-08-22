@@ -138,6 +138,7 @@ Preserve capture-time locked DPS evidence while resolving current/build copy aut
 
 
 ## Work log (current session)
+- Controller receipt reconciliation aligned PLAN checkpoints 49.1 and 49.2 with verified review PASS and hygiene receipts.
 - Review PASS at exact product/test head 47c3a3b: Full 18 blocking passes, Lua 221/221, parse 294/294, integration 70/70; one nonblocking manual skip remains unverified.
 - Full-discovered durable ordinary-evidence fixtures repaired; five focused runners and Fast 43/43 pass.
 - Review FAIL: Full exact head f615b78 exposed five legacy fixtures without verified ordinary Echo evidence.

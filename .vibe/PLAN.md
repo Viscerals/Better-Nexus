@@ -8,7 +8,7 @@
 
 ### 49.1 — Separate historical locked snapshots from copy authority (#23)
 
-- Status: `IN_REVIEW`
+- Status: `DONE`
 - Objective:
   - Preserve capture-time locked evidence while resolving current copy authority only through a stronger exact association.
 - Deliverables:
@@ -32,7 +32,7 @@
 
 depends_on: [49.1]
 
-- Status: `NOT_STARTED`
+- Status: `DONE`
 - Objective:
   - Select the best real Dummy/LK pair sharing verified owner and exact ordinary plus locked/full-combat identity, or expose Average as unavailable.
 - Deliverables:
