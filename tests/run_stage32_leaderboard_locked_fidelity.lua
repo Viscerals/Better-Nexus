@@ -110,7 +110,7 @@ NexusDB = {settings={},chars={},futureRoot={keep=true}}
 Nexus.Store.Init()
 Nexus.LoadoutEvidence.Init(NexusDB)
 
-local catalog = {rows={}}
+local catalog = {rows={},familyOf={}}
 local overflowOrdinary = {}
 for index = 1, 79 do
     local id = 210000 + index
@@ -142,6 +142,10 @@ catalog.rows[lockedIds[2]].name = "Collision"
 catalog.rows[lockedIds[2]].groupId = 9999
 catalog.rows[lockedIds[3]].name = "Collision"
 catalog.rows[lockedIds[3]].groupId = 9999
+local wishlistModel = Nexus.WishlistModel.New()
+for id in pairs(catalog.rows) do
+    catalog.familyOf[id] = wishlistModel.Family(id, catalog)
+end
 
 local validOrdinary = {}
 for index, echo in ipairs(overflowOrdinary) do

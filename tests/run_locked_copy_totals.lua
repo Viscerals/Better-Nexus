@@ -373,6 +373,25 @@ local encodedMalformedOk, encodedMalformed = pcall(Nexus.Codec.EncodeEBH1, {
 }, "MAGE", "Malformed")
 Check(encodedMalformedOk and encodedMalformed == "EBH1::MAGE:Malformed",
     "EBH1 encoder raised or emitted a malformed numeric row")
+for label, row in pairs({
+    oversizedId={spellId=2147483648,quality=2,stacks=1},
+    oversizedQuality={spellId=750001,quality=256,stacks=1},
+    oversizedStacks={spellId=750001,quality=2,stacks=121},
+    hugeFinite={spellId=1e300,quality=2,stacks=1},
+}) do
+    local ok, encoded = pcall(Nexus.Codec.EncodeEBH1, {row}, "MAGE", label)
+    Check(ok and encoded == "EBH1::MAGE:" .. label,
+        "EBH1 encoder exceeded decoder tuple bounds: " .. label)
+end
+local sevenLockedRows = {}
+for index = 1, 7 do
+    sevenLockedRows[index] = {
+        spellId=751000 + index,quality=2,stacks=1,locked=true,
+    }
+end
+Check(Nexus.Codec.EncodeEBH1(sevenLockedRows,"MAGE","Seven")
+        == "EBH1::MAGE:Seven",
+    "EBH1 encoder exceeded the decoder's six-copy locked budget")
 local multiPlan = Model.PlanLockCommit({}, {}, {[750001]=multiReplacement}, {
     [750010]=true,[750011]=true,[750012]=true,
 }, {[750001]=3,[750010]=1,[750011]=1,[750012]=1})
