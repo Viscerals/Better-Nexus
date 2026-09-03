@@ -268,7 +268,7 @@ local function NewState(database, meta)
     local state = {
         database=database,meta=meta,phase="pool-before",cursor=nil,
         overlay=overlay,dps=dps,entries=entries,dpsStack=nil,dpsSeen=nil,
-        evidenceStore=evidenceStore,
+        evidenceStore=evidenceStore,maintenance=nil,
         catalogOwner=type(database.buildCatalog) == "table"
             and database.buildCatalog or nil,
         emptyOverlay=emptyOverlay,emptyDps=emptyDps,emptyEntries=emptyEntries,
@@ -341,10 +341,52 @@ local function RefreshOwners(state)
     local changed = meta ~= state.meta or catalogOwner ~= state.catalogOwner
         or evidenceStore ~= state.evidenceStore or overlay ~= state.overlay
         or dps ~= state.dps or entries ~= state.entries
+    -- Only a replaced catalog backing table is current-source drift for the
+    -- catalog root; evidence or DPS owner changes are not.
+    state.catalogOwnerChanged = overlay ~= state.overlay
+        or catalogOwner ~= state.catalogOwner
     state.meta,state.catalogOwner,state.evidenceStore =
         meta,catalogOwner,evidenceStore
     state.overlay,state.dps,state.entries = overlay,dps,entries
     return "ok",nil,changed
+end
+
+-- Overlay rows are never mutated in place. The catalog maintenance handle
+-- collects every compacted replacement off-state and commits them together;
+-- any restart discards the uncommitted candidate before a new walk begins.
+local function CancelOverlayCandidate(state)
+    local handle = state.maintenance
+    state.maintenance = nil
+    if handle then
+        local catalog = Nexus and Nexus.BuildCatalog
+        if catalog and type(catalog.CancelMaintenance) == "function" then
+            catalog.CancelMaintenance(handle)
+        end
+    end
+end
+
+local function OverlayCatalog(state)
+    local catalog = Nexus and Nexus.BuildCatalog
+    if not (catalog and type(catalog.BoundDatabase) == "function"
+        and catalog.BoundDatabase() == state.database
+        and type(catalog.MaintenanceOverlayNext) == "function") then
+        return nil
+    end
+    return catalog
+end
+
+-- Replacing a bound SavedVariables owner is current-source drift for the
+-- catalog root. The maintenance owner performs one explicit readmission from
+-- cursor zero so its next walk sees the exact new selected rows.
+local function ReadmitCatalog(database)
+    local catalog = Nexus and Nexus.BuildCatalog
+    if not (catalog and type(catalog.BeginRootAdmission) == "function"
+        and type(catalog.PumpRootAdmission) == "function") then return end
+    catalog.BeginRootAdmission(database, Nexus.BundledBuilds)
+    for _ = 1, 10000000 do
+        local result = catalog.PumpRootAdmission()
+        if type(result) ~= "table" or result.state ~= "pending" then return end
+    end
 end
 
 local function RestartForExternalChange(state, ownersChanged)
@@ -356,6 +398,11 @@ local function RestartForExternalChange(state, ownersChanged)
         and dpsRevision == state.dpsRevision then return false end
     state.buildRevision,state.dpsRevision = buildRevision,dpsRevision
     if not ownersChanged and state.phase == "pool-before" then return false end
+    CancelOverlayCandidate(state)
+    if ownersChanged and state.catalogOwnerChanged then
+        state.catalogOwnerChanged = false
+        ReadmitCatalog(state.database)
+    end
     state.phase,state.cursor,state.done =
         ownersChanged and "pool-before" or "overlay",nil,false
     state.dpsStack,state.dpsSeen = nil,nil
@@ -432,17 +479,40 @@ local function Step(state)
         state.stats.phase = state.phase
         return true
     elseif state.phase == "overlay" then
-        local key, row = SafeNext(state.overlay,state.cursor)
-        state.cursor = key
-        if key ~= nil then
-            state.stats.overlayRecordsBefore =
-                state.stats.overlayRecordsBefore + 1
-            local changed = Compaction.CompactBuildRow(
-                row, true, state.stats)
-            state.buildChanged = changed or state.buildChanged
-            state.stats.overlayRecordsAfter =
-                state.stats.overlayRecordsAfter + 1
-            return true
+        local catalog = OverlayCatalog(state)
+        if catalog and not state.maintenance then
+            state.maintenance = catalog.BeginCatalogMaintenance({
+                database=state.database, operation="compaction"})
+        end
+        if not (catalog and state.maintenance) then
+            -- Overlay rows can be compacted only through the catalog
+            -- authority bound to this exact database. An unbound, pending,
+            -- invalidated, or future root blocks the migration instead of
+            -- stamping unvisited rows complete.
+            error("catalog authority unavailable")
+        end
+        if catalog and state.maintenance then
+            local id, row, done = catalog.MaintenanceOverlayNext(
+                state.maintenance, state.cursor)
+            if not done and id ~= nil then
+                state.cursor = id
+                state.stats.overlayRecordsBefore =
+                    state.stats.overlayRecordsBefore + 1
+                local changed = Compaction.CompactBuildRow(
+                    row, true, state.stats)
+                if changed then
+                    local staged = catalog.MaintenanceReplaceRow(
+                        state.maintenance, id, row)
+                    if staged then
+                        state.buildChanged = true
+                    else
+                        Add(state.stats, "retainedUnavailable")
+                    end
+                end
+                state.stats.overlayRecordsAfter =
+                    state.stats.overlayRecordsAfter + 1
+                return true
+            end
         end
         state.phase,state.cursor = "dps",nil
         BeginDps(state)
@@ -499,6 +569,7 @@ end
 
 local function Fail(state, err)
     local message = tostring(err):sub(1,500)
+    CancelOverlayCandidate(state)
     state.meta.lastError = message
     state.meta.inProgress = nil
     active = nil
@@ -507,12 +578,14 @@ local function Fail(state, err)
 end
 
 local function StopWithoutWrite(reason)
+    if active then CancelOverlayCandidate(active) end
     active = nil
     CancelPump()
     return {blocked=true,reason=reason,pending=false},false
 end
 
 local function CompleteWithoutWrite(meta)
+    if active then CancelOverlayCandidate(active) end
     active = nil
     CancelPump()
     return DeepCopy(meta.last or {migrationVersion=MIGRATION_VERSION}),false
@@ -614,6 +687,22 @@ function Compaction.Pump()
         if RestartForExternalChange(state,ownersChanged) then
             return DeepCopy(state.stats),false
         end
+        -- Publish every compacted overlay replacement as one catalog
+        -- transaction before the migration stamp; a drifted candidate is
+        -- discarded and the bounded walk restarts from cursor zero.
+        local handle = state.maintenance
+        state.maintenance = nil
+        if handle then
+            local catalog = Nexus and Nexus.BuildCatalog
+            local committed, commitWhy = catalog.CommitMaintenance(handle)
+            if not committed then
+                if commitWhy == "SOURCE_DRIFT" or commitWhy == "CANDIDATE_FAILED" then
+                    RestartForExternalChange(state,true)
+                    return DeepCopy(state.stats),false
+                end
+                return Fail(state,commitWhy)
+            end
+        end
         local finishOk, result, changed = pcall(Finish,state)
         if not finishOk then return Fail(state,result) end
         return result,changed
@@ -647,6 +736,7 @@ function Compaction.Init(database)
         return DeepCopy(meta.last or {migrationVersion=MIGRATION_VERSION}), false
     end
     if active and active.database ~= database then
+        CancelOverlayCandidate(active)
         CancelPump()
         active = nil
     end

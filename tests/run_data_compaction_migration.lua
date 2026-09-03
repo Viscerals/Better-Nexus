@@ -168,9 +168,13 @@ print(string.format(
     tostring(stats.retainedMalformed), tostring(stats.retainedConflicts),
     tostring(stats.retainedNonCanonical),tostring(stats.pumps),
     tostring(stats.maxPumpWork)))
+-- The malformed scale-1000 row is a deny-only INVALIDATED reservation under
+-- the catalog authority contract; compaction never visits or rewrites it.
+assert(Catalog.AuthorityState("scale-1000").state == "INVALIDATED",
+    "malformed overlay row was admitted as a compaction candidate")
 assert(NexusDB.dataCompaction.version == 1
-    and stats.overlayRecordsBefore == 1000
-    and stats.overlayRecordsAfter == 1000
+    and stats.overlayRecordsBefore == 999
+    and stats.overlayRecordsAfter == 999
     and stats.dpsRecordsBefore == 280
     and stats.dpsRecordsAfter == 280
     and stats.recordCountsUnchanged
@@ -203,9 +207,9 @@ assert(firstPersonal.dummy.echoes == nil
 assert(NexusDB.communityBuilds["scale-0998"].echoes
     and NexusDB.communityBuilds["scale-0999"].echoes
     and NexusDB.communityBuilds["scale-1000"].echoes
+    and NexusDB.communityBuilds["scale-1000"].echoes[1].spellId == 0
     and stats.retainedNonCanonical >= 1
-    and stats.retainedConflicts >= 1
-    and stats.retainedMalformed >= 1,
+    and stats.retainedConflicts >= 1,
     "unprovable rows were compacted or not counted")
 
 -- The migration stamp makes repeat Store.Init byte-for-byte stable.
@@ -322,11 +326,13 @@ Evidence.RegisterReferenceProvider("test.interrupt", function()
     error("forced migration interruption")
 end)
 local interruptedResult = Compaction.Init(interruptedDb)
+-- A failed candidate publishes nothing: the raw overlay row keeps its exact
+-- inline evidence and the migration stamp is absent until a later complete
+-- transaction commits.
 assert(interruptedResult.blocked
     and not interruptedDb.dataCompaction.version
-    and interruptedDb.communityBuilds.interrupt.echoes == nil
-    and interruptedDb.communityBuilds.interrupt.evidenceKey,
-    "failed migration did not leave a safe resumable partial state")
+    and DeepEqual(interruptedDb.communityBuilds.interrupt.echoes, interruptEchoes),
+    "failed migration mutated raw storage before its transaction committed")
 Evidence.RegisterReferenceProvider("test.interrupt", nil)
 local resumedResult, resumed = Compaction.Init(interruptedDb)
 local resumeGuard = 0

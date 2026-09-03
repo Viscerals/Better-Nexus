@@ -228,7 +228,10 @@ assert(not cold.pending and cold.pendingPhase == nil
     and cold.catalogPuts == 4 and cold.catalogPutCalls == 4
     and cold.catalogPutChanges == 4 and cold.writes == 4
     and cold.compactionCalls == 4
-    and cold.compactionWrites == 0
+    -- Catalog admission stores one canonical evidence record, so each
+    -- saved-import row now round-trips through the shared pool instead of
+    -- being retained as non-canonical inline evidence.
+    and cold.compactionWrites == 4
     and cold.referenceCalls == 0 and cold.referenceStores == 0
     and cold.relatedIndexUpdates == 4
     and cold.cleanupEnumerations == 1

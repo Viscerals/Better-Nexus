@@ -684,23 +684,81 @@ install.
 
 ## core/BuildCatalog.lua — `Nexus.BuildCatalog`
 
-`BuildCatalog.Init(db, bundled)`, `Get(id)`, `All()`, `Summaries()`,
-`DeltaSummaries()`, `IsAuthor(name)`, `ForEach(visitor)`, `Count()`,
-`Put(build)`, `RemoveOverlay(id)`, `SetTombstone(id, tombstone)`,
-`ClearTombstone(id)`, `OverlaySnapshot()`, `DeltaSnapshot()`, and
+The catalog is the single admission authority for community build rows. Nothing
+outside this module publishes catalog state, and every read is served from one
+published root generation.
+
+Legacy facade: `Init(db, bundled)`, `Get(id)`, `GetSummary(id)`, `All()`,
+`Summaries()`, `DeltaSummaries()`, `IsAuthor(name)`, `ForEach(visitor)`,
+`Count()`, `Put(build)`, `RemoveOverlay(id)`, `SetTombstone(id, tombstone,
+options)`, `ClearTombstone(id)`, `OverlaySnapshot()`, `DeltaSnapshot()`, and
 `TombstoneSnapshot()`. Returned records/tables are defensive copies; summary
-surfaces deliberately omit Echo arrays. Rebinding the same database and immutable
-bundle is an idempotent allocation-bounded fast path. Read precedence is
-authorized tombstone, then a personal or at-least-as-new overlay row, then the
-bundled row. `DeltaSnapshot()` contains only overlay rows that win that selection;
-stale hidden rows and bundled-only rows are excluded. During the staged consumer
-cutover, `NexusDB.communityBuilds` is the canonical overlay backing table.
+surfaces deliberately omit Echo arrays.
+
+Admission: `BeginRootAdmission(db, bundled)` captures one generation-bound
+handle and `PumpRootAdmission()` advances it in bounded slices until it reports
+a terminal state; `CancelRootAdmission()` discards an uncommitted candidate
+without publishing. A candidate never becomes public before its final commit, a
+failed candidate changes nothing, and restart resumes from cursor zero.
+`RootState()`, `AuthorityState()`, and `Status()` report the published root, its
+fixed refusal reason when unbound or invalidated, and bounded status accounting.
+`Budget()` and `BudgetCounters()` expose the fixed
+`CATALOG_AUTHORITY_BUDGET_V1` totals and the per-pump frontier slice actually
+consumed. Replacing a bound SavedVariables owner is current-source drift and
+publishes `ROOT_INVALIDATED`; a reload returns `ROOT_UNBOUND` until admission
+reproduces the root.
+
+Bounded reads: `BeginRecordCursor()`, `BeginSummaryCursor()`,
+`BeginDeltaCursor()`, `BeginRelatedCursor(id)`, `BeginSavedMirrorCursor()`, and
+`BeginDiagnosticCursor()` return generation-bound tokens advanced by their
+matching `*Next` call. A token whose root generation has been replaced answers
+`STALE_CURSOR` exactly once and `INVALID_CURSOR` afterwards. The one-call
+collection reads (`All`, `Summaries`, `DeltaSummaries`, `TombstoneSnapshot`,
+and the snapshot pair) refuse with `CURSOR_REQUIRED` above the fixed one-call
+limits instead of returning a partial or unbounded copy.
+
+Identity and evidence: typed IDs are collision-free (`n:<int>` for numbers,
+`s:<len>:<bytes>` for strings) and protocol-7 refuses numeric, over-width, and
+invalid-UTF-8 identities. Admission stores one canonical evidence record whose
+duplicate role-bearing tuples merge by checked stack addition, so a public copy
+carries the unique canonical tuple count. `Nexus.LoadoutEvidence.SemanticLimits`
+owns the issue #22 envelope (79 ordinary, 6 locked, 85 total copies), which is a
+semantic bound separate from the 256-entry parser ceiling; a record over the
+envelope is refused with `SEMANTIC_ENVELOPE`. `FindExactFingerprint`,
+`FindExactFingerprintId`, and `ResolveFingerprintIdentity` read bounded identity
+and fingerprint indexes, never a scan. Unknown fields are preserved at their
+original scope, including tuple-scoped subtrees; an unknown subtree that cannot
+be attributed to one tuple is refused with `AMBIGUOUS_NESTED_UNKNOWN_SCOPE` or
+`UNKNOWN_TUPLE_SCHEMA_MIGRATION_REQUIRED`. A newer `buildCatalog.schemaVersion`
+binds the catalog read-only: metadata, overlay rows, and tombstones are
+preserved without migration, and every mutation API refuses until a supported
+database is rebound.
+
+Mutation and tombstones: `BeginAllocationClaim`/`CancelAllocationClaim`,
+`PutWithClaim`, `PutDeferred`/`PublishDeferred`, and `AllocationOccupancy`
+bound ID allocation against every reserved surface. `SetTombstone` performs one
+atomic row-to-tombstone replacement over an exact admitted row; exact replay is
+a no-op, unequal replay preserves both raw objects, and a delete over a row that
+was never admitted is refused. Reservations are deny-only substates
+(`TOMBSTONE_CURRENT_DENY` in-session, `TOMBSTONE_RELOADED_BLOCK_ALL` after a
+reload, `TOMBSTONE_OPAQUE_BLOCK_ALL` for an unproven remote order). Only a
+current, module-private one-shot `TombstoneReadmissionClaimV1` from
+`BeginTombstoneReadmissionClaim` can replace one; remote input, recovery,
+migration, and replay cannot.
+
+Maintenance: retention and compaction run inside one transaction bound to the
+exact database. `BeginCatalogMaintenance(db)` returns a handle refused with
+`DETACHED_DATABASE` when the binding does not match;
+`MaintenanceOverlayNext`, `MaintenanceReplaceRow`, `MaintenanceEvictOverlay`,
+`MaintenanceRetireTombstone`, and `MaintenanceExpireBarrier` collect bounded
+work off-state, and only `CommitMaintenance` publishes one replacement root.
+`CancelMaintenance` discards the candidate and leaves the prior root intact.
 Overlay writes establish `evidenceKey`; after compaction is enabled, only an
-exact deep round trip removes the inline duplicate. Merged and snapshot reads
-hydrate a missing inline array from `LoadoutEvidence` without mutating
-SavedVariables. A newer `buildCatalog.schemaVersion` binds the catalog read-only:
-metadata, overlay rows, and tombstones are preserved without migration, and all
-catalog mutation APIs reject writes until a supported database is rebound.
+exact deep round trip removes the inline duplicate. During the staged consumer
+cutover, `NexusDB.communityBuilds` is the canonical overlay backing table. Read
+precedence is authorized tombstone, then a personal or at-least-as-new overlay
+row, then the bundled row. `DeltaSnapshot()` contains only overlay rows that win
+that selection; stale hidden rows and bundled-only rows are excluded.
 
 ## core/SyncProtocol.lua — pure wire and compact-payload boundary
 

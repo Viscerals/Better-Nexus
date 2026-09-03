@@ -137,7 +137,10 @@ overlay["retained-marker-build"] = {
     loadoutAvailable=true,
 }
 
-for i = 1, 2100 do
+-- Persisted tombstones are reloaded/opaque block-all reservations under the
+-- catalog authority contract: they never retire by age and the complete
+-- selected root must stay within the 2,048-slot ceiling.
+for i = 1, 100 do
     NexusDB.syncTombstones[string.format("old-delete-%04d", i)] = {
         stamp=now - 200 * 24 * 60 * 60 + i, author="OldPeer",
     }
@@ -189,19 +192,20 @@ assert(overlay["remote-char-001"] ~= nil,
     "Average selection did not preserve its lower raw-category contributor")
 assert(summary.orphanAutoBuildsRemoved >= 45,
     "superseded automatic DPS pages were not reclaimed")
+-- An eviction is a deny-only replay barrier for its exact typed ID. No
+-- newer sender-controlled revision clears it; only trusted local expiry in
+-- the central catalog transaction can.
 local evictedMarker = NexusDB.communityRetentionEvictions
     and NexusDB.communityRetentionEvictions["retained-marker-build"]
-local evictedRevision = type(evictedMarker) == "table"
-    and evictedMarker.revision or evictedMarker
-assert(type(evictedMarker) == "table" and evictedRevision
+assert(type(evictedMarker) == "table" and evictedMarker.schemaVersion == 1
     and not Nexus.DataRetention.AllowsRemoteRevision(
-        "MarkerPeer", evictedRevision, NexusDB, "retained-marker-build")
-    and Nexus.DataRetention.AllowsRemoteRevision(
-        "MarkerPeer", evictedRevision + 1, NexusDB, "retained-marker-build")
+        "MarkerPeer", now, NexusDB, "retained-marker-build")
+    and not Nexus.DataRetention.AllowsRemoteRevision(
+        "MarkerPeer", now + 1, NexusDB, "retained-marker-build")
     and Nexus.DataRetention.AllowsRemoteRevision(
         "OtherPeer", 1, NexusDB, "unrelated-older-build")
     and NexusDB.communityBuildRetentionFloor == nil,
-    "exact eviction marker suppressed an unrelated build or lost its own ID")
+    "exact eviction barrier suppressed an unrelated build or lost its own ID")
 
 local characterCount = 0
 for _ in pairs(dummy) do characterCount = characterCount + 1 end
@@ -230,15 +234,17 @@ assert(NexusDB.syncTombstones["release-mask"] ~= nil
     "compaction resurrected a tombstoned bundled build")
 assert(NexusDB.syncTombstones.pending ~= nil,
     "pending local delete was compacted before transmission")
-assert(summary.tombstonesRemoved == 2100
+assert(summary.tombstonesRemoved == 0
     and NexusDB.syncTombstoneFloor == nil
-    and NexusDB.syncTombstones["old-delete-0001"] == nil,
-    "old non-baseline tombstones were not safely forgotten")
+    and NexusDB.syncTombstones["old-delete-0001"] ~= nil
+    and Nexus.BuildCatalog.TombstoneState("old-delete-0001").state
+        == "OPAQUE_BLOCK_ALL",
+    "persisted tombstones regained age-retirement authority")
 assert(Nexus.DataRetention.AllowsRemoteRevision(
         "OldPeer", 1, NexusDB, "unrelated-after-tombstone-compaction")
     and Nexus.DataRetention.AllowsRemoteRevision(
         "OldPeer", 1, NexusDB, "old-delete-0001"),
-    "forgotten tombstone suppressed its own or an unrelated ID")
+    "a tombstone reservation acted as a replay barrier for another ID")
 local retainedDelete = NexusDB.syncTombstones["retained-delete"]
 assert(type(retainedDelete) == "table"
         and 1 <= (tonumber(retainedDelete.stamp) or 0),
@@ -259,27 +265,26 @@ assert(Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerOne,"B")
         and Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerTwo,"B"),
     "peers did not converge after exact suppression was forgotten")
 
-overlay.superseded = {
+assert(Nexus.BuildCatalog.Put({
     id="superseded", title="Old DPS page", author="Remote",
     autoDps=true, lastModified=now,
-}
+}))
 assert(Nexus.DataRetention.ReleaseSupersededAutoBuild("superseded", NexusDB)
     and overlay.superseded == nil,
     "direct superseded-page cleanup did not remove an unreferenced remote page")
 
 local markerAge = 30 * 24 * 60 * 60
-overlay["old-evicted-today"] = {
+assert(Nexus.BuildCatalog.Put({
     id="old-evicted-today",title="Old revision evicted today",author="Remote",
     autoDps=true,lastModified=now - 90 * 24 * 60 * 60,
-}
-local oldRevision = overlay["old-evicted-today"].lastModified
+}))
 assert(Nexus.DataRetention.ReleaseSupersededAutoBuild(
         "old-evicted-today", NexusDB),
     "old remote build was not evicted")
 local freshMarker = NexusDB.communityRetentionEvictions["old-evicted-today"]
-assert(type(freshMarker) == "table" and freshMarker.revision == oldRevision
-        and freshMarker.recordedAt == now,
-    "eviction marker did not separate revision from creation time")
+assert(type(freshMarker) == "table" and freshMarker.schemaVersion == 1
+        and freshMarker.receiptAtServerTime == now,
+    "eviction barrier did not record its trusted local creation time")
 Nexus.DataRetention.Enforce(NexusDB, "same-pass marker aging")
 assert(NexusDB.communityRetentionEvictions["old-evicted-today"] ~= nil,
     "new marker for an old revision expired in its creation pass")

@@ -33,6 +33,30 @@ function Protocol.New(options)
         or (identity and identity.CanonicalOwnerKey)
     local P = {}
 
+    -- Issue #22: the 79/6/85 loadout envelope is owned by LoadoutEvidence and
+    -- reused here. It is separate from, and narrower than, the parser
+    -- ceiling `maxBuildEchoes`; neither limit substitutes for the other.
+    local function SemanticLimits()
+        local evidence = options.semanticLimits
+            or (Nexus and Nexus.LoadoutEvidence
+                and Nexus.LoadoutEvidence.SemanticLimits)
+        if type(evidence) == "function" then
+            local ok, limits = pcall(evidence)
+            if ok and type(limits) == "table" then return limits end
+        elseif type(evidence) == "table" then
+            return evidence
+        end
+        return {ordinary=79, locked=6, total=85}
+    end
+
+    local function WithinSemanticEnvelope(ordinary, locked)
+        local limits = SemanticLimits()
+        return ordinary <= (limits.ordinary or 79)
+            and locked <= (limits.locked or 6)
+            and ordinary + locked <= (limits.total or 85)
+    end
+    P.SemanticLimits = SemanticLimits
+
     local function OwnerIdentityMatches(ownerKey, author)
         if not ownerKeyMatchesAuthor(ownerKey, author) then return false end
         if ownerKey == nil or type(author) ~= "string"
@@ -190,6 +214,14 @@ function Protocol.New(options)
             end
         end
         if #echoes == 0 then return nil end
+        local ordinaryCopies, lockedCopies = 0, 0
+        for _, echo in ipairs(echoes) do
+            if echo.locked then lockedCopies = lockedCopies + echo.stacks
+            else ordinaryCopies = ordinaryCopies + echo.stacks end
+        end
+        if not WithinSemanticEnvelope(ordinaryCopies, lockedCopies) then
+            return nil
+        end
         return {
             id=tostring(data.id),
             title=tostring(title):sub(1, 120),
@@ -334,12 +366,19 @@ function Protocol.New(options)
             or not DenseArray(echoes, maxBuildEchoes) then
             return nil
         end
-        local total = 0
+        local total, ordinaryCopies, lockedCopies = 0, 0, 0
         for index = 1, #echoes do
-            local valid, stacks = NetworkEcho(echoes[index])
+            local valid, stacks, _, _, lockedRole = NetworkEcho(echoes[index])
             if not valid then return nil end
             total = total + stacks
             if total > maxBuildEchoes * 120 then return nil end
+            if lockedRole then lockedCopies = lockedCopies + stacks
+            else ordinaryCopies = ordinaryCopies + stacks end
+        end
+        -- Parser/resource safety never implies a valid loadout. Slot 4 is the
+        -- only role proof; missing role authority is never inferred locked.
+        if not WithinSemanticEnvelope(ordinaryCopies, lockedCopies) then
+            return nil
         end
         return P.CompactDecode(data)
     end
@@ -383,7 +422,7 @@ function Protocol.New(options)
             or not ValidSummaryHash(data.h)
             or (data.lh ~= nil and not ValidSummaryHash(data.lh))
             or (data.n ~= nil and (not P.FiniteNumber(data.n)
-                or data.n < 0 or data.n > maxBuildEchoes * 120
+                or data.n < 0 or data.n > (SemanticLimits().total or 85)
                 or data.n ~= math.floor(data.n)))
             or (data.x ~= nil and data.x ~= 1) then
             return nil, "schema"

@@ -227,9 +227,24 @@ local function CatalogGet(id)
     return catalog.Get(id)
 end
 
+-- Complete collections are read through the generation-bound record
+-- cursor; the DPS owner never receives a root-owned catalog table.
 local function CatalogAll()
     local catalog = Catalog()
-    return catalog and catalog.All and catalog.All() or {}
+    local out = {}
+    if not (catalog and type(catalog.BeginRecordCursor) == "function") then
+        return out
+    end
+    local token = catalog.BeginRecordCursor()
+    if not token then return out end
+    for _ = 1, 4096 do
+        local page, err = catalog.RecordCursorNext(token)
+        if err or type(page) ~= "table" or page.done then break end
+        if page.id ~= nil and page.record ~= nil then
+            out[page.id] = page.record
+        end
+    end
+    return out
 end
 
 local function CatalogPut(build)

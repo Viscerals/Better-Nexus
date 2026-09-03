@@ -18,6 +18,9 @@ NexusDB.communityBuilds.mine = {
  ownerKey="owner@ebonhold",realm="ebonhold",ownerVerified=true,
  echoes={{spellId=200050,stacks=1}}, class="MAGE"
 }
+-- A raw write behind the published root grants no authority: rebind once
+-- so the fixture rows are admitted through the catalog owner.
+H.RebindCatalog()
 Nexus.DpsCapture = {
  GetLeaderboard=function(id, category)
    if id == "mine" and category == "dummy" then return {{dps=24000000,player="Owner"}} end

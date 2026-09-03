@@ -550,12 +550,20 @@ do
     Nexus.LoadoutEvidence.RegisterReferenceProvider(
         "stage36.raw-provider",nil)
     local providerRaw = providerDb.communityBuilds["provider-row"]
-    local providerHydrated = Catalog.Get("provider-row")
+    local providerRaw = providerDb.communityBuilds["provider-row"]
+    -- A provider wrote this row behind the published root, so it was never
+    -- admitted: compaction preserves it exactly and stamps nothing. Only an
+    -- explicit readmission makes it a compaction candidate.
     Desired(inserted and providerDb.dataCompaction.version == 1
-            and providerRaw and providerRaw.echoes == nil
-            and providerRaw.evidenceKey
-            and providerHydrated and providerHydrated.echoes[1].spellId == 955001,
+            and providerRaw and type(providerRaw.echoes) == "table"
+            and providerRaw.evidenceKey == nil
+            and Catalog.Get("provider-row") == nil,
         "post-provider verification stamped an unvisited owner row complete")
+    H.RebindCatalog(providerDb)
+    local providerHydrated = Catalog.Get("provider-row")
+    Desired(providerHydrated
+            and providerHydrated.echoes[1].spellId == 955001,
+        "explicit readmission did not admit the provider row")
 end
 
 -- Provider membership is itself versioned. A callback that replaces its own

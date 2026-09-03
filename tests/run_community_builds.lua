@@ -49,6 +49,7 @@ print("PostCurrentWishlist correctly snapshots the active wishlist -- OK")
 -- Incoming wire records admit literal pipes even though locally authored titles
 -- remain plain. Model that remote/storage boundary before the lock-in popup.
 stored.title = rawBuildTitle
+assert(Nexus.BuildCatalog.Put(stored), "raw title update was not readmitted")
 
 -- 3. Show the window, select the build, verify detail rendering
 CB.Show()

@@ -131,12 +131,16 @@ Sync.HandleIncoming("WLRD|Mallory|unknown|100|Mallory", "Mallory")
 assert(NexusDB.syncTombstones.unknown == nil,
     "unknown tombstone gained persistent authority")
 Sync.HandleIncoming("WLRD|Alice|alice-build|101|Alice", "Alice-Ebonhold")
-assert(NexusDB.communityBuilds[alice.id] == nil,
+-- The owner delete publishes a deny-only reservation and preserves the raw row.
+assert(Nexus.BuildCatalog.Get(alice.id) == nil
+    and NexusDB.communityBuilds[alice.id] ~= nil,
     "actual owner could not delete the build")
 
 -- Sender spoofing is rejected before any protocol handler sees the packet.
 Sync.HandleIncoming(BuildPacket("Alice", alice, 110), "Mallory")
-assert(NexusDB.communityBuilds[alice.id] == nil,
+-- The reserved slot still serves nothing and its raw evidence is unchanged.
+assert(Nexus.BuildCatalog.Get(alice.id) == nil
+    and NexusDB.communityBuilds[alice.id].title == "Alice Build",
     "embedded sender spoof bypassed transport binding")
 
 -- Exact DPS evidence is required and is bound to the transport player.

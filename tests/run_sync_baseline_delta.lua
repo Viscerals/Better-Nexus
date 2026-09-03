@@ -164,7 +164,7 @@ H.sentChatMessages = {}
 local beforeDeleteHash, beforeDeleteDps = Sync.GetCompatibilityHashes()
 assert(Catalog.SetTombstone("baseline-b", {
     stamp=40,author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,
-}))
+}, {source="local"}))
 assert(Sync.HandleIncoming("WLRQ|DeletePeer|" .. beforeDeleteHash .. "|"
     .. beforeDeleteDps .. "|one-delete", "DeletePeer"))
 Pump(100)

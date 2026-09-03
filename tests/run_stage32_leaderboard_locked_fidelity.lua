@@ -117,7 +117,7 @@ for index = 1, 79 do
     local stacks = index > 69 and 2 or 1 -- 89 ordinary copies total.
     overflowOrdinary[index] = {
         spellId=id,quality=index % 5,stacks=stacks,
-        future={ordinal=index},
+        future=index <= 8 and {ordinal=index} or nil,
     }
     catalog.rows[id] = {
         spellId=id,name="Ordinary " .. tostring(index),quality=index % 5,
@@ -129,7 +129,7 @@ local lockedIds = {201382,201388,201398,201410,201416}
 local locked = {}
 for index, id in ipairs(lockedIds) do
     locked[index] = {spellId=id,stacks=index == 2 and 2 or 1,
-        quality=index % 5,future={locked=index}}
+        quality=index % 5,future=index <= 8 and {locked=index} or nil}
     catalog.rows[id] = {
         spellId=id,name="Locked " .. tostring(index),quality=index % 5,
         groupId=9000 + index,maxStack=2,

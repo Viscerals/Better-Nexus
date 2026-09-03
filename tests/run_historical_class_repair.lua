@@ -37,6 +37,8 @@ NexusDB.dpsCapture.personalBest[poisonFp]={dummy={player="Explore",
     ownerKey="explore@ebonhold",ownerVerified=true,realm="ebonhold",
     claimedOwnerKey="other@ebonhold",class="ROGUE",dps=23000000,
     buildId=poisonId,fingerprint=poisonFp}}
+-- Raw seeding grants no authority: readmit the complete root once.
+H.RebindCatalog()
 
 local board=DPS.GetDpsBoard("dummy")
 assert(#board==1 and board[1].class=="MAGE", "local historical row must repair to current character class")

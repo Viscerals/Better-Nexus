@@ -222,11 +222,13 @@ assert(Repair.Classify({catalogAvailable=true,dummy=strictDummy,lk=strictLk}).re
         == "insufficient-evidence",
     "fractional legacy protocol metadata was accepted")
 builds["opaque-future-id"] = "preserve opaque SavedVariables value"
+H.RebindCatalog()
 local opaqueOk = Catalog.PutDeferred({id="opaque-future-id"})
 assert(opaqueOk == false
         and builds["opaque-future-id"] == "preserve opaque SavedVariables value",
     "deferred repair overwrote a non-table occupied SavedVariables identity")
 builds["opaque-future-id"] = nil
+H.RebindCatalog()
 local originals, dpsBefore = {}, Snapshot(NexusDB.dpsCapture)
 for _, id in ipairs(collisionIds) do originals[id] = Snapshot(builds[id]) end
 local identityCollisionBefore = Snapshot(builds[collisionSlotBase])
@@ -394,9 +396,20 @@ assert(Snapshot(NexusDB.dpsCapture) == dpsBefore
 
 -- Recovered unverified content participates in local exact qualification but
 -- is excluded from Sync delta/relay surfaces until independent ownership proof.
-assert(Count(Catalog.DeltaSummaries()) == deltaBefore,
+assert(Count(Catalog.DeltaSummaries() or {}) == deltaBefore,
     "unverified recovered identities entered the Sync delta digest")
+-- Over the one-call limit the delta reader returns only CURSOR_REQUIRED, so
+-- the fallback check walks the generation-bound delta cursor instead.
 local deltaSnapshot = Catalog.DeltaSnapshot()
+if not deltaSnapshot then
+    deltaSnapshot = {}
+    local deltaToken = Catalog.BeginDeltaCursor()
+    for _ = 1, 4096 do
+        local page = deltaToken and Catalog.DeltaCursorNext(deltaToken)
+        if not page or page.done then break end
+        if page.id ~= nil then deltaSnapshot[page.id] = page.record end
+    end
+end
 assert(deltaSnapshot[firstRecoveredId] == nil
         and Catalog.SyncState(firstRecoveredId).delta == nil,
     "unverified recovered identity entered a fallback Sync delta reader")

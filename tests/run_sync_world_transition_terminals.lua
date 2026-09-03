@@ -81,6 +81,9 @@ local function FreshDb()
     NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={}}
     H.sentChatMessages = {}
     H.joinedChannels = {wrbuildssync=7}
+    -- Replacing the SavedVariables owner is current-source drift, so the
+    -- catalog root is readmitted from cursor zero before sync work resumes.
+    H.RebindCatalog(NexusDB)
     Sync.Init(Nexus.Codec, {})
 end
 
@@ -124,6 +127,17 @@ local function AdmitShare(id)
         and status.queueAdmitted == true,
         id .. " did not enter the admitted Share owner")
     return status
+end
+
+-- A delete is one atomic row-to-tombstone transaction over an exact
+-- admitted row, so every delete fixture admits its build before
+-- broadcasting the tombstone.
+local function DeleteBuild(id)
+    local build = ShareBuild(id)
+    local stored, storeWhy = Nexus.BuildCatalog.Put(build)
+    Check(stored == true, id .. " delete fixture was not admitted: "
+        .. tostring(storeWhy))
+    return build
 end
 
 -- First initialization remains destructive and constant-shape, while an
@@ -497,7 +511,7 @@ Check(finalPendingOk == false and finalPendingWhy == "sync queue full"
 -- the tombstone packet admitted, expiry names the exact ID, and no raw packet
 -- is retained in the defensive status.
 FreshDb()
-local deleteBuild = ShareBuild("zone-delete")
+local deleteBuild = DeleteBuild("zone-delete")
 local deleteOk, deleteWhy, deleteStatus = Sync.BroadcastDelete(deleteBuild)
 local deleteGeneration = deleteStatus and deleteStatus.generation
 if deleteStatus then
@@ -531,7 +545,7 @@ Check(DeleteStatus("zone-delete").outcome == "expired",
 -- Delete packets share the same generic terminal boundary for active
 -- duplicates, explicit reset, successful attempts, and local retry exhaustion.
 FreshDb()
-local resetDeleteBuild = ShareBuild("reset-delete")
+local resetDeleteBuild = DeleteBuild("reset-delete")
 local resetDeleteOk, _, resetDelete = Sync.BroadcastDelete(resetDeleteBuild)
 local resetDeleteDepth = Sync.WorkState().sending
 local duplicateDeleteOk, duplicateDeleteWhy, duplicateDelete =
@@ -557,7 +571,7 @@ Check(resetDeleteVisible and resetDeleteVisible.outcome == "reset"
 
 FreshDb()
 local sentDeleteOk, _, sentDelete = Sync.BroadcastDelete(
-    ShareBuild("sent-delete"))
+    DeleteBuild("sent-delete"))
 Pump(1.2, 1)
 local sentDeleteVisible = DeleteStatus("sent-delete")
 Check(sentDeleteOk == true and sentDeleteVisible
@@ -576,7 +590,7 @@ Check(sentDeleteVisible and sentDeleteVisible.outcome == "sent-attempted"
 FreshDb()
 SendChatMessage = function() error("stage36 delete send failure") end
 local failedDeleteOk, _, failedDelete = Sync.BroadcastDelete(
-    ShareBuild("dropped-delete"))
+    DeleteBuild("dropped-delete"))
 Pump(2.2, 1); Pump(2.2, 1); Pump(2.2, 1)
 SendChatMessage = realSendChatMessage
 local failedDeleteVisible = DeleteStatus("dropped-delete")
@@ -600,9 +614,9 @@ H.joinedChannels = {}
 local multiShareA = AdmitShare("multi-share-a")
 local multiShareB = AdmitShare("multi-share-b")
 local multiDeleteAOk, _, multiDeleteA = Sync.BroadcastDelete(
-    ShareBuild("multi-delete-a"))
+    DeleteBuild("multi-delete-a"))
 local multiDeleteBOk, _, multiDeleteB = Sync.BroadcastDelete(
-    ShareBuild("multi-delete-b"))
+    DeleteBuild("multi-delete-b"))
 Check(multiDeleteAOk == true and multiDeleteBOk == true
         and ScalarOnly(multiShareA) and ScalarOnly(multiShareB)
         and ScalarOnly(multiDeleteA) and ScalarOnly(multiDeleteB),

@@ -144,10 +144,10 @@ local function IsLocalDpsRow(row)
         local ok, value = pcall(store.IsAccountOwnerKey, row.ownerKey)
         if ok and value then return true end
     end
-    local overlay = NexusDB and NexusDB.communityBuilds
-    if row.ownerVerified == true and type(overlay) == "table"
+    local catalog = Nexus and Nexus.BuildCatalog
+    if row.ownerVerified == true and catalog and type(catalog.Get) == "function"
         and ValidBuildId(row.buildId)
-        and IsLocalBuild(overlay[row.buildId]) then return true end
+        and IsLocalBuild(catalog.Get(row.buildId)) then return true end
     local owner = CurrentOwnerKey()
     if row.ownerVerified == true and owner ~= nil
         and CharacterKey(row) == owner then return true end
@@ -403,51 +403,63 @@ local function AuthorKey(value)
     return key ~= "" and key or "<unknown>"
 end
 
-local function RemoveOverlayIds(database, ids)
-    if #ids == 0 then return 0 end
+-- Catalog rows are read and mutated only through the catalog authority bound
+-- to this exact database. A detached database receives zero catalog work.
+local function CatalogFor(database)
+    local catalog = Nexus and Nexus.BuildCatalog
+    if not (catalog and type(catalog.BoundDatabase) == "function"
+        and catalog.BoundDatabase() == database
+        and type(catalog.BeginCatalogMaintenance) == "function") then
+        return nil
+    end
+    return catalog
+end
+
+local function OverlaySummaries(catalog)
+    local rows = {}
+    local token = catalog.BeginSummaryCursor()
+    if not token then return rows end
+    for _ = 1, 4096 do
+        local summary, done, err = catalog.SummaryCursorNext(token)
+        if err then break end
+        if type(summary) == "table" and summary.source == "overlay" then
+            rows[summary.id] = summary
+        end
+        if done then break end
+    end
+    return rows
+end
+
+-- One retention transaction evicts every marked overlay row and installs
+-- its replay barrier atomically; nothing is removed unless all of it commits.
+local function EvictOverlayIds(catalog, database, ids)
+    if #ids == 0 then return 0, 0 end
     table.sort(ids, function(left, right)
         return TypedIdentity(left) < TypedIdentity(right)
     end)
-    local catalog = Nexus and Nexus.BuildCatalog
-    if catalog and type(catalog.RemoveOverlayBatch) == "function" then
-        local ok, removed = pcall(catalog.RemoveOverlayBatch, ids)
-        if ok then return tonumber(removed) or 0 end
-    end
-    local overlay = type(database.communityBuilds) == "table"
-        and database.communityBuilds or {}
-    local removed = 0
+    local handle = catalog.BeginCatalogMaintenance({database=database,
+        operation="retention"})
+    if not handle then return 0, 0 end
+    local staged = 0
     for _, id in ipairs(ids) do
-        if overlay[id] ~= nil then overlay[id] = nil; removed = removed + 1 end
+        local ok, why = catalog.MaintenanceEvictOverlay(handle, id)
+        if ok and why ~= "BARRIER_REPLAY_NOOP" then staged = staged + 1 end
     end
-    return removed
-end
-
-local function MarkEvictions(database, overlay, ids)
-    if #ids == 0 then return 0 end
-    database.communityRetentionEvictions =
-        type(database.communityRetentionEvictions) == "table"
-        and database.communityRetentionEvictions or {}
-    local markers, changed = database.communityRetentionEvictions, 0
-    local recordedAt = math.max(1, EpochNow())
-    for _, id in ipairs(ids) do
-        local revision = math.max(1, BuildStamp(overlay[id]))
-        local prior = markers[id]
-        local priorRevision = type(prior) == "table"
-            and tonumber(prior.revision or prior.stamp) or tonumber(prior) or 0
-        if revision > priorRevision or type(prior) ~= "table" then
-            markers[id] = {
-                revision=math.max(revision, priorRevision),
-                recordedAt=recordedAt,
-            }
-            changed = changed + 1
-        end
+    if staged == 0 then
+        catalog.CancelMaintenance(handle)
+        return 0, 0
     end
-    return changed
+    if not catalog.CommitMaintenance(handle) then return 0, 0 end
+    return staged, staged
 end
 
 local function PruneOverlay(database, referenced, limits)
-    local overlay = type(database.communityBuilds) == "table"
-        and database.communityBuilds or {}
+    local catalog = CatalogFor(database)
+    if not catalog then
+        return {before=0, after=0, removed=0, orphaned=0, perClass=0,
+            perAuthor=0, global=0, referencedKept=0, markersAdded=0}
+    end
+    local overlay = OverlaySummaries(catalog)
     local marked, orphaned = {}, 0
     local remoteBefore = 0
     for id, build in pairs(overlay) do
@@ -507,8 +519,7 @@ local function PruneOverlay(database, referenced, limits)
 
     local ids = {}
     for id in pairs(marked) do ids[#ids + 1] = id end
-    local markersAdded = MarkEvictions(database, overlay, ids)
-    local removed = RemoveOverlayIds(database, ids)
+    local removed, markersAdded = EvictOverlayIds(catalog, database, ids)
     return {
         before=remoteBefore,
         after=math.max(0, remoteBefore - removed),
@@ -522,129 +533,55 @@ local function PruneOverlay(database, referenced, limits)
     }
 end
 
-local function PruneEvictionMarkers(database, now)
-    local source = type(database.communityRetentionEvictions) == "table"
-        and database.communityRetentionEvictions or {}
-    local before = Count(source)
+-- Replay barriers and tombstones are catalog ingress authority. Only the
+-- central transaction may expire a current-session barrier or retire a
+-- current-session tombstone by trusted local age; reloaded and opaque
+-- reservations stay block-all, and capacity pressure never prunes a winner.
+local function ExpireReservations(database, stepName, expireName)
+    local catalog = CatalogFor(database)
+    if not catalog then return 0 end
+    local handle = catalog.BeginCatalogMaintenance({database=database,
+        operation="retention"})
+    if not handle then return 0 end
+    local cursor, staged = nil, 0
+    for _ = 1, DEFAULT_LIMITS.evictionMarkers do
+        local id, _, done = catalog[stepName](cursor)
+        if done or id == nil then break end
+        if catalog[expireName](handle, id) then staged = staged + 1 end
+        cursor = id
+    end
+    if staged == 0 then
+        catalog.CancelMaintenance(handle)
+        return 0
+    end
+    if not catalog.CommitMaintenance(handle) then return 0 end
+    return staged
+end
+
+local function PruneEvictionMarkers(database)
+    local before = Count(database.communityRetentionEvictions)
     -- Retention suppression is exact-ID authority. Older schema versions
     -- compacted removed markers into a global timestamp floor, which allowed
     -- build B's history to reject an unrelated older build A. Forget the
     -- obsolete floor; once an exact marker is deliberately removed, that one
     -- build may re-enter and converge normally.
     database.communityBuildRetentionFloor = nil
-    local cutoff = now > DEFAULT_LIMITS.evictionMarkerAge
-        and now - DEFAULT_LIMITS.evictionMarkerAge or 0
-    local rows = {}
-    for id, value in pairs(source) do
-        local revision = type(value) == "table"
-            and tonumber(value.revision or value.stamp) or tonumber(value) or 0
-        local recordedAt = type(value) == "table"
-            and tonumber(value.recordedAt or value.evictedAt) or nil
-        -- Numeric v3 markers mixed the remote revision with marker age. Start
-        -- their age clock now instead of expiring suppression evidence early.
-        if not recordedAt or recordedAt <= 0 then
-            recordedAt = math.max(1, now)
-            source[id] = {revision=revision,recordedAt=recordedAt}
-        end
-        rows[#rows + 1] = {
-            id=id, revision=revision, recordedAt=recordedAt,
-            expired=cutoff > 0 and recordedAt <= cutoff,
-        }
-    end
-    table.sort(rows, function(left, right)
-        if left.recordedAt ~= right.recordedAt then
-            return left.recordedAt < right.recordedAt
-        end
-        return TypedIdentity(left.id) < TypedIdentity(right.id)
-    end)
-    local removed, remaining = 0, before
-    for _, row in ipairs(rows) do
-        if row.expired then
-            source[row.id] = nil
-            removed, remaining = removed + 1, remaining - 1
-        end
-    end
-    if remaining > DEFAULT_LIMITS.evictionMarkers then
-        for _, row in ipairs(rows) do
-            if remaining <= DEFAULT_LIMITS.evictionMarkers then break end
-            if source[row.id] ~= nil then
-                source[row.id] = nil
-                removed, remaining = removed + 1, remaining - 1
-            end
-        end
-    end
+    local removed = ExpireReservations(database, "BarrierNext",
+        "MaintenanceExpireBarrier")
     return {
         before=before, after=math.max(0, before - removed), removed=removed,
         floor=0,
     }
 end
 
-local function TombStamp(value)
-    if type(value) == "table" then return tonumber(value.stamp) or 0 end
-    return tonumber(value) or 0
-end
-
-local function PruneTombstones(database, now)
-    local source = type(database.syncTombstones) == "table"
-        and database.syncTombstones or {}
-    local exactBefore = Count(source)
+local function PruneTombstones(database)
+    local exactBefore = Count(database.syncTombstones)
     -- As with eviction markers, a deleted build's exact tombstone cannot act
-    -- as a namespace-wide watermark. Immutable baseline masks and pending
-    -- deletes remain exact and are never candidates here; forgotten remote
-    -- tombstones permit only their own IDs to re-enter.
+    -- as a namespace-wide watermark. Immutable baseline masks remain exact and
+    -- are never candidates here.
     database.syncTombstoneFloor = nil
-    local cutoff = now > DEFAULT_LIMITS.tombstoneAge
-        and now - DEFAULT_LIMITS.tombstoneAge or 0
-    local candidates = {}
-    local catalog = Nexus and Nexus.BuildCatalog
-    for id, tomb in pairs(source) do
-        local stamp = TombStamp(tomb)
-        local pending = type(tomb) == "table" and tomb.pending == true
-        local bundled = catalog and type(catalog.HasBaseline) == "function"
-            and catalog.HasBaseline(id) or false
-        if stamp > 0 and not pending and not bundled then
-            candidates[#candidates + 1] = {
-                id=id, stamp=stamp,
-                expired=cutoff > 0 and stamp <= cutoff,
-            }
-        end
-    end
-    table.sort(candidates, function(left, right)
-        if left.stamp ~= right.stamp then return left.stamp < right.stamp end
-        return tostring(left.id) < tostring(right.id)
-    end)
-
-    local marked, countAfter = {}, exactBefore
-    for _, entry in ipairs(candidates) do
-        if entry.expired then
-            marked[entry.id] = true
-            countAfter = countAfter - 1
-        end
-    end
-    if countAfter > DEFAULT_LIMITS.exactTombstones then
-        for _, entry in ipairs(candidates) do
-            if countAfter <= DEFAULT_LIMITS.exactTombstones then break end
-            if not marked[entry.id] then
-                marked[entry.id] = true
-                countAfter = countAfter - 1
-            end
-        end
-    end
-
-    local ids = {}
-    for id in pairs(marked) do ids[#ids + 1] = id end
-    table.sort(ids, function(left, right) return tostring(left) < tostring(right) end)
-    local removed = 0
-    if #ids > 0 then
-        if catalog and type(catalog.RemoveTombstonesBatch) == "function" then
-            local ok, value = pcall(catalog.RemoveTombstonesBatch, ids)
-            if ok then removed = tonumber(value) or 0 end
-        else
-            for _, id in ipairs(ids) do
-                if source[id] ~= nil then source[id] = nil; removed = removed + 1 end
-            end
-        end
-    end
+    local removed = ExpireReservations(database, "TombstoneNext",
+        "MaintenanceRetireTombstone")
     return {
         before=exactBefore, after=math.max(0, exactBefore - removed),
         removed=removed, floor=0,
@@ -731,8 +668,8 @@ function Retention.Enforce(database, reason)
         local overlayCount = Count(database.communityBuilds)
         local evictionCount = Count(database.communityRetentionEvictions)
         local tombstoneCount = Count(database.syncTombstones)
-        local evictions = PruneEvictionMarkers(database, now)
-        local tombstones = PruneTombstones(database, now)
+        local evictions = PruneEvictionMarkers(database)
+        local tombstones = PruneTombstones(database)
         local evidenceRemoved, evidenceBlocked = 0, false
         if tombstones.removed > 0 then
             evidenceRemoved, evidenceBlocked = CollectEvidence(database)
@@ -780,8 +717,8 @@ function Retention.Enforce(database, reason)
     local referenced = CollectBuildReferences(dps, selectedBuildIds)
     local overlay = PruneOverlay(database, referenced, limits)
     local now = EpochNow()
-    local evictions = PruneEvictionMarkers(database, now)
-    local tombstones = PruneTombstones(database, now)
+    local evictions = PruneEvictionMarkers(database)
+    local tombstones = PruneTombstones(database)
     local dpsRemoved = characterRemoved + personalRemoved + buildBestRemoved
     local evidenceRemoved, evidenceBlocked = 0, false
     if dpsRemoved > 0 or overlay.removed > 0 or tombstones.removed > 0 then
@@ -848,29 +785,33 @@ function Retention.Request(reason)
     end)
 end
 
-function Retention.AllowsRemoteRevision(_, stamp, database, buildId)
+-- Every non-none replay barrier vetoes every inbound row for its exact typed
+-- ID. No sender-controlled revision, stamp, clock, or arrival order can clear
+-- it; only trusted local expiry inside the central catalog transaction can.
+function Retention.AllowsRemoteRevision(_, _, database, buildId)
     database = type(database) == "table" and database or NexusDB
+    local catalog = CatalogFor(database)
+    if catalog then
+        local barrier = catalog.BarrierState(buildId)
+        return not (type(barrier) == "table" and barrier.blocked == true)
+    end
     local marker = type(database) == "table"
         and type(database.communityRetentionEvictions) == "table"
         and database.communityRetentionEvictions[buildId] or nil
-    local revision = type(marker) == "table"
-        and tonumber(marker.revision or marker.stamp) or tonumber(marker) or 0
-    return (tonumber(stamp) or 0) > (revision or 0)
+    return marker == nil
 end
 
 function Retention.ReleaseSupersededAutoBuild(buildId, database)
     if not ValidBuildId(buildId) then return false end
     database = type(database) == "table" and database or NexusDB
-    if type(database) ~= "table" then return false end
-    local overlay = type(database.communityBuilds) == "table"
-        and database.communityBuilds or {}
-    local build = overlay[buildId]
+    local catalog = type(database) == "table" and CatalogFor(database) or nil
+    if not catalog then return false end
+    local build = catalog.Get(buildId)
     if type(build) ~= "table" or build.autoDps ~= true or IsLocalBuild(build) then
         return false
     end
     if CollectBuildReferences(database.dpsCapture)[buildId] then return false end
-    MarkEvictions(database, overlay, { buildId })
-    local removed = RemoveOverlayIds(database, { buildId })
+    local removed = EvictOverlayIds(catalog, database, { buildId })
     if removed > 0 then CollectEvidence(database); return true end
     return false
 end

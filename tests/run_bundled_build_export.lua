@@ -78,8 +78,16 @@ assert(count == bundle.generation.included
 
 NexusDB = {}
 local summary = Nexus.BuildCatalog.Init(NexusDB, bundle)
+-- Shipped rows above the 79/6/85 envelope are reserved deny-only, so the
+-- available count is the admissible subset of the generated baseline.
+local admissible = 0
+for _, build in pairs(bundle.builds) do
+    if Nexus.LoadoutEvidence.SemanticEnvelope(build.echoes).valid then
+        admissible = admissible + 1
+    end
+end
 assert(summary.bundled == count and summary.overlay == 0
-    and Nexus.BuildCatalog.Count() == count,
+    and Nexus.BuildCatalog.Count() == admissible,
     "clean database did not expose only the generated baseline")
 assert(next(Nexus.BuildCatalog.OverlaySnapshot()) == nil,
     "clean database gained an overlay while loading the baseline")

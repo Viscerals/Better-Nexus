@@ -291,9 +291,21 @@ for _, row in ipairs({
         postedAt=1, lastModified=1,
     },
 }) do
-    assert(Nexus.BuildCatalog.Put(row), "summary authority control was not stored")
-    assert(not Community.IsOwnBuild(row.id),
-        "full catalog row unexpectedly granted summary-control authority")
+    -- A source presenting two aliases for one field with unequal normalized
+    -- values fails admission outright; an admitted row must still grant no
+    -- summary-control authority.
+    local storedOk, storedWhy = Nexus.BuildCatalog.Put(row)
+    if storedOk then
+        assert(not Community.IsOwnBuild(row.id),
+            "full catalog row unexpectedly granted summary-control authority")
+    else
+        assert((storedWhy == "ALIAS_DISAGREEMENT"
+                    or storedWhy == "MALFORMED_ROW")
+                and Nexus.BuildCatalog.Get(row.id) == nil
+                and not Community.IsOwnBuild(row.id),
+            "contradictory alias row was refused without a bounded reason: "
+                .. tostring(storedWhy))
+    end
 end
 AssertNotMineInLibrary("summary-provenance")
 AssertNotMineInLibrary("summary-realm")
@@ -331,10 +343,15 @@ assert(qualifiedRow.ownerVerified == false and qualifiedRow.ownerKey == nil
             and qualifiedBuild.isMine ~= true
             and not Community.IsOwnBuild(qualifiedBuild),
     "qualified-author conflict was stamped as verified Community authority")
+-- Stale identity components, presented coherently: contradictory aliases for
+-- one field are refused at admission, so this fixture states the same value
+-- in both the compact and verbose form.
 qualifiedBuild.o = "twin@realmb"
+qualifiedBuild.ownerKey = "twin@realmb"
 qualifiedBuild.p = "Other"
-qualifiedBuild.r = "RealmB"
 qualifiedBuild.player = "Other"
+qualifiedBuild.r = "RealmB"
+qualifiedBuild.realm = "RealmB"
 assert(Nexus.BuildCatalog.Put(qualifiedBuild),
     "explicit promotion alias control was not persisted")
 
@@ -373,10 +390,17 @@ local reuseId, reuseBuild = Community.EnsureDpsBuildForEchoes(
     })
 assert(reuseId and reuseBuild and reuseBuild.ownerVerified == false,
     "fingerprint promotion control was not retained as ambient evidence")
-reuseBuild.o = "twin@realmb"
+-- Same coherent-alias rule: state each field once in both forms.
+-- Stale presentation metadata only: the owner claim stays coherent so the
+-- later exact evidence can promote this same retained page, and every stale
+-- component must then be replaced rather than merged.
 reuseBuild.p = "Twin"
+reuseBuild.player = "Twin"
 reuseBuild.r = "RealmB"
-reuseBuild.a = "Other-RealmX"
+reuseBuild.realm = "RealmB"
+-- The author alias is left at its stored value: a compact alias that
+-- contradicts its verbose field is refused at admission, and one that
+-- agrees is a no-op, so author text cannot be used to poison this row.
 assert(Nexus.BuildCatalog.Put(reuseBuild),
     "fingerprint promotion alias control was not persisted")
 local reusedId, promotedReuse = Community.EnsureDpsBuildForEchoes(
@@ -627,18 +651,27 @@ for _, build in ipairs(invalidBuilds) do
             and NexusDB.syncTombstones[build.id] == nil,
         "delete egress laundered rejected build authority: " .. build.id)
 
-    assert(Nexus.BuildCatalog.Put(build),
-        "response authority control was not stored: " .. build.id)
-    Nexus.Sync.Init(Nexus.Codec, {})
-    H.sentChatMessages = {}
-    assert(Nexus.Sync.HandleIncoming(
-        "WLLQ|Requester-RealmQ|" .. build.id, "Requester-RealmQ"),
-        "response authority request was rejected: " .. build.id)
-    for _ = 1, 180 do Nexus.Sync.OnUpdate(0.2) end
-    for _, message in ipairs(H.sentChatMessages) do
-        local wire = tostring(message.text or ""):gsub("||", "|")
-        assert(not wire:find(build.id, 1, true),
-            "response egress laundered rejected build authority: " .. build.id)
+    -- A row whose compact and verbose aliases disagree is refused at
+    -- admission, so it never becomes durable state that a response could
+    -- serve. A row that is admitted must still never reach the wire.
+    local storedOk, storedWhy = Nexus.BuildCatalog.Put(build)
+    if not storedOk then
+        assert((storedWhy == "ALIAS_DISAGREEMENT"                    or storedWhy == "MALFORMED_ROW")
+                and Nexus.BuildCatalog.Get(build.id) == nil,
+            "rejected build authority was not refused with a bounded reason: "
+                .. build.id .. "/" .. tostring(storedWhy))
+    else
+        Nexus.Sync.Init(Nexus.Codec, {})
+        H.sentChatMessages = {}
+        assert(Nexus.Sync.HandleIncoming(
+            "WLLQ|Requester-RealmQ|" .. build.id, "Requester-RealmQ"),
+            "response authority request was rejected: " .. build.id)
+        for _ = 1, 180 do Nexus.Sync.OnUpdate(0.2) end
+        for _, message in ipairs(H.sentChatMessages) do
+            local wire = tostring(message.text or ""):gsub("||", "|")
+            assert(not wire:find(build.id, 1, true),
+                "response egress laundered rejected build authority: " .. build.id)
+    end
     end
 end
 

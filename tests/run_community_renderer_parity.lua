@@ -23,7 +23,10 @@ for index = 1, 1000 do
 end
 NexusDB.communityBuilds["renderer-0500"].link =
     "https://example.invalid/|Hitem:1|hspoof|h"
-NexusDB.communityBuilds["renderer-0501"].link = string.rep("x", 2049)
+-- Admitted durable evidence whose bytes are unsafe to display: the record is
+-- represented, but the renderer must refuse to show its link.
+NexusDB.communityBuilds["renderer-0501"].link =
+    "https://example.invalid/" .. string.char(1) .. "control"
 Nexus.Store.Init()
 local eligibility = {}
 Nexus.DpsCapture = {
@@ -51,7 +54,7 @@ Nexus.Sync = {
 dofile("ui/CommunityBuilds.lua")
 local C = Nexus.CommunityBuilds
 C.Init(nil, nil)
-for _, build in pairs(Nexus.BuildCatalog.Summaries()) do
+for _, build in pairs(H.CatalogSummaries()) do
     local index = tonumber(tostring(build.id):match("(%d+)$")) or 0
     eligibility[build.fingerprint] = {
         dummy=index,lk=index+1,best=index+1,average=index+0.5,count=2,

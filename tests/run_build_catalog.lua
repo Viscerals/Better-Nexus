@@ -73,9 +73,15 @@ assert(Nexus.BuildCatalog.RemoveOverlay("delta-unverified")
         and Nexus.BuildCatalog.RemoveOverlay("delta-saved"),
     "authority delta fixtures were not removed cleanly")
 
-assert(Nexus.BuildCatalog.Put({ id="deleted", title="Resurrection attempt",
-    postedAt=50, lastModified=50, echoes={{spellId=3,stacks=2}} }))
-assert(Nexus.BuildCatalog.Get("deleted") == nil,
+-- A tombstone reservation denies every write for its typed ID; nothing can
+-- clear it implicitly and the refused write leaves the root unchanged.
+local resurrectOk, resurrectWhy = Nexus.BuildCatalog.Put({ id="deleted",
+    title="Resurrection attempt", postedAt=50, lastModified=50,
+    echoes={{spellId=3,stacks=2}} })
+assert(resurrectOk == false and resurrectWhy == "TOMBSTONE_RESERVATION",
+    "Put on a tombstoned ID was not refused: " .. tostring(resurrectWhy))
+assert(Nexus.BuildCatalog.Get("deleted") == nil
+    and database.communityBuilds.deleted == nil,
     "Put implicitly cleared an authorized tombstone")
 assert(Nexus.BuildCatalog.Count() == 3,
     "merged catalog count should include two visible baseline rows and personal")
@@ -86,8 +92,9 @@ assert(Nexus.BuildCatalog.Get("newer").title == "Bundled newer",
     "All exposed mutable bundled storage")
 
 local incoming = { id="copy", title="Copied", postedAt=40, lastModified=40,
-    echoes={{spellId=5,stacks=1}} }
-assert(Nexus.BuildCatalog.Put(incoming))
+    author="Boganic", ownerKey="boganic@ebonhold", realm="ebonhold",
+    ownerVerified=true, isMine=true, echoes={{spellId=5,stacks=1}} }
+assert(Nexus.BuildCatalog.Put(incoming, {source="local"}))
 incoming.title = "changed after Put"
 assert(Nexus.BuildCatalog.Get("copy").title == "Copied",
     "Put retained the caller's mutable table")
@@ -102,7 +109,8 @@ assert(putOk and putTarget == "baseline"
     and database.communityBuilds.newer == nil,
     "canonical baseline-equivalent Put was persisted in the overlay")
 
-assert(Nexus.BuildCatalog.SetTombstone("copy", {stamp=41,author="Me"}))
+assert(Nexus.BuildCatalog.SetTombstone("copy", {stamp=41,author="Boganic"},
+    {source="local"}))
 assert(Nexus.BuildCatalog.Get("copy") == nil,
     "SetTombstone did not hide and remove the overlay row")
 assert(Nexus.BuildCatalog.ClearTombstone("copy"))
@@ -161,10 +169,14 @@ occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("booleanOpaque")
 assert(occupancy == "opaque" and represented == nil
     and allocationDb.communityBuilds.booleanOpaque == false,
     "false raw overlay evidence was cleared or reported free")
+-- A coherent row stored without an embedded id is admitted under its exact
+-- typed map key; the key is restored on every public copy and its unknown
+-- subtree stays raw and untouched.
 occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("malformed")
-assert(occupancy == "opaque" and represented == nil
+assert(occupancy == "visible" and represented
+    and represented.id == "malformed" and represented.future == nil
     and allocationDb.communityBuilds.malformed.future.keep == true,
-    "malformed raw overlay evidence was exposed, cleared, or reported free")
+    "id-less overlay row was exposed, cleared, or reported free")
 occupancy, represented = Nexus.BuildCatalog.AllocationOccupancy("mismatched")
 assert(occupancy == "opaque" and represented == nil
     and allocationDb.communityBuilds.mismatched.id == "different-id"

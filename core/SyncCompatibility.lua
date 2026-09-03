@@ -111,15 +111,33 @@ function Compatibility.New(options)
         return table.concat(encoded)
     end
 
-    local function CatalogDelta()
+    -- Complete collections are read only through generation-bound cursors;
+    -- a stale or refused cursor yields an empty bounded map, never a partial
+    -- root-owned table.
+    local function CursorMap(beginName, nextName)
         local catalog = getCatalog()
-        return catalog and catalog.DeltaSnapshot
-            and catalog.DeltaSnapshot() or {}
+        local out = {}
+        if not (catalog and type(catalog[beginName]) == "function") then
+            return out
+        end
+        local token = catalog[beginName]()
+        if not token then return out end
+        for _ = 1, 4096 do
+            local page, err = catalog[nextName](token)
+            if err or type(page) ~= "table" or page.done then break end
+            if page.id ~= nil and page.record ~= nil then
+                out[page.id] = page.record
+            end
+        end
+        return out
+    end
+
+    local function CatalogDelta()
+        return CursorMap("BeginDeltaCursor", "DeltaCursorNext")
     end
 
     local function CatalogAll()
-        local catalog = getCatalog()
-        return catalog and catalog.All and catalog.All() or {}
+        return CursorMap("BeginRecordCursor", "RecordCursorNext")
     end
 
     function C.DeltaBuildHash()
@@ -309,8 +327,9 @@ function Compatibility.New(options)
                     complete, tostring(build.fingerprintHash
                         or build.fingerprint or "0")}, ":")
                 local bucket = C.BuildBucket(id)
-                if not validIdentifier(tostring(build.id or ""),
-                        maxBuildIdBytes) or not relayEligible(build) then
+                if type(build.id) ~= "string"
+                    or not validIdentifier(build.id, maxBuildIdBytes)
+                    or not relayEligible(build) then
                     snapshot.claimSafeByBucket[bucket] = false
                 end
                 snapshot.byBucket[bucket][#snapshot.byBucket[bucket] + 1] = {
@@ -320,8 +339,14 @@ function Compatibility.New(options)
             return false, nil, true
         end
 
-        local id, tombstone = next(getTombstones() or {}, snapshot.cursor)
-        if id == nil then
+        local catalog = getCatalog()
+        local id, tombstone, done
+        if catalog and type(catalog.TombstoneNext) == "function" then
+            id, tombstone, done = catalog.TombstoneNext(snapshot.cursor)
+        else
+            done = true
+        end
+        if done or id == nil then
             snapshot.complete = true
             return true, nil, true
         end

@@ -902,8 +902,10 @@ Control(Session.QueueLegacyRecovery("unrelated-recovery") == true,
 local shareBuild = assert(PutBuild("unrelated-share", "Alice", 851, false))
 Control(Sync.BroadcastBuildSummary(shareBuild, {retryOnFull=true}) == true,
     "unrelated Share summary admitted")
-Control(Sync.BroadcastDelete({id="unrelated-delete",title="Unrelated delete",
-    author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,isMine=true})
+-- A delete requires an admitted row with current local-owner proof, so the
+-- unrelated delete fixture publishes its build first.
+local deleteBuild = assert(PutBuild("unrelated-delete", "Alice", 852, false))
+Control(Sync.BroadcastDelete(Catalog.Get("unrelated-delete") or deleteBuild)
     == true, "unrelated delete admitted")
 Control(Sync.HandleIncoming(
     "WLRQ|ResponderPeer|0|0|c1-unrelated-response|1.20.0-beta.1",

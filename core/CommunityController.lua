@@ -209,17 +209,45 @@ function Controller.New(options)
         return false, "build catalog unavailable"
     end
 
-    local function SetTombstone(id, tombstone)
+    local function SetTombstone(id, tombstone, options)
         local catalog = Catalog()
         if catalog and type(catalog.SetTombstone) == "function" then
-            return catalog.SetTombstone(id, tombstone)
+            return catalog.SetTombstone(id, tombstone, options)
         end
         return false, "build catalog unavailable"
     end
 
+    -- The catalog's fixed state reason when its root is not serving. A row
+    -- reserved deny-only exists but grants no read, mutation, or deletion;
+    -- reporting "not found" would misdescribe preserved data.
+    local function RootRefusal()
+        local catalog = Catalog()
+        if not (catalog and type(catalog.RootState) == "function") then
+            return "build catalog unavailable"
+        end
+        local root = catalog.RootState()
+        if type(root) ~= "table" or root.state == "ROOT_ADMITTED" then return nil end
+        return tostring(root.reason or root.state)
+    end
+
+    -- Complete collections are read through the generation-bound record
+    -- cursor; every page is a defensive copy and no root-owned table escapes.
     local function Store()
         local catalog = Catalog()
-        return catalog and catalog.All and catalog.All() or {}
+        local out = {}
+        if not (catalog and type(catalog.BeginRecordCursor) == "function") then
+            return out
+        end
+        local token = catalog.BeginRecordCursor()
+        if not token then return out end
+        for _ = 1, 4096 do
+            local page, err = catalog.RecordCursorNext(token)
+            if err or type(page) ~= "table" or page.done then break end
+            if page.id ~= nil and page.record ~= nil then
+                out[page.id] = page.record
+            end
+        end
+        return out
     end
 
     local function IsAdmin()
@@ -2426,7 +2454,17 @@ function Controller.New(options)
 
     function M.DeleteBuild(id)
         local b = LoadBuild(id)
-        if not b then return false, "not found" end
+        if not b then
+            local refusal = RootRefusal()
+            if refusal then
+                -- Bounded refusal receipt: nothing was removed, nothing queued.
+                return false, {
+                    localRemoved=false, queueAdmitted=false, retryPending=false,
+                    storageReason=refusal, queueReason=refusal,
+                }
+            end
+            return false, "not found"
+        end
         local owner = IsOwnBuild(b)
         if not owner and not IsAdmin() then
             return false, "not your build"
@@ -2468,7 +2506,7 @@ function Controller.New(options)
                 stamp=(time and time()) or 0,
                 author=tostring(b.author or ""),
                 localOnly=not owner or nil,
-            })
+            }, {source="local"})
             if tombstoned then tombstoneWhy = nil end
         end
         local _, removeWhy = RemoveOverlay(id)

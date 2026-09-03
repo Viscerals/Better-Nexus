@@ -116,8 +116,11 @@ NexusDB = {
     },
 }
 Nexus.Store.Init()
-assert(NexusDB.communityBuilds.canonical == nil,
-    "canonical bundled row with transient cache fields remained in overlay")
+-- An overlay that owns unknown evidence (here `_nexusDps`) is never pruned by
+-- baseline equivalence; the unknown owner survives at its exact scope.
+assert(NexusDB.communityBuilds.canonical ~= nil
+    and NexusDB.communityBuilds.canonical._nexusDps.best == 123,
+    "baseline pruning removed an overlay that owns unknown evidence")
 assert(NexusDB.communityBuilds.personalEqual
     and NexusDB.communityBuilds.personalEqual.isMine,
     "locally marked row was pruned by canonical migration")
@@ -187,19 +190,19 @@ assert(futureDb.communityBuilds == futureOverlay
 assert(compactionCalls == 0,
     "startup compaction mutated a future catalog overlay")
 local ok, reason = Nexus.BuildCatalog.Put({id="blocked",title="Blocked"})
-assert(not ok and reason == "future build catalog schema is read-only"
+assert(not ok and reason == "ROOT_READ_ONLY_FUTURE_SCHEMA"
     and futureOverlay.blocked == nil,
     "future catalog accepted an overlay write")
 ok, reason = Nexus.BuildCatalog.RemoveOverlay("future")
-assert(not ok and reason == "future build catalog schema is read-only"
+assert(not ok and reason == "ROOT_READ_ONLY_FUTURE_SCHEMA"
     and futureOverlay.future == futureRow,
     "future catalog accepted an overlay removal")
 ok, reason = Nexus.BuildCatalog.SetTombstone("future", {stamp=99})
-assert(not ok and reason == "future build catalog schema is read-only"
+assert(not ok and reason == "ROOT_READ_ONLY_FUTURE_SCHEMA"
     and futureTombstones.future == nil,
     "future catalog accepted a tombstone write")
 ok, reason = Nexus.BuildCatalog.ClearTombstone("gone")
-assert(not ok and reason == "future build catalog schema is read-only"
+assert(not ok and reason == "ROOT_READ_ONLY_FUTURE_SCHEMA"
     and futureTombstones.gone.futureOnly,
     "future catalog accepted a tombstone removal")
 

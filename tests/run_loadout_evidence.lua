@@ -97,13 +97,16 @@ assert(not Evidence.Intern({[2]={spellId=200104,stacks=1}})
     and Evidence.Stats().entries == entriesBeforeMalformed,
     "malformed evidence entered the pool")
 
--- Inline rows retain their established order and are defensive. A synthetic
+-- Public reads serve the admitted canonical evidence record (one unique
+-- sorted tuple order with grouped stacks) and are defensive. A synthetic
 -- pool-only row then proves offline hydration without a network request.
 local inlineCopy = Catalog.Get("short-a")
-assert(inlineCopy.echoes[1].spellId == sameA[1].spellId,
-    "additive reads reordered an existing inline build")
+assert(#inlineCopy.echoes == 2 and inlineCopy.echoes[1].spellId == 200100
+    and inlineCopy.echoes[1].stacks == 2
+    and inlineCopy.echoes[2].spellId == 200101,
+    "public read did not serve the canonical evidence record")
 inlineCopy.echoes[1].stacks = 99
-assert(Catalog.Get("short-a").echoes[1].stacks == 1,
+assert(Catalog.Get("short-a").echoes[1].stacks == 2,
     "a public build copy mutated SavedVariables")
 rawA.echoes = nil
 local pooledBuild = Catalog.Get("short-a")

@@ -66,6 +66,7 @@ print("send side is fully logged (broadcast + each wire message) -- OK")
 local msgs = {}
 for _, m in ipairs(H.sentChatMessages) do msgs[#msgs + 1] = m end
 NexusDB.communityBuilds = nil
+H.RebindCatalog()
 Sync.ClearLog()
 clock = clock + 3600   -- ensure any window is closed
 for _, m in ipairs(msgs) do
@@ -79,6 +80,7 @@ print("valid owner update is accepted and logged outside a sync window -- OK")
 
 -- RECEIVE side, success: with a window open, the store must be logged
 NexusDB.communityBuilds = {}
+H.RebindCatalog()
 Sync.Init(Codec, Nexus.GameAdapter or {})
 Sync.ClearLog()
 clock = clock + 10

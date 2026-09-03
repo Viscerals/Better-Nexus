@@ -133,18 +133,22 @@ assert(Catalog.FindExactFingerprintId(exactKey) == "index-exact"
     "private Saved mirror hid or became the public exact-content winner")
 assert(Catalog.RemoveOverlay("000-saved-exact"),
     "private Saved exact-index control could not be removed")
-assert(Catalog.Put({
+-- Non-finite or non-positive Echo data is refused at admission; it never
+-- reaches durable storage or any index.
+local invalidOk, invalidWhy = Catalog.Put({
     id="invalid-exact",title="Invalid Exact",author="Other",
     ownerKey="other@ebonhold",class="MAGE",postedAt=1998,
     lastModified=1998,echoes={
         {spellId=0,quality=0,stacks=1},
         {spellId=810001,quality=0,stacks=math.huge},
     },
-}))
+})
+assert(invalidOk == false and invalidWhy == "MALFORMED_ROW"
+    and NexusDB.communityBuilds["invalid-exact"] == nil,
+    "non-finite/non-positive Echo data was admitted")
 assert(Catalog.FindExactFingerprintId("0x1") == nil
     and Catalog.FindExactFingerprintId("810001xinf") == nil,
     "non-finite/non-positive Echo data entered the exact index")
-assert(Catalog.RemoveOverlay("invalid-exact"))
 
 assert(Catalog.Put({
     id="000-auto",title="Auto Collision",author="IndexMage",

@@ -84,6 +84,7 @@ NexusDB.communityBuilds = { ["b1"] = { id = "b1", title = "Retry Test",
     description = "d", author = "Bob", class = "MAGE",
     echoes = { { spellId = 200100, quality = 3, stacks = 1 } },
     postedAt = 1, lastModified = 1, isMine = false } }
+Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
 CB.Show()
 CB.Select("b1")
 

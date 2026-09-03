@@ -151,7 +151,10 @@ assert(copied==nil and not detail.copy:IsEnabled()
         and detail.more:GetText():find("evidence changed",1,true),
     "recovered current locked change did not stale the candidate")
 assert(Nexus.BuildCatalog.Put(currentTargetBefore))
-assert(Equal(NexusDB,savedBefore),
+-- The admission owner writes its canonical known fields on every accepted
+-- update, so compare the restored record rather than raw byte equality.
+assert(Equal(Nexus.BuildCatalog.Get("legacy-dps-resolved-080"),
+        currentTargetBefore),
     "display, Open, or Copy mutated SavedVariables")
 
 -- A represented catalog revision invalidates the projection exactly once.
@@ -199,8 +202,16 @@ assert(ambiguous==nil
         and ambiguousReason=="exact build identity is ambiguous",
     "equally authoritative exact identities did not fail closed")
 
+-- The row belongs to its remote author, so the reservation is published by
+-- that owner's exact transport rather than by this character.
+local tombstoneTarget = assert(Nexus.BuildCatalog.Get("legacy-dps-resolved-081"),
+    "tombstone fixture row was not admitted")
+local tombstoneOwner = Nexus.Identity.VerifiedOwnerKey(tombstoneTarget)
+    or tombstoneTarget.ownerKey
+local tombstoneSender = tostring(tombstoneOwner):gsub("@", "-")
 assert(Nexus.BuildCatalog.SetTombstone("legacy-dps-resolved-081",
-    {author="fixture",stamp=50}))
+    {author=tombstoneTarget.author,stamp=50},
+    {source="remote", sender=tombstoneSender}))
 local tombstoned,tombstoneReason=Nexus.BuildCatalog.ResolveFingerprintIdentity(
     "raw-collision-081","880081x1")
 assert(tombstoned==nil
@@ -210,8 +221,12 @@ assert(tombstoned==nil
 assert(Nexus.BuildCatalog.Put({id="tombstone-fallback",
     title="Tombstone fallback",fingerprint="881001x1",
     echoes={{spellId=881001,stacks=1}},lastModified=50})
-    and Nexus.BuildCatalog.SetTombstone("raw-tombstoned",
-        {author="fixture",stamp=51}))
+    )
+-- Persisted legacy tombstone evidence: preserved raw and reserved deny-only
+-- on reload; it grants no current-session authority.
+NexusDB.syncTombstones = NexusDB.syncTombstones or {}
+NexusDB.syncTombstones["raw-tombstoned"] = {author="fixture",stamp=51}
+H.RebindCatalog()
 local rawTombstoned,rawTombstoneReason=
     Nexus.BuildCatalog.ResolveFingerprintIdentity(
         "raw-tombstoned","881001x1")

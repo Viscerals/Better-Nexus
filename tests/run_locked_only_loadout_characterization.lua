@@ -112,6 +112,8 @@ local cases = {
         fingerprint=lockedFingerprint,loadoutAvailable=true}),
 }
 for id, row in pairs(cases) do NexusDB.communityBuilds[id] = row end
+-- Raw seeding grants no authority: readmit the complete root once.
+H.RebindCatalog()
 
 local expectedReasons = {
     absent="absent",empty="empty",unresolved="unresolved",
@@ -177,9 +179,21 @@ local communityRows, communitySummary = Nexus.ViewProjections.Builds({
 })
 Check(type(communityRows) == "table" and communitySummary.total == 2,
     "real Community projection did not publish only complete catalog rows")
-Check(communitySummary.ready == 2 and communitySummary.pending == 6,
+Check(communitySummary.ready == 2 and communitySummary.pending == 4,
     string.format("Community counted incomplete overlay rows as public or pending: ready=%s pending=%s",
         tostring(communitySummary.ready),tostring(communitySummary.pending)))
+
+-- The malformed row and the row whose combined roles exceed the 6-copy
+-- locked envelope are quarantined deny-only: preserved raw, never public,
+-- and never pending.
+for _, quarantined in ipairs({"malformed", "cross"}) do
+    local state = Nexus.BuildCatalog.AuthorityState(quarantined)
+    Check(state.state == "INVALIDATED" and state.occupancy == "BLOCKED"
+            and Nexus.BuildCatalog.Get(quarantined) == nil
+            and NexusDB.communityBuilds[quarantined] == cases[quarantined],
+        "over-envelope or malformed locked evidence was not deny-only: "
+            .. quarantined)
+end
 
 local delta = Nexus.BuildCatalog.DeltaSnapshot()
 local broadcastable = 0

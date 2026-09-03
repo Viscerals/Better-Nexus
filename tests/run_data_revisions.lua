@@ -61,31 +61,36 @@ end)
 R.Subscribe(R.BUILD_LIBRARY_CHANGED, function(_, revision)
     callbacks[#callbacks + 1] = "good-" .. revision
 end)
+-- The replacement is locally owned so the trusted local delete below can
+-- publish a current-session tombstone and retire it again.
 local changed = {
-    id="base",title="Changed",description="",author="Release",class="MAGE",
+    id="base",title="Changed",description="",author="Boganic",class="MAGE",
+    ownerKey="boganic@ebonhold",realm="ebonhold",ownerVerified=true,isMine=true,
     postedAt=1,lastModified=2,echoes={{spellId=1,quality=3,stacks=1}},
 }
-assert(Catalog.Put(changed))
+assert(Catalog.Put(changed, {source="local"}))
 assert(Catalog.Get("base").title == "Changed"
     and R.Get(R.BUILD_LIBRARY_CHANGED) == 2
     and table.concat(callbacks, ",") == "bad,good-2",
     "subscriber failure broke or reordered the originating build mutation")
-assert(Catalog.Put(changed) and R.Get(R.BUILD_LIBRARY_CHANGED) == 2,
+assert(Catalog.Put(changed, {source="local"}) and R.Get(R.BUILD_LIBRARY_CHANGED) == 2,
     "duplicate build put advanced the revision")
-assert(Catalog.SetTombstone("base", {stamp=3,author="Release"})
+assert(Catalog.SetTombstone("base", {stamp=3,author="Boganic"}, {source="local"})
     and R.Get(R.BUILD_LIBRARY_CHANGED) == 3,
     "visible tombstone did not advance once")
-assert(Catalog.SetTombstone("base", {stamp=4,author="Release"})
-    and R.Get(R.BUILD_LIBRARY_CHANGED) == 4,
-    "newer tombstone metadata did not advance Sync-facing build data")
-assert(Catalog.SetTombstone("base", {stamp=4,author="Release"})
-    and R.Get(R.BUILD_LIBRARY_CHANGED) == 4,
+-- A changed replay never refreshes a published tombstone; an exact replay is
+-- an idempotent no-op. Neither publishes a revision.
+assert(not Catalog.SetTombstone("base", {stamp=4,author="Boganic"}, {source="local"})
+    and R.Get(R.BUILD_LIBRARY_CHANGED) == 3,
+    "changed tombstone metadata refreshed the reservation")
+assert(Catalog.SetTombstone("base", {stamp=3,author="Boganic"}, {source="local"})
+    and R.Get(R.BUILD_LIBRARY_CHANGED) == 3,
     "duplicate tombstone metadata advanced the build revision")
 assert(Catalog.ClearTombstone("base")
-    and R.Get(R.BUILD_LIBRARY_CHANGED) == 5,
+    and R.Get(R.BUILD_LIBRARY_CHANGED) == 4,
     "clearing a baseline tombstone did not restore one visible revision")
 assert(not Catalog.RemoveOverlay("missing")
-    and R.Get(R.BUILD_LIBRARY_CHANGED) == 5,
+    and R.Get(R.BUILD_LIBRARY_CHANGED) == 4,
     "missing overlay removal advanced the revision")
 
 -- A release catalog token is Sync-facing represented identity even when its
@@ -93,13 +98,15 @@ assert(not Catalog.RemoveOverlay("missing")
 dofile("core/Revisions.lua")
 R = Nexus.Revisions
 Catalog.Init(NexusDB, bundle)
-assert(R.Get(R.BUILD_LIBRARY_CHANGED) == 0)
+-- Replacing the revision owner is callback-owner drift: the catalog re-proves
+-- its complete root once before serving again.
+assert(R.Get(R.BUILD_LIBRARY_CHANGED) == 1)
 local retokened = {
     schemaVersion=1,catalogVersion="revision-test-2",sourceVersion="test",
     builds={base=baseline},
 }
 Catalog.Init(NexusDB, retokened)
-assert(R.Get(R.BUILD_LIBRARY_CHANGED) == 1,
+assert(R.Get(R.BUILD_LIBRARY_CHANGED) == 2,
     "catalog identity change did not advance the build revision")
 
 -- DPS revisions advance for a winning row and later metadata enrichment,
@@ -212,6 +219,9 @@ local Sync = Nexus.Sync
 NexusDB.communityBuilds = NexusDB.communityBuilds or {}
 NexusDB.syncTombstones = NexusDB.syncTombstones or {}
 Sync.Init(Nexus.Codec, {})
+-- Sync.Init explicitly rebinds the catalog to this database, which is one
+-- represented-data publication. Presence traffic must add nothing to it.
+local buildBaseline = R.Get(R.BUILD_LIBRARY_CHANGED)
 assert(Sync.HandleIncoming("WLNP|Peer|1.0.0", "Peer")
     and R.Get(R.SYNC_CHANGED) == 1,
     "new accepted peer did not advance Sync revision")
@@ -227,7 +237,7 @@ Sync.LogRaw("status only")
 Sync.OnUpdate(1)
 assert(R.Get(R.SYNC_CHANGED) == 2,
     "rejected traffic, logs, queues, or timers advanced Sync revision")
-assert(R.Get(R.BUILD_LIBRARY_CHANGED) == 0
+assert(R.Get(R.BUILD_LIBRARY_CHANGED) == buildBaseline
     and R.Get(R.DPS_CHANGED) == 0 and R.Get(R.CATALOG_CHANGED) == 0,
     "presence/status traffic advanced an unrelated data revision")
 

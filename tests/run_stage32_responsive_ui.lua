@@ -40,7 +40,7 @@ Nexus.DpsCapture = {
     GetDpsBoard=function() return {} end,
     IsDetailsAvailable=function() return false end,
 }
-for _, build in pairs(Nexus.BuildCatalog.Summaries()) do
+for _, build in pairs(H.CatalogSummaries()) do
     eligibility[build.fingerprint] = {
         dummy=999999999,lk=888888888,best=999999999,
         average=944444443.5,count=2,

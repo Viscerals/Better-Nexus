@@ -26,10 +26,10 @@ local rows=DPS.GetDpsBoard("dummy")
 assert(#rows==100,"100 distinct characters should produce 100 rows")
 -- Same character, stronger different exact loadout: still 100 rows.
 local better={{spellId=400050,stacks=2},{spellId=410050,stacks=1}}
-NexusDB.communityBuilds["stress-50b"]={id="stress-50b",title="Winner 50",
+assert(Nexus.BuildCatalog.Put({id="stress-50b",title="Winner 50",
  author="Player50",ownerKey="player50@ebonhold",ownerVerified=true,
  realm="ebonhold",class="MAGE",echoes=better,lastModified=200,
- postedAt=200,isMine=false}
+ postedAt=200,isMine=false}))
 assert(DPS.ReceiveRecord({
  v=6,f=DPS.GetEchoKey(better),e=better,c="dummy",d=9000000,u=65,
  t=200,p="Player50",o="player50@ebonhold",r="ebonhold",

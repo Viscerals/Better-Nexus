@@ -180,8 +180,10 @@ local replacementCases = {
     {name="locked", echoes={{spellId=610002,quality=2,stacks=1,locked=true}},
         reason="cross-role"},
     {name="empty", echoes={}, reason="empty"},
+    -- Malformed Echo data is refused at admission: it never replaces the
+    -- admitted complete record or reaches durable storage.
     {name="malformed", echoes={{spellId=0,quality=2,stacks=1}},
-        reason="malformed"},
+        reason="malformed", refused="MALFORMED_ROW"},
 }
 
 for _, case in ipairs(replacementCases) do
@@ -197,24 +199,33 @@ for _, case in ipairs(replacementCases) do
             and Catalog.FindExactFingerprintId(completeFingerprint) == id
             and Catalog.SyncState(id).delta ~= nil,
         case.name .. " setup warmed complete summary/index/Sync state")
-    Control(Catalog.Put(BuildRecord(id, case.echoes, 2)) == true
-            and db.communityBuilds[id] == rawIdentity,
-        case.name .. " replacement preserved the legacy SavedVariables table identity")
-    local public = Catalog.Get(id)
-    local verdict = Evidence.OrdinaryCompleteness(db.communityBuilds[id])
-    Control(public and public.ordinaryComplete == false
-            and verdict.complete == false and verdict.reason == case.reason,
-        case.name .. " authoritative evidence sees the replacement")
-    local summary = Catalog.GetSummary(id)
-    local syncState = Catalog.SyncState(id)
-    Desired("replacement", summary and summary.ordinaryComplete == false
-            and summary.ordinaryCompletenessReason == case.reason,
-        case.name .. " replacement retained a stale complete summary")
-    Desired("replacement",
-        Catalog.FindExactFingerprintId(completeFingerprint) ~= id,
-        case.name .. " replacement retained the stale exact-fingerprint winner")
-    Desired("replacement", syncState and syncState.delta == nil,
-        case.name .. " replacement remained Sync-eligible")
+    if case.refused then
+        local refusedOk, refusedWhy = Catalog.Put(BuildRecord(id, case.echoes, 2))
+        Control(refusedOk == false and refusedWhy == case.refused
+                and db.communityBuilds[id] == rawIdentity
+                and Catalog.GetSummary(id).ordinaryComplete == true
+                and Catalog.FindExactFingerprintId(completeFingerprint) == id,
+            case.name .. " replacement was admitted or disturbed the complete record")
+    else
+        Control(Catalog.Put(BuildRecord(id, case.echoes, 2)) == true
+                and db.communityBuilds[id] == rawIdentity,
+            case.name .. " replacement preserved the legacy SavedVariables table identity")
+        local public = Catalog.Get(id)
+        local verdict = Evidence.OrdinaryCompleteness(db.communityBuilds[id])
+        Control(public and public.ordinaryComplete == false
+                and verdict.complete == false and verdict.reason == case.reason,
+            case.name .. " authoritative evidence sees the replacement")
+        local summary = Catalog.GetSummary(id)
+        local syncState = Catalog.SyncState(id)
+        Desired("replacement", summary and summary.ordinaryComplete == false
+                and summary.ordinaryCompletenessReason == case.reason,
+            case.name .. " replacement retained a stale complete summary")
+        Desired("replacement",
+            Catalog.FindExactFingerprintId(completeFingerprint) ~= id,
+            case.name .. " replacement retained the stale exact-fingerprint winner")
+        Desired("replacement", syncState and syncState.delta == nil,
+            case.name .. " replacement remained Sync-eligible")
+    end
 end
 
 -- Incomplete verdicts are deliberately not cached. The opposite transition
@@ -385,7 +396,7 @@ do
 
     local exactAccepts = {
         {name="zero count",patch={n=0}},
-        {name="maximum count",patch={n=30720}},
+        {name="maximum count",patch={n=85}},
         {name="unknown class token",patch={c="UNKNOWN"}},
     }
     for _, case in ipairs(exactAccepts) do
@@ -431,7 +442,9 @@ end
 -- Keep the exact accepted boundaries on the real WLBI ingress path too.
 do
     local countZero = SummaryPayload({n=0})
-    local countMax = SummaryPayload({n=30720})
+    -- Issue #22: the summary scalar is total stacks, so the exact accepted
+    -- ingress maximum is the 85-copy envelope.
+    local countMax = SummaryPayload({n=85})
     local classUnknown = SummaryPayload({c="UNKNOWN"})
     Control(DeliverSummary("WirePeer", countZero) == true
             and DeliverSummary("WirePeer", countMax) == true
@@ -584,14 +597,16 @@ Desired("storage", Sync.Stats().storageRejected == beforeStorageRejected + 1
 
 local outboundBeforeDelete = Sync.WorkState().outbound
 beforeStorageRejected = Sync.Stats().storageRejected
+-- A future root serves no record, so the caller holds its own reference.
 local deleteQueued, _, deleteStatus =
-    Sync.BroadcastDelete(Catalog.Get("future-mine"))
+    Sync.BroadcastDelete(futureDb.communityBuilds["future-mine"])
 Desired("storage", deleteQueued == false
         and type(deleteStatus) == "table"
         and deleteStatus.outcome == "rejected"
         and deleteStatus.terminal == true
         and Sync.WorkState().outbound == outboundBeforeDelete
-        and Catalog.Get("future-mine") ~= nil
+        and Catalog.Get("future-mine") == nil
+        and futureDb.communityBuilds["future-mine"] ~= nil
         and Sync.Stats().storageRejected == beforeStorageRejected + 1,
     "future-schema local delete queued bytes after tombstone storage refusal")
 
@@ -609,7 +624,10 @@ Desired("storage", controllerDeleted == false
         and type(controllerDeleteOutcome.storageReason) == "string"
         and type(controllerDeleteOutcome.queueReason) == "string"
         and futureDeleteController.SelectedId() == "future-mine"
-        and Catalog.Get("future-mine") ~= nil
+        -- A future root is reserved deny-only: the raw row is preserved
+        -- byte-for-byte while no current read can serve it.
+        and Catalog.Get("future-mine") == nil
+        and futureDb.communityBuilds["future-mine"] ~= nil
         and Codec.JSONEncode(futureDb) == beforeControllerDeleteBytes,
     "future-schema Community delete reported removal after storage refusal")
 
@@ -620,7 +638,8 @@ local inboundDelete = Sync.HandleIncoming(table.concat({
     "Viewer-Ebonhold",futureRequestId,
 }, "|"), "FuturePeer-Ebonhold")
 Desired("storage", inboundDelete == false
-        and Catalog.Get("future-existing") ~= nil
+        and Catalog.Get("future-existing") == nil
+        and futureDb.communityBuilds["future-existing"] ~= nil
         and Sync.Stats().storageRejected == beforeStorageRejected + 1
         and Sync.Stats().malformedRejected == beforeMalformedRejected
         and Sync.Stats().requestLastReason == "storage",

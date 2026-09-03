@@ -117,6 +117,8 @@ NexusDB.communityBuilds.collision={id="collision",title="Unrelated",author="Othe
   ownerKey="other@ebonhold",class="MAGE",echoes=collisionEchoes,
   fingerprint=DPS.GetEchoKey(collisionEchoes),postedAt=1,lastModified=1}
 local winningEchoes={{spellId=200105,stacks=2}}
+-- Raw seeding grants no authority: readmit the complete root once.
+H.RebindCatalog()
 local winningFp=DPS.GetEchoKey(winningEchoes)
 assert(DPS.ReceiveRecord({v=7,f=winningFp,h=DPS.GetEchoHash(winningEchoes),e=winningEchoes,
   c="dummy",d=27000000,u=65,t=now+1,p="Collisionmage",k="MAGE",

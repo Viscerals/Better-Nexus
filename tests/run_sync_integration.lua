@@ -59,6 +59,7 @@ print("messages from unrelated channels are correctly ignored -- OK")
 -- Now simulate it arriving on the REAL sync channel (as another client
 -- receiving Alice's broadcast) -- must be processed
 NexusDB.communityBuilds = nil  -- pretend this is Bob's fresh client
+H.RebindCatalog()
 -- Receiving is opt-in: Bob must request a sync first.
 Nexus.Sync.RequestSync()
 for _, msg in ipairs(H.sentChatMessages) do

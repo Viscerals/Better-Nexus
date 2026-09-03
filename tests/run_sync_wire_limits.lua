@@ -56,7 +56,9 @@ H.Advance(2)
 -- real endgame wishlist.
 local bigEchoes = {}
 for i = 1, 70 do
-    bigEchoes[i] = { spellId = 200000 + i, quality = 3, stacks = 9 }
+    -- One copy per Echo keeps this inside the valid 79-copy envelope while
+    -- still spanning several wire chunks.
+    bigEchoes[i] = { spellId = 200000 + i, quality = 3, stacks = 1 }
 end
 local bigBuild = {
     id = "mine-1784886552-123456",       -- realistic generated id length
@@ -89,6 +91,7 @@ print("all wire messages fit within WoW's 255-char chat limit -- OK")
 ------------------------------------------------------------------------
 local msgs = H.sentChatMessages
 NexusDB.communityBuilds = nil
+H.RebindCatalog()
 Sync.RequestSync()
 clock = clock + 1
 
@@ -124,6 +127,7 @@ local function RegenMessages(stamp)
 end
 
 NexusDB.communityBuilds = nil
+H.RebindCatalog()
 local msgs2 = RegenMessages(1784886999)
 clock = clock + 10
 Sync.RequestSync()
@@ -140,6 +144,7 @@ print("delivery also works when only the numbered channel form is available -- O
 -- Traffic on an UNRELATED channel must still be ignored
 ------------------------------------------------------------------------
 NexusDB.communityBuilds = nil
+H.RebindCatalog()
 local msgs3 = RegenMessages(1784887777)
 clock = clock + 10
 Sync.RequestSync()

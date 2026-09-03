@@ -106,6 +106,7 @@ NexusDB.communityBuilds["theirs"] = { id = "theirs", title = "Theirs",
     echoes = { { spellId = 1, quality = 0, stacks = 1 } },
     postedAt = 1, lastModified = 1, ownerKey = "bob@ebonhold",
     ownerVerified = true, isMine = false }
+H.RebindCatalog()
 local okE, errE = CB.EditBuild("theirs", "Hijacked", "nope")
 assert(not okE, "editing someone else's build must be refused")
 local okU, errU = CB.UpdateFromWishlist("theirs")

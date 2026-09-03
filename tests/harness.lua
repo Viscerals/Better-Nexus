@@ -666,4 +666,55 @@ dofile("core/DiagnosticLogs.lua")
 dofile("core/ViewRefresh.lua")
 dofile("core/Updates.lua")
 
+-- Package B catalog authority: complete collections are read only through
+-- generation-bound cursors. Test fixtures use these bounded walks instead of
+-- the one-call `All`/`Summaries` exports, which refuse over-limit roots.
+function H.CatalogAll()
+    local catalog = Nexus.BuildCatalog
+    local out = {}
+    local token = catalog and catalog.BeginRecordCursor and catalog.BeginRecordCursor()
+    if not token then return out end
+    for _ = 1, 4096 do
+        local page, err = catalog.RecordCursorNext(token)
+        if err or type(page) ~= "table" or page.done then break end
+        if page.id ~= nil and page.record ~= nil then out[page.id] = page.record end
+    end
+    return out
+end
+
+-- A raw write behind the published root grants no authority. A fixture that
+-- seeds SavedVariables directly performs one explicit supported rebind, which
+-- re-admits every selected typed slot from cursor zero.
+function H.RebindCatalog(database, bundle)
+    database = database or NexusDB
+    if Nexus.LoadoutEvidence and Nexus.LoadoutEvidence.Init then
+        Nexus.LoadoutEvidence.Init(database)
+    end
+    -- Explicit readmission from cursor zero: `Init` may reuse an exact
+    -- unchanged binding, so a fixture that rewrote raw storage asks the
+    -- admission owner for a complete new root.
+    local catalog = Nexus.BuildCatalog
+    catalog.BeginRootAdmission(database, bundle or Nexus.BundledBuilds)
+    local result
+    for _ = 1, 10000000 do
+        result = catalog.PumpRootAdmission()
+        if result.state ~= "pending" then break end
+    end
+    return result
+end
+
+function H.CatalogSummaries()
+    local catalog = Nexus.BuildCatalog
+    local out = {}
+    local token = catalog and catalog.BeginSummaryCursor and catalog.BeginSummaryCursor()
+    if not token then return out end
+    for _ = 1, 4096 do
+        local summary, done, err = catalog.SummaryCursorNext(token)
+        if err then break end
+        if type(summary) == "table" then out[summary.id] = summary end
+        if done then break end
+    end
+    return out
+end
+
 return H

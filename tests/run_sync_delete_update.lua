@@ -66,19 +66,21 @@ local ok, id = CB.PostCurrentWishlist("Rogue Double Strike", "the good one", H.w
 assert(ok, "post failed")
 local postMsgs = Drain()
 
--- Now act as the RECEIVING client: clear the library, receive it fresh
-NexusDB.communityBuilds = nil
+-- Now act as the RECEIVING client: remove the local copy through the
+-- catalog owner and receive it fresh. Raw SavedVariables are never edited
+-- around the catalog authority.
+local Catalog = Nexus.BuildCatalog
+assert(Catalog.RemoveOverlay(id), "local copy was not released")
 Sync.ClearLog()
 clock = clock + 10
 Sync.RequestSync()
 Deliver(postMsgs, "Solkr")
 local lib = NexusDB.communityBuilds
-assert(lib and lib[id], "build was not received")
-assert(lib[id].isMine == false, "a received build must not be marked mine")
+assert(lib and lib[id] and Catalog.Get(id), "build was not received")
+assert(Catalog.Get(id).isMine == false, "a received build must not be marked mine")
 print("build received from author -- OK")
 
-local receiverBeforeEdit = {}
-for k, v in pairs(lib[id]) do receiverBeforeEdit[k] = v end
+local receiverBeforeEdit = Catalog.Get(id)
 receiverBeforeEdit.isMine = false
 
 -- 1. UPDATE must be logged as an update, not a duplicate, and must not
@@ -86,11 +88,14 @@ receiverBeforeEdit.isMine = false
 wall = wall + 100
 UnitName = function() return "Solkr" end
 -- rebuild the author's copy so we can edit and re-share it
-NexusDB.communityBuilds[id].isMine = true
+local authorCopy = Catalog.Get(id)
+authorCopy.isMine = true
+assert(Catalog.Put(authorCopy, {source="local"}), "author copy was not restored")
 CB.EditBuild(id, "Rogue Double Strike v2", "now even better")
 local editMsgs = Drain()
 -- Restore the receiver's older copy before delivering the author's update.
-NexusDB.communityBuilds[id] = receiverBeforeEdit
+assert(Catalog.Put(receiverBeforeEdit, {source="remote", sender="Solkr-Ebonhold"}),
+    "receiver copy was not restored")
 
 Sync.ClearLog()
 clock = clock + 10
@@ -98,11 +103,12 @@ Sync.RequestSync()
 Deliver(editMsgs, "Solkr")
 local text = provider("sync")
 assert(text:find("UPDATED") or text:find("DUPLICATE"), "updated build was neither accepted nor recognized as already current")
-assert(NexusDB.communityBuilds[id].title == "Rogue Double Strike v2",
+assert(Catalog.Get(id).title == "Rogue Double Strike v2",
     "the update did not actually apply")
 local count = 0
 for _ in pairs(NexusDB.communityBuilds) do count = count + 1 end
-assert(count == 1, "the update created a duplicate entry (" .. count .. " entries)")
+assert(count == 1 and Catalog.Count() == 1,
+    "the update created a duplicate entry (" .. count .. " entries)")
 print("an update is logged as UPDATED, applies in place, creates no duplicate -- OK")
 
 -- 2. Re-delivering the exact same wire transfer is idempotent. Transport may
@@ -125,7 +131,11 @@ clock = clock + 10
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Solkr||" .. id .. "||99999",
     "Solkr-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
     nil, nil, nil, 5, Sync.ChannelName())
-assert(NexusDB.communityBuilds[id] == nil,
+-- Protocol 7 carries no operation-order proof, so the remote delete becomes
+-- an opaque deny-only reservation: the build leaves every public surface
+-- while its admitted raw row is preserved as evidence.
+assert(Catalog.Get(id) == nil and Catalog.Count() == 0
+    and Catalog.TombstoneState(id).state == "OPAQUE_BLOCK_ALL",
     "the author's delete did not remove the build -- it would linger forever")
 text = provider("sync")
 assert(text:find("DELETED"), "the delete was not logged")
@@ -136,7 +146,7 @@ Sync.ClearLog()
 clock = clock + 10
 Sync.RequestSync()
 Deliver(editMsgs, "Solkr")
-assert(NexusDB.communityBuilds[id] == nil,
+assert(Catalog.Get(id) == nil,
     "a deleted build was resurrected by a stale copy still in flight")
 text = provider("sync")
 assert(text:find("tombstoned"), "the tombstone rejection was not logged")
@@ -155,7 +165,7 @@ UnitName = function() return "Solkr" end
 clock = clock + 10
 Sync.RequestSync()
 Deliver(hijackMsgs, "Griefer")
-assert(NexusDB.communityBuilds[id] == nil
+assert(Catalog.Get(id) == nil
     and NexusDB.syncTombstones[id] ~= nil,
     "a different author seized a tombstoned build ID with a newer revision")
 print("a tombstoned build ID cannot be seized by a different author -- OK")
@@ -169,11 +179,15 @@ local summaryHijackMsgs = Drain()
 clock = clock + 10
 Sync.RequestSync()
 Deliver(summaryHijackMsgs, "Griefer")
-assert(NexusDB.communityBuilds[id] == nil
+assert(Catalog.Get(id) == nil
     and NexusDB.syncTombstones[id] ~= nil,
     "a different author seized a tombstoned build ID through a summary")
 print("summary-only sync cannot bypass tombstone ownership -- OK")
 
+-- Remote tombstone-to-row readmission always fails closed: protocol 7 has no
+-- request identity or ordering proof, so even the original author cannot
+-- supersede the reservation over the wire. Only an explicit trusted local
+-- claim can replace it.
 H.sentChatMessages = {}
 assert(Sync.BroadcastBuild({ id=id, title="Authorized return", description="good",
     author="Solkr", ownerKey="solkr@ebonhold",
@@ -184,12 +198,20 @@ local returnMsgs = Drain()
 clock = clock + 10
 Sync.RequestSync()
 Deliver(returnMsgs, "Solkr")
-assert(NexusDB.communityBuilds[id]
-    and NexusDB.communityBuilds[id].title == "Authorized return"
-    and NexusDB.syncTombstones[id] == nil,
-    "the original author could not explicitly supersede their tombstone: "
+assert(Catalog.Get(id) == nil and NexusDB.syncTombstones[id] ~= nil,
+    "a remote revision superseded a tombstone reservation: "
         .. tostring(provider("sync")))
-print("the original author can supersede their tombstone with a newer revision -- OK")
+local claim = assert(Catalog.BeginTombstoneReadmissionClaim(id))
+assert(Catalog.PutWithClaim(claim, { id=id, title="Authorized return",
+    description="good", author="Solkr", ownerKey="solkr@ebonhold",
+    ownerVerified=true, isMine=true, class="ROGUE",
+    echoes={{spellId=200100,quality=3,stacks=1}},
+    postedAt=100001, lastModified=100001 }, {source="local"}),
+    "the trusted local owner could not readmit their own build")
+assert(Catalog.Get(id) and Catalog.Get(id).title == "Authorized return"
+    and NexusDB.syncTombstones[id] == nil,
+    "local readmission did not atomically replace the tombstone")
+print("only an explicit trusted local claim can supersede a tombstone -- OK")
 
 -- 6. A delete from someone who is NOT the author must be REFUSED
 NexusDB.communityBuilds = { ["victim"] = { id = "victim",
@@ -197,11 +219,13 @@ NexusDB.communityBuilds = { ["victim"] = { id = "victim",
     ownerKey = "solkr@ebonhold", ownerVerified = true,
     class = "ROGUE", echoes = { { spellId = 1, quality = 0, stacks = 1 } },
     postedAt = 1, lastModified = 1, isMine = false } }
+NexusDB.syncTombstones = {}
+Catalog.Init(NexusDB, Nexus.BundledBuilds)
 Sync.ClearLog()
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Griefer||victim||99999",
     "Griefer-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
     nil, nil, nil, 5, Sync.ChannelName())
-assert(NexusDB.communityBuilds["victim"],
+assert(NexusDB.communityBuilds["victim"] and Catalog.Get("victim"),
     "a non-author was allowed to delete someone else's shared build")
 text = provider("sync")
 assert(text:find("is not the author"), "the refused delete was not logged with a reason")
@@ -213,10 +237,12 @@ NexusDB.communityBuilds = { ["mine"] = { id = "mine", title = "My Build",
     ownerKey = "solkr@ebonhold", ownerVerified = true,
     echoes = { { spellId = 1, quality = 0, stacks = 1 } },
     postedAt = 1, lastModified = 1, isMine = true } }
+NexusDB.syncTombstones = {}
+Catalog.Init(NexusDB, Nexus.BundledBuilds)
 Sync.ClearLog()
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Solkr||mine||99999",
     "Solkr-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
     nil, nil, nil, 5, Sync.ChannelName())
-assert(NexusDB.communityBuilds["mine"],
+assert(NexusDB.communityBuilds["mine"] and Catalog.Get("mine"),
     "an incoming delete removed one of MY OWN builds")
 print("incoming deletes can never remove your own builds -- OK")

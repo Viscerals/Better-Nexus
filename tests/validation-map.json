@@ -29,6 +29,29 @@
       "full_required": true
     },
     {
+      "id": "catalog-authority",
+      "patterns": [
+        "^core/(BuildCatalog|LoadoutEvidence|DataRetention|DataCompaction|BuildHashCache)\\.lua$",
+        "^tests/(catalog_authority_support|run_catalog_authority_admission|run_catalog_authority_tombstones|run_catalog_authority_maintenance|run_sync_semantic_envelope)\\.lua$",
+        "^tests/run-catalog-authority-expected-red\\.js$"
+      ],
+      "groups": ["authority", "runtime"],
+      "tests": [
+        "tests/run-catalog-authority-expected-red.js",
+        "tests/run_catalog_authority_admission.lua",
+        "tests/run_catalog_authority_tombstones.lua",
+        "tests/run_catalog_authority_maintenance.lua",
+        "tests/run_sync_semantic_envelope.lua",
+        "tests/run_build_catalog.lua",
+        "tests/run_build_catalog_migration.lua",
+        "tests/run_data_retention.lua",
+        "tests/run_data_compaction_migration.lua",
+        "tests/run_loadout_evidence.lua",
+        "tests/run_integration.lua"
+      ],
+      "full_required": true
+    },
+    {
       "id": "sync",
       "patterns": ["^core/Sync.*\\.lua$"],
       "groups": ["sync"],

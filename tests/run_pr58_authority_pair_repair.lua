@@ -429,8 +429,7 @@ Desired(not detail.copy:IsEnabled() and detail.copyCandidate == nil,
 detail.copy:GetScript("OnClick")()
 Desired(opened == nil, "historical Copy reached Wishlist mutation")
 
-local currentLocked = {{spellId=981201,quality=4,stacks=1,
-    future={current="kept"}}}
+local currentLocked = {{spellId=981201,quality=4,stacks=1}}
 local currentBuild = Clone(historicalBuild)
 currentBuild.author = "Current"
 if type(Evidence.CurrentCopyAuthority) == "function" then

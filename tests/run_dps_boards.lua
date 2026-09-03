@@ -30,6 +30,9 @@ local collisionId=dummy[1].buildId
 local collisionBuild=NexusDB.communityBuilds[collisionId]
 collisionBuild.fingerprint="different-current-content"
 collisionBuild.echoes={{spellId=299999,stacks=1}}
+-- A raw write behind the published root grants no authority: rebind once
+-- so the fixture rows are admitted through the catalog owner.
+H.RebindCatalog()
 local collisionRow
 for _,candidate in ipairs(DPS.GetDpsBoard("dummy")) do
     if candidate.player=="Bravo" then collisionRow=candidate break end

@@ -46,6 +46,7 @@ NexusDB.communityBuilds = {
         echoes={{spellId=3,quality=3,stacks=1}},postedAt=300,lastModified=300,
         author="Carol",ownerKey="carol@unknown",description=""},
 }
+Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
 Nexus.DpsCapture = Nexus.DpsCapture or {}
 Nexus.DpsCapture.GetCommunityEligibility = function()
     return {

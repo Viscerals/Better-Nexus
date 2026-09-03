@@ -110,6 +110,8 @@ end
 -- Hash that matches A's isMine builds
 local matchHash = bucketHash({ ["r1"]={lastModified=50000,
     fingerprint="200100x1",
+    -- The admission owner derives fingerprintHash for a complete row.
+    fingerprintHash="303bf11",
     echoes={{spellId=200100,quality=3,stacks=1}}} })
 Sync.HandleIncoming("WLRQ|peer2|"..matchHash.."|0|matching-state", "peer2")
 for i=1,20 do Sync.OnUpdate(0.2) end

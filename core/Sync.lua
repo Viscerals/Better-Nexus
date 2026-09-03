@@ -168,26 +168,68 @@ local function CatalogGet(id)
     return catalog.Get(id)
 end
 
-local function CatalogAll()
+-- Every catalog write names its exact source so the central admission owner
+-- derives provenance itself; Sync never clears a tombstone before a write.
+local function CatalogPut(build, options)
     local catalog = Catalog()
-    return catalog and catalog.All and catalog.All() or {}
+    if not (catalog and catalog.Put) then return false end
+    return catalog.Put(build, options)
 end
 
-local function CatalogPut(build)
+local function CatalogSetTombstone(id, tomb, options)
     local catalog = Catalog()
-    return catalog and catalog.Put and catalog.Put(build) or false
+    if not (catalog and catalog.SetTombstone) then return false end
+    return catalog.SetTombstone(id, tomb, options)
 end
 
-local function CatalogSetTombstone(id, tomb)
+-- The catalog's fixed state reason when its root is not serving. Inbound
+-- work refused for that reason is a local storage refusal, not malformed or
+-- unknown data: the durable row exists and is reserved deny-only.
+local function CatalogRootRefusal()
     local catalog = Catalog()
-    return catalog and catalog.SetTombstone
-        and catalog.SetTombstone(id, tomb) or false
+    if not (catalog and type(catalog.RootState) == "function") then return nil end
+    local root = catalog.RootState()
+    if type(root) ~= "table" or root.state == "ROOT_ADMITTED" then return nil end
+    return tostring(root.reason or root.state)
 end
 
-local function CatalogClearTombstone(id)
+-- Fixed-shape tombstone reservation view. Sync never holds the raw
+-- SavedVariables tombstone table; a NONE state returns nil.
+local function CatalogTombstoneView(id)
     local catalog = Catalog()
-    return catalog and catalog.ClearTombstone
-        and catalog.ClearTombstone(id) or false
+    if not (catalog and type(catalog.TombstoneState) == "function") then return nil end
+    local view = catalog.TombstoneState(id)
+    if type(view) ~= "table" or view.state == "NONE" then return nil end
+    return view
+end
+
+-- Bounded compatibility map of every tombstone reservation: the same
+-- `{stamp, author, ownerKey, ownerVerified}` token shape the exact PR #68
+-- bucket hash uses, plus the session-only `localOwned` verdict.
+local function TombstoneMap()
+    local catalog = Catalog()
+    local out = {}
+    if not (catalog and type(catalog.TombstoneNext) == "function") then return out end
+    local cursor
+    for _ = 1, 2048 do
+        local id, view, done = catalog.TombstoneNext(cursor)
+        if done or id == nil then break end
+        out[id] = {stamp=view.stamp, author=view.author, ownerKey=view.ownerKey,
+            ownerVerified=view.ownerVerified == true or nil,
+            localOwned=view.localOwned == true}
+        cursor = id
+    end
+    return out
+end
+
+-- Protocol 7 gains no typed envelope. Only an exact 1..96-byte, UTF-8,
+-- delimiter-free identifier is representable; everything else stops before
+-- any message, header, request, correlation, queue, or bucket key exists.
+local function WireBuildId(id)
+    if type(id) ~= "string" then return nil, "PROTOCOL7_TYPED_ID_UNREPRESENTABLE" end
+    if #id > MAX_BUILD_ID_BYTES then return nil, "PROTOCOL7_ID_WIDTH_UNREPRESENTABLE" end
+    if not Identity.ValidUtf8(id) then return nil, "PROTOCOL7_ID_UNREPRESENTABLE" end
+    return id
 end
 
 local function OrdinaryComplete(record)
@@ -681,10 +723,10 @@ if not (CompatibilityFactory
     and type(CompatibilityFactory.New) == "function") then
     error("Nexus SyncCompatibility must load before Sync")
 end
+-- Only a current-session tombstone published by this client's own
+-- transaction carries local delete authority; persisted fields never do.
 local function LocalOwnsVerifiedTomb(tomb)
-    local localOwner = CurrentOwnerKey()
-    return localOwner ~= nil
-        and Identity.VerifiedOwnerKey(tomb) == localOwner
+    return type(tomb) == "table" and tomb.localOwned == true
 end
 
 Compatibility = CompatibilityFactory.New({
@@ -701,7 +743,7 @@ Compatibility = CompatibilityFactory.New({
     getDpsCapture=function()
         return Nexus and Nexus.DpsCapture
     end,
-    getTombstones=function() return tombstones end,
+    getTombstones=TombstoneMap,
     localOwnsTomb=LocalOwnsVerifiedTomb,
     relayEligible=function(build) return RelayEligible(build) end,
     myName=MyName,
@@ -737,8 +779,14 @@ local CurrentBuildHash = Compatibility.CurrentBuildHash
 local CurrentDpsHash = Compatibility.CurrentDpsHash
 
 local function BucketContainsTombstone(bucket)
-    for id in pairs(tombstones or {}) do
+    local catalog = Catalog()
+    if not (catalog and type(catalog.TombstoneNext) == "function") then return false end
+    local cursor
+    for _ = 1, 2048 do
+        local id, _, done = catalog.TombstoneNext(cursor)
+        if done or id == nil then break end
         if BuildBucket(id) == bucket then return true end
+        cursor = id
     end
     return false
 end
@@ -1147,6 +1195,8 @@ RelayEligible = function(build, source)
 end
 
 function Responder.PrepareSummary(build, responseContext)
+    local wireId, wireWhy = WireBuildId(build and build.id)
+    if not wireId then return nil, wireWhy end
     if not RelayEligible(build) then return nil, "relay unauthorized" end
     return Compatibility.PrepareSummary(build, responseContext)
 end
@@ -1355,58 +1405,30 @@ function Operation.DeleteMetadata(id, tomb, status)
     }
 end
 
-local function MarkDeletePending(id, tomb, status)
+-- Pending deletes are a session-only fixed-shape map. A durable `pending`
+-- field on a tombstone is opaque evidence and grants no retry authority.
+local function MarkDeletePending(id, _, status)
     pendingDeletes[id] = status or true
-    if type(tomb) == "table" then tomb.pending = true end
 end
 
-local function ClearPendingDelete(id, tomb)
+local function ClearPendingDelete(id)
     pendingDeletes[id] = nil
-    if type(tomb) == "table" and tombstones[id] == tomb then
-        tomb.pending = nil
-    end
 end
 
 PendingDeleteCount = function()
     local count = 0
     for id in pairs(pendingDeletes) do
-        local tomb = tombstones[id]
-        if LocalOwnsTomb(tomb) then
+        if LocalOwnsTomb(CatalogTombstoneView(id)) then
             count = count + 1
         end
     end
     return count
 end
 
-function Operation.DiscoverPendingDeletes(budget)
-    if Operation.deleteDiscoveryComplete then return 0 end
-    local available = MAX_RECOVERY_QUEUE - PendingDeleteCount()
-    if available <= 0 then return 0 end
-    -- Lua 5.1 rejects next(table, key) when the retained key was removed
-    -- between bounded discovery slices. Restarting from the table head is
-    -- safe and bounded; already admitted IDs are skipped below.
-    if Operation.deleteCursor ~= nil
-        and tombstones[Operation.deleteCursor] == nil then
-        Operation.deleteCursor = nil
-    end
-    local inspected, admitted = 0, 0
-    budget = math.max(1, math.floor(tonumber(budget) or 1))
-    while inspected < budget and available > 0 do
-        local id, tomb = next(tombstones, Operation.deleteCursor)
-        Operation.deleteCursor = id
-        if id == nil then
-            Operation.deleteDiscoveryComplete = true
-            break
-        end
-        inspected = inspected + 1
-        if type(tomb) == "table" and tomb.pending
-            and pendingDeletes[id] == nil
-            and LocalOwnsTomb(tomb) then
-            pendingDeletes[id] = true
-            admitted, available = admitted + 1, available - 1
-        end
-    end
-    return admitted
+function Operation.DiscoverPendingDeletes()
+    -- Persisted pending markers never restore session delete work.
+    Operation.deleteDiscoveryComplete = true
+    return 0
 end
 
 local function PumpPendingDeletes(elapsed)
@@ -1418,7 +1440,7 @@ local function PumpPendingDeletes(elapsed)
     local current = Now()
     local selectedId, selectedTomb, selectedStatus
     for id, status in pairs(pendingDeletes) do
-        local tomb = tombstones[id]
+        local tomb = CatalogTombstoneView(id)
         if not tomb then
             if type(status) == "table" then
                 Operation.Transition(status, "rejected", "missing tombstone")
@@ -1542,15 +1564,20 @@ local function StoreSummary(data, transportSender, context)
         Responder.NoteContextOutcome(context, "duplicate", "stale")
         return true, false
     end
-    local tomb = tombstones[id]
-    if tomb and (not TombOwnerKey(tomb)
-        or TombOwnerKey(tomb) ~= Identity.CanonicalOwnerKey(data.o)) then
-        LogEvent("RX", "REJECT summary resurrection of '%s': tombstone belongs to %s",
-            tostring(id), tostring(TombAuthor(tomb)))
-        Responder.NoteContextOutcome(context, "rejected", "ownership")
-        return false, false
-    end
-    if tomb and stamp <= TombStamp(tomb) then
+    local summaryReservation = CatalogTombstoneView(id)
+    if summaryReservation then
+        -- Every tombstone reservation denies inbound summaries for its exact
+        -- typed ID; a newer stamp or a matching owner never resurrects it. A
+        -- foreign owner claim is reported as a refusal, not a benign skip.
+        local reserved = Identity.CanonicalOwnerKey(summaryReservation.ownerKey)
+        local incoming = Identity.CanonicalOwnerKey(data.o or data.ownerKey)
+        if reserved and (incoming ~= reserved
+            or not Identity.TransportOwns(reserved, transportSender)) then
+            LogEvent("RX", "REJECT summary resurrection of '%s': tombstone belongs to %s",
+                tostring(id), tostring(TombAuthor(summaryReservation)))
+            Responder.NoteContextOutcome(context, "rejected", "ownership")
+            return false, false
+        end
         LogEvent("RX","skip summary '%s': tombstoned", tostring(data.t))
         Responder.NoteContextOutcome(context, "rejected", "tombstone")
         return true, false
@@ -1623,8 +1650,8 @@ local function StoreSummary(data, transportSender, context)
         linkHash=newLinkHash, needsFullBuild=linkChanged or nil,
         ownerVerified=true,
     }
-    CatalogClearTombstone(id)
-    local stored, storedAs = CatalogPut(record)
+    local stored, storedAs = CatalogPut(record, {source="remote",
+        sender=transportSender})
     if stored == false then
         stats.storageRejected = (stats.storageRejected or 0) + 1
         Responder.NoteContextOutcome(context, "rejected", "storage")
@@ -1668,6 +1695,8 @@ function Sync.RequestLoadout(buildId)
     -- Menu clicks never transmit directly. If this is a summary inherited from
     -- an older Nexus peer, queue one slow background recovery request instead.
     -- Current peers send complete builds during normal reconciliation.
+    local wireId, why = WireBuildId(buildId)
+    if not wireId then return false, why end
     local queued = Session.QueueLegacyRecovery(buildId)
     return false, queued and "queued for background recovery" or "awaiting sync"
 end
@@ -1683,7 +1712,9 @@ end
 -- can ever exceed the hard limit.
 function Responder.ChunkBuildMessages(buildId, lastMod, data, responseMode,
         responseContext)
-    if not ValidIdentifier(tostring(buildId or ""), MAX_BUILD_ID_BYTES)
+    local wireId, wireWhy = WireBuildId(buildId)
+    if not wireId then return nil, wireWhy end
+    if not ValidIdentifier(buildId, MAX_BUILD_ID_BYTES)
         or not ValidIntegerText(tostring(lastMod or ""), 0)
         or type(data) ~= "string" or data == "" or #data > MAX_BYTES then
         return nil, "invalid build envelope"
@@ -1744,8 +1775,10 @@ function Responder.PrepareBuild(build, responseMode, responseContext, source)
     if not build or type(build.echoes) ~= "table" or #build.echoes == 0 then
         return nil, "no echoes"
     end
-    if not ValidIdentifier(tostring(build.id or ""), MAX_BUILD_ID_BYTES) then
-        return nil, "invalid build id"
+    local wireId, wireWhy = WireBuildId(build.id)
+    if not wireId then return nil, wireWhy end
+    if not ValidIdentifier(build.id, MAX_BUILD_ID_BYTES) then
+        return nil, "PROTOCOL7_ID_UNREPRESENTABLE"
     end
     if responseMode then
         Reconciler.NoteStat("buildSerializations", 1)
@@ -1842,8 +1875,10 @@ function Sync.BroadcastBuild(build)
     if not build or type(build.echoes) ~= "table" or #build.echoes == 0 then
         return false, "no echoes"
     end
-    if not ValidIdentifier(tostring(build.id or ""), MAX_BUILD_ID_BYTES) then
-        return false, "invalid build id"
+    local wireId, wireWhy = WireBuildId(build.id)
+    if not wireId then return false, wireWhy end
+    if not ValidIdentifier(build.id, MAX_BUILD_ID_BYTES) then
+        return false, "PROTOCOL7_ID_UNREPRESENTABLE"
     end
     if not RelayEligible(build) then return false, "relay unauthorized" end
     local buildKey = tostring(build.id or build.fingerprintHash or build.fingerprint or "")
@@ -1871,11 +1906,20 @@ function Sync.BroadcastMine()
     end
     local sent = {}   -- track by id to avoid double-sending
     local n = 0
-    -- True mesh: redistribute every valid build held locally.
-    for _, b in pairs(CatalogAll()) do
-        if not (b.legacyRecovered == true and b.ownerVerified ~= true)
-            and BroadcastSummary(b) then n=n+1 end
-        sent[b.id] = true
+    -- True mesh: redistribute every valid build held locally through the
+    -- generation-bound record cursor; no complete collection is copied.
+    local catalog = Catalog()
+    local cursor = catalog and type(catalog.BeginRecordCursor) == "function"
+        and catalog.BeginRecordCursor() or nil
+    while cursor do
+        local page, err = catalog.RecordCursorNext(cursor)
+        if err or not page or page.done then break end
+        local b = page.record
+        if type(b) == "table" then
+            if not (b.legacyRecovered == true and b.ownerVerified ~= true)
+                and BroadcastSummary(b) then n=n+1 end
+            sent[b.id] = true
+        end
     end
     -- Also include hot builds not already sent (covers: posted while no
     -- peer was listening, then peer syncs within HOT_WINDOW)
@@ -2471,9 +2515,12 @@ function Sync.BroadcastDps(buildId, player, dps, level, category)
 end
 
 function Sync.BroadcastDelete(build)
-    if not build or not ValidIdentifier(tostring(build.id or ""),
-        MAX_BUILD_ID_BYTES) then return false end
-    local id = tostring(build.id)
+    if not build then return false end
+    local id, wireWhy = WireBuildId(build.id)
+    if not id then return false, wireWhy end
+    if not ValidIdentifier(id, MAX_BUILD_ID_BYTES) then
+        return false, "PROTOCOL7_ID_UNREPRESENTABLE"
+    end
     local author = tostring(build.author or MyName())
     local localOwner = CurrentOwnerKey()
     if Identity.SavedMirrorKind(build) ~= "ordinary"
@@ -2481,7 +2528,7 @@ function Sync.BroadcastDelete(build)
         or not Identity.LocalOwnsRecord(build, localOwner) then
         return false
     end
-    local existing = tombstones[id]
+    local existing = CatalogTombstoneView(id)
     local existingVersion = existing and (tostring(TombStamp(existing))
         .. ":" .. TombAuthor(existing)) or ""
     local existingKey = existing and Operation.Key("delete", id,
@@ -2505,7 +2552,7 @@ function Sync.BroadcastDelete(build)
             stamp=tonumber((time and time()) or 0) or 0,author=author,
             ownerKey=localOwner,ownerVerified=true,
         }
-    local tombStored, tombStoreWhy = CatalogSetTombstone(id, tomb)
+    local tombStored, tombStoreWhy = CatalogSetTombstone(id, tomb, {source="local"})
     if tombStored == false then
         stats.storageRejected = (stats.storageRejected or 0) + 1
         local refused = Operation.NewDelete(id, tomb)
@@ -2515,7 +2562,7 @@ function Sync.BroadcastDelete(build)
         return false, tombStoreWhy or "tombstone storage refused",
             Operation.Copy(refused)
     end
-    tombstones[id] = tomb
+    tomb = CatalogTombstoneView(id) or tomb
     hotBuilds[id] = nil
     RequestRetention("local delete stored")
     local status = Operation.NewDelete(id, tomb)
@@ -2561,13 +2608,18 @@ local function ShouldStore(id, lastMod, author, ownerKey, transportSender)
     if not AllowsRemoteRevision(author, lastMod, id) then
         return false, "retention floor"
     end
-    local tomb = tombstones[id]
-    if tomb and (not TombOwnerKey(tomb)
-        or TombOwnerKey(tomb) ~= Identity.CanonicalOwnerKey(ownerKey)
-        or not Identity.TransportOwns(TombOwnerKey(tomb), transportSender)) then
-        return false, "tombstone owner"
-    end
-    if tomb and (tonumber(lastMod) or 0) <= TombStamp(tomb) then
+    -- Any tombstone reservation denies every inbound row for its typed ID.
+    -- Protocol 7 supplies no order proof, so remote resurrection never
+    -- succeeds; only an explicit trusted local claim can readmit a row. A
+    -- foreign owner claim is reported as a refusal, not a benign duplicate.
+    local reservation = CatalogTombstoneView(id)
+    if reservation then
+        local reserved = Identity.CanonicalOwnerKey(reservation.ownerKey)
+        local incoming = Identity.CanonicalOwnerKey(ownerKey)
+        if reserved and (incoming ~= reserved
+            or not Identity.TransportOwns(reserved, transportSender)) then
+            return false, "tombstone owner"
+        end
         return false, "deleted"
     end
     local existing = CatalogGet(id)
@@ -2614,8 +2666,8 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
         ownerVerified=ownerVerified and true or false,
         relaySender=not ownerVerified and relaySender or nil,
     }
-    CatalogClearTombstone(payload.id)
-    local stored, storedAs = CatalogPut(record)
+    local stored, storedAs = CatalogPut(record, {source="remote",
+        sender=relaySender})
     if stored == false then return false, storedAs end
     if storedAs == "baseline" then
         stats.baselineSkipped = (stats.baselineSkipped or 0) + 1
@@ -2713,7 +2765,7 @@ local function CommitReceivedBuild(payload, transportSender, context)
             Responder.NoteContextOutcome(context, "rejected", "tombstone")
         elseif why == "tombstone owner" then
             LogEvent("RX", "REJECT resurrection of '%s': tombstone belongs to %s",
-                tostring(payload.id), tostring(TombAuthor(tombstones[payload.id])))
+                tostring(payload.id), tostring(TombAuthor(CatalogTombstoneView(payload.id))))
             Responder.NoteContextOutcome(context, "rejected", "ownership")
         else
             stats.duplicatesSkipped = stats.duplicatesSkipped + 1
@@ -2864,19 +2916,29 @@ local function HandleDelete(sender, buildId, stamp, originAuthor, context)
             tostring(buildId), tostring(sender))
         return false
     end
-    local prior = tombstones[buildId]
-    if prior and (not TombOwnerKey(prior)
-        or not Identity.TransportOwns(TombOwnerKey(prior), sender)) then
+    local prior = CatalogTombstoneView(buildId)
+    if prior then
+        -- An exact replay of the reservation evidence is an idempotent no-op;
+        -- every unequal replay is a conflict that changes nothing.
+        if TombStamp(prior) == (tonumber(stamp) or 0)
+            and TombAuthor(prior) == author then
+            Responder.NoteContextOutcome(context, "duplicate", "stale")
+            return true
+        end
         Responder.NoteContextOutcome(context, "rejected", "ownership")
-        LogEvent("RX", "REJECT tombstone claim for '%s' from %s",
+        LogEvent("RX", "REJECT tombstone conflict for '%s' from %s",
             tostring(buildId), tostring(sender))
         return false
     end
-    if prior and TombStamp(prior) >= (tonumber(stamp) or 0) then
-        Responder.NoteContextOutcome(context, "duplicate", "stale")
-        return true
-    end
     if not existing then
+        local refusal = CatalogRootRefusal()
+        if refusal then
+            stats.storageRejected = (stats.storageRejected or 0) + 1
+            Responder.NoteContextOutcome(context, "rejected", "storage")
+            LogEvent("RX", "REJECT delete of '%s': local storage refused (%s)",
+                tostring(buildId), refusal)
+            return false
+        end
         Responder.NoteContextOutcome(context, "rejected", "tombstone")
         LogEvent("RX", "REJECT unprovable tombstone for unknown build '%s'",
             tostring(buildId))
@@ -2911,7 +2973,8 @@ local function HandleDelete(sender, buildId, stamp, originAuthor, context)
         ownerKey=existingOwner,
         ownerVerified=true,
     }
-    local tombStored = CatalogSetTombstone(buildId, tomb)
+    local tombStored = CatalogSetTombstone(buildId, tomb,
+        {source="remote", sender=sender})
     if tombStored == false then
         stats.storageRejected = (stats.storageRejected or 0) + 1
         Responder.NoteContextOutcome(context, "rejected", "storage")
@@ -2919,7 +2982,6 @@ local function HandleDelete(sender, buildId, stamp, originAuthor, context)
             tostring(existing.title))
         return false
     end
-    tombstones[buildId] = tomb
     seenRemoteIds[buildId] = nil
     hotBuilds[buildId] = nil
     Session.ClearRequestedLoadout(buildId)
@@ -3279,7 +3341,10 @@ end
 ------------------------------------------------------------------------
 
 function Sync.TombstoneCount()
-    local n = 0; for _ in pairs(tombstones) do n=n+1 end; return n
+    local catalog = Catalog()
+    if not (catalog and type(catalog.Status) == "function") then return 0 end
+    local status = catalog.Status()
+    return type(status) == "table" and tonumber(status.tombstoneCount) or 0
 end
 
 function Sync.OnUpdate(elapsed)
@@ -3367,26 +3432,11 @@ function Sync.Init(codec, adapter)
     if Catalog() and Catalog().Init then
         Catalog().Init(NexusDB, Nexus.BundledBuilds)
     end
-    local catalogStatus = Catalog() and Catalog().Status
-        and Catalog().Status() or nil
-    if type(catalogStatus) == "table"
-        and catalogStatus.readOnly == true then
-        -- A newer catalog schema owns the complete SavedVariables shape,
-        -- including any tombstone table already present. Bind an empty runtime
-        -- view so older recovery logic can neither normalize nor replay it.
-        tombstones = {}
-    elseif type(NexusDB.syncTombstones) == "table" then
-        tombstones = NexusDB.syncTombstones
-    else
-        NexusDB.syncTombstones = {}
-        tombstones = NexusDB.syncTombstones
-    end
+    -- Tombstone authority is served only by the catalog's published root;
+    -- Sync never binds the raw SavedVariables tombstone table again.
+    tombstones = {}
     Operation.deleteCursor = nil
-    Operation.deleteDiscoveryComplete = false
-    -- Restore only bounded admission markers. Additional persisted pending
-    -- tombstones are discovered resumably as capacity opens; their uncapped
-    -- storage and unknown fields remain untouched.
-    Operation.DiscoverPendingDeletes(MAX_RECOVERY_QUEUE)
+    Operation.deleteDiscoveryComplete = true
     local scheduler = Nexus and Nexus.Scheduler
     if scheduler and scheduler.IsInitialized and scheduler.IsInitialized()
         and type(scheduler.Every) == "function" then

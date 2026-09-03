@@ -26,8 +26,33 @@ Nexus.Store.Init()
 Nexus.Store.Init()
 Nexus.CommunityBuilds.Init({}, {})
 Nexus.Sync.Init(Nexus.Codec, {})
+-- Complete collections are read through the generation-bound summary cursor.
+local function Summaries()
+    local out = {}
+    local token = assert(Nexus.BuildCatalog.BeginSummaryCursor())
+    for _ = 1, 4096 do
+        local summary, done, err = Nexus.BuildCatalog.SummaryCursorNext(token)
+        assert(err == nil, tostring(err))
+        if summary then out[summary.id] = summary end
+        if done then break end
+    end
+    return out
+end
+-- Shipped bundled rows above the issue #22 envelope (79 ordinary, 6 locked,
+-- 85 total copies) are quarantined deny-only; only rows inside it count.
+local function AdmissibleBundledCount()
+    local limits = Nexus.LoadoutEvidence.SemanticLimits()
+    local count = 0
+    for _, build in pairs(Nexus.BundledBuilds.builds) do
+        local verdict = Nexus.LoadoutEvidence.SemanticEnvelope(build.echoes)
+        if verdict.valid and verdict.ordinary <= limits.ordinary then
+            count = count + 1
+        end
+    end
+    return count
+end
 local mageBuilds, fingerprintCounts = {}, {}
-for _, build in pairs(Nexus.BuildCatalog.Summaries()) do
+for _, build in pairs(Summaries()) do
     if build.class == "MAGE" and type(build.fingerprint) == "string" then
         mageBuilds[#mageBuilds + 1] = build
         fingerprintCounts[build.fingerprint] =
@@ -71,7 +96,8 @@ assert(login.initCalls == 5 and login.rebinds == 1
     string.format("login rebuilt/copied catalog: calls=%s rebinds=%s fast=%s snapshots=%s",
         tostring(login.initCalls), tostring(login.rebinds),
         tostring(login.fastPathHits), tostring(login.revisionSnapshots)))
-assert(Catalog.Count() == Nexus.BundledBuilds.generation.included,
+assert(Catalog.Count() == AdmissibleBundledCount()
+    and Catalog.Status().bundledCount == Nexus.BundledBuilds.generation.included,
     "startup fast path changed the merged bundled catalog")
 
 -- Every later PLAYER_ENTERING_WORLD reinitializes Sync and DPS. Those calls
@@ -99,7 +125,8 @@ assert(Catalog.IsAuthor(knownAuthor)
     and not Catalog.IsAuthor("DefinitelyNotABundledAuthor"),
     "bounded author lookup returned the wrong membership")
 for _ = 1, 100 do assert(Catalog.IsAuthor(knownAuthor)) end
-assert(Catalog.DebugStats().authorIndexRebuilds == beforeAuthor + 1,
+-- The author index is part of the published root; lookups never rebuild it.
+assert(Catalog.DebugStats().authorIndexRebuilds == beforeAuthor,
     "repeated author lookups rebuilt the catalog author index")
 
 -- The first automatic Sync pass warms both compatibility hashes. Hashing may
@@ -126,7 +153,7 @@ for _ = 1, 20000 do
 end
 assert(type(rows) == "table" and #rows > 0
     and #rows > 0 and #rows <= 20
-    and projection.total == Nexus.BundledBuilds.generation.included
+    and projection.total == AdmissibleBundledCount()
     and rows[1].echoes == nil and rows[1].loadoutAvailable == true,
     string.format("Community projection materialized full bundled Echo arrays: rows=%s total=%s echoes=%s available=%s",
         tostring(type(rows)=="table" and #rows or nil),

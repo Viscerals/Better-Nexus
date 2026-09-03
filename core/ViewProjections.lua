@@ -341,12 +341,30 @@ local function BuildProjection(filters)
     -- never interpret that state as an all-class request.
     if filters.classFilter == "" then return {}, summary end
 
-    local reader = catalog and (catalog.Summaries or catalog.All)
-    if type(reader) ~= "function" then
-        error("BuildCatalog projection reader unavailable")
-    end
     counters.builds.catalogWalks = counters.builds.catalogWalks + 1
-    local all = reader()
+    local all
+    if catalog and type(catalog.BeginSummaryCursor) == "function"
+        and type(catalog.SummaryCursorNext) == "function" then
+        -- Lightweight summaries are walked through the generation-bound
+        -- summary cursor; a stale cursor yields an empty projection rather
+        -- than a partial root-owned table.
+        all = {}
+        local token = catalog.BeginSummaryCursor()
+        if token then
+            for _ = 1, 4096 do
+                local summary, done, err = catalog.SummaryCursorNext(token)
+                if err then all = {}; break end
+                if type(summary) == "table" then all[summary.id] = summary end
+                if done then break end
+            end
+        end
+    else
+        local reader = catalog and (catalog.Summaries or catalog.All)
+        if type(reader) ~= "function" then
+            error("BuildCatalog projection reader unavailable")
+        end
+        all = reader()
+    end
     if type(all) ~= "table" then error("BuildCatalog projection reader returned invalid data") end
     local eligibility = CommunityEligibility()
     local out = {}

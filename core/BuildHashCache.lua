@@ -101,16 +101,38 @@ local function RebuildBucket(mode, bucket)
     state.stats[key] = state.stats[key] + 1
 end
 
+-- Walk lightweight generation-bound summaries and tombstone views; the
+-- cache never copies a complete root-owned collection or an Echo array.
+local function CollectRows(catalog)
+    if not (catalog and type(catalog.BeginSummaryCursor) == "function"
+        and type(catalog.SummaryCursorNext) == "function"
+        and type(catalog.TombstoneNext) == "function") then return nil end
+    local delta, legacy, tombstones = {}, {}, {}
+    local token = catalog.BeginSummaryCursor()
+    if not token then return nil end
+    for _ = 1, 4096 do
+        local summary, done, err = catalog.SummaryCursorNext(token)
+        if err then return nil end
+        if type(summary) == "table" then
+            legacy[summary.id] = summary
+            if summary.syncDelta then delta[summary.id] = summary end
+        end
+        if done then break end
+    end
+    local cursor
+    for _ = 1, 4096 do
+        local id, view, done = catalog.TombstoneNext(cursor)
+        if done or id == nil then break end
+        tombstones[id] = view
+        cursor = id
+    end
+    return delta, legacy, tombstones
+end
+
 local function Warm()
     local catalog = Catalog()
-    if not (catalog and catalog.DeltaSnapshot and catalog.All
-        and catalog.TombstoneSnapshot) then return false end
-    local deltaReader = catalog.DeltaSummaries or catalog.DeltaSnapshot
-    local legacyReader = catalog.Summaries or catalog.All
-    local okDelta, delta = pcall(deltaReader)
-    local okLegacy, legacy = pcall(legacyReader)
-    local okTombs, tombstones = pcall(catalog.TombstoneSnapshot)
-    if not okDelta or not okLegacy or not okTombs then return false end
+    local ok, delta, legacy, tombstones = pcall(CollectRows, catalog)
+    if not ok or not delta then return false end
 
     local deltaEntries, legacyEntries = NewBuckets(), NewBuckets()
     state.stats.collectionWalks = state.stats.collectionWalks + 2

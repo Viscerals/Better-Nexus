@@ -180,6 +180,7 @@ NexusDB.communityBuilds = {
         echoes={{spellId=200102, quality=3, stacks=1}},
     },
 }
+H.RebindCatalog()
 limits = Sync.WorkState()
 for i = 1, limits.maxOutboundQueue - 1 do
     assert(Sync.BroadcastDps("bucket-fill-" .. i, "Alice", 4000 + i,
@@ -270,25 +271,34 @@ assert(invalidWire == 0,
 -- pending and use the first capacity that becomes available. Otherwise the
 -- local row is gone before online peers receive its tombstone.
 NexusDB.communityBuilds = {}
+H.RebindCatalog()
 NexusDB.syncTombstones = {}
+H.RebindCatalog()
 Sync.Init(Nexus.Codec, {})
 limits = Sync.WorkState()
 for i = 1, limits.maxOutboundQueue do
     assert(Sync.BroadcastDps("delete-fill-" .. i, "Alice", 5000 + i,
         80, "dummy"), "failed to fill delete backpressure queue")
 end
-local immediateDelete, deleteWhy = Sync.BroadcastDelete({
+-- A delete requires an admitted row: publish it through the catalog owner
+-- first, then delete the admitted record.
+assert(Nexus.BuildCatalog.Put({
     id="delete-backpressure", title="Delete Backpressure", author="Alice",
     ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
     lastModified=30, postedAt=30,
     echoes={{spellId=200301, quality=3, stacks=1}},
-})
+}, {source="local"}), "delete backpressure fixture was not admitted")
+local immediateDelete, deleteWhy = Sync.BroadcastDelete(
+    Nexus.BuildCatalog.Get("delete-backpressure"))
 assert(not immediateDelete and deleteWhy == "queued for retry",
     "full-queue delete was not retained for retry")
 assert(Sync.WorkState().pendingDeletes == 1,
     "retained delete was not exposed as pending work")
-assert(NexusDB.syncTombstones["delete-backpressure"].pending == true,
-    "retained delete was not persisted across reloads")
+-- Pending delete state is session-only: a durable pending marker would be
+-- opaque evidence and grant no retry authority.
+assert(NexusDB.syncTombstones["delete-backpressure"] ~= nil
+    and NexusDB.syncTombstones["delete-backpressure"].pending == nil,
+    "a durable pending marker was written")
 H.joinedChannels[Sync.ChannelName()] = 7
 clock = clock + 1.2
 Sync.OnUpdate(1.2) -- observe the full queue, then drain one packet
@@ -319,13 +329,15 @@ while Sync.WorkState().sending < limits.maxOutboundQueue do
         .. tostring(fillWhy) .. " depth=" .. tostring(Sync.WorkState().sending))
 end
 local expiredBefore = Sync.Stats().operationExpired or 0
-local expiryOk, expiryWhy = Sync.BroadcastDelete({
+assert(Nexus.BuildCatalog.Put({
     id="delete-continuous-saturation", title="Delete Continuous Saturation",
     author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,
     realm="ebonhold",isMine=true,
     lastModified=31, postedAt=31,
     echoes={{spellId=200302, quality=3, stacks=1}},
-})
+}, {source="local"}), "saturation delete fixture was not admitted")
+local expiryOk, expiryWhy = Sync.BroadcastDelete(
+    Nexus.BuildCatalog.Get("delete-continuous-saturation"))
 assert(not expiryOk and expiryWhy == "queued for retry",
     "continuously saturated delete did not enter bounded retry ownership")
 local expiryStarted = clock
@@ -375,54 +387,28 @@ for index = 1, recoveryCap + persistedExtra do
         ownerKey="alice@ebonhold",ownerVerified=true,
     }
 end
-local discoveryTable = NexusDB.syncTombstones
-local realNext = next
-local capturedCursor
-next = function(target, key)
-    local found, value = realNext(target, key)
-    if target == discoveryTable and found ~= nil then capturedCursor = found end
-    return found, value
-end
-local initOk, initError = pcall(Sync.Init, Nexus.Codec, {})
-next = realNext
-assert(initOk, "persisted delete discovery setup failed: "
-    .. tostring(initError))
-assert(capturedCursor and discoveryTable[capturedCursor]
-        and Sync.WorkState().pendingDeletes == recoveryCap
-        and Sync.WorkState().pendingDeleteDiscovery == 1,
-    "persisted delete discovery did not stop at its public fixed bound")
-assert(Nexus.BuildCatalog.ClearTombstone(capturedCursor),
-    "persisted delete cursor fixture could not remove the sliced key")
-H.joinedChannels[Sync.ChannelName()] = 7
-local discoveryOk, discoveryError = pcall(function()
-    local budget = (recoveryCap + persistedExtra) * 2
-    for _ = 1, budget do
-        clock = clock + 1.2
-        Sync.OnUpdate(1.2)
-        local work = Sync.WorkState()
-        if work.pendingDeletes == 0
-            and work.pendingDeleteDiscovery == 0 then return end
-    end
-end)
-assert(discoveryOk, "removed persisted delete cursor broke Lua 5.1 discovery: "
-    .. tostring(discoveryError))
-local pendingPersisted = 0
-for _, tomb in pairs(NexusDB.syncTombstones) do
-    if type(tomb) == "table" and tomb.pending then
-        pendingPersisted = pendingPersisted + 1
-    end
-end
+local persistedBytes = Nexus.Codec.JSONEncode(NexusDB.syncTombstones)
+Sync.Init(Nexus.Codec, {})
+-- A durable  field is opaque evidence. It restores no session
+-- delete work, is never rewritten, and its typed slot stays deny-only.
 local discoveryWork = Sync.WorkState()
 assert(discoveryWork.pendingDeletes == 0
         and discoveryWork.pendingDeleteDiscovery == 0
-        and pendingPersisted == 0,
-    "bounded persisted delete discovery stranded work after cursor removal")
+        and Nexus.Codec.JSONEncode(NexusDB.syncTombstones) == persistedBytes,
+    "persisted pending markers restored session delete authority")
+local sampleId = string.format("persisted-delete-%04d", 1)
+local sampleView = Nexus.BuildCatalog.TombstoneState(sampleId)
+assert(sampleView.state == "OPAQUE_BLOCK_ALL" and sampleView.localOwned == false
+        and sampleView.pending == nil
+        and Nexus.BuildCatalog.AuthorityState(sampleId).occupancy == "BLOCKED",
+    "persisted pending marker gained tombstone or delete authority")
 
 -- DPS bucket broadcasters report partial queue admission separately from the
 -- number of records queued. A partial result must retain the pending bucket
 -- for retry instead of treating it as complete.
 Sync.Init(Nexus.Codec, {})
 NexusDB.communityBuilds = {}
+H.RebindCatalog()
 local partialCalls = 0
 Nexus.DpsCapture = {
     GetSyncHash = function() return "abc,0,0,0,0,0,0,0" end,

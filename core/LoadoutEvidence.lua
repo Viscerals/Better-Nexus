@@ -808,3 +808,45 @@ end
 function Evidence.SchemaVersion()
     return SCHEMA_VERSION
 end
+
+-- Package B / issue #22: one canonical owner for the Project Ebonhold loadout
+-- envelope. Parser/resource ceilings (MAX_ENTRIES, MAX_TOTAL_STACKS) stay a
+-- separate contract; these limits describe a valid game loadout and are
+-- reused by every trust boundary instead of duplicating literals.
+local SEMANTIC_LIMITS = {ordinary=79, locked=6, total=85}
+
+function Evidence.SemanticLimits()
+    return {ordinary=SEMANTIC_LIMITS.ordinary, locked=SEMANTIC_LIMITS.locked,
+        total=SEMANTIC_LIMITS.total}
+end
+
+-- Count stack copies by role. Rows are `{spellId, quality, stacks, locked}`
+-- shapes or `{count}` aliases; every stack copy counts once, so duplicate
+-- segmentation cannot change the total. Returns a fixed-shape verdict.
+function Evidence.SemanticEnvelope(rows, options)
+    options = type(options) == "table" and options or {}
+    local ordinary, locked, total = 0, 0, 0
+    for _, row in ipairs(type(rows) == "table" and rows or {}) do
+        if type(row) ~= "table" then
+            return {valid=false, reason="malformed", ordinary=ordinary,
+                locked=locked, total=total}
+        end
+        local stacks = row.stacks
+        if stacks == nil then stacks = row.count end
+        if stacks == nil then stacks = row.stack end
+        if stacks == nil then stacks = 1 end
+        stacks = FiniteInteger(stacks, 1, MAX_TOTAL_STACKS)
+        if not stacks then
+            return {valid=false, reason="malformed", ordinary=ordinary,
+                locked=locked, total=total}
+        end
+        local isLocked = options.forceLocked == true
+            or row.locked == true or row.locked == 1
+        if isLocked then locked = locked + stacks else ordinary = ordinary + stacks end
+        total = total + stacks
+    end
+    local valid = ordinary <= SEMANTIC_LIMITS.ordinary
+        and locked <= SEMANTIC_LIMITS.locked and total <= SEMANTIC_LIMITS.total
+    return {valid=valid, reason=valid and "valid" or "SEMANTIC_ENVELOPE",
+        ordinary=ordinary, locked=locked, total=total}
+end

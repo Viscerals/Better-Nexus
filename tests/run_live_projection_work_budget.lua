@@ -399,7 +399,12 @@ print(string.format(
     maxima.comparisons,tostring(worst.comparisons),maxima.joins,
     maxima.copies,maxima.publications,maxima.binds))
 
-assert(Nexus.BuildCatalog.Count() == 1000
+-- Row 979 carries a 4,096-byte author: malformed known evidence that is
+-- preserved raw and reserved deny-only, so 999 rows are admitted.
+local hostileId = string.format("live-budget-%04d", 979)
+assert(Nexus.BuildCatalog.Count() == 999
+    and Nexus.BuildCatalog.AuthorityState(hostileId).state == "INVALIDATED"
+    and #NexusDB.communityBuilds[hostileId].author == 4096
     and Nexus.DpsCapture.IdentityLookupStats().indexedRows == 1200,
     "large fixture capped or lost catalog/DPS source data")
 assert(maxima.sourceRows <= 25,
@@ -448,7 +453,9 @@ assert(communityVirtual.results <= 20 and communityVirtual.active <= 7
     and leaderboardVirtual.active <= 7,
     "bounded construction lost the public Community limit or fixed row pools")
 assert(communityStatus.bundledCount == 0
-    and communityStatus.overlayCount == 1000
+    -- The hostile row is reserved deny-only, so it is neither represented
+    -- overlay data nor publicly available.
+    and communityStatus.overlayCount == 999
     and communityStatus.availableCount == 999
     and communityStatus.filterMatchedCount > 0
     and communityStatus.filterMatchedCount <= communityStatus.availableCount

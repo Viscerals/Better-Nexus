@@ -41,6 +41,7 @@ for index = 1, 500 do
     }
 end
 
+local tombstoneOrder, tombstonePosition
 local counts = {delta=0, all=0, tombstones=0, next=0}
 local catalog = {
     CatalogVersion=function() return catalogVersion end,
@@ -56,6 +57,55 @@ local catalog = {
         local id = orderedIds[index]
         if not id then return nil, nil, true end
         return id, delta[id], false
+    end,
+    -- Generation-bound cursor seams: the compatibility owner walks bounded
+    -- pages instead of copying a complete root-owned collection.
+    BeginRecordCursor=function()
+        counts.all = counts.all + 1
+        local keys = {}
+        for id in pairs(all) do keys[#keys + 1] = id end
+        table.sort(keys)
+        return {keys=keys, index=0}
+    end,
+    RecordCursorNext=function(token)
+        token.index = token.index + 1
+        local id = token.keys[token.index]
+        if not id then return {done=true} end
+        return {done=false, id=id, record=all[id]}
+    end,
+    BeginDeltaCursor=function()
+        counts.delta = counts.delta + 1
+        local keys = {}
+        for id in pairs(delta) do keys[#keys + 1] = id end
+        table.sort(keys)
+        return {keys=keys, index=0}
+    end,
+    DeltaCursorNext=function(token)
+        token.index = token.index + 1
+        local id = token.keys[token.index]
+        if not id then return {done=true} end
+        return {done=false, id=id, record=delta[id]}
+    end,
+    TombstoneNext=function(cursor)
+        if cursor == nil then
+            counts.tombstones = counts.tombstones + 1
+            tombstoneOrder = {}
+            for id in pairs(tombstones) do
+                tombstoneOrder[#tombstoneOrder + 1] = id
+            end
+            table.sort(tombstoneOrder)
+            tombstonePosition = {}
+            for index, id in ipairs(tombstoneOrder) do
+                tombstonePosition[id] = index
+            end
+        end
+        local index = cursor and ((tombstonePosition[cursor] or 0) + 1) or 1
+        local id = tombstoneOrder and tombstoneOrder[index]
+        if not id then return nil, nil, true end
+        local tomb = tombstones[id]
+        return id, {stamp=tomb.stamp, author=tomb.author,
+            ownerKey=tomb.ownerKey, ownerVerified=tomb.ownerVerified,
+            localOwned=tomb.ownerKey == "local@realm"}, false
     end,
 }
 

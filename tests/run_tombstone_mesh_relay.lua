@@ -13,7 +13,13 @@ Sync.Init(Nexus.Codec,{})
 Sync.HandleIncoming("WLRD|PeerA||x||20||Origin","PeerA")
 assert(NexusDB.communityBuilds.x,"relayed author deletion gained owner authority")
 Sync.HandleIncoming("WLRD|Origin||x||20||Origin","Origin-Ebonhold")
-assert(not NexusDB.communityBuilds.x,"direct author deletion was not applied")
+-- Protocol 7 carries no operation-order proof, so an owner delete installs a
+-- deny-only reservation: the row leaves every public surface while its
+-- admitted raw evidence is preserved.
+assert(Nexus.BuildCatalog.Get("x") == nil
+    and NexusDB.communityBuilds.x ~= nil
+    and Nexus.BuildCatalog.TombstoneState("x").state == "OPAQUE_BLOCK_ALL",
+    "direct author deletion was not applied")
 H.sentChatMessages={}; clock=clock+100
 Sync.HandleIncoming("WLRQ|NewPeer|0|0|relay-delete","NewPeer")
 for i=1,100 do Sync.OnUpdate(0.2) end

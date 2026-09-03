@@ -48,13 +48,13 @@ local ordinary, locked = {}, {}
 for index = 1, 79 do
     ordinary[index] = {
         spellId=610000 + index, quality=index % 5, stacks=1,
-        future={ordinary=index},
+        future=index <= 8 and {ordinary=index} or nil,
     }
 end
 for index = 1, 6 do
     locked[index] = {
         spellId=620000 + index, quality=index % 5, stacks=1,
-        future={locked=index},
+        future=index <= 8 and {locked=index} or nil,
     }
 end
 locked[1].spellId = ordinary[79].spellId

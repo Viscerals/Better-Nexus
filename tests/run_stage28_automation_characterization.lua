@@ -36,6 +36,18 @@ for index = 1, BUILD_ROWS - 1 do
     }
 end
 local selectedEchoes = Echoes(79, 0)
+-- Admission emits one canonical evidence record: duplicate role-bearing
+-- tuples are merged by checked stack addition, so a public copy carries the
+-- unique tuple count rather than the raw row count.
+local selectedCanonicalRows = 0
+do
+    local seen = {}
+    for _, echo in ipairs(selectedEchoes) do
+        local key = tostring(echo.spellId) .. ":" .. tostring(echo.quality)
+        if not seen[key] then seen[key] = true
+            selectedCanonicalRows = selectedCanonicalRows + 1 end
+    end
+end
 builds[selectedId] = {
     id=selectedId,title="Stage 28 Selected",description="selected fixture",
     author="Fixture",ownerKey="selected@testrealm",class="MAGE",
@@ -323,7 +335,7 @@ assert(Nexus.RequestRecompute())
 H.Advance(0.2, 0.2)
 local changed = Delta(Snapshot(), changedBefore)
 Check(changed.fullSteps == 1 and changed.selectedGets == 1
-    and changed.selectedEchoCopies == #selectedEchoes
+    and changed.selectedEchoCopies == selectedCanonicalRows
     and changed.selectionKeyReads == 1 and changed.previewCompiles == 1
     and changed.panelProgress == 1,
     string.format("selected revision did not rebuild exactly once: full=%d key=%d get=%d copies=%d compile=%d progress=%d",

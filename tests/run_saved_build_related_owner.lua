@@ -300,7 +300,7 @@ slots.bySlot[2] = {
 ImportAll(controller)
 local foreignMirror = assert(Nexus.BuildCatalog.Get(foreignMirrorId))
 local localSlotTwo
-for id, build in pairs(Nexus.BuildCatalog.All()) do
+for id, build in pairs(H.CatalogAll()) do
     if build.importedSavedBuild and build.serverSlot == 2
         and Nexus.Identity.VerifiedOwnerKey(build) == "twin@realma" then
         localSlotTwo = id
@@ -315,7 +315,7 @@ assert(Nexus.BuildCatalog.RemoveOverlay(foreignMirrorId),
     "foreign base mirror removal failed")
 ImportAll(controller)
 local stableLocalSlotTwo
-for id, build in pairs(Nexus.BuildCatalog.All()) do
+for id, build in pairs(H.CatalogAll()) do
     if build.importedSavedBuild and build.serverSlot == 2
         and Nexus.Identity.VerifiedOwnerKey(build) == "twin@realma" then
         stableLocalSlotTwo = id
@@ -351,7 +351,7 @@ slots.bySlot[4] = {
 ImportAll(controller)
 local ambiguousMirror = assert(Nexus.BuildCatalog.Get(ambiguousMirrorId))
 local localSlotFour
-for id, build in pairs(Nexus.BuildCatalog.All()) do
+for id, build in pairs(H.CatalogAll()) do
     if build.importedSavedBuild and build.serverSlot == 4
         and Nexus.Identity.VerifiedOwnerKey(build) == "twin@realma" then
         localSlotFour = id
@@ -535,7 +535,7 @@ local function ProjectPublic(search, qualifiedOnly)
 end
 
 local function LocalMirrorForSlot(slot)
-    for id, build in pairs(Nexus.BuildCatalog.All()) do
+    for id, build in pairs(H.CatalogAll()) do
         if build.importedSavedBuild and tonumber(build.serverSlot) == slot
             and Nexus.Identity.VerifiedOwnerKey(build) == "twin@realma" then
             return id, build
@@ -753,28 +753,37 @@ assert(foreignProjected.class == "UNKNOWN"
 -- switch to Saved-build publication semantics.
 for index, marker in ipairs({"true", 1, {future=true}}) do
     local malformedId = "malformed-saved-marker-" .. index
-    assert(Nexus.BuildCatalog.Put({
+    -- A malformed marker type is refused at admission, so the row never
+    -- becomes durable state; an admitted row must still cross no boundary.
+    local markerOk, markerWhy = Nexus.BuildCatalog.Put({
         id=malformedId,title="Malformed Saved Marker " .. index,
         serverTitle="Malformed Saved Marker " .. index,author="Twin",
         class="MAGE",postedAt=80 + index,lastModified=80 + index,
         echoes=Echoes(991000 + index * 100, 6),
-        importedSavedBuild=marker,isMine=true,serverSlot=10 + index,
-    }), "malformed Saved marker fixture did not initialize: " .. index)
-    local malformed = assert(Nexus.BuildCatalog.Get(malformedId))
-    local published, why = controller.PublishImportedBuild(malformedId)
-    local rows = ProjectMine("malformed saved marker " .. index, false)
-    local malformedDetail = changedDetailProjection.Detail(malformedId, {
-        ownerKey="twin@realma",player="Twin",currentClass="MAGE",
+        importedSavedBuild=marker,isMine=true,serverSlot=10 + index
     })
-    assert(not controller.IsOwnBuild(malformed)
-        and controller.ProjectBuild(malformed) == nil
-        and controller.Build(malformedId) == nil
-        and malformedDetail == nil
-        and not published and why == "not a saved loadout"
-        and not ProjectedBuild(rows, malformedId)
-        and Nexus.BuildCatalog.Get("published-" .. malformedId) == nil,
-        "EXPECTED RED: malformed Saved marker crossed authority boundaries: "
-            .. index)
+    if not markerOk then
+        assert(markerWhy == "MALFORMED_ROW"
+                and Nexus.BuildCatalog.Get(malformedId) == nil,
+            "malformed Saved marker was refused without a bounded reason: "
+                .. index .. "/" .. tostring(markerWhy))
+    else
+        local malformed = assert(Nexus.BuildCatalog.Get(malformedId))
+        local published, why = controller.PublishImportedBuild(malformedId)
+        local rows = ProjectMine("malformed saved marker " .. index, false)
+        local malformedDetail = changedDetailProjection.Detail(malformedId, {
+            ownerKey="twin@realma",player="Twin",currentClass="MAGE",
+        })
+        assert(not controller.IsOwnBuild(malformed)
+            and controller.ProjectBuild(malformed) == nil
+            and controller.Build(malformedId) == nil
+            and malformedDetail == nil
+            and not published and why == "not a saved loadout"
+            and not ProjectedBuild(rows, malformedId)
+            and Nexus.BuildCatalog.Get("published-" .. malformedId) == nil,
+            "EXPECTED RED: malformed Saved marker crossed authority boundaries: "
+                .. index)
+    end
 end
 
 local explicitOrdinaryId = "explicit-false-ordinary"
@@ -898,9 +907,13 @@ assert(asyncProjectedSaved and asyncProjectedSaved._nexusQualified == true
 -- though BuildCatalog.Get cannot materialize them. Neither Saved mirror nor
 -- publication allocation may overwrite or hide data at those identities.
 local tombstoneMirrorBase = "saved-twin-11"
-assert(Nexus.BuildCatalog.SetTombstone(tombstoneMirrorBase, {
-    stamp=900000,author="Twin",
-}), "Saved mirror tombstone fixture did not initialize")
+-- Persisted legacy tombstone evidence occupies the typed identity: it is
+-- preserved raw and reserved deny-only after readmission.
+NexusDB.syncTombstones = NexusDB.syncTombstones or {}
+NexusDB.syncTombstones[tombstoneMirrorBase] = {stamp=900000,author="Twin"}
+H.RebindCatalog()
+assert(Nexus.BuildCatalog.TombstoneState(tombstoneMirrorBase).state
+    == "OPAQUE_BLOCK_ALL", "Saved mirror tombstone fixture did not initialize")
 slots.bySlot[11] = {
     name="Tombstone Collision Slot",class="MAGE",echoes=Echoes(995001, 6),
 }
@@ -917,6 +930,7 @@ assert(tombstoneMirrorId and tombstoneMirrorId ~= tombstoneMirrorBase
 local opaqueMirrorBase = "saved-twin-12"
 local opaqueMirrorValue = "opaque-saved-mirror-collision"
 NexusDB.communityBuilds[opaqueMirrorBase] = opaqueMirrorValue
+H.RebindCatalog()
 assert(Nexus.BuildCatalog.AllocationOccupancy(opaqueMirrorBase) == "opaque",
     "opaque Saved mirror fixture was not observable as occupied")
 slots.bySlot[12] = {
@@ -929,9 +943,11 @@ assert(opaqueMirrorId and opaqueMirrorId ~= opaqueMirrorBase
     "EXPECTED RED: Saved mirror allocation overwrote opaque raw storage")
 
 local tombstonePublicationBase = "published-" .. tombstoneMirrorId
-assert(Nexus.BuildCatalog.SetTombstone(tombstonePublicationBase, {
-    stamp=900001,author="Twin",
-}), "publication tombstone fixture did not initialize")
+-- Persisted legacy tombstone evidence at the publication identity.
+NexusDB.syncTombstones[tombstonePublicationBase] = {stamp=900001,author="Twin"}
+H.RebindCatalog()
+assert(Nexus.BuildCatalog.TombstoneState(tombstonePublicationBase).state
+    == "OPAQUE_BLOCK_ALL", "publication tombstone fixture did not initialize")
 local tombstonePublished, tombstonePublishedId =
     controller.PublishImportedBuild(tombstoneMirrorId)
 local tombstonePublicationState =
@@ -952,6 +968,7 @@ assert(tombstonePublished and tombstonePublishedId ~= tombstonePublicationBase
 local opaquePublicationBase = "published-" .. opaqueMirrorId
 local opaquePublicationValue = "opaque-publication-collision"
 NexusDB.communityBuilds[opaquePublicationBase] = opaquePublicationValue
+H.RebindCatalog()
 assert(Nexus.BuildCatalog.AllocationOccupancy(opaquePublicationBase)
         == "opaque",
     "opaque publication fixture was not observable as occupied")

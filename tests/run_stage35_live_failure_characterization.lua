@@ -76,13 +76,13 @@ local ordinary, locked = {}, {}
 for index = 1, 79 do
     ordinary[index] = {
         spellId=310000 + index,quality=index % 5,stacks=1,
-        future={ordinary=index},
+        future=index <= 8 and {ordinary=index} or nil,
     }
 end
 for index = 1, 6 do
     locked[index] = {
         spellId=320000 + index,quality=index % 5,stacks=1,
-        future={locked=index},
+        future=index <= 8 and {locked=index} or nil,
     }
 end
 locked[1].spellId = ordinary[79].spellId
@@ -279,12 +279,19 @@ Check(buildCount == 504 and echoRows == 36187
 
 local baselineDb = {communityBuilds={},syncTombstones={}}
 local baselineSummary = Nexus.BuildCatalog.Init(baselineDb, bundled)
+local admissibleBundled = 0
+for _, row in pairs(bundled.builds) do
+    if Nexus.LoadoutEvidence.SemanticEnvelope(row.echoes).valid then
+        admissibleBundled = admissibleBundled + 1
+    end
+end
 Check(baselineSummary.bundled == 504 and baselineSummary.overlay == 0
-        and baselineSummary.merged == 504 and Nexus.BuildCatalog.Count() == 504,
+        and baselineSummary.merged == admissibleBundled
+        and Nexus.BuildCatalog.Count() == admissibleBundled,
     "bundled baseline was not available before Sync")
 
 dofile("core/CommunityProjection.lua")
-local rows = Nexus.BuildCatalog.Summaries()
+local rows = H.CatalogSummaries()
 local revisions = {build=1,dps=1}
 local function Project(filters)
     local search = tostring(filters.search or ""):lower()
@@ -311,7 +318,7 @@ local blankFilters = {scope="all",classFilter="ALL",currentClassOnly=false,
     qualifiedOnly=false,search="",sortMode="title",page=1}
 local blankBefore = Signature(blankFilters)
 local allRows, allStatus = projection.List(blankFilters)
-Check(#allRows == 504 and allStatus.total == 504
+Check(#allRows == admissibleBundled and allStatus.total == admissibleBundled
         and Signature(blankFilters) == blankBefore,
     "blank Community filters did not expose the immutable baseline")
 local searchTerm = tostring(allRows[1].title or allRows[1].author or ""):lower()

@@ -374,6 +374,9 @@ assert(Nexus.BuildCatalog.Get(staleId),
 local staleStored = assert(NexusDB.communityBuilds[staleId],
     "stale-owner fixture has no authoritative overlay record")
 staleStored.ownerKey = "other@ebonhold"
+-- The ownership change must be admitted before it is authority: a raw write
+-- behind the published root grants nothing.
+H.RebindCatalog()
 local deletesBeforeStale = deleteCalls
 local stalePrinted = {}
 local stalePrint = print

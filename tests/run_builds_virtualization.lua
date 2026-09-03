@@ -53,7 +53,7 @@ Nexus.DpsCapture = {
 dofile("ui/CommunityBuilds.lua")
 local C = Nexus.CommunityBuilds
 C.Init(nil,nil)
-for _, build in pairs(Nexus.BuildCatalog.Summaries()) do
+for _, build in pairs(H.CatalogSummaries()) do
     local index = tonumber(tostring(build.id):match("(%d+)$")) or 0
     eligibility[build.fingerprint] = {
         dummy=index,lk=index+1,best=index+1,average=index+0.5,count=2,

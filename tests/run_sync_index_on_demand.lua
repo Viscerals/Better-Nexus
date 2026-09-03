@@ -6,7 +6,9 @@ local Sync=Nexus.Sync
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 local function Pump(steps) for _=1,steps do clock=clock+0.2; Sync.OnUpdate(0.2) end end
 local who='Source'; UnitName=function() return who end
-local echoes={}; for i=1,79 do echoes[i]={spellId=200000+i,stacks=(i%3)+1,quality=3} end
+-- Exactly 79 ordinary copies: the valid maximum under issue #22, still a
+-- 79-row payload that must chunk.
+local echoes={}; for i=1,79 do echoes[i]={spellId=200000+i,stacks=1,quality=3} end
 local build={id='build-79',title='AoE | ST',description=string.rep('description ',50),
     author='Source',ownerKey='source@ebonhold',ownerVerified=true,
     realm='ebonhold',class='MAGE',echoes=echoes,

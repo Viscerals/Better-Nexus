@@ -41,6 +41,9 @@ assert(not sawDpsClaim,"owner-only DPS bucket emitted a suppressible claim")
 
 -- Tombstone: a relay holds Origin's valid delete. Claims from another relay
 -- cannot suppress Origin's later authoritative WLRD response.
+-- Tombstone: a relayed remote delete is a deny-only reservation with zero
+-- relay authority. The deletion owner's own current-session tombstone is
+-- what answers a request, and another relay's claim cannot suppress it.
 currentName="Relay"; clock=clock+100
 NexusDB={communityBuilds={gone={id="gone",title="Gone",author="Origin",
   ownerKey="origin@ebonhold",ownerVerified=true,class="MAGE",
@@ -48,14 +51,34 @@ NexusDB={communityBuilds={gone={id="gone",title="Gone",author="Origin",
   syncTombstones={},dpsCapture={}}
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync); Pump(100); H.sentChatMessages={}
 Sync.HandleIncoming("WLRD|Origin|gone|20|Origin","Origin-Ebonhold")
-assert(not NexusDB.communityBuilds.gone,"authoritative delete fixture failed")
+assert(Nexus.BuildCatalog.Get("gone") == nil
+  and NexusDB.communityBuilds.gone ~= nil
+  and Nexus.BuildCatalog.TombstoneState("gone").state == "OPAQUE_BLOCK_ALL",
+  "relayed delete did not become a deny-only reservation")
+H.sentChatMessages={}; Pump(100)
+for _,m in ipairs(H.sentChatMessages) do
+  assert(not m.text:find("^WLRD|"),
+    "a relayed remote delete gained relay authority")
+end
+
+-- The owner's own client deletes its own build: that current-session
+-- tombstone is the authoritative response a claim must not suppress.
+currentName="Origin"; clock=clock+100
+NexusDB={communityBuilds={mine={id="mine",title="Mine",author="Origin",
+  ownerKey="origin@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
+  class="MAGE",echoes=echoes,postedAt=10,lastModified=10}},
+  syncTombstones={},dpsCapture={}}
+Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync); Pump(100); H.sentChatMessages={}
+assert(Sync.BroadcastDelete(Nexus.BuildCatalog.Get("mine")),
+  "authoritative delete fixture failed")
+Pump(100); H.sentChatMessages={}
 local buildHash=select(1,Sync.GetCompatibilityHashes())
 local buildBucket,buildBucketHash=NonzeroBucket(buildHash)
 assert(buildBucket,"tombstone did not occupy a reconciliation bucket")
 Sync.HandleIncoming("WLRQ|RequesterTwo|0|0|delete-owner","RequesterTwo")
 Sync.HandleIncoming("WLBC|RelayTwo|RequesterTwo|delete-owner|B|"..buildBucket.."|"..buildBucketHash,"RelayTwo")
 Sync.HandleIncoming("WLRC|RelayTwo|RequesterTwo|delete-owner|"..buildHash.."|0","RelayTwo")
-currentName="Origin"; Pump(100)
+Pump(100)
 local sawDelete,sawDeleteClaim=false,false
 for _,m in ipairs(H.sentChatMessages) do
   sawDelete=sawDelete or not not m.text:find("^WLRD|")
@@ -81,11 +104,13 @@ assert(projected and projected[1] and projected[1].player==accented,
 NexusDB.communityBuilds["utf8-gone"]={id="utf8-gone",title="Gone",
   author=accented,ownerKey=accented:lower().."@ebonhold",class="MAGE",
   ownerVerified=true,echoes=echoes,postedAt=10,lastModified=10}
+H.RebindCatalog()
 assert(not Sync.HandleIncoming("WLRD|Valentine|utf8-gone|20|Valentine","Valentine")
   and NexusDB.communityBuilds["utf8-gone"],
   "ASCII lookalike gained UTF-8 tombstone authority")
 assert(Sync.HandleIncoming("WLRD|"..accented.."|utf8-gone|21|"..accented,
-  accented.."-Ebonhold") and not NexusDB.communityBuilds["utf8-gone"]
+  accented.."-Ebonhold") and Nexus.BuildCatalog.Get("utf8-gone") == nil
+  and NexusDB.communityBuilds["utf8-gone"] ~= nil
   and NexusDB.syncTombstones["utf8-gone"].author==accented,
   "exact UTF-8 tombstone identity was changed or rejected")
 

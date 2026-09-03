@@ -34,6 +34,7 @@ assert(receipts==1 and payloads==0,
     'matching compatibility hashes did not produce one payload-free receipt')
 
 build.lastModified=102
+H.RebindCatalog()
 local b3,d3=Sync.GetCompatibilityHashes()
 assert(b3~=b1 and d3==d1,'build-only change did not isolate the build hash')
 

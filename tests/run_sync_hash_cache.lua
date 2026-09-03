@@ -76,6 +76,7 @@ assert(dpsHits.collectionWalks == dpsWarm.collectionWalks
 local buildBefore = Sync.HashCacheStats()
 assert(Catalog.Put({
     id="peer-a",title="Peer",author="Peer",class="MAGE",
+    ownerKey="peer@ebonhold",realm="ebonhold",ownerVerified=true,
     postedAt=2,lastModified=2,fingerprint="200200x1",fingerprintHash="222",
     echoes={{spellId=200200,quality=3,stacks=1}},
 }))
@@ -89,7 +90,8 @@ assert(buildAfter.targetedInvalidations == buildBefore.targetedInvalidations + 1
     "one build mutation did not stay inside one deterministic bucket")
 
 local tombBefore = Sync.HashCacheStats()
-assert(Catalog.SetTombstone("peer-a", {stamp=3,author="Peer"}))
+assert(Catalog.SetTombstone("peer-a", {stamp=3,author="Peer"},
+    {source="remote", sender="Peer-Ebonhold"}))
 AssertCanonical()
 local tombAfter = Sync.HashCacheStats()
 assert(tombAfter.targetedInvalidations == tombBefore.targetedInvalidations + 1
@@ -97,7 +99,8 @@ assert(tombAfter.targetedInvalidations == tombBefore.targetedInvalidations + 1
     and tombAfter.deltaBucketRebuilds == tombBefore.deltaBucketRebuilds + 1
     and tombAfter.legacyBucketRebuilds == tombBefore.legacyBucketRebuilds + 1,
     "one tombstone mutation did not stay inside one deterministic bucket")
-assert(Catalog.SetTombstone("peer-a", {stamp=3,author="Peer"}))
+assert(Catalog.SetTombstone("peer-a", {stamp=3,author="Peer"},
+    {source="remote", sender="Peer-Ebonhold"}))
 local duplicateTomb = Sync.HashCacheStats()
 assert(duplicateTomb.targetedInvalidations == tombAfter.targetedInvalidations,
     "duplicate tombstone invalidated the build hash cache")
@@ -177,13 +180,13 @@ assert(allDpsAfter.fullRebuilds == allDpsBefore.fullRebuilds + 1
 -- A failed warm-up never publishes a half-initialized cache. Restoring the
 -- catalog lets the reloaded module build cleanly and reproduce both hashes.
 local expectedCurrent, expectedLegacy = Sync.GetCompatibilityHashes(), Sync.GetLegacyBuildHash()
-local realDelta = Catalog.DeltaSummaries
+local realDelta = Catalog.BeginSummaryCursor
 dofile("core/BuildHashCache.lua")
-Catalog.DeltaSummaries = function() error("forced cache warm failure") end
+Catalog.BeginSummaryCursor = function() error("forced cache warm failure") end
 assert(Nexus.BuildHashCache.Delta() == nil
     and Nexus.BuildHashCache.Stats().initialized == false,
     "failed cache warm published initialized state")
-Catalog.DeltaSummaries = realDelta
+Catalog.BeginSummaryCursor = realDelta
 assert(Sync.GetCompatibilityHashes() == expectedCurrent
     and Sync.GetLegacyBuildHash() == expectedLegacy
     and Nexus.BuildHashCache.Stats().fullRebuilds == 1,

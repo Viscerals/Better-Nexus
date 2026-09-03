@@ -168,6 +168,7 @@ NexusDB.communityBuilds["legacy-nil-full"] = {
     ownerKey="twin@realma",isMine=false,class="MAGE",lastModified=31,
     echoes={{spellId=200100,quality=3,stacks=1}},
 }
+H.RebindCatalog()
 assert(not Sync.HandleIncoming(
     BuildPacket("Twin-RealmB", "legacy-nil-full", "twin@realmb", 32),
     "Twin-RealmB"),
@@ -183,6 +184,7 @@ NexusDB.communityBuilds["legacy-nil-summary"] = {
     id="legacy-nil-summary",title="Legacy Nil Summary",author="Twin",
     ownerKey="twin@realma",isMine=false,class="MAGE",lastModified=32,
 }
+H.RebindCatalog()
 assert(Sync.HandleIncoming(
     SummaryPacket("Twin-RealmA", "legacy-nil-summary", "twin@realma", 33),
     "Twin-RealmA"),
@@ -195,6 +197,7 @@ NexusDB.communityBuilds["stale-mine-full"] = {
     ownerKey="twin@realma",ownerVerified=false,isMine=true,class="MAGE",
     lastModified=33,echoes={{spellId=200101,quality=3,stacks=1}},
 }
+H.RebindCatalog()
 assert(Sync.HandleIncoming(
     BuildPacket("Twin-RealmA", "stale-mine-full", "twin@realma", 34),
     "Twin-RealmA"),
@@ -208,6 +211,7 @@ NexusDB.communityBuilds["stale-mine-summary"] = {
     ownerKey="twin@realma",ownerVerified=false,isMine=true,class="MAGE",
     lastModified=34,
 }
+H.RebindCatalog()
 assert(Sync.HandleIncoming(
     SummaryPacket("Twin-RealmA", "stale-mine-summary", "twin@realma", 35),
     "Twin-RealmA"),
@@ -221,10 +225,15 @@ NexusDB.communityBuilds["stale-mine-delete"] = {
     ownerKey="twin@realma",ownerVerified=false,isMine=true,class="MAGE",
     lastModified=35,echoes={{spellId=200102,quality=3,stacks=1}},
 }
+H.RebindCatalog()
 assert(Sync.HandleIncoming(
     "WLRD|Twin-RealmA|stale-mine-delete|36|Twin", "Twin-RealmA"),
     "EXPECTED RED: stale isMine blocked exact-owner delete")
-assert(NexusDB.communityBuilds["stale-mine-delete"] == nil
+-- Protocol 7 proves no operation order, so the delete publishes a deny-only
+-- reservation: the row leaves every public surface, its admitted raw evidence
+-- is preserved, and the reservation records the exact owner claim.
+assert(Nexus.BuildCatalog.Get("stale-mine-delete") == nil
+        and NexusDB.communityBuilds["stale-mine-delete"] ~= nil
         and NexusDB.syncTombstones["stale-mine-delete"]
         and NexusDB.syncTombstones["stale-mine-delete"].ownerKey
             == "twin@realma",
@@ -237,13 +246,16 @@ local function MalformedTrue(id, stamp, complete)
     return {
         id=id,title="Malformed True",author="Twin",
         ownerKey="twin@realma",ownerVerified=true,realm="realma",
-        o="other@realma",claimedOwnerKey="twin@realma",
+        -- A compact alias that contradicts its verbose field is refused at
+        -- admission, so the retained claim is stated coherently here.
+        o="twin@realma",claimedOwnerKey="twin@realma",
         class="MAGE",lastModified=stamp,
         echoes=complete and {{spellId=200103,quality=3,stacks=1}} or nil,
     }
 end
 NexusDB.communityBuilds["malformed-true-full"] =
     MalformedTrue("malformed-true-full",36,true)
+H.RebindCatalog()
 assert(not Sync.HandleIncoming(BuildPacket("Twin-RealmB",
         "malformed-true-full","twin@realmb",37),"Twin-RealmB"),
     "wrong realm repaired malformed raw-true build evidence")
@@ -258,6 +270,7 @@ assert(Identity.VerifiedOwnerKey(
 
 NexusDB.communityBuilds["malformed-true-summary"] =
     MalformedTrue("malformed-true-summary",37,false)
+H.RebindCatalog()
 assert(Sync.HandleIncoming(SummaryPacket("Twin-RealmA",
         "malformed-true-summary","twin@realma",38),"Twin-RealmA"),
     "EXPECTED RED: exact owner summary could not repair malformed raw-true evidence")
@@ -267,11 +280,13 @@ assert(Identity.VerifiedOwnerKey(
 
 NexusDB.communityBuilds["malformed-true-delete"] =
     MalformedTrue("malformed-true-delete",38,true)
+H.RebindCatalog()
 assert(Sync.HandleIncoming(
         "WLRD|Twin-RealmA|malformed-true-delete|39|Twin","Twin-RealmA")
-        and NexusDB.communityBuilds["malformed-true-delete"]==nil
-        and Identity.VerifiedOwnerKey(
-            NexusDB.syncTombstones["malformed-true-delete"])=="twin@realma",
+        and Nexus.BuildCatalog.Get("malformed-true-delete")==nil
+        and NexusDB.communityBuilds["malformed-true-delete"]~=nil
+        and NexusDB.syncTombstones["malformed-true-delete"].ownerKey
+            =="twin@realma",
     "EXPECTED RED: exact owner delete could not replace malformed raw-true evidence")
 
 assert(Sync.HandleIncoming(
@@ -281,7 +296,8 @@ assert(Sync.HandleIncoming(
 assert(Sync.HandleIncoming(
     "WLRD|Twin-RealmA|relayed-delete|35|Twin", "Twin-RealmA"),
     "exact owner could not delete its third-party relayed evidence")
-assert(NexusDB.communityBuilds["relayed-delete"] == nil
+assert(Nexus.BuildCatalog.Get("relayed-delete") == nil
+        and NexusDB.communityBuilds["relayed-delete"] ~= nil
         and NexusDB.syncTombstones["relayed-delete"]
         and NexusDB.syncTombstones["relayed-delete"].ownerKey
             == "twin@realma",
@@ -555,6 +571,7 @@ for key, value in pairs(preAdoptionSaved) do inboundSummarySaved[key] = value en
 inboundSummarySaved.id = "inbound-saved-summary"
 inboundSummarySaved.lastModified = 50
 NexusDB.communityBuilds[inboundSummarySaved.id] = inboundSummarySaved
+H.RebindCatalog()
 assert(not Sync.HandleIncoming(SummaryPacket("Twin-RealmA",
         inboundSummarySaved.id,"twin@realma",51),"Twin-RealmA")
         and NexusDB.communityBuilds[inboundSummarySaved.id]
@@ -566,6 +583,7 @@ for key, value in pairs(foreignVerifiedSaved) do inboundFullSaved[key] = value e
 inboundFullSaved.id = "inbound-saved-full"
 inboundFullSaved.lastModified = 51
 NexusDB.communityBuilds[inboundFullSaved.id] = inboundFullSaved
+H.RebindCatalog()
 assert(not Sync.HandleIncoming(BuildPacket("Twin-RealmB",
         inboundFullSaved.id,"twin@realmb",52),"Twin-RealmB")
         and NexusDB.communityBuilds[inboundFullSaved.id]
@@ -577,6 +595,7 @@ for key, value in pairs(foreignVerifiedSaved) do inboundDeleteSaved[key] = value
 inboundDeleteSaved.id = "inbound-saved-delete"
 inboundDeleteSaved.lastModified = 52
 NexusDB.communityBuilds[inboundDeleteSaved.id] = inboundDeleteSaved
+H.RebindCatalog()
 assert(not Sync.HandleIncoming(
         "WLRD|Twin-RealmB|inbound-saved-delete|53|Twin","Twin-RealmB")
         and NexusDB.communityBuilds[inboundDeleteSaved.id]
@@ -629,6 +648,7 @@ local retainedBuilds, retainedTombstones =
 NexusDB.communityBuilds = {}
 for _, build in ipairs(deniedSaved) do
     NexusDB.communityBuilds[build.id] = build
+H.RebindCatalog()
 end
 NexusDB.syncTombstones = {}
 Sync.Init(Codec, {})
@@ -837,7 +857,8 @@ assert(NexusDB.communityBuilds["twin-a"] ~= nil,
 assert(Sync.HandleIncoming(
     "WLRD|Twin-RealmA|twin-a|101|Twin", "Twin-RealmA"),
     "exact RealmA transport could not delete its verified build")
-assert(NexusDB.communityBuilds["twin-a"] == nil
+assert(Nexus.BuildCatalog.Get("twin-a") == nil
+        and NexusDB.communityBuilds["twin-a"] ~= nil
         and NexusDB.syncTombstones["twin-a"]
         and NexusDB.syncTombstones["twin-a"].ownerKey == "twin@realma",
     "exact delete did not persist canonical tombstone authority")
@@ -888,7 +909,7 @@ assert(not Sync.HandleIncoming(
     BuildPacket("Twin-RealmB", "twin-a", "twin@realma", 102),
     "Twin-RealmB"),
     "same-name RealmB transport resurrected RealmA's tombstoned build")
-assert(NexusDB.communityBuilds["twin-a"] == nil,
+assert(Nexus.BuildCatalog.Get("twin-a") == nil,
     "cross-realm resurrection changed durable state after reload")
 
 Nexus.BundledBuilds = {
