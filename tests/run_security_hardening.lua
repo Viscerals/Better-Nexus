@@ -9,9 +9,12 @@ local Codec, Sync, DPS = Nexus.Codec, Nexus.Sync, Nexus.DpsCapture
 time = function() return 50000 end
 NexusDB = { communityBuilds={}, syncTombstones={}, dpsCapture={} }
 
+-- Legacy-to-bundle cutover: clearing the preserved legacy input no longer
+-- resets durable state, so a reset client is a fresh database whose bootstrap
+-- builds a new first complete bundle.
 local function ResetSync()
-    NexusDB.communityBuilds = {}
-    NexusDB.syncTombstones = {}
+    NexusDB = { communityBuilds={}, syncTombstones={},
+        dpsCapture=NexusDB.dpsCapture }
     Sync.Init(Codec, {})
 end
 
@@ -107,13 +110,16 @@ local alice = {
     ownerKey="alice@ebonhold", class="MAGE", description="original",
     lastModified=10, echoes={{spellId=200100, quality=3, stacks=1}},
 }
+-- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 394 and
+-- 4849): the durable authority payload is `authorityBundle`; the exact PR #68
+-- locations are read-only preserved input that receiving never writes.
 Sync.HandleIncoming(BuildPacket("Mallory", alice, 10), "Mallory")
-local relayed = NexusDB.communityBuilds[alice.id]
+local relayed = H.DurableBuilds()[alice.id]
 assert(relayed and relayed.ownerVerified == false and relayed.ownerKey == nil
     and relayed.claimedOwnerKey == "alice@ebonhold"
     and not relayed.isMine, "relay gained build-owner authority")
 Sync.HandleIncoming(BuildPacket("Alice", alice, 10), "Alice-Ebonhold")
-local verified = NexusDB.communityBuilds[alice.id]
+local verified = H.DurableBuilds()[alice.id]
 assert(verified and verified.ownerVerified == true
     and verified.ownerKey == "alice@ebonhold",
     "direct owner did not replace the unverified relay")
@@ -123,24 +129,24 @@ local forged = {
     echoes={{spellId=200101, quality=3, stacks=1}},
 }
 Sync.HandleIncoming(BuildPacket("Mallory", forged, 99), "Mallory")
-assert(NexusDB.communityBuilds[alice.id].title == "Alice Build",
+assert(H.DurableBuilds()[alice.id].title == "Alice Build",
     "relayed overwrite changed owner-controlled state")
 Sync.HandleIncoming("WLRD|Mallory|alice-build|100|Alice", "Mallory")
-assert(NexusDB.communityBuilds[alice.id], "spoofed tombstone deleted a build")
+assert(H.DurableBuilds()[alice.id], "spoofed tombstone deleted a build")
 Sync.HandleIncoming("WLRD|Mallory|unknown|100|Mallory", "Mallory")
-assert(NexusDB.syncTombstones.unknown == nil,
+assert(H.DurableTombstones().unknown == nil,
     "unknown tombstone gained persistent authority")
 Sync.HandleIncoming("WLRD|Alice|alice-build|101|Alice", "Alice-Ebonhold")
 -- The owner delete publishes a deny-only reservation and preserves the raw row.
 assert(Nexus.BuildCatalog.Get(alice.id) == nil
-    and NexusDB.communityBuilds[alice.id] ~= nil,
+    and H.DurableBuilds()[alice.id] ~= nil,
     "actual owner could not delete the build")
 
 -- Sender spoofing is rejected before any protocol handler sees the packet.
 Sync.HandleIncoming(BuildPacket("Alice", alice, 110), "Mallory")
 -- The reserved slot still serves nothing and its raw evidence is unchanged.
 assert(Nexus.BuildCatalog.Get(alice.id) == nil
-    and NexusDB.communityBuilds[alice.id].title == "Alice Build",
+    and H.DurableBuilds()[alice.id].title == "Alice Build",
     "embedded sender spoof bypassed transport binding")
 
 -- Exact DPS evidence is required and is bound to the transport player.
@@ -189,28 +195,86 @@ UnitName = function() return "Boganic" end
 GetNormalizedRealmName = function() return "Ebonhold" end
 local Builds = Nexus.CommunityBuilds
 local originalEchoes = {{spellId=200300, quality=2, stacks=1}}
-NexusDB.communityBuilds = {
-    mine={id="mine", title="Original", description="Original description",
-        author="Boganic", ownerKey="boganic@ebonhold",
-        ownerVerified=true,realm="ebonhold",class="MAGE",
-        echoes=originalEchoes, postedAt=10, lastModified=10, isMine=true,
-        fingerprint="stale", fingerprintHash="stale", echoCount=99},
+-- Seeded as exact PR #68 legacy input on a fresh database so bootstrap admits
+-- it and builds the first complete bundle (state machine line 374). After bundle
+-- occupancy a raw legacy write is not an admission input at all (line 394).
+NexusDB = {
+    dpsCapture=NexusDB.dpsCapture,
+    syncTombstones={},
+    communityBuilds={
+        mine={id="mine", title="Original", description="Original description",
+            author="Boganic", ownerKey="boganic@ebonhold",
+            ownerVerified=true,realm="ebonhold",class="MAGE",
+            echoes=originalEchoes, postedAt=10, lastModified=10, isMine=true,
+            fingerprint="stale", fingerprintHash="stale", echoCount=99},
+    },
 }
 local adapter = { Wishlist=function()
     return {entries={{spellId=200301, quality=3, stacks=2}}}
 end }
 Builds.Init(adapter, {})
+-- `backing` is the preserved legacy input map and `mine` the exact legacy row
+-- bootstrap admitted from it. Both must survive every later publication
+-- untouched: after occupancy these locations are neither storage nor input.
+local backing = NexusDB.communityBuilds
+local mine = backing.mine
+local legacyBytes = Nexus.Codec.JSONEncode(backing)
+local durableBefore = H.DurableBuilds().mine
+assert(durableBefore ~= nil and Nexus.BuildCatalog.Get("mine") ~= nil,
+    "bootstrap did not admit the legacy row into the first complete bundle")
 local ok = Builds.EditBuild("mine", "Changed", "Changed description",
     "https://example.com/not-discord")
-local mine = NexusDB.communityBuilds.mine
 assert(not ok and mine.title == "Original"
     and mine.description == "Original description" and mine.lastModified == 10,
     "invalid link partially mutated the build")
-local oldFingerprint, oldHash = mine.fingerprint, mine.fingerprintHash
+-- Capture the published row after Init. Admission may already have replaced
+-- the seed table; that prior row must stay immutable across Echo replacement.
+local oldFingerprint, oldHash = durableBefore.fingerprint, durableBefore.fingerprintHash
+local oldEchoCount = durableBefore.echoCount
+local bundleBefore = rawget(NexusDB, "authorityBundle")
 local replaced, count = Builds.UpdateFromWishlist("mine")
-assert(replaced and count == 1 and mine.echoCount == 2
-    and mine.fingerprint ~= oldFingerprint and mine.fingerprintHash ~= oldHash
-    and mine.loadoutAvailable == true and mine.needsFullBuild == false,
+local published = H.DurableBuilds().mine
+local publicRow = Nexus.BuildCatalog.Get("mine")
+
+-- Architecture 3b5de54f, MASTER-RC-001 and MASTER-RC-002. Five separate
+-- obligations, each proved on its own; the identity check is repointed at the
+-- authoritative seam rather than removed.
+--
+-- 1. The legacy input is preserved exactly: same map identity, same row
+--    identity, same bytes. Line 394 gives it no Package B writer.
+assert(NexusDB.communityBuilds == backing and backing.mine == mine
+    and Nexus.Codec.JSONEncode(backing) == legacyBytes,
+    "the preserved legacy input map, row, or bytes changed")
+-- 2. The new authoritative data is published through one complete bundle
+--    replacement, so the durable row is replaced, never rewritten in place.
+assert(replaced and count == 1
+    and rawget(NexusDB, "authorityBundle") ~= bundleBefore
+    and published ~= durableBefore,
+    "Echo replacement did not publish a replacement row inside a new bundle")
+-- 3. The old durable snapshot is not rewritten: the superseded bundle graph
+--    stays byte-exact.
+assert(bundleBefore.communityBuilds.mine == durableBefore
+    and durableBefore.fingerprint == oldFingerprint
+    and durableBefore.fingerprintHash == oldHash
+    and durableBefore.echoCount == oldEchoCount,
+    "the superseded durable row was rewritten in place")
+-- 4. Public reads return the replacement row with refreshed derived identity.
+assert(publicRow and publicRow.echoCount == 2
+    and publicRow.fingerprint ~= oldFingerprint
+    and publicRow.fingerprintHash ~= oldHash
+    and publicRow.loadoutAvailable == true and publicRow.needsFullBuild == false
+    and published.echoCount == 2
+    and published.fingerprint ~= oldFingerprint
+    and published.fingerprintHash ~= oldHash
+    and published.loadoutAvailable == true and published.needsFullBuild == false,
     "Echo replacement left stale derived identity")
+-- 5. The preserved legacy contents cannot override an occupied bundle: an
+--    explicit complete readmission from cursor zero still serves the
+--    replacement, not the stale legacy row (line 394, never a fallback).
+H.RebindCatalog()
+assert(Nexus.BuildCatalog.Get("mine").echoCount == 2
+    and Nexus.BuildCatalog.Get("mine").fingerprint ~= oldFingerprint
+    and NexusDB.communityBuilds == backing and backing.mine == mine,
+    "stale legacy input overrode the occupied authority bundle")
 
 print("sync authority, bounded transfers, DPS evidence, and atomic builds -- OK")

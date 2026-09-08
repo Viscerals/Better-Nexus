@@ -507,9 +507,34 @@ Check(finalPendingOk == false and finalPendingWhy == "sync queue full"
         and (Sync.Stats().operationExpired or 0) == 1,
     "pending Share owners did not terminate through fixed outcomes")
 
+-- MASTER-RC-019 REGION NOTE, architecture justification for every delete
+-- rewrite below. Architecture line 4856 and the mixed-client tombstone rows:
+-- "a local row-to-tombstone operation is not a Sync message ... zero-wire",
+-- refused unconditionally with REMOTE_TOMBSTONE_ORDER_UNPROVEN before encoder
+-- invocation and before queueing.
+--
+-- Every assertion below that required a delete to reach a TRANSMISSION
+-- terminal -- queued, already-queued, attempted, sent-attempted, dropped on
+-- retry exhaustion, reset, or expired -- characterised a capability the
+-- accepted architecture removes, not a guarantee that survives. Those are
+-- REWRITTEN (b) to the invariants that do survive and are strictly stronger:
+-- the refusal is a bounded scalar-only defensive receipt, it is idempotent, it
+-- occupies no outbound queue depth, it never reaches an attempted/sent/
+-- dropped/expired terminal, and it never moves the operation counters.
+--
+-- The defensive-copy property -- a caller mutating a returned receipt cannot
+-- touch the live operation owner -- is the safety invariant these blocks
+-- exist to protect, and it is preserved verbatim throughout.
+--
+-- Every Share (non-delete) assertion in this region is unchanged.
+--
+-- Negative control that the retired terminals are real rather than quietly
+-- dropped: tests/run_sync_mixed_client_matrix.lua MIX-08 requires the BASE
+-- reference tree to still reach the queued delete terminal.
+--
 -- Delete ownership uses the same terminal transport boundary. Zoning keeps
--- the tombstone packet admitted, expiry names the exact ID, and no raw packet
--- is retained in the defensive status.
+-- the tombstone refused, and no raw packet is retained in the defensive
+-- status.
 FreshDb()
 local deleteBuild = DeleteBuild("zone-delete")
 local deleteOk, deleteWhy, deleteStatus = Sync.BroadcastDelete(deleteBuild)
@@ -521,25 +546,28 @@ end
 local deleteQueue = Sync.WorkState().sending
 WorldEntry()
 local deleteCopy = DeleteStatus("zone-delete")
-Check(deleteOk == true and deleteWhy == "queued"
+Check(deleteOk == false and deleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN"
         and type(deleteStatus) == "table",
-    "admitted delete did not return bounded ownership metadata")
+    "refused delete did not return bounded ownership metadata")
 Check(Sync.WorkState().sending == deleteQueue
-        and deleteCopy and deleteCopy.outcome == "queued"
+        and deleteCopy and deleteCopy.outcome == "rejected"
         and deleteCopy.generation == deleteGeneration
         and deleteCopy.operationKey ~= "caller-mutated",
-    "world entry discarded or falsely terminalized admitted delete traffic")
+    "world entry discarded the refused delete receipt or leaked its live owner")
 H.joinedChannels = {}
 Pump(301, 1)
 deleteCopy = DeleteStatus("zone-delete")
+-- A refused delete owns no retry, so 301 seconds cannot expire it; it is
+-- already terminal at its refusal. The bounded-receipt and defensive-copy
+-- properties are asserted exactly as before.
 Check(deleteStatus and deleteStatus.outcome == "caller-mutated"
         and deleteCopy and deleteCopy.terminal == true
-        and deleteCopy.outcome == "expired"
+        and deleteCopy.outcome == "rejected"
         and deleteCopy.id == "zone-delete"
         and ScalarOnly(deleteCopy),
-    "delete expiry lost exact bounded terminal ownership")
+    "refused delete lost exact bounded terminal ownership")
 deleteCopy.outcome = "mutated-copy"
-Check(DeleteStatus("zone-delete").outcome == "expired",
+Check(DeleteStatus("zone-delete").outcome == "rejected",
     "delete status getter exposed its live mutable owner")
 
 -- Delete packets share the same generic terminal boundary for active
@@ -550,42 +578,50 @@ local resetDeleteOk, _, resetDelete = Sync.BroadcastDelete(resetDeleteBuild)
 local resetDeleteDepth = Sync.WorkState().sending
 local duplicateDeleteOk, duplicateDeleteWhy, duplicateDelete =
     Sync.BroadcastDelete(resetDeleteBuild)
-Check(resetDeleteOk == true and duplicateDeleteOk == true
-        and duplicateDeleteWhy == "already queued"
-        and duplicateDelete.generation == resetDelete.generation
+-- Idempotence survives and is stronger: a repeated local delete is refused
+-- identically and still adds no outbound depth. It cannot be "already queued"
+-- because it was never queued.
+Check(resetDeleteOk == false and duplicateDeleteOk == false
+        and duplicateDeleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN"
         and duplicateDelete.operationKey == resetDelete.operationKey
         and Sync.WorkState().sending == resetDeleteDepth,
-    "active delete retry was not idempotent")
+    "repeated local delete refusal was not idempotent")
 duplicateDelete.outcome = "caller-mutated"
-Check(DeleteStatus("reset-delete").outcome == "queued",
+Check(DeleteStatus("reset-delete").outcome == "rejected",
     "duplicate delete receipt mutated the active owner")
 Sync.Init(Nexus.Codec, {})
 local resetDeleteVisible = DeleteStatus("reset-delete")
-Check(resetDeleteVisible and resetDeleteVisible.outcome == "reset"
+-- Session reset terminalizes ACTIVE operations. A refused delete is already
+-- terminal and holds no active ownership, so it is not reset and must not move
+-- the reset counter. The defensive-copy and bounded-receipt properties are
+-- asserted unchanged.
+Check(resetDeleteVisible and resetDeleteVisible.outcome == "rejected"
         and resetDeleteVisible.terminal == true
-        and resetDelete.outcome == "queued"
+        and resetDelete.outcome == "rejected"
         and duplicateDelete.outcome == "caller-mutated"
         and ScalarOnly(resetDeleteVisible)
-        and (Sync.Stats().operationReset or 0) == 1,
-    "admitted delete reset did not terminalize exactly once")
+        and (Sync.Stats().operationReset or 0) == 0,
+    "a refused delete was reset as though it held active ownership")
 
 FreshDb()
 local sentDeleteOk, _, sentDelete = Sync.BroadcastDelete(
     DeleteBuild("sent-delete"))
 Pump(1.2, 1)
 local sentDeleteVisible = DeleteStatus("sent-delete")
-Check(sentDeleteOk == true and sentDeleteVisible
-        and sentDeleteVisible.outcome == "attempted"
-        and sentDeleteVisible.terminal == false
-        and sentDeleteVisible.sent == true
-        and sentDelete.outcome == "queued",
-    "delete API return skipped the bounded attribution window")
+-- The attribution window belongs to traffic that reaches transport. A refused
+-- delete never does, so it is never attempted and never marked sent.
+Check(sentDeleteOk == false and sentDeleteVisible
+        and sentDeleteVisible.outcome == "rejected"
+        and sentDeleteVisible.terminal == true
+        and sentDeleteVisible.sent ~= true
+        and sentDelete.outcome == "rejected",
+    "a refused delete entered the bounded attribution window")
 Pump(4.1, 1)
 sentDeleteVisible = DeleteStatus("sent-delete")
-Check(sentDeleteVisible and sentDeleteVisible.outcome == "sent-attempted"
+Check(sentDeleteVisible and sentDeleteVisible.outcome == "rejected"
         and sentDeleteVisible.terminal == true
         and sentDeleteVisible.accepted == false,
-    "delete API return invented receipt or failed to settle")
+    "a refused delete invented a send receipt")
 
 FreshDb()
 SendChatMessage = function() error("stage36 delete send failure") end
@@ -594,13 +630,15 @@ local failedDeleteOk, _, failedDelete = Sync.BroadcastDelete(
 Pump(2.2, 1); Pump(2.2, 1); Pump(2.2, 1)
 SendChatMessage = realSendChatMessage
 local failedDeleteVisible = DeleteStatus("dropped-delete")
-Check(failedDeleteOk == true and failedDeleteVisible
-        and failedDeleteVisible.outcome == "dropped"
-        and failedDeleteVisible.reason == "retry exhausted"
+-- A send failure cannot reach a delete that never sends. With no retry
+-- ownership there is no exhaustion terminal and the dropped counter must not
+-- move, even though SendChatMessage is erroring throughout this block.
+Check(failedDeleteOk == false and failedDeleteVisible
+        and failedDeleteVisible.outcome == "rejected"
         and failedDeleteVisible.terminal == true
-        and failedDelete.outcome == "queued"
-        and (Sync.Stats().operationDropped or 0) == 1,
-    "delete retry exhaustion did not retain its exact terminal")
+        and failedDelete.outcome == "rejected"
+        and (Sync.Stats().operationDropped or 0) == 0,
+    "a refused delete reached the retry-exhaustion terminal")
 
 -- Multiple exact owners retain their original absolute expiry through world
 -- transitions. Per-ID receipts remain independently queryable, and retrying A
@@ -617,10 +655,13 @@ local multiDeleteAOk, _, multiDeleteA = Sync.BroadcastDelete(
     DeleteBuild("multi-delete-a"))
 local multiDeleteBOk, _, multiDeleteB = Sync.BroadcastDelete(
     DeleteBuild("multi-delete-b"))
-Check(multiDeleteAOk == true and multiDeleteBOk == true
-        and ScalarOnly(multiShareA) and ScalarOnly(multiShareB)
-        and ScalarOnly(multiDeleteA) and ScalarOnly(multiDeleteB),
+-- SPLIT: the Share half of this block is kept verbatim; only the delete half
+-- is rewritten.
+Check(ScalarOnly(multiShareA) and ScalarOnly(multiShareB),
     "multi-owner expiry fixture was not admitted as bounded receipts")
+Check(multiDeleteAOk == false and multiDeleteBOk == false
+        and ScalarOnly(multiDeleteA) and ScalarOnly(multiDeleteB),
+    "refused multi-owner deletes were not bounded receipts")
 
 clock = clock + 60
 WorldEntry()
@@ -629,12 +670,15 @@ local multiShareAExpired = ShareStatus("multi-share-a")
 local multiShareBExpired = ShareStatus("multi-share-b")
 local multiDeleteAQueued = DeleteStatus("multi-delete-a")
 local multiDeleteBQueued = DeleteStatus("multi-delete-b")
+-- SPLIT: Share expiry kept verbatim, including the exact expired count of 2,
+-- which was only ever the two Shares at this point.
 Check(multiShareAExpired and multiShareAExpired.outcome == "expired"
         and multiShareBExpired and multiShareBExpired.outcome == "expired"
-        and multiDeleteAQueued and multiDeleteAQueued.outcome == "queued"
-        and multiDeleteBQueued and multiDeleteBQueued.outcome == "queued"
         and (Sync.Stats().operationExpired or 0) == 2,
     "world entry extended Share expiry or crossed exact operation owners")
+Check(multiDeleteAQueued and multiDeleteAQueued.outcome == "rejected"
+        and multiDeleteBQueued and multiDeleteBQueued.outcome == "rejected",
+    "a refused delete acquired queued ownership across world entry")
 
 clock = clock + 100
 WorldEntry()
@@ -642,17 +686,25 @@ Pump(80, 1)
 local multiDeleteAExpired = DeleteStatus("multi-delete-a")
 local multiDeleteBExpired = DeleteStatus("multi-delete-b")
 local multiExpiryStats = Sync.Stats()
-Check(multiDeleteAExpired and multiDeleteAExpired.outcome == "expired"
-        and multiDeleteBExpired and multiDeleteBExpired.outcome == "expired"
-        and multiExpiryStats.operationQueued == 4
+-- COUNTER DERIVATION, not a lowered expectation. The original figures counted
+-- four operations: 2 Shares + 2 deletes. Under architecture 4856 a local
+-- delete is never a queued operation and never acquires retry ownership, so it
+-- can neither be queued nor expire. The queued and expired populations are
+-- therefore exactly the 2 Shares. The Share terms and the
+-- attempted/accepted zero terms are unchanged; only the two delete terms are
+-- removed, and the deletes are asserted below to hold their rejected terminal.
+Check(multiExpiryStats.operationQueued == 2
         and multiExpiryStats.operationAttempted == 0
-        and multiExpiryStats.operationExpired == 4
+        and multiExpiryStats.operationExpired == 2
         and multiExpiryStats.operationAccepted == 0
         and ScalarOnly(multiShareAExpired)
-        and ScalarOnly(multiShareBExpired)
+        and ScalarOnly(multiShareBExpired),
+    "aggregate Share expiry lost exact multi-owner identities or counters")
+Check(multiDeleteAExpired and multiDeleteAExpired.outcome == "rejected"
+        and multiDeleteBExpired and multiDeleteBExpired.outcome == "rejected"
         and ScalarOnly(multiDeleteAExpired)
         and ScalarOnly(multiDeleteBExpired),
-    "aggregate expiry lost exact multi-owner identities or counters")
+    "a refused delete expired instead of holding its rejected terminal")
 
 JoinTemporaryChannel, JoinChannelByName =
     savedJoinTemporary, savedJoinNamed

@@ -95,6 +95,12 @@ assert(Nexus.LoadoutEvidence.ReferenceDpsRow(build))
 local remoteBefore, buildBefore = Signature(remote), Signature(build)
 local altBefore, localBefore = Signature(alt), Signature(localUnknown)
 local unrelatedBroadcasts = 0
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[A]=1}),{
     BroadcastDpsRecord=function() unrelatedBroadcasts=unrelatedBroadcasts+1 end,
 })
@@ -124,6 +130,7 @@ local lateAdapter = {
         return {synced=lockedReady,bySpell={[A]=1}}
     end,
 }
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(lateAdapter,{})
 DPS.GetDpsBoard("dummy")
 assert(type(lateAuthority.lockedEchoes)=="table",
@@ -145,6 +152,7 @@ local provenDb = EmptyDps()
 provenDb.personalBest[proven.fingerprint]={dummy=proven}
 local provenBefore = Signature(proven)
 DPS = LoadDps({loadoutEvidence={schemaVersion=1,entries={}},dpsCapture=provenDb})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[C]=9}),{})
 local provenKey = Key(provenFinal)
 assert(provenDb.personalBest[Key(provenSource)]
@@ -172,6 +180,7 @@ local interrupted = EmptyDps({
 interrupted.personalBest[Key(provenFinal)]={dummy=partial}
 DPS = LoadDps({loadoutEvidence={schemaVersion=1,entries={}},
     dpsCapture=interrupted})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[B]=5}),{})
 local resumed = interrupted.personalBest[Key(provenSource)]
     and interrupted.personalBest[Key(provenSource)].dummy
@@ -179,6 +188,7 @@ assert(resumed and Signature(resumed.echoes)==Signature(provenSource)
     and interrupted.lockedMigrationSource==nil,
     "interrupted source was not restored exactly")
 local resumedOnce = Signature(interrupted)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[A]=99}),{})
 assert(Signature(interrupted)==resumedOnce,
     "repeated initialization double-transformed interrupted recovery")
@@ -195,6 +205,7 @@ sharedDb.characterBest.dummy[shared.ownerKey]=shared
 DPS = LoadDps({loadoutEvidence={schemaVersion=1,entries={}},dpsCapture=sharedDb})
 DPS.MigrateLegacyLeaderboard()
 local sharedBefore = Signature(shared)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[C]=4}),{})
 assert(sharedDb.personalBest[Key(provenSource)]
     and sharedDb.personalBest[Key(provenSource)].dummy==shared,
@@ -220,6 +231,7 @@ Nexus.LoadoutEvidence.Init(conflictRoot)
 DPS.MigrateLegacyLeaderboard()
 conflicting.lockedEvidenceKey = assert(Nexus.LoadoutEvidence.Intern(Echoes(B,1)))
 local conflictBefore = Signature(conflicting)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[C]=4}),{})
 assert(Signature(conflicting)==conflictBefore
     and conflictDb.personalBest[Key(provenSource)].dummy==conflicting,
@@ -232,6 +244,7 @@ ambiguousDb.characterBest.dummy[ambiguous.ownerKey]=ambiguous
 local ambiguousBefore = Signature(ambiguousDb)
 DPS = LoadDps({loadoutEvidence={schemaVersion=1,entries={}},
     dpsCapture=ambiguousDb})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[A]=1}),{})
 assert(Signature(ambiguousDb)==ambiguousBefore,
     "completed-v1 ambiguous inverse was reconstructed")
@@ -253,12 +266,14 @@ local stablePeer = NewRow("Stable", "stable@otherrealm", Echoes(C,1))
 recoverDb.characterBest.dummy[stablePeer.ownerKey]=stablePeer
 local recoverableBefore = Signature(recoverable)
 local stableBefore = Signature(stablePeer)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[C]=7}),{})
 assert(Signature(recoverable)==recoverableBefore,
     "completed-v1 direct reference was treated as historical provenance")
 assert(Signature(stablePeer)==stableBefore,
     "completed-v1 recovery changed an unrelated peer row")
 local recoveredOnce = Signature(recoverDb)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[A]=99}),{})
 assert(Signature(recoverDb)==recoveredOnce,
     "repeated init changed an exact completed-v1 recovery")
@@ -275,6 +290,7 @@ DPS = LoadDps(legitimateRoot)
 Nexus.LoadoutEvidence.Init(legitimateRoot)
 legitimate.evidenceKey = assert(Nexus.LoadoutEvidence.Intern(legitimatePre))
 local legitimateBefore = Signature(legitimateDb)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[C]=8}),{})
 assert(Signature(legitimateDb)==legitimateBefore,
     "completed-v1 row already matching exact authority was reversed")
@@ -291,6 +307,7 @@ DPS = LoadDps(orphanRoot)
 Nexus.LoadoutEvidence.Init(orphanRoot)
 assert(Nexus.LoadoutEvidence.Intern(preState))
 local orphanBefore = Signature(orphanDb)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[A]=1}),{})
 assert(Signature(orphanDb)==orphanBefore,
     "orphan LoadoutEvidence was similarity-attached to a completed row")
@@ -316,10 +333,12 @@ local noLockDb = EmptyDps()
 noLockDb.characterBest.dummy[noLock.ownerKey]=noLock
 local noLockBefore = Signature(noLock)
 DPS = LoadDps({loadoutEvidence={schemaVersion=1,entries={}},dpsCapture=noLockDb})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({}),{})
 assert(Signature(noLock)==noLockBefore,
     "authoritative no-lock state rewrote historical evidence")
 local noLockOnce = Signature(noLockDb)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[A]=1}),{})
 assert(Signature(noLockDb)==noLockOnce,
     "repeated no-lock initialization changed migration state")
@@ -338,6 +357,7 @@ local futureRoot = {
 local futureBefore = Signature(futureRoot)
 Nexus.BuildCatalog = {Status=function() return {readOnly=true} end}
 DPS = LoadDps(futureRoot)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter({[A]=1}),{})
 assert(Signature(futureRoot)==futureBefore,
     "future-schema/read-only state was mutated")

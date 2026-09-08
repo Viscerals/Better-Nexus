@@ -268,7 +268,7 @@ NexusDB = {
     communityBuilds={},syncTombstones={},
     dpsCapture={characterBest=characterBest,personalBest={},buildBest={}},
 }
-Catalog.Init(NexusDB, bundle)
+H.AdmitCatalogV1(NexusDB, bundle)
 DPS.Init({}, {})
 local savedBefore = H.CloneValue(NexusDB)
 

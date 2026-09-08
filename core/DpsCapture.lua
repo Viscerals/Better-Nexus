@@ -258,27 +258,79 @@ local ReferenceEvidence, StoredEchoes
 -- personalBest[fingerprint][category] = this character's highest pull
 -- buildBest[fingerprint][category]    = highest known pull worldwide
 -- Older per-player leaderboard rows are migrated once on access.
-local function PersonalBestStore()
-    local db = DB()
+-- MASTER-RC-001, DpsAuthorityOwnerV1. Architecture line 2839: "All DPS
+-- candidate construction moves behind one DpsAuthorityOwnerV1 ... The
+-- module-private dpsPreparationEpoch advances once before a protected
+-- replacement of the complete detached DPS field set or durable sidecar ... The
+-- implementation test names every former direct write site and proves the
+-- inventory is exclusive."
+--
+-- The three DPS owner roots are personalBest, buildBest and characterBest.
+-- Every assignment to them lives between the two inventory markers below and
+-- nowhere else; tests/run_catalog_authority_bootstrap.lua DPA-02 scans this
+-- file and fails on any assignment outside the region, so the inventory is
+-- exclusive by measurement rather than by convention.
+--
+-- One file-level local is spent: the owner is a table of functions.
+local DpsAuthorityOwner = {epoch=0, SCHEMA=1}
+
+function DpsAuthorityOwner.Epoch() return DpsAuthorityOwner.epoch end
+
+-- DPS-AUTHORITY-WRITER-INVENTORY BEGIN
+-- The sole lazy creation site for the three owner roots.
+function DpsAuthorityOwner.Roots(db)
     db.personalBest = db.personalBest or {}
-    return db.personalBest
+    db.buildBest = db.buildBest or {}
+    db.characterBest = db.characterBest or { dummy = {}, lk = {} }
+    db.characterBest.dummy = db.characterBest.dummy or {}
+    db.characterBest.lk = db.characterBest.lk or {}
+    return db.personalBest, db.buildBest, db.characterBest
+end
+
+-- The sole protected replacement of the complete detached DPS field set. The
+-- module-private preparation epoch advances exactly ONCE, before the
+-- replacement, never per field.
+function DpsAuthorityOwner.ReplaceRoots(db, personal, build, character)
+    DpsAuthorityOwner.epoch = DpsAuthorityOwner.epoch + 1
+    db.personalBest = personal
+    db.buildBest = build
+    db.characterBest = character
+    return DpsAuthorityOwner.epoch
+end
+-- DPS-AUTHORITY-WRITER-INVENTORY END
+
+-- The durable sidecar the authority bundle carries. It takes the AUTHORITY
+-- DATABASE, not the DPS payload, and reads the bounded recovery gate of
+-- architecture line 2835.
+function DpsAuthorityOwner.Sidecar(database)
+    local payload = type(database) == "table" and database.dpsCapture or nil
+    return {
+        schemaVersion = DpsAuthorityOwner.SCHEMA,
+        migrationCompletionVersion = type(payload) == "table"
+            and (tonumber(payload.lockedMigrationVersion) or 0) or 0,
+        preparationEpoch = DpsAuthorityOwner.epoch,
+    }
+end
+
+if type(Nexus.MainInternals) ~= "table" then Nexus.MainInternals = {} end
+Nexus.MainInternals.DpsAuthority = DpsAuthorityOwner
+
+local function PersonalBestStore()
+    local personal = DpsAuthorityOwner.Roots(DB())
+    return personal
 end
 
 local function BuildBestStore()
-    local db = DB()
-    db.buildBest = db.buildBest or {}
-    return db.buildBest
+    local _, build = DpsAuthorityOwner.Roots(DB())
+    return build
 end
 
 -- Public mesh state is bounded to one winning loadout per character and
 -- encounter. The row still carries the exact loadout fingerprint/build id,
 -- but weaker loadouts from the same character are replaced.
 local function CharacterBestStore()
-    local db = DB()
-    db.characterBest = db.characterBest or { dummy = {}, lk = {} }
-    db.characterBest.dummy = db.characterBest.dummy or {}
-    db.characterBest.lk = db.characterBest.lk or {}
-    return db.characterBest
+    local _, _, character = DpsAuthorityOwner.Roots(DB())
+    return character
 end
 
 local function PlayerKey(name)
@@ -730,10 +782,13 @@ local function MigrateLocalLockedBaseline()
             buildBest=DeepCopy(BuildBestStore()),
             characterBest=DeepCopy(CharacterBestStore()),
         }
-        db.personalBest = DeepCopy(source.personalBest or {})
-        db.buildBest = DeepCopy(source.buildBest or {})
-        db.characterBest = DeepCopy(source.characterBest
-            or { dummy={}, lk={} })
+        -- MASTER-RC-001: one protected replacement of the complete detached
+        -- field set through the owner, which advances the preparation epoch
+        -- exactly once. This was three direct writes.
+        DpsAuthorityOwner.ReplaceRoots(db,
+            DeepCopy(source.personalBest or {}),
+            DeepCopy(source.buildBest or {}),
+            DeepCopy(source.characterBest or { dummy={}, lk={} }))
         db.lockedMigrationSource = nil
         local changed = not DeepEqual(beforeState.personalBest, PersonalBestStore())
             or not DeepEqual(beforeState.buildBest, BuildBestStore())
@@ -989,9 +1044,12 @@ local identityIndex = {
         candidateChecks=0,eligibilityReads=0,intersections=0},
 }
 
+-- MASTER-RC-012: the one canonical typed-identity encoder, shared from
+-- core/Identity.lua. A second local encoding here would let numeric and string
+-- ids diverge between the DPS index and the catalog.
 local function IdentityPart(value)
     if value == nil then return nil end
-    return type(value) .. ":" .. tostring(value)
+    return Nexus.Identity.TypedIdentity(value)
 end
 
 local function AddIdentityRow(map, value, row)
@@ -3400,11 +3458,22 @@ function DPS.Init(adapter, sync)
     identityIndex.initialized = false
     InvalidateAllDpsHashes()
     NexusDB = NexusDB or {}
-    if Nexus.LoadoutEvidence and Nexus.LoadoutEvidence.Init then
-        Nexus.LoadoutEvidence.Init(NexusDB)
-    end
-    if Catalog() and Catalog().Init then
-        Catalog().Init(NexusDB, Nexus.BundledBuilds)
+    -- MASTER-RC-001, dependent-side prohibition of architecture lines
+    -- 1207-1211. This previously drove LoadoutEvidence.Init and Catalog().Init
+    -- directly from DPS.Init, which is exactly a dependent initializer calling
+    -- another domain recovery pump: architecture line 1715 makes `Init` a
+    -- pump that "cannot be called outside the startup coordinator or an
+    -- explicit supported rebind." It now registers one idempotent dependency
+    -- and binds nothing; the coordinator services it.
+    -- The dependency is registered only when there actually is one. This is
+    -- the same condition the read gate uses (NexusDB ~= the bound database);
+    -- registering unconditionally would force a needless re-admission on every
+    -- ordinary login and discard in-flight candidate state.
+    local catalog = Catalog()
+    if catalog and type(catalog.RequestAuthorityRebindV1) == "function"
+        and type(catalog.BoundDatabase) == "function"
+        and catalog.BoundDatabase() ~= NexusDB then
+        catalog.RequestAuthorityRebindV1("SOURCE_REBIND_REQUIRED")
     end
     MigrateLocalLockedBaseline()
     local migrated = MigrateLegacyLeaderboard()

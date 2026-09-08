@@ -39,7 +39,7 @@ H.wishlist = { name = "MyBuild", class = "MAGE", echoes = {
 local rawBuildTitle = "|cffff0000Fire|r"
 local ok1, id1 = CB.PostCurrentWishlist("Fire Mage AoE", "Great for farming, easy to play.", H.wishlist)
 assert(ok1, "PostCurrentWishlist should have succeeded")
-local stored = NexusDB.communityBuilds[id1]
+local stored = H.DurableBuilds()[id1]
 assert(stored, "posted build not found in the store")
 assert(stored.title == "Fire Mage AoE", "wrong title stored")
 assert(stored.description == "Great for farming, easy to play.", "wrong description stored")
@@ -114,5 +114,5 @@ print("Lock In goes through confirmation then calls the real, confirmed upload p
 
 -- 6. Delete removes it from the store and the list
 CB2.DeleteBuild(id1)
-assert(NexusDB.communityBuilds[id1] == nil, "DeleteBuild did not remove the entry")
+assert(H.DurableBuilds()[id1] == nil, "DeleteBuild did not remove the entry")
 print("DeleteBuild correctly removes a posted build -- OK")

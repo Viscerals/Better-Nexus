@@ -32,8 +32,13 @@ local msgs=EncodeBob("bob-1","Bob's Build",100)
 -- Login-time sync fires within the bounded 8-16 second startup delay above.
 assert(Sync.IsReceiving(),"automatic login sync should open the receive window")
 for _,m in ipairs(msgs) do Sync.HandleIncoming(m.text,"Bob-Ebonhold") end
-assert(NexusDB.communityBuilds and NexusDB.communityBuilds["bob-1"],
+-- Legacy-to-bundle cutover (architecture 3b5de54f, state machine lines 394,
+-- 4849): received builds are durable in the authority bundle only; the exact
+-- PR #68 location is preserved read-only input that receiving never writes.
+assert(H.DurableBuilds()["bob-1"] and Sync and Nexus.BuildCatalog.Get("bob-1"),
     "automatic login sync did not accept current build metadata")
+assert(rawget(NexusDB, "communityBuilds") == nil,
+    "receiving wrote a legacy payload location")
 print("automatic login sync receives current mesh metadata -- OK")
 
 -- Once the status window expires, direct-author traffic is still accepted.
@@ -41,14 +46,14 @@ clock=clock+70
 assert(not Sync.IsReceiving(),"automatic receive window should expire")
 local msgs2=EncodeBob("bob-2","Bob's Second",200)
 for _,m in ipairs(msgs2) do Sync.HandleIncoming(m.text,"Bob-Ebonhold") end
-assert(NexusDB.communityBuilds["bob-2"],"direct-author data was dropped outside a sync window")
+assert(H.DurableBuilds()["bob-2"],"direct-author data was dropped outside a sync window")
 print("direct-author updates remain accepted after the status window -- OK")
 
 -- Manual Sync Now reopens convergence.
 clock=clock+10
 assert(Sync.RequestSync(),"manual sync should succeed")
 for _,m in ipairs(msgs2) do Sync.HandleIncoming(m.text,"Bob-Ebonhold") end
-assert(NexusDB.communityBuilds["bob-2"],"manual sync lost existing metadata")
+assert(H.DurableBuilds()["bob-2"],"manual sync lost existing metadata")
 print("manual sync reconciles already accepted metadata -- OK")
 
 -- Convergence may run several bounded passes. Once it reports idle it must stop.

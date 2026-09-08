@@ -54,8 +54,9 @@ depends_on: [50.2]
 
 - Status: `IN_REVIEW`
 - Objective:
-  - Implement the accepted catalog-authority state machine on exact PR #68 and
-    stop at one clean, locally validated candidate for independent review.
+  - Complete `MASTER-RC-006`, the only open root in the accepted aggregated
+    Repair Wave 1, then stop at one frozen locally validated candidate for fresh
+    independent review.
 - Deliverables:
   - Generation-bound resumable bounded admission with one published root.
   - Collision-free typed identity and explicit authority-state transitions.
@@ -65,6 +66,8 @@ depends_on: [50.2]
   - Bounded identity/fingerprint indexes, cursors, and status accounting.
   - Retention and compaction as transactions bound to the exact database.
   - Rollback/restart, mixed-client, protocol-7, and Package A compatibility.
+  - One V1 slice per public admission call, constant-work cursor Begin, bounded
+    Next and copy work, persistent frontiers, and fixed protected-commit work.
 - Acceptance:
   - [x] A genuine expected-red matrix is recorded on exact PR #68 before any
     product edit.
@@ -73,6 +76,17 @@ depends_on: [50.2]
     workflow, Release Policy, security, and diff checks pass.
   - [x] No rejected-candidate implementation is imported and no protected path
     is modified.
+  - [x] Eighteen roots are closed with coordinator rulings; only
+    `MASTER-RC-006` remains open.
+  - [x] `MASTER-RC-006` expected-red, maximum-frontier, fail-capability, focused,
+    path-accounting, and residual proofs pass on the current repair.
+  - [x] One candidate freeze commit records its exact commit, tree, parent, and
+    path inventory.
+  - [ ] Exact-head Fast and Full pass on the frozen candidate.
   - [ ] Independent review of the frozen candidate.
 - Evidence:
   - `.vibe/EVIDENCE.md` Stage 50.3 implementation receipts.
+  - `C:\T3\BN\receipts\wave1\CLOSURE_RULINGS_2026-09-06.md`.
+  - `C:\T3\BN\receipts\wave1\CODEX_TAKEOVER_BLOCKED_2026-09-07.md`.
+  - Governing Amendment 13 SHA-256
+    `292d3258f86986297b8eb55c6f9223010bc2bfdb4e4c4ffdf49b99337ab031b4`.

@@ -70,7 +70,13 @@ local bundle = {schemaVersion=1,catalogVersion="class-test",sourceVersion="test"
     unverifiedOnly=Build("unverifiedOnly",810011,"PRIEST","Unverified","RealmA",false),
 }}
 local db = {communityBuilds={},syncTombstones={tombstoned={stamp=50,author="Owner"}}}
-Nexus.BuildCatalog.Init(db,bundle)
+-- MASTER-RC-001 (architecture 1207-1211): BuildCatalog is itself a named
+-- dependent initializer, so Catalog.Init no longer drives the LoadoutEvidence
+-- owner. A fixture that drives Init directly performs the same
+-- evidence-before-catalog admission explicitly. No assertion or expected value
+-- in this fixture is changed.
+Nexus.LoadoutEvidence.Init(db)
+H.AdmitCatalogV1(db,bundle)
 local ownerKey = Nexus.Identity.OwnerKey("Owneronly","RealmA")
 local ownerRequest = {player="Owneronly",ownerKey=ownerKey,
     ownerVerified=true,realm="realma"}

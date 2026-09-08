@@ -40,7 +40,7 @@ NexusDB = {
 }
 
 local Store, Adapter = Nexus.Store, Nexus.GameAdapter
-Store.Init()
+H.BootstrapStore()
 Adapter.Init({}, Store)
 H.DeliverSlots({
     [1]={slot=1, name="Server Mirror", verified=true,

@@ -15,6 +15,27 @@ local MAX_TOTAL_STACKS = 10000
 local MAX_CONFLICTS = 40
 local boundDb, boundReadOnly
 local readOnlyEmptyStore = {schemaVersion=SCHEMA_VERSION + 1,entries={}}
+-- MASTER-RC-005: an open detached evidence candidate. While one is open this
+-- module writes no SavedVariables location; every intern lands in the detached
+-- replacement store, which becomes durable only when the authority commit
+-- coordinator installs it inside the complete bundle.
+local candidate = nil
+-- The durable evidence payload after the accepted legacy-to-bundle cutover.
+-- State machine line 394 gives the exact PR #68 `loadoutEvidence` location "No
+-- Package B writer", makes it "Legacy admission only", and keeps it "Preserved
+-- legacy input when the bundle is absent. Never used as fallback after bundle
+-- occupancy." RAW-01 (line 4849) makes one complete `authorityBundle` pointer
+-- the sole durable payload write. `detachedStore` holds the store this module
+-- built or repaired off-state while no durable location was selectable; the
+-- commit coordinator installs it inside the next complete bundle. It is never
+-- written to SavedVariables here.
+local detachedStore = nil
+-- The exact selected table `detachedStore` was derived from, so a repeated call
+-- returns the same off-state store instead of building a new one and losing the
+-- interns already staged in it. nil is a valid source: it means "no durable
+-- location was selectable at all".
+local detachedSource = nil
+local detachedSourceSet = false
 local referenceProviders = {}
 local referenceProviderGeneration = 0
 local runtime = {
@@ -80,6 +101,79 @@ local function RecordConflict(kind, claimed, actual)
     return item
 end
 
+-- The bundle's evidence field once a bundle is occupied; the preserved legacy
+-- input only while the bundle is absent. Never a fallback after occupancy.
+local function SelectedDurableStore()
+    if type(boundDb) ~= "table" then return nil end
+    local bundle = rawget(boundDb, "authorityBundle")
+    if type(bundle) == "table" then return rawget(bundle, "loadoutEvidence") end
+    return rawget(boundDb, "loadoutEvidence")
+end
+
+-- One detached, shape-repaired copy of a malformed store. The source table is
+-- never mutated, so a preserved legacy input stays byte-identical and a live
+-- nested bundle field is never written.
+local function ShapeRepaired(store)
+    local repaired = {schemaVersion=SCHEMA_VERSION, entries={}}
+    if type(store) == "table" then
+        for key, value in pairs(store) do repaired[key] = value end
+        repaired.entries = {}
+        local entries = type(store.entries) == "table" and store.entries or {}
+        for key, value in pairs(entries) do repaired.entries[key] = value end
+        if repaired.schemaVersion == nil then
+            repaired.schemaVersion = SCHEMA_VERSION
+        end
+    end
+    return repaired
+end
+
+-- The store this module currently treats as durable, ignoring any open
+-- candidate. Either the exact selected table, or one cached off-state store
+-- bound to the exact selection it was derived from. It never writes anything.
+local function CurrentDurableStore()
+    local selected = SelectedDurableStore()
+    if detachedSourceSet and detachedSource == selected
+        and type(detachedStore) == "table" then
+        return detachedStore
+    end
+    if type(selected) ~= "table" then
+        -- Line 394 gives the legacy location no Package B writer, so an absent
+        -- store is built detached and becomes durable only when the commit
+        -- coordinator installs it inside the next complete bundle.
+        detachedSource, detachedSourceSet = selected, true
+        detachedStore = {schemaVersion=SCHEMA_VERSION, entries={}}
+        return detachedStore
+    end
+    if boundReadOnly then return selected end
+    if tonumber(selected.schemaVersion)
+        and tonumber(selected.schemaVersion) > SCHEMA_VERSION then
+        return selected
+    end
+    if type(selected.entries) ~= "table" or selected.schemaVersion == nil then
+        detachedSource, detachedSourceSet = selected, true
+        detachedStore = ShapeRepaired(selected)
+        return detachedStore
+    end
+    return selected
+end
+
+-- The detached replacement store for an open candidate, materialized on first
+-- use so a transaction that never touches evidence allocates nothing.
+local function CandidateStore()
+    if not candidate then return nil end
+    if candidate.store then return candidate.store end
+    local live = CurrentDurableStore()
+    local replacement = {schemaVersion=SCHEMA_VERSION, entries={}}
+    if type(live) == "table" then
+        for key, value in pairs(live) do replacement[key] = value end
+        replacement.entries = {}
+        local entries = type(live.entries) == "table" and live.entries or {}
+        for key, value in pairs(entries) do replacement.entries[key] = value end
+    end
+    candidate.store = replacement
+    return replacement
+end
+
 local function Store()
     if type(NexusDB) == "table" and NexusDB ~= boundDb then
         Evidence.Init(NexusDB)
@@ -87,23 +181,20 @@ local function Store()
         NexusDB = type(NexusDB) == "table" and NexusDB or {}
         Evidence.Init(NexusDB)
     end
-    local store = boundDb.loadoutEvidence
-    if type(store) ~= "table" then
-        if boundReadOnly then return readOnlyEmptyStore end
-        store = {schemaVersion=SCHEMA_VERSION, entries={}}
-        boundDb.loadoutEvidence = store
+    if candidate and not boundReadOnly then
+        local staged = CandidateStore()
+        if staged then return staged end
     end
-    if boundReadOnly then return store end
+    if boundReadOnly and type(SelectedDurableStore()) ~= "table" then
+        return readOnlyEmptyStore
+    end
     -- A newer owner may use an entirely different entries shape. Preserve it
     -- byte-for-byte; callers that understand only schema 1 treat an unknown
-    -- shape as empty/read-only instead of "repairing" future data.
-    if tonumber(store.schemaVersion)
-        and tonumber(store.schemaVersion) > SCHEMA_VERSION then
-        return store
-    end
-    if type(store.entries) ~= "table" then store.entries = {} end
-    if store.schemaVersion == nil then store.schemaVersion = SCHEMA_VERSION end
-    return store
+    -- shape as empty/read-only instead of "repairing" future data. Shape repair
+    -- happens off-state inside CurrentDurableStore: repairing in place would
+    -- either write a preserved legacy input or mutate a live nested bundle
+    -- field, and the architecture forbids both.
+    return CurrentDurableStore()
 end
 
 local function FingerprintNormalized(rows)
@@ -117,7 +208,88 @@ local function FingerprintNormalized(rows)
     return #parts > 1 and table.concat(parts, "|") or nil
 end
 
+------------------------------------------------------------------------
+-- Detached evidence candidate (MASTER-RC-005)
+--
+-- Architecture 3b5de54f: "EvidenceCoordinator builds only evidence fields. They
+-- never write SavedVariables." "Build a detached evidence candidate and publish
+-- it atomically with the catalog root in one complete bundle."
+------------------------------------------------------------------------
+
+-- MASTER-RC-003. THE canonical evidence-union identity, owned here.
+-- Required repaired outcome: "one LoadoutEvidence-owned canonical union;
+-- canonical grouping independent of source array."
+--
+-- A tuple's identity is exactly (spellId, quality, locked). The transport array
+-- it arrived in -- the inline echoes array or the separate lockedEchoes array --
+-- is shape, not identity, so the same semantic tuple carried in both arrays is
+-- ONE canonical member whose stacks are summed. The locked role IS identity and
+-- stays distinguished; only the source array is dropped.
+--
+-- Returns -1, 0 or 1. Ordinary sorts before locked so the published order is
+-- deterministic across both source arrays.
+function Evidence.CanonicalTupleOrder(left, right)
+    if left.spellId ~= right.spellId then
+        return left.spellId < right.spellId and -1 or 1
+    end
+    if left.quality ~= right.quality then
+        return left.quality < right.quality and -1 or 1
+    end
+    local leftLocked = left.locked and true or false
+    local rightLocked = right.locked and true or false
+    if leftLocked ~= rightLocked then
+        return leftLocked and 1 or -1
+    end
+    return 0
+end
+
+function Evidence.BeginCandidate()
+    if not candidate then candidate = {store=nil} end
+    return true
+end
+
+-- The complete detached replacement store, or nil when this transaction interned
+-- nothing and the current durable store is carried through unchanged.
+function Evidence.CandidateStore()
+    return candidate and candidate.store or nil
+end
+
+-- The coordinator has already installed this exact table inside the published
+-- complete bundle, which RAW-01 makes the sole durable payload write. Nothing
+-- further is written here: line 394 gives the legacy `loadoutEvidence` location
+-- no Package B writer, so the former compatibility-mirror assignment is gone.
+function Evidence.PublishCandidate()
+    if candidate and candidate.store then
+        detachedStore, detachedSource, detachedSourceSet = nil, nil, false
+    end
+    candidate = nil
+    return true
+end
+
+-- The store the commit coordinator must install in the next complete bundle:
+-- an open candidate's detached replacement, else the selected durable store,
+-- else the detached store built while no durable location was selectable.
+-- A detached authority instance passes its own database and gets nil unless it
+-- is the exact bound one, so it can never borrow this module's global state.
+function Evidence.DurableStore(database)
+    if database ~= nil and database ~= boundDb then return nil end
+    if candidate and candidate.store then return candidate.store end
+    if type(boundDb) ~= "table" then return nil end
+    return CurrentDurableStore()
+end
+
+function Evidence.CancelCandidate()
+    candidate = nil
+    return true
+end
+
+function Evidence.CandidateOpen()
+    return candidate ~= nil
+end
+
 function Evidence.Init(database)
+    candidate = nil
+    detachedStore, detachedSource, detachedSourceSet = nil, nil, false
     boundDb = type(database) == "table" and database or {}
     local catalog = Nexus and Nexus.BuildCatalog
     local supported = catalog and type(catalog.SchemaVersion) == "function"
@@ -125,13 +297,13 @@ function Evidence.Init(database)
     local stored = type(boundDb.buildCatalog) == "table"
         and tonumber(boundDb.buildCatalog.schemaVersion) or nil
     boundReadOnly = supported ~= nil and stored ~= nil and stored > supported
-    local store = boundDb.loadoutEvidence
+    local store = SelectedDurableStore()
     if type(store) ~= "table" then
         if boundReadOnly then
             return {schemaVersion=nil,entries=0,readOnly=true}
         end
-        store = {schemaVersion=SCHEMA_VERSION, entries={}}
-        boundDb.loadoutEvidence = store
+        -- Built detached: line 394 leaves the legacy location read-only.
+        store = CurrentDurableStore()
     end
     if boundReadOnly then
         return {
@@ -150,8 +322,9 @@ function Evidence.Init(database)
             readOnly=true,
         }
     end
-    if type(store.entries) ~= "table" then store.entries = {} end
-    if store.schemaVersion == nil then store.schemaVersion = SCHEMA_VERSION end
+    if type(store.entries) ~= "table" or store.schemaVersion == nil then
+        store = CurrentDurableStore()
+    end
     return {
         schemaVersion=store.schemaVersion,
         entries=Count(store.entries),

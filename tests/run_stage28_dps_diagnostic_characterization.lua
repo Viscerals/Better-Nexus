@@ -24,7 +24,14 @@ dofile("core/DpsCapture.lua")
 
 local Sync, DPS = Nexus.Sync, Nexus.DpsCapture
 NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 
 local failures = {}
@@ -118,6 +125,7 @@ local responder = {
         return true
     end,
 }
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, responder)
 local digestBefore = DPS.GetSyncHash()
 local cache = DPS.HashCacheStats()

@@ -22,9 +22,14 @@ assert(type(Catalog.DebugStats) == "function",
 -- ADDON_LOADED Store.Init, Main Init's Store.Init, then the Community, Sync,
 -- and DPS subsystem initializers all bind the same database and immutable
 -- release bundle during one login.
-Nexus.Store.Init()
-Nexus.Store.Init()
+H.BootstrapStore()
+H.BootstrapStore()
 Nexus.CommunityBuilds.Init({}, {})
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps.
+H.AdmitCatalogV1(NexusDB)
 Nexus.Sync.Init(Nexus.Codec, {})
 -- Complete collections are read through the generation-bound summary cursor.
 local function Summaries()
@@ -88,11 +93,16 @@ NexusDB.dpsCapture.characterBest = {
 }
 NexusDB.dpsCapture.personalBest = {}
 NexusDB.dpsCapture.buildBest = {}
+H.AdmitCatalogV1(NexusDB)
 Nexus.DpsCapture.Init({}, Nexus.Sync)
 
 local login = Catalog.DebugStats()
-assert(login.initCalls == 5 and login.rebinds == 1
-    and login.fastPathHits == 4 and login.revisionSnapshots == 0,
+local maximumPumps = Catalog.Budget().maximumPumps
+assert(login.rootAdmissions == 1 and login.rebinds == 1
+    and login.rootPumps > 0 and login.rootPumps <= maximumPumps
+    and login.fastPathHits == 4
+    and login.initCalls == login.rootPumps + login.fastPathHits
+    and login.revisionSnapshots == 0,
     string.format("login rebuilt/copied catalog: calls=%s rebinds=%s fast=%s snapshots=%s",
         tostring(login.initCalls), tostring(login.rebinds),
         tostring(login.fastPathHits), tostring(login.revisionSnapshots)))
@@ -102,11 +112,16 @@ assert(Catalog.Count() == AdmissibleBundledCount()
 
 -- Every later PLAYER_ENTERING_WORLD reinitializes Sync and DPS. Those calls
 -- must stay allocation-free when the database/bundle bindings are unchanged.
+H.AdmitCatalogV1(NexusDB)
 Nexus.Sync.Init(Nexus.Codec, {})
+H.AdmitCatalogV1(NexusDB)
 Nexus.DpsCapture.Init({}, Nexus.Sync)
 local zone = Catalog.DebugStats()
-assert(zone.initCalls == 7 and zone.rebinds == 1
-    and zone.fastPathHits == 6 and zone.revisionSnapshots == 0,
+assert(zone.initCalls == login.initCalls + 2
+    and zone.rootAdmissions == login.rootAdmissions
+    and zone.rootPumps == login.rootPumps and zone.rebinds == 1
+    and zone.fastPathHits == login.fastPathHits + 2
+    and zone.revisionSnapshots == 0,
     "zone transition recopied the unchanged bundled catalog")
 
 -- Author membership may scan visible build identities once per library

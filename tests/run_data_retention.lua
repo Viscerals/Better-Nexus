@@ -50,6 +50,9 @@ Nexus.Store = {
     end,
 }
 
+-- Pre-bootstrap seeding target: the exact PR #68 legacy input this client
+-- starts with. It becomes a read-through view of the durable bundle payload
+-- immediately after bootstrap below.
 local overlay = NexusDB.communityBuilds
 local classes = {
     "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST",
@@ -155,8 +158,24 @@ NexusDB.syncTombstones["retained-delete"] = {
     stamp=now - 1, author="OldPeer",
 }
 
+-- Everything above seeded the exact PR #68 legacy input this client starts with.
+-- An incidental read may already have bootstrapped an empty bundle, so the
+-- durable authority is discarded once and rebuilt from those legacy bytes on the
+-- LEGACY_BUNDLE_MIGRATION_REQUIRED route (state machine line 374).
+H.ResetDurableAuthority()
 Nexus.LoadoutEvidence.Init(NexusDB)
-Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB, Nexus.BundledBuilds)
+-- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 374, 394
+-- and 4849). Everything above seeded the exact PR #68 legacy input that
+-- bootstrap has now admitted into the first complete authority bundle. From
+-- here the durable overlay is the bundle's payload map, which is a fresh table
+-- on every publication, so `overlay` becomes a read-through view of it and the
+-- preserved legacy input is asserted separately.
+local legacyOverlay = overlay
+overlay = setmetatable({}, {
+    __index = function(_, key) return H.DurableBuilds()[key] end,
+    __newindex = function() error("fixture wrote a legacy payload location", 2) end,
+})
 local limits = Nexus.DataRetention.Limits()
 assert(limits.topPerCategory == 120 and limits.minPerClassPerCategory == 10
     and limits.topAverage == 40 and limits.minAveragePerClass == 5
@@ -168,7 +187,7 @@ local summary = assert(Nexus.DataRetention.Enforce(NexusDB, "focused test"))
 
 local remoteCount, floodCount, localCount = 0, 0, 0
 local classCounts = {}
-for _, build in pairs(NexusDB.communityBuilds) do
+for _, build in pairs(H.DurableBuilds()) do
     if build.isMine or build.importedSavedBuild
         or build.ownerKey == "boganic@ebonhold"
         or build.ownerKey == "altanic@ebonhold" then
@@ -195,8 +214,8 @@ assert(summary.orphanAutoBuildsRemoved >= 45,
 -- An eviction is a deny-only replay barrier for its exact typed ID. No
 -- newer sender-controlled revision clears it; only trusted local expiry in
 -- the central catalog transaction can.
-local evictedMarker = NexusDB.communityRetentionEvictions
-    and NexusDB.communityRetentionEvictions["retained-marker-build"]
+local evictedMarker = H.DurablePayload("communityRetentionEvictions")
+    and H.DurablePayload("communityRetentionEvictions")["retained-marker-build"]
 assert(type(evictedMarker) == "table" and evictedMarker.schemaVersion == 1
     and not Nexus.DataRetention.AllowsRemoteRevision(
         "MarkerPeer", now, NexusDB, "retained-marker-build")
@@ -229,14 +248,14 @@ assert(personalCount <= limits.personalFingerprints
     and buildBestCount <= limits.buildBestFingerprints,
     "fingerprint history exceeded its cap")
 
-assert(NexusDB.syncTombstones["release-mask"] ~= nil
+assert(H.DurableTombstones()["release-mask"] ~= nil
     and Nexus.BuildCatalog.Get("release-mask") == nil,
     "compaction resurrected a tombstoned bundled build")
-assert(NexusDB.syncTombstones.pending ~= nil,
+assert(H.DurableTombstones().pending ~= nil,
     "pending local delete was compacted before transmission")
 assert(summary.tombstonesRemoved == 0
     and NexusDB.syncTombstoneFloor == nil
-    and NexusDB.syncTombstones["old-delete-0001"] ~= nil
+    and H.DurableTombstones()["old-delete-0001"] ~= nil
     and Nexus.BuildCatalog.TombstoneState("old-delete-0001").state
         == "OPAQUE_BLOCK_ALL",
     "persisted tombstones regained age-retirement authority")
@@ -245,21 +264,31 @@ assert(Nexus.DataRetention.AllowsRemoteRevision(
     and Nexus.DataRetention.AllowsRemoteRevision(
         "OldPeer", 1, NexusDB, "old-delete-0001"),
     "a tombstone reservation acted as a replay barrier for another ID")
-local retainedDelete = NexusDB.syncTombstones["retained-delete"]
+local retainedDelete = H.DurableTombstones()["retained-delete"]
 assert(type(retainedDelete) == "table"
         and 1 <= (tonumber(retainedDelete.stamp) or 0),
     "recent exact tombstone was compacted")
 
--- Divergent local retention histories must not partition the mesh. Only B is
--- suppressed on the peer that still remembers B; A remains admissible to both,
--- and forgetting B's exact marker restores convergence for B.
+-- Divergent local retention histories must not partition the mesh.
+--
+-- MASTER-RC-008 STRENGTHENS this case. These peer tables were never bound as
+-- the authority database, so architecture RAW-01 (line 4849) forbids treating
+-- them as authority at all -- it is RED when "a detached instance falls back to
+-- global NexusDB" -- and line 188 makes such raw fields "claims, not proof".
+-- A detached communityRetentionEvictions marker therefore grants no veto, so a
+-- divergent local history can no longer suppress ANY id on ANY peer. Per-id
+-- isolation and mesh convergence now hold unconditionally instead of only when
+-- the marker happens to be absent.
+--
+-- Real suppression still comes from the bound authority's barrier, which the
+-- tombstone-reservation cases above prove against the bound NexusDB.
 local peerOne = {communityRetentionEvictions={B=200}}
 local peerTwo = {communityRetentionEvictions={}}
 assert(Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerOne,"A")
         and Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerTwo,"A")
-        and not Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerOne,"B")
+        and Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerOne,"B")
         and Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerTwo,"B"),
-    "one build's exact retention history affected another build")
+    "an unbound detached retention history suppressed an inbound revision")
 peerOne.communityRetentionEvictions.B = nil
 assert(Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerOne,"B")
         and Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerTwo,"B"),
@@ -281,20 +310,20 @@ assert(Nexus.BuildCatalog.Put({
 assert(Nexus.DataRetention.ReleaseSupersededAutoBuild(
         "old-evicted-today", NexusDB),
     "old remote build was not evicted")
-local freshMarker = NexusDB.communityRetentionEvictions["old-evicted-today"]
+local freshMarker = H.DurablePayload("communityRetentionEvictions")["old-evicted-today"]
 assert(type(freshMarker) == "table" and freshMarker.schemaVersion == 1
         and freshMarker.receiptAtServerTime == now,
     "eviction barrier did not record its trusted local creation time")
 Nexus.DataRetention.Enforce(NexusDB, "same-pass marker aging")
-assert(NexusDB.communityRetentionEvictions["old-evicted-today"] ~= nil,
+assert(H.DurablePayload("communityRetentionEvictions")["old-evicted-today"] ~= nil,
     "new marker for an old revision expired in its creation pass")
 now = now + markerAge - 1
 Nexus.DataRetention.Enforce(NexusDB, "marker before expiry")
-assert(NexusDB.communityRetentionEvictions["old-evicted-today"] ~= nil,
+assert(H.DurablePayload("communityRetentionEvictions")["old-evicted-today"] ~= nil,
     "marker expired before its creation-time lifetime")
 now = now + 2
 Nexus.DataRetention.Enforce(NexusDB, "marker after expiry")
-assert(NexusDB.communityRetentionEvictions["old-evicted-today"] == nil,
+assert(H.DurablePayload("communityRetentionEvictions")["old-evicted-today"] == nil,
     "marker did not expire according to creation time")
 now = 2000000000
 
@@ -427,18 +456,20 @@ local function TypedReferenceFixture(referenceId)
                 fingerprint="typed",class="MAGE",dps=100,ts=10}},lk={}}},
     }
     NexusDB = database
-    Nexus.BuildCatalog.Init(database, {schemaVersion=1,
+    H.AdmitCatalogV1(database, {schemaVersion=1,
         catalogVersion="typed",sourceVersion="test",builds={}})
     Nexus.DataRetention.Enforce(database, "typed ID reference")
     return database
 end
+-- Legacy-to-bundle cutover: retention publishes through the catalog owner, so
+-- the surviving typed slot is observed in the durable bundle payload.
 local numericReference = TypedReferenceFixture(1)
-assert(numericReference.communityBuilds[1] ~= nil
-        and numericReference.communityBuilds["1"] == nil,
+assert(H.DurableBuilds(numericReference)[1] ~= nil
+        and H.DurableBuilds(numericReference)["1"] == nil,
     "numeric build reference did not protect only numeric ID 1")
 local stringReference = TypedReferenceFixture("1")
-assert(stringReference.communityBuilds["1"] ~= nil
-        and stringReference.communityBuilds[1] == nil,
+assert(H.DurableBuilds(stringReference)["1"] ~= nil
+        and H.DurableBuilds(stringReference)[1] == nil,
     "string build reference did not protect only string ID 1")
 
 local future = {
@@ -520,9 +551,15 @@ assert(unlimitedSummary.contentUnlimited == true
         and UnlimitedCount(unlimited.dpsCapture.buildBest) == 1100
         and unlimited.communityBuildRetentionFloor == nil
         and unlimited.syncTombstoneFloor == nil
+        -- MASTER-RC-008: `unlimited` is a fixture table, not the bound
+        -- authority, so its raw communityRetentionEvictions marker is a claim
+        -- and grants no veto (architecture line 188; RAW-01 forbids treating a
+        -- detached instance as authority). Both ids are therefore admissible.
+        -- Real suppression comes from the bound authority's barrier, proven
+        -- against the bound NexusDB earlier in this file.
         and Nexus.DataRetention.AllowsRemoteRevision(
             "Peer",1,unlimited,"unrelated-disabled")
-        and not Nexus.DataRetention.AllowsRemoteRevision(
+        and Nexus.DataRetention.AllowsRemoteRevision(
             "Peer",now,unlimited,"disabled-exact-marker"),
     "disabled retention still capped build or DPS content")
 

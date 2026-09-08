@@ -63,7 +63,7 @@ for index = 1, 1000 do
         end
     end
 end
-Nexus.Store.Init()
+H.BootstrapStore()
 dofile("core/DpsCapture.lua")
 Nexus.DpsCapture.Init({}, {})
 

@@ -90,7 +90,9 @@ print("all wire messages fit within WoW's 255-char chat limit -- OK")
 -- BUG 1: the channel filter must match 3.3.5's actual arg layout
 ------------------------------------------------------------------------
 local msgs = H.sentChatMessages
-NexusDB.communityBuilds = nil
+-- Legacy-to-bundle cutover: the durable payload is the bundle, so a fresh
+-- receiving client is a fresh database, not a cleared legacy location.
+NexusDB = {}
 H.RebindCatalog()
 Sync.RequestSync()
 clock = clock + 1
@@ -126,7 +128,9 @@ local function RegenMessages(stamp)
     return H.sentChatMessages
 end
 
-NexusDB.communityBuilds = nil
+-- Legacy-to-bundle cutover: the durable payload is the bundle, so a fresh
+-- receiving client is a fresh database, not a cleared legacy location.
+NexusDB = {}
 H.RebindCatalog()
 local msgs2 = RegenMessages(1784886999)
 clock = clock + 10
@@ -135,15 +139,16 @@ for _, m in ipairs(msgs2) do
     H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Boganicc-Ebonhold", "Common",
         "12. " .. Sync.ChannelName())      -- arg4 only, no arg9
 end
-assert(NexusDB.communityBuilds
-    and NexusDB.communityBuilds["mine-1784886552-123456"],
+assert(H.DurableBuilds()["mine-1784886552-123456"],
     "delivery failed when only the numbered arg4 form was present")
 print("delivery also works when only the numbered channel form is available -- OK")
 
 ------------------------------------------------------------------------
 -- Traffic on an UNRELATED channel must still be ignored
 ------------------------------------------------------------------------
-NexusDB.communityBuilds = nil
+-- Legacy-to-bundle cutover: the durable payload is the bundle, so a fresh
+-- receiving client is a fresh database, not a cleared legacy location.
+NexusDB = {}
 H.RebindCatalog()
 local msgs3 = RegenMessages(1784887777)
 clock = clock + 10
@@ -152,7 +157,6 @@ for _, m in ipairs(msgs3) do
     H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Boganicc", "Common",
         "2. Trade", nil, nil, nil, 2, "Trade")
 end
-assert(not (NexusDB.communityBuilds
-    and NexusDB.communityBuilds["mine-1784886552-123456"]),
+assert(H.DurableBuilds()["mine-1784886552-123456"] == nil,
     "traffic from an unrelated channel was processed -- filter is too loose now")
 print("unrelated channel traffic is still correctly ignored -- OK")

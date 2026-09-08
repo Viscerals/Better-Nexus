@@ -87,7 +87,7 @@ Nexus.DataCompaction = {Init=function(db)
     assert(db == root, "compaction initializer received a replacement root")
 end}
 
-Store.Init()
+H.BootstrapStore()
 assert(table.concat(calls, ",") == "evidence,catalog,compaction",
     "Store additive owners initialized out of order")
 assert(NexusDB == root and NexusDB.settings == settings
@@ -113,7 +113,7 @@ assert(Store.SettingsVersion() == 2 and Store.Settings() == transientSettings
     "Store public accessors exposed or mutated a future owner")
 
 calls = {}
-Store.Init()
+H.BootstrapStore()
 assert(table.concat(calls, ",") == "evidence,catalog,compaction"
     and NexusDB == root and Store.Settings() == transientSettings
     and Store.State() == transientState
@@ -127,7 +127,7 @@ Nexus.BuildCatalog.Init = function(db, receivedBundle)
     assert(db == root and receivedBundle == bundle)
     return {readOnly=true}
 end
-Store.Init()
+H.BootstrapStore()
 assert(table.concat(calls, ",") == "evidence,catalog",
     "read-only catalog path ran data compaction")
 
@@ -141,8 +141,17 @@ Nexus.BuildCatalog.Init = function(db, receivedBundle)
     assert(db == root and receivedBundle == bundle)
     error("injected catalog failure")
 end
-local catalogOk, catalogWhy = pcall(Store.Init)
-assert(not catalogOk and tostring(catalogWhy):find("injected catalog failure", 1, true)
+-- MASTER-RC-001, architecture 3b5de54f state machine line 1206: Store.Init
+-- returns the explicit detached authority result and never raises. An owner
+-- fault is STORE_INVALID, is attributed to the exact owner, and withholds
+-- every later owner. INTENTIONAL COMPATIBILITY BREAK: PR #68 propagated the
+-- raw error. Failure containment and ordering coverage are unchanged.
+local catalogOk, catalogResult = pcall(H.BootstrapStore)
+assert(catalogOk and type(catalogResult) == "table"
+    and catalogResult.state == "failed"
+    and catalogResult.reason == "STORE_INVALID"
+    and catalogResult.owner == "BuildCatalog.Init"
+    and tostring(catalogResult.error):find("injected catalog failure", 1, true)
     and table.concat(calls, ",") == "evidence,catalog-fail",
     "Store swallowed catalog failure or invoked compaction afterward")
 assert(NexusDB == root and NexusDB.settings == settings
@@ -157,8 +166,12 @@ Nexus.LoadoutEvidence.Init = function(db)
     assert(db == root)
     error("injected evidence failure")
 end
-local ok, why = pcall(Store.Init)
-assert(not ok and tostring(why):find("injected evidence failure", 1, true)
+local ok, evidenceResult = pcall(H.BootstrapStore)
+assert(ok and type(evidenceResult) == "table"
+    and evidenceResult.state == "failed"
+    and evidenceResult.reason == "STORE_INVALID"
+    and evidenceResult.owner == "LoadoutEvidence.Init"
+    and tostring(evidenceResult.error):find("injected evidence failure", 1, true)
     and table.concat(calls, ",") == "evidence-fail",
     "Store swallowed failure or invoked a later persistence owner")
 assert(NexusDB == root and NexusDB.settings == settings
@@ -184,7 +197,7 @@ Nexus.DataCompaction.Init = function(db)
     calls[#calls + 1] = "compaction"
     assert(db == root)
 end
-Store.Init()
+H.BootstrapStore()
 assert(table.concat(calls, ",") == "evidence,catalog,compaction"
     and NexusDB == root and Store.Settings() == transientSettings
     and Store.State() == transientState

@@ -75,7 +75,9 @@ Sync.ClearLog()
 clock = clock + 10
 Sync.RequestSync()
 Deliver(postMsgs, "Solkr")
-local lib = NexusDB.communityBuilds
+-- Legacy-to-bundle cutover (state machine lines 394, 4849): the durable copy
+-- lives in the authority bundle; the exact PR #68 location is preserved input.
+local lib = H.DurableBuilds()
 assert(lib and lib[id] and Catalog.Get(id), "build was not received")
 assert(Catalog.Get(id).isMine == false, "a received build must not be marked mine")
 print("build received from author -- OK")
@@ -106,7 +108,7 @@ assert(text:find("UPDATED") or text:find("DUPLICATE"), "updated build was neithe
 assert(Catalog.Get(id).title == "Rogue Double Strike v2",
     "the update did not actually apply")
 local count = 0
-for _ in pairs(NexusDB.communityBuilds) do count = count + 1 end
+for _ in pairs(H.DurableBuilds()) do count = count + 1 end
 assert(count == 1 and Catalog.Count() == 1,
     "the update created a duplicate entry (" .. count .. " entries)")
 print("an update is logged as UPDATED, applies in place, creates no duplicate -- OK")
@@ -121,7 +123,7 @@ text = provider("sync")
 assert(text:find("DUPLICATE") or not text:find("UPDATED"),
     "an exact wire replay was applied as an update: " .. tostring(text))
 count = 0
-for _ in pairs(NexusDB.communityBuilds) do count = count + 1 end
+for _ in pairs(H.DurableBuilds()) do count = count + 1 end
 assert(count == 1, "a duplicate replay created a second entry")
 print("re-delivering the same wire version is idempotent, still one entry -- OK")
 
@@ -166,7 +168,7 @@ clock = clock + 10
 Sync.RequestSync()
 Deliver(hijackMsgs, "Griefer")
 assert(Catalog.Get(id) == nil
-    and NexusDB.syncTombstones[id] ~= nil,
+    and H.DurableTombstones()[id] ~= nil,
     "a different author seized a tombstoned build ID with a newer revision")
 print("a tombstoned build ID cannot be seized by a different author -- OK")
 
@@ -180,7 +182,7 @@ clock = clock + 10
 Sync.RequestSync()
 Deliver(summaryHijackMsgs, "Griefer")
 assert(Catalog.Get(id) == nil
-    and NexusDB.syncTombstones[id] ~= nil,
+    and H.DurableTombstones()[id] ~= nil,
     "a different author seized a tombstoned build ID through a summary")
 print("summary-only sync cannot bypass tombstone ownership -- OK")
 
@@ -198,7 +200,7 @@ local returnMsgs = Drain()
 clock = clock + 10
 Sync.RequestSync()
 Deliver(returnMsgs, "Solkr")
-assert(Catalog.Get(id) == nil and NexusDB.syncTombstones[id] ~= nil,
+assert(Catalog.Get(id) == nil and H.DurableTombstones()[id] ~= nil,
     "a remote revision superseded a tombstone reservation: "
         .. tostring(provider("sync")))
 local claim = assert(Catalog.BeginTombstoneReadmissionClaim(id))
@@ -209,11 +211,15 @@ assert(Catalog.PutWithClaim(claim, { id=id, title="Authorized return",
     postedAt=100001, lastModified=100001 }, {source="local"}),
     "the trusted local owner could not readmit their own build")
 assert(Catalog.Get(id) and Catalog.Get(id).title == "Authorized return"
-    and NexusDB.syncTombstones[id] == nil,
+    and H.DurableTombstones()[id] == nil,
     "local readmission did not atomically replace the tombstone")
 print("only an explicit trusted local claim can supersede a tombstone -- OK")
 
 -- 6. A delete from someone who is NOT the author must be REFUSED
+-- After the cutover an occupied bundle is authoritative and a raw legacy write
+-- is not an admission input, so this fixture seeds a fresh database and lets
+-- bootstrap admit the exact PR #68 legacy input (state machine line 374).
+NexusDB = {}
 NexusDB.communityBuilds = { ["victim"] = { id = "victim",
     title = "Someone Else's Build", description = "d", author = "Solkr",
     ownerKey = "solkr@ebonhold", ownerVerified = true,
@@ -225,13 +231,16 @@ Sync.ClearLog()
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Griefer||victim||99999",
     "Griefer-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
     nil, nil, nil, 5, Sync.ChannelName())
-assert(NexusDB.communityBuilds["victim"] and Catalog.Get("victim"),
+assert(H.DurableBuilds()["victim"] and Catalog.Get("victim"),
     "a non-author was allowed to delete someone else's shared build")
+assert(NexusDB.communityBuilds["victim"] ~= nil,
+    "the preserved legacy bootstrap input was rewritten")
 text = provider("sync")
 assert(text:find("is not the author"), "the refused delete was not logged with a reason")
 print("a delete from a non-author is refused and logged -- OK")
 
 -- 7. Nobody can delete YOUR OWN build out from under you
+NexusDB = {}
 NexusDB.communityBuilds = { ["mine"] = { id = "mine", title = "My Build",
     description = "d", author = "Solkr", class = "ROGUE",
     ownerKey = "solkr@ebonhold", ownerVerified = true,
@@ -243,6 +252,8 @@ Sync.ClearLog()
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Solkr||mine||99999",
     "Solkr-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
     nil, nil, nil, 5, Sync.ChannelName())
-assert(NexusDB.communityBuilds["mine"] and Catalog.Get("mine"),
+assert(H.DurableBuilds()["mine"] and Catalog.Get("mine"),
     "an incoming delete removed one of MY OWN builds")
+assert(NexusDB.communityBuilds["mine"] ~= nil,
+    "the preserved legacy bootstrap input was rewritten")
 print("incoming deletes can never remove your own builds -- OK")

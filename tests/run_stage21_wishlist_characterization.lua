@@ -71,7 +71,12 @@ local function SlotsWith(candidate)
 end
 
 H.DeliverSlots(SlotsWith(designed), 1)
-local state = Store.State()
+-- MASTER-RC-001: Store.State() now returns a defensive copy, so a value
+-- captured once no longer aliases later writes. H.LiveStoreStateV1()
+-- re-resolves at the point of every access through the authorized
+-- StoreAuthorityOwnerV1.UpdateStateV1 entry. Only the read timing changes;
+-- every assertion below is unchanged.
+local state = H.LiveStoreStateV1()
 for slot = 1, 3 do
     state.loadoutWishlists[slot] = {
         slot=102, name="Synthetic Designed Target", key=legitimateKey,

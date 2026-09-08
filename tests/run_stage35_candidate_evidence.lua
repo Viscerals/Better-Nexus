@@ -85,7 +85,7 @@ NexusDB = {
     settingsVersion=2, settings={}, chars={}, buildFilters={}, dpsCapture={},
     communityBuilds={[build.id]=build}, futureRoot={keep=true},
 }
-Nexus.Store.Init()
+H.BootstrapStoreReady()
 
 local validDpsRecord = {
     buildId=build.id,resolvedBuildId=build.id,

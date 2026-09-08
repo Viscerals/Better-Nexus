@@ -5,7 +5,12 @@
 local F = dofile("tests/automation_live_fixture.lua")
 local H = F.H
 local Adapter = Nexus.GameAdapter
-local state = Nexus.Store.State()
+-- MASTER-RC-001: Store.State() now returns a defensive copy, so a value
+-- captured once no longer aliases later writes. H.LiveStoreStateV1()
+-- re-resolves at the point of every access through the authorized
+-- StoreAuthorityOwnerV1.UpdateStateV1 entry. Only the read timing changes;
+-- every assertion below is unchanged.
+local state = H.LiveStoreStateV1()
 
 local checks = 0
 local function Check(value, message)
@@ -623,7 +628,17 @@ Check(boundedLifecycle.prepared == 4
         and boundedLifecycle.spacingRetries == 1
         and boundedLifecycle.explicitRetries == 1
         and boundedLifecycle.postExpiryBlocked == 3,
-    "final AutoLock lifecycle totals were not exact and bounded")
+    "final AutoLock lifecycle totals were not exact and bounded: "
+        .. "prepared=" .. tostring(boundedLifecycle.prepared)
+        .. " submitted=" .. tostring(boundedLifecycle.submitted)
+        .. " awaiting=" .. tostring(boundedLifecycle.awaitingConfirmation)
+        .. " confirmed=" .. tostring(boundedLifecycle.confirmed)
+        .. " rejected=" .. tostring(boundedLifecycle.rejected)
+        .. " expired=" .. tostring(boundedLifecycle.expired)
+        .. " superseded=" .. tostring(boundedLifecycle.superseded)
+        .. " spacingRetries=" .. tostring(boundedLifecycle.spacingRetries)
+        .. " explicitRetries=" .. tostring(boundedLifecycle.explicitRetries)
+        .. " postExpiryBlocked=" .. tostring(boundedLifecycle.postExpiryBlocked))
 print(string.format(
     "stage32 AutoLock confirmation: checks=%d calls=%d prepared=%d submitted=%d awaiting=%d confirmed=%d rejected=%d expired=%d superseded=%d postExpiry=%d capacity=1/%d",
     checks,#lockCalls,boundedLifecycle.prepared,

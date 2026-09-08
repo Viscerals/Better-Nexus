@@ -8,6 +8,12 @@ UnitName=function(unit) return unit=="player" and "Viewer" or nil end
 UnitClass=function() return "Mage","MAGE" end
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
 local DPS=Nexus.DpsCapture
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, {BroadcastBuild=function() return true end})
 local a={{spellId=200001,stacks=2},{spellId=200002,stacks=1}}
 local b={{spellId=200010,stacks=1},{spellId=200011,stacks=3}}

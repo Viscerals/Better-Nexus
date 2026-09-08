@@ -64,7 +64,12 @@ local function Candidate(rows, slot, name)
         verified=false,echoes=rows}
 end
 
-local state = Store.State()
+-- MASTER-RC-001: Store.State() now returns a defensive copy, so a value
+-- captured once no longer aliases later writes. H.LiveStoreStateV1()
+-- re-resolves at the point of every access through the authorized
+-- StoreAuthorityOwnerV1.UpdateStateV1 entry. Only the read timing changes;
+-- every assertion below is unchanged.
+local state = H.LiveStoreStateV1()
 local ordinary41 = Rows(41, 0, false)
 local ordinary41Key = assert(Adapter.WishlistKey(ordinary41))
 state.loadoutWishlists[1] = {

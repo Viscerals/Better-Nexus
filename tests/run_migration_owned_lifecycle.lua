@@ -36,12 +36,19 @@ local adapter = {
     Owned=function() return {synced=true,bySpell={},byFamily={}} end,
 }
 local DPS=Nexus.DpsCapture
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
 assert(not NexusDB.dpsCapture.lockedMigrationVersion
     and NexusDB.dpsCapture.personalBest[oldKey],
     "migration ran before locked data was authoritative")
 
 lockedReady=true
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
 assert(NexusDB.dpsCapture.lockedMigrationVersion==1,
     "successful locked migration did not persist its version")
@@ -49,6 +56,7 @@ assert(NexusDB.dpsCapture.personalBest[oldKey]
     and NexusDB.dpsCapture.personalBest[oldKey].dummy.echoes[1].count==2,
     "unproven locked baseline changed historical data")
 local once=Codec.JSONEncode(NexusDB.dpsCapture)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
 assert(Codec.JSONEncode(NexusDB.dpsCapture)==once,
     "repeated initialization changed completed migration data")
@@ -94,6 +102,7 @@ NexusDB.dpsCapture=interrupted
 lockedReady=false
 dofile("core/DpsCapture.lua")
 DPS=Nexus.DpsCapture
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
 local retried=NexusDB.dpsCapture.personalBest[oldKey]
 assert(retried and retried.dummy.echoes[1].spellId==200100
@@ -107,11 +116,13 @@ assert(partialEvidenceTouches==0,
 assert(revisionBumps>0,
     "represented interrupted-source restoration did not advance DPS revision")
 lockedReady=true
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
 assert(NexusDB.dpsCapture.lockedMigrationVersion==1,
     "authoritative retry did not complete restored migration")
 local retryOnce=Codec.JSONEncode(NexusDB.dpsCapture)
 dofile("core/DpsCapture.lua")
+H.AdmitCatalogV1(NexusDB)
 Nexus.DpsCapture.Init(adapter,{})
 assert(Codec.JSONEncode(NexusDB.dpsCapture)==retryOnce,
     "reload after resumed migration changed data again")

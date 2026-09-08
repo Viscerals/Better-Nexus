@@ -102,6 +102,13 @@ dofile("core/Main.lua")
 
 H.FireEvent("ADDON_LOADED", "Nexus")
 H.FireEvent("PLAYER_ENTERING_WORLD")
+-- Architecture 3b5de54f lines 1203-1204 and 1519: authority bootstrap
+-- advances at most one PumpAuthorityBootstrap slice per scheduler turn, so
+-- world entry completes on the turn the coordinator reaches STORE_READY.
+-- Drive ordinary scheduler turns under a closed bound and prove startup
+-- actually completed. Nothing else in this file changes: no expected count,
+-- tolerance, threshold or oracle below is adjusted.
+H.RequireStarted()
 H.Advance(1, 0.2)
 
 local function Number(value) return tonumber(value) or 0 end

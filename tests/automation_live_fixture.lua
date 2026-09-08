@@ -187,6 +187,18 @@ dofile("core/MainDiagnostics.lua")
 dofile("core/Main.lua")
 H.FireEvent("ADDON_LOADED", "Nexus")
 H.FireEvent("PLAYER_ENTERING_WORLD")
+-- Architecture 3b5de54f lines 1203-1204 and 1519: authority bootstrap advances
+-- at most one PumpAuthorityBootstrap slice per scheduler turn, so world entry
+-- completes on the turn the coordinator reaches STORE_READY rather than inside
+-- the event that requested it. Drive ordinary scheduler turns under a closed
+-- bound until startup actually completes, and only then establish the baseline
+-- below. Without this the first turns of the baseline window are consumed by
+-- bootstrap, which shifts the direct 0.2-second Poll cadence phase and makes
+-- every dependent measure one poll short.
+--
+-- This is the only change to this file. No expected count, tolerance,
+-- threshold, cadence value or oracle is altered here or in any dependent.
+H.RequireStarted()
 
 -- Establish a current baseline immediately before each test's measured work.
 H.Advance(1, 0.2)

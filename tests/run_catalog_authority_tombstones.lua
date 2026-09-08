@@ -12,6 +12,17 @@ local now = 2000000000
 time = function() return now end
 
 local function Catalog() return Nexus.BuildCatalog end
+
+-- Harness-only precommit fault: rebind a durable map to an equal-contents table.
+-- Map identity changes, so the production token drift guard refuses before any
+-- write, while every durable byte stays exactly as it was. No production hook.
+-- Legacy-to-bundle cutover (state machine line 394): the exact PR #68 locations
+-- are no longer the selected authority input or the serving witness, so drift is
+-- a foreign replacement of the bundle payload field the root was admitted from.
+local function DriftDurableMap(db, name)
+    return S.DriftSelectedMap(db, name)
+end
+
 local function LocalTomb(stamp)
     return {stamp=stamp or now, author="Boganic", ownerKey="boganic@ebonhold",
         ownerVerified=true}
@@ -36,14 +47,14 @@ Case("TMB-01", "current-session, persisted V1, and legacy tombstones", function(
     Check(view.state == "CURRENT_DENY" and view.localOwned == true
         and view.stamp == now and view.author == "Boganic",
         "current-session tombstone view lost derived fields")
-    Check(db.communityBuilds.tmb01 == nil and type(db.syncTombstones.tmb01) == "table"
-        and db.syncTombstones.tmb01.schemaVersion == 1,
+    Check(S.Durable(db).tmb01 == nil and type(S.Durable(db, "syncTombstones").tmb01) == "table"
+        and S.Durable(db, "syncTombstones").tmb01.schemaVersion == 1,
         "row-to-tombstone did not publish the V1 durable shape")
     local legacyState = S.State("legacy")
     Check(legacyState.reservation == "TOMBSTONE_OPAQUE_BLOCK_ALL"
         and catalog.TombstoneState("legacy").localOwned == false,
         "legacy tombstone regained owner authority")
-    Check(db.syncTombstones.legacy == legacy and legacy.ownerVerified == true,
+    Check(S.Durable(db, "syncTombstones").legacy == legacy and legacy.ownerVerified == true,
         "legacy tombstone was rewritten")
     S.Reload()
     S.Bind(db)
@@ -80,9 +91,9 @@ Case("TMB-02", "malformed and opaque tombstones grant nothing", function()
         Check(ok == false and why == "TOMBSTONE_RESERVATION",
             "opaque reservation accepted a row: " .. id)
     end
-    Check(S.Encode({db.syncTombstones.scalar, db.syncTombstones.flag,
-        db.syncTombstones.text, db.syncTombstones.payload}) == bytes
-        and db.syncTombstones.meta == hostile,
+    Check(S.Encode({S.Durable(db, "syncTombstones").scalar, S.Durable(db, "syncTombstones").flag,
+        S.Durable(db, "syncTombstones").text, S.Durable(db, "syncTombstones").payload}) == bytes
+        and S.Durable(db, "syncTombstones").meta == hostile,
         "opaque tombstones were rewritten")
 end)
 
@@ -157,7 +168,7 @@ Case("TMB-05", "row to tombstone is one prepared root publish", function()
         "notification observed an intermediate catalog state")
     Check(S.Root().generation == generation + 1,
         "row-to-tombstone did not publish exactly one generation")
-    Check(db.communityBuilds.tmb05 == nil, "overlay slot survived the tombstone")
+    Check(S.Durable(db).tmb05 == nil, "overlay slot survived the tombstone")
 end)
 
 Case("TMB-06", "failure and termination boundaries preserve one coherent state", function()
@@ -166,52 +177,244 @@ Case("TMB-06", "failure and termination boundaries preserve one coherent state",
     local catalog = Catalog()
     local rawBytes = S.Encode(db)
     local generation = S.Root().generation
-    catalog.InstallFaultInjector(function(boundary)
-        if boundary == "before-commit" then error("injected before commit") end
-    end)
+    -- Repair Wave 1 (MASTER-RC-002): the only reachable failure boundary is now
+    -- precommit, because publication is one callback-free swap after all fallible
+    -- preparation. Drift is that real boundary.
+    DriftDurableMap(db, "communityBuilds")
     local ok = catalog.SetTombstone("tmb06", LocalTomb(), {source="local"})
     Check(ok == false and S.Encode(db) == rawBytes
-        and S.Root().generation == generation and catalog.Get("tmb06") ~= nil,
+        and S.Root().generation == generation,
         "pre-commit failure changed raw or public state")
-    catalog.InstallFaultInjector(function(boundary)
-        if boundary == "after-raw-write" then error("injected after raw write") end
-    end)
-    ok = catalog.SetTombstone("tmb06", LocalTomb(), {source="local"})
-    Check(ok == false and S.Root().state == "ROOT_INVALIDATED",
-        "protected failure did not publish the invalid sentinel")
+    Check(S.Root().state == "ROOT_INVALIDATED",
+        "drift failure did not publish the invalid sentinel")
     Check(catalog.Get("tmb06") == nil and catalog.Count() == 0,
         "invalid sentinel served stale products")
-    Check(type(db.syncTombstones.tmb06) == "table" and db.communityBuilds.tmb06 == nil,
-        "durable state is not one complete new bundle")
-    catalog.InstallFaultInjector(nil)
+    Check(S.Encode(db) == rawBytes,
+        "a failed mutation left a half-written durable bundle")
     S.Reload()
     S.Bind(db)
-    Check(Nexus.BuildCatalog.TombstoneState("tmb06").state == "RELOADED_BLOCK_ALL",
-        "reload did not admit the complete durable state from cursor zero")
+    Check(Nexus.BuildCatalog.TombstoneState("tmb06").state == "NONE",
+        "reload did not admit the complete unchanged durable state")
     -- notification failure keeps the new root final
     local db2 = S.Database({tmb06b=S.LocalBuild("tmb06b", 3)})
     S.Bind(db2)
     local unsubscribe = Nexus.Revisions.Subscribe(
         Nexus.Revisions.BUILD_LIBRARY_CHANGED, function() error("subscriber failed") end)
-    Nexus.BuildCatalog.InstallFaultInjector(function(boundary)
-        if boundary == "notify" then error("injected notification failure") end
-    end)
+    -- Harness-only collaborator substitution: only the notification method is
+    -- swapped, so the callback owner identity the production token records is
+    -- unchanged and this is a notification failure rather than drift. No
+    -- production authority export and no shipped instrumentation.
+    local realAdvance = Nexus.Revisions.Advance
+    Nexus.Revisions.Advance = function() error("notification collaborator failed") end
     local before = Nexus.BuildCatalog.DebugStats().notificationFailures or 0
-    Check(Nexus.BuildCatalog.SetTombstone("tmb06b", LocalTomb(), {source="local"}),
-        "notification failure undid the mutation")
+    local committed = Nexus.BuildCatalog.SetTombstone("tmb06b", LocalTomb(),
+        {source="local"})
+    Nexus.Revisions.Advance = realAdvance
     unsubscribe()
-    Nexus.BuildCatalog.InstallFaultInjector(nil)
+    Check(committed, "notification failure undid the mutation")
     Check(Nexus.BuildCatalog.TombstoneState("tmb06b").state == "CURRENT_DENY"
-        and db2.syncTombstones.tmb06b ~= nil
+        and S.Durable(db2, "syncTombstones").tmb06b ~= nil
         and Nexus.BuildCatalog.DebugStats().notificationFailures == before + 1,
         "notification failure was not recorded as replay-only")
+end)
+
+-- Class 5 terminal 3 -- catalog tombstone notification-only replay (NTF)
+--
+-- MASTER-RC-015. Governing architecture:
+--   line 650: a catalog-root notification fault keeps the new root final,
+--             records bounded NOTIFICATION_FAILED, and schedules
+--             notification-only replay.
+--   lines 2391-2394 and 2550-2630: BuildCatalog owns the atomic tombstone
+--             transaction; replay is bound to the published root generation,
+--             never reruns raw writes or the authority transaction, and becomes
+--             stale after a newer root publishes.
+--   line 4743: the tombstone-replacement fixture keeps the new root final,
+--             retries notification only, emits no false-success relay, and
+--             never replays the mutation.
+--
+-- Line 628 states the same publication invariant for DPS, evidence, recovery,
+-- registry, and provider publication. It is corroborative, not this seam.
+-- Line 1598 is not applicable. It specifies the separate StoreMutationTokenV1
+-- completion result for Store-owned post-ready mutations.
+--
+-- The withdrawn citation is recorded here on purpose so no future reader
+-- repeats it: an earlier revision of these cases read line 1598 as requiring a
+-- notification="PENDING" field on Catalog.RootState(). It does not. Line 1598
+-- is one row of core/Store.lua's own exhaustive table (1538-1540), reachable
+-- only from STORE_READY for RegisterCurrentCharacter, Retention, and
+-- Compaction -- a pipeline that is unimplemented and belongs to MASTER-RC-001.
+-- Catalog.SetTombstone is named at 1720-1727 as BuildCatalog's own mutation
+-- API, refusing "with a bounded reason" (its actual (bool, string) shape), and
+-- never returns a {state=,result=} table. The tombstone replay requirement is
+-- fully grounded without 1598, so nothing was lost by withdrawing it: the
+-- replay is observable as the delayed Nexus.Revisions.Advance effect itself,
+-- which is exactly what NTF-01 asserts.
+--
+-- TMB-06 above proves only that the commit is not undone and that exactly one
+-- NOTIFICATION_FAILED receipt is recorded. Both are independently proved by the
+-- not-undone pattern used for terminals 1 and 2, and TMB-06 stays green with
+-- every replay and staleness mechanism deleted. It is therefore not a
+-- fail-capable oracle for terminal 3. The two cases below are.
+--
+-- Fault technique: the harness-only Nexus.Revisions.Advance substitution TMB-06
+-- already uses, extended to count calls. Only the notification collaborator is
+-- swapped, so the callback owner identity the production token records is
+-- unchanged and this is a notification failure rather than drift. No production
+-- fault-injection export exists or is added.
+
+-- One counting collaborator for both cases. `failures` is how many of the
+-- leading calls raise; every later call is delivered to the real Revisions.
+local function CountingAdvance(failures)
+    local attempts = {}
+    local realAdvance = Nexus.Revisions.Advance
+    S.pendingRestores[#S.pendingRestores + 1] = function()
+        Nexus.Revisions.Advance = realAdvance
+    end
+    Nexus.Revisions.Advance = function(event, detail)
+        attempts[#attempts + 1] = {event=event, reason=detail and detail.reason,
+            scope=detail and detail.scope, id=detail and detail.id}
+        if #attempts <= failures then
+            error("notification collaborator failed")
+        end
+        return realAdvance(event, detail)
+    end
+    return attempts, function() Nexus.Revisions.Advance = realAdvance end
+end
+
+-- One ordinary turn of the existing shared scheduler -- exactly what the
+-- Scheduler frame's OnUpdate handler runs (core/Scheduler.lua Init). No new
+-- pump, no new export, and no clock movement, so nothing else in the fixture is
+-- perturbed by the dispatch.
+local function SchedulerTurn()
+    return Nexus.Scheduler.Tick(GetTime())
+end
+
+Case("NTF-01",
+    "tombstone post-publication failure replays only the failed notification",
+function()
+    local db = S.Database({ntf01=S.LocalBuild("ntf01", 3)})
+    S.Bind(db)
+    local catalog = Catalog()
+    local attempts, restore = CountingAdvance(1)
+
+    local relayBefore = #H.sentChatMessages
+    local committed = catalog.SetTombstone("ntf01", LocalTomb(), {source="local"})
+    Check(committed, "notification failure undid the mutation")
+    Check(catalog.TombstoneState("ntf01").state == "CURRENT_DENY"
+        and S.Durable(db, "syncTombstones").ntf01 ~= nil,
+        "notification failure did not keep the new root final")
+
+    -- Step 1: exactly one attempt has been made at commit time.
+    Check(#attempts == 1,
+        "expected exactly one notification attempt at commit, got " .. tostring(#attempts))
+    local committedRoot = S.Root()
+    local committedBytes = S.Encode(db)
+
+    -- Step 2: the replay is not synchronous with the commit. It is dispatched by
+    -- a LATER ordinary scheduler turn (architecture 628/650: "schedule").
+    SchedulerTurn()
+    Check(#attempts == 2,
+        "the scheduler turn did not dispatch a notification replay; attempts="
+            .. tostring(#attempts))
+
+    -- Step 3: the replay carries the exact failed notification -- same event,
+    -- reason, scope, and id -- not a fresh generic refresh.
+    Check(attempts[2].event == attempts[1].event
+        and attempts[2].reason == attempts[1].reason
+        and attempts[2].scope == attempts[1].scope
+        and attempts[2].id == attempts[1].id,
+        "the replay did not carry the exact failed notification")
+    Check(attempts[2].event == Nexus.Revisions.BUILD_LIBRARY_CHANGED
+        and attempts[2].scope == "record" and attempts[2].id == "ntf01",
+        "the replayed notification lost its exact event, scope, or id: "
+            .. tostring(attempts[2].event) .. "/" .. tostring(attempts[2].scope)
+            .. "/" .. tostring(attempts[2].id))
+
+    -- Step 4: notification only. No durable byte, serving-root identity (which
+    -- moves if and only if servingGeneration moves), catalog generation, durable
+    -- bundle generation, committed-mutation revision, or relay changed.
+    local replayedRoot = S.Root()
+    Check(S.Encode(db) == committedBytes, "the replay changed a durable byte")
+    Check(replayedRoot.servingGeneration == committedRoot.servingGeneration
+        and replayedRoot.generation == committedRoot.generation
+        and replayedRoot.durableBundleGeneration == committedRoot.durableBundleGeneration
+        and replayedRoot.committedMutationRevision == committedRoot.committedMutationRevision
+        and replayedRoot.state == committedRoot.state,
+        "the replay moved a published generation, the serving root, or the root state")
+    Check(#H.sentChatMessages == relayBefore, "the replay emitted a relay")
+
+    -- Step 5: bounded. Further ordinary turns deliver no duplicate.
+    SchedulerTurn()
+    SchedulerTurn()
+    Check(#attempts == 2,
+        "a later scheduler turn delivered a duplicate notification; attempts="
+            .. tostring(#attempts))
+    restore()
+end)
+
+Case("NTF-03",
+    "tombstone notification replay is discarded after a newer root publication",
+function()
+    local db = S.Database({ntf03a=S.LocalBuild("ntf03a", 3),
+        ntf03b=S.LocalBuild("ntf03b", 3)})
+    S.Bind(db)
+    local catalog = Catalog()
+    local attempts, restore = CountingAdvance(1)
+    local before = catalog.DebugStats()
+
+    -- Generation G: the notification fails and a replay is queued for it.
+    Check(catalog.SetTombstone("ntf03a", LocalTomb(), {source="local"}),
+        "notification failure undid the mutation")
+    Check(#attempts == 1 and attempts[1].id == "ntf03a",
+        "the failed notification was not the ntf03a commit")
+    local staleGeneration = S.Root().servingGeneration
+    Check(catalog.DebugStats().notificationFailures == before.notificationFailures + 1,
+        "the failed notification recorded no bounded NOTIFICATION_FAILED receipt")
+
+    -- Generation G+1 publishes BEFORE the queued replay dispatches.
+    Check(catalog.SetTombstone("ntf03b", LocalTomb(), {source="local"}),
+        "the superseding mutation refused")
+    Check(#attempts == 2 and attempts[2].id == "ntf03b",
+        "the newer publication did not notify for itself")
+    Check(S.Root().servingGeneration > staleGeneration,
+        "the second commit did not publish a newer serving root")
+
+    -- Architecture 2618-2630: replay "becomes stale if a newer root publishes".
+    -- The queued G notification is discarded unnotified, never delivered.
+    SchedulerTurn()
+    SchedulerTurn()
+    Check(#attempts == 2,
+        "a replay bound to a superseded generation was delivered; attempts="
+            .. tostring(#attempts))
+    for index = 3, #attempts do
+        Check(attempts[index].id ~= "ntf03a",
+            "the stale ntf03a notification was replayed after a newer root published")
+    end
+    -- NON-VACUITY. Silence alone cannot distinguish "queued, then correctly
+    -- discarded as stale" from "never queued at all", and a case that passes
+    -- when the whole mechanism is absent is not evidence for the reason it is
+    -- named for. DebugStats is the normative catalog diagnostic surface
+    -- (architecture line 1721), and it proves an item really was queued for
+    -- generation G and really was discarded unnotified.
+    Check(catalog.DebugStats().notificationReplaysStale
+            == (before.notificationReplaysStale or 0) + 1,
+        "no notification replay was queued and discarded as stale; the silence "
+            .. "above would then be vacuous. stale="
+            .. tostring(catalog.DebugStats().notificationReplaysStale))
+    Check(catalog.DebugStats().notificationReplays
+            == (before.notificationReplays or 0),
+        "a stale-bound replay was counted as delivered")
+    Check(catalog.TombstoneState("ntf03a").state == "CURRENT_DENY"
+        and catalog.TombstoneState("ntf03b").state == "CURRENT_DENY",
+        "the stale discard disturbed a committed mutation")
+    restore()
 end)
 
 Case("TMB-07", "backing replacement invalidates suppression until recovery", function()
     local db = S.Database({tmb07=S.LocalBuild("tmb07", 3)})
     S.Bind(db)
     Check(Catalog().SetTombstone("tmb07", LocalTomb(), {source="local"}))
-    db.syncTombstones = S.DeepCopy(db.syncTombstones)
+    S.DriftSelectedMap(db, "syncTombstones", true)
     Check(S.Root().state == "ROOT_INVALIDATED",
         "tombstone backing replacement was not detected")
     Check(Catalog().TombstoneState("tmb07").state == "NONE"
@@ -261,7 +464,7 @@ Case("TMB-08", "replay, refresh, local claim, and remote resurrection", function
         "trusted local claim could not readmit")
     Check(S.State("tmb08").state == "READMITTED"
         and catalog.TombstoneState("tmb08").state == "NONE"
-        and db.syncTombstones.tmb08 == nil and db.communityBuilds.tmb08 ~= nil,
+        and S.Durable(db, "syncTombstones").tmb08 == nil and S.Durable(db).tmb08 ~= nil,
         "readmission did not atomically replace the tombstone")
     local okTwice, whyTwice = catalog.PutWithClaim(claim, S.LocalBuild("tmb08", 2),
         {source="local"})
@@ -298,11 +501,11 @@ Case("TMB-09", "only current-session tombstones retire by trusted age", function
     now = now + 180 * DAY + 1
     local okAged = Retire("tmb09")
     Check(okAged and catalog.TombstoneState("tmb09").state == "NONE"
-        and db.syncTombstones.tmb09 == nil,
+        and S.Durable(db, "syncTombstones").tmb09 == nil,
         "aged current-session tombstone did not retire")
     local okReloaded, whyReloaded = Retire("old")
     Check(okReloaded == false and whyReloaded == "TOMBSTONE_RESERVATION_BLOCK_ALL"
-        and db.syncTombstones.old == persisted,
+        and S.Durable(db, "syncTombstones").old == persisted,
         "reloaded tombstone expired: " .. tostring(whyReloaded))
     -- clock rollback makes trusted time unavailable for the session
     Check(catalog.Put(S.LocalBuild("tmb09b", 2), {source="local"}))
@@ -344,8 +547,8 @@ Case("EVC-01", "exact typed keys: numeric 1 and string \"1\" are distinct", func
     Check(catalog.BarrierState(1).blocked == true
         and catalog.BarrierState("1").blocked == false,
         "typed barrier keys were coerced")
-    Check(db.communityBuilds[1] == nil and db.communityBuilds["1"] ~= nil
-        and type(db.communityRetentionEvictions[1]) == "table",
+    Check(S.Durable(db)[1] == nil and S.Durable(db)["1"] ~= nil
+        and type(S.Durable(db, "communityRetentionEvictions")[1]) == "table",
         "eviction touched the wrong typed slot")
     local _, _, advisory = catalog.AllocationOccupancy(1)
     Check(advisory.blocked == true, "barrier-only ID reported vacant")
@@ -403,10 +606,10 @@ Case("EVC-04", "exact replay is a no-op; conflicts stay deny-only", function()
     S.Bind(db)
     Check(Evict(db, "evc04"))
     local generation = S.Root().generation
-    local barrier = db.communityRetentionEvictions.evc04
+    local barrier = S.Durable(db, "communityRetentionEvictions").evc04
     local okReplay = Evict(db, "evc04")
     Check(okReplay and S.Root().generation == generation
-        and db.communityRetentionEvictions.evc04 == barrier,
+        and S.Durable(db, "communityRetentionEvictions").evc04 == barrier,
         "exact replay mutated the barrier")
 end)
 
@@ -433,7 +636,7 @@ Case("EVC-06", "30-day expiry uses trusted local observation only", function()
     Check(okEarly == false and whyEarly == "BARRIER_NOT_EXPIRED",
         "barrier expired early: " .. tostring(whyEarly))
     now = created + 30 * DAY
-    Check(Expire(db, "evc06") and db.communityRetentionEvictions.evc06 == nil,
+    Check(Expire(db, "evc06") and S.Durable(db, "communityRetentionEvictions").evc06 == nil,
         "current barrier did not expire at 30 days")
     -- reloaded barriers restart their interval at each reload
     Check(Catalog().Put(S.Build("evc06b", 2, 0, {autoDps=true})))
@@ -461,7 +664,7 @@ Case("EVC-07", "authenticated inbound rows never clear a barrier", function()
     for _, stamp in ipairs({5, 10, 999999}) do
         local ok = Catalog().Put(S.Build("evc07", 2, 0, {lastModified=stamp}),
             {source="remote", sender="Peer-Ebonhold"})
-        Check(ok == false and db.communityBuilds.evc07 == nil,
+        Check(ok == false and S.Durable(db).evc07 == nil,
             "authenticated inbound revision cleared a barrier: " .. stamp)
     end
     Check(Catalog().BarrierState("evc07").blocked == true, "barrier was cleared")
@@ -550,7 +753,7 @@ end)
 Case("MUT-04", "backing-table replacement fails the token", function()
     local db = S.Database({mut04=S.Build("mut04", 3, 0)})
     S.Bind(db)
-    db.communityBuilds = S.DeepCopy(db.communityBuilds)
+    DriftDurableMap(db, "communityBuilds")
     Check(S.Root().state == "ROOT_INVALIDATED" and Catalog().Get("mut04") == nil,
         "overlay replacement was served from a stale root")
     local ok, why = Catalog().Put(S.Build("mut04b", 1, 0))
@@ -622,13 +825,14 @@ Case("TRN-01", "row-state transition table: legal edges only", function()
         if state == "UNADMITTED" then
             return id
         elseif state == "ADMITTED" then
-            db.communityBuilds[id] = S.LocalBuild(id, 2)
+            S.SeedDurable(db, "communityBuilds", id, S.LocalBuild(id, 2))
         elseif state == "INVALIDATED" then
-            db.communityBuilds[id] = S.LocalBuild(id, 90)
+            S.SeedDurable(db, "communityBuilds", id, S.LocalBuild(id, 90))
         elseif state == "READ_ONLY_FUTURE_SCHEMA" then
-            db.communityBuilds[id] = S.LocalBuild(id, 2, {schemaVersion=2})
+            S.SeedDurable(db, "communityBuilds", id,
+                S.LocalBuild(id, 2, {schemaVersion=2}))
         elseif state == "TOMBSTONED" then
-            db.communityBuilds[id] = S.LocalBuild(id, 2)
+            S.SeedDurable(db, "communityBuilds", id, S.LocalBuild(id, 2))
         end
         return id
     end
@@ -684,10 +888,12 @@ Case("TRN-01", "row-state transition table: legal edges only", function()
             local id = "trn-" .. state:lower()
             if state ~= "UNADMITTED" then
                 if state == "INVALIDATED" then
-                    prepared.communityBuilds[id] = S.LocalBuild(id, 90)
+                    S.SeedDurable(prepared, "communityBuilds", id,
+                        S.LocalBuild(id, 90))
                     S.Bind(prepared)
                 elseif state == "READ_ONLY_FUTURE_SCHEMA" then
-                    prepared.communityBuilds[id] = S.LocalBuild(id, 2, {schemaVersion=2})
+                    S.SeedDurable(prepared, "communityBuilds", id,
+                        S.LocalBuild(id, 2, {schemaVersion=2}))
                     S.Bind(prepared)
                 else
                     Check(catalog.Put(S.LocalBuild(id, 2), {source="local"}))

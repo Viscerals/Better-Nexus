@@ -77,7 +77,7 @@ assert(count == bundle.generation.included
     "generated catalog counts do not match its contents")
 
 NexusDB = {}
-local summary = Nexus.BuildCatalog.Init(NexusDB, bundle)
+local summary = H.AdmitCatalogV1(NexusDB, bundle)
 -- Shipped rows above the 79/6/85 envelope are reserved deny-only, so the
 -- available count is the admissible subset of the generated baseline.
 local admissible = 0

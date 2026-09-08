@@ -45,7 +45,7 @@ Nexus.BundledBuilds={schemaVersion=1,catalogVersion="stage35-navigation",
     sourceVersion="test",generatedAt=0,builds=builds}
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={
     characterBest={dummy=rows,lk={}},personalBest={},buildBest={}}}
-Nexus.BuildCatalog.Init(NexusDB,Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB,Nexus.BundledBuilds)
 dofile("core/DpsCapture.lua")
 Nexus.DpsCapture.Init({}, {})
 
@@ -151,11 +151,45 @@ assert(copied==nil and not detail.copy:IsEnabled()
         and detail.more:GetText():find("evidence changed",1,true),
     "recovered current locked change did not stale the candidate")
 assert(Nexus.BuildCatalog.Put(currentTargetBefore))
--- The admission owner writes its canonical known fields on every accepted
--- update, so compare the restored record rather than raw byte equality.
+-- MASTER-RC-014. The superseded oracle compared ONE restored record and called
+-- the result "display, Open, or Copy mutated SavedVariables". A one-record
+-- comparison cannot observe a mutation anywhere else in SavedVariables, so it
+-- could not detect the defect it named. The restored-record comparison is kept
+-- for what it does prove -- that the admission owner round-trips the record --
+-- and the complete raw baseline below is the oracle the claim actually needs.
 assert(Equal(Nexus.BuildCatalog.Get("legacy-dps-resolved-080"),
         currentTargetBefore),
+    "the admission owner did not restore the record it accepted")
+
+-- Complete raw baseline equality across the read-only navigation surface.
+local rawBaseline = H.CloneValue(NexusDB)
+detail = NexusLeaderboardFrame._leaderboardDetail
+local copyHandler = detail.copy:GetScript("OnClick")
+if copyHandler then copyHandler() end
+Nexus.BuildCatalog.Get("legacy-dps-resolved-080")
+assert(Equal(NexusDB, rawBaseline),
     "display, Open, or Copy mutated SavedVariables")
+
+-- NEGATIVE CONTROL. This is the deliverable, not an extra: it proves the
+-- rejected one-record oracle is INSUFFICIENT rather than merely narrower. A
+-- mutation is planted outside the single record that oracle inspects, and
+-- outside the four payload maps the MASTER-RC-017 serving witness binds, so the
+-- published root stays admitted and the record itself is untouched. The
+-- rejected oracle must therefore still pass while the required complete raw
+-- baseline must fail. If this control ever stops failing, the two oracles are
+-- equivalent and this case is void.
+local controlRecord = H.CloneValue(
+    Nexus.BuildCatalog.Get("legacy-dps-resolved-080"))
+NexusDB.rc014NegativeControl = {planted=true}
+assert(Equal(Nexus.BuildCatalog.Get("legacy-dps-resolved-080"), controlRecord),
+    "the negative control disturbed the record the rejected oracle inspects, "
+        .. "so it does not isolate the two oracles")
+assert(not Equal(NexusDB, rawBaseline),
+    "the complete raw baseline failed to detect a SavedVariables mutation "
+        .. "outside the one record the rejected oracle inspects")
+NexusDB.rc014NegativeControl = nil
+assert(Equal(NexusDB, rawBaseline),
+    "the negative control was not fully reverted")
 
 -- A represented catalog revision invalidates the projection exactly once.
 Nexus.BuildCatalog.All=originalAll
@@ -224,8 +258,10 @@ assert(Nexus.BuildCatalog.Put({id="tombstone-fallback",
     )
 -- Persisted legacy tombstone evidence: preserved raw and reserved deny-only
 -- on reload; it grants no current-session authority.
-NexusDB.syncTombstones = NexusDB.syncTombstones or {}
-NexusDB.syncTombstones["raw-tombstoned"] = {author="fixture",stamp=51}
+-- A raw write behind the published root grants no authority. After the cutover
+-- the durable location is the bundle payload, so the persisted legacy tombstone
+-- evidence is seeded there and readmitted from cursor zero.
+H.DurableTombstones()["raw-tombstoned"] = {author="fixture",stamp=51}
 H.RebindCatalog()
 local rawTombstoned,rawTombstoneReason=
     Nexus.BuildCatalog.ResolveFingerprintIdentity(
@@ -236,7 +272,7 @@ assert(rawTombstoned==nil
 
 -- Reload reconstructs the same bounded index without changing stored rows.
 dofile("core/BuildCatalog.lua")
-Nexus.BuildCatalog.Init(NexusDB,Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB,Nexus.BundledBuilds)
 local reloaded=Nexus.BuildCatalog.ResolveFingerprintIdentity(
     "raw-collision-082","880082x1")
 assert(reloaded=="legacy-dps-resolved-082",

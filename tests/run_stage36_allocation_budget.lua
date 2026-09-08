@@ -353,7 +353,7 @@ NexusDB = {
 UnitName = function() return "BudgetOwner" end
 GetNormalizedRealmName = function() return "Ebonhold" end
 H.now = 700
-Store.Init()
+H.BootstrapStore()
 local cold = Compaction.Stats()
 Desired(cold.pending == true and cold.lastPumpWork <= cold.workBudget,
     "large first-run compaction was not deferred after one bounded pump")
@@ -385,6 +385,8 @@ Control(compacted.pending == false and compacted.maxPumpWork <= 32
 Control(NexusDB.dataCompaction.version == 1
         and Scheduler.Pending("data-compaction") == nil,
     "completed compaction retained pending scheduler ownership")
+-- Legacy-to-bundle cutover: the exact PR #68 tombstone map keeps its identity as
+-- preserved bootstrap input and takes no ordinary write.
 Control(NexusDB.buildFilters == filters
         and NexusDB.syncTombstones == tombstones
         and NexusDB.futureRoot == opaque
@@ -392,7 +394,7 @@ Control(NexusDB.buildFilters == filters
     "compaction replaced filters, tombstones, or unknown root ownership")
 for index = 1, 160 do
     local id = string.format("budget-%03d",index)
-    local raw, hydrated = NexusDB.communityBuilds[id],Catalog.Get(id)
+    local raw, hydrated = H.DurableBuilds()[id],Catalog.Get(id)
     Control(raw and raw.echoes == nil and raw.futureRow.keep == "row-" .. index
             and raw.ownerKey == "budgetowner@ebonhold"
             and hydrated and hydrated.echoes[1].spellId == 910000 + index,
@@ -410,7 +412,7 @@ Control(Catalog.Get("budget-001").title == "Edited during compaction",
     "revision restart lost the concurrent exact catalog edit")
 
 local stable = Copy(NexusDB)
-Store.Init()
+H.BootstrapStore()
 Control(Equal(stable,NexusDB),
     "completed first-run compaction changed bytes on repeated initialization")
 
@@ -461,7 +463,7 @@ do
     NexusDB = ownerDb
     Nexus.BundledBuilds = {schemaVersion=1,catalogVersion="owner-rebind",
         sourceVersion="test",builds={}}
-    Store.Init()
+    H.BootstrapStore()
     Desired(Compaction.Stats().pending == true,
         "owner replacement fixture completed before its bounded yield")
 
@@ -487,13 +489,23 @@ do
     local replacementEvidence = {
         schemaVersion=1,entries={},futureOwner={keep=true},
     }
+    -- Legacy-to-bundle cutover (state machine lines 374, 394, 4849): replacing
+    -- every canonical owner table is modelled as the client's whole durable
+    -- authority being replaced, so the bundle is discarded and rebuilt from the
+    -- replacement legacy input on the bootstrap route.
     ownerDb.communityBuilds = replacement
     ownerDb.dpsCapture = replacementDps
     ownerDb.loadoutEvidence = replacementEvidence
+    H.ResetDurableAuthority(ownerDb)
     Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED,
         {scope="owner replacement"})
     Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,
         {scope="owner replacement"})
+    -- DataCompaction registers this source rebind when it observes the owner
+    -- replacement. This direct fixture has no MainLifecycle scheduler, so it
+    -- dispatches the same bounded coordinator route before maintenance resumes.
+    Catalog.RequestAuthorityRebindV1("SOURCE_REBIND_REQUIRED")
+    H.RebindAuthorityV1("SOURCE_REBIND_REQUIRED")
     local guard = 0
     while Compaction.Stats().pending do
         Compaction.Pump()
@@ -508,8 +520,9 @@ do
     Desired(ownerDb.communityBuilds == replacement
             and ownerDb.dpsCapture == replacementDps
             and ownerDb.loadoutEvidence == replacementEvidence
-            and replacement["owner-new-48"].echoes == nil
-            and replacement["owner-new-48"].futureRow.keep == "replacement-48"
+            and H.DurableBuilds(ownerDb)["owner-new-48"].echoes == nil
+            and H.DurableBuilds(ownerDb)["owner-new-48"].futureRow.keep
+                == "replacement-48"
             and hydrated and hydrated.echoes[1].spellId == 940048
             and replacementDpsRow.echoes == nil
             and Nexus.LoadoutEvidence.ResolveDpsEchoes(replacementDpsRow)[1].spellId
@@ -528,7 +541,9 @@ do
         "stage36.raw-provider",function()
             if not inserted then
                 inserted = true
-                providerDb.communityBuilds["provider-row"] = {
+                -- A raw write behind the published root grants no authority.
+                -- After the cutover that durable location is the bundle payload.
+                H.DurableBuilds(providerDb)["provider-row"] = {
                     id="provider-row",title="Provider Row",author="Provider",
                     class="MAGE",postedAt=1,lastModified=1,
                     fingerprint="955001x1",
@@ -540,7 +555,7 @@ do
     NexusDB = providerDb
     Nexus.BundledBuilds = {schemaVersion=1,catalogVersion="provider-boundary",
         sourceVersion="test",builds={}}
-    Store.Init()
+    H.BootstrapStore()
     local providerGuard = 0
     while Compaction.Stats().pending do
         Compaction.Pump()
@@ -549,16 +564,31 @@ do
     end
     Nexus.LoadoutEvidence.RegisterReferenceProvider(
         "stage36.raw-provider",nil)
-    local providerRaw = providerDb.communityBuilds["provider-row"]
-    local providerRaw = providerDb.communityBuilds["provider-row"]
+    local providerRaw = H.DurableBuilds(providerDb)["provider-row"]
     -- A provider wrote this row behind the published root, so it was never
     -- admitted: compaction preserves it exactly and stamps nothing. Only an
     -- explicit readmission makes it a compaction candidate.
-    Desired(inserted and providerDb.dataCompaction.version == 1
+    --
+    -- MASTER-RC-017 STRENGTHENS this case. The raw write adds a key to a map
+    -- the published root's bounded per-key serving witness is bound to, so
+    -- architecture 3b5de54f line 137 makes it current-source drift, which
+    -- "cancels work and publishes ROOT_INVALIDATED", and line 140 makes a
+    -- replaced witness bound by the public root invalidate that root. The
+    -- transaction is therefore cancelled rather than completed, so
+    -- dataCompaction.version is NOT stamped.
+    --
+    -- Every preservation guarantee of the superseded expectation is retained
+    -- verbatim -- the row survives byte-exact with its echoes, gains no
+    -- evidenceKey, and is never served -- and the drift outcome is now asserted
+    -- explicitly instead of a completed version stamp. This is a stronger
+    -- oracle, not a relaxed one: before the repair the raw write was invisible
+    -- and the root kept serving as if its source were still proven.
+    Desired(inserted and providerDb.dataCompaction.version == nil
             and providerRaw and type(providerRaw.echoes) == "table"
             and providerRaw.evidenceKey == nil
-            and Catalog.Get("provider-row") == nil,
-        "post-provider verification stamped an unvisited owner row complete")
+            and Catalog.Get("provider-row") == nil
+            and Catalog.RootState().state == "ROOT_INVALIDATED",
+        "post-provider raw write was not caught as current-source drift")
     H.RebindCatalog(providerDb)
     local providerHydrated = Catalog.Get("provider-row")
     Desired(providerHydrated
@@ -585,7 +615,7 @@ do
     NexusDB = providerDb
     Nexus.BundledBuilds = {schemaVersion=1,
         catalogVersion="provider-generation",sourceVersion="test",builds={}}
-    Store.Init()
+    H.BootstrapStore()
     Desired(replaced and not providerDb.dataCompaction.version
             and string.find(tostring(providerDb.dataCompaction.lastError or ""),
                 "providers changed",1,true),
@@ -629,7 +659,7 @@ do
     NexusDB = providerDb
     Nexus.BundledBuilds = {schemaVersion=1,
         catalogVersion="provider-future",sourceVersion="test",builds={}}
-    Store.Init()
+    H.BootstrapStore()
     local futureGuard = 0
     while not futureSnapshot and Compaction.Stats().pending do
         Compaction.Pump()
@@ -672,7 +702,7 @@ do
     NexusDB = providerDb
     Nexus.BundledBuilds = {schemaVersion=1,catalogVersion="provider-late",
         sourceVersion="test",builds={}}
-    Store.Init()
+    H.BootstrapStore()
     local firstGuard = 0
     while healthChecks == 0 do
         Compaction.Pump()
@@ -736,7 +766,7 @@ do
     NexusDB = schemaDb
     Nexus.BundledBuilds = {schemaVersion=1,catalogVersion="future-midflight",
         sourceVersion="test",builds={}}
-    Store.Init()
+    H.BootstrapStore()
     Control(Compaction.Stats().pending == true,
         "future metadata fixture completed before its bounded yield")
     schemaDb.dataCompaction.schemaVersion = 99
@@ -763,11 +793,26 @@ do
     NexusDB = evidenceDb
     Nexus.BundledBuilds = {schemaVersion=1,catalogVersion="future-evidence",
         sourceVersion="test",builds={}}
-    Store.Init()
+    H.BootstrapStore()
     Control(Compaction.Stats().pending == true,
         "future evidence fixture completed before its bounded yield")
-    evidenceDb.loadoutEvidence.schemaVersion = 99
-    evidenceDb.loadoutEvidence.futureOwner = {keep=true}
+    -- Legacy-to-bundle cutover observation repoint (MASTER-RC-001, architecture
+    -- 3b5de54f). State machine line 394 gives the exact PR #68 `loadoutEvidence`
+    -- location "No Package B writer ... Never used as fallback after bundle
+    -- occupancy", and RAW-01 (line 4849) makes one complete `authorityBundle`
+    -- pointer the sole durable payload write, so bootstrap no longer creates
+    -- `evidenceDb.loadoutEvidence` and the durable evidence store is the
+    -- bundle's field. The behaviour under test is unchanged: a future-schema
+    -- evidence owner appearing mid-flight must block the compaction pump
+    -- without mutating a single byte of the database. Only the location the
+    -- fixture poisons moved to the selected durable store.
+    local durableEvidence = H.DurablePayload("loadoutEvidence", evidenceDb)
+    Control(type(durableEvidence) == "table",
+        "bootstrap did not publish a durable evidence store inside the bundle")
+    Control(rawget(evidenceDb, "loadoutEvidence") == nil,
+        "bootstrap wrote the legacy evidence payload location")
+    durableEvidence.schemaVersion = 99
+    durableEvidence.futureOwner = {keep=true}
     local evidenceAtBoundary = Copy(evidenceDb)
     local stoppedEvidence = Compaction.Pump()
     Desired(stoppedEvidence.blocked and not evidenceDb.dataCompaction.version
@@ -790,7 +835,7 @@ do
     NexusDB = deepDb
     Nexus.BundledBuilds = {schemaVersion=1,catalogVersion="deep-budget",
         sourceVersion="test",builds={}}
-    Store.Init()
+    H.BootstrapStore()
     local realNext, maxNextCalls, deepGuard = next,0,0
     while Compaction.Stats().pending do
         local calls = 0

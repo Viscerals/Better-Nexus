@@ -74,8 +74,11 @@ assert(Catalog.Put({
     postedAt=11, lastModified=11, fingerprintHash="deadbeef",
     echoes={{spellId=200102,quality=3,stacks=1}},
 }))
-local rawA, rawB = NexusDB.communityBuilds["short-a"],
-    NexusDB.communityBuilds["short-b"]
+-- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 374,
+-- 394, 4849): the durable authority payload is `authorityBundle`; the exact
+-- PR #68 locations are read-only preserved bootstrap input.
+local rawA, rawB = H.DurableBuilds()["short-a"],
+    H.DurableBuilds()["short-b"]
 assert(rawA.evidenceKey == keyA and rawB.evidenceKey ~= keyA
     and rawB.evidenceKey ~= rawA.evidenceKey,
     "a short-hash collision merged distinct full evidence")
@@ -291,4 +294,44 @@ assert(type(dpsPayload.e) == "table" and #dpsPayload.e == 2
 
 assert(Evidence.Stats().entries >= 7,
     "evidence cardinality did not retain all distinct canonical loadouts")
+
+-- EVD-OFFSTATE: the durable evidence payload after the accepted legacy-to-bundle
+-- cutover (MASTER-RC-001, architecture 3b5de54f). State machine line 394 gives
+-- the exact PR #68 `loadoutEvidence` location "No Package B writer | Legacy
+-- admission only | Preserved legacy input when the bundle is absent. Never used
+-- as fallback after bundle occupancy", and RAW-01 (line 4849) makes one
+-- complete `authorityBundle` pointer the sole durable payload write.
+--
+-- A malformed legacy input therefore may not be repaired in place, because that
+-- is a write to a preserved legacy input. It is repaired off-state instead, and
+-- the repaired store must be stable: rebuilding it on every read would silently
+-- discard every intern staged since the previous read.
+do
+    local malformedDb = {loadoutEvidence={schemaVersion=1, entries="malformed"}}
+    local legacyStore = malformedDb.loadoutEvidence
+    local legacyEntries = legacyStore.entries
+    local priorDb = NexusDB
+    NexusDB = malformedDb
+    Evidence.Init(malformedDb)
+    local firstKey = Evidence.Intern({{spellId=200500,quality=3,stacks=1}})
+    local secondKey = Evidence.Intern({{spellId=200501,quality=3,stacks=1}})
+    local durable = Evidence.DurableStore(malformedDb)
+    local staged = 0
+    for _ in pairs(type(durable) == "table"
+        and type(durable.entries) == "table" and durable.entries or {}) do
+        staged = staged + 1
+    end
+    assert(firstKey and secondKey and staged == 2,
+        "off-state evidence repair discarded an intern between reads")
+    assert(Evidence.DurableStore(malformedDb) == durable,
+        "off-state evidence repair rebuilt its store on every read")
+    assert(rawget(malformedDb, "loadoutEvidence") == legacyStore
+        and legacyStore.entries == legacyEntries
+        and legacyStore.entries == "malformed"
+        and rawget(malformedDb, "authorityBundle") == nil,
+        "malformed legacy evidence input was repaired in place or replaced")
+    NexusDB = priorDb
+    Evidence.Init(priorDb)
+end
+
 print("canonical loadout evidence pooling and exact offline/wire reads -- OK")

@@ -8,6 +8,12 @@ local DPS=Nexus.DpsCapture
 UnitName=function(unit) return unit=="player" and "Viewer" or nil end
 UnitClass=function() return "Mage","MAGE" end
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, {BroadcastBuild=function() return true end})
 local a={{spellId=200001,stacks=2},{spellId=200002,stacks=1}}
 local b={{spellId=200010,stacks=1},{spellId=200011,stacks=3}}
@@ -27,7 +33,7 @@ assert(dummy[1].build and dummy[1].buildId and #dummy[1].echoes==2
     and dummy[1].ownerVerified==true and dummy[1].ownerKey=="bravo@realmb",
     "verified board row lacks its copyable exact build")
 local collisionId=dummy[1].buildId
-local collisionBuild=NexusDB.communityBuilds[collisionId]
+local collisionBuild=H.DurableBuilds()[collisionId]
 collisionBuild.fingerprint="different-current-content"
 collisionBuild.echoes={{spellId=299999,stacks=1}}
 -- A raw write behind the published root grants no authority: rebind once

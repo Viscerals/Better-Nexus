@@ -115,8 +115,10 @@ local RESPONSE_QUEUE_HEADROOM = 8 -- do no response preparation near saturation
 local SHARE_RETRY_INTERVAL  = 1
 local SHARE_RETRY_MAX_AGE   = 120
 local SHARE_RETRY_MAX_ATTEMPTS = 8
-local DELETE_RETRY_MAX_AGE = 300
-local DELETE_RETRY_MAX_ATTEMPTS = 8
+-- MASTER-RC-019: the delete retry bounds were removed with the retry pump.
+-- A local row-to-tombstone operation is an unconditional zero-wire refusal
+-- (architecture line 4856), so no delete ever acquires retry ownership and
+-- there is no age or attempt budget left to bound.
 
 ------------------------------------------------------------------------
 -- Module state
@@ -1385,32 +1387,28 @@ local function DeleteWireMessage(id, tomb, responseContext)
         Responder.ContextSuffix(responseContext, false))
 end
 
-function Operation.NewDelete(id, tomb)
+function Operation.NewDelete(id, tomb, registerActive)
     local version = tostring(TombStamp(tomb)) .. ":" .. TombAuthor(tomb)
     local status = Operation.New("delete", id, version,
-        Operation.deleteById[tostring(id)])
+        Operation.deleteById[tostring(id)], registerActive)
     status.owner = TombAuthor(tomb)
     return status
 end
 
-function Operation.DeleteMetadata(id, tomb, status)
-    local current = Now()
-    return {
-        operationStatus=status,operationKind="delete",
-        operationId=tostring(id),operationVersion=status.version,
-        operationKey=status.operationKey,
-        transferId=status.operationKey,buildId=tostring(id),
-        queueClass="bulk",enqueuedAt=current,
-        expiresAt=current + PENDING_MAX_AGE,
-    }
-end
+-- MASTER-RC-019: Operation.DeleteMetadata described the outbound queue
+-- envelope for a delete packet. With the originating send refused zero-wire
+-- and the retry pump removed, nothing enqueues a delete, so the envelope had
+-- no remaining caller.
 
 -- Pending deletes are a session-only fixed-shape map. A durable `pending`
 -- field on a tombstone is opaque evidence and grants no retry authority.
-local function MarkDeletePending(id, _, status)
-    pendingDeletes[id] = status or true
-end
-
+--
+-- MASTER-RC-019. `MarkDeletePending` was removed with the retry pump below:
+-- architecture line 4856 makes the originating local delete an unconditional
+-- zero-wire refusal, so nothing populates this map any more and
+-- `PendingDeleteCount()` honestly reports zero. The map, its clear entry and
+-- its count are kept because `Sync.WorkState()` is a public surface that must
+-- keep reporting them.
 local function ClearPendingDelete(id)
     pendingDeletes[id] = nil
 end
@@ -1435,60 +1433,20 @@ local function PumpPendingDeletes(elapsed)
     pendingDeleteTicker = pendingDeleteTicker + (tonumber(elapsed) or 0)
     if pendingDeleteTicker < 1 then return end
     pendingDeleteTicker = 0
+    -- MASTER-RC-019. The retry-pump CONSUMER that used to live here -- expiry
+    -- and drop transitions, owner selection, and the retry
+    -- Transport.Enqueue(DeleteWireMessage(...)) -- was unreachable once the
+    -- originating local delete became an unconditional zero-wire refusal
+    -- (architecture line 4856): `MarkDeletePending` had exactly one caller, in
+    -- the enqueue tail that refusal replaced, so `pendingDeletes` can never be
+    -- non-empty and every branch past this point was dead.
+    --
+    -- Discovery is kept: it is reachable, it publishes
+    -- `Operation.deleteDiscoveryComplete`, and it honestly returns zero.
+    -- DeleteWireMessage itself is kept for the RESPONDER path, which answers a
+    -- peer's reconciliation request and is how tombstones legitimately
+    -- propagate now that the originating send emits nothing.
     Operation.DiscoverPendingDeletes(32)
-    if not next(pendingDeletes) then return end
-    local current = Now()
-    local selectedId, selectedTomb, selectedStatus
-    for id, status in pairs(pendingDeletes) do
-        local tomb = CatalogTombstoneView(id)
-        if not tomb then
-            if type(status) == "table" then
-                Operation.Transition(status, "rejected", "missing tombstone")
-            end
-            pendingDeletes[id] = nil
-        elseif type(status) == "table" and status.expiresAt
-            and current >= status.expiresAt then
-            ClearPendingDelete(id, tomb)
-            Operation.Transition(status, "expired", "delete retry expired")
-        elseif LocalOwnsTomb(tomb)
-            and (not selectedId or tostring(id) < tostring(selectedId)) then
-            selectedId, selectedTomb, selectedStatus = id, tomb, status
-        end
-    end
-    if not selectedId then return end
-    if Transport.BulkFree() <= 0 then
-        return
-    end
-    if type(selectedStatus) ~= "table" then
-        selectedStatus = Operation.NewDelete(selectedId, selectedTomb)
-        selectedStatus.expiresAt = current + DELETE_RETRY_MAX_AGE
-        pendingDeletes[selectedId] = selectedStatus
-        Operation.latestDelete = selectedStatus
-        Operation.Transition(selectedStatus, "retry-pending",
-            "restored pending delete")
-    end
-    selectedStatus.retryAttempts = (selectedStatus.retryAttempts or 0) + 1
-    if selectedStatus.retryAttempts > DELETE_RETRY_MAX_ATTEMPTS then
-        ClearPendingDelete(selectedId, selectedTomb)
-        Operation.Transition(selectedStatus, "dropped",
-            "delete retry attempts exhausted")
-        return
-    end
-    local queued, why = Transport.Enqueue(
-        DeleteWireMessage(selectedId, selectedTomb),
-        Operation.DeleteMetadata(selectedId, selectedTomb, selectedStatus))
-    if queued then
-        ClearPendingDelete(selectedId, selectedTomb)
-        Operation.Transition(selectedStatus, "queued", "transport admitted")
-        LogEvent("TX", "queued pending delete '%s'", tostring(selectedId))
-    elseif why ~= "sync queue full" then
-        -- A permanent local serialization failure cannot be helped by retrying;
-        -- the tombstone remains available to normal reconciliation.
-        ClearPendingDelete(selectedId, selectedTomb)
-        Operation.Transition(selectedStatus, "rejected", why)
-        LogEvent("TX", "dropping unsendable pending delete '%s': %s",
-            tostring(selectedId), tostring(why or "invalid packet"))
-    end
 end
 
 Sync._pendingDeleteScheduled = false
@@ -2565,32 +2523,28 @@ function Sync.BroadcastDelete(build)
     tomb = CatalogTombstoneView(id) or tomb
     hotBuilds[id] = nil
     RequestRetention("local delete stored")
-    local status = Operation.NewDelete(id, tomb)
+    -- MASTER-RC-019. Architecture line 4856 and the mixed-client tombstone
+    -- rows: "Refuse before encoder invocation with
+    -- REMOTE_TOMBSTONE_ORDER_UNPROVEN; emit zero bytes, retain the exact local
+    -- serving root, create no outbound ownership claim, and produce zero
+    -- relay", and for new->new "Same local refusal and zero-wire result ... A
+    -- local row-to-tombstone operation is not a Sync message."
+    --
+    -- The refusal is UNCONDITIONAL. It is not conditioned on a peer protocol
+    -- version, and it cannot be: no per-peer protocol-capability tracking
+    -- exists anywhere in this codebase. Session.MarkPeer stores the parsed
+    -- addon version, core/SyncCompatibility.lua carries no protocol/release/
+    -- legacy concept, and protocolVersion is a DPS payload field.
+    --
+    -- The local tombstone was already committed through the central owner
+    -- above and is RETAINED: only the wire is refused. This returns before
+    -- DeleteWireMessage is constructed and before Transport.Enqueue, and the
+    -- status registers no active delete claim.
+    local status = Operation.NewDelete(id, tomb, false)
     Operation.latestDelete = status
-    local queued, why = Transport.Enqueue(DeleteWireMessage(id, tomb),
-        Operation.DeleteMetadata(id, tomb, status))
-    if queued then
-        ClearPendingDelete(id, tomb)
-        Operation.Transition(status, "queued", "transport admitted")
-        LogEvent("TX","delete '%s'", tostring(build.title or id))
-        return true, "queued", Operation.Copy(status)
-    end
-    if why == "sync queue full" then
-        if PendingDeleteCount() >= MAX_RECOVERY_QUEUE then
-            Operation.Transition(status, "rejected",
-                "delete retry queue full")
-            return false, "delete retry queue full", Operation.Copy(status)
-        end
-        status.expiresAt = Now() + DELETE_RETRY_MAX_AGE
-        status.retryAttempts = 0
-        MarkDeletePending(id, tomb, status)
-        Operation.Transition(status, "retry-pending", why)
-        LogEvent("TX", "delete '%s' queued for retry",
-            tostring(build.title or id))
-        return false, "queued for retry", Operation.Copy(status)
-    end
-    Operation.Transition(status, "rejected", why)
-    return false, why, Operation.Copy(status)
+    Operation.Transition(status, "rejected", "REMOTE_TOMBSTONE_ORDER_UNPROVEN")
+    ClearPendingDelete(id, tomb)
+    return false, "REMOTE_TOMBSTONE_ORDER_UNPROVEN", Operation.Copy(status)
 end
 
 function Sync.GetDeleteStatus(id)
@@ -3429,8 +3383,22 @@ function Sync.Init(codec, adapter)
     -- during PLAYER_ENTERING_WORLD.
     seenRemoteIds = {}
     NexusDB = NexusDB or {}
-    if Catalog() and Catalog().Init then
-        Catalog().Init(NexusDB, Nexus.BundledBuilds)
+    -- MASTER-RC-001, dependent-side prohibition of architecture lines
+    -- 1207-1211. This previously drove Catalog().Init
+    -- directly from Sync.Init, which is exactly a dependent initializer calling
+    -- another domain recovery pump: architecture line 1715 makes `Init` a
+    -- pump that "cannot be called outside the startup coordinator or an
+    -- explicit supported rebind." It now registers one idempotent dependency
+    -- and binds nothing; the coordinator services it.
+    -- The dependency is registered only when there actually is one. This is
+    -- the same condition the read gate uses (NexusDB ~= the bound database);
+    -- registering unconditionally would force a needless re-admission on every
+    -- ordinary login and discard in-flight candidate state.
+    local catalog = Catalog()
+    if catalog and type(catalog.RequestAuthorityRebindV1) == "function"
+        and type(catalog.BoundDatabase) == "function"
+        and catalog.BoundDatabase() ~= NexusDB then
+        catalog.RequestAuthorityRebindV1("SOURCE_REBIND_REQUIRED")
     end
     -- Tombstone authority is served only by the catalog's published root;
     -- Sync never binds the raw SavedVariables tombstone table again.

@@ -27,7 +27,7 @@ NexusDB.communityBuilds["renderer-0500"].link =
 -- represented, but the renderer must refuse to show its link.
 NexusDB.communityBuilds["renderer-0501"].link =
     "https://example.invalid/" .. string.char(1) .. "control"
-Nexus.Store.Init()
+H.BootstrapStoreReady()
 local eligibility = {}
 Nexus.DpsCapture = {
     GetCommunityEligibility=function()

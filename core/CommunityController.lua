@@ -242,7 +242,13 @@ function Controller.New(options)
         if not token then return out end
         for _ = 1, 4096 do
             local page, err = catalog.RecordCursorNext(token)
-            if err or type(page) ~= "table" or page.done then break end
+            -- MASTER-RC-018: a cursor error is NOT a clean done. Breaking on
+            -- both returned the accumulated prefix as if the collection were
+            -- complete, so a mid-walk fault silently produced a short result.
+            -- An error now yields the fixed empty result; only page.done ends a
+            -- complete walk.
+            if err then return {} end
+            if type(page) ~= "table" or page.done then break end
             if page.id ~= nil and page.record ~= nil then
                 out[page.id] = page.record
             end
@@ -2258,18 +2264,20 @@ function Controller.New(options)
             local _, source = catalog.Get(id)
             if source == "overlay" and type(build.echoes) == "table"
                 and #build.echoes > 0 then
-                local oldFingerprint = build.fingerprint
-                local oldHash = build.fingerprintHash
-                local oldCount = build.echoCount
-                local oldAvailable = build.loadoutAvailable
-                local oldNeeds = build.needsFullBuild
-                if RefreshBuildIdentity(build)
-                    and (oldFingerprint ~= build.fingerprint
-                        or oldHash ~= build.fingerprintHash
-                        or oldCount ~= build.echoCount
-                        or oldAvailable ~= build.loadoutAvailable
-                        or oldNeeds ~= build.needsFullBuild) then
-                    local saved = SaveBuild(build)
+                -- Detached candidate: never rewrite a published durable row.
+                local candidate = ShallowCopy(build)
+                local oldFingerprint = candidate.fingerprint
+                local oldHash = candidate.fingerprintHash
+                local oldCount = candidate.echoCount
+                local oldAvailable = candidate.loadoutAvailable
+                local oldNeeds = candidate.needsFullBuild
+                if RefreshBuildIdentity(candidate)
+                    and (oldFingerprint ~= candidate.fingerprint
+                        or oldHash ~= candidate.fingerprintHash
+                        or oldCount ~= candidate.echoCount
+                        or oldAvailable ~= candidate.loadoutAvailable
+                        or oldNeeds ~= candidate.needsFullBuild) then
+                    local saved = SaveBuild(candidate)
                     if saved then changed = changed + 1 end
                 end
             end
@@ -2432,19 +2440,14 @@ function Controller.New(options)
         for _, e in ipairs(wl.entries) do
             echoes[#echoes+1] = { spellId=e.spellId, quality=e.quality, stacks=e.stacks or 1 }
         end
-        local candidate = { echoes = echoes }
+        local candidate = ShallowCopy(b)
+        candidate.echoes = echoes
         local identityOk, identityErr = RefreshBuildIdentity(candidate)
         if not identityOk then return false, identityErr end
-        b.echoes = echoes
-        b.fingerprint = candidate.fingerprint
-        b.fingerprintHash = candidate.fingerprintHash
-        b.echoCount = candidate.echoCount
-        b.loadoutAvailable = candidate.loadoutAvailable
-        b.needsFullBuild = candidate.needsFullBuild
-        b.lastModified = NextStamp(b.lastModified or b.postedAt)
-        local saved, saveWhy = SaveBuild(b)
+        candidate.lastModified = NextStamp(b.lastModified or b.postedAt)
+        local saved, saveWhy = SaveBuild(candidate)
         if not saved then return false, saveWhy or "build storage refused" end
-        BroadcastIfPossible(b)
+        BroadcastIfPossible(candidate)
         local D = Nexus.DpsCapture
         if D and D.BroadcastBestForBuild then
             pcall(D.BroadcastBestForBuild, id)

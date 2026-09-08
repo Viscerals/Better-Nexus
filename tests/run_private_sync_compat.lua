@@ -34,7 +34,15 @@ end
 local echoes={{spellId=200100,stacks=1},{spellId=200102,stacks=2}}
 local fp,hash=DPS.GetEchoKey(echoes),DPS.GetEchoHash(echoes)
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
-Sync.Init(Codec,{}); DPS.Init({},Sync)
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
+Sync.Init(Codec,{})
+H.AdmitCatalogV1(NexusDB)
+DPS.Init({},Sync)
 local record={protocolVersion=7,fingerprint=fp,loadoutHash=hash,echoes=echoes,
     category='dummy',dps=25000000,duration=65,ts=49000,player='Localhero',class='MAGE',
     ownerKey='localhero@ebonhold',realm='ebonhold',ownerVerified=true,
@@ -63,7 +71,10 @@ assert(localizedPayload.p=='Duká','localized DPS identity changed on the wire')
 
 currentName='Receiver'
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
-Sync.Init(Codec,{}); DPS.Init({},Sync)
+H.AdmitCatalogV1(NexusDB)
+Sync.Init(Codec,{})
+H.AdmitCatalogV1(NexusDB)
+DPS.Init({},Sync)
 for _,message in ipairs(localizedMessages) do
     Sync.HandleIncoming(message.text,'Duká')
 end

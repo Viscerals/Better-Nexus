@@ -46,6 +46,12 @@ NexusDB = {
 
 Nexus.Store.Init()
 dofile("core/DpsCapture.lua")
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Nexus.DpsCapture.Init({}, {})
 
 local slots = {activeSlot=1,bySlot={
@@ -909,8 +915,11 @@ assert(asyncProjectedSaved and asyncProjectedSaved._nexusQualified == true
 local tombstoneMirrorBase = "saved-twin-11"
 -- Persisted legacy tombstone evidence occupies the typed identity: it is
 -- preserved raw and reserved deny-only after readmission.
-NexusDB.syncTombstones = NexusDB.syncTombstones or {}
-NexusDB.syncTombstones[tombstoneMirrorBase] = {stamp=900000,author="Twin"}
+-- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 394,
+-- 4849): a raw write behind the published root grants no authority, and the
+-- durable location after bundle occupancy is the bundle payload. Seed there and
+-- readmit from cursor zero.
+H.DurableTombstones()[tombstoneMirrorBase] = {stamp=900000,author="Twin"}
 H.RebindCatalog()
 assert(Nexus.BuildCatalog.TombstoneState(tombstoneMirrorBase).state
     == "OPAQUE_BLOCK_ALL", "Saved mirror tombstone fixture did not initialize")
@@ -924,12 +933,12 @@ assert(tombstoneMirrorId and tombstoneMirrorId ~= tombstoneMirrorBase
     and tombstoneMirrorState.visible == nil
     and tombstoneMirrorState.delta == nil
     and tombstoneMirrorState.tombstone ~= nil
-    and NexusDB.communityBuilds[tombstoneMirrorBase] == nil,
+    and H.DurableBuilds()[tombstoneMirrorBase] == nil,
     "EXPECTED RED: Saved mirror allocation wrote through a tombstoned ID")
 
 local opaqueMirrorBase = "saved-twin-12"
 local opaqueMirrorValue = "opaque-saved-mirror-collision"
-NexusDB.communityBuilds[opaqueMirrorBase] = opaqueMirrorValue
+H.DurableBuilds()[opaqueMirrorBase] = opaqueMirrorValue
 H.RebindCatalog()
 assert(Nexus.BuildCatalog.AllocationOccupancy(opaqueMirrorBase) == "opaque",
     "opaque Saved mirror fixture was not observable as occupied")
@@ -939,12 +948,12 @@ slots.bySlot[12] = {
 ImportAll(controller)
 local opaqueMirrorId = LocalMirrorForSlot(12)
 assert(opaqueMirrorId and opaqueMirrorId ~= opaqueMirrorBase
-    and NexusDB.communityBuilds[opaqueMirrorBase] == opaqueMirrorValue,
+    and H.DurableBuilds()[opaqueMirrorBase] == opaqueMirrorValue,
     "EXPECTED RED: Saved mirror allocation overwrote opaque raw storage")
 
 local tombstonePublicationBase = "published-" .. tombstoneMirrorId
 -- Persisted legacy tombstone evidence at the publication identity.
-NexusDB.syncTombstones[tombstonePublicationBase] = {stamp=900001,author="Twin"}
+H.DurableTombstones()[tombstonePublicationBase] = {stamp=900001,author="Twin"}
 H.RebindCatalog()
 assert(Nexus.BuildCatalog.TombstoneState(tombstonePublicationBase).state
     == "OPAQUE_BLOCK_ALL", "publication tombstone fixture did not initialize")
@@ -958,7 +967,7 @@ assert(tombstonePublished and tombstonePublishedId ~= tombstonePublicationBase
     and tombstonePublicationState.visible == nil
     and tombstonePublicationState.delta == nil
     and tombstonePublicationState.tombstone ~= nil
-    and NexusDB.communityBuilds[tombstonePublicationBase] == nil
+    and H.DurableBuilds()[tombstonePublicationBase] == nil
     and tombstonePublication
     and tombstonePublication.sourceSavedBuildId == tombstoneMirrorId
     and Nexus.Identity.VerifiedOwnerKey(tombstonePublication)
@@ -967,7 +976,7 @@ assert(tombstonePublished and tombstonePublishedId ~= tombstonePublicationBase
 
 local opaquePublicationBase = "published-" .. opaqueMirrorId
 local opaquePublicationValue = "opaque-publication-collision"
-NexusDB.communityBuilds[opaquePublicationBase] = opaquePublicationValue
+H.DurableBuilds()[opaquePublicationBase] = opaquePublicationValue
 H.RebindCatalog()
 assert(Nexus.BuildCatalog.AllocationOccupancy(opaquePublicationBase)
         == "opaque",
@@ -977,7 +986,7 @@ local opaquePublished, opaquePublishedId =
 local opaquePublication = opaquePublishedId
     and Nexus.BuildCatalog.Get(opaquePublishedId) or nil
 assert(opaquePublished and opaquePublishedId ~= opaquePublicationBase
-    and NexusDB.communityBuilds[opaquePublicationBase]
+    and H.DurableBuilds()[opaquePublicationBase]
         == opaquePublicationValue
     and opaquePublication
     and opaquePublication.sourceSavedBuildId == opaqueMirrorId

@@ -297,13 +297,24 @@ local/metadata-only changes remain explicit non-hash invalidations.
 `Intern(echoes, claimedReference)`, `Resolve(reference, inline)`,
 `Reference(record)`, `ReferenceDpsRow(row)`, `ResolveDpsRow(row)`,
 `ResolveBuildRow(row)`, `Snapshot()`, `Stats()`, `Conflicts()`,
-`RegisterReferenceProvider(name, callback)`, and `CollectGarbage(db)` own the
-content-addressed `NexusDB.loadoutEvidence.entries` pool. Identity is the full
-canonical spell/quality/stack/locked tuple string, never a short hash or caller
-claim. Equal canonical arrays share one stored entry; a mismatched claim or
-corrupt stored key is retained as a bounded in-session conflict and never
-overwrites another exact array. Public resolution always returns a defensive
-copy.
+`RegisterReferenceProvider(name, callback)`, `DurableStore(database)`, and
+`CollectGarbage(db)` own the content-addressed evidence `entries` pool. That
+pool is the `loadoutEvidence` field of the durable authority bundle once
+`NexusDB.authorityBundle` is occupied; the PR #68 `NexusDB.loadoutEvidence`
+location is a preserved read-only admission input only while the bundle is
+absent, and is never consulted as a fallback after occupancy. The module
+performs no durable write of its own: `DurableStore(database)` returns the
+store the commit coordinator installs inside the next complete bundle pointer,
+which RAW-01 makes the sole durable payload write, and it returns nil for any
+database that is not the bound one so a detached authority instance can never
+borrow this module's state. A malformed or absent store is shape-repaired into
+a detached replacement, never in place, so a preserved legacy input keeps its
+table identity and its bytes and a live nested bundle field is never mutated.
+Identity is the full canonical spell/quality/stack/locked tuple string, never a
+short hash or caller claim. Equal canonical arrays share one stored entry; a
+mismatched claim or corrupt stored key is retained as a bounded in-session
+conflict and never overwrites another exact array. Public resolution always
+returns a defensive copy.
 
 Additive references are introduced before the verified compaction migration;
 only byte-for-byte canonical overlay/DPS arrays remove their inline duplicate;
@@ -754,11 +765,17 @@ exact database. `BeginCatalogMaintenance(db)` returns a handle refused with
 work off-state, and only `CommitMaintenance` publishes one replacement root.
 `CancelMaintenance` discards the candidate and leaves the prior root intact.
 Overlay writes establish `evidenceKey`; after compaction is enabled, only an
-exact deep round trip removes the inline duplicate. During the staged consumer
-cutover, `NexusDB.communityBuilds` is the canonical overlay backing table. Read
-precedence is authorized tombstone, then a personal or at-least-as-new overlay
-row, then the bundled row. `DeltaSnapshot()` contains only overlay rows that win
-that selection; stale hidden rows and bundled-only rows are excluded.
+exact deep round trip removes the inline duplicate. The canonical overlay
+backing table is `NexusDB.authorityBundle.communityBuilds`, the catalog payload
+field of the durable authority bundle. The PR #68 `NexusDB.communityBuilds`,
+`NexusDB.syncTombstones`, `NexusDB.buildCatalog` and
+`NexusDB.communityRetentionEvictions` locations have no Package B writer: they
+are admission input only while the bundle is absent, are preserved
+byte-identically once it is occupied, and are never used as a fallback after
+occupancy. Read precedence is authorized tombstone, then a personal or
+at-least-as-new overlay row, then the bundled row. `DeltaSnapshot()` contains
+only overlay rows that win that selection; stale hidden rows and bundled-only
+rows are excluded.
 
 ## core/SyncProtocol.lua — pure wire and compact-payload boundary
 
@@ -876,7 +893,7 @@ overlay/tombstone reconciliation plus summaries; exact bundled loadouts are
 requested explicitly by known ID. Existing identities still
 require an author-originated update: catalog tokens are compatibility hints, not
 ownership authentication. A baseline-equivalent legacy payload is accepted
-without copying it into `NexusDB.communityBuilds`. `Sync.Stats()` exposes
+without copying it into the durable overlay payload. `Sync.Stats()` exposes
 `baselineSkipped` and `overlaySent` for this boundary. Normal build and DPS hash
 reads use revision caches; `Sync.GetCanonicalBuildHashes()` and
 `DpsCapture.GetSyncHashUncached()` are explicit read-only verification paths and

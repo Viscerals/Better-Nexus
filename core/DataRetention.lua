@@ -176,19 +176,22 @@ end
 local function BetterDps(left, right)
     if left.dps ~= right.dps then return left.dps > right.dps end
     if left.stamp ~= right.stamp then return left.stamp > right.stamp end
-    return tostring(left.key) < tostring(right.key)
+    -- MASTER-RC-012: canonical comparator, never tostring. tostring makes
+    -- numeric 1 and string "1" tie and sorts numeric 10 before numeric 2.
+    return Identity.CompareTypedIds(left.key, right.key) < 0
 end
 
 local function BetterRow(left, right)
     if left.protected ~= right.protected then return left.protected end
     if left.stamp ~= right.stamp then return left.stamp > right.stamp end
     if left.dps ~= right.dps then return left.dps > right.dps end
-    return tostring(left.key) < tostring(right.key)
+    -- MASTER-RC-012: canonical comparator, never tostring. tostring makes
+    -- numeric 1 and string "1" tie and sorts numeric 10 before numeric 2.
+    return Identity.CompareTypedIds(left.key, right.key) < 0
 end
 
-local function TypedIdentity(value)
-    return type(value) .. ":" .. tostring(value == nil and "" or value)
-end
+-- MASTER-RC-012: the one canonical encoder, shared from core/Identity.lua.
+local TypedIdentity = Identity.TypedIdentity
 
 local function RowIdentity(row)
     if type(row) ~= "table" then return nil end
@@ -405,6 +408,21 @@ end
 
 -- Catalog rows are read and mutated only through the catalog authority bound
 -- to this exact database. A detached database receives zero catalog work.
+-- MASTER-RC-008 / RAW-01. A detached instance must never fall back to the raw
+-- NexusDB global: RAW-01 is RED when "a detached instance falls back to global
+-- NexusDB". When no exact database is supplied the only admissible source is
+-- the catalog's exact bound authority database, and when there is none the
+-- caller receives its fixed empty or refusing result rather than raw storage.
+local function AuthorityDatabase(database)
+    if type(database) == "table" then return database end
+    local catalog = Nexus and Nexus.BuildCatalog
+    if catalog and type(catalog.BoundDatabase) == "function" then
+        local bound = catalog.BoundDatabase()
+        if type(bound) == "table" then return bound end
+    end
+    return nil
+end
+
 local function CatalogFor(database)
     local catalog = Nexus and Nexus.BuildCatalog
     if not (catalog and type(catalog.BoundDatabase) == "function"
@@ -435,7 +453,7 @@ end
 local function EvictOverlayIds(catalog, database, ids)
     if #ids == 0 then return 0, 0 end
     table.sort(ids, function(left, right)
-        return TypedIdentity(left) < TypedIdentity(right)
+        return Identity.CompareTypedIds(left, right) < 0
     end)
     local handle = catalog.BeginCatalogMaintenance({database=database,
         operation="retention"})
@@ -610,7 +628,13 @@ local function BumpDpsAndViews(reason)
 end
 
 function Retention.Enforce(database, reason)
-    database = type(database) == "table" and database or NexusDB
+    -- MASTER-RC-008 / RAW-01: an unsupplied database resolves to the exact
+    -- bound authority, never to the raw NexusDB global. A database supplied
+    -- explicitly by the coordinator is operated on as given; what is forbidden
+    -- is the silent global fallback, and deciding ADMISSION from raw fields of
+    -- a table that was never proven to be the authority -- see
+    -- AllowsRemoteRevision.
+    database = AuthorityDatabase(database)
     if type(database) ~= "table" then return nil, "database required" end
     local priorMeta = type(database.dataRetention) == "table"
         and database.dataRetention or nil
@@ -781,7 +805,8 @@ function Retention.Request(reason)
         return true
     end
     return scheduler.After("data-retention.enforce", 3, function()
-        Retention.Enforce(NexusDB, reason or "scheduled")
+        -- Resolve the exact bound authority at run time; never the raw global.
+        Retention.Enforce(nil, reason or "scheduled")
     end)
 end
 
@@ -789,21 +814,21 @@ end
 -- ID. No sender-controlled revision, stamp, clock, or arrival order can clear
 -- it; only trusted local expiry inside the central catalog transaction can.
 function Retention.AllowsRemoteRevision(_, _, database, buildId)
-    database = type(database) == "table" and database or NexusDB
-    local catalog = CatalogFor(database)
-    if catalog then
-        local barrier = catalog.BarrierState(buildId)
-        return not (type(barrier) == "table" and barrier.blocked == true)
+    local catalog = CatalogFor(AuthorityDatabase(database))
+    if not catalog then
+        -- No bound authority proves this table, so it holds no admitted rows
+        -- and no barrier of its own. A raw communityRetentionEvictions marker
+        -- in an unbound table is not authority and never vetoes (MASTER-RC-008;
+        -- architecture line 188 makes such fields claims, not proof).
+        return true
     end
-    local marker = type(database) == "table"
-        and type(database.communityRetentionEvictions) == "table"
-        and database.communityRetentionEvictions[buildId] or nil
-    return marker == nil
+    local barrier = catalog.BarrierState(buildId)
+    return not (type(barrier) == "table" and barrier.blocked == true)
 end
 
 function Retention.ReleaseSupersededAutoBuild(buildId, database)
     if not ValidBuildId(buildId) then return false end
-    database = type(database) == "table" and database or NexusDB
+    database = AuthorityDatabase(database)
     local catalog = type(database) == "table" and CatalogFor(database) or nil
     if not catalog then return false end
     local build = catalog.Get(buildId)
@@ -817,12 +842,11 @@ function Retention.ReleaseSupersededAutoBuild(buildId, database)
 end
 
 function Retention.Limits(database)
-    database = type(database) == "table" and database or NexusDB
-    return ResolveLimits(database)
+    return ResolveLimits(AuthorityDatabase(database))
 end
 
 function Retention.Stats(database)
-    database = type(database) == "table" and database or NexusDB
+    database = AuthorityDatabase(database)
     local meta = type(database) == "table" and database.dataRetention or nil
     return type(meta) == "table" and Copy(meta.last) or nil
 end

@@ -59,6 +59,13 @@ assert(SlashCmdList.NEXUS("status")==nil
     "pre-initialization command did not preserve its exact response")
 H.FireEvent("ADDON_LOADED","Nexus")
 H.FireEvent("PLAYER_ENTERING_WORLD")
+-- Architecture 3b5de54f lines 1203-1204 and 1519: authority bootstrap
+-- advances at most one PumpAuthorityBootstrap slice per scheduler turn, so
+-- world entry completes on the turn the coordinator reaches STORE_READY.
+-- Drive ordinary scheduler turns under a closed bound and prove startup
+-- actually completed. Nothing else in this file changes: no expected count,
+-- tolerance, threshold or oracle below is adjusted.
+H.RequireStarted()
 
 local Adapter=Nexus.GameAdapter
 local catalog={rows={[200100]={name="Alpha",quality=3}},
@@ -137,7 +144,8 @@ Expect("dps",table.concat({
 },"\n"))
 Expect("sync","asking other players for their builds -- results appear in /nexus builds")
 Expect("err","retained error")
-Nexus.Store.State().flagDemotions={DISABLE_SUPPRESSES_GUARANTEE="fixture"}
+Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(state)
+    state.flagDemotions={DISABLE_SUPPRESSES_GUARANTEE="fixture"} end)
 Expect("flags",table.concat({
     "DISABLE_SUPPRESSES_GUARANTEE = false",
     "demoted DISABLE_SUPPRESSES_GUARANTEE: fixture",

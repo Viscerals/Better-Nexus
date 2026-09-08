@@ -1,6 +1,21 @@
 -- Stage 28.6 expected-red characterization for Share input and exact UTF-8
 -- identity. Keep every failure named so the repair cannot hide one boundary
 -- behind an earlier assertion.
+--
+-- Legacy-to-bundle cutover observation repoint (MASTER-RC-001, architecture
+-- 3b5de54f). State machine line 394 gives the exact PR #68 payload locations
+-- "No Package B writer | Legacy admission only | Preserved legacy input when
+-- the bundle is absent. Never used as fallback after bundle occupancy", and
+-- line 4849 (RAW-01) requires "one complete `authorityBundle` pointer is the
+-- sole durable payload write ... legacy payload locations are read-only
+-- inputs". This fixture picked the build Share had just published by
+-- enumerating `NexusDB.communityBuilds`; after the cutover a runtime-shared
+-- build never appears there by construction. The shared row is therefore
+-- selected from the durable bundle payload through `H.DurableBuilds()`. Every
+-- exact-byte identity check on that row -- author, owner key, description --
+-- is unchanged, which is the whole point of this characterization, and the
+-- preserved legacy input is now additionally checked to keep its table
+-- identity and to take no write.
 local H = dofile("tests/harness.lua")
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
@@ -24,6 +39,7 @@ NexusDB = {
     settingsVersion=2, settings={}, chars={}, dpsCapture={},
     buildFilters={scope="all",sortMode="title"}, communityBuilds={},
 }
+local legacyBuilds=NexusDB.communityBuilds
 Nexus.Store.Init()
 
 local slot = {slot=1,name="UTF-8 Source",class="MAGE",echoes={
@@ -74,7 +90,11 @@ post._postTitleBox:SetText("Exact UTF-8 owner")
 postDescription:SetText(safeDescription)
 assert(post._postGoBtn:GetScript("OnClick"))()
 local shared
-for _, build in pairs(NexusDB.communityBuilds) do shared = build break end
+for _, build in pairs(H.DurableBuilds()) do shared = build break end
+local legacyRows = 0
+for _ in pairs(rawget(NexusDB, "communityBuilds") or {}) do legacyRows = legacyRows + 1 end
+Check(rawget(NexusDB, "communityBuilds") == legacyBuilds and legacyRows == 0,
+    "Share wrote a legacy payload location")
 Check(shared and shared.author == accented,
     "Share changed exact UTF-8 author bytes")
 Check(shared and shared.ownerKey == accented:lower() .. "@ebonhold",

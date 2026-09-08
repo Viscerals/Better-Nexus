@@ -155,18 +155,87 @@ local function MutationSnapshot()
     }, ":")
 end
 
--- ADDON_LOADED owns only SavedVariables/diagnostic binding. The update frame
--- remains inert until PLAYER_ENTERING_WORLD completes initialization.
+-- Architecture 3b5de54f lines 1201-1204: AuthorityBootstrapCoordinatorV1 is
+-- the sole startup sequencing owner, MainLifecycle creates it before calling
+-- Store.Init, and dispatches at most ONE PumpAuthorityBootstrap slice per
+-- scheduler turn. Line 1519: Store releases dependents only on entering
+-- STORE_READY. So ADDON_LOADED now performs exactly one bind slice and
+-- releases NO dependent while authority is pending -- DiagnosticLogs.Init is
+-- withheld here rather than run twice.
 H.FireEvent("ADDON_LOADED", "Nexus")
-assert(table.concat(lifecycle, ",") == "Store.Init,DiagnosticLogs.Init",
-    "ADDON_LOADED performed more than cheap persistence initialization")
+assert(table.concat(lifecycle, ",") == "Store.Init",
+    "ADDON_LOADED released a dependent while Store authority was pending: "
+        .. table.concat(lifecycle, ","))
 H.Advance(0.4, 0.2)
 assert(#routed == 0 and MutationSnapshot() == "0:0:0:0:0:0:0",
     "pre-world update reached adapter, transport, or gameplay work")
 
+-- World entry is recorded while bootstrap is still pending and completes on
+-- the scheduler turn the coordinator reaches STORE_READY. The fixture drives
+-- ordinary scheduler turns under a closed bound; it never pumps the
+-- coordinator itself and never assumes readiness was reached.
 H.FireEvent("PLAYER_ENTERING_WORLD")
+assert(#routed == 0 and MutationSnapshot() == "0:0:0:0:0:0:0",
+    "world entry released dependents while Store authority was pending")
+local BOOTSTRAP_TURN_BOUND = 32
+local function WorldEntryCompleted()
+    for _, entry in ipairs(lifecycle) do
+        if entry == "DpsCapture.Init" then return true end
+    end
+    return false
+end
+local bootstrapTurns = 0
+while not WorldEntryCompleted() and bootstrapTurns < BOOTSTRAP_TURN_BOUND do
+    bootstrapTurns = bootstrapTurns + 1
+    H.Advance(0.01, 0.01)
+end
+assert(WorldEntryCompleted(),
+    "authority bootstrap did not reach STORE_READY within "
+        .. BOOTSTRAP_TURN_BOUND .. " scheduler turns: "
+        .. table.concat(lifecycle, ","))
+print(string.format(
+    "authority bootstrap spanned %d scheduler turns (one slice per turn)",
+    bootstrapTurns))
+assert(bootstrapTurns > 0,
+    "world entry completed without spanning a scheduler turn, so bootstrap "
+        .. "was driven synchronously rather than one slice per turn")
+-- EXACT PIN, deliberately not a range and not "converges within the bound".
+-- The closed bound above only catches non-convergence; a fixture whose profile
+-- converges in a few turns would still pass it if a defect made bootstrap take
+-- two hundred. This pin is what catches that drift. If it changes, the cause
+-- must be understood and the new number justified -- it must never be widened
+-- to make a failure disappear.
+assert(bootstrapTurns == 5, string.format(
+    "authority bootstrap turn count drifted: expected exactly 5, measured %d. "
+        .. "Do NOT widen this pin; establish why the slice count changed.",
+    bootstrapTurns))
+
+-- MASTER-RC-001, condition on the approved fixture bound: the bound is a
+-- HARNESS loop limit only. Production has NO turn cap -- the scheduler pumps
+-- one slice per turn until STORE_READY or a terminal state, however many turns
+-- that takes. This is asserted from source so it cannot regress silently: an
+-- account large enough to need more turns than any fixture bound must still
+-- reach STORE_READY, and a production cap would strand it forever.
+local function ReadSource(path)
+    local handle = assert(io.open(path, "rb"), "unable to read " .. path)
+    local text = handle:read("*a")
+    handle:close()
+    return text
+end
+local lifecycleSource = ReadSource("core/MainLifecycle.lua")
+local storeSource = ReadSource("core/Store.lua")
+assert(not lifecycleSource:find("BOOTSTRAP_TURN_BOUND", 1, true)
+        and not storeSource:find("BOOTSTRAP_TURN_BOUND", 1, true),
+    "a harness turn bound leaked into production bootstrap")
+assert(not storeSource:find("BOOTSTRAP_MAX_SLICES", 1, true),
+    "the retired private slice cap reappeared in core/Store.lua")
+assert(lifecycleSource:find("PumpBootstrapSlice()", 1, true),
+    "MainLifecycle no longer dispatches a bootstrap slice per scheduler turn")
+-- Store.Init is called once at ADDON_LOADED (the bind) and once by Initialize
+-- on the readiness turn. Every dependent runs exactly once, after STORE_READY,
+-- in the PR #68 relative order.
 local expectedLifecycle = table.concat({
-    "Store.Init", "DiagnosticLogs.Init",
+    "Store.Init",
     "Store.Init", "DiagnosticLogs.Init", "Adapter.Init", "Panel.Init",
     "Sync.Init", "DpsCapture.Init",
 }, ",")

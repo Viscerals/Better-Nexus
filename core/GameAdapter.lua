@@ -15,6 +15,38 @@ A.DIAGNOSTIC_PASSIVE = false
 
 -- Forward-declare every closure-captured local (Lua 5.1 scoping rule).
 local Store
+
+-- MASTER-RC-001 (amendment 10). Store.State() is a DURABLE_READ and returns a
+-- defensive copy; writing through it would be a silent no-op. Every write to
+-- per-character state goes through StoreAuthorityOwnerV1.UpdateStateV1, the
+-- architecture's counted private mutation entry (lines 1907-1912). Read-only
+-- uses of Store.State() below are unchanged.
+local function UpdateStoreState(mutator)
+    local internals = Nexus and Nexus.MainInternals
+    local owner = type(internals) == "table" and internals.StoreAuthorityOwner
+    -- Honour the INJECTED Store. A stub Store must never resolve the real
+    -- durable writer -- writing through the global owner would bypass
+    -- dependency injection, which tests/run_wishlist_controller_parity.lua
+    -- exists to catch. A stub exposes only the surface it needs (typically
+    -- State/Settings); a real Store module exposes the full nine-export facade.
+    -- Identity alone is not usable here: fixtures re-`dofile` core/Store.lua,
+    -- which rebinds Nexus.Store and the owner while an already-initialized
+    -- consumer still holds the previous module, so a real Store legitimately
+    -- fails an identity check.
+    local realStore = type(Store) == "table"
+        and type(Store.Init) == "function"
+        and type(Store.CurrentOwnerKey) == "function"
+    if realStore and type(owner) == "table"
+        and type(owner.UpdateStateV1) == "function" then
+        return owner.UpdateStateV1(mutator)
+    end
+    -- No authorized owner for THIS Store. Fall back to whatever state table the
+    -- injected facade exposes, which is exactly the pre-migration behaviour for
+    -- such a Store.
+    local injected = Store and Store.State and Store.State()
+    if type(injected) ~= "table" then return nil end
+    return true, mutator(injected)
+end
 local callbacks
 local catalogCache, playerMaskCache
 local catalogObservedRef, catalogObservedHint
@@ -1350,9 +1382,9 @@ function A.SetFirstRunWishlist(wishlistSlot, candidate)
     if not selected then return false, why end
     local record = StoredWishlistRecord(selected)
     if not record then return false, "invalid wishlist" end
-    local state = Store and Store.State and Store.State()
-    if not state then return false, "store unavailable" end
-    state.firstRunWishlist = record
+    if not UpdateStoreState(function(state)
+        state.firstRunWishlist = record
+    end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
     return true
 end
@@ -1360,17 +1392,17 @@ end
 function A.SetFirstRunWishlistIdentity(name, echoes)
     local record = StoredWishlistRecord({name=name, echoes=echoes})
     if not record then return false end
-    local state = Store and Store.State and Store.State()
-    if not state then return false end
-    state.firstRunWishlist = record
+    if not UpdateStoreState(function(state)
+        state.firstRunWishlist = record
+    end) then return false end
     MarkWishlistProjectionDirty()
     return true
 end
 
 function A.ClearFirstRunWishlist()
-    local state = Store and Store.State and Store.State()
-    if not state then return false end
-    state.firstRunWishlist = nil
+    if not UpdateStoreState(function(state)
+        state.firstRunWishlist = nil
+    end) then return false end
     MarkWishlistProjectionDirty()
     return true
 end
@@ -1625,11 +1657,11 @@ function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes)
     end
     local record = StoredWishlistRecord({name=name, echoes=echoes})
     if not record then return false, "invalid wishlist" end
-    local state = Store and Store.State and Store.State()
-    if not state then return false, "store unavailable" end
-    state.loadoutWishlists = state.loadoutWishlists or {}
-    state.loadoutWishlists[loadoutSlot] = record
-    state.firstRunWishlist = nil
+    if not UpdateStoreState(function(state)
+        state.loadoutWishlists = state.loadoutWishlists or {}
+        state.loadoutWishlists[loadoutSlot] = record
+        state.firstRunWishlist = nil
+    end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
     return true
 end
@@ -1657,11 +1689,12 @@ end
 function A.SetFirstLoadoutWishlistIdentity(name, echoes)
     local record = StoredWishlistRecord({name=name, echoes=echoes})
     if not record then return false, "invalid wishlist" end
-    local state = Store and Store.State and Store.State()
-    if not state then return false, "store unavailable" end
-    state.loadoutWishlists = state.loadoutWishlists or {}
-    state.loadoutWishlists[1] = record
-    state.firstRunWishlist = StoredWishlistRecord(record)
+    local mirrored = StoredWishlistRecord(record)
+    if not UpdateStoreState(function(state)
+        state.loadoutWishlists = state.loadoutWishlists or {}
+        state.loadoutWishlists[1] = record
+        state.firstRunWishlist = mirrored
+    end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
     return true
 end
@@ -1684,11 +1717,11 @@ function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
     if not selected then return false, why end
     local record = StoredWishlistRecord(selected)
     if not record then return false, "invalid wishlist" end
-    local state = Store and Store.State and Store.State()
-    if not state then return false, "store unavailable" end
-    state.loadoutWishlists = state.loadoutWishlists or {}
-    state.loadoutWishlists[loadoutSlot] = record
-    state.firstRunWishlist = nil
+    if not UpdateStoreState(function(state)
+        state.loadoutWishlists = state.loadoutWishlists or {}
+        state.loadoutWishlists[loadoutSlot] = record
+        state.firstRunWishlist = nil
+    end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
     return true
 end
@@ -1701,11 +1734,11 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
         slot=wishlistSlot, name=name, echoes=echoes,
     })
     if not record then return false end
-    local state = Store and Store.State and Store.State()
-    if not state then return false end
-    state.loadoutWishlists = state.loadoutWishlists or {}
-    state.loadoutWishlists[loadoutSlot] = record
-    state.firstRunWishlist = nil
+    if not UpdateStoreState(function(state)
+        state.loadoutWishlists = state.loadoutWishlists or {}
+        state.loadoutWishlists[loadoutSlot] = record
+        state.firstRunWishlist = nil
+    end) then return false end
     MarkWishlistProjectionDirty()
     return true
 end
@@ -1713,10 +1746,11 @@ end
 function A.ClearLoadoutWishlist(loadoutSlot)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     loadoutSlot = tonumber(loadoutSlot)
-    local state = Store and Store.State and Store.State()
-    if not state or not loadoutSlot then return false end
-    state.loadoutWishlists = state.loadoutWishlists or {}
-    state.loadoutWishlists[loadoutSlot] = nil
+    if not loadoutSlot then return false end
+    if not UpdateStoreState(function(state)
+        state.loadoutWishlists = state.loadoutWishlists or {}
+        state.loadoutWishlists[loadoutSlot] = nil
+    end) then return false end
     MarkWishlistProjectionDirty()
     return true
 end
@@ -1771,12 +1805,13 @@ function A.Wishlist()
     local starter = IsPopulatedLoadout(activeSlot, slots)
         and ResolveFirstRunWishlist() or nil
     if starter then
-        local state = Store and Store.State and Store.State()
         local record = StoredWishlistRecord(starter)
-        if state and record then
-            state.loadoutWishlists = state.loadoutWishlists or {}
-            state.loadoutWishlists[activeSlot] = record
-            state.firstRunWishlist = nil
+        if record then
+            UpdateStoreState(function(state)
+                state.loadoutWishlists = state.loadoutWishlists or {}
+                state.loadoutWishlists[activeSlot] = record
+                state.firstRunWishlist = nil
+            end)
             MarkWishlistProjectionDirty()
         end
         return EchoesToWishlist(starter.echoes, starter.name,
@@ -2000,7 +2035,7 @@ function A.ToggleLever(leverId, wantDisabled)
     local ok = SafeCall(svc.ToggleTomeEcho, lv.members[1])
     if ok then
         pending[leverId] = { t = GetTime(), want = wantDisabled and true or false }
-        if st then st.tomeTogglePending = pending end
+        UpdateStoreState(function(state) state.tomeTogglePending = pending end)
         leverProjectionRevision = leverProjectionRevision + 1
         return true
     end
@@ -2021,12 +2056,15 @@ local function ReconcileTomePending()
     if not cat or not svc then return end
     local now = GetTime()
     local mirrorLive = A.DiscoverySynced()
-    for lever, p in pairs(st.tomeTogglePending) do
+    UpdateStoreState(function(state)
+    local map = state.tomeTogglePending
+    if not map then return end
+    for lever, p in pairs(map) do
         local sentAt = (type(p) == "table" and tonumber(p.t)) or tonumber(p) or 0
         local want = not (type(p) == "table" and p.want == false)
         if sentAt > now then      -- cross-boot entry: restart the window
             if type(p) == "table" then p.t = now else
-                st.tomeTogglePending[lever] = { t = now, want = want }
+                map[lever] = { t = now, want = want }
             end
             sentAt = now
         end
@@ -2043,10 +2081,11 @@ local function ReconcileTomePending()
             -- clear silently: a genuine failure just leaves the echo in the
             -- pool (mild), and we no longer disable unknown tomes (the cause
             -- of the old per-lever "no confirmation" chat spam)
-            st.tomeTogglePending[lever] = nil
+            map[lever] = nil
             leverProjectionRevision = leverProjectionRevision + 1
         end
     end
+    end)
 end
 
 ------------------------------------------------------------------------
@@ -2415,8 +2454,9 @@ function A.SetSoloPicker()
     if not (opt and opt.SetSetting and opt.GetSetting) then return false end
     local cur = SafeCall(function() return opt:GetSetting("autoAcceptLoadoutEchoes") end)
     if cur then
-        local st = Store and Store.State()
-        if st and st.priorAutoAccept == nil then st.priorAutoAccept = true end
+        UpdateStoreState(function(state)
+            if state.priorAutoAccept == nil then state.priorAutoAccept = true end
+        end)
         pcall(function() opt:SetSetting("autoAcceptLoadoutEchoes", false) end)
         return true, "disabled"
     end
@@ -2436,7 +2476,7 @@ function A.RestoreAutoAccept()
     local opt = OptSvc()
     if st and st.priorAutoAccept and opt and opt.SetSetting then
         pcall(function() opt:SetSetting("autoAcceptLoadoutEchoes", true) end)
-        st.priorAutoAccept = nil
+        UpdateStoreState(function(state) state.priorAutoAccept = nil end)
         return true
     end
     return false
@@ -3137,7 +3177,20 @@ function A.AutomationSignature()
     local svc = PS()
     local echoOk = ReconcileEchoState(false, "fallback")
     if not echoOk then return nil end
-    local state = Store and Store.State and Store.State() or nil
+    -- MASTER-RC-001. These signature fields are IDENTITY SENTINELS: the
+    -- fallback comparator tests them with a raw `~=` (SameFallbackSignature in
+    -- core/AutomationRuntime.lua), and their meaning is "was the character
+    -- state replaced underneath us". That only works against a stable
+    -- reference. Store.State() now returns a per-content defensive snapshot
+    -- whose object identity changes on every content change, so reading the
+    -- sentinel from it made the five-second fallback fire on ordinary content
+    -- edits it was never meant to react to -- measured as one extra
+    -- post-expiry AutoLock evaluation.
+    --
+    -- The live row is what the sentinel always meant, so it is read through the
+    -- authorized entry. That read changes nothing, so it invalidates nothing.
+    local _, state = UpdateStoreState(function(row) return row end)
+    if type(state) ~= "table" then state = nil end
     local settings = Store and Store.Settings and Store.Settings() or nil
     local associations = type(state) == "table" and state.loadoutWishlists or nil
     return {

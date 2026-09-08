@@ -53,7 +53,7 @@ Case("ADM-03", "80 ordinary rejects before durable or public state", function()
         "80 ordinary reached a public surface")
     Check(Catalog().FindExactFingerprintId(state.fingerprint or "") == nil,
         "exact index served an invalid row")
-    Check(db.communityBuilds.adm03 == raw and S.Encode(raw) == bytes,
+    Check(S.Durable(db).adm03 == raw and S.Encode(raw) == bytes,
         "raw row was mutated or removed")
     Check(state.occupancy == "BLOCKED", "invalid typed ID was not deny-only")
 end)
@@ -222,6 +222,8 @@ Case("ADM-11", "drift, supersession, and cancellation during scan", function()
     Catalog().PumpRootAdmission()
     local cancelled = Catalog().CancelRootAdmission()
     Check(cancelled.state == "ROOT_UNBOUND", "cancellation did not unbind")
+    -- No bundle was ever published on this path, so the exact PR #68 location
+    -- is still the selected durable state (state machine line 374).
     Check(S.Count(db.communityBuilds) == 30, "cancellation changed raw storage")
     -- candidate supersession restarts at cursor zero
     Catalog().BeginRootAdmission(db, S.Bundle())
@@ -264,6 +266,8 @@ Case("BUD-01", "2,049 slots and 65-key objects are fatal, never pruned", functio
             .. tostring(S.Root().state) .. "/" .. tostring(S.Root().reason))
     Check(summary.merged == 0 and Nexus.BuildCatalog.Count() == 0,
         "over-limit root exposed partial authority")
+    -- The over-limit root never published, so no bundle exists and the exact
+    -- PR #68 legacy input is still the selected durable state.
     Check(S.Count(db.communityBuilds) == 2049, "over-limit root pruned raw rows")
     local wide = S.Build("bud01-wide", 1, 0)
     for index = 1, 65 do wide["extra" .. index] = index end
@@ -355,7 +359,7 @@ Case("FUT-01", "future row is deny-only and byte-preserved", function()
         and select(1, catalog.SetTombstone("fut01", {stamp=1,author="Peer"},
             {source="local"})) == false,
         "future row accepted deletion or tombstone")
-    Check(db.communityBuilds.fut01 == future and S.Encode(future) == bytes,
+    Check(S.Durable(db).fut01 == future and S.Encode(future) == bytes,
         "future row was cloned, pruned, or normalized")
     Check(state.occupancy == "BLOCKED", "future row slot reported free")
     local summaries = catalog.Summaries()
@@ -404,15 +408,15 @@ Case("UNK-01", "unknown scalar survives update, restart, and maintenance", funct
     S.Bind(db)
     local catalog = Nexus.BuildCatalog
     Check(catalog.Put(S.Build("unk01", 3, 0, {futureScalar="keep me"})))
-    Check(db.communityBuilds.unk01.futureScalar == "keep me",
+    Check(S.Durable(db).unk01.futureScalar == "keep me",
         "unknown scalar was dropped on store")
     Check(catalog.Put(S.Build("unk01", 4, 0, {title="Updated"})))
-    Check(db.communityBuilds.unk01.futureScalar == "keep me"
-        and db.communityBuilds.unk01.title == "Updated",
+    Check(S.Durable(db).unk01.futureScalar == "keep me"
+        and S.Durable(db).unk01.title == "Updated",
         "unknown scalar was lost on update")
     S.Reload()
     S.Bind(db)
-    Check(NexusDB.communityBuilds.unk01.futureScalar == "keep me"
+    Check(S.Durable(NexusDB).unk01.futureScalar == "keep me"
         and Nexus.BuildCatalog.Get("unk01").title == "Updated",
         "unknown scalar was lost on restart")
     local handle = Nexus.BuildCatalog.BeginCatalogMaintenance({
@@ -422,8 +426,8 @@ Case("UNK-01", "unknown scalar survives update, restart, and maintenance", funct
     copy.description = "compacted"
     Check(Nexus.BuildCatalog.MaintenanceReplaceRow(handle, "unk01", copy))
     Check(Nexus.BuildCatalog.CommitMaintenance(handle))
-    Check(db.communityBuilds.unk01.futureScalar == "keep me"
-        and db.communityBuilds.unk01.description == "compacted",
+    Check(S.Durable(db).unk01.futureScalar == "keep me"
+        and S.Durable(db).unk01.description == "compacted",
         "maintenance replacement erased the unknown scalar")
 end)
 
@@ -434,7 +438,7 @@ Case("UNK-02", "nested unknown scope follows its tuple or refuses", function()
     local row = S.Build("unk02", 3, 0)
     row.echoes[2].futureTag = {kind="rune", level=3}
     Check(catalog.Put(row))
-    local stored = db.communityBuilds.unk02
+    local stored = S.Durable(db).unk02
     local owner
     for _, echo in ipairs(stored.echoes) do
         if echo.futureTag then owner = echo end
@@ -446,7 +450,7 @@ Case("UNK-02", "nested unknown scope follows its tuple or refuses", function()
     reordered.echoes = {reordered.echoes[3], reordered.echoes[1], reordered.echoes[2]}
     Check(catalog.Put(reordered))
     owner = nil
-    for _, echo in ipairs(db.communityBuilds.unk02.echoes) do
+    for _, echo in ipairs(S.Durable(db).unk02.echoes) do
         if echo.futureTag then owner = echo end
     end
     Check(owner and owner.spellId == 100001 and owner.futureTag.level == 3,
@@ -464,7 +468,7 @@ Case("UNK-02", "nested unknown scope follows its tuple or refuses", function()
     Check(okRemoval == false
         and whyRemoval == "UNKNOWN_TUPLE_SCHEMA_MIGRATION_REQUIRED",
         "unknown-owning tuple was removed: " .. tostring(whyRemoval))
-    Check(#db.communityBuilds.unk02.echoes == 3, "refused update changed storage")
+    Check(#S.Durable(db).unk02.echoes == 3, "refused update changed storage")
 end)
 
 Case("UNK-03", "over-budget unknown evidence invalidates without truncation", function()
@@ -475,12 +479,12 @@ Case("UNK-03", "over-budget unknown evidence invalidates without truncation", fu
     local state = S.State("unk03")
     Check(state.state == "INVALIDATED" and state.reason == "UNKNOWN_EVIDENCE_BUDGET",
         "over-budget unknown was admitted: " .. tostring(state.reason))
-    Check(S.Encode(row) == bytes and db.communityBuilds.unk03 == row,
+    Check(S.Encode(row) == bytes and S.Durable(db).unk03 == row,
         "over-budget row was truncated or replaced")
     local inbound = S.Build("unk03b", 3, 0, {futureBlob=string.rep("z", 4097)})
     local ok, why = Nexus.BuildCatalog.Put(inbound)
     Check(ok == false and why == "UNKNOWN_EVIDENCE_BUDGET"
-        and db.communityBuilds.unk03b == nil,
+        and S.Durable(db).unk03b == nil,
         "over-budget inbound row reached durable storage")
 end)
 
@@ -495,10 +499,10 @@ Case("UNK-04", "baseline-equivalent overlay with unknown field survives", functi
     local db = S.Database({unk04=overlayRow, ["unk04-plain"]=plain},
         {}, {buildCatalog={schemaVersion=1, catalogVersion="old", sourceVersion="x"}})
     S.Bind(db, S.Bundle({unk04=bundledRow, ["unk04-plain"]=bundledPlain}, "new"))
-    Check(db.communityBuilds.unk04 == overlayRow
+    Check(S.Durable(db).unk04 == overlayRow
         and overlayRow.futureOwner.marker == "keep",
         "baseline pruning removed an unknown-owning overlay")
-    Check(db.communityBuilds["unk04-plain"] == nil,
+    Check(S.Durable(db)["unk04-plain"] == nil,
         "known-only baseline-equivalent overlay was not pruned")
     Check(Nexus.BuildCatalog.Get("unk04") ~= nil, "overlay row unavailable")
 end)
@@ -513,7 +517,7 @@ Case("UNK-05", "update replaces known fields exactly and keeps unknown scope", f
     local update = S.Build("unk05", 3, 0, {futureB="b"})
     update.link, update.description = nil, nil
     Check(catalog.Put(update))
-    local stored = db.communityBuilds.unk05
+    local stored = S.Durable(db).unk05
     Check(stored.link == nil and stored.description == nil,
         "omitted known fields retained stale authority")
     Check(stored.futureA == "a" and stored.futureB == "b",

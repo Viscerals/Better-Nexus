@@ -27,7 +27,14 @@ dofile("core/DpsCapture.lua")
 
 NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={}}
 local Sync, DPS = Nexus.Sync, Nexus.DpsCapture
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
 
 local failures = {}
@@ -121,6 +128,7 @@ local captureSync = {
     BroadcastDpsRecord=function() return true end,
     BroadcastBuild=function() return true end,
 }
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(captureAdapter, captureSync)
 DETAILS_ATTRIBUTE_DAMAGE = 1
 local captureDps = 250000
@@ -181,6 +189,22 @@ NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={
         },
     },personalBest={},buildBest={},
 }}
+-- MASTER-RC-009, architecture 3b5de54f lines 1715 and 1721. The assignment
+-- above is fixture preparation only. Init is the only root-binding surface,
+-- and status reads return bounded scalars that never imply row authority, so
+-- the replacement root carries no authority until one explicit admission is
+-- driven. The first swap in this file is admitted by DPS.Init; this one had
+-- been relying on the following READ to bind and admit it, which is the exact
+-- defect this wave removes.
+local preAdmission = Nexus.BuildCatalog.Status()
+assert(preAdmission.readOnly == true,
+    "the replacement root granted row authority without an explicit Init")
+assert(Nexus.BuildCatalog.RebindRequired() == "SOURCE_REBIND_REQUIRED",
+    "a status read bound the replacement root instead of recording one "
+        .. "explicit rebind request")
+Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+local admittedRoot = NexusDB
+
 local eligibility = DPS.GetCommunityEligibility()
 local validFingerprint = DPS.GetEchoKey({{spellId=410001,stacks=1}})
 local shortDummyFingerprint = DPS.GetEchoKey({{spellId=410002,stacks=1}})
@@ -276,6 +300,28 @@ local originalDurationRejects = reasons.duration
 reasons.duration = 999999
 Check(DPS.RejectionStats().duration == originalDurationRejects,
     "DPS rejection diagnostics did not return a defensive copy")
+
+-- MASTER-RC-009 guarantee, retained explicitly: an ordinary read never binds,
+-- admits, or mutates an unrelated database. A foreign root is swapped under
+-- the module, every duration-facing read surface is exercised, and the foreign
+-- root must gain nothing while the bound generation stays put.
+local unrelated = {communityBuilds={},syncTombstones={},dpsCapture={
+    characterBest={dummy={},lk={}}, personalBest={}, buildBest={},
+}}
+local generationBefore = Nexus.BuildCatalog.Status().generation
+NexusDB = unrelated
+DPS.GetCommunityEligibility()
+DPS.GetCommunityQualification(validFingerprint)
+DPS.RejectionStats()
+Check(next(unrelated.dpsCapture.characterBest.dummy) == nil
+    and next(unrelated.dpsCapture.characterBest.lk) == nil
+    and next(unrelated.dpsCapture.personalBest) == nil
+    and next(unrelated.dpsCapture.buildBest) == nil,
+    "an ordinary read wrote into an unrelated database")
+Check(Nexus.BuildCatalog.Status().generation == generationBefore
+    and Nexus.BuildCatalog.RebindRequired() == "SOURCE_REBIND_REQUIRED",
+    "an ordinary read bound or admitted an unrelated database")
+NexusDB = admittedRoot
 
 if #failures > 0 then
     error("EXPECTED RED [Stage 26.3 DPS duration contract]:\n - "

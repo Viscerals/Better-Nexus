@@ -33,6 +33,12 @@ GetNormalizedRealmName = function() return localRealm end
 local function Reset(name, realm)
     localName, localRealm = name, realm
     NexusDB = {communityBuilds={}, syncTombstones={}, dpsCapture={}}
+    -- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+    -- longer admit the catalog root as a side effect. The same admission is
+    -- performed explicitly here, before the call, because the removed side
+    -- effect ran inside Init ahead of Init's own dependent steps. No assertion
+    -- or expected value in this fixture is changed.
+    H.AdmitCatalogV1(NexusDB)
     DPS.Init(Adapter, nil)
     Community.Init(Adapter, Nexus.Model)
 end
@@ -553,6 +559,7 @@ assert(nilId and nilBuild and nilBuild.ownerVerified == false
 -- Neither direct sends nor derived response candidates may erase retained
 -- claim/relay evidence and re-emit it as verified owner traffic.
 Reset("Twin", "RealmA")
+H.AdmitCatalogV1(NexusDB)
 Nexus.Sync.Init(Nexus.Codec, Adapter)
 local outboundEchoes = {{spellId=720030, quality=2, stacks=1}}
 local outboundFingerprint = DPS.GetEchoKey(outboundEchoes)
@@ -592,6 +599,7 @@ assert(Nexus.BuildCatalog.Put({
     postedAt=1, lastModified=1,
 }), "DPS provenance build control was not stored")
 local copied = 0
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter, {
     BroadcastDpsRecord=function()
         copied = copied + 1
@@ -640,6 +648,7 @@ for _, build in ipairs(invalidBuilds) do
             and not Nexus.Identity.LocalOwnsRecord(build, "twin@realma")
             and not Community.IsOwnBuild(build),
         "invalid build authority control unexpectedly verified: " .. build.id)
+    H.AdmitCatalogV1(NexusDB)
     Nexus.Sync.Init(Nexus.Codec, {})
     local summarized, summaryWhy = Nexus.Sync.BroadcastBuildSummary(build)
     assert(summarized == false and summaryWhy == "relay unauthorized",
@@ -661,6 +670,7 @@ for _, build in ipairs(invalidBuilds) do
             "rejected build authority was not refused with a bounded reason: "
                 .. build.id .. "/" .. tostring(storedWhy))
     else
+        H.AdmitCatalogV1(NexusDB)
         Nexus.Sync.Init(Nexus.Codec, {})
         H.sentChatMessages = {}
         assert(Nexus.Sync.HandleIncoming(
@@ -681,6 +691,7 @@ local verifiedRemote = BuildVariant("authority-remote", {
 })
 assert(Nexus.Identity.VerifiedOwnerKey(verifiedRemote) == "remote@realmb",
     "verified remote build control lost canonical authority")
+H.AdmitCatalogV1(NexusDB)
 Nexus.Sync.Init(Nexus.Codec, {})
 assert(Nexus.Sync.BroadcastBuildSummary(verifiedRemote)
         and Nexus.Sync.BroadcastBuild(verifiedRemote)
@@ -704,6 +715,7 @@ assert(not legacyEdited and legacyEditWhy == "not your build"
         and not legacyDeleted and legacyDeleteWhy == "not your build"
         and Nexus.BuildCatalog.Get(legacyLocal.id) ~= nil,
     "EXPECTED RED: unverified ordinary legacy evidence mutated or associated")
+H.AdmitCatalogV1(NexusDB)
 Nexus.Sync.Init(Nexus.Codec, {})
 local legacySummary, legacySummaryWhy =
     Nexus.Sync.BroadcastBuildSummary(legacyLocal)

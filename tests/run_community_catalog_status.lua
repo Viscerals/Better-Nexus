@@ -18,7 +18,7 @@ NexusDB = {
         category="builds",futureFilter="keep",
     },
 }
-Nexus.Store.Init()
+H.BootstrapStoreReady()
 
 local eligibilityReads = 0
 Nexus.DpsCapture = {
@@ -168,7 +168,7 @@ C.Refresh()
 local overlaid = C.DiagnosticSnapshot()
 assert(overlaid.bundledCount == 504 and overlaid.overlayCount == 1
     and overlaid.availableCount == 347 and overlaid.resultCount == 347
-    and NexusDB.communityBuilds["stage35-overlay"] ~= nil,
+    and H.DurableBuilds()["stage35-overlay"] ~= nil,
     "overlay status did not update independently from the bundled baseline")
 local bundledRows = 0
 for _ in pairs(Nexus.BundledBuilds.builds) do bundledRows = bundledRows + 1 end

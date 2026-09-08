@@ -30,7 +30,12 @@ local database = {
     syncTombstones = { deleted={stamp=30,author="A"} },
 }
 
-local summary = Nexus.BuildCatalog.Init(database, baseline)
+-- MASTER-RC-001: architecture lines 1207-1211 forbid BuildCatalog from driving
+-- the LoadoutEvidence owner, so Catalog.Init no longer admits the evidence pool
+-- itself; the startup coordinator owns that order. A fixture that drives Init
+-- directly performs the same evidence-before-catalog admission explicitly.
+Nexus.LoadoutEvidence.Init(database)
+local summary = H.AdmitCatalogV1(database, baseline)
 assert(summary.bundled == 3 and summary.overlay == 3,
     "initial migration counts are wrong")
 assert(summary.redundantRemoved == 0,
@@ -105,9 +110,15 @@ local baselineEquivalent = {
     echoCount=1, loadoutAvailable=true,
 }
 local putOk, putTarget = Nexus.BuildCatalog.Put(baselineEquivalent)
+-- Legacy-to-bundle cutover (state machine lines 394, 4849): "persisted in the
+-- overlay" now means the durable authority bundle. The exact PR #68 location is
+-- read-only preserved bootstrap input and keeps its seeded row untouched.
 assert(putOk and putTarget == "baseline"
-    and database.communityBuilds.newer == nil,
+    and H.DurableBuilds(database).newer == nil,
     "canonical baseline-equivalent Put was persisted in the overlay")
+assert(database.communityBuilds.newer ~= nil
+    and database.communityBuilds.newer.title == "Stale overlay",
+    "the preserved legacy bootstrap input was rewritten")
 
 assert(Nexus.BuildCatalog.SetTombstone("copy", {stamp=41,author="Boganic"},
     {source="local"}))
@@ -156,7 +167,8 @@ local allocationBundle = {
             echoes={{spellId=95,stacks=1}}},
     },
 }
-local allocationSummary = Nexus.BuildCatalog.Init(allocationDb, allocationBundle)
+Nexus.LoadoutEvidence.Init(allocationDb)
+local allocationSummary = H.AdmitCatalogV1(allocationDb, allocationBundle)
 local occupancy, represented =
     Nexus.BuildCatalog.AllocationOccupancy("absent")
 assert(occupancy == "absent" and represented == nil,

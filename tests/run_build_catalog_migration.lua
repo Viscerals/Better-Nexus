@@ -51,10 +51,21 @@ NexusDB = {
 
 local liveUnitName = UnitName
 UnitName = function() return nil end
-Nexus.Store.Init()
+H.BootstrapStore()
 UnitName = liveUnitName
-local overlay = NexusDB.communityBuilds
+-- The player identity was unavailable for the whole bootstrap above and only
+-- becomes available now. It is an admission input, so the coordinator re-proves
+-- the admission against it (MASTER-RC-009). A read must not, and no longer
+-- does. Every assertion below is unchanged.
+H.RebindAuthorityOwner()
+-- Legacy-to-bundle cutover (state machine lines 374, 394, 4849): the schema and
+-- catalog-version migration and its redundant-row prune happen inside the first
+-- complete authority bundle. The exact PR #68 location is read-only preserved
+-- bootstrap input, so every seeded row is still there byte-for-byte.
+local legacy = NexusDB.communityBuilds
+local overlay = H.DurableBuilds()
 assert(overlay.equal == nil, "baseline-equal legacy row remained in overlay")
+assert(legacy.equal ~= nil, "the preserved legacy bootstrap input was rewritten")
 assert(overlay.oldremote and overlay.oldremote.title == "Stale",
     "differing older remote row was not preserved losslessly")
 assert(overlay.newer and overlay.newer.title == "Local newer",
@@ -70,12 +81,15 @@ assert(overlay.legacy and overlay.legacy.title == "Legacy only",
 assert(NexusDB.buildFilters == filters and NexusDB.dpsCapture == dps
     and NexusDB.syncTombstones == tombstones,
     "unrelated filters, DPS, or tombstones changed during migration")
-assert(NexusDB.buildCatalog.schemaVersion == 1
-    and NexusDB.buildCatalog.catalogVersion == "migration-1",
+local durableMeta = H.DurablePayload("buildCatalog")
+assert(durableMeta and durableMeta.schemaVersion == 1
+    and durableMeta.catalogVersion == "migration-1",
     "catalog migration metadata was not recorded")
+assert(rawget(NexusDB, "buildCatalog") == nil,
+    "catalog migration wrote the legacy metadata location")
 
 local before = Nexus.BuildCatalog.OverlaySnapshot()
-Nexus.Store.Init()
+H.BootstrapStore()
 local after = Nexus.BuildCatalog.OverlaySnapshot()
 local beforeCount, afterCount = 0, 0
 for _ in pairs(before) do beforeCount = beforeCount + 1 end
@@ -115,7 +129,7 @@ NexusDB = {
             fingerprintHash="2",echoCount=1,loadoutAvailable=true,isMine=true},
     },
 }
-Nexus.Store.Init()
+H.BootstrapStore()
 -- An overlay that owns unknown evidence (here `_nexusDps`) is never pruned by
 -- baseline equivalence; the unknown owner survives at its exact scope.
 assert(NexusDB.communityBuilds.canonical ~= nil
@@ -135,7 +149,7 @@ NexusDB = {
         two={id="two",title="Two",postedAt=2,lastModified=2},
     },
 }
-Nexus.Store.Init()
+H.BootstrapStore()
 assert(NexusDB.communityBuilds.one and NexusDB.communityBuilds.two,
     "empty bundled catalog lost legacy community builds")
 assert(Nexus.BuildCatalog.Count() == 2,
@@ -173,8 +187,8 @@ Nexus.DataCompaction = {Init=function(database)
     compactionCalls = compactionCalls + 1
     database.communityBuilds.future = nil
 end}
-Nexus.Store.Init()
-local futureSummary = Nexus.BuildCatalog.Init(futureDb, futureBundle)
+H.BootstrapStore()
+local futureSummary = H.AdmitCatalogV1(futureDb, futureBundle)
 assert(futureSummary.readOnly and not futureSummary.migrated
     and futureSummary.schemaVersion == 99
     and futureSummary.redundantRemoved == 0,
@@ -208,9 +222,11 @@ assert(not ok and reason == "ROOT_READ_ONLY_FUTURE_SCHEMA"
 
 local writableDb = {communityBuilds={},syncTombstones={}}
 NexusDB = writableDb
-Nexus.BuildCatalog.Init(writableDb, futureBundle)
+H.AdmitCatalogV1(writableDb, futureBundle)
 assert(Nexus.BuildCatalog.Put({id="writable",title="Writable"})
-    and writableDb.communityBuilds.writable,
+    and H.DurableBuilds(writableDb).writable,
     "read-only guard survived rebinding to a supported schema")
+assert(next(writableDb.communityBuilds) == nil,
+    "an ordinary write reached a legacy payload location")
 
 print("BuildCatalog migration preserved data and is idempotent -- OK")

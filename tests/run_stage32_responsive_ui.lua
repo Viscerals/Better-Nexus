@@ -30,7 +30,7 @@ for index = 1, 25 do
         echoes={{spellId=780000+index,quality=3,stacks=1}},
     }
 end
-Nexus.Store.Init()
+H.BootstrapStoreReady()
 local eligibility = {}
 Nexus.DpsCapture = {
     GetCommunityEligibility=function() return eligibility end,

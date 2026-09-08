@@ -41,7 +41,8 @@ end
 
 SelectAtLevel(80)
 A.ClearFirstRunWishlist()
-Nexus.Store.State().loadoutWishlists = {}
+Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(
+    function(state) state.loadoutWishlists = {} end)
 SelectAtLevel(20)
 
 -- The explicitly selected target promotes exactly once when a real populated

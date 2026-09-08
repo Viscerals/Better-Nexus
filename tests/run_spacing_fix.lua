@@ -80,6 +80,13 @@ dofile("ui/CommunityBuilds.lua")
 local CB = Nexus.CommunityBuilds
 CB.Init(A, Nexus.Model)
 
+-- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 374,
+-- 394, 4849): the durable authority payload is `authorityBundle`; the exact
+-- PR #68 locations are read-only preserved bootstrap input.
+-- Seeded as exact PR #68 legacy input on a fresh database, so bootstrap admits
+-- it and builds the first complete bundle (line 374).
+NexusDB = { syncTombstones = {}, dpsCapture = NexusDB.dpsCapture,
+    buildFilters = NexusDB.buildFilters }
 NexusDB.communityBuilds = { ["b1"] = { id = "b1", title = "Retry Test",
     description = "d", author = "Bob", class = "MAGE",
     echoes = { { spellId = 200100, quality = 3, stacks = 1 } },

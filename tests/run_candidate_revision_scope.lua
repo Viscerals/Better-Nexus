@@ -130,7 +130,7 @@ NexusDB = {
     settingsVersion=2,settings={},chars={},buildFilters={},dpsCapture={},
     communityBuilds={[build.id]=Copy(build)},futureRoot={keep=true},
 }
-Nexus.Store.Init()
+H.BootstrapStore()
 
 -- Supply every existing exact/public lookup shape so the regression remains
 -- attached to the real Community producer while its locked resolver is

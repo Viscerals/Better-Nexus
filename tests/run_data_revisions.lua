@@ -120,6 +120,12 @@ UnitName = function() return "Local" end
 GetNormalizedRealmName = function() return "Ebonhold" end
 NexusDB.dpsCapture = {}
 Nexus.CommunityBuilds = nil
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, {})
 assert(R.Get(R.DPS_CHANGED) == 0, "empty DPS initialization advanced revision")
 local echoes = {{spellId=200200,stacks=2}}
@@ -203,6 +209,7 @@ NexusDB.dpsCapture = {
     personalBest={["200200x2"]={dummy=personalRow}},
     buildBest={},
 }
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, {})
 assert(R.Get(R.DPS_CHANGED) == 1
     and personalRow.ownerKey == "local@ebonhold"
@@ -218,6 +225,7 @@ dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/
 local Sync = Nexus.Sync
 NexusDB.communityBuilds = NexusDB.communityBuilds or {}
 NexusDB.syncTombstones = NexusDB.syncTombstones or {}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
 -- Sync.Init explicitly rebinds the catalog to this database, which is one
 -- represented-data publication. Presence traffic must add nothing to it.

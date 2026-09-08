@@ -150,7 +150,7 @@ local bundle = {
             echoes=ordinaryExact,postedAt=1,lastModified=1},
     },
 }
-Nexus.BuildCatalog.Init(NexusDB, bundle)
+H.AdmitCatalogV1(NexusDB, bundle)
 local readBefore = Signature({db=NexusDB,cases=cases})
 
 local summaries = Nexus.BuildCatalog.Summaries()

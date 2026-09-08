@@ -12,6 +12,12 @@ local build={id='compat-build',title='Compat',author='Valentine',ownerKey='valen
     realm='ebonhold',ownerVerified=true,class='MAGE',echoes=echoes,
     lastModified=101,postedAt=101,isMine=true}
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync)
 Pump(100); H.sentChatMessages={}
 local b1,d1=Sync.GetCompatibilityHashes()
@@ -44,6 +50,7 @@ assert(DPS.ReceiveRecord({v=7,f=fp,h=hash,e=echoes,c='dummy',d=25000000,u=60,t=4
 local b4,d4=Sync.GetCompatibilityHashes()
 assert(b4==b3 and d4~=d3,'DPS-only change did not isolate the DPS hash')
 
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
 local b5,d5=Sync.GetCompatibilityHashes()
 assert(b5==b4 and d5==d4,'reinitialization changed compatibility hashes')

@@ -29,7 +29,7 @@ NexusDB = {communityBuilds={
         postedAt=1,lastModified=1,fingerprint="200111x1",fingerprintHash="111a",
         echoes={{spellId=200111,quality=3,stacks=1}}},
 },syncTombstones={},dpsCapture={}}
-Catalog.Init(NexusDB, Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB, Nexus.BundledBuilds)
 DPS.Init({}, {})
 Sync.Init(Nexus.Codec, {})
 

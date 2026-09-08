@@ -46,6 +46,12 @@ local bundle = {
 }
 Nexus.BundledBuilds = bundle
 NexusDB = {communityBuilds={},syncTombstones={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
 Pump(100)
 H.sentChatMessages = {}
@@ -140,6 +146,7 @@ assert(#baselinePackets > 0, "exact-loadout fixture did not capture baseline pay
 playerName = "Receiver"
 clock = clock + 100
 NexusDB = {communityBuilds={},syncTombstones={}}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
 for _, packet in ipairs(baselinePackets) do
     assert(Sync.HandleIncoming(packet, "Alice"),
@@ -157,7 +164,20 @@ assert((Sync.Stats().baselineSkipped or 0) >= 1,
 -- any immutable baseline build into the response. Only the author may send it.
 playerName = "Alice"
 clock = clock + 100
-NexusDB = {communityBuilds={},syncTombstones={}}
+-- MASTER-RC-004: bundled author text is not ownership (architecture 3b5de54f
+-- line 193, "Bundled author text never proves local ownership"). Alice
+-- therefore establishes a genuine verified local authored row for this id
+-- instead of relying on the removed bundled-text delete privilege. The delete
+-- delta subject below -- that a tombstone participates in the release-aware
+-- delta without dragging any immutable baseline build into the response -- is
+-- unchanged, and so are its assertions.
+NexusDB = {communityBuilds={
+    ["baseline-b"]={id="baseline-b",title="Baseline B",author="Alice",
+        ownerKey="alice@ebonhold",realm="ebonhold",ownerVerified=true,
+        isMine=true,class="MAGE",description="B",postedAt=20,lastModified=20,
+        echoes={{spellId=200102,quality=3,stacks=1}}},
+},syncTombstones={}}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
 Pump(100)
 H.sentChatMessages = {}

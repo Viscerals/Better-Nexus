@@ -29,24 +29,63 @@
       "full_required": true
     },
     {
+      "id": "store-authority-kernel",
+      "patterns": [
+        "^core/(Store|MainLifecycle|LegacyDataMigration)\\.lua$",
+        "^tests/(run_store_legacy_retirement|run_store_contract_characterization|run_store_additive_migrations|run_main_lifecycle_parity|run_main_contract_characterization|run_legacy_data_migration|run_conservative_account_identity|run_stage36_lifecycle_safety|run_module_contract_characterization)\\.lua$"
+      ],
+      "groups": [
+        "authority",
+        "runtime"
+      ],
+      "tests": [
+        "tests/run_store_legacy_retirement.lua",
+        "tests/run_store_contract_characterization.lua",
+        "tests/run_store_additive_migrations.lua",
+        "tests/run_main_lifecycle_parity.lua",
+        "tests/run_main_contract_characterization.lua",
+        "tests/run_legacy_data_migration.lua",
+        "tests/run_conservative_account_identity.lua",
+        "tests/run_stage36_lifecycle_safety.lua",
+        "tests/run_module_contract_characterization.lua",
+        "tests/run_catalog_authority_read_purity.lua",
+        "tests/run_catalog_authority_bootstrap.lua"
+      ],
+      "full_required": true
+    },
+    {
       "id": "catalog-authority",
       "patterns": [
         "^core/(BuildCatalog|LoadoutEvidence|DataRetention|DataCompaction|BuildHashCache)\\.lua$",
-        "^tests/(catalog_authority_support|run_catalog_authority_admission|run_catalog_authority_tombstones|run_catalog_authority_maintenance|run_sync_semantic_envelope)\\.lua$",
+        "^tests/(catalog_authority_support|run_catalog_authority_admission|run_catalog_authority_bootstrap|run_catalog_authority_commit_fault_matrix|run_catalog_authority_cursor_lifetime|run_catalog_authority_generation_exhaustion|run_catalog_authority_maintenance|run_catalog_authority_read_purity|run_catalog_authority_provenance|run_catalog_authority_tombstones|run_catalog_authority_semantic_union|run_catalog_authority_witness_drift|run_catalog_authority_work_budget|run_catalog_authority_unknown_fields|run_catalog_runtime_cutover|run_data_retention_detached_isolation|run_sync_semantic_envelope|run_typed_id_parity|run_sync_mixed_client_matrix)\\.lua$",
         "^tests/run-catalog-authority-expected-red\\.js$"
       ],
       "groups": ["authority", "runtime"],
       "tests": [
         "tests/run-catalog-authority-expected-red.js",
         "tests/run_catalog_authority_admission.lua",
+        "tests/run_catalog_authority_semantic_union.lua",
+        "tests/run_catalog_authority_bootstrap.lua",
+        "tests/run_catalog_authority_commit_fault_matrix.lua",
+        "tests/run_catalog_authority_cursor_lifetime.lua",
+        "tests/run_catalog_authority_generation_exhaustion.lua",
         "tests/run_catalog_authority_tombstones.lua",
         "tests/run_catalog_authority_maintenance.lua",
+        "tests/run_catalog_authority_provenance.lua",
+        "tests/run_catalog_authority_read_purity.lua",
+        "tests/run_catalog_authority_witness_drift.lua",
+        "tests/run_catalog_authority_work_budget.lua",
+        "tests/run_catalog_runtime_cutover.lua",
         "tests/run_sync_semantic_envelope.lua",
+        "tests/run_sync_mixed_client_matrix.lua",
         "tests/run_build_catalog.lua",
+        "tests/run_catalog_authority_unknown_fields.lua",
         "tests/run_build_catalog_migration.lua",
         "tests/run_data_retention.lua",
         "tests/run_data_compaction_migration.lua",
+        "tests/run_data_retention_detached_isolation.lua",
         "tests/run_loadout_evidence.lua",
+        "tests/run_typed_id_parity.lua",
         "tests/run_integration.lua"
       ],
       "full_required": true

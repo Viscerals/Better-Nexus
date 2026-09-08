@@ -14,6 +14,12 @@ local build={id='build-79',title='AoE | ST',description=string.rep('description 
     realm='ebonhold',class='MAGE',echoes=echoes,
     postedAt=10,lastModified=10,isMine=true}
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{}); Nexus.DpsCapture.Init({},Sync)
 
 H.sentChatMessages={}
@@ -26,26 +32,30 @@ end
 assert(#complete>1,'complete 79-Echo reconciliation was not chunked')
 
 who='Receiver'; NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+H.AdmitCatalogV1(NexusDB)
 clock=1200; Sync.Init(Nexus.Codec,{})
 for _,m in ipairs(complete) do
     Sync.HandleIncoming(m.text,'Source-Ebonhold')
 end
-local loaded=NexusDB.communityBuilds['build-79']
+-- Legacy-to-bundle cutover: durable rows live in the bundle payload.
+local loaded=H.DurableBuilds()['build-79']
 assert(loaded and loaded.echoes and #loaded.echoes==79,'complete loadout did not reassemble')
 assert(loaded.description:find('description'),'full description was not restored')
 
 -- Legacy compact summaries are accepted only from their direct author and
 -- remain explicitly incomplete until a background recovery succeeds.
 who='Source'; NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
+H.AdmitCatalogV1(NexusDB)
 clock=1400; Sync.Init(Nexus.Codec,{})
 H.sentChatMessages={}; assert(Sync.BroadcastBuildSummary(build)); Pump(10)
 local summaries=H.sentChatMessages
 who='Receiver'; NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
 for _,m in ipairs(summaries) do
     Sync.HandleIncoming(m.text,'Source-Ebonhold')
 end
-local placeholder=NexusDB.communityBuilds['build-79']
+local placeholder=H.DurableBuilds()['build-79']
 assert(placeholder and not placeholder.loadoutAvailable and not placeholder.echoes,
     'legacy summary was incorrectly treated as exact evidence')
 assert(placeholder.title=='AoE | ST',
@@ -55,6 +65,7 @@ assert(not immediate and why,'legacy recovery request did not remain background-
 
 -- A recovery rejected at the queue cap must remain immediately eligible once
 -- a slot opens; rejected work must not receive the 120-second cooldown.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
 local recoveryLimit=Sync.WorkState().maxRecoveryQueue
 for i=1,recoveryLimit do

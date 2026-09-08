@@ -64,7 +64,7 @@ for index = 1, 595 do
     }
 end
 
-Nexus.Store.Init()
+H.BootstrapStore()
 dofile("core/DpsCapture.lua")
 Nexus.DpsCapture.Init({}, {})
 for _, category in ipairs({"dummy", "lk"}) do

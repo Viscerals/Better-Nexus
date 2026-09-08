@@ -1,4 +1,22 @@
 -- Atomic/resumable conversion of pre-refactor account and DPS storage.
+--
+-- Repair Wave 1, amendment 3, MASTER-RC-001. Architecture 3b5de54f,
+-- docs/SYNC_TRUST_CATALOG_AUTHORITY_STATE_MACHINE.md lines 2983-2985:
+--   "Exact PR #68 LegacyDataMigration.Init/Pump/Finish and its writes in
+--    Store.lua are disabled before authority bootstrap."
+--   "The old module cannot resume a durable cursor or write
+--    accountCharacters, DPS tables, leaderboard, or migration metadata after
+--    Package B loads."
+--
+-- INTENTIONAL COMPATIBILITY BREAK: PR #68 let any caller drive Init/Pump/
+-- Status directly, and this fixture did exactly that. Package B now loads the
+-- module RETIRED. Its direct mutation entry points are inert and write
+-- nothing until AuthorityBootstrapCoordinatorV1 classifies the recovery input
+-- and authorizes one exact database, which is the replacement bootstrap path
+-- Arm() exercises below. The conversion itself is unchanged: every migration,
+-- preservation, realm-safety, idempotence, future-schema and retention
+-- assertion in this file is retained, and the inert behaviour of the retired
+-- entry points is new coverage this file did not previously have.
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua")
 dofile("data/DefaultProfile.lua")
@@ -79,6 +97,58 @@ NexusDB = {
 local sourceAccounts = NexusDB.accountCharacters
 local sourceCharacter = NexusDB.dpsCapture.characterBest
 local sourceLegacy = NexusDB.dpsCapture.leaderboard
+-- The replacement bootstrap path. AuthorityBootstrapCoordinatorV1 calls this
+-- exact classification before authority bootstrap; nothing else may arm the
+-- writer, and it writes nothing itself.
+local function Arm(database)
+    local classified = Nexus.LegacyDataMigration.ClassifyLegacyWriterV1(
+        database, {owner="authority-bootstrap-coordinator"})
+    assert(classified.armed,
+        "the coordinator refused to authorize the bounded conversion: "
+        .. tostring(classified.classification))
+    return classified
+end
+
+-- Retired entry points are inert: no metadata, no staging, no durable cursor.
+assert(Nexus.LegacyDataMigration.LegacyWriterRetired(NexusDB),
+    "the legacy writer was not retired when Package B loaded")
+local retired = Nexus.LegacyDataMigration.Init(NexusDB)
+assert(retired.retired == true and retired.pending ~= true
+    and retired.reason == "LEGACY_WRITER_RETIRED_V1"
+    and rawget(NexusDB, "legacyDataMigration") == nil
+    and NexusDB.accountCharacters == sourceAccounts
+    and NexusDB.dpsCapture.characterBest == sourceCharacter
+    and NexusDB.dpsCapture.leaderboard == sourceLegacy,
+    "the retired writer began a conversion or wrote migration metadata")
+assert(Nexus.LegacyDataMigration.Pump(32) == true
+    and rawget(NexusDB, "legacyDataMigration") == nil,
+    "the retired writer resumed a durable cursor")
+
+-- A stale in-progress receipt is preserved exactly and never resumed.
+local staleReceipt = {
+    settingsVersion=2, accountCharacters={},
+    legacyDataMigration={schemaVersion=1,version=2,state="running",
+        phase="accounts",staging={rows="keep"}},
+    dpsCapture={leaderboard={stale=true}},
+}
+local staleMeta = staleReceipt.legacyDataMigration
+local staleStaging = staleMeta.staging
+local staleInit = Nexus.LegacyDataMigration.Init(staleReceipt)
+assert(staleInit.retired == true
+    and staleReceipt.legacyDataMigration == staleMeta
+    and staleMeta.state == "running" and staleMeta.phase == "accounts"
+    and staleMeta.staging == staleStaging and staleStaging.rows == "keep"
+    and staleReceipt.dpsCapture.leaderboard.stale == true,
+    "the retired writer resumed or rewrote a stale in-progress receipt")
+local staleStatus = Nexus.LegacyDataMigration.Status(staleReceipt)
+assert(staleStatus.retired == true and staleStatus.pending == false
+    and staleStatus.state == "running" and staleStatus.phase == "accounts"
+    and staleReceipt.legacyDataMigration == staleMeta,
+    "Status armed the retired writer or mutated the preserved receipt")
+
+local classified = Arm(NexusDB)
+assert(classified.classification == "INACTIVE",
+    "recovery classification drifted: " .. tostring(classified.classification))
 local summary = Nexus.LegacyDataMigration.Init(NexusDB)
 assert(summary.pending and Nexus.LegacyDataMigration.BlocksDpsMigration(NexusDB),
     "known legacy database did not begin a blocking staged conversion")
@@ -98,6 +168,12 @@ assert(not Nexus.LegacyDataMigration.Pump(3),
     "tiny pump unexpectedly completed the whole migration")
 local durablePhase = NexusDB.legacyDataMigration.phase
 dofile("core/LegacyDataMigration.lua")
+-- A reloaded module is retired again, so it cannot resume the durable cursor
+-- until the coordinator re-authorizes this exact database.
+assert(Nexus.LegacyDataMigration.Init(NexusDB).retired == true
+    and NexusDB.legacyDataMigration.phase == durablePhase,
+    "a reloaded module resumed the durable cursor without authorization")
+Arm(NexusDB)
 assert(Nexus.LegacyDataMigration.Init(NexusDB).pending
     and NexusDB.legacyDataMigration.phase == durablePhase,
     "reload did not resume the durable migration phase")
@@ -183,6 +259,7 @@ for index = 1, 140 do
     versionFive.dpsCapture.buildBest[id] = {dummy={dps=index}}
 end
 NexusDB = versionFive
+Arm(versionFive)
 assert(Nexus.LegacyDataMigration.Init(versionFive).pending,
     "version-5 absent-retention fixture did not enter migration")
 while not Nexus.LegacyDataMigration.Pump(32) do end
@@ -206,6 +283,7 @@ assert(v5Summary.contentUnlimited == true
 
 -- Unknown future settings and future migration metadata are both preserved.
 local futureSettings = {settingsVersion=6,dpsCapture={future=true}}
+Arm(futureSettings)
 local futureSummary = Nexus.LegacyDataMigration.Init(futureSettings)
 assert(futureSummary.complete and futureSummary.skipped
     and futureSettings.legacyDataMigration == nil
@@ -217,6 +295,7 @@ local futureMigration = {
     legacyDataMigration={schemaVersion=2,version=1,state="future"},
     dpsCapture={leaderboard={future=true}},
 }
+Arm(futureMigration)
 local futureMarker = Nexus.LegacyDataMigration.Init(futureMigration)
 assert(futureMarker.readOnly and not futureMarker.complete
     and futureMigration.legacyDataMigration.state == "future"

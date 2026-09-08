@@ -45,6 +45,24 @@ NexusDB = {
 
 dofile("core/DpsCapture.lua")
 local DPS, R = Nexus.DpsCapture, Nexus.Revisions
+
+-- MASTER-RC-009, architecture 3b5de54f lines 1715 and 1721. Init is the only
+-- root-binding surface and cannot be called outside the startup coordinator or
+-- an explicit supported rebind; status reads return bounded scalars and never
+-- imply row authority. Fixture preparation is therefore separated from runtime
+-- reads: the raw-global assignment above is setup only, and it is proven here
+-- to carry no authority until one explicit admission is driven. Previously
+-- this file relied on the first READ to bind and admit the swapped root, which
+-- is the exact defect this wave removes.
+local preAdmission = Nexus.BuildCatalog.Status()
+assert(preAdmission.state == "ROOT_UNBOUND" and preAdmission.readOnly == true
+    and preAdmission.generation == 0 and preAdmission.availableCount == 0,
+    "the raw-global swap granted row authority without an explicit Init")
+assert(Nexus.BuildCatalog.RebindRequired() == "SOURCE_REBIND_REQUIRED",
+    "a status read bound the swapped root instead of recording one explicit "
+        .. "rebind request")
+Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+local admittedRoot = NexusDB
 local initialRows = 0
 for _ in pairs(dummy) do initialRows = initialRows + 1 end
 for _ in pairs(lk) do initialRows = initialRows + 1 end
@@ -117,6 +135,28 @@ assert(refreshedStats.rebuilds == 2
     and refreshedStats.eligibilityReads == 3
     and refreshedStats.intersections == 2,
     "eligibility revision refresh performed unexpected index work")
+
+-- MASTER-RC-009 guarantee, retained explicitly rather than implied: an
+-- ordinary read never binds, admits, or mutates an unrelated database. Swap a
+-- foreign root under the module, read through every eligibility surface, and
+-- prove the foreign root gained no rows and the bound generation did not move.
+local unrelated = {dpsCapture={
+    characterBest={dummy={},lk={}}, personalBest={}, buildBest={},
+}}
+local generationBefore = Nexus.BuildCatalog.Status().generation
+NexusDB = unrelated
+DPS.GetCommunityEligibility()
+DPS.GetCommunityQualification("900001x1")
+DPS.GetCachedCommunityQualification("exact-id", "900001x1", nil)
+assert(next(unrelated.dpsCapture.characterBest.dummy) == nil
+    and next(unrelated.dpsCapture.characterBest.lk) == nil
+    and next(unrelated.dpsCapture.personalBest) == nil
+    and next(unrelated.dpsCapture.buildBest) == nil,
+    "an ordinary read wrote into an unrelated database")
+assert(Nexus.BuildCatalog.Status().generation == generationBefore
+    and Nexus.BuildCatalog.RebindRequired() == "SOURCE_REBIND_REQUIRED",
+    "an ordinary read bound or admitted an unrelated database")
+NexusDB = admittedRoot
 
 print(string.format(
     "community DPS eligibility: rows=%d rebuilds=%d intersections=%d defensive snapshots -- OK",

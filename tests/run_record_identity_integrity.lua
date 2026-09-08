@@ -13,6 +13,12 @@ GetNormalizedRealmName=function() return "Ebonhold" end
 UnitName=function() return "Mageowner" end
 UnitClass=function() return "Mage", "MAGE" end
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(A,nil); C.Init(A,Nexus.Model)
 
 local mageEchoes={{spellId=200100,stacks=1},{spellId=200101,stacks=1}}
@@ -32,6 +38,10 @@ assert(C.IsOwnBuild(id), "capturing character must own its record page")
 -- Account-wide SavedVariables do not grant ownership to another character.
 UnitName=function() return "Shamanalt" end
 UnitClass=function() return "Shaman", "SHAMAN" end
+-- The current-character owner proof just changed. It is an admission input, so
+-- the coordinator re-proves the admission; a read no longer re-admits
+-- (MASTER-RC-009). The ownership and refusal assertions below are unchanged.
+H.RebindAuthorityOwner()
 assert(not C.IsOwnBuild(id), "another character on the same account must not own the Mage build")
 local ok,err=C.EditBuild(id,"Fraud edit","no")
 assert(not ok and err=="not your build", "cross-character edit must be rejected")
@@ -43,7 +53,7 @@ assert(DPS.ReceiveRecord({v=7,f=remoteFp,e=remoteEchoes,c="dummy",d=25000000,u=6
   p="Remotemage",k="MAGE",o="remotemage@ebonhold",r="ebonhold",l=80}),
   "valid remote Mage record should be accepted")
 local found
-for _,build in pairs(NexusDB.communityBuilds) do
+for _,build in pairs(H.DurableBuilds()) do
   if build.author=="Remotemage" then found=build break end
 end
 assert(found and found.class=="MAGE", "remote Mage record must not inherit local Shaman class")
@@ -113,7 +123,7 @@ assert(promoted and DPS.VerifiedOwnerKey(promoted)=="promote@ebonhold"
 -- A hostile/accidental build ID collision must not attach an exact DPS row
 -- to an unrelated loadout merely because the opaque IDs match.
 local collisionEchoes={{spellId=200104,stacks=1}}
-NexusDB.communityBuilds.collision={id="collision",title="Unrelated",author="Other",
+H.DurableBuilds().collision={id="collision",title="Unrelated",author="Other",
   ownerKey="other@ebonhold",class="MAGE",echoes=collisionEchoes,
   fingerprint=DPS.GetEchoKey(collisionEchoes),postedAt=1,lastModified=1}
 local winningEchoes={{spellId=200105,stacks=2}}
@@ -130,8 +140,8 @@ for _,row in ipairs(DPS.GetDpsBoard("dummy")) do
   if row.player=="Collisionmage" then collisionRow=row break end
 end
 assert(collisionRow and collisionRow.buildId~="collision"
-  and NexusDB.communityBuilds[collisionRow.buildId]
-  and NexusDB.communityBuilds[collisionRow.buildId].fingerprint==winningFp,
+  and H.DurableBuilds()[collisionRow.buildId]
+  and H.DurableBuilds()[collisionRow.buildId].fingerprint==winningFp,
   "colliding DPS build ID was not detached to an exact safe loadout")
 local unrelated=DPS.GetLeaderboard("collision","dummy")
 for _,row in ipairs(unrelated) do

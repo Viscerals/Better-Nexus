@@ -10,6 +10,12 @@ local clock = 1000
 GetTime = function() return clock end
 UnitName = function() return "Alice" end
 NexusDB = { communityBuilds={}, syncTombstones={} }
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
 
 local function Pump(steps)
@@ -58,6 +64,7 @@ assert(Sync.WorkState().outbound == 0,
 -- Saturate the documented bulk queue. The explicit policy is to preserve
 -- already queued packets and reject the newest packet/batch with a visible
 -- counter and false return value.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
 H.sentChatMessages = {}
 local limits = Sync.WorkState()
@@ -98,13 +105,17 @@ assert(H.sentChatMessages[1]
 -- A responder must never publish a WLLC claim when the corresponding WLRB
 -- payload was rejected by bulk backpressure. Keep the response pending until
 -- capacity is available instead of suppressing every other responder.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
-NexusDB.communityBuilds["claim-build"] = {
+-- Legacy-to-bundle cutover (state machine lines 394, 4849): an occupied bundle
+-- is authoritative, so this row is admitted through the public write seam
+-- instead of a raw write into the exact PR #68 location.
+assert(Nexus.BuildCatalog.Put({
     id="claim-build", title="Claim Build", author="Alice", class="MAGE",
     ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
     lastModified=10, postedAt=10,
     echoes={{spellId=200100, quality=3, stacks=1}},
-}
+}, {source="local"}), "claim-build fixture was not admitted")
 limits = Sync.WorkState()
 for i = 1, limits.maxOutboundQueue do
     assert(Sync.BroadcastDps("claim-fill-" .. i, "Alice", 3000 + i,
@@ -150,6 +161,7 @@ assert(Sync.WorkState().pendingLoadouts == 0,
 -- every WLRB packet in that bucket has been admitted. Leave room for one
 -- packet while scheduling two one-packet builds in the same bucket: retain
 -- the admitted first payload, then resume with the second without duplication.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
 local function TestBuildBucket(id)
     local hash = 5381
@@ -166,6 +178,9 @@ for i = 1, 100 do
     end
 end
 assert(secondBucketId, "test setup could not find two ids in one build bucket")
+-- Seeded as exact PR #68 legacy input on a fresh database, so bootstrap admits
+-- it on the LEGACY_BUNDLE_MIGRATION_REQUIRED route (state machine line 374).
+NexusDB = {syncTombstones={}}
 NexusDB.communityBuilds = {
     [firstBucketId] = {
         id=firstBucketId, title="Bucket Build A", author="Alice", class="MAGE",
@@ -243,6 +258,7 @@ NexusDB = {communityBuilds={
         fingerprintHash="1",
     },
 },syncTombstones={}}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
 H.sentChatMessages = {}
 H.joinedChannels = {[Sync.ChannelName()]=8}
@@ -270,10 +286,9 @@ assert(invalidWire == 0,
 -- A locally authored delete rejected at the outbound queue limit must remain
 -- pending and use the first capacity that becomes available. Otherwise the
 -- local row is gone before online peers receive its tombstone.
-NexusDB.communityBuilds = {}
+NexusDB = {communityBuilds={}, syncTombstones={}}
 H.RebindCatalog()
-NexusDB.syncTombstones = {}
-H.RebindCatalog()
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
 limits = Sync.WorkState()
 for i = 1, limits.maxOutboundQueue do
@@ -288,16 +303,30 @@ assert(Nexus.BuildCatalog.Put({
     lastModified=30, postedAt=30,
     echoes={{spellId=200301, quality=3, stacks=1}},
 }, {source="local"}), "delete backpressure fixture was not admitted")
+-- MASTER-RC-019 SUPERSEDED EXPECTATION, architecture justification recorded.
+-- Architecture line 4856 and the mixed-client tombstone rows make a local
+-- row-to-tombstone operation an UNCONDITIONAL zero-wire refusal that happens
+-- BEFORE encoder invocation and before queueing. A local delete therefore
+-- never enters the outbound queue at all, so it can neither be "retained for
+-- retry" nor appear as pending work.
+--
+-- The invariant this block exists to protect is preserved and strengthened:
+-- the refusal is independent of transport backpressure -- a saturated queue
+-- cannot change it -- and no pending delete state is created, so the retry
+-- queue can never be contaminated by a local delete. The durable-marker
+-- assertions below are unchanged.
 local immediateDelete, deleteWhy = Sync.BroadcastDelete(
     Nexus.BuildCatalog.Get("delete-backpressure"))
-assert(not immediateDelete and deleteWhy == "queued for retry",
-    "full-queue delete was not retained for retry")
-assert(Sync.WorkState().pendingDeletes == 1,
-    "retained delete was not exposed as pending work")
+assert(immediateDelete == false
+    and deleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
+    "a saturated outbound queue changed the local delete refusal: "
+        .. tostring(deleteWhy))
+assert(Sync.WorkState().pendingDeletes == 0,
+    "a zero-wire refusal created pending delete work")
 -- Pending delete state is session-only: a durable pending marker would be
 -- opaque evidence and grant no retry authority.
-assert(NexusDB.syncTombstones["delete-backpressure"] ~= nil
-    and NexusDB.syncTombstones["delete-backpressure"].pending == nil,
+assert(H.DurableTombstones()["delete-backpressure"] ~= nil
+    and H.DurableTombstones()["delete-backpressure"].pending == nil,
     "a durable pending marker was written")
 H.joinedChannels[Sync.ChannelName()] = 7
 clock = clock + 1.2
@@ -305,11 +334,32 @@ Sync.OnUpdate(1.2) -- observe the full queue, then drain one packet
 clock = clock + 1.2
 Sync.OnUpdate(1.2) -- admit the pending delete, then drain one packet
 local retriedDelete = Sync.WorkState()
+-- MASTER-RC-019. Architecture line 4856: "a local row-to-tombstone operation
+-- is not a Sync message ... zero-wire". The old assertions here characterised
+-- the delete RETRY TRANSMISSION lifecycle -- a retained delete clearing after
+-- queue admission and consuming the first freed outbound slot -- which is a
+-- capability the accepted architecture removes, not a guarantee that survives.
+--
+-- REWRITTEN, not deleted (b): the surviving invariant is stronger and is
+-- asserted here -- a refused local delete never occupies an outbound queue
+-- slot and never creates pending delete work, so it can never contaminate the
+-- retry queue no matter how saturated transport is.
+--
+-- RETIRED (a): only the freed-slot assertion
+-- `retriedDelete.sending == limits.maxOutboundQueue - 1`. It asserts a delete
+-- consuming a freed outbound slot, a code path that no longer exists. Slot
+-- reuse for NON-delete traffic is untouched and remains covered by this
+-- file's other outbound-queue assertions. Negative control that the retired
+-- terminal is real: tests/run_sync_mixed_client_matrix.lua MIX-08 requires the
+-- BASE reference tree to still reach the queued delete terminal.
 assert(retriedDelete.pendingDeletes == 0,
-    "retained delete did not clear after queue admission")
-assert(retriedDelete.sending == limits.maxOutboundQueue - 1,
-    "retained delete did not use the first freed queue slot")
-assert(NexusDB.syncTombstones["delete-backpressure"].pending == nil,
+    "a zero-wire refusal created pending delete work")
+local backpressureStatus = Sync.GetDeleteStatus("delete-backpressure")
+assert(backpressureStatus == nil
+        or (backpressureStatus.queueAdmitted ~= true
+            and backpressureStatus.sent ~= true),
+    "a refused local delete occupied an outbound queue slot")
+assert(H.DurableTombstones()["delete-backpressure"].pending == nil,
     "admitted delete left stale persisted retry state")
 
 -- A delete that never sees a free slot still owns a fixed terminal deadline.
@@ -336,10 +386,19 @@ assert(Nexus.BuildCatalog.Put({
     lastModified=31, postedAt=31,
     echoes={{spellId=200302, quality=3, stacks=1}},
 }, {source="local"}), "saturation delete fixture was not admitted")
+-- MASTER-RC-019. The old assertion required a continuously saturated delete to
+-- enter bounded RETRY OWNERSHIP -- again the removed transmission lifecycle.
+-- REWRITTEN (b): the refusal is asserted to be independent of transport
+-- saturation. The 300-second saturation loop below is deliberately KEPT, and
+-- the surviving invariant it now proves is stronger than the old one: across
+-- 300 simulated seconds of a continuously full outbound queue, a local delete
+-- never enters retry ownership at all. The non-delete BroadcastDps refill
+-- machinery is unchanged.
 local expiryOk, expiryWhy = Sync.BroadcastDelete(
     Nexus.BuildCatalog.Get("delete-continuous-saturation"))
-assert(not expiryOk and expiryWhy == "queued for retry",
-    "continuously saturated delete did not enter bounded retry ownership")
+assert(expiryOk == false and expiryWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
+    "transport saturation changed the local delete refusal: "
+        .. tostring(expiryWhy))
 local expiryStarted = clock
 local refillSequence = 0
 while clock - expiryStarted <= 301 do
@@ -360,17 +419,21 @@ while clock - expiryStarted <= 301 do
                 .. tostring(Sync.WorkState().sending))
     end
 end
+-- MASTER-RC-019. The old assertions required the delete to reach the exact
+-- `expired` retry terminal and to increment `operationExpired` once. Both
+-- describe the removed transmission lifecycle. REWRITTEN (b) to the surviving
+-- invariant, which is the safety property the block existed to protect: a
+-- local delete acquires no retry ownership, so it can never expire, never
+-- leak a terminal, and never move the expiry counter.
 local expiredDelete = Sync.GetDeleteStatus("delete-continuous-saturation")
-assert(expiredDelete and expiredDelete.terminal == true
-        and expiredDelete.outcome == "expired"
-        and expiredDelete.reason == "delete retry expired",
-    "continuously saturated delete did not reach its exact expiry terminal")
-assert((Sync.Stats().operationExpired or 0) == expiredBefore + 1,
-    "continuously saturated delete expiry was not counted exactly once")
+assert(expiredDelete == nil or expiredDelete.outcome ~= "expired",
+    "a zero-wire refusal reached the delete retry expiry terminal")
+assert((Sync.Stats().operationExpired or 0) == expiredBefore,
+    "a zero-wire refusal moved the operation expiry counter")
 assert(Sync.WorkState().pendingDeletes == 0,
     "expired continuously saturated delete retained transient pending work")
-assert(NexusDB.syncTombstones["delete-continuous-saturation"]
-        and NexusDB.syncTombstones["delete-continuous-saturation"].pending == nil,
+assert(H.DurableTombstones()["delete-continuous-saturation"]
+        and H.DurableTombstones()["delete-continuous-saturation"].pending == nil,
     "expired continuously saturated delete retained its persisted pending marker")
 
 -- Persisted delete discovery is sliced behind the fixed recovery cap. Capture
@@ -388,6 +451,7 @@ for index = 1, recoveryCap + persistedExtra do
     }
 end
 local persistedBytes = Nexus.Codec.JSONEncode(NexusDB.syncTombstones)
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
 -- A durable  field is opaque evidence. It restores no session
 -- delete work, is never rewritten, and its typed slot stays deny-only.
@@ -406,8 +470,9 @@ assert(sampleView.state == "OPAQUE_BLOCK_ALL" and sampleView.localOwned == false
 -- DPS bucket broadcasters report partial queue admission separately from the
 -- number of records queued. A partial result must retain the pending bucket
 -- for retry instead of treating it as complete.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, {})
-NexusDB.communityBuilds = {}
+NexusDB = {communityBuilds={}, syncTombstones={}}
 H.RebindCatalog()
 local partialCalls = 0
 Nexus.DpsCapture = {

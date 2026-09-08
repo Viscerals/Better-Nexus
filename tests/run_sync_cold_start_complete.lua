@@ -13,6 +13,12 @@ local build={id='cold-build',title='Gnome Army',description='full guide',author=
     postedAt=10,lastModified=10,isMine=true}
 
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
 H.sentChatMessages={}
 Sync.HandleIncoming('WLRQ|Fresh|0|0|cold-req','Fresh')
@@ -25,9 +31,12 @@ end
 assert(chunks>0,'cold-start reconciliation did not send the complete build')
 
 who='Fresh'; NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+H.AdmitCatalogV1(NexusDB)
 clock=2000; Sync.Init(Nexus.Codec,{})
 for _,m in ipairs(response) do Sync.HandleIncoming(m.text,'Author-Ebonhold') end
-local loaded=NexusDB.communityBuilds['cold-build']
+-- Legacy-to-bundle cutover: the fresh client's durable copy is the bundle's
+-- payload, not the exact PR #68 location (state machine lines 394, 4849).
+local loaded=H.DurableBuilds()['cold-build']
 assert(loaded and loaded.echoes and #loaded.echoes==79 and loaded.description=='full guide',
     'fresh client did not receive the complete build')
 assert(loaded.ownerVerified==true,'direct author build was not marked owner-verified')

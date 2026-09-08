@@ -10,6 +10,105 @@ local Identity = assert(Nexus.Identity,
 local Store = {}
 Nexus.Store = Store
 
+-- MASTER-RC-013. AuthorityBootstrapCoordinatorV1 is startup sequencing, not
+-- consumer API. Architecture line 1912 fixes the public Store inventory at
+-- exactly nine exports ("The nine-export public Store inventory therefore
+-- remains exact"), while line 1202 requires core/MainLifecycle.lua to CREATE
+-- the coordinator before calling Store.Init -- so the constructor must be
+-- reachable from another module without being a Store facade export.
+--
+-- Nexus.MainInternals is this codebase's established internals seam for
+-- exactly that shape: Lifecycle, ViewModel, AutomationRuntime, Commands and
+-- Diagnostics are all registered there as factories and none of them is a
+-- public export or part of any facade inventory. The coordinator factory is
+-- the same shape and belongs there.
+--
+-- `owner` binds the factory to this exact Store module, so a stub Store never
+-- resolves a real coordinator and the readiness negative controls keep their
+-- meaning.
+if type(Nexus.MainInternals) ~= "table" then Nexus.MainInternals = {} end
+local AuthorityBootstrap = {owner=Store}
+Nexus.MainInternals.AuthorityBootstrap = AuthorityBootstrap
+
+-- MASTER-RC-001, architecture lines 1907-1912. StoreAuthorityOwnerV1 owns the
+-- two COUNTED PRIVATE mutation entries the architecture names by hand:
+-- `UpdateSettingsV1` and `UpdateStateV1`, "callable only by the static internal
+-- caller inventory... The nine-export public Store inventory therefore remains
+-- exact." They live on the internals seam for exactly that reason -- putting
+-- either on the `Store` facade would break the nine-export inventory RAW-01
+-- fixes, and line 1912 rejects a public alias outright.
+--
+-- `owner` binds them to this exact Store module, the same shape
+-- AuthorityBootstrap already uses, so a stub Store resolves no writer.
+local StoreAuthorityOwner = {owner=Store}
+Nexus.MainInternals.StoreAuthorityOwner = StoreAuthorityOwner
+
+-- MASTER-RC-001. Store.State returns a BOUNDED DEFENSIVE COPY, and the same
+-- copy for as long as the underlying row has not changed.
+--
+-- Detachment alone is not sufficient: handing back a freshly allocated table on
+-- every read makes every read look like a change to the product's
+-- identity-based change detection (static automation caches, association churn
+-- guards, refresh budgets), which rebuild on reference inequality. Measured:
+-- 17 fixtures failed on exactly that, e.g. "five-second fallback rebuilt
+-- unchanged static automation". A per-revision snapshot preserves BOTH
+-- properties -- the caller can never reach durable state through the return,
+-- and an unchanged row keeps a stable identity.
+--
+-- The snapshot is invalidated by revision (bumped by every UpdateStateV1), by
+-- owner key, and by database identity, so a rebind or reload cannot serve a
+-- stale row.
+local stateRevision = 0
+local stateSnapshot, stateSnapshotOwner, stateSnapshotDb, stateSnapshotRevision
+local stateSnapshotSource
+
+-- Every path that mutates a character row must call this. Verified by direct
+-- search rather than assumed: the mutation paths are UpdateStateV1, the bounded
+-- STORE_CHAR_MIGRATION_PENDING row work (which calls EnsureStateShape and
+-- FillMissing on the live row), and the `db.chars = {}` initialization. All
+-- three call it. Test fixtures that assign db.chars[...] directly are caught by
+-- the source-row identity check in Store.State instead.
+local function InvalidateStateSnapshot()
+    stateRevision = stateRevision + 1
+    stateSnapshot = nil
+    stateSnapshotSource = nil
+end
+
+-- Structural equality against the cached snapshot, used to decide whether a
+-- write actually changed anything the cache depends on.
+local function SameAsSnapshot(left, right, seen)
+    if left == right then return true end
+    if type(left) ~= "table" or type(right) ~= "table" then return false end
+    seen = seen or {}
+    if seen[left] and seen[left][right] then return true end
+    seen[left] = seen[left] or {}
+    seen[left][right] = true
+    for key, value in pairs(left) do
+        if not SameAsSnapshot(value, right[key], seen) then return false end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then return false end
+    end
+    return true
+end
+
+-- MASTER-RC-001: the durable-bundle owner sources `storeData` from here, the
+-- same way it sources `loadoutEvidence` from the evidence owner. Declared on
+-- the internals seam so the public Store inventory stays at nine.
+function AuthorityBootstrap.DurableStoreData(db)
+    return AuthorityBootstrap.__storeData and AuthorityBootstrap.__storeData(db)
+end
+
+-- The metering contract, published for measurement rather than kept private, so
+-- a test can assert the arithmetic instead of trusting it.
+function AuthorityBootstrap.SourceBounds()
+    return AuthorityBootstrap.__bounds and AuthorityBootstrap.__bounds()
+end
+
+function AuthorityBootstrap.PumpCaps()
+    return AuthorityBootstrap.__caps and AuthorityBootstrap.__caps()
+end
+
 -- Versioned shape changes are additive and ordered. User preferences,
 -- per-character safety state, and unknown/future fields are never rebuilt
 -- merely because the shipped defaults or schema version changed.
@@ -93,97 +192,521 @@ local function AccountWritesAllowed(database)
     return true
 end
 
-local function ReadLegacyMigrationMarker(db)
-    local migrations = rawget(db, LEGACY_MIGRATION_NAMESPACE)
-    if migrations == nil then return nil, nil end
-    if type(migrations) ~= "table" then
-        error("NexusDB legacy migration namespace is owned by an incompatible value")
-    end
+-- ===================================================================
+-- Package B authority bootstrap kernel, V1.
+-- Architecture 3b5de54f, docs/SYNC_TRUST_CATALOG_AUTHORITY_STATE_MACHINE.md:
+--   1200-1330  AuthorityBootstrapCoordinatorV1, the exhaustive ordered
+--              selection table, StoreLegacyBindingTokenV1 /
+--              StoreLegacyBindingWriterV1, and the terminal legacy class.
+--   1206       Store.Init(coordinator) returns {state="pending"} until the
+--              coordinator reaches STORE_READY; a successful pcall is never
+--              interpreted as readiness.
+--   1519       Store "enters STORE_READY and releases dependents", and only
+--              after the terminal WishlistRealizerDB disposition completes.
+--   1646       The exact PR #68 MainLifecycle -> Store.Init -> dependent Init
+--              call graph changes and the Store.lua fall-through is removed.
+--   2983-2985  The exact PR #68 LegacyDataMigration direct writer is disabled
+--              before authority bootstrap.
+-- ===================================================================
 
-    local marker = rawget(migrations, LEGACY_MIGRATION_KEY)
-    if marker == nil then return nil, migrations end
-    local version = type(marker) == "table" and tonumber(marker.version) or nil
-    if type(marker) ~= "table" or marker.completed ~= true
-        or not version or version ~= version or version >= math.huge
-        or version ~= math.floor(version) or version < 1 then
-        error("NexusDB legacy migration marker is malformed")
-    end
-    return marker, migrations
+-- Explicit lifecycle states, grouped in one table so this file adds no
+-- unnecessary file-level locals (Lua 5.1 caps them at 200).
+local SS = {
+    UNBOUND="STORE_UNBOUND",
+    LEGACY_BIND="STORE_LEGACY_BIND_PENDING",
+    CHAR_MIGRATION="STORE_CHAR_MIGRATION_PENDING",
+    BUNDLE_ADMISSION="STORE_DURABLE_BUNDLE_ADMISSION_PENDING",
+    AUTHORITY="STORE_AUTHORITY_PENDING",
+    COMPACTION="STORE_COMPACTION_PENDING",
+    FINAL_COMMIT="STORE_FINAL_COMMIT_PENDING",
+    LEGACY_DISPOSITION="STORE_LEGACY_DISPOSITION_PENDING",
+    SERVING_PUBLICATION="STORE_SERVING_PUBLICATION_PENDING",
+    READY="STORE_READY",
+    -- MASTER-RC-001: the post-ready mutation sub-machine (architecture
+    -- 1580-1602). Reachable ONLY from STORE_READY.
+    MUTATION_BUILD="STORE_MUTATION_BUILD_PENDING",
+    MUTATION_FINAL="STORE_MUTATION_FINAL_COMMIT_PENDING",
+    INVALID="STORE_INVALID",
+    FUTURE_SCHEMA="STORE_READ_ONLY_FUTURE_SCHEMA",
+    DISPOSITION_FAILED="STORE_LEGACY_DISPOSITION_FAILED",
+    DISPOSITION_REAUTH="STORE_LEGACY_DISPOSITION_REAUTH_REQUIRED",
+}
+local DECISION = {
+    completed=true, adoptedLegacy=true, keptCurrent=true,
+    noLegacy=true, ignoredEmptyLegacy=true,
+}
+
+-- INTENTIONAL COMPATIBILITY BREAK (architecture 1200-1330). PR #68 accepted
+-- metatable-backed current/legacy database tables and coercible or
+-- metatable-backed marker forms. V1 rejects them fail-closed: a metatable can
+-- forge presence, emptiness, or a decision, and neither bounded migration nor
+-- terminal legacy deletion authority may rest on a value that cannot be
+-- verified raw.
+local function PlainTable(value)
+    return type(value) == "table" and getmetatable(value) == nil
 end
 
--- Select an authority without clearing either SavedVariables name. A shared
--- table is an interrupted adoption retry: once NexusDB is rebound, the next
--- call must finish against that exact root instead of reclassifying it.
-local function SelectDatabaseForLegacyMigration()
-    local current = NexusDB
-    local legacy = WishlistRealizerDB
-
-    if current ~= nil and type(current) ~= "table" then
-        error("NexusDB is malformed; preserving it for recovery")
-    end
-
-    if type(current) == "table" then
-        local marker = ReadLegacyMigrationMarker(current)
-        if marker then return current, marker.decision or "completed" end
-    end
-
-    if legacy ~= nil and type(legacy) ~= "table" then
-        error("WishlistRealizerDB is malformed; preserving it for recovery")
-    end
-
-    if type(current) == "table" and current == legacy then
-        return current, "adoptedLegacy"
-    end
-
-    if type(current) == "table" and next(current) ~= nil then
-        return current, "keptCurrent"
-    end
-
-    if type(legacy) == "table" and next(legacy) ~= nil then
-        ReadLegacyMigrationMarker(legacy)
-        return legacy, "adoptedLegacy"
-    end
-
-    local db = type(current) == "table" and current or {}
-    ReadLegacyMigrationMarker(db)
-    return db, legacy == nil and "noLegacy" or "ignoredEmptyLegacy"
+local function ExactInteger(value)
+    return type(value) == "number" and value == value
+        and value < math.huge and value > -math.huge
+        and value == math.floor(value)
 end
 
-local function CompleteLegacyMigration(db, decision)
-    -- Re-read after every ordered owner. A future owner or interrupted write
-    -- that occupied this namespace must block legacy release, not be replaced.
-    local marker, migrations = ReadLegacyMigrationMarker(db)
-    if not marker then
-        if not migrations then
-            migrations = {}
-            db[LEGACY_MIGRATION_NAMESPACE] = migrations
+-- Returns "ABSENT" | "CURRENT" | "FUTURE" | "MALFORMED", marker.
+-- The exact future discriminator is a plain one-key namespace and a plain
+-- marker whose raw version is finite, exact, integral, and greater than one.
+-- Classification reads no other marker field before that verdict.
+local function ClassifyMigrationMarker(db)
+    local namespace = rawget(db, LEGACY_MIGRATION_NAMESPACE)
+    if namespace == nil then return "ABSENT" end
+    if not PlainTable(namespace) then return "MALFORMED" end
+    local keys, only = 0, nil
+    for key in pairs(namespace) do keys = keys + 1; only = key end
+    local marker = rawget(namespace, LEGACY_MIGRATION_KEY)
+    if marker == nil then
+        return keys == 0 and "ABSENT" or "MALFORMED"
+    end
+    if not PlainTable(marker) then return "MALFORMED" end
+    if keys ~= 1 or only ~= LEGACY_MIGRATION_KEY then return "MALFORMED" end
+    local version = rawget(marker, "version")
+    if ExactInteger(version) and version > LEGACY_MIGRATION_VERSION then
+        return "FUTURE", marker
+    end
+    if version ~= LEGACY_MIGRATION_VERSION then return "MALFORMED" end
+    if rawget(marker, "completed") ~= true then return "MALFORMED" end
+    local decision = rawget(marker, "decision")
+    if decision ~= nil and not DECISION[decision] then return "MALFORMED" end
+    for key in pairs(marker) do
+        if key ~= "version" and key ~= "completed" and key ~= "decision" then
+            return "MALFORMED"
         end
-        marker = {
-            version=LEGACY_MIGRATION_VERSION,
-            completed=true,
-            decision=decision,
-        }
-        migrations[LEGACY_MIGRATION_KEY] = marker
     end
-
-    -- The durable marker is visible before the old global is released. If a
-    -- later load sees the marker and a reintroduced legacy value, current wins.
-    WishlistRealizerDB = nil
+    return "CURRENT", marker
 end
 
-local function MigratePendingToggleRecords(db, sourceVersion)
-    for _, state in pairs(db.chars) do
-        local pending = type(state) == "table" and state.tomeTogglePending
-        if type(pending) == "table" then
-            for lever, value in pairs(pending) do
+-- A fresh table identity is not reconstructable from durable fields, so a
+-- reloaded process can never forge a previous session's request.
+local function NewRequestIdentity() return {} end
+
+-- StoreLegacyBindingTokenV1. The ordered decision table is exhaustive and
+-- stops at the first matching row. Selection clears neither global.
+local function SelectAuthorityDatabaseV1()
+    local current, legacy = NexusDB, WishlistRealizerDB
+    local token = {
+        request=NewRequestIdentity(),
+        currentValue=current, legacyValue=legacy,
+        currentPresent=current ~= nil, legacyPresent=legacy ~= nil,
+    }
+    local currentPlain = PlainTable(current)
+    if current ~= nil and not currentPlain then
+        token.row, token.failure = 1, SS.INVALID
+        return token
+    end
+    if currentPlain then
+        if rawget(current, "authorityBundle") ~= nil then
+            token.row, token.selected = 2, current
+            token.decision, token.bundleDeferred = "keptCurrent", true
+        else
+            local class, marker = ClassifyMigrationMarker(current)
+            if class == "FUTURE" then
+                token.row, token.failure = 3, SS.FUTURE_SCHEMA
+                return token
+            elseif class == "CURRENT" then
+                token.row, token.selected = 4, current
+                token.decision = marker.decision or "completed"
+            elseif class == "MALFORMED" then
+                token.row, token.failure = 5, SS.INVALID
+                return token
+            end
+        end
+    end
+    if not token.selected then
+        local legacyPlain = PlainTable(legacy)
+        if legacy ~= nil and not legacyPlain then
+            token.row, token.failure = 6, SS.INVALID
+            return token
+        end
+        if currentPlain and current == legacy then
+            token.row, token.selected = 7, current
+            token.decision = "adoptedLegacy"
+        elseif currentPlain and next(current) ~= nil then
+            token.row, token.selected = 8, current
+            token.decision = "keptCurrent"
+        elseif legacyPlain and next(legacy) ~= nil then
+            if rawget(legacy, "authorityBundle") ~= nil then
+                token.row, token.selected = 9, legacy
+                token.decision, token.bundleDeferred = "adoptedLegacy", true
+            else
+                local class = ClassifyMigrationMarker(legacy)
+                if class == "FUTURE" then
+                    token.row, token.failure = 10, SS.FUTURE_SCHEMA
+                    return token
+                elseif class == "MALFORMED" then
+                    token.row, token.failure = 12, SS.INVALID
+                    return token
+                end
+                token.row = class == "CURRENT" and 11 or 13
+                token.selected, token.decision = legacy, "adoptedLegacy"
+            end
+        elseif currentPlain then
+            token.row, token.selected = 14, current
+            token.decision = legacy == nil and "noLegacy" or "ignoredEmptyLegacy"
+        else
+            token.row, token.selected = 15, {}
+            token.decision = legacy == nil and "noLegacy" or "ignoredEmptyLegacy"
+        end
+    end
+    return token
+end
+
+-- The terminal legacy class is exactly ABSENT, SELECTED_ALIAS,
+-- DISTINCT_EMPTY_PRESERVE, or FOREIGN_BLOCK. A copied identity, identity
+-- replacement, nonempty table, metatable, or type drift is FOREIGN_BLOCK.
+local function LegacyTerminalClass(token)
+    local legacy = WishlistRealizerDB
+    if legacy == nil then return "ABSENT" end
+    if legacy == token.selected and NexusDB == token.selected then
+        return "SELECTED_ALIAS"
+    end
+    if PlainTable(legacy) and next(legacy) == nil then
+        return "DISTINCT_EMPTY_PRESERVE"
+    end
+    return "FOREIGN_BLOCK"
+end
+
+-- StoreLegacyBindingWriterV1, part one. Adopting the selected identity is the
+-- only write before bounded admission. Both globals are verified before and
+-- after; a mismatch enters STORE_INVALID and clears nothing.
+local function BindSelectedDatabase(token)
+    local selected = token.selected
+    if NexusDB == selected then return true end
+    local legacyBefore = WishlistRealizerDB
+    NexusDB = selected
+    if NexusDB ~= selected or WishlistRealizerDB ~= legacyBefore then
+        return false
+    end
+    return true
+end
+
+-- StoreLegacyBindingWriterV1, part two: the one terminal disposition.
+-- INTENTIONAL COMPATIBILITY BREAK. PR #68 cleared WishlistRealizerDB
+-- unconditionally. V1 performs exactly one verified nil write, and only for
+-- SELECTED_ALIAS. A distinct empty legacy table is preserved without any write
+-- and grants no authority; a distinct nonempty, metatable-backed, or drifted
+-- value is FOREIGN_BLOCK and fails closed for explicit reauthorization rather
+-- than being silently deleted.
+local function DisposeLegacyBinding(token)
+    local class = token.legacyClass
+    if class == "ABSENT" then
+        if WishlistRealizerDB ~= nil then return false, SS.DISPOSITION_REAUTH end
+        return true
+    end
+    if class == "SELECTED_ALIAS" then
+        if WishlistRealizerDB ~= token.selected or NexusDB ~= token.selected then
+            return false, SS.DISPOSITION_REAUTH
+        end
+        WishlistRealizerDB = nil
+        if WishlistRealizerDB ~= nil then return false, SS.DISPOSITION_FAILED end
+        return true
+    end
+    if class == "DISTINCT_EMPTY_PRESERVE" then
+        local legacy = WishlistRealizerDB
+        if legacy ~= token.legacyValue or not PlainTable(legacy)
+            or next(legacy) ~= nil then
+            return false, SS.DISPOSITION_REAUTH
+        end
+        return true
+    end
+    return false, SS.DISPOSITION_REAUTH
+end
+
+-- The exact three-field V1 marker is a durable non-authoritative receipt of
+-- the selection decision. An admitted existing marker is never rewritten and a
+-- future or malformed one never reaches this point.
+local function PublishMigrationMarker(db, decision)
+    local class = ClassifyMigrationMarker(db)
+    if class ~= "ABSENT" then return class == "CURRENT" end
+    local migrations = rawget(db, LEGACY_MIGRATION_NAMESPACE)
+    if migrations == nil then
+        migrations = {}
+        db[LEGACY_MIGRATION_NAMESPACE] = migrations
+    end
+    migrations[LEGACY_MIGRATION_KEY] = {
+        version=LEGACY_MIGRATION_VERSION,
+        completed=true,
+        decision=decision,
+    }
+    return true
+end
+
+-- MASTER-RC-001. Architecture line 1349: "Numeric tomeTogglePending migration
+-- is incremental. No synchronous PR #68 pairs(db.chars) path remains."
+-- Line 1364: "One pump admits at most 8 rows, 64 edges, 64 nodes, 2,048 graph
+-- bytes, 64 cursor entries, 64 comparisons, or 2,048 compared bytes."
+--
+-- The character walk is now a resumable frontier. It never enumerates the whole
+-- map: Lua's next(map, cursor) resumes from the last key admitted, so a pump
+-- touches only the rows it charges. A pump ends at the FIRST cap reached, and
+-- the per-row numeric pending migration resumes mid-row on its own cursor, so a
+-- single row with more pending levers than the edge cap cannot overrun a pump.
+--
+-- One file-level local is spent on purpose: the frontier is a table of
+-- functions rather than several locals.
+-- MASTER-RC-001, metering. Architecture lines 1356-1366 fix the complete Store
+-- source bounds with exact derivations, and line 1364 the per-pump ceilings.
+-- Both are written as their derivations rather than as literals, so a drift in
+-- any factor is visible instead of hidden behind a constant.
+local CharMigration = {
+    ROWS=8, EDGES=64,
+    KEY_WIDTH=183, DEPTH=6,
+    CAPS = {
+        rows=8, edges=64, nodes=64, graphBytes=2048,
+        cursorEntries=64, comparisons=64, comparedBytes=2048,
+    },
+    BOUNDS = {
+        mapEntries = 4096,
+        SGE = 4096 * 16384 + 4096 + 16384 + 2 * 16384,
+        SGN = 4096 * 2000 + 4096 + 2 + 2000 + 2 * 2000,
+        SGB = 4096 * 32768 + 4096 * 183 + 32768 + 2 * 32768,
+        SM  = 4096 + 4096 + 64 + 32 + 2 * 16384 + 2 * 16384,
+        SSC = 2 * (2048 * 11) + 64 * 6,
+        SSB = 2 * 183 * ((2 * 2048 * 11) + (64 * 6)),
+    },
+}
+
+-- Charge a graph against the source bounds, RESUMABLY.
+--
+-- Line 1346 permits a single row to carry up to 16,384 edges while line 1364
+-- admits at most 64 edges per pump, so no pump can ever charge a maximal row
+-- atomically: the architecture requires intra-row resumption for the general
+-- graph exactly as it does for the tomeTogglePending levers. The walk is
+-- therefore an explicit frame stack carried on the work item, and a pump stops
+-- AT a cap mid-row and resumes from the same frame and key.
+--
+-- Cycles and cross-map table aliases are invalid (line 1349), so one shared
+-- visited set spans the whole source rather than one per row: a table reachable
+-- twice is an alias.
+function CharMigration.Open(work, value)
+    if type(value) ~= "table" then return end
+    if work.seen[value] then
+        work.failure = "SOURCE_ALIAS_OR_CYCLE"
+        return
+    end
+    work.seen[value] = true
+    work.nodes = work.nodes + 1
+    work.pumpNodes = work.pumpNodes + 1
+    work.stack = work.stack or {}
+    work.stack[#work.stack + 1] = {table=value, key=nil, depth=#work.stack + 1}
+end
+
+-- Advances the charge frontier. Returns "done" when the stack is empty,
+-- "capped" when a per-pump ceiling was reached, or "failed".
+function CharMigration.ChargeSlice(work)
+    local caps = CharMigration.CAPS
+    local stack = work.stack
+    while stack and #stack > 0 do
+        local frame = stack[#stack]
+        local key, value = next(frame.table, frame.key)
+        if key == nil then
+            stack[#stack] = nil
+        else
+            frame.key = key
+            work.edges = work.edges + 1
+            work.pumpEdges = work.pumpEdges + 1
+            local keyText = tostring(key)
+            if #keyText > CharMigration.KEY_WIDTH then
+                work.failure = "SOURCE_KEY_WIDTH_EXCEEDED"
+                return "failed"
+            end
+            work.graphBytes = work.graphBytes + #keyText
+            work.pumpBytes = work.pumpBytes + #keyText
+            local kind = type(value)
+            if kind == "string" then
+                work.graphBytes = work.graphBytes + #value
+                work.pumpBytes = work.pumpBytes + #value
+            elseif kind == "number" or kind == "boolean" then
+                work.graphBytes = work.graphBytes + 8
+                work.pumpBytes = work.pumpBytes + 8
+            elseif kind == "table" then
+                if frame.depth + 1 > CharMigration.DEPTH then
+                    work.failure = "SOURCE_DEPTH_EXCEEDED"
+                    return "failed"
+                end
+                CharMigration.Open(work, value)
+                if work.failure then return "failed" end
+            end
+            if not CharMigration.WithinBounds(work) then return "failed" end
+            if work.pumpEdges >= caps.edges
+                or work.pumpNodes >= caps.nodes
+                or work.pumpBytes >= caps.graphBytes then
+                return "capped"
+            end
+        end
+    end
+    work.stack = nil
+    return "done"
+end
+
+-- Fail closed the moment any complete source bound is passed.
+function CharMigration.WithinBounds(work)
+    local bounds = CharMigration.BOUNDS
+    if work.rows > bounds.mapEntries
+        or work.edges > bounds.SGE
+        or work.nodes > bounds.SGN
+        or work.graphBytes > bounds.SGB
+        or work.cursorEntries > bounds.SM
+        or work.comparisons > bounds.SSC
+        or work.comparedBytes > bounds.SSB then
+        work.failure = work.failure or "SOURCE_BOUND_EXCEEDED"
+        return false
+    end
+    return true
+end
+
+-- MASTER-RC-001, the detached StoreDataV1 wrapper. Architecture line 289 gives
+-- the shape and line 1346 places its construction in
+-- STORE_CHAR_MIGRATION_PENDING. Lines 1379-1383 meter it exactly:
+--   SOE=9 fields, SON=6 (the table plus five numeric scalar nodes),
+--   SOK=117 exact field-name bytes, SOB=18*9+8*5=202, SOP=18.
+-- "Its settings, chars, and account-character child graphs are the already
+-- charged admitted candidates and are referenced, not rebuilt", so this wrapper
+-- carries references and rebuilds nothing.
+--
+-- The three-field migration-marker candidate is charged separately as SMOE=3,
+-- SMON=4, SMOK=24, SMOB=81, SMOP=6. It is a CANDIDATE: `completed` stays false
+-- until the terminal legacy disposition seals at STORE_FINAL_COMMIT_PENDING,
+-- which is the only place the durable marker is published.
+--
+-- The wrapper is offered to the bundle owner through the internals seam, never
+-- as a Store facade export: architecture line 1912 fixes the public Store
+-- inventory at exactly nine (MASTER-RC-013).
+local StoreData = {current=nil, revision=0}
+
+function StoreData.Build(db, token)
+    StoreData.revision = StoreData.revision + 1
+    local revision = StoreData.revision
+    local wrapper = {
+        schemaVersion = 1,
+        storeRevision = revision,
+        settingsRevision = revision,
+        accountRevision = revision,
+        settingsVersion = NormalizeVersion(db.settingsVersion),
+        settings = db.settings,
+        chars = db.chars,
+        accountCharacters = type(db.accountCharacters) == "table"
+            and db.accountCharacters or {},
+        migrationMarker = {
+            version = 1,
+            completed = false,
+            decision = tostring(token and token.decision or "current"),
+        },
+    }
+    StoreData.current = {db=db, value=wrapper}
+    return wrapper
+end
+
+-- The bundle owner asks for the exact wrapper built for the exact database it
+-- is committing; anything else returns nil rather than a foreign candidate.
+function StoreData.Durable(db)
+    local current = StoreData.current
+    if current and current.db == db then return current.value end
+    return nil
+end
+AuthorityBootstrap.__storeData = StoreData.Durable
+AuthorityBootstrap.__bounds = function()
+    local out = {}
+    for k, v in pairs(CharMigration.BOUNDS) do out[k] = v end
+    return out
+end
+AuthorityBootstrap.__caps = function()
+    local out = {}
+    for k, v in pairs(CharMigration.CAPS) do out[k] = v end
+    return out
+end
+
+function CharMigration.Begin(db, sourceVersion)
+    return {db=db, sourceVersion=sourceVersion, cursor=nil,
+        name=nil, pending=nil, done=false, failure=nil, seen={},
+        stack=nil, settingsCharged=false,
+        pumpRows=0, pumpEdges=0, pumpNodes=0, pumpBytes=0,
+        rows=0, edges=0, nodes=0, graphBytes=0,
+        cursorEntries=0, comparisons=0, comparedBytes=0}
+end
+
+-- Returns true when the whole frontier is complete, false while work remains.
+function CharMigration.Pump(work)
+    if work.failure then return true end
+    if work.done then return true end
+    local db = work.db
+    if type(db.chars) ~= "table" then work.done = true; return true end
+    local caps = CharMigration.CAPS
+    -- Per-pump ledgers, reset at the start of every pump.
+    work.pumpRows, work.pumpEdges = 0, 0
+    work.pumpNodes, work.pumpBytes = 0, 0
+    while true do
+        -- Line 1347: "The settings graph has the same per-graph bounds." It is
+        -- charged through the same resumable frontier, once, before the rows.
+        if not work.settingsCharged then
+            if work.stack == nil then
+                CharMigration.Open(work, db.settings)
+                if work.failure then return true end
+            end
+            local verdict = CharMigration.ChargeSlice(work)
+            if verdict == "failed" then return true end
+            if verdict == "capped" then return false end
+            work.settingsCharged = true
+        end
+        if work.name == nil then
+            local name, state = next(db.chars, work.cursor)
+            if name == nil then work.done = true; return true end
+            work.name, work.cursor, work.pending = name, name, nil
+            -- Shape drift is filled without replacing the state table, its
+            -- safety latches, or newer fields. A row carries at most 64 direct
+            -- keys (line 1347), which is exactly one pump edge cap, so the fill
+            -- itself stays atomic while its graph does not.
+            state = EnsureStateShape(state)
+            db.chars[name] = state
+            FillMissing(state, FreshState())
+            -- This mutates the live row in place; the read snapshot must not
+            -- survive it.
+            InvalidateStateSnapshot()
+            work.pumpRows = work.pumpRows + 1
+            -- One selected-row ordinal per admitted row (the SM dimension).
+            work.rows = work.rows + 1
+            work.cursorEntries = work.cursorEntries + 1
+            if not CharMigration.WithinBounds(work) then return true end
+            CharMigration.Open(work, state)
+            if work.failure then return true end
+        end
+        if work.stack ~= nil then
+            local verdict = CharMigration.ChargeSlice(work)
+            if verdict == "failed" then return true end
+            if verdict == "capped" then return false end
+        end
+        local state = db.chars[work.name]
+        local pending = type(state) == "table" and state.tomeTogglePending or nil
+        if type(pending) == "table" and work.sourceVersion < SETTINGS_VERSION then
+            while true do
+                local lever, value = next(pending, work.pending)
+                if lever == nil then break end
+                work.pending = lever
                 if type(value) == "number" and value == value
                     and value < math.huge and value > -math.huge then
                     pending[lever] = { t=value, want=true }
                 end
+                work.pumpEdges = work.pumpEdges + 1
+                if work.pumpEdges >= caps.edges then return false end
             end
         end
+        work.name, work.pending = nil, nil
+        if work.pumpRows >= caps.rows then return false end
     end
+end
 
+-- MASTER-RC-001: the per-character half of this migration is now driven
+-- incrementally by CharMigration above. What remains here is the bounded
+-- settings-level tweak, which is constant work.
+local function MigratePendingToggleRecords(db, sourceVersion)
     -- v1.19.x had no qualification toggle.  Defaulting that newly introduced
     -- filter on during an upgrade can make a successfully migrated library
     -- appear empty when the legacy cache has only one DPS category per
@@ -219,80 +742,575 @@ local function ApplyMigrations(db)
     end
 end
 
-function Store.Init()
-    -- Binding is the first half of the legacy rename migration. Completion is
-    -- deliberately last so dependency failures retain the recovery reference.
-    local db, legacyDecision = SelectDatabaseForLegacyMigration()
-    NexusDB = db
-    local futureSettingsOwner = HasFutureSettingsOwner(db)
-    if not futureSettingsOwner then
-        if type(db.chars) ~= "table" then db.chars = {} end
-        if type(db.settings) ~= "table" then db.settings = {} end
+-- ===================================================================
+-- AuthorityBootstrapCoordinatorV1 -- the sole startup sequencing owner.
+-- One V1 slice per PumpAuthorityBootstrap call; a pending slice schedules
+-- another pump and releases the Lua stack. Dependents are released only when
+-- the coordinator itself reaches STORE_READY (architecture line 1519), never
+-- because an initialization call completed and never because a pcall
+-- succeeded (line 1206).
+-- ===================================================================
 
-        local profile = Nexus.DefaultProfile
-        local defaults = profile and profile.defaultSettings or {}
+-- Architecture line 1715: "Repeated calls with the same exact token pump the
+-- same private handle." This is that handle. Store.Init keeps exactly one,
+-- advances it by exactly one V1 slice per call, and replaces it only when the
+-- exact durable source identity drifts -- which is a new process start, never
+-- a resumption. There is no private multi-slice drive: continuation
+-- scheduling belongs to the MainLifecycle scheduler (lines 1203-1204).
+local privateBootstrapHandle = nil
 
-        ApplyMigrations(db)
-        FillMissing(db.settings, defaults)
+local function OwnerCall(C, name, fn, a, b)
+    local ok, value = pcall(fn, a, b)
+    if ok then return true, value end
+    C.state = SS.INVALID
+    C.result = {state="failed", reason="STORE_INVALID", owner=name, error=value}
+    return false
+end
 
-        -- Per-character shape drift is filled recursively without replacing
-        -- the state table, its safety latches, or newer fields.
-        for name, state in pairs(db.chars) do
-            state = EnsureStateShape(state)
-            db.chars[name] = state
-            FillMissing(state, FreshState())
+local function BootstrapSlice(C)
+    local state = C.state
+    if state == SS.UNBOUND then
+        local token = SelectAuthorityDatabaseV1()
+        C.token = token
+        if token.failure then
+            C.state = token.failure
+            C.result = {state="failed", row=token.row,
+                reason=token.failure == SS.FUTURE_SCHEMA
+                    and "FUTURE_SCHEMA" or "STORE_INVALID"}
+            return
         end
+        if not BindSelectedDatabase(token) then
+            C.state = SS.INVALID
+            C.result = {state="failed", reason="STORE_INVALID",
+                detail="BIND_VERIFICATION"}
+            return
+        end
+        token.legacyClass = LegacyTerminalClass(token)
+        C.database = token.selected
+        C.state = SS.LEGACY_BIND
+        return
     end
 
-    -- The evidence pool is bound before BuildCatalog so overlay writes can
-    -- attach content-addressed references without ever touching the immutable
-    -- release bundle.
-    if Nexus.LoadoutEvidence and Nexus.LoadoutEvidence.Init then
-        Nexus.LoadoutEvidence.Init(db)
+    if state == SS.LEGACY_BIND then
+        C.futureSettingsOwner = HasFutureSettingsOwner(C.database)
+        C.state = C.token.bundleDeferred and SS.BUNDLE_ADMISSION
+            or SS.CHAR_MIGRATION
+        return
     end
 
-    -- BuildCatalog owns the versioned release-baseline migration. During the
-    -- staged cutover, communityBuilds remains the single canonical overlay
-    -- table so existing runtime consumers keep working without duplicating the
-    -- same records under two SavedVariables keys.
-    local catalogSummary
-    if Nexus.BuildCatalog and Nexus.BuildCatalog.Init then
-        catalogSummary = Nexus.BuildCatalog.Init(db, Nexus.BundledBuilds)
-    end
-    if AccountWritesAllowed(db)
-        and not (catalogSummary and catalogSummary.readOnly) then
-        db.accountCharacters = type(db.accountCharacters) == "table"
-            and db.accountCharacters or {}
-        Store.RegisterCurrentCharacter()
-    end
-    local migrationSummary
-    if Nexus.LegacyDataMigration and Nexus.LegacyDataMigration.Init
-        and not futureSettingsOwner
-        and not (catalogSummary and catalogSummary.readOnly) then
-        migrationSummary = Nexus.LegacyDataMigration.Init(db)
-    end
-    local dataReady = not migrationSummary
-        or migrationSummary.complete == true
-    -- DPS migration owns generated build references. It must finish before
-    -- compaction/retention can classify an automatic page as unreferenced.
-    if Nexus.DpsCapture
-        and type(Nexus.DpsCapture.MigrateLegacyLeaderboard) == "function"
-        and not (catalogSummary and catalogSummary.readOnly)
-        and dataReady then
-        Nexus.DpsCapture.MigrateLegacyLeaderboard()
-    end
-    if Nexus.DataCompaction and Nexus.DataCompaction.Init
-        and not (catalogSummary and catalogSummary.readOnly)
-        and dataReady then
-        Nexus.DataCompaction.Init(db)
-    end
-    if Nexus.DataRetention and Nexus.DataRetention.Init
-        and not (catalogSummary and catalogSummary.readOnly)
-        and dataReady then
-        Nexus.DataRetention.Init(db)
+    if state == SS.CHAR_MIGRATION or state == SS.BUNDLE_ADMISSION then
+        local db = C.database
+        if C.futureSettingsOwner then
+            C.state = SS.AUTHORITY
+            return
+        end
+        if C.charWork == nil then
+            if type(db.chars) ~= "table" then
+                db.chars = {}
+                InvalidateStateSnapshot()
+            end
+            if type(db.settings) ~= "table" then db.settings = {} end
+            local profile = Nexus.DefaultProfile
+            FillMissing(db.settings, profile and profile.defaultSettings or {})
+            -- The source version is captured before ApplyMigrations stamps it,
+            -- so the incremental pending migration still knows where it came
+            -- from.
+            C.charWork = CharMigration.Begin(db,
+                NormalizeVersion(db.settingsVersion))
+        end
+        -- Exactly one bounded frontier pump per coordinator slice. The state
+        -- stays STORE_CHAR_MIGRATION_PENDING until the frontier completes, so
+        -- a large character map spans slices instead of one unbounded scan.
+        if not CharMigration.Pump(C.charWork) then return end
+        -- A source past any complete bound, or carrying a cycle, cross-map
+        -- alias, over-deep graph or over-wide key, fails closed here. It is
+        -- never partially admitted.
+        if C.charWork.failure then
+            C.state = SS.INVALID
+            C.result = {state="failed", reason="STORE_INVALID",
+                detail=C.charWork.failure}
+            return
+        end
+        -- Line 1346: the completed frontier yields ONE detached StoreDataV1.
+        -- The account map is NOT created here: a read-only catalog verdict must
+        -- withhold the account owner entirely, and the only authorized creation
+        -- site is the guarded one in STORE_COMPACTION_PENDING. The wrapper
+        -- references the map when it exists and a detached empty table when it
+        -- does not, so building the candidate never writes to the database.
+        C.storeData = StoreData.Build(db, C.token)
+        -- Version stamping happens only after the row work completed, which
+        -- preserves "stamp only after the idempotent migration succeeded".
+        ApplyMigrations(db)
+        C.state = SS.AUTHORITY
+        return
     end
 
-    CompleteLegacyMigration(db, legacyDecision)
+    if state == SS.AUTHORITY then
+        local db = C.database
+        -- Lines 2983-2985: the exact PR #68 LegacyDataMigration direct writer
+        -- is retired at load and stays inert unless this coordinator
+        -- classifies the recovery input and authorizes this exact database.
+        -- The classification reads only fixed top-level metadata and writes
+        -- nothing, and it happens before any authority bootstrap work.
+        local migration = Nexus.LegacyDataMigration
+        if migration and type(migration.ClassifyLegacyWriterV1) == "function" then
+            local okClass, classified = OwnerCall(C,
+                "LegacyDataMigration.ClassifyLegacyWriterV1",
+                migration.ClassifyLegacyWriterV1, db, C)
+            if not okClass then return end
+            C.legacyRecovery = classified
+        end
+        -- The evidence pool is admitted before the catalog so overlay writes
+        -- can attach content-addressed references.
+        -- AUTHORITY-COORDINATOR-DRIVE BEGIN. This is AuthorityBootstrapCoordinatorV1
+        -- itself, the sole startup sequencing owner named at architecture
+        -- lines 1207-1211. Every surface below is handed to OwnerCall by
+        -- reference and invoked by the coordinator with C in hand; no
+        -- dependent drives another domain here.
+        if Nexus.LoadoutEvidence and Nexus.LoadoutEvidence.Init
+            and not OwnerCall(C, "LoadoutEvidence.Init",
+                Nexus.LoadoutEvidence.Init, db) then
+            return
+        end
+        -- MASTER-RC-001: open the bootstrap seal before the catalog owner is
+        -- released, so a completed admission installs no public pointer while
+        -- the coordinator is still short of its serving-publication state
+        -- (architecture 1517-1519, 1715).
+        if Nexus.BuildCatalog
+            and type(Nexus.BuildCatalog.BeginBootstrapSealV1) == "function" then
+            OwnerCall(C, "BuildCatalog.BeginBootstrapSealV1",
+                Nexus.BuildCatalog.BeginBootstrapSealV1)
+        end
+        if Nexus.BuildCatalog and Nexus.BuildCatalog.Init then
+            local ok, summary = OwnerCall(C, "BuildCatalog.Init",
+                Nexus.BuildCatalog.Init, db, Nexus.BundledBuilds)
+            if not ok then return end
+            C.catalogSummary = summary
+            -- MASTER-RC-006: the coordinator dispatches one catalog admission
+            -- slice per coordinator slice. It stays in this state and exposes
+            -- the domain tag used by bounded offline drivers until the exact
+            -- same private handle reaches a terminal result.
+            if type(summary) == "table" and summary.state == "pending" then
+                return
+            end
+        end
+        -- AUTHORITY-COORDINATOR-DRIVE END
+        C.state = SS.COMPACTION
+        return
+    end
+
+    if state == SS.COMPACTION then
+        local db = C.database
+        local readOnly = C.catalogSummary and C.catalogSummary.readOnly
+        if AccountWritesAllowed(db) and not readOnly then
+            db.accountCharacters = type(db.accountCharacters) == "table"
+                and db.accountCharacters or {}
+            if not OwnerCall(C, "Store.RegisterCurrentCharacter",
+                Store.RegisterCurrentCharacter) then
+                return
+            end
+            -- MASTER-RC-009. The current-character owner proof is an admission
+            -- input, and it only became available now -- after BuildCatalog was
+            -- admitted in STORE_AUTHORITY_PENDING. The coordinator owns
+            -- admission (line 1201), so IT re-proves the catalog. A read must
+            -- never do this, which is why the read gate now only records the
+            -- request.
+            --
+            -- The re-proof is CONDITIONAL: one pure status read reports whether
+            -- the owner proof actually drifted, and only then is a rebind
+            -- driven. An ordinary login, where the identity was already
+            -- available when the catalog was admitted, performs no extra
+            -- admission work at all.
+            local catalog = Nexus.BuildCatalog
+            if catalog and type(catalog.Status) == "function"
+                and type(catalog.RebindRequired) == "function"
+                and type(catalog.PumpAuthorityRebindV1) == "function" then
+                pcall(catalog.Status)
+                if catalog.RebindRequired() then
+                    -- AUTHORITY-COORDINATOR-DRIVE BEGIN. MASTER-RC-001: the
+                    -- evidence pool is admitted before the catalog on the
+                    -- rebind path too. Catalog.Init used to do this itself by
+                    -- driving LoadoutEvidence directly, which lines 1207-1211
+                    -- forbid; the coordinator owns the order instead.
+                    local target = type(catalog.PendingRebindDatabaseV1)
+                        == "function" and catalog.PendingRebindDatabaseV1()
+                        or db
+                    if Nexus.LoadoutEvidence and Nexus.LoadoutEvidence.Init
+                        and type(target) == "table"
+                        and not OwnerCall(C, "LoadoutEvidence.Init",
+                            Nexus.LoadoutEvidence.Init, target) then
+                        return
+                    end
+                    -- AUTHORITY-COORDINATOR-DRIVE END
+                    if not OwnerCall(C, "BuildCatalog.PumpAuthorityRebindV1",
+                        catalog.PumpAuthorityRebindV1) then
+                        return
+                    end
+                end
+            end
+        end
+        -- Bounded legacy-data/DPS recovery runs only under this coordinator,
+        -- and only after the current character is part of the staged
+        -- snapshot -- the exact PR #68 relative order, now coordinator-owned.
+        local migration = Nexus.LegacyDataMigration
+        local recovery
+        -- AUTHORITY-COORDINATOR-DRIVE BEGIN. This is AuthorityBootstrapCoordinatorV1
+        -- itself, the sole startup sequencing owner named at architecture
+        -- lines 1207-1211. Every surface below is handed to OwnerCall by
+        -- reference and invoked by the coordinator with C in hand; no
+        -- dependent drives another domain here.
+        if migration and type(migration.Init) == "function"
+            and not C.futureSettingsOwner and not readOnly then
+            local okRecovery, summary = OwnerCall(C, "LegacyDataMigration.Init",
+                migration.Init, db)
+            if not okRecovery then return end
+            recovery = summary
+        end
+        -- DPS migration owns generated build references, so it must finish
+        -- before compaction/retention can classify a page as unreferenced.
+        local dataReady = not recovery or recovery.complete == true
+        if Nexus.DpsCapture and not readOnly and dataReady
+            and type(Nexus.DpsCapture.MigrateLegacyLeaderboard) == "function"
+            and not OwnerCall(C, "DpsCapture.MigrateLegacyLeaderboard",
+                Nexus.DpsCapture.MigrateLegacyLeaderboard) then
+            return
+        end
+        -- AUTHORITY-COORDINATOR-DRIVE END
+        C.state = SS.FINAL_COMMIT
+        return
+    end
+
+    if state == SS.FINAL_COMMIT then
+        -- The one complete durable bundle pointer and its serving pair are
+        -- written by the catalog authority owner during
+        -- STORE_AUTHORITY_PENDING. This slice seals the bootstrap disposition
+        -- and publishes the exact migration marker the committed bundle
+        -- carries, so the durable receipt is visible before any legacy write.
+        C.sealed = C.token.decision
+        if not C.futureSettingsOwner then
+            PublishMigrationMarker(C.database, C.sealed)
+        end
+        C.state = SS.LEGACY_DISPOSITION
+        return
+    end
+
+    if state == SS.LEGACY_DISPOSITION then
+        local disposed, failure = DisposeLegacyBinding(C.token)
+        if not disposed then
+            C.state = failure
+            C.result = {state="failed", legacyClass=C.token.legacyClass,
+                reason=failure == SS.DISPOSITION_FAILED
+                    and "LEGACY_DISPOSITION_FAILED"
+                    or "LEGACY_DISPOSITION_REAUTH_REQUIRED"}
+            return
+        end
+        C.state = SS.SERVING_PUBLICATION
+        return
+    end
+
+    if state == SS.SERVING_PUBLICATION then
+        -- MASTER-RC-001, architecture 1517-1519: "Only after the disposition
+        -- completes does STORE_SERVING_PUBLICATION_PENDING construct/verify the
+        -- replacement serving pair and perform the final currentServingRoot
+        -- swap." The catalog held its admitted generation privately sealed
+        -- through every earlier state; this is where it becomes public
+        -- authority, and only here.
+        if Nexus.BuildCatalog
+            and type(Nexus.BuildCatalog.PublishSealedServingV1) == "function"
+            and not OwnerCall(C, "BuildCatalog.PublishSealedServingV1",
+                Nexus.BuildCatalog.PublishSealedServingV1) then
+            return
+        end
+        C.state = SS.READY
+        C.result = {state="ready", result="BOOTSTRAP_COMMITTED",
+            decision=C.sealed}
+        local db = C.database
+        local readOnly = C.catalogSummary and C.catalogSummary.readOnly
+        -- AUTHORITY-COORDINATOR-DRIVE BEGIN. This is AuthorityBootstrapCoordinatorV1
+        -- itself, the sole startup sequencing owner named at architecture
+        -- lines 1207-1211. Every surface below is handed to OwnerCall by
+        -- reference and invoked by the coordinator with C in hand; no
+        -- dependent drives another domain here.
+        if not readOnly then
+            if Nexus.DataCompaction and Nexus.DataCompaction.Init
+                and not OwnerCall(C, "DataCompaction.Init",
+                    Nexus.DataCompaction.Init, db) then
+                return
+            end
+            if Nexus.DataRetention and Nexus.DataRetention.Init
+                and not OwnerCall(C, "DataRetention.Init",
+                    Nexus.DataRetention.Init, db) then
+                return
+            end
+        end
+        -- AUTHORITY-COORDINATOR-DRIVE END
+        return
+    end
+end
+
+------------------------------------------------------------------------
+-- MASTER-RC-001: the post-ready Store mutation pipeline.
+--
+-- Architecture 1538-1540 opens core/Store.lua's own exhaustive transition
+-- table; rows 1580-1602 define this closed sub-machine. Line 4850 (DPS-01)
+-- names its absence directly as a required expected-red: "a post-ready mutation
+-- has no closed result/route ledger".
+--
+--   STORE_READY | valid RegisterCurrentCharacter, Retention, or Compaction with
+--                 no active input/candidate
+--       -> capture one exact StoreMutationTokenV1; MUTATION_BUILD, pending
+--   MUTATION_BUILD | bounded slice incomplete          -> same state, pending
+--   MUTATION_BUILD | candidate complete and token exact -> MUTATION_FINAL, pending
+--   MUTATION_FINAL | complete success
+--       -> STORE_READY, {state="ready", result="MUTATION_COMMITTED"}
+--   MUTATION_FINAL | post-publication notification fault
+--       -> STORE_READY, {state="ready", result="MUTATION_COMMITTED",
+--                        notification="PENDING"}
+--   MUTATION_BUILD or MUTATION_FINAL | any second mutation request
+--       -> same state, {state="failed", reason="STORE_MUTATION_BUSY"}
+--
+-- ENTRY CONDITION. Reachable only FROM STORE_READY. The bootstrap coordinator's
+-- own Store.RegisterCurrentCharacter call in STORE_COMPACTION_PENDING is a
+-- bootstrap finalizer step and deliberately does NOT enter this machine.
+--
+-- EXPORT CEILING. RAW-01 fixes "exact Store 9, Retention 8, and Compaction 8 API
+-- inventories plus two counted private Store mutation entries". This adds no
+-- public Store/Retention/Compaction export.
+--
+-- CORRECTION (sixth consultation). The architecture's TWO COUNTED PRIVATE
+-- ENTRIES are named at lines 1907-1912 and they are
+-- `StoreAuthorityOwnerV1.UpdateSettingsV1` and `StoreAuthorityOwnerV1.UpdateStateV1`
+-- -- "callable only by the static internal caller inventory... The nine-export
+-- public Store inventory therefore remains exact". They are NOT the coordinator
+-- methods below. `BeginStoreMutationV1`/`PumpStoreMutationV1` are internal
+-- implementation detail of this machine and do not substitute for, or count as,
+-- those two named entries. An earlier revision of this comment claimed they did;
+-- it was wrong, and the claim is recorded here as withdrawn so it is not
+-- reintroduced. `UpdateSettingsV1`/`UpdateStateV1` remain owed by MASTER-RC-001:
+-- line 1900's "must migrate all current direct table writes to them and reject
+-- any unlisted Store writer" is mandatory, in explicit contrast to line 1197's
+-- conditional "if implementation adds it" wording for a genuinely optional item.
+------------------------------------------------------------------------
+
+local MUTATION_ROUTES = {
+    RegisterCurrentCharacter=true, Retention=true, Compaction=true,
+}
+
+-- MASTER-RC-001: the bound post-ready mutation owner, recorded by Store.Init.
+-- An ongoing RegisterCurrentCharacter submits through this coordinator instead
+-- of writing durably on its own; architecture 1897-1899 says that export
+-- "submits one StoreAuthorityOwnerV1 mutation and can complete only through a
+-- complete bundle replacement".
+local boundCoordinator
+
+-- Forward declarations. The account-row candidate helpers are defined with the
+-- other account helpers below, after CurrentIdentity/AccountRowMatchesCurrent,
+-- which this pipeline is textually above.
+local BuildAccountRowCandidate, CommitAccountRowCandidate
+
+-- One immutable StoreMutationTokenV1. It pins the selected identity and the
+-- durable bundle behind it, so any drift under the candidate is detectable
+-- without re-deriving the source.
+local function CaptureStoreMutationToken(C, route, request)
+    local db = C.database
+    return {
+        route=route,
+        requestIdentity=type(request) == "table" and request.identity or route,
+        selected=db,
+        globalSelected=NexusDB,
+        bundle=type(db) == "table" and rawget(db, "authorityBundle") or nil,
+    }
+end
+
+local function StoreMutationTokenIsExact(C, token)
+    if type(token) ~= "table" or C.database ~= token.selected then return false end
+    if NexusDB ~= token.globalSelected then return false end
+    return type(token.selected) ~= "table"
+        or rawget(token.selected, "authorityBundle") == token.bundle
+end
+
+-- Notification faults are observed through the normative catalog diagnostic
+-- surface (architecture line 1721 names Status/DebugStats), never through a new
+-- export and never by duplicating retry logic: the bounded replay itself is
+-- already owned by BuildCatalog's NotifyBuild/ReplayPendingNotification pair
+-- (MASTER-RC-015), and this only reads whether one was recorded.
+local function NotificationFailureCount()
+    local catalog = Nexus.BuildCatalog
+    if type(catalog) ~= "table" or type(catalog.DebugStats) ~= "function" then
+        return nil
+    end
+    local ok, stats = pcall(catalog.DebugStats)
+    if not ok or type(stats) ~= "table" then return nil end
+    return tonumber(stats.notificationFailures)
+end
+
+-- The bounded build slice. It allocates and proves the candidate off-state and
+-- performs no durable write on any route.
+local function StoreMutationBuildSlice(C, mutation)
+    if mutation.route == "RegisterCurrentCharacter" then
+        local candidate = BuildAccountRowCandidate(C.database)
+        if not candidate then return false, "CANDIDATE_FAILED" end
+        mutation.candidate = candidate
+        return true
+    end
+    -- Retention and Compaction own their own bounded internal frontiers; the
+    -- candidate this phase proves is that the route is admissible and its owner
+    -- is present. Their durable work belongs to the final-commit phase, which
+    -- is where their existing transactional commit already lives.
+    local owner = mutation.route == "Retention" and Nexus.DataRetention
+        or Nexus.DataCompaction
+    if type(owner) ~= "table" then return false, "CANDIDATE_FAILED" end
+    mutation.candidate = {owner=owner}
+    return true
+end
+
+-- The final commit. Exactly one durable route action, then the post-publication
+-- notification outcome is read.
+local function StoreMutationFinalCommit(C, mutation)
+    local before = NotificationFailureCount()
+    local committed
+    if mutation.route == "RegisterCurrentCharacter" then
+        committed = CommitAccountRowCandidate(C.database, mutation.candidate) ~= nil
+    elseif mutation.route == "Retention" then
+        local owner = mutation.candidate.owner
+        committed = type(owner.Enforce) ~= "function"
+            or pcall(owner.Enforce, C.database, "post-ready mutation")
+    else
+        local owner = mutation.candidate.owner
+        committed = type(owner.Pump) ~= "function" or pcall(owner.Pump)
+    end
+    if not committed then return false, "CANDIDATE_FAILED" end
+    local after = NotificationFailureCount()
+    local faulted = before ~= nil and after ~= nil and after > before
+    return true, nil, faulted
+end
+
+local function StoreMutationSlice(C)
+    local mutation = C.mutation
+    if not mutation then return C.result end
+    if not StoreMutationTokenIsExact(C, mutation.token) then
+        C.mutation, C.state = nil, SS.READY
+        C.result = {state="ready", result="SOURCE_DRIFT"}
+        return C.result
+    end
+    if C.state == SS.MUTATION_BUILD then
+        local ok, why = StoreMutationBuildSlice(C, mutation)
+        if not ok then
+            C.mutation, C.state = nil, SS.READY
+            C.result = {state="ready", result=why}
+            return C.result
+        end
+        C.state = SS.MUTATION_FINAL
+        C.result = {state="pending", store=C.state}
+        return C.result
+    end
+    local ok, why, faulted = StoreMutationFinalCommit(C, mutation)
+    C.mutation, C.state = nil, SS.READY
+    if not ok then
+        C.result = {state="ready", result=why}
+        return C.result
+    end
+    -- Architecture line 1598, literally. The mutation is committed and final;
+    -- only the notification is outstanding, and its bounded replay is already
+    -- scheduled by BuildCatalog.
+    C.result = {state="ready", result="MUTATION_COMMITTED",
+        notification=faulted and "PENDING" or nil}
+    return C.result
+end
+
+function AuthorityBootstrap.New()
+    local C = {state=SS.UNBOUND, result={state="pending", store=SS.UNBOUND}}
+    function C:State() return self.state end
+    function C:Result() return self.result end
+    function C:IsReady() return self.state == SS.READY end
+    function C:Database() return self.database end
+    function C:Settle()
+        if self.state ~= SS.READY and self.result.state ~= "failed" then
+            local catalogPending = self.state == SS.AUTHORITY
+                and type(self.catalogSummary) == "table"
+                and self.catalogSummary.state == "pending"
+            self.result = {state="pending", store=self.state,
+                workDomain=catalogPending and "catalog" or nil}
+        end
+        return self.result
+    end
+    function C:PumpAuthorityBootstrap()
+        if self.state == SS.READY or self.result.state == "failed" then
+            return self.result
+        end
+        BootstrapSlice(self)
+        return self:Settle()
+    end
+    -- Store.Init's binding entry. Repeating it never restarts bootstrap.
+    function C:BindAuthorityDatabase()
+        if self.state == SS.UNBOUND then BootstrapSlice(self) end
+        return self:Settle()
+    end
+    -- MASTER-RC-001, counted private Store mutation entry 1 of 2.
+    function C:BeginStoreMutationV1(request)
+        local route = type(request) == "table" and request.route or request
+        if self.state == SS.MUTATION_BUILD or self.state == SS.MUTATION_FINAL then
+            -- Same state; the in-flight candidate is preserved, not discarded.
+            return {state="failed", reason="STORE_MUTATION_BUSY"}
+        end
+        if self.state ~= SS.READY then
+            return {state="failed", reason="STORE_ILLEGAL_TRANSITION"}
+        end
+        if not MUTATION_ROUTES[route] then
+            return {state="failed", reason="STORE_ILLEGAL_TRANSITION"}
+        end
+        self.mutation = {route=route,
+            token=CaptureStoreMutationToken(self, route, request)}
+        self.state = SS.MUTATION_BUILD
+        self.result = {state="pending", store=self.state}
+        return self.result
+    end
+    -- MASTER-RC-001, counted private Store mutation entry 2 of 2.
+    function C:PumpStoreMutationV1()
+        if self.state ~= SS.MUTATION_BUILD and self.state ~= SS.MUTATION_FINAL then
+            return self.result
+        end
+        return StoreMutationSlice(self)
+    end
+    return C
+end
+
+-- "The same exact token" is the bound identity the handle already selected.
+-- A handle whose selected identity is still the exact authority source is the
+-- same token and is pumped further; any drift is a different token.
+local function PrivateHandleTokenIsExact(handle)
+    local token = handle.token
+    if token == nil then return false end
+    return token.selected ~= nil and NexusDB == token.selected
+end
+
+-- Store.Init(coordinator) binds the exact database and returns the explicit
+-- detached result {state="pending"} until the coordinator reaches
+-- STORE_READY. It performs no dependent initialization itself: the PR #68
+-- fall-through is removed (line 1646) and every dependent is released by the
+-- coordinator at STORE_READY (line 1519).
+function Store.Init(coordinator)
+    if coordinator ~= nil then
+        boundCoordinator = coordinator
+        return coordinator:BindAuthorityDatabase()
+    end
+    -- No external sequencer was supplied. Store advances exactly one private
+    -- handle by exactly one V1 slice per call (line 1715). Slice-limit
+    -- exhaustion is never readiness: the caller keeps receiving the explicit
+    -- detached {state="pending"} result until the coordinator reaches
+    -- STORE_READY (line 1206), and completed migration work is never repeated
+    -- because the same handle carries the pending state forward.
+    local handle = privateBootstrapHandle
+    if handle ~= nil and PrivateHandleTokenIsExact(handle) then
+        return handle:PumpAuthorityBootstrap()
+    end
+    -- Either there is no handle yet, or the exact durable source drifted under
+    -- it. Both are one process start: reclassify from the exact durable
+    -- source, exactly as a reload does.
+    handle = AuthorityBootstrap.New()
+    privateBootstrapHandle = handle
+    boundCoordinator = handle
+    return handle:BindAuthorityDatabase()
 end
 
 local function CurrentIdentity()
@@ -336,17 +1354,25 @@ local function AccountRowMatchesCurrent(row, ownerKey, name)
     return true
 end
 
-function Store.RegisterCurrentCharacter()
+-- MASTER-RC-001. The account-row mutation is split into a candidate build and a
+-- durable commit so the post-ready StoreMutationTokenV1 pipeline has a real
+-- STORE_MUTATION_BUILD_PENDING phase to occupy (architecture 1580-1602). The
+-- build allocates and populates the replacement row OFF-STATE and writes
+-- nothing; only the commit assigns. Neither is a public export: Store's public
+-- inventory stays at the exact nine RAW-01 fixes.
+function BuildAccountRowCandidate(database)
     local ownerKey, name, realm = CurrentIdentity()
-    local database = NexusDB
     if not ownerKey or type(database) ~= "table"
         or not AccountWritesAllowed(database) then return nil end
     local characters = type(database.accountCharacters) == "table"
-        and database.accountCharacters or {}
-    database.accountCharacters = characters
-    local row = characters[ownerKey]
-    if not AccountRowMatchesCurrent(row, ownerKey, name) then return nil end
-    row = type(row) == "table" and row or {}
+        and database.accountCharacters or nil
+    local existing = characters and characters[ownerKey] or nil
+    if not AccountRowMatchesCurrent(existing, ownerKey, name) then return nil end
+    -- Copy off-state: the published row is never mutated in place during build.
+    local row = {}
+    if type(existing) == "table" then
+        for key, value in pairs(existing) do row[key] = value end
+    end
     row.name, row.realm = name, realm
     local class = UnitClass and select(2, UnitClass("player")) or nil
     if class and class ~= "" then row.class = tostring(class):upper() end
@@ -354,8 +1380,52 @@ function Store.RegisterCurrentCharacter()
     if ok and tonumber(stamp) and tonumber(stamp) > 0 then
         row.lastSeen = math.floor(tonumber(stamp))
     end
-    characters[ownerKey] = row
-    return ownerKey, row
+    return {ownerKey=ownerKey, row=row}
+end
+
+function CommitAccountRowCandidate(database, candidate)
+    if type(database) ~= "table" or type(candidate) ~= "table" then return nil end
+    local characters = type(database.accountCharacters) == "table"
+        and database.accountCharacters or {}
+    database.accountCharacters = characters
+    -- Preserve the published row's IDENTITY. The build phase prepared its
+    -- fields off-state; the commit applies them onto the existing table rather
+    -- than replacing it. Replacing it would change observable row identity,
+    -- which tests/run_conservative_account_identity.lua proves must not happen
+    -- ("registration replaced the existing canonical RealmA row"). The prepared
+    -- row is a superset of the existing fields, so applying it is exactly the
+    -- pre-existing in-place update.
+    local existing = characters[candidate.ownerKey]
+    if type(existing) == "table" then
+        for key, value in pairs(candidate.row) do existing[key] = value end
+        return candidate.ownerKey, existing
+    end
+    characters[candidate.ownerKey] = candidate.row
+    return candidate.ownerKey, candidate.row
+end
+
+-- Public export 3 of the exact nine, classified DURABLE_MUTATION at line ~1888.
+-- Architecture 1897-1899: it "submits one StoreAuthorityOwnerV1 mutation and can
+-- complete only through a complete bundle replacement".
+--
+-- MASTER-RC-001, sixth consultation. Post-STORE_READY this SUBMITS into the
+-- coordinator's post-ready machine and performs no synchronous durable write;
+-- completion happens on later scheduler turns, one slice per turn, driven by
+-- core/MainLifecycle.lua. Before STORE_READY -- the bootstrap finalizer at
+-- STORE_COMPACTION_PENDING, and any caller with no bound coordinator -- the
+-- exact prior synchronous build-then-commit is unchanged, because the
+-- post-ready machine is reachable only FROM STORE_READY.
+function Store.RegisterCurrentCharacter()
+    local C = boundCoordinator
+    if type(C) == "table" and type(C.State) == "function"
+        and type(C.BeginStoreMutationV1) == "function"
+        and C:State() == SS.READY then
+        return C:BeginStoreMutationV1({route="RegisterCurrentCharacter"})
+    end
+    local database = NexusDB
+    local candidate = BuildAccountRowCandidate(database)
+    if not candidate then return nil end
+    return CommitAccountRowCandidate(database, candidate)
 end
 
 function Store.IsAccountOwnerKey(ownerKey)
@@ -401,17 +1471,106 @@ end
 -- Per-character live subtable. The full local identity is re-read on every
 -- call. Until both name and realm are proven, callers share only the transient
 -- session table; transient or ambiguous short-key state is never promoted.
+-- MASTER-RC-001, architecture 1907-1912: the counted private `UpdateStateV1`
+-- entry. This is now the SOLE authorized writer of the per-character state row.
+-- Every caller that used to mutate the table `Store.State()` returned routes
+-- here instead, so the read can hand back a defensive copy without silently
+-- discarding writes.
+--
+-- The mutator receives the owned live row and mutates it in place, which
+-- preserves each migrated site's exact prior read/write semantics -- the
+-- boundary amendment 10 draws. Returns `true` plus the mutator's own results, so
+-- a caller can still distinguish "no Store owner reachable" from a real result.
+--
+-- STILL OWED, disclosed rather than silently absorbed: the architecture's
+-- durable-writer table (line 392 and its adjacent StoreDataV1 row) ultimately
+-- requires State/Settings/registration mutations to be *submitted* and installed
+-- by the coordinator "only in a complete bundle". This entry is synchronous,
+-- because amendment 10 authorizes "no behavior change beyond preserving each
+-- site's existing read/write semantics through the new path", and routing every
+-- wishlist and flag write through an asynchronous bundle replacement is exactly
+-- such a behavior change. Consolidating the write path here is the prerequisite
+-- for that later step: there is now one place to change instead of 32.
+function StoreAuthorityOwner.UpdateStateV1(mutator)
+    if type(mutator) ~= "function" then return nil end
+    local ownerKey = CurrentIdentity()
+    local db = NexusDB
+    if not ownerKey or type(db) ~= "table" or HasFutureSettingsOwner(db)
+        or type(db.chars) ~= "table" then
+        -- Same fallback the read has always used: a transient, never-persisted
+        -- row while identity or the store is not yet usable.
+        transientState = EnsureStateShape(transientState)
+        return true, mutator(transientState)
+    end
+    local state = EnsureStateShape(db.chars[ownerKey])
+    db.chars[ownerKey] = state
+    -- Any authorized write invalidates the read snapshot.
+    -- MASTER-RC-001. Invalidate on a real CONTENT change, not merely because
+    -- the mutation route was taken. Measured: the dominant callers of this
+    -- entry write nothing at all -- AutoLockBucket(false) only returns the
+    -- existing sub-table, and `x = x or {}` is a no-op once initialized -- yet
+    -- unconditional invalidation made every such call churn the read snapshot
+    -- and rebuild every identity-based production cache. A read must not force
+    -- an invalidation, which is the same rule the snapshot already applies to
+    -- Store.State itself.
+    local cached = (stateSnapshotOwner == ownerKey and stateSnapshotDb == db
+        and stateSnapshotSource == state) and stateSnapshot or nil
+    local results = {mutator(state)}
+    if cached == nil or not SameAsSnapshot(cached, state) then
+        InvalidateStateSnapshot()
+    end
+    return true, unpack(results)
+end
+
 function Store.State()
     local ownerKey = CurrentIdentity()
     local db = NexusDB
     if not ownerKey or not db or HasFutureSettingsOwner(db)
         or type(db.chars) ~= "table" then
+        -- The transient row is returned LIVE and identical across calls, on
+        -- purpose. It is session scratch that is "deliberately never merged
+        -- into the persisted store", so it is not durable authority and the
+        -- DURABLE_READ defensive-copy requirement does not reach it. An
+        -- existing contract test asserts that identity directly
+        -- (tests/run_store_contract_characterization.lua:34-40: repeated
+        -- pre-init access must return the same table and must not create
+        -- persisted state). Copying here was an over-reach beyond the ruling,
+        -- caught by that test, and is not repeated.
         transientState = transientState or FreshState()
         return transientState
     end
-    local state = db.chars[ownerKey]
-    state = EnsureStateShape(state)
-    db.chars[ownerKey] = state
-    Store.RegisterCurrentCharacter()
-    return state
+    -- MASTER-RC-001, sixth consultation + amendment 10. All THREE violations
+    -- this function carried are now repaired, and it is a pure DURABLE_READ:
+    --
+    --   1. the Store.RegisterCurrentCharacter() call is REMOVED. Store.State is
+    --      classified DURABLE_READ and RegisterCurrentCharacter DURABLE_MUTATION
+    --      (line ~1888); a read may not call, begin, pump, drain, or silently
+    --      enqueue an ordinary mutation while presenting as a plain read.
+    --      MASTER-RC-009's accepted exception is narrower -- it permits
+    --      recording a non-authorizing rebind request, not causing an
+    --      independent business mutation. Ordinary registration is now triggered
+    --      by core/MainLifecycle.lua post-readiness (architecture 1198-1206).
+    --   2. EnsureStateShape no longer mutates the durable row: it shapes the
+    --      detached snapshot instead.
+    --   3. the `db.chars[ownerKey] = state` direct durable write is REMOVED
+    --      (line 392: "Never mutate a live nested bundle field"; RAW-01's RED
+    --      condition for a transaction writing a nested/live authority field).
+    --      The row is created and written only by
+    --      StoreAuthorityOwnerV1.UpdateStateV1, the counted private entry.
+    --
+    -- The return is a detached defensive copy, so a caller mutating it cannot
+    -- reach durable state. All 32 former write-through call sites were migrated
+    -- to UpdateStateV1 under amendment 10 before this flip, so no write is
+    -- silently discarded.
+    local source = db.chars[ownerKey]
+    if stateSnapshot ~= nil and stateSnapshotOwner == ownerKey
+        and stateSnapshotDb == db and stateSnapshotRevision == stateRevision
+        and stateSnapshotSource == source then
+        return stateSnapshot
+    end
+    local snapshot = EnsureStateShape(DeepCopy(source))
+    stateSnapshot, stateSnapshotOwner = snapshot, ownerKey
+    stateSnapshotDb, stateSnapshotRevision = db, stateRevision
+    stateSnapshotSource = source
+    return snapshot
 end

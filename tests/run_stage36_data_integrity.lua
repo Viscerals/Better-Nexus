@@ -102,7 +102,14 @@ local function ResetSync(database)
     NexusDB = database or {communityBuilds={},syncTombstones={}}
     H.sentChatMessages = {}
     H.joinedChannels = {}
+    -- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+    -- longer admit the catalog root as a side effect. The same admission is
+    -- performed explicitly here, before the call, because the removed side
+    -- effect ran inside Init ahead of Init's own dependent steps. No assertion
+    -- or expected value in this fixture is changed.
+    H.AdmitCatalogV1(NexusDB)
     DPS.Init({}, Sync)
+    H.AdmitCatalogV1(NexusDB)
     Sync.Init(Codec, {})
     Control(Sync.IsConnected(), "Sync fixture joined its named channel")
     return NexusDB
@@ -193,7 +200,13 @@ for _, case in ipairs(replacementCases) do
     Catalog.Init(db, Nexus.BundledBuilds)
     Control(Catalog.Put(BuildRecord(id, completeEchoes, 1)) == true,
         case.name .. " setup stored complete record")
-    local rawIdentity = db.communityBuilds[id]
+    -- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 394 and
+    -- 4849). The durable row is the bundle's payload row; `db.communityBuilds`
+    -- is the preserved PR #68 bootstrap input and takes no ordinary write.
+    local legacyBacking = db.communityBuilds
+    local bundleBefore = rawget(db, "authorityBundle")
+    local backing = H.DurableBuilds(db)
+    local rawIdentity = backing[id]
     local warmSummary = Catalog.GetSummary(id)
     Control(warmSummary and warmSummary.ordinaryComplete == true
             and Catalog.FindExactFingerprintId(completeFingerprint) == id
@@ -201,17 +214,33 @@ for _, case in ipairs(replacementCases) do
         case.name .. " setup warmed complete summary/index/Sync state")
     if case.refused then
         local refusedOk, refusedWhy = Catalog.Put(BuildRecord(id, case.echoes, 2))
+        -- A refused candidate performs no durable payload write at all, so the
+        -- bundle pointer, its payload map, and the row are all unchanged.
         Control(refusedOk == false and refusedWhy == case.refused
-                and db.communityBuilds[id] == rawIdentity
+                and rawget(db, "authorityBundle") == bundleBefore
+                and H.DurableBuilds(db) == backing
+                and H.DurableBuilds(db)[id] == rawIdentity
+                and db.communityBuilds == legacyBacking
                 and Catalog.GetSummary(id).ordinaryComplete == true
                 and Catalog.FindExactFingerprintId(completeFingerprint) == id,
             case.name .. " replacement was admitted or disturbed the complete record")
     else
+        -- Architecture 3b5de54f, MASTER-RC-001/RC-002: a successful update
+        -- replaces one complete bundle pointer, so its payload map and the row
+        -- are both replacements while the superseded graph stays byte-exact and
+        -- the preserved legacy input is never written.
+        local previousEchoes = rawIdentity.echoes
         Control(Catalog.Put(BuildRecord(id, case.echoes, 2)) == true
-                and db.communityBuilds[id] == rawIdentity,
-            case.name .. " replacement preserved the legacy SavedVariables table identity")
+                and rawget(db, "authorityBundle") ~= bundleBefore
+                and H.DurableBuilds(db) ~= backing
+                and H.DurableBuilds(db)[id] ~= rawIdentity
+                and backing[id] == rawIdentity
+                and rawIdentity.echoes == previousEchoes
+                and db.communityBuilds == legacyBacking
+                and next(legacyBacking) == nil,
+            case.name .. " replacement preserved the superseded durable graph")
         local public = Catalog.Get(id)
-        local verdict = Evidence.OrdinaryCompleteness(db.communityBuilds[id])
+        local verdict = Evidence.OrdinaryCompleteness(H.DurableBuilds(db)[id])
         Control(public and public.ordinaryComplete == false
                 and verdict.complete == false and verdict.reason == case.reason,
             case.name .. " authoritative evidence sees the replacement")
@@ -229,7 +258,7 @@ for _, case in ipairs(replacementCases) do
 end
 
 -- Incomplete verdicts are deliberately not cached. The opposite transition
--- must remain immediately recoverable even though the durable table is reused.
+-- must remain immediately recoverable after a detached durable-row replacement.
 do
     local id = "same-table-recovered"
     local db = {communityBuilds={},syncTombstones={}}
@@ -237,11 +266,16 @@ do
     Catalog.Init(db, Nexus.BundledBuilds)
     Control(Catalog.Put(BuildRecord(id, {}, 1)) == true,
         "incomplete setup stored")
-    local rawIdentity = db.communityBuilds[id]
+    local legacyBacking = db.communityBuilds
+    local backing = H.DurableBuilds(db)
+    local rawIdentity = backing[id]
     Control(Catalog.GetSummary(id).ordinaryComplete == false,
         "incomplete setup was characterized before recovery")
     Control(Catalog.Put(BuildRecord(id, completeEchoes, 2)) == true
-            and db.communityBuilds[id] == rawIdentity,
+            and H.DurableBuilds(db) ~= backing
+            and H.DurableBuilds(db)[id] ~= rawIdentity
+            and backing[id] == rawIdentity
+            and db.communityBuilds == legacyBacking and next(legacyBacking) == nil,
         "incomplete-to-complete replacement reused its table")
     local summary = Catalog.GetSummary(id)
     Control(summary and summary.ordinaryComplete == true
@@ -512,6 +546,7 @@ clock = clock + 100
 NexusDB = futureDb
 H.sentChatMessages = {}
 H.joinedChannels = {}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 Control(Sync.IsConnected(),
     "future-schema Sync fixture joined its named channel")
@@ -734,10 +769,12 @@ do
     NexusDB = opaqueDpsDb
     H.sentChatMessages = {}
     H.joinedChannels = {}
+    H.AdmitCatalogV1(NexusDB)
     DPS.Init({}, Sync)
     Desired("storage", opaqueDpsDb.dpsCapture == opaqueDpsIdentity
             and Codec.JSONEncode(opaqueDpsDb) == opaqueDpsBytes,
         "DPS.Init normalized an opaque future-owned DPS table")
+    H.AdmitCatalogV1(NexusDB)
     Sync.Init(Codec, {})
     Control(Catalog.Status().readOnly == true and Sync.IsConnected(),
         "opaque future-DPS fixture reached connected read-only Sync")
@@ -775,6 +812,7 @@ do
     NexusDB = opaqueTombstoneDb
     H.sentChatMessages = {}
     H.joinedChannels = {}
+    H.AdmitCatalogV1(NexusDB)
     Sync.Init(Codec, {})
     Control(Catalog.Status().readOnly == true and Sync.IsConnected(),
         "opaque future-tombstone fixture reached connected read-only Sync")
@@ -1025,6 +1063,7 @@ Desired("provenance", takeover and takeover.author == "Origin"
         and takeover.ownerVerified == false,
     "different direct sender promoted an unverified relayed ID to verified ownership")
 
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 local dpsEchoes = {{spellId=650100,stacks=1}}
 local dpsFingerprint = DPS.GetEchoKey(dpsEchoes)
@@ -1108,6 +1147,7 @@ local communityDb = {
 }
 NexusDB = communityDb
 Catalog.Init(communityDb, Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, nil)
 local communityBroadcasts = {}
 Nexus.Sync = {
@@ -1197,6 +1237,7 @@ UnitClass = function() return "Mage", "MAGE" end
 local savedDb = {communityBuilds={},syncTombstones={},dpsCapture={}}
 NexusDB = savedDb
 Catalog.Init(savedDb, Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, nil)
 Nexus.Sync = {
     IsReceiving=function() return false end,
@@ -1241,8 +1282,8 @@ Control(PumpSavedImport("complete Saved Build import") == 2,
     "complete Saved Build setup stored both mirrors")
 local lockedSavedId = "saved-savedowner-1"
 local malformedSavedId = "saved-savedowner-2"
-local lockedSavedIdentity = savedDb.communityBuilds[lockedSavedId]
-local malformedSavedIdentity = savedDb.communityBuilds[malformedSavedId]
+local lockedSavedIdentity = H.DurableBuilds(savedDb)[lockedSavedId]
+local malformedSavedIdentity = H.DurableBuilds(savedDb)[malformedSavedId]
 Control(lockedSavedIdentity and malformedSavedIdentity
         and Catalog.GetSummary(lockedSavedId).ordinaryComplete == true
         and Catalog.GetSummary(malformedSavedId).ordinaryComplete == true
@@ -1281,13 +1322,13 @@ Desired("replacement", lockedSaved == nil
         and lockedSavedSummary == nil
         and lockedSavedState.delta == nil
         and projectedSaved[lockedSavedId] == nil
-        and savedDb.communityBuilds[lockedSavedId] ~= lockedSavedIdentity,
+        and H.DurableBuilds(savedDb)[lockedSavedId] ~= lockedSavedIdentity,
     "complete-to-locked Saved Build retained stale summary/spell evidence")
 Desired("replacement", malformedSaved == nil
         and malformedSavedSummary == nil
         and malformedSavedState.delta == nil
         and projectedSaved[malformedSavedId] == nil
-        and savedDb.communityBuilds[malformedSavedId] ~= malformedSavedIdentity,
+        and H.DurableBuilds(savedDb)[malformedSavedId] ~= malformedSavedIdentity,
     "complete-to-malformed Saved Build retained stale summary/spell evidence")
 Desired("replacement", type(savedRows) == "table" and #savedRows == 0
         and savedProjection and savedProjection.ready == 0
@@ -1305,6 +1346,7 @@ UnitClass = function() return "Mage", "MAGE" end
 local claimDb = {communityBuilds={},syncTombstones={},dpsCapture={}}
 NexusDB = claimDb
 Catalog.Init(claimDb, Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, nil)
 local victimId = "victim-incomplete-build"
 Control(Catalog.Put({
@@ -1314,7 +1356,7 @@ Control(Catalog.Put({
     }) == true
         and Catalog.GetSummary(victimId).ordinaryComplete == false,
     "ownerless DPS collision setup stored an incomplete victim build")
-local victimIdentity = claimDb.communityBuilds[victimId]
+local victimIdentity = H.DurableBuilds(claimDb)[victimId]
 local claimCommunity = Nexus.CommunityInternals.Controller.New({
     catalog=function() return Catalog end,
     notify=function() end,
@@ -1348,9 +1390,9 @@ Desired("provenance", claimantRow and claimantRow.ownerVerified == true
         and claimantBuild and claimantBuild.author == "DpsClaimant"
         and claimantBuild.ownerVerified == true
         and claimantBuild.ordinaryComplete == true
-        and claimDb.communityBuilds[victimId] == victimIdentity
-        and type(claimDb.communityBuilds[victimId].echoes) == "table"
-        and #claimDb.communityBuilds[victimId].echoes == 0
+        and H.DurableBuilds(claimDb)[victimId] == victimIdentity
+        and type(H.DurableBuilds(claimDb)[victimId].echoes) == "table"
+        and #H.DurableBuilds(claimDb)[victimId].echoes == 0
         and victimAfterClaim and victimAfterClaim.ordinaryComplete == false
         and Catalog.GetSummary(victimId).ordinaryComplete == false,
     "ownerless direct DPS hydrated another author's incomplete build ID")

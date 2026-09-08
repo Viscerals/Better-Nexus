@@ -107,7 +107,7 @@ local function EchoKey(values)
 end
 
 NexusDB = {settings={},chars={},futureRoot={keep=true}}
-Nexus.Store.Init()
+H.BootstrapStore()
 Nexus.LoadoutEvidence.Init(NexusDB)
 
 local catalog = {rows={},familyOf={}}
@@ -199,7 +199,12 @@ Adapter.SetFirstLoadoutWishlistIdentity = function()
 end
 Adapter.PresentationRevisions = function() return 0,0,0,0,0 end
 
-local character = Nexus.Store.State()
+-- MASTER-RC-001: Store.State() now returns a defensive copy, so a value
+-- captured once no longer aliases later writes. H.LiveStoreStateV1()
+-- re-resolves at the point of every access through the authorized
+-- StoreAuthorityOwnerV1.UpdateStateV1 entry. Only the read timing changes;
+-- every assertion below is unchanged.
+local character = H.LiveStoreStateV1()
 character.lockDesignTargetsBySlot = {
     unrelated={ [299999]=true, future={keep=true} },
 }

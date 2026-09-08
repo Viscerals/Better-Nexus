@@ -9,17 +9,65 @@
 -- mutated before a complete candidate commits.
 
 Nexus = Nexus or {}
+-- MASTER-RC-003: LoadoutEvidence owns the canonical evidence-union identity and
+-- loads before this module (Nexus.toc 22 before 25).
+local Evidence = assert(Nexus.LoadoutEvidence,
+    "Nexus LoadoutEvidence must load before BuildCatalog")
 local Identity = assert(Nexus.Identity,
     "Nexus Identity must load before BuildCatalog")
 local Catalog = {}
 Nexus.BuildCatalog = Catalog
 
 local STORAGE_SCHEMA_VERSION = 1
+
+------------------------------------------------------------------------
+-- Durable authority kernel (MASTER-RC-001).
+--
+-- The accepted architecture at 3b5de54f names exactly one durable authority
+-- payload slot, `authorityDatabase.authorityBundle`, written only by
+-- AuthorityCommitCoordinatorV1 as one complete detached bundle, and exactly one
+-- public authority pointer, `currentServingRoot`, written only by
+-- AuthorityServingRootWriterV1 in two closed modes. Both live here.
+------------------------------------------------------------------------
+
+-- "Every durable generation or revision is an unsigned exact Lua 5.1 integer in
+-- 0..9,007,199,254,740,991."
+local GENERATION_MAXIMUM = 9007199254740991
+local BUNDLE_SCHEMA_VERSION = 1
+
+-- AuthorityDurableBundleV1. The order is the architecture's field order; the
+-- catalog domain owns the first four, LoadoutEvidence owns the fifth, and the
+-- remaining five are carried as complete detached snapshots until their own
+-- owners route their writes through this coordinator.
+local BUNDLE_PAYLOAD_FIELDS = {
+    "communityBuilds", "syncTombstones", "buildCatalog",
+    "communityRetentionEvictions", "loadoutEvidence", "dpsCapture",
+    "dpsAuthority", "storeData", "dataRetention", "dataCompaction",
+}
+local BUNDLE_CATALOG_MAPS = {
+    communityBuilds=true, syncTombstones=true, communityRetentionEvictions=true,
+}
+local BUNDLE_KNOWN_FIELDS = {schemaVersion=true, transactionGeneration=true}
+for _, field in ipairs(BUNDLE_PAYLOAD_FIELDS) do BUNDLE_KNOWN_FIELDS[field] = true end
+
+-- One shared immutable marker fills every domain field of an invalid serving
+-- root. "Neither form uses absent/nil fields as state."
+local INVALID_AUTHORITY_DOMAIN = {}
+
+-- The six cursor families below share one bounded stale-sentinel cap.
+local CURSOR_FAMILIES = {
+    "record", "summary", "delta", "savedMirror", "diagnostic", "related",
+}
 local TOMBSTONE_SCHEMA_VERSION = 1
 local BARRIER_SCHEMA_VERSION = 1
 local TOMBSTONE_AGE = 180 * 24 * 60 * 60
 local BARRIER_AGE = 30 * 24 * 60 * 60
 local MAX_SAFE_INTEGER = 9007199254740991
+-- Architecture 3b5de54f lines 1022-1060. This is the exact Pbuild ledger,
+-- including the start-token capture pump and every named and derived frontier
+-- term. Fixture drivers read it from Catalog.Budget instead of fitting a bound
+-- to the bundled data set.
+local ADMISSION_MAX_PUMPS = 58622488
 
 -- CATALOG_AUTHORITY_BUDGET_V1: complete-root totals.
 local BUDGET = {
@@ -134,6 +182,11 @@ local BARRIER_V1_FIELDS = {
     receiptRevision=true, receiptAtServerTime=true,
 }
 
+-- A missing optional release bundle is one stable empty source. A fresh table
+-- per Init call would change the source identity and restart any multi-slice
+-- admission before its persistent frontier could complete.
+local EMPTY_BUNDLED = {builds={}}
+
 ------------------------------------------------------------------------
 -- Module state (one table keeps every closure inside the Lua 5.1 upvalue
 -- limit). Nothing here is ever stored in SavedVariables.
@@ -142,7 +195,16 @@ local BARRIER_V1_FIELDS = {
 local ST = {
     db=nil, bundled=nil, baseline=nil,
     rootState="ROOT_UNBOUND", rootReason=nil,
-    published=nil, candidate=nil, futureToken=nil,
+    -- currentServingRoot is the sole public authority pointer. ST.published is
+    -- deliberately gone: every reader goes through ServingCatalogRoot().
+    currentServingRoot=nil, servingGeneration=0,
+    -- The exact selected durable bundle and its durable transaction generation.
+    durableBundle=nil, durableBundleGeneration=0,
+    -- AUTHORITY_GENERATION_EXHAUSTED is an outer deny-only latch with precedence
+    -- over every root/domain/API state. It is session state; a reload re-detects
+    -- the maximum durable counter during bundle admission.
+    exhausted=false,
+    candidate=nil, futureToken=nil,
     bindingGeneration=0, committedMutationRevision=0, preparationEpoch=0,
     reservationEpoch=0, semanticGeneration=0, generation=0,
     sessionTombstones=setmetatable({}, {__mode="k"}),
@@ -152,7 +214,6 @@ local ST = {
     cursorRegistry=setmetatable({}, {__mode="k"}), activeCursors={},
     cursorSequence=0,
     maintenanceRegistry=setmetatable({}, {__mode="k"}), activeMaintenance=nil,
-    faultInjector=nil,
     recordEpoch=0, exactEpoch=0, exactRevisionClock=0,
     recordRevisions={}, exactRevisions={},
     trustedHigh=nil, trustedUntrusted=false,
@@ -170,8 +231,14 @@ local ST = {
         identityRawHits=0, identityFingerprintHits=0,
         ownerClassLookups=0, ownerClassHits=0, ownerClassConflicts=0,
         rootAdmissions=0, rootPumps=0, commits=0, protectedFailures=0,
-        notificationFailures=0, maintenanceCommits=0, claimsIssued=0,
+        notificationFailures=0, notificationReplays=0,
+        notificationReplaysStale=0,
+        maintenanceCommits=0, claimsIssued=0,
         cursorsBegun=0, driftInvalidations=0,
+        bundleWrites=0, servingSwaps=0, cursorSentinels=0,
+        cursorRowsInspected=0, maxCursorRowsPerCall=0,
+        cursorCopyNodes=0, cursorCopyBytes=0, cursorCopyPending=0,
+        maxCursorCopyNodesPerCall=0, maxCursorCopyBytesPerCall=0,
     },
 }
 
@@ -239,20 +306,11 @@ end
 
 -- Collision-free typed identity: numeric 1 and string "1" occupy different
 -- local slots through every index, cursor, snapshot, and reload.
+-- MASTER-RC-012: the one canonical codec now lives in core/Identity.lua and is
+-- shared with every other typed-identity consumer. The returned strings are
+-- byte-identical to the private codec this replaced.
 local function TypedKey(id)
-    local kind = type(id)
-    if kind == "number" then
-        if not FiniteInteger(id, 1, 2147483647) then
-            return nil, "INVALID_TYPED_ID"
-        end
-        return "n:" .. string.format("%d", id), "number"
-    elseif kind == "string" then
-        if #id < 1 or #id > BUDGET.keyWidth or id:find("[%c]") then
-            return nil, "INVALID_TYPED_ID"
-        end
-        return "s:" .. #id .. ":" .. id, "string"
-    end
-    return nil, "INVALID_TYPED_ID"
+    return Identity.TypedKey(id, BUDGET.keyWidth)
 end
 
 local function CompareSlots(left, right)
@@ -274,25 +332,11 @@ local function CompareStrings(left, right)
     return left < right and -1 or 1, math.min(#left, #right) + 1
 end
 
+-- MASTER-RC-003: the canonical union rule lives in LoadoutEvidence. This used
+-- to rank tuples by their source array, so the same semantic tuple carried in
+-- both the inline and locked arrays became two members instead of one.
 local function CompareTuples(left, right)
-    local bytes = 30
-    if left.spellId ~= right.spellId then
-        return left.spellId < right.spellId and -1 or 1, bytes
-    end
-    if left.quality ~= right.quality then
-        return left.quality < right.quality and -1 or 1, bytes
-    end
-    local leftLocked, rightLocked = left.locked and true or false,
-        right.locked and true or false
-    if leftLocked ~= rightLocked then
-        return leftLocked and 1 or -1, bytes
-    end
-    local leftOrigin = left.origin == "lockedArray" and 1 or 0
-    local rightOrigin = right.origin == "lockedArray" and 1 or 0
-    if leftOrigin ~= rightOrigin then
-        return leftOrigin < rightOrigin and -1 or 1, bytes
-    end
-    return 0, bytes
+    return Evidence.CanonicalTupleOrder(left, right), 30
 end
 
 local function TrustedServerTime()
@@ -1327,10 +1371,14 @@ local function FinishRowVerdict(walker, slot, source, options)
     verdict.relatedFingerprint = derived.computedFingerprint or derived.exactFingerprint
     verdict.savedKind = Identity.SavedMirrorKind(snapshot)
     verdict.verifiedOwner = Identity.VerifiedOwnerKey(snapshot)
-    -- Package authority: an immutable bundled row's coherent owner tuple is
-    -- trusted for delete ownership even without a verification flag.
-    verdict.trustedOwner = verdict.verifiedOwner
-        or (source == "bundled" and Identity.CoherentRecordOwnerKey(snapshot)) or nil
+    -- MASTER-RC-004. A bundled row's coherent owner tuple is NOT delete
+    -- authority. Architecture 3b5de54f line 193: "Bundled package row | Content
+    -- fields and immutable bundled source position only. ... Bundled author text
+    -- never proves local ownership." Line 188 makes ownerVerified, isMine and
+    -- provenance fields "claims, not proof", and line 202 requires internally
+    -- coherent spoofed tuples to obtain "zero verified-owner or mutation
+    -- privilege". Only a derived verified owner carries authority, so the
+    -- separate trusted-owner concept is removed rather than narrowed.
     if verdict.savedKind == "invalid" then
         verdict.state, verdict.reason = "INVALIDATED", "MALFORMED_ROW"
         verdict.snapshot = nil
@@ -1365,9 +1413,50 @@ local function AuthorKey(value)
         or (value:match("^([^-]+)") or value):lower()
 end
 
+-- The related/exact index is part of the published root, so a replacement root
+-- must not mutate the index a superseded root still references (MASTER-RC-001,
+-- MASTER-RC-002). CloneIndex copies only the eight top-level maps; every bucket
+-- below them is shared until a write touches it, and `owned` records the buckets
+-- this index may mutate in place.
+local INDEX_MAPS = {
+    "exact", "fingerprints", "titles", "spells", "saved",
+    "ownerClasses", "authors", "memberships",
+}
+
 local function NewIndex()
-    return {exact={}, fingerprints={}, titles={}, spells={}, saved={},
-        ownerClasses={}, authors={}, memberships={}}
+    return {owned={}, exact={}, fingerprints={}, titles={}, spells={},
+        saved={}, ownerClasses={}, authors={}, memberships={}}
+end
+
+local function CloneIndex(index)
+    local out = {owned={}}
+    for _, name in ipairs(INDEX_MAPS) do
+        local copy = {}
+        for key, value in pairs(index[name]) do copy[key] = value end
+        out[name] = copy
+    end
+    return out
+end
+
+-- Copy-on-write: a bucket created under an earlier index is shared with a
+-- superseded root, so it is cloned before the first mutation in this index.
+local function OwnBucket(index, map, bucketKey)
+    if bucketKey == nil then return nil end
+    local bucket = map[bucketKey]
+    if bucket == nil or index.owned[bucket] then return bucket end
+    local copy = {}
+    for key, value in pairs(bucket) do
+        if key == "ids" or key == "classes" or key == "idVector" then
+            local inner = {}
+            for innerKey, innerValue in pairs(value) do inner[innerKey] = innerValue end
+            copy[key] = inner
+        else
+            copy[key] = value
+        end
+    end
+    index.owned[copy] = true
+    map[bucketKey] = copy
+    return copy
 end
 
 local function BetterExactCandidate(id, verdict, currentId, currentVerdict)
@@ -1380,7 +1469,7 @@ end
 
 local function RecomputeExactWinner(rows, bucket)
     bucket.winnerKey, bucket.winnerId = nil, nil
-    for key in pairs(bucket.ids) do
+    for _, key in ipairs(bucket.idVector) do
         local verdict = rows[key]
         if verdict and verdict.snapshot then
             if BetterExactCandidate(verdict.id, verdict, bucket.winnerId,
@@ -1391,17 +1480,28 @@ local function RecomputeExactWinner(rows, bucket)
     end
 end
 
-local function AddBucket(map, bucketKey, key, work)
+local function AddBucket(index, map, bucketKey, key, work, rows)
     if not bucketKey then return nil end
-    local bucket = map[bucketKey]
+    local bucket = OwnBucket(index, map, bucketKey)
     if not bucket then
-        bucket = {ids={}, count=0}
+        bucket = {ids={}, idVector={}, count=0}
+        index.owned[bucket] = true
         map[bucketKey] = bucket
         if work then Charge(work, "indexNodes", 1) end
     end
     if not bucket.ids[key] then
         bucket.ids[key] = true
         bucket.count = bucket.count + 1
+        local position = #bucket.idVector + 1
+        if not work then
+            for index = 1, #bucket.idVector do
+                if CompareSlots(rows[key], rows[bucket.idVector[index]]) < 0 then
+                    position = index
+                    break
+                end
+            end
+        end
+        table.insert(bucket.idVector, position, key)
         if work then
             Charge(work, "indexEdges", 1)
             Charge(work, "indexBytes", #bucketKey + 18)
@@ -1410,12 +1510,15 @@ local function AddBucket(map, bucketKey, key, work)
     return bucket
 end
 
-local function RemoveBucket(map, bucketKey, key)
-    local bucket = bucketKey and map[bucketKey]
+local function RemoveBucket(index, map, bucketKey, key)
+    local bucket = bucketKey and OwnBucket(index, map, bucketKey) or nil
     if not bucket then return end
     if bucket.ids[key] then
         bucket.ids[key] = nil
         bucket.count = math.max(0, bucket.count - 1)
+        for index, existing in ipairs(bucket.idVector) do
+            if existing == key then table.remove(bucket.idVector, index); break end
+        end
     end
     if bucket.count == 0 then map[bucketKey] = nil end
 end
@@ -1423,22 +1526,24 @@ end
 local function IndexRemove(index, rows, key)
     local membership = index.memberships[key]
     if not membership then return end
-    local exactBucket = membership.exact and index.exact[membership.exact]
+    local exactBucket = membership.exact
+        and OwnBucket(index, index.exact, membership.exact) or nil
     if exactBucket and exactBucket.ids[key] then
         local field = membership.exactAuto and "autoCount" or "explicitCount"
         exactBucket[field] = math.max(0, (exactBucket[field] or 0) - 1)
     end
-    RemoveBucket(index.exact, membership.exact, key)
+    RemoveBucket(index, index.exact, membership.exact, key)
     if exactBucket and index.exact[membership.exact] and exactBucket.winnerKey == key then
         RecomputeExactWinner(rows, exactBucket)
     end
-    RemoveBucket(index.fingerprints, membership.fingerprint, key)
-    RemoveBucket(index.titles, membership.title, key)
-    RemoveBucket(index.saved, membership.saved, key)
+    RemoveBucket(index, index.fingerprints, membership.fingerprint, key)
+    RemoveBucket(index, index.titles, membership.title, key)
+    RemoveBucket(index, index.saved, membership.saved, key)
     for _, spellKey in ipairs(membership.spells or {}) do
-        RemoveBucket(index.spells, spellKey, key)
+        RemoveBucket(index, index.spells, spellKey, key)
     end
-    local owner = membership.classOwner and index.ownerClasses[membership.classOwner]
+    local owner = membership.classOwner
+        and OwnBucket(index, index.ownerClasses, membership.classOwner) or nil
     if owner and owner.ids[key] then
         local class = owner.ids[key]
         owner.ids[key] = nil
@@ -1448,7 +1553,7 @@ local function IndexRemove(index, rows, key)
         if owner.count <= 0 then index.ownerClasses[membership.classOwner] = nil end
     end
     if membership.author then
-        local authorBucket = index.authors[membership.author]
+        local authorBucket = OwnBucket(index, index.authors, membership.author)
         if authorBucket then
             authorBucket[key] = nil
             if next(authorBucket) == nil then index.authors[membership.author] = nil end
@@ -1465,7 +1570,7 @@ local function IndexAdd(index, rows, verdict, work)
     local savedKind = verdict.savedKind
     local exact = savedKind == "ordinary" and verdict.complete
         and verdict.exactFingerprint or nil
-    local exactBucket = AddBucket(index.exact, exact, key, work)
+    local exactBucket = AddBucket(index, index.exact, exact, key, work, rows)
     membership.exact = exact
     membership.exactAuto = snapshot.autoDps == true
     if exactBucket then
@@ -1479,9 +1584,10 @@ local function IndexAdd(index, rows, verdict, work)
     if savedKind == "ordinary" and verdict.verifiedOwner then
         local class = NormalizedClass(snapshot.class)
         if class then
-            local owner = index.ownerClasses[verdict.verifiedOwner]
+            local owner = OwnBucket(index, index.ownerClasses, verdict.verifiedOwner)
             if not owner then
                 owner = {ids={}, classes={}, count=0}
+                index.owned[owner] = true
                 index.ownerClasses[verdict.verifiedOwner] = owner
             end
             if owner.ids[key] == nil then
@@ -1495,8 +1601,13 @@ local function IndexAdd(index, rows, verdict, work)
     end
     local authorKey = AuthorKey(snapshot.author)
     if authorKey then
-        index.authors[authorKey] = index.authors[authorKey] or {}
-        index.authors[authorKey][key] = true
+        local authorBucket = OwnBucket(index, index.authors, authorKey)
+        if not authorBucket then
+            authorBucket = {}
+            index.owned[authorBucket] = true
+            index.authors[authorKey] = authorBucket
+        end
+        authorBucket[key] = true
         membership.author = authorKey
         if work then Charge(work, "indexEdges", 1) end
     end
@@ -1504,7 +1615,7 @@ local function IndexAdd(index, rows, verdict, work)
     if author ~= "" then
         if savedKind == "saved" then
             membership.saved = RelatedKey(author, "saved")
-            AddBucket(index.saved, membership.saved, key, work)
+            AddBucket(index, index.saved, membership.saved, key, work, rows)
         else
             local fingerprint = verdict.relatedFingerprint
             membership.fingerprint = RelatedKey(author, fingerprint)
@@ -1516,11 +1627,11 @@ local function IndexAdd(index, rows, verdict, work)
                 local spellKey = RelatedKey(author, tostring(spellId))
                 if spellKey then
                     membership.spells[#membership.spells + 1] = spellKey
-                    AddBucket(index.spells, spellKey, key, work)
+                    AddBucket(index, index.spells, spellKey, key, work, rows)
                 end
             end
-            AddBucket(index.fingerprints, membership.fingerprint, key, work)
-            AddBucket(index.titles, membership.title, key, work)
+            AddBucket(index, index.fingerprints, membership.fingerprint, key, work, rows)
+            AddBucket(index, index.titles, membership.title, key, work, rows)
         end
     end
     index.memberships[key] = membership
@@ -1530,13 +1641,443 @@ end
 -- Root token, drift detection, published root
 ------------------------------------------------------------------------
 
-local function CaptureToken(db)
+------------------------------------------------------------------------
+-- Generation domain (MASTER-RC-007)
+------------------------------------------------------------------------
+
+-- An unsigned exact Lua 5.1 integer in 0..GENERATION_MAXIMUM. A negative,
+-- fractional, nonfinite, larger, or non-numeric value is malformed
+-- current-schema evidence, never a current counter.
+local function ExactGeneration(value)
+    if type(value) ~= "number" then return false end
+    if value ~= value then return false end
+    if value == math.huge or value == -math.huge then return false end
+    if value < 0 or value > GENERATION_MAXIMUM then return false end
+    return math.floor(value) == value
+end
+
+-- Latch the outer deny-only state. It publishes no candidate, permits no read
+-- that can grant authority, and is never cleared by byte equality: only a fresh
+-- session (module reload) plus a durable counter below the maximum clears it.
+local function LatchGenerationExhausted()
+    ST.exhausted = true
+    ST.rootState = "AUTHORITY_GENERATION_EXHAUSTED"
+    ST.rootReason = "GENERATION_EXHAUSTED"
+    ST.candidate = nil
+    ST.activeClaim = nil
+    ST.activeCursors = {}
+    ST.activeMaintenance = nil
+    ST.cursorRegistry = setmetatable({}, {__mode="k"})
+end
+
+-- True when the named counter cannot take one more required increment. The
+-- check runs before the increment, never after it.
+local function IncrementWouldExhaust(...)
+    for index = 1, select("#", ...) do
+        local value = select(index, ...)
+        if not ExactGeneration(value) or value >= GENERATION_MAXIMUM then
+            return true
+        end
+    end
+    return false
+end
+
+------------------------------------------------------------------------
+-- AuthorityServingRootWriterV1 (MASTER-RC-001)
+--
+-- The sole serving-location writer, with exactly two closed assignment modes:
+-- one initial invalid-bootstrap install and one protected final
+-- replacement-or-sentinel swap. Every other assignment site is forbidden, and
+-- the pointer never enters SavedVariables.
+------------------------------------------------------------------------
+
+local function NewServingRoot(catalogRoot, durableBundleGeneration)
     return {
-        databaseIdentity=db, overlayIdentity=rawget(db, "communityBuilds"),
-        tombstoneIdentity=rawget(db, "syncTombstones"),
-        metadataIdentity=rawget(db, "buildCatalog"),
-        evictionIdentity=rawget(db, "communityRetentionEvictions"),
-        bundledIdentity=ST.bundled, baselineIdentity=ST.baseline,
+        catalogRoot=catalogRoot,
+        dpsRoot=INVALID_AUTHORITY_DOMAIN,
+        evidenceRoot=INVALID_AUTHORITY_DOMAIN,
+        providerRegistryRoot=INVALID_AUTHORITY_DOMAIN,
+        durableBundleGeneration=durableBundleGeneration or 0,
+        generation=0,
+    }
+end
+
+-- InvalidBootstrapServingRootV1 and the ordinary invalid sentinel share one
+-- shape: all four domain fields reference the same immutable marker.
+local function NewInvalidServingRoot()
+    return NewServingRoot(INVALID_AUTHORITY_DOMAIN, 0)
+end
+
+local function AuthorityServingRootWriterV1(mode, serving)
+    if mode == "initial-invalid-install" then
+        if ST.currentServingRoot ~= nil then return false end
+        serving = NewInvalidServingRoot()
+        serving.generation = 0
+        ST.currentServingRoot = serving
+        return true
+    end
+    if mode ~= "final-swap" then return false end
+    if type(serving) ~= "table" then return false end
+    ST.servingGeneration = ST.servingGeneration + 1
+    serving.generation = ST.servingGeneration
+    ST.currentServingRoot = serving
+    ST.debugStats.servingSwaps = ST.debugStats.servingSwaps + 1
+    return true
+end
+
+-- MASTER-RC-001 REOPENED ELEMENT: serving publication order.
+-- Architecture 1517-1519 permits the final `currentServingRoot` swap only in
+-- `STORE_SERVING_PUBLICATION_PENDING`, after legacy disposition completes, and
+-- line 1715 says a bootstrap `Init` yields "only a detached bounded summary of
+-- the privately sealed generation; it becomes public only in the final
+-- all-domain serving publication."
+--
+-- While the startup coordinator holds the seal, a completed admission installs
+-- NO public pointer: the constructed serving root is retained privately in
+-- ST.sealedServing and swapped in only when the coordinator reaches its own
+-- serving-publication state. Outside bootstrap -- ordinary rebind, maintenance
+-- readmission, post-ready supersession -- nothing changes and the swap is
+-- immediate, so this narrows bootstrap only.
+--
+-- The coordinator owns the ordering: it opens and closes the seal through the
+-- two entries below. BuildCatalog never inspects coordinator state and never
+-- drives it, which keeps lines 1207-1211 satisfied.
+function Catalog.BeginBootstrapSealV1()
+    ST.bootstrapSeal = true
+    ST.sealedServing = nil
+    return true
+end
+
+function Catalog.PublishSealedServingV1()
+    ST.bootstrapSeal = nil
+    local sealed = ST.sealedServing
+    ST.sealedServing = nil
+    if type(sealed) ~= "table" then return false end
+    return AuthorityServingRootWriterV1("final-swap", sealed)
+end
+
+function Catalog.SealedServingPendingV1()
+    return ST.sealedServing ~= nil
+end
+
+-- Every consumer obtains the catalog root only through the serving pointer.
+-- There is no separately consumable public catalog pointer.
+local function ServingCatalogRoot()
+    local serving = ST.currentServingRoot
+    if type(serving) ~= "table" then return nil end
+    local root = serving.catalogRoot
+    if root == nil or root == INVALID_AUTHORITY_DOMAIN then return nil end
+    return root
+end
+
+-- Publish the ordinary invalid sentinel. This never restores slots and never
+-- republishes a prior token.
+local function PublishInvalidServing()
+    AuthorityServingRootWriterV1("final-swap", NewInvalidServingRoot())
+end
+
+------------------------------------------------------------------------
+-- AuthorityCommitCoordinatorV1 (MASTER-RC-001, MASTER-RC-005)
+--
+-- The sole durable writer of `authorityDatabase.authorityBundle`. It accepts
+-- only a complete detached AuthorityDurableBundleV1 and replaces the pointer
+-- exactly once; it never mutates a live nested bundle field.
+--
+-- Scope note, recorded rather than assumed: this slice implements the writer,
+-- the complete-bundle shape, the generation domain, and the serving pointer.
+-- Bundle-versus-legacy *read* precedence (the ordered Store selection table and
+-- the STORE_READY gate) belongs to the bootstrap element of MASTER-RC-001 owned
+-- by core/Store.lua and core/MainLifecycle.lua and is not closed here. Until it
+-- lands, the exact PR #68 locations remain the admission inputs and are kept
+-- byte-equal to the published bundle payload by the legacy compatibility mirror
+-- in CommitBatch. This is a bounded, disclosed remainder, not a downgrade.
+------------------------------------------------------------------------
+
+local function ShallowSnapshot(value)
+    if type(value) ~= "table" then return {} end
+    local out = {}
+    for key, child in pairs(value) do out[key] = child end
+    return out
+end
+
+-- The common raw bundle discriminator. It inspects only the slot's Lua type,
+-- metatable, raw schema discriminator, and generation domain, and never falls
+-- back to a legacy location once any nonnil bundle exists.
+local function ClassifyDurableBundle(db)
+    local raw = rawget(db, "authorityBundle")
+    if raw == nil then return "absent" end
+    if type(raw) ~= "table" or getmetatable(raw) ~= nil then
+        return "invalid", "AUTHORITY_BUNDLE_INVALID"
+    end
+    local version = rawget(raw, "schemaVersion")
+    if ExactGeneration(version) and version > BUNDLE_SCHEMA_VERSION then
+        return "future", "AUTHORITY_BUNDLE_FUTURE_SCHEMA", raw, version
+    end
+    if version ~= BUNDLE_SCHEMA_VERSION then
+        return "invalid", "AUTHORITY_BUNDLE_INVALID"
+    end
+    local generation = rawget(raw, "transactionGeneration")
+    if not ExactGeneration(generation) or generation < 1 then
+        return "invalid", "AUTHORITY_BUNDLE_INVALID"
+    end
+    for key in pairs(raw) do
+        if not BUNDLE_KNOWN_FIELDS[key] then
+            return "invalid", "AUTHORITY_BUNDLE_INVALID"
+        end
+    end
+    -- Reload detects a maximum selected durable counter before current-schema
+    -- admission and re-enters the deny-only state.
+    if generation >= GENERATION_MAXIMUM then
+        return "exhausted", "GENERATION_EXHAUSTED", raw, generation
+    end
+    return "current", nil, raw, generation
+end
+
+-- One complete detached bundle. Every payload field is a fresh table, so a
+-- superseded bundle graph stays byte-exact after the replacement.
+--
+-- `source` is the exact selected authority input for the catalog domain's four
+-- payload fields: the occupied bundle after bundle occupancy, and the exact
+-- PR #68 legacy locations only while the bundle is absent. State machine line
+-- 394 gives those locations "No Package B writer / Legacy admission only /
+-- Preserved legacy input when the bundle is absent. Never used as fallback
+-- after bundle occupancy."
+--
+-- The remaining six fields are carried forward from the bound database, because
+-- their owners (Store, LegacyDataMigration, DpsCapture, DataRetention,
+-- DataCompaction, and the evidence owner) are not yet routed through this
+-- coordinator. That is the disclosed bootstrap remainder of MASTER-RC-001
+-- recorded in the checkpoint, not an accepted end state.
+local function BuildDurableBundleCandidate(db, source, generation, overrides)
+    local bundle = {
+        schemaVersion=BUNDLE_SCHEMA_VERSION,
+        transactionGeneration=generation,
+    }
+    for _, field in ipairs(BUNDLE_PAYLOAD_FIELDS) do
+        local override = overrides and overrides[field]
+        local origin = (BUNDLE_CATALOG_MAPS[field] or field == "buildCatalog")
+            and source or db
+        if override ~= nil then
+            bundle[field] = override
+        elseif field == "dpsAuthority" then
+            -- MASTER-RC-001: DpsAuthorityOwnerV1 owns the durable DPS sidecar
+            -- and offers it through the internals seam, the same way the Store
+            -- and evidence owners offer theirs. It is never read from the
+            -- database.
+            local internals = Nexus and Nexus.MainInternals
+            local owner = type(internals) == "table"
+                and internals.DpsAuthority or nil
+            local owned = owner and type(owner.Sidecar) == "function"
+                and owner.Sidecar(db) or nil
+            bundle[field] = owned or ShallowSnapshot(nil)
+        elseif field == "storeData" then
+            -- MASTER-RC-001: the Store owner builds one detached StoreDataV1
+            -- during STORE_CHAR_MIGRATION_PENDING and offers it through the
+            -- internals seam. Asking the owner keeps one construction rule for
+            -- the domain, exactly as loadoutEvidence does below, and RAW-01
+            -- forbids `authorityDatabase.storeData` surviving as a top-level
+            -- field, so it is never read from the database.
+            local internals = Nexus and Nexus.MainInternals
+            local owner = type(internals) == "table"
+                and internals.AuthorityBootstrap or nil
+            local owned = owner
+                and type(owner.DurableStoreData) == "function"
+                and owner.DurableStoreData(db) or nil
+            bundle[field] = owned or ShallowSnapshot(nil)
+        elseif field == "loadoutEvidence" then
+            -- The evidence owner selects its own durable payload: the bundle's
+            -- field after occupancy, the preserved legacy input only while the
+            -- bundle is absent (state machine line 394). Asking the owner keeps
+            -- one selection rule for the domain instead of a second one here,
+            -- and it never reads the legacy location after occupancy. The
+            -- entries map is detached as well, so no live nested bundle field
+            -- is ever carried by reference into the replacement.
+            local owner = Nexus and Nexus.LoadoutEvidence
+            local owned = owner and type(owner.DurableStore) == "function"
+                and owner.DurableStore(db) or nil
+            if type(owned) ~= "table" then owned = rawget(origin, field) end
+            local snapshot = ShallowSnapshot(owned)
+            snapshot.entries = ShallowSnapshot(snapshot.entries)
+            bundle[field] = snapshot
+        else
+            bundle[field] = ShallowSnapshot(rawget(origin, field))
+        end
+    end
+    return bundle
+end
+
+------------------------------------------------------------------------
+-- Evidence candidate seam (MASTER-RC-005)
+--
+-- EvidenceCoordinator builds only evidence fields and never writes
+-- SavedVariables. The catalog opens a detached candidate before preparation, so
+-- every intern performed while a candidate is being built lands in the detached
+-- store and becomes durable only inside the complete bundle.
+------------------------------------------------------------------------
+
+local function EvidenceOwner()
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    if type(evidence) ~= "table" then return nil end
+    if type(evidence.BeginCandidate) ~= "function" then return nil end
+    return evidence
+end
+
+local function EvidenceBeginCandidate()
+    local evidence = EvidenceOwner()
+    if evidence then evidence.BeginCandidate(ST.db) end
+end
+
+-- The complete detached replacement store, or nil when this transaction interned
+-- nothing and the current durable store is carried unchanged.
+local function EvidenceCandidateStore()
+    local evidence = EvidenceOwner()
+    return evidence and evidence.CandidateStore() or nil
+end
+
+local function EvidencePublishCandidate()
+    local evidence = EvidenceOwner()
+    if evidence then evidence.PublishCandidate() end
+end
+
+local function EvidenceCancelCandidate()
+    local evidence = EvidenceOwner()
+    if evidence then evidence.CancelCandidate() end
+end
+
+------------------------------------------------------------------------
+-- Cursor root release (MASTER-RC-011)
+--
+-- Release old root and accumulator state at publication and supersession.
+-- At most one bounded stale-once sentinel survives per cursor family; every
+-- other superseded entry leaves the registry and its next use is INVALID_CURSOR.
+------------------------------------------------------------------------
+
+local function ReleaseSupersededCursors()
+    local registry = ST.cursorRegistry
+    if type(registry) ~= "table" then return end
+    local sentinel = {}
+    local drop = {}
+    for token, state in pairs(registry) do
+        if state.servingGeneration ~= ST.servingGeneration then
+            local family = state.kind
+            if sentinel[family] then
+                drop[#drop + 1] = token
+            else
+                sentinel[family] = true
+                -- The sentinel keeps no root wrapper, no accumulator, and no
+                -- page state: only enough to refuse once with STALE_CURSOR.
+                registry[token] = {kind=family, stale=true,
+                    servingGeneration=state.servingGeneration}
+                ST.debugStats.cursorSentinels = ST.debugStats.cursorSentinels + 1
+            end
+        end
+    end
+    for _, token in ipairs(drop) do registry[token] = nil end
+end
+
+local function RetainedRootCount()
+    local registry = ST.cursorRegistry
+    if type(registry) ~= "table" then return 0 end
+    local held = 0
+    for _, state in pairs(registry) do
+        if state.servingGeneration ~= ST.servingGeneration then held = held + 1 end
+    end
+    return held
+end
+
+-- The only Package B durable payload write, immediately followed by its
+-- identity verification.
+local function CommitDurableBundle(db, bundle)
+    rawset(db, "authorityBundle", bundle)
+    if rawget(db, "authorityBundle") ~= bundle then return false end
+    ST.durableBundle = bundle
+    ST.durableBundleGeneration = bundle.transactionGeneration
+    ST.debugStats.bundleWrites = ST.debugStats.bundleWrites + 1
+    return true
+end
+
+-- The serving witness binds the exact authority input the root was admitted
+-- from. After bundle occupancy that is the durable bundle pointer and its four
+-- catalog payload field identities; the exact PR #68 legacy locations are
+-- witnessed only while the bundle is absent, which is the one condition under
+-- which line 394 makes them admission input at all.
+-- MASTER-RC-017. The bounded per-key serving witness. Architecture line 454:
+-- admission stores "a detached, bounded exact SourceWitness for the complete
+-- selected raw source, including known and unknown keys, values, aliases, table
+-- topology, and provenance. The witness is not a hash and no digest collision
+-- can grant authority." Line 137 makes a per-key witness change current-source
+-- drift, and line 140 makes a missing or replaced witness bound by the public
+-- root invalidate that root.
+--
+-- Whole-map table identity cannot see a row replaced, added, or removed inside
+-- an unchanged map, so the witness records the exact admitted value identity of
+-- every key plus the key count. It stores identities, never digests.
+--
+-- One file-level local is spent on purpose: core/BuildCatalog.lua is close to
+-- the Lua 5.1 200 file-level local ceiling, so the capture and recheck helpers
+-- are fields of one table rather than two more locals.
+local Witness = {KEY_MAXIMUM=4096}
+
+function Witness.Capture(map)
+    if type(map) ~= "table" then return nil end
+    local keys, count = {}, 0
+    for key, value in pairs(map) do
+        count = count + 1
+        -- A source larger than the bound cannot be exactly witnessed, so it is
+        -- recorded as unprovable and fails closed on every recheck rather than
+        -- being silently trusted.
+        if count > Witness.KEY_MAXIMUM then return {overflow=true} end
+        keys[key] = value
+    end
+    return {keys=keys, count=count}
+end
+
+-- MASTER-RC-017 REOPENED ELEMENT: the bundled baseline is an admitted source.
+-- The bundled `builds` map is what the root is admitted FROM, so architecture
+-- lines 135-141 make it a backing table behind the public root and any change
+-- to it current-source drift. It is RE-READ from the bundle on every recheck:
+-- ST.baseline is written only inside BeginRootAdmission, so comparing a token
+-- field back to it -- as the removed `baselineIdentity` check did -- could
+-- never observe a change made behind the root.
+function Witness.BaselineMap()
+    local bundled = ST.bundled
+    if type(bundled) ~= "table" then return nil end
+    local builds = rawget(bundled, "builds")
+    if type(builds) ~= "table" then return nil end
+    return builds
+end
+
+function Witness.Drifted(witness, map)
+    if witness == nil then return type(map) == "table" end
+    if witness.overflow then return true end
+    if type(map) ~= "table" then return true end
+    local count = 0
+    for key, value in pairs(map) do
+        count = count + 1
+        if witness.keys[key] ~= value then return true end
+    end
+    return count ~= witness.count
+end
+
+local function CaptureToken(db, selectedBundle)
+    local bundle = selectedBundle or rawget(db, "authorityBundle")
+    local source = type(bundle) == "table" and bundle or db
+    return {
+        databaseIdentity=db, bundleIdentity=bundle,
+        overlayIdentity=rawget(source, "communityBuilds"),
+        tombstoneIdentity=rawget(source, "syncTombstones"),
+        metadataIdentity=rawget(source, "buildCatalog"),
+        evictionIdentity=rawget(source, "communityRetentionEvictions"),
+        -- Bounded per-key witnesses over the exact admitted payload maps.
+        overlayWitness=Witness.Capture(rawget(source, "communityBuilds")),
+        tombstoneWitness=Witness.Capture(rawget(source, "syncTombstones")),
+        metadataWitness=Witness.Capture(rawget(source, "buildCatalog")),
+        evictionWitness=Witness.Capture(
+            rawget(source, "communityRetentionEvictions")),
+        bundledIdentity=ST.bundled,
+        -- MASTER-RC-017: a bounded per-key witness over the bundled baseline,
+        -- the same shape WIT-01..03 established for the payload maps.
+        baselineWitness=Witness.Capture(Witness.BaselineMap()),
         ownerIdentity=CurrentOwnerKey(),
         bindingGeneration=ST.bindingGeneration,
         committedMutationRevision=ST.committedMutationRevision,
@@ -1549,14 +2090,34 @@ end
 local function TokenDrifted(token)
     local db = token.databaseIdentity
     if type(db) ~= "table" then return "SOURCE_DRIFT" end
-    if rawget(db, "communityBuilds") ~= token.overlayIdentity
-        or rawget(db, "syncTombstones") ~= token.tombstoneIdentity
-        or rawget(db, "buildCatalog") ~= token.metadataIdentity
-        or rawget(db, "communityRetentionEvictions") ~= token.evictionIdentity
+    local bundle = rawget(db, "authorityBundle")
+    if bundle ~= token.bundleIdentity then return "SOURCE_DRIFT" end
+    local source = type(bundle) == "table" and bundle or db
+    if rawget(source, "communityBuilds") ~= token.overlayIdentity
+        or rawget(source, "syncTombstones") ~= token.tombstoneIdentity
+        or rawget(source, "buildCatalog") ~= token.metadataIdentity
+        or rawget(source, "communityRetentionEvictions") ~= token.evictionIdentity
         or (Nexus and Nexus.Revisions) ~= token.callbackOwnerIdentity then
         return "SOURCE_DRIFT"
     end
-    if token.bundledIdentity ~= ST.bundled or token.baselineIdentity ~= ST.baseline then
+    -- Per-key recheck. This runs on every authority-bearing operation, which is
+    -- what line 137 requires: a row replaced, added, or removed behind the
+    -- published root is current-source drift even when every map identity is
+    -- unchanged.
+    if Witness.Drifted(token.overlayWitness, rawget(source, "communityBuilds"))
+        or Witness.Drifted(token.tombstoneWitness,
+            rawget(source, "syncTombstones"))
+        or Witness.Drifted(token.metadataWitness, rawget(source, "buildCatalog"))
+        or Witness.Drifted(token.evictionWitness,
+            rawget(source, "communityRetentionEvictions")) then
+        return "SOURCE_DRIFT"
+    end
+    if token.bundledIdentity ~= ST.bundled then return "SOURCE_DRIFT" end
+    -- MASTER-RC-017: per-key recheck of the bundled baseline, re-read from the
+    -- bundle. This replaces an identity-only comparison against the cached
+    -- ST.baseline, which was blind both to a replaced nested builds map and to
+    -- a row replaced, added or removed inside an unchanged one.
+    if Witness.Drifted(token.baselineWitness, Witness.BaselineMap()) then
         return "SOURCE_DRIFT"
     end
     if ST.bindingGeneration ~= token.bindingGeneration then return "SOURCE_DRIFT" end
@@ -1568,39 +2129,132 @@ local function Invalidate(reason)
         ST.debugStats.driftInvalidations = ST.debugStats.driftInvalidations + 1
     end
     ST.rootState, ST.rootReason = "ROOT_INVALIDATED", reason
-    ST.published = nil
+    PublishInvalidServing()
     ST.activeClaim = nil
     ST.activeCursors = {}
     ST.activeMaintenance = nil
 end
 
 -- Every authority API first proves the published root is still bound to the
--- exact raw identities it was admitted from.
+-- exact raw identities it was admitted from. The outer generation-exhaustion
+-- latch has precedence over every root/domain/API state: when it is latched no
+-- inner state transition runs and the fixed bounded result is returned.
+-- MASTER-RC-009. This is the READ gate and it performs no admission of any
+-- kind. When the raw global no longer matches the bound authority database,
+-- or the local-owner proof has drifted, it records exactly one explicit
+-- rebind request and returns a fixed read-only result: bytes, generation and
+-- state are all preserved. Architecture 3b5de54f,
+-- docs/SYNC_TRUST_CATALOG_AUTHORITY_STATE_MACHINE.md lines 1200-1206 -- every
+-- dependent owner "register[s] one idempotent dependency with this
+-- coordinator; they do not call a domain recovery pump or raw writer
+-- directly". Only Catalog.PumpAuthorityRebindV1 binds or admits.
 local function Gate()
+    if ST.exhausted then return nil, "GENERATION_EXHAUSTED" end
     if type(NexusDB) == "table" and NexusDB ~= ST.db and ST.candidate == nil then
-        Catalog.Init(NexusDB, Nexus.BundledBuilds)
+        ST.rebindRequired = "SOURCE_REBIND_REQUIRED"
+        return nil, "ROOT_REBIND_REQUIRED"
     end
+    local published = ServingCatalogRoot()
     if ST.rootState == "ROOT_ADMITTED" then
-        local drift = ST.published and TokenDrifted(ST.published.token)
-        if drift then Invalidate(drift) end
+        local drift = published and TokenDrifted(published.token)
+        if drift then Invalidate(drift); published = nil end
     end
-    -- The local-owner proof is an admission input. When the character
-    -- identity becomes available or changes, every selection and provenance
-    -- verdict is re-proved by one explicit complete re-admission.
-    if ST.rootState == "ROOT_ADMITTED" and ST.published and ST.candidate == nil
-        and ST.published.token.ownerIdentity ~= CurrentOwnerKey() then
-        Catalog.Init(ST.db, ST.bundled)
+    -- MASTER-RC-009, closing element. The local-owner proof is an admission
+    -- input, so when the character identity becomes available or changes every
+    -- selection and provenance verdict must be re-proved by a complete
+    -- re-admission. That re-admission is admission work, and architecture
+    -- lines 1200-1206 forbid a dependent owner from driving it directly: a
+    -- READ must never bind, admit, or advance durable state. This branch
+    -- previously called Catalog.Init here, so a read re-admitted and could
+    -- advance a generation. It now records one explicit rebind request and
+    -- returns a fixed read-only refusal; only Catalog.PumpAuthorityRebindV1,
+    -- driven by the MainLifecycle scheduler turn or by MutationGate, performs
+    -- the re-admission.
+    if ST.rootState == "ROOT_ADMITTED" and published and ST.candidate == nil
+        and published.token.ownerIdentity ~= CurrentOwnerKey() then
+        ST.rebindRequired = ST.rebindRequired or "OWNER_REBIND_REQUIRED"
+        return nil, "ROOT_REBIND_REQUIRED"
     end
-    if ST.rootState == "ROOT_ADMITTED" then return ST.published end
+    if ST.rootState == "ROOT_ADMITTED" then return published end
     return nil, ST.candidate and "ROOT_ADMISSION_PENDING" or ST.rootState
+end
+
+-- The one explicit coordinator rebind. AuthorityBootstrapCoordinatorV1 and
+-- the mutation gate drive it; nothing else binds or admits.
+function Catalog.RebindRequired() return ST.rebindRequired end
+
+-- MASTER-RC-001. A dependent REGISTERS an idempotent rebind dependency here
+-- instead of driving admission itself. Architecture lines 1207-1211: every
+-- dependent initializer "register[s] one idempotent dependency with this
+-- coordinator; they do not call a domain recovery pump or raw writer
+-- directly." This records a request and binds, admits, allocates and mutates
+-- nothing; only Catalog.PumpAuthorityRebindV1 -- driven by the startup
+-- coordinator, the MainLifecycle scheduler turn, or MutationGate -- performs
+-- the admission. Repeated calls collapse to the one pending request.
+function Catalog.RequestAuthorityRebindV1(reason)
+    if reason ~= "OWNER_REBIND_REQUIRED" then
+        reason = "SOURCE_REBIND_REQUIRED"
+    end
+    ST.rebindRequired = ST.rebindRequired or reason
+    return ST.rebindRequired
+end
+
+-- requestedReason lets the startup coordinator re-prove admission when it has
+-- just made an admission input available (the current-character owner proof),
+-- without a read having recorded the request first. Only the coordinator and
+-- MutationGate reach this; a read still never binds or admits.
+-- MASTER-RC-001. The database the next Catalog.PumpAuthorityRebindV1 would
+-- bind. A pure read that binds, admits and mutates nothing. It exists so the
+-- startup coordinator and the MainLifecycle rebind pump can admit the evidence
+-- pool against the SAME database before the catalog -- preserving the
+-- evidence-before-catalog order that Catalog.Init used to enforce internally
+-- by driving LoadoutEvidence directly -- without either driver duplicating
+-- source selection.
+function Catalog.PendingRebindDatabaseV1()
+    local reason = ST.rebindRequired
+    if not reason then return nil end
+    if reason == "OWNER_REBIND_REQUIRED" then return ST.db end
+    return type(NexusDB) == "table" and NexusDB or ST.db
+end
+
+function Catalog.PumpAuthorityRebindV1(database, bundle, requestedReason)
+    local reason = ST.rebindRequired or requestedReason
+    if not reason then return {rebound=false} end
+    ST.rebindRequired = nil
+    local nextDb, nextBundle
+    if reason == "OWNER_REBIND_REQUIRED" then
+        nextDb, nextBundle = ST.db, ST.bundled
+    else
+        nextDb = type(NexusDB) == "table" and NexusDB or ST.db
+        nextBundle = type(Nexus.BundledBuilds) == "table"
+            and Nexus.BundledBuilds or ST.bundled
+    end
+    if type(database) == "table" then nextDb = database end
+    if type(bundle) == "table" then nextBundle = bundle end
+    local summary = Catalog.Init(nextDb, nextBundle)
+    -- MASTER-RC-006: Init advances exactly one slice. Preserve the one pending
+    -- request until a later coordinator turn reaches a terminal result.
+    if type(summary) == "table" and summary.state == "pending" then
+        ST.rebindRequired = ST.rebindRequired or reason
+    end
+    return {rebound=true, reason=reason, summary=summary,
+        exhausted=ST.exhausted == true}
+end
+
+-- A mutation may require the coordinator rebind before it runs. A read may
+-- never trigger one.
+local function MutationGate()
+    if ST.rebindRequired then Catalog.PumpAuthorityRebindV1() end
+    return Gate()
 end
 
 ------------------------------------------------------------------------
 -- Root admission handle
 ------------------------------------------------------------------------
 
-local function ClassifyMetadata(db)
-    local meta = rawget(db, "buildCatalog")
+-- `meta` is the selected raw metadata value: the bundle's `buildCatalog` field
+-- after occupancy, the legacy location only while the bundle is absent.
+local function ClassifyMetadata(meta)
     if meta == nil then return "current", nil, nil end
     if type(meta) ~= "table" or getmetatable(meta) ~= nil then
         return "invalid", "METADATA_MALFORMED"
@@ -1787,15 +2441,16 @@ local function ComputeCounts(handle)
 end
 
 local function OverlayVectors(handle)
-    local overlayKeys, tombstoneKeys = {}, {}
+    local overlayKeys, tombstoneKeys, barrierKeys = {}, {}, {}
     for _, slot in ipairs(handle.slotVector) do
         local verdict = handle.verdicts[slot.key]
         if verdict.source == "overlay" and verdict.snapshot then
             overlayKeys[#overlayKeys + 1] = slot.key
         end
         if verdict.tombstone then tombstoneKeys[#tombstoneKeys + 1] = slot.key end
+        if verdict.barrier then barrierKeys[#barrierKeys + 1] = slot.key end
     end
-    return overlayKeys, tombstoneKeys
+    return overlayKeys, tombstoneKeys, barrierKeys
 end
 
 -- Known-field baseline equivalence: an overlay that duplicates its bundled
@@ -1816,31 +2471,105 @@ local function BaselineEquivalent(snapshot, hasUnknown, overlayRaw, bundledRaw, 
     return DeepEqual(left, right)
 end
 
-local function RunFaultInjector(boundary)
-    if ST.faultInjector then ST.faultInjector(boundary) end
-end
-
 -- Notifications run only after the new root is public. A failing subscriber,
 -- scheduler, or logger cannot undo or replay the committed mutation; it is
 -- recorded as one bounded NOTIFICATION_FAILED receipt.
+--
+-- MASTER-RC-015, class 5 terminal 3. Architecture 2618-2630: "The owner records
+-- one bounded NOTIFICATION_FAILED receipt and schedules notification-only replay
+-- bound to the exact new root generation. Replay never reruns raw writes or the
+-- authority transaction and becomes stale if a newer root publishes." Governing
+-- with 650, 2391-2394 ("BuildCatalog owns one transaction"), and 4743. Line 628
+-- states the same invariant generically for DPS, evidence, recovery, registry,
+-- and provider publication and is corroborative only.
+--
+-- Line 1598 is NOT this seam. It is one row of core/Store.lua's own exhaustive
+-- table (1538-1540) for the separate StoreMutationTokenV1 post-ready pipeline,
+-- reachable only from STORE_READY for RegisterCurrentCharacter, Retention, and
+-- Compaction. That pipeline is unimplemented and is MASTER-RC-001's, not this
+-- root's; nothing here may publish a result field on its behalf.
+--
+-- The mechanism is deliberately the smallest one that satisfies the governing
+-- clauses: exactly ONE private pending item, dispatched by the existing shared
+-- Nexus.Scheduler on a later ordinary turn. No new pump, no new export, no new
+-- module dependency, and NO new public field -- the replay is observable as the
+-- delayed Nexus.Revisions.Advance effect itself, plus the normative catalog
+-- diagnostics DebugStats already owns (architecture line 1721).
+local ReplayPendingNotification
+
 local function NotifyBuild(reason, id, scope)
+    scope = scope or (id ~= nil and "record" or "all")
     local ok = pcall(function()
-        RunFaultInjector("notify")
         local revisions = Nexus and Nexus.Revisions
         if revisions and type(revisions.Advance) == "function" then
             revisions.Advance(revisions.BUILD_LIBRARY_CHANGED, {
-                reason=reason, scope=scope or (id ~= nil and "record" or "all"), id=id,
+                reason=reason, scope=scope, id=id,
             })
         end
     end)
-    if not ok then
+    if ok then return true end
+    ST.debugStats.notificationFailures = ST.debugStats.notificationFailures + 1
+    -- One bounded pending item, bound to the exact published serving root's
+    -- identity AND its generation. A second failure supersedes the first: once a
+    -- newer root has published, the earlier item is stale by construction, so
+    -- retaining it could only produce a discard.
+    ST.pendingNotification = {
+        reason=reason, id=id, scope=scope,
+        serving=ST.currentServingRoot,
+        servingGeneration=ST.servingGeneration,
+    }
+    local scheduler = Nexus and Nexus.Scheduler
+    if scheduler and type(scheduler.After) == "function" then
+        -- Keyed, so at most one replay task exists at any time in any session.
+        pcall(scheduler.After, "build-catalog-notification-replay", 0,
+            ReplayPendingNotification)
+    end
+    return false
+end
+
+-- Dispatched by the scheduler on a later ordinary turn, never from a read and
+-- never from the commit that queued it. It touches no raw write, no authority
+-- transaction, no serving swap, and no revision or generation counter on either
+-- the delivered or the discarded path: it is notification only.
+function ReplayPendingNotification()
+    -- A reload replaces this module while the scheduler may still hold the
+    -- previous session's closure. That closure owns a dead ST whose bound
+    -- generation would still compare equal to itself, so it must never deliver.
+    if Nexus.BuildCatalog ~= Catalog then return end
+    local pending = ST.pendingNotification
+    if not pending then return end
+    -- Bounded: this one dispatch consumes the item on both paths. A replay that
+    -- fails again is recorded as a further NOTIFICATION_FAILED receipt and is
+    -- not requeued, so no unbounded retry loop can exist.
+    ST.pendingNotification = nil
+    if pending.serving ~= ST.currentServingRoot
+        or pending.servingGeneration ~= ST.servingGeneration then
+        ST.debugStats.notificationReplaysStale =
+            ST.debugStats.notificationReplaysStale + 1
+        return
+    end
+    local ok = pcall(function()
+        local revisions = Nexus and Nexus.Revisions
+        if revisions and type(revisions.Advance) == "function" then
+            revisions.Advance(revisions.BUILD_LIBRARY_CHANGED, {
+                reason=pending.reason, scope=pending.scope, id=pending.id,
+            })
+        end
+    end)
+    if ok then
+        ST.debugStats.notificationReplays = ST.debugStats.notificationReplays + 1
+    else
         ST.debugStats.notificationFailures = ST.debugStats.notificationFailures + 1
     end
 end
 
 local function PublishRoot(handle)
     local db = handle.token.databaseIdentity
-    local classification, metaReason, meta, metaVersion = ClassifyMetadata(db)
+    -- The exact selected authority input: the occupied bundle, or the legacy
+    -- locations only while the bundle is absent (state machine lines 374, 394).
+    local source = handle.source or db
+    local classification, metaReason, meta, metaVersion =
+        ClassifyMetadata(rawget(source, "buildCatalog"))
     if classification == "invalid" then return AdmissionFail(handle, metaReason) end
     local catalogVersion = tostring(ST.bundled and ST.bundled.catalogVersion or "unversioned")
     local needsMigration = meta == nil
@@ -1860,22 +2589,25 @@ local function PublishRoot(handle)
     local drift = TokenDrifted(handle.token)
     if drift then return AdmissionFail(handle, drift) end
     ST.preparationEpoch = ST.preparationEpoch + 1
+    -- Off-state preparation of the migrated catalog metadata and the pruned
+    -- overlay. No legacy payload location is written here or anywhere else:
+    -- line 394 gives those locations no Package B writer, so the schema and
+    -- catalog-version migration lands only inside the bundle candidate.
+    local overrides = nil
     local ok = pcall(function()
-        RunFaultInjector("before-commit")
-        if rawget(db, "communityBuilds") == nil then rawset(db, "communityBuilds", {}) end
-        if rawget(db, "syncTombstones") == nil then rawset(db, "syncTombstones", {}) end
-        if meta == nil then
-            meta = {}
-            rawset(db, "buildCatalog", meta)
-        end
         if needsMigration then
-            rawset(meta, "schemaVersion", STORAGE_SCHEMA_VERSION)
-            rawset(meta, "catalogVersion", catalogVersion)
-            rawset(meta, "sourceVersion", tostring(ST.bundled
-                and ST.bundled.sourceVersion or "unknown"))
-            local overlay = rawget(db, "communityBuilds")
+            local migrated = ShallowSnapshot(meta)
+            migrated.schemaVersion = STORAGE_SCHEMA_VERSION
+            migrated.catalogVersion = catalogVersion
+            migrated.sourceVersion = tostring(ST.bundled
+                and ST.bundled.sourceVersion or "unknown")
+            overrides = {buildCatalog=migrated}
+            if #prune > 0 then
+                local overlay = ShallowSnapshot(rawget(source, "communityBuilds"))
+                for _, slot in ipairs(prune) do overlay[slot.id] = nil end
+                overrides.communityBuilds = overlay
+            end
             for _, slot in ipairs(prune) do
-                rawset(overlay, slot.id, nil)
                 slot.overlay = nil
                 local replacement = AdmitRaw(slot.bundled, slot, "bundled", {})
                 replacement.overlayRaw, replacement.bundledRaw = nil, slot.bundled
@@ -1884,27 +2616,76 @@ local function PublishRoot(handle)
                 IndexAdd(handle.index, handle.verdicts, replacement, nil)
             end
         end
-        RunFaultInjector("after-raw-write")
     end)
     if not ok then
         ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
         return AdmissionFail(handle, "PROTECTED_COMMIT_FAILED")
     end
+    -- Durable bundle disposition. An absent bundle is the legacy migration
+    -- route: admit the exact PR #68 legacy inputs and write the first complete
+    -- bundle with transactionGeneration=1. An occupied bundle whose selected
+    -- catalog metadata already matches is the zero-delta route: it is adopted
+    -- with no bundle allocation, no bundle write and no generation advance. An
+    -- occupied bundle that still needs the schema/catalog-version migration is
+    -- the architecture's authorized startup delta: one detached replacement
+    -- bundle and one bundle write before disposition and serving publication.
+    if handle.bundleClass == "absent" then
+        overrides = overrides or {}
+        if overrides.loadoutEvidence == nil then
+            overrides.loadoutEvidence = EvidenceCandidateStore()
+        end
+        local candidate = BuildDurableBundleCandidate(db, db, 1, overrides)
+        if not CommitDurableBundle(db, candidate) then
+            return AdmissionFail(handle, "AUTHORITY_BUNDLE_WRITE_FAILED")
+        end
+    elseif overrides ~= nil then
+        local generation = handle.bundleGeneration or 0
+        if IncrementWouldExhaust(generation) then
+            LatchGenerationExhausted()
+            return AdmissionFail(handle, "GENERATION_EXHAUSTED")
+        end
+        if overrides.loadoutEvidence == nil then
+            overrides.loadoutEvidence = EvidenceCandidateStore()
+        end
+        local candidate = BuildDurableBundleCandidate(db, handle.bundleRaw,
+            generation + 1, overrides)
+        if not CommitDurableBundle(db, candidate) then
+            return AdmissionFail(handle, "AUTHORITY_BUNDLE_WRITE_FAILED")
+        end
+    else
+        ST.durableBundle = handle.bundleRaw
+        ST.durableBundleGeneration = handle.bundleGeneration or 0
+    end
+    EvidencePublishCandidate()
     handle.token = CaptureToken(db)
     handle.counts = ComputeCounts(handle)
-    local overlayKeys, tombstoneKeys = OverlayVectors(handle)
+    local overlayKeys, tombstoneKeys, barrierKeys = OverlayVectors(handle)
     ST.generation = ST.generation + 1
     ST.semanticGeneration = ST.semanticGeneration + 1
-    ST.published = {
+    -- One pointer swap publishes the complete root by installing it inside a
+    -- replacement currentServingRoot. The domain root has no separately
+    -- consumable public pointer.
+    -- MASTER-RC-001: under the startup coordinator's seal this generation is
+    -- constructed and retained PRIVATELY. No public pointer is installed until
+    -- Catalog.PublishSealedServingV1, which only the coordinator calls, in
+    -- STORE_SERVING_PUBLICATION_PENDING after legacy disposition (1517-1519).
+    local sealedServing = NewServingRoot({
         generation=ST.generation, token=handle.token, rows=handle.verdicts,
         slots=handle.slots, slotVector=handle.slotVector, slotCount=handle.slotCount,
         index=handle.index, counts=handle.counts, overlayKeys=overlayKeys,
-        tombstoneKeys=tombstoneKeys, catalogVersion=catalogVersion,
+        tombstoneKeys=tombstoneKeys, barrierKeys=barrierKeys,
+        catalogVersion=catalogVersion,
         schemaVersion=metaVersion or STORAGE_SCHEMA_VERSION,
         migrated=needsMigration, redundantRemoved=#prune,
-    }
+    }, ST.durableBundleGeneration)
+    if ST.bootstrapSeal then
+        ST.sealedServing = sealedServing
+    else
+        AuthorityServingRootWriterV1("final-swap", sealedServing)
+    end
     ST.rootState, ST.rootReason = "ROOT_ADMITTED", nil
     ST.activeCursors = {}
+    ReleaseSupersededCursors()
     ST.debugStats.relatedIndexRebuilds = ST.debugStats.relatedIndexRebuilds + 1
     ST.debugStats.authorIndexRebuilds = ST.debugStats.authorIndexRebuilds + 1
     handle.phase = "published"
@@ -1918,16 +2699,45 @@ local function PumpAdmission(handle)
     local result
     if handle.phase == "capture" then
         local db = handle.token.databaseIdentity
-        local classification, reason, _, version = ClassifyMetadata(db)
+        -- A selected database's nonnil raw authorityBundle is classified before
+        -- any legacy location decides anything. It never falls back.
+        local bundleClass, bundleReason, bundleRaw, bundleValue =
+            ClassifyDurableBundle(db)
+        handle.bundleClass = bundleClass
+        handle.bundleRaw, handle.bundleGeneration = bundleRaw, bundleValue
+        if bundleClass == "exhausted" then
+            LatchGenerationExhausted()
+            handle.phase, handle.failure = "failed", "GENERATION_EXHAUSTED"
+            ClosePump(work)
+            return "failed"
+        end
+        if bundleClass == "invalid" then
+            ClosePump(work)
+            return AdmissionFail(handle, bundleReason)
+        end
+        if bundleClass == "future" then
+            handle.phase, handle.futureSchema = "future", bundleValue
+            ClosePump(work)
+            return "future"
+        end
+        -- Bundle-versus-legacy read precedence. Once any complete bundle is
+        -- occupied it is the only admission input for the catalog domain; the
+        -- exact PR #68 locations are "Never used as fallback after bundle
+        -- occupancy" (state machine line 394) and are read only on the absent
+        -- bundle's LEGACY_BUNDLE_MIGRATION_REQUIRED route (line 374).
+        local source = bundleClass == "absent" and db or bundleRaw
+        handle.source = source
+        local classification, reason, _, version =
+            ClassifyMetadata(rawget(source, "buildCatalog"))
         if classification == "invalid" then
             result = AdmissionFail(handle, reason)
         elseif classification == "future" then
             handle.phase, handle.futureSchema = "future", version
             result = "future"
         else
-            local okOverlay, overlay = PlainMapOrNil(rawget(db, "communityBuilds"))
-            local okTomb, tombstones = PlainMapOrNil(rawget(db, "syncTombstones"))
-            local okEvict, evictions = PlainMapOrNil(rawget(db, "communityRetentionEvictions"))
+            local okOverlay, overlay = PlainMapOrNil(rawget(source, "communityBuilds"))
+            local okTomb, tombstones = PlainMapOrNil(rawget(source, "syncTombstones"))
+            local okEvict, evictions = PlainMapOrNil(rawget(source, "communityRetentionEvictions"))
             local okBundle, bundledMap = PlainMapOrNil(ST.baseline)
             if not (okOverlay and okTomb and okEvict and okBundle) then
                 result = AdmissionFail(handle, "ROOT_MAP_MALFORMED")
@@ -1977,7 +2787,7 @@ end
 local function SummaryOf(handle, state, reason)
     local counts = handle and handle.counts or {}
     local mapCounts = handle and handle.mapCounts or {}
-    local published = ST.published
+    local published = ServingCatalogRoot()
     return {
         migrated=published and published.migrated or false,
         bundled=counts.bundled or mapCounts.bundled or 0,
@@ -1997,6 +2807,11 @@ end
 
 local function FinishAdmission(result)
     local handle = ST.candidate
+    -- The generation-exhaustion latch discards the candidate, so there is no
+    -- handle to finish: the fixed outer result is returned unchanged.
+    if not handle then
+        return {state=ST.rootState, reason=ST.rootReason, pumps=0}
+    end
     if result == "pending" then return {state="pending", pumps=handle.pumps} end
     ST.candidate = nil
     ST.lastCounters = handle.counters
@@ -2006,7 +2821,7 @@ local function FinishAdmission(result)
         return {state="ROOT_ADMITTED", pumps=handle.pumps, generation=ST.generation}
     elseif result == "future" then
         ST.rootState, ST.rootReason = "ROOT_READ_ONLY_FUTURE_SCHEMA", "FUTURE_SCHEMA"
-        ST.published = nil
+        PublishInvalidServing()
         ST.futureToken = handle.token
         ST.lastInitSummary = SummaryOf(handle, "ROOT_READ_ONLY_FUTURE_SCHEMA", "FUTURE_SCHEMA")
         return {state="ROOT_READ_ONLY_FUTURE_SCHEMA", reason="FUTURE_SCHEMA", pumps=handle.pumps}
@@ -2025,16 +2840,25 @@ function Catalog.BeginRootAdmission(database, bundle)
     local bundled = type(bundle) == "table" and bundle
         or type(Nexus.BundledBuilds) == "table" and Nexus.BundledBuilds or {}
     local baseline = type(bundled.builds) == "table" and bundled.builds or {}
+    if ST.exhausted then
+        return {state=ST.rootState, reason="GENERATION_EXHAUSTED", pumps=0}
+    end
     ST.db, ST.bundled, ST.baseline = db, bundled, baseline
-    ST.published = nil
+    PublishInvalidServing()
     ST.rootState, ST.rootReason = "ROOT_ADMISSION_PENDING", nil
     ST.activeClaim, ST.activeCursors, ST.activeMaintenance = nil, {}, nil
+    -- A complete rebind discards every prior session cursor: no registry entry
+    -- may outlive the root it was issued against.
+    ST.cursorRegistry = setmetatable({}, {__mode="k"})
     ST.candidate = NewAdmission(db)
     ST.debugStats.rootAdmissions = ST.debugStats.rootAdmissions + 1
     return {state="pending", pumps=0}
 end
 
 function Catalog.PumpRootAdmission()
+    if ST.exhausted then
+        return {state=ST.rootState, reason="GENERATION_EXHAUSTED", pumps=0}
+    end
     local handle = ST.candidate
     if not handle then return {state=ST.rootState, reason=ST.rootReason, pumps=0} end
     local drift = TokenDrifted(handle.token)
@@ -2049,22 +2873,39 @@ function Catalog.CancelRootAdmission()
     if ST.candidate then
         ST.candidate = nil
         ST.rootState, ST.rootReason = "ROOT_UNBOUND", "CANCELLED"
-        ST.published = nil
+        PublishInvalidServing()
     end
     return {state=ST.rootState, reason=ST.rootReason}
 end
 
+-- MASTER-RC-006, architecture line 1715. One public admission call performs
+-- no more than one V1 slice and returns the honest pending or terminal result.
+local function AdmissionSlice()
+    local result = Catalog.PumpRootAdmission()
+    if type(result) == "table" and result.state == "pending" then
+        return {state="pending", pumps=result.pumps}
+    end
+    return DeepCopy(ST.lastInitSummary
+        or SummaryOf(nil, ST.rootState, ST.rootReason))
+end
+
 function Catalog.Init(database, bundle)
+    ST.rebindRequired = nil
     ST.debugStats.initCalls = ST.debugStats.initCalls + 1
+    if ST.exhausted then
+        return SummaryOf(nil, ST.rootState, "GENERATION_EXHAUSTED")
+    end
     local nextDb = type(database) == "table" and database or {}
     local nextBundled = type(bundle) == "table" and bundle
-        or type(Nexus.BundledBuilds) == "table" and Nexus.BundledBuilds or {}
+        or type(Nexus.BundledBuilds) == "table" and Nexus.BundledBuilds
+        or EMPTY_BUNDLED
     local nextBaseline = type(nextBundled.builds) == "table" and nextBundled.builds or {}
     if ST.candidate == nil and ST.db == nextDb and ST.bundled == nextBundled
         and ST.baseline == nextBaseline
         and (ST.rootState == "ROOT_ADMITTED" or ST.rootState == "ROOT_READ_ONLY_FUTURE_SCHEMA")
         and ST.lastInitSummary then
-        local token = ST.published and ST.published.token or ST.futureToken
+        local servingRoot = ServingCatalogRoot()
+        local token = servingRoot and servingRoot.token or ST.futureToken
         if token and not TokenDrifted(token)
             and token.ownerIdentity == CurrentOwnerKey() then
             ST.debugStats.fastPathHits = ST.debugStats.fastPathHits + 1
@@ -2073,17 +2914,21 @@ function Catalog.Init(database, bundle)
             return summary
         end
     end
+    -- Repeated calls with the same exact source resume the same private handle.
+    -- Do not compare nextBaseline here: an absent bundle builds a fresh empty
+    -- table for that expression on every call and would restart forever.
+    if ST.candidate ~= nil and ST.db == nextDb and ST.bundled == nextBundled then
+        return AdmissionSlice()
+    end
     ST.debugStats.rebinds = ST.debugStats.rebinds + 1
-    if Nexus.LoadoutEvidence and Nexus.LoadoutEvidence.Init then
-        Nexus.LoadoutEvidence.Init(nextDb)
-    end
+    -- MASTER-RC-001, dependent-side prohibition of architecture lines
+    -- 1207-1211. This previously called Nexus.LoadoutEvidence.Init(nextDb):
+    -- BuildCatalog, itself a named dependent initializer, drove another
+    -- domain owner directly. The evidence pool is still admitted before the
+    -- catalog, but by the startup coordinator (core/Store.lua BootstrapSlice)
+    -- and by the coordinator rebind pump, never from here.
     Catalog.BeginRootAdmission(nextDb, nextBundled)
-    local result
-    for _ = 1, 100000000 do
-        result = Catalog.PumpRootAdmission()
-        if result.state ~= "pending" then break end
-    end
-    return DeepCopy(ST.lastInitSummary or SummaryOf(nil, ST.rootState, ST.rootReason))
+    return AdmissionSlice()
 end
 
 ------------------------------------------------------------------------
@@ -2091,7 +2936,8 @@ end
 ------------------------------------------------------------------------
 
 function Catalog.Budget()
-    return {totals=DeepCopy(BUDGET), slices=DeepCopy(SLICE)}
+    return {totals=DeepCopy(BUDGET), slices=DeepCopy(SLICE),
+        maximumPumps=ADMISSION_MAX_PUMPS}
 end
 
 function Catalog.BudgetCounters()
@@ -2101,12 +2947,17 @@ function Catalog.BudgetCounters()
 end
 
 function Catalog.RootState()
-    if ST.rootState == "ROOT_ADMITTED" and ST.published then
-        local drift = TokenDrifted(ST.published.token)
+    local servingRoot = ServingCatalogRoot()
+    if ST.rootState == "ROOT_ADMITTED" and servingRoot then
+        local drift = TokenDrifted(servingRoot.token)
         if drift then Invalidate(drift) end
     end
     return {
         state=ST.rootState, reason=ST.rootReason, generation=ST.generation,
+        -- The serving pointer and the exact durable bundle generation it binds.
+        servingGeneration=ST.servingGeneration,
+        durableBundleGeneration=ST.durableBundleGeneration,
+        generationMaximum=GENERATION_MAXIMUM,
         schemaVersion=STORAGE_SCHEMA_VERSION,
         catalogVersion=tostring(ST.bundled and ST.bundled.catalogVersion or "unversioned"),
         bindingGeneration=ST.bindingGeneration,
@@ -2158,13 +3009,13 @@ function Catalog.TrustedServerTime()
     return TrustedServerTime()
 end
 
-function Catalog.InstallFaultInjector(callback)
-    ST.faultInjector = type(callback) == "function" and callback or nil
-    return true
-end
-
 function Catalog.DebugStats()
-    return DeepCopy(ST.debugStats)
+    local stats = DeepCopy(ST.debugStats)
+    -- MASTER-RC-011: registry entries still bound to a superseded serving
+    -- generation. The documented cap is one bounded stale sentinel per family.
+    stats.retainedRoots = RetainedRootCount()
+    stats.cursorFamilyCap = #CURSOR_FAMILIES
+    return stats
 end
 
 function Catalog.SchemaVersion()
@@ -2379,12 +3230,14 @@ function Catalog.ForEach(visitor)
     if type(visitor) ~= "function" then return 0 end
     local all, why = Catalog.All()
     if not all then return 0, why end
-    local root = ST.published
+    local servingGeneration = ST.servingGeneration
     local count = 0
     for id, record in pairs(all) do
         count = count + 1
         visitor(id, record)
-        if ST.published ~= root then return count, "STALE_CURSOR" end
+        if ST.servingGeneration ~= servingGeneration then
+            return count, "STALE_CURSOR"
+        end
     end
     return count
 end
@@ -2424,23 +3277,52 @@ end
 
 -- Stateless generation-bound steps over the immutable overlay and tombstone
 -- vectors: each call examines at most one slot.
-local function VectorStep(vector, cursorId, root)
-    local ordinal = 0
-    if cursorId ~= nil then
-        local typedKey = TypedKey(cursorId)
-        for index, key in ipairs(vector) do
-            if key == typedKey then ordinal = index; break end
-        end
-        if ordinal == 0 then return nil end
+-- MASTER-RC-010. A legacy raw-ID continuation carries no generation, so a walk
+-- captured against one root kept stepping a REPLACED root and served rows
+-- committed after the walk began. Each legacy family now binds the generation
+-- its walk started at: a continuation presented after a root replacement
+-- returns STALE_CURSOR once and INVALID_CURSOR thereafter, which is the
+-- "stale once, then invalidate" contract the root requires.
+--
+-- The public (id, record, done) shape is unchanged. Every consumer --
+-- core/Sync.lua, core/SyncCompatibility.lua, core/BuildHashCache.lua and the
+-- retention reservation sweeps -- breaks on `done or id == nil` before reading
+-- the second slot, so the reason travels there without disturbing them.
+local function LegacyWalkGuard(family, cursorId)
+    local walks = ST.legacyWalks
+    if walks == nil then walks = {}; ST.legacyWalks = walks end
+    if cursorId == nil then
+        -- A fresh walk binds the current published generation.
+        walks[family] = {generation=ST.generation, nextIndex=1}
+        return walks[family]
     end
-    local key = vector[ordinal + 1]
-    return key and root.rows[key] or nil
+    local walk = walks[family]
+    if walk == nil then return nil, "INVALID_CURSOR" end
+    if walk.generation ~= ST.generation then
+        if not walk.staled then
+            walk.staled = true
+            return nil, "STALE_CURSOR"
+        end
+        return nil, "INVALID_CURSOR"
+    end
+    if walk.lastId ~= cursorId then return nil, "INVALID_CURSOR" end
+    return walk
+end
+
+local function VectorStep(vector, walk, root)
+    local key = vector[walk.nextIndex]
+    walk.nextIndex = walk.nextIndex + 1
+    local verdict = key and root.rows[key] or nil
+    walk.lastId = verdict and verdict.id or nil
+    return verdict
 end
 
 function Catalog.SyncDeltaNext(cursor)
     local root = Gate()
     if not root then return nil, nil, true end
-    local verdict = VectorStep(root.overlayKeys, cursor, root)
+    local walk, guardWhy = LegacyWalkGuard("delta", cursor)
+    if guardWhy then return nil, guardWhy, true end
+    local verdict = VectorStep(root.overlayKeys, walk, root)
     if not verdict then return nil, nil, true end
     local record = SyncEligible(verdict) and PublicRecord(verdict) or nil
     return verdict.id, record, false
@@ -2449,7 +3331,9 @@ end
 function Catalog.TombstoneNext(cursor)
     local root = Gate()
     if not root then return nil, nil, true end
-    local verdict = VectorStep(root.tombstoneKeys, cursor, root)
+    local walk, guardWhy = LegacyWalkGuard("tombstone", cursor)
+    if guardWhy then return nil, guardWhy, true end
+    local verdict = VectorStep(root.tombstoneKeys, walk, root)
     if not verdict then return nil, nil, true end
     return verdict.id, TombstoneView(verdict), false
 end
@@ -2457,21 +3341,11 @@ end
 function Catalog.BarrierNext(cursor)
     local root = Gate()
     if not root then return nil, nil, true end
-    local ordinal = 0
-    if cursor ~= nil then
-        local typedKey = TypedKey(cursor)
-        for index, slot in ipairs(root.slotVector) do
-            if slot.key == typedKey then ordinal = index; break end
-        end
-        if ordinal == 0 then return nil, nil, true end
-    end
-    for index = ordinal + 1, root.slotCount do
-        local verdict = root.rows[root.slotVector[index].key]
-        if verdict and verdict.barrier then
-            return verdict.id, Catalog.BarrierState(verdict.id), false
-        end
-    end
-    return nil, nil, true
+    local walk, guardWhy = LegacyWalkGuard("barrier", cursor)
+    if guardWhy then return nil, guardWhy, true end
+    local verdict = VectorStep(root.barrierKeys, walk, root)
+    if not verdict then return nil, nil, true end
+    return verdict.id, Catalog.BarrierState(verdict.id), false
 end
 
 function Catalog.RecordRevision(id)
@@ -2541,7 +3415,7 @@ local function ReleaseClaim(claim)
 end
 
 function Catalog.BeginAllocationClaim(id)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return nil, why end
     local verdict, typedKey = VerdictOf(root, id)
     if not typedKey then return nil, "INVALID_TYPED_ID" end
@@ -2554,7 +3428,7 @@ function Catalog.CancelAllocationClaim(claim)
 end
 
 function Catalog.BeginTombstoneReadmissionClaim(id)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return nil, why end
     local verdict, typedKey = VerdictOf(root, id)
     if not typedKey then return nil, "INVALID_TYPED_ID" end
@@ -2572,15 +3446,45 @@ end
 -- Mutation transactions
 ------------------------------------------------------------------------
 
+-- MASTER-RC-003: identity is (spellId, quality, locked); the source array is
+-- deliberately absent so a cross-array duplicate keys to one canonical member.
 local function TupleKey(row)
     return tostring(row.spellId) .. ":" .. tostring(row.quality) .. ":"
-        .. (row.locked and "1" or "0") .. ":" .. (row.origin or "inline")
+        .. (row.locked and "1" or "0")
 end
 
 -- Construct the detached destination row: exact V1 known fields, the
 -- existing unknown owners at their original scope, and every incoming
 -- unknown field that does not overwrite an existing owner.
-local function BuildDestination(verdict, walker, existing)
+-- MASTER-RC-013 sibling, MASTER-RC-016. Row-to-tombstone replacement used to
+-- drop every top-level and tuple-scoped unknown field the row owned: the
+-- durable overlay row disappeared and the tombstone record carried none of it,
+-- so future-owned evidence was destroyed by a delete. The required repaired
+-- outcome is that "unknown evidence [is] carried in the atomic transaction and
+-- restored by scope, or fail closed".
+--
+-- This builds the scoped carriage. Top-level unknown owners and each tuple's
+-- exact unknown subtree are copied out under their original scope, bounded by
+-- the same BUDGET.unknownTables ceiling that bounds admission.
+local function CarriedUnknown(existing)
+    if type(existing) ~= "table" then return nil end
+    local top, tuples, count = nil, nil, 0
+    for key, value in pairs(existing.unknown or {}) do
+        top = top or {}
+        top[key] = DeepCopy(value)
+    end
+    for _, row in ipairs(existing.grouped or {}) do
+        if row.unknown ~= nil and count < BUDGET.unknownTables then
+            tuples = tuples or {}
+            tuples[TupleKey(row)] = DeepCopy(row.unknown)
+            count = count + 1
+        end
+    end
+    if top == nil and tuples == nil then return nil end
+    return {top=top, tuples=tuples}
+end
+
+local function BuildDestination(verdict, walker, existing, carried)
     local destination = {}
     for key, value in pairs(verdict.snapshot) do
         if FIELD[key] and FIELD[key].kind ~= "evidence" then
@@ -2590,10 +3494,18 @@ local function BuildDestination(verdict, walker, existing)
     destination.id = verdict.id
     local existingUnknown = existing and existing.unknown or {}
     for key, value in pairs(existingUnknown) do destination[key] = DeepCopy(value) end
+    -- Restored by scope: unknown evidence carried through a tombstone returns to
+    -- the exact scope it was taken from, and never overwrites a live owner.
+    for key, value in pairs(carried and carried.top or {}) do
+        if destination[key] == nil then destination[key] = DeepCopy(value) end
+    end
     for key, value in pairs(walker.unknown) do
         if destination[key] == nil then destination[key] = DeepCopy(value) end
     end
     local existingTupleUnknown = {}
+    for key, value in pairs(carried and carried.tuples or {}) do
+        existingTupleUnknown[key] = value
+    end
     for _, row in ipairs(existing and existing.grouped or {}) do
         if row.unknown ~= nil then existingTupleUnknown[TupleKey(row)] = row.unknown end
     end
@@ -2632,10 +3544,14 @@ local function BuildDestination(verdict, walker, existing)
     return destination
 end
 
+-- MASTER-RC-005: preparation may intern evidence, so it opens a detached
+-- evidence candidate first. Nothing interned here is durable until the authority
+-- commit coordinator installs the candidate inside the complete bundle.
 local function CompactDestination(destination)
     local compaction = Nexus and Nexus.DataCompaction
     local evidence = Nexus and Nexus.LoadoutEvidence
     local compacted = false
+    EvidenceBeginCandidate()
     if compaction and type(compaction.Enabled) == "function"
         and compaction.Enabled(ST.db)
         and type(compaction.CompactBuildRow) == "function" then
@@ -2720,6 +3636,11 @@ local function RefreshVectors(root, key)
     else
         RemoveKey(root.tombstoneKeys, key)
     end
+    if verdict and verdict.barrier then
+        InsertKey(root.barrierKeys, key, root.slots)
+    else
+        RemoveKey(root.barrierKeys, key)
+    end
 end
 
 local function ApplyCounts(root, previous, verdict)
@@ -2739,79 +3660,202 @@ local function ApplyCounts(root, previous, verdict)
     Delta(verdict, 1)
 end
 
--- One protected replacement of a single typed slot: exact old products are
--- replaced by the prepared verdict inside a synchronous no-callback section.
-local function CommitSlot(root, slot, verdict, rawWrites, reason, deferred)
-    local key = slot.key
-    local previous = root.rows[key]
+-- One complete detached replacement of a whole candidate, published through one
+-- durable bundle write and one serving-root swap (MASTER-RC-001, MASTER-RC-002,
+-- MASTER-RC-005).
+--
+-- Every fallible step -- map shape, drift, verdict preparation,
+-- replacement-root construction and bundle construction -- happens off-state.
+-- The protected section allocates nothing and runs no production callback: it is
+-- the single durable bundle rawset, its identity verification, the
+-- non-authoritative legacy mirror rawsets, and one currentServingRoot swap.
+--
+-- The live published root's rows, slots, index, counts, and vectors are never
+-- mutated. The candidate root is invisible until the swap, and the superseded
+-- root becomes unreachable immediately after it.
+local function CloneServingCatalogRoot(root)
+    local rows, slots = {}, {}
+    for key, value in pairs(root.rows) do rows[key] = value end
+    for key, value in pairs(root.slots) do slots[key] = value end
+    local slotVector = {}
+    for index, slot in ipairs(root.slotVector) do slotVector[index] = slot end
+    local overlayKeys, tombstoneKeys, barrierKeys = {}, {}, {}
+    for index, key in ipairs(root.overlayKeys) do overlayKeys[index] = key end
+    for index, key in ipairs(root.tombstoneKeys) do tombstoneKeys[index] = key end
+    for index, key in ipairs(root.barrierKeys) do barrierKeys[index] = key end
+    return {
+        generation=root.generation, token=root.token, rows=rows, slots=slots,
+        slotVector=slotVector, slotCount=root.slotCount,
+        index=CloneIndex(root.index), counts=DeepCopy(root.counts),
+        overlayKeys=overlayKeys, tombstoneKeys=tombstoneKeys,
+        barrierKeys=barrierKeys,
+        catalogVersion=root.catalogVersion, schemaVersion=root.schemaVersion,
+        migrated=false, redundantRemoved=0,
+    }
+end
+
+local function DetachedSlot(slot)
+    return {key=slot.key, id=slot.id, kind=slot.kind, overlay=slot.overlay,
+        bundled=slot.bundled, tombstone=slot.tombstone, barrier=slot.barrier}
+end
+
+local function CommitBatch(root, items, reason, deferred, notifyScope)
     local drift = TokenDrifted(root.token)
-    if drift then Invalidate(drift); return false, drift end
-    ST.preparationEpoch = ST.preparationEpoch + 1
+    if drift then
+        EvidenceCancelCandidate()
+        Invalidate(drift)
+        return false, drift
+    end
     local db = root.token.databaseIdentity
-    local phase = "prepare"
-    local ok = pcall(function()
-        RunFaultInjector("before-commit")
-        phase = "protected"
-        for _, write in ipairs(rawWrites) do
-            local map = rawget(db, write.map)
-            if map == nil then
-                map = {}
-                rawset(db, write.map, map)
+    -- The occupied bundle is the sole durable authority payload. Every commit
+    -- reads its current payload from that bundle and never from the exact PR #68
+    -- legacy locations, which after occupancy are neither input nor storage.
+    local current = ST.durableBundle
+    if type(current) ~= "table" then
+        EvidenceCancelCandidate()
+        Invalidate("AUTHORITY_BUNDLE_ABSENT")
+        return false, "AUTHORITY_BUNDLE_ABSENT"
+    end
+
+    -- Off-state validation. A target map that exists but is not a table would
+    -- fail mid-publication, so the candidate is refused before any durable write.
+    for _, item in ipairs(items) do
+        for _, write in ipairs(item.writes) do
+            local map = rawget(current, write.map)
+            if map ~= nil and type(map) ~= "table" then
+                EvidenceCancelCandidate()
+                return false, "ROOT_MAP_MALFORMED"
             end
-            local current = rawget(map, write.id)
-            if write.map == "communityBuilds" and type(write.value) == "table"
-                and type(current) == "table" and getmetatable(current) == nil
-                and current ~= write.value then
-                -- Replace the overlay row's known fields in place: the
-                -- durable table identity survives, absent V1-known fields
-                -- are removed, and the row is never cleared first.
-                for field in pairs(current) do
-                    if write.value[field] == nil then rawset(current, field, nil) end
+        end
+    end
+
+    -- Every required increment is refused before any one of them is performed.
+    if IncrementWouldExhaust(ST.durableBundleGeneration, ST.generation,
+        ST.committedMutationRevision, ST.semanticGeneration,
+        ST.preparationEpoch, ST.servingGeneration) then
+        EvidenceCancelCandidate()
+        LatchGenerationExhausted()
+        return false, "GENERATION_EXHAUSTED"
+    end
+
+    -- Off-state construction of the complete detached bundle payload. Each
+    -- changed catalog map is copied once and the candidate's writes are applied
+    -- to the copy, so no live nested bundle field is ever mutated.
+    local payload = {}
+    for _, item in ipairs(items) do
+        for _, write in ipairs(item.writes) do
+            if BUNDLE_CATALOG_MAPS[write.map] then
+                if payload[write.map] == nil then
+                    payload[write.map] = ShallowSnapshot(rawget(current, write.map))
                 end
-                for field, value in pairs(write.value) do
-                    rawset(current, field, value)
+                payload[write.map][write.id] = write.value
+            end
+        end
+    end
+    local stagedEvidence = EvidenceCandidateStore()
+    if stagedEvidence ~= nil then payload.loadoutEvidence = stagedEvidence end
+    local bundle = BuildDurableBundleCandidate(db, current,
+        ST.durableBundleGeneration + 1, payload)
+
+    -- Off-state construction of the complete replacement serving root.
+    local replacement = CloneServingCatalogRoot(root)
+    local applyOk = pcall(function()
+        for _, item in ipairs(items) do
+            local slot, verdict = item.slot, item.verdict
+            local key = slot.key
+            local previous = replacement.rows[key]
+            if previous then
+                IndexRemove(replacement.index, replacement.rows, key)
+            end
+            if verdict then
+                replacement.rows[key] = verdict
+                if replacement.slots[key] then
+                    replacement.slots[key] = DetachedSlot(slot)
+                else
+                    InsertSlot(replacement, DetachedSlot(slot))
                 end
-                if verdict and verdict.overlayRaw == write.value then
-                    verdict.overlayRaw = current
-                end
-                if slot.overlay == write.value then slot.overlay = current end
+                IndexAdd(replacement.index, replacement.rows, verdict, nil)
             else
-                rawset(map, write.id, write.value)
+                replacement.rows[key] = nil
+                RemoveSlot(replacement, key)
             end
-            if write.session then ST[write.session][write.value] = true end
+            ApplyCounts(replacement, previous, verdict)
+            RefreshVectors(replacement, key)
+            item.previous = previous
         end
-        RunFaultInjector("after-raw-write")
-        if previous then IndexRemove(root.index, root.rows, key) end
-        if verdict then
-            root.rows[key] = verdict
-            if not root.slots[key] then InsertSlot(root, slot) end
-            IndexAdd(root.index, root.rows, verdict, nil)
-        else
-            root.rows[key] = nil
-            RemoveSlot(root, key)
+    end)
+    if not applyOk then
+        EvidenceCancelCandidate()
+        ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
+        return false, "CANDIDATE_CONSTRUCTION_FAILED"
+    end
+
+    -- Build the two session registries and the complete source token before
+    -- the protected pointer replacement. The commit section below performs no
+    -- attacker-sized scan, copy, sort, or witness capture.
+    local sessionTombstones = setmetatable({}, {__mode="k"})
+    local sessionBarriers = setmetatable({}, {__mode="k"})
+    for key, value in pairs(ST.sessionTombstones) do sessionTombstones[key] = value end
+    for key, value in pairs(ST.sessionBarriers) do sessionBarriers[key] = value end
+    for _, item in ipairs(items) do
+        for _, write in ipairs(item.writes) do
+            if write.session == "sessionTombstones" then
+                sessionTombstones[write.value] = true
+            elseif write.session == "sessionBarriers" then
+                sessionBarriers[write.value] = true
+            end
         end
-        ApplyCounts(root, previous, verdict)
-        RefreshVectors(root, key)
-        root.token = CaptureToken(db)
-        RunFaultInjector("before-publish")
+    end
+    ST.preparationEpoch = ST.preparationEpoch + 1
+    local replacementToken = CaptureToken(db, bundle)
+    -- Protected section: allocation-free and callback-free. The single durable
+    -- bundle rawset and its identity verification are the only authority
+    -- payload write in the whole transaction. No legacy payload location is
+    -- written: line 394 gives the exact PR #68 locations no Package B writer,
+    -- and RAW-01 (line 4849) requires one complete `authorityBundle` pointer to
+    -- be the sole durable payload write.
+    local ok = pcall(function()
+        if not CommitDurableBundle(db, bundle) then
+            error("AUTHORITY_BUNDLE_VERIFICATION_FAILED", 0)
+        end
+        ST.sessionTombstones = sessionTombstones
+        ST.sessionBarriers = sessionBarriers
+        replacement.token = replacementToken
     end)
     if not ok then
-        if phase == "prepare" then return false, "CANDIDATE_FAILED" end
+        EvidenceCancelCandidate()
         ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
+        -- A protected commit failure leaves one complete selected durable bundle
+        -- and publishes the preallocated invalid sentinel. It never performs slot
+        -- restoration and never republishes the prior token.
         Invalidate("PROTECTED_COMMIT_FAILED")
         return false, "PROTECTED_COMMIT_FAILED"
     end
-    BumpRevisions(verdict, previous, slot.id)
-    ST.published = {
-        generation=ST.generation, token=root.token, rows=root.rows, slots=root.slots,
-        slotVector=root.slotVector, slotCount=root.slotCount, index=root.index,
-        counts=root.counts, overlayKeys=root.overlayKeys,
-        tombstoneKeys=root.tombstoneKeys, catalogVersion=root.catalogVersion,
-        schemaVersion=root.schemaVersion, migrated=false, redundantRemoved=0,
-    }
+    -- The detached evidence candidate is now durable inside the published
+    -- bundle, so the live compatibility mirror binds to that same graph.
+    EvidencePublishCandidate()
+
+    for _, item in ipairs(items) do
+        BumpRevisions(item.verdict, item.previous, item.slot.id)
+    end
+    replacement.generation = ST.generation
+    -- One serving swap for the whole candidate.
+    AuthorityServingRootWriterV1("final-swap",
+        NewServingRoot(replacement, ST.durableBundleGeneration))
     ST.activeCursors = {}
-    if not deferred then NotifyBuild(reason, slot.id) end
+    ReleaseSupersededCursors()
+    -- Notification is strictly after publication and can never unpublish it.
+    -- A callback failure must not report that the transaction did not commit.
+    if not deferred then
+        pcall(NotifyBuild, reason, notifyScope == "all" and nil
+            or (items[1] and items[1].slot.id), notifyScope)
+    end
     return true
+end
+
+local function CommitSlot(root, slot, verdict, rawWrites, reason, deferred)
+    return CommitBatch(root, {{slot=slot, verdict=verdict, writes=rawWrites}},
+        reason, deferred)
 end
 
 local function SlotFor(root, id)
@@ -2851,8 +3895,9 @@ local function BundledRawFor(slot)
 end
 
 local function PutInternal(record, options, claim, deferred)
+    local carriedUnknown
     ST.debugStats.putCalls = ST.debugStats.putCalls + 1
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return false, why end
     if type(record) ~= "table" or record.id == nil then
         return false, "build id required"
@@ -2872,6 +3917,11 @@ local function PutInternal(record, options, claim, deferred)
                 return false, "STALE_CLAIM"
             end
             readmitTombstone = true
+            -- MASTER-RC-016: restore the unknown evidence this exact tombstone
+            -- carried, at its original scope.
+            local carriedRaw = entryOrWhy.extra.tombstoneRaw
+            carriedUnknown = type(carriedRaw) == "table"
+                and carriedRaw.unknownEvidence or nil
         end
     else
         if existing and existing.tombstone then return false, "TOMBSTONE_RESERVATION" end
@@ -2907,7 +3957,8 @@ local function PutInternal(record, options, claim, deferred)
         return Fail("PROVENANCE_COLLISION")
     end
     local destination, destinationWhy = BuildDestination(verdict, walker,
-        existingRow and existingRow.source == "overlay" and existingRow or nil)
+        existingRow and existingRow.source == "overlay" and existingRow or nil,
+        carriedUnknown)
     if not destination then return Fail(destinationWhy) end
     local rawWrites = {}
     local storedAs = "overlay"
@@ -2936,6 +3987,9 @@ local function PutInternal(record, options, claim, deferred)
             and DeepEqual(verdict.snapshot, existingRow.snapshot)
             and DeepEqual(destination, existingRow.overlayRaw) then
             if claim then ReleaseClaim(claim) end
+            -- Nothing publishes, so nothing this preparation interned may become
+            -- durable: the detached evidence candidate is discarded.
+            EvidenceCancelCandidate()
             return true, storedAs
         end
         rawWrites[#rawWrites + 1] = {map="communityBuilds", id=slot.id, value=destination}
@@ -2963,7 +4017,7 @@ function Catalog.PutWithClaim(claim, record, options)
     if type(claim) ~= "table" or not ST.claimRegistry[claim] then
         return false, "INVALID_CLAIM"
     end
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return false, why end
     local entry = ST.claimRegistry[claim]
     local typedKey = type(record) == "table" and TypedKey(record.id) or nil
@@ -2973,7 +4027,7 @@ end
 
 -- Stage one repair record without publishing a represented-data revision.
 function Catalog.PutDeferred(record)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return false, why end
     if type(record) ~= "table" or record.id == nil then
         return false, "build id required"
@@ -2990,7 +4044,7 @@ function Catalog.PutDeferred(record)
 end
 
 function Catalog.PublishDeferred(changed, reason)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return false, why end
     changed = math.max(0, math.floor(tonumber(changed) or 0))
     if changed == 0 then return true, 0 end
@@ -3020,7 +4074,7 @@ local function CarryBarrier(replacement, existing, slot)
 end
 
 function Catalog.RemoveOverlay(id)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return false, why end
     local slot, existing, slotWhy = SlotFor(root, id)
     if not slot then return false, slotWhy end
@@ -3040,7 +4094,7 @@ function Catalog.RemoveOverlay(id)
 end
 
 function Catalog.RemoveOverlayBatch(ids)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return 0, why end
     if type(ids) ~= "table" then return 0, "build id list required" end
     local removed = 0
@@ -3068,11 +4122,14 @@ local function TombstoneRecord(slot, existing, tombstone)
         receiptRevision=ST.receiptRevision,
         receiptAtServerTime=TrustedServerTime() or 0,
         remoteStampEvidence=tonumber(tombstone.stamp) or 0,
+        -- MASTER-RC-016: the replaced row's unknown evidence travels with the
+        -- tombstone inside the same atomic transaction instead of being lost.
+        unknownEvidence=CarriedUnknown(existing),
     }
 end
 
 function Catalog.SetTombstone(id, tombstone, options)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return false, why end
     if id == nil or type(tombstone) ~= "table" then return false, "tombstone required" end
     options = type(options) == "table" and options or {}
@@ -3102,11 +4159,11 @@ function Catalog.SetTombstone(id, tombstone, options)
     local current = CurrentOwnerKey()
     if sourceKind == "local" then
         -- Local deletion requires current local-owner proof for the admitted
-        -- row: a verified overlay owner, or the coherent owner tuple of an
-        -- immutable bundled row (package authority, never user text).
+        -- row: a derived verified overlay owner and nothing else. A bundled
+        -- row's coherent author/player/ownerKey tuple proves nothing
+        -- (MASTER-RC-004, architecture line 193).
         local owns = current ~= nil
-            and (Identity.LocalOwnsBuild(existing.snapshot, current)
-                or (existing.source == "bundled" and existing.trustedOwner == current))
+            and Identity.LocalOwnsBuild(existing.snapshot, current)
         if not owns then
             return false, "LOCAL_OWNER_REQUIRED"
         end
@@ -3142,9 +4199,19 @@ function Catalog.SetTombstone(id, tombstone, options)
     if storedOwner and claimedOwner and storedOwner ~= claimedOwner then
         return false, "REMOTE_OWNER_REQUIRED"
     end
+    -- MASTER-RC-004: a bundled row's owner text is not remote delete authority
+    -- either. Architecture line 195 gives remote rows their owner contract --
+    -- "Require Identity.TransportOwns(canonicalOwnerKey, actualSender) for
+    -- direct owner authority" -- and that contract is preserved unchanged for
+    -- remote and overlay rows. But line 193 admits from a bundled row "Content
+    -- fields and immutable bundled source position only", so a bundled row's
+    -- ownerKey is content, not an owner claim a sender can prove. A bundled row
+    -- therefore carries remote delete authority only from a derived verified
+    -- owner.
     local owner = existing.verifiedOwner
-        or (existing.source == "bundled" and existing.trustedOwner)
-        or storedOwner or claimedOwner or nil
+    if owner == nil and existing.source ~= "bundled" then
+        owner = storedOwner or claimedOwner or nil
+    end
     if not (owner and Identity.TransportOwns(owner, options.sender)) then
         return false, "REMOTE_OWNER_REQUIRED"
     end
@@ -3180,7 +4247,7 @@ local function RetiredReplacement(slot, existing)
 end
 
 function Catalog.ClearTombstone(id)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return false, why end
     local slot, existing, slotWhy = SlotFor(root, id)
     if not slot then return false, slotWhy end
@@ -3201,7 +4268,7 @@ end
 
 function Catalog.BeginCatalogMaintenance(request)
     request = type(request) == "table" and request or {}
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return nil, why end
     if request.database ~= ST.db then return nil, "DETACHED_DATABASE" end
     local handle = {operation=request.operation or "retention",
@@ -3216,7 +4283,7 @@ local function MaintenanceOpen(handle)
     if type(handle) ~= "table" or not ST.maintenanceRegistry[handle] then
         return nil, "INVALID_MAINTENANCE_HANDLE"
     end
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return nil, why end
     if handle.state ~= "open" then return nil, "INVALID_MAINTENANCE_HANDLE" end
     return root
@@ -3349,8 +4416,16 @@ end
 function Catalog.MaintenanceOverlayNext(handle, cursor)
     local root, why = MaintenanceOpen(handle)
     if not root then return nil, nil, true, why end
-    local verdict = VectorStep(root.overlayKeys, cursor, root)
+    if cursor == nil then
+        handle.overlayNextIndex, handle.overlayLastId = 1, nil
+    elseif handle.overlayLastId ~= cursor then
+        return nil, nil, true, "INVALID_CURSOR"
+    end
+    local key = root.overlayKeys[handle.overlayNextIndex]
+    handle.overlayNextIndex = handle.overlayNextIndex + 1
+    local verdict = key and root.rows[key] or nil
     if not verdict then return nil, nil, true end
+    handle.overlayLastId = verdict.id
     return verdict.id, DeepCopy(verdict.overlayRaw), false
 end
 
@@ -3416,21 +4491,20 @@ function Catalog.CommitMaintenance(handle)
         end
         prepared[#prepared + 1] = item
     end
-    local applied = 0
-    for _, item in ipairs(prepared) do
-        local ok, commitWhy = CommitSlot(root, item.op.slot, item.verdict,
-            item.writes, "catalog maintenance", true)
-        if not ok then return false, commitWhy end
-        applied = applied + 1
+    local batch = {}
+    for index, item in ipairs(prepared) do
+        batch[index] = {slot=item.op.slot, verdict=item.verdict, writes=item.writes}
     end
+    local ok, commitWhy = CommitBatch(root, batch, nil, true)
+    if not ok then return false, commitWhy end
     ST.debugStats.maintenanceCommits = ST.debugStats.maintenanceCommits + 1
-    NotifyBuild(handle.operation == "compaction" and "exact evidence compaction"
+    pcall(NotifyBuild, handle.operation == "compaction" and "exact evidence compaction"
         or "catalog maintenance", nil, "all")
-    return true, {applied=applied}
+    return true, {applied=#batch}
 end
 
 function Catalog.RemoveTombstonesBatch(ids)
-    local root, why = Gate()
+    local root, why = MutationGate()
     if not root then return 0, why end
     if type(ids) ~= "table" then return 0, "tombstone id list required" end
     local removed = 0
@@ -3451,6 +4525,99 @@ end
 -- diagnostic. Authority is the exact token identity in a weak registry.
 ------------------------------------------------------------------------
 
+-- One namespace spends one file-level local for the six bounded cursor
+-- families. Copy state stays private and is discarded on completion,
+-- supersession, staleness, or publication.
+local Cursor = {}
+
+function Cursor.ChargeCopy(nodes, bytes, pending)
+    local stats = ST.debugStats
+    stats.cursorCopyNodes = stats.cursorCopyNodes + nodes
+    stats.cursorCopyBytes = stats.cursorCopyBytes + bytes
+    stats.maxCursorCopyNodesPerCall = math.max(
+        stats.maxCursorCopyNodesPerCall, nodes)
+    stats.maxCursorCopyBytesPerCall = math.max(
+        stats.maxCursorCopyBytesPerCall, bytes)
+    if pending then stats.cursorCopyPending = stats.cursorCopyPending + 1 end
+end
+
+function Cursor.AssignCopy(state, frame, key, value)
+    if type(value) ~= "table" then
+        frame.target[key] = value
+        return
+    end
+    local existing = state.copySeen[value]
+    if existing then
+        frame.target[key] = existing
+        return
+    end
+    local child = {}
+    state.copySeen[value] = child
+    frame.target[key] = child
+    state.copyFrames[#state.copyFrames + 1] = {
+        source=value, target=child, cursor=nil,
+    }
+end
+
+function Cursor.CopyStep(state, verdict)
+    if state.copyState ~= "COPY_PENDING" then
+        local source = verdict and verdict.snapshot
+        if type(source) ~= "table" then return nil, verdict, true end
+        state.copyState = "COPY_PENDING"
+        state.copyAccumulator = {}
+        state.copySeen = {[source]=state.copyAccumulator}
+        state.copyFrames = {{source=source, target=state.copyAccumulator, cursor=nil}}
+        state.copyVerdict = verdict
+        state.copyFresh = true
+        state.copyEdge = nil
+    end
+    local nodes, bytes = 0, 0
+    if state.copyFresh then
+        nodes, bytes, state.copyFresh = 1, 1, nil
+    end
+    while nodes < 64 and bytes < 2048 do
+        local edge = state.copyEdge
+        if edge then
+            local consumed = math.min(edge.remaining, 2048 - bytes)
+            edge.remaining = edge.remaining - consumed
+            bytes = bytes + consumed
+            if edge.remaining > 0 then break end
+            state.copyEdge = nil
+            Cursor.AssignCopy(state, edge.frame, edge.key, edge.value)
+        else
+            local frame = state.copyFrames[#state.copyFrames]
+            if not frame then
+                local copy, copiedVerdict = state.copyAccumulator, state.copyVerdict
+                state.copyState, state.copyAccumulator = "IDLE", nil
+                state.copySeen, state.copyFrames, state.copyVerdict = nil, nil, nil
+                if copy.id == nil then copy.id = copiedVerdict.id end
+                Cursor.ChargeCopy(nodes, bytes, false)
+                return copy, copiedVerdict, true
+            end
+            local key, value = next(frame.source, frame.cursor)
+            if key == nil then
+                state.copyFrames[#state.copyFrames] = nil
+            else
+                frame.cursor = key
+                nodes = nodes + 1
+                local cost = ScalarBytes(key)
+                    + (type(value) == "table" and 1 or ScalarBytes(value))
+                local available = 2048 - bytes
+                if cost > available then
+                    state.copyEdge = {frame=frame, key=key, value=value,
+                        remaining=cost - available}
+                    bytes = 2048
+                else
+                    bytes = bytes + cost
+                    Cursor.AssignCopy(state, frame, key, value)
+                end
+            end
+        end
+    end
+    Cursor.ChargeCopy(nodes, bytes, true)
+    return nil, state.copyVerdict, false
+end
+
 local function BeginCursor(family, state)
     local root, why = Gate()
     if not root then return nil, why end
@@ -3459,7 +4626,11 @@ local function BeginCursor(family, state)
     ST.cursorSequence = ST.cursorSequence + 1
     local token = {kind=family, cursorId=ST.cursorSequence, generation=ST.generation}
     state = state or {}
-    state.kind, state.rootIdentity, state.generation = family, ST.published, ST.generation
+    -- MASTER-RC-011: the entry binds the serving generation it was issued
+    -- against. It holds no root wrapper, so a superseded root is released at
+    -- publication instead of being pinned by an unused retained token.
+    state.kind, state.generation = family, ST.generation
+    state.servingGeneration = ST.servingGeneration
     state.nextIndex, state.exhausted = 1, false
     ST.cursorRegistry[token] = state
     ST.activeCursors[family] = token
@@ -3471,7 +4642,10 @@ local function CursorState(token, family)
     local state = type(token) == "table" and ST.cursorRegistry[token] or nil
     if not state or state.kind ~= family then return nil, "INVALID_CURSOR" end
     local root = Gate()
-    if not root or state.rootIdentity ~= root or state.generation ~= ST.generation then
+    if not root or state.stale or state.servingGeneration ~= ST.servingGeneration
+        or state.generation ~= ST.generation then
+        -- A stale-once sentinel refuses exactly once and then leaves the
+        -- registry; its next use is INVALID_CURSOR.
         ST.cursorRegistry[token] = nil
         if ST.activeCursors[family] == token then ST.activeCursors[family] = nil end
         return nil, "STALE_CURSOR"
@@ -3480,14 +4654,58 @@ local function CursorState(token, family)
 end
 
 local function NextVerdict(state, root, filter)
-    while state.nextIndex <= root.slotCount do
+    local inspected = 0
+    while state.nextIndex <= root.slotCount and inspected < BUDGET.oneCallRows do
         local slot = root.slotVector[state.nextIndex]
         state.nextIndex = state.nextIndex + 1
+        inspected = inspected + 1
         local verdict = root.rows[slot.key]
-        if verdict and filter(verdict) then return verdict end
+        if verdict and filter(verdict) then
+            ST.debugStats.cursorRowsInspected =
+                ST.debugStats.cursorRowsInspected + inspected
+            ST.debugStats.maxCursorRowsPerCall = math.max(
+                ST.debugStats.maxCursorRowsPerCall, inspected)
+            return verdict, false
+        end
     end
+    ST.debugStats.cursorRowsInspected =
+        ST.debugStats.cursorRowsInspected + inspected
+    ST.debugStats.maxCursorRowsPerCall = math.max(
+        ST.debugStats.maxCursorRowsPerCall, inspected)
+    if inspected == BUDGET.oneCallRows then return nil, true end
     state.exhausted = true
-    return nil
+    return nil, false
+end
+
+function Cursor.RecordPage(state, root, filter)
+    local verdict, scanPending
+    if state.copyState == "COPY_PENDING" then
+        verdict = state.copyVerdict
+    else
+        verdict, scanPending = NextVerdict(state, root, filter)
+        if scanPending then return {done=false, state="COPY_PENDING"} end
+        if not verdict then return {done=true} end
+    end
+    local copy, copiedVerdict, complete = Cursor.CopyStep(state, verdict)
+    if not complete then return {done=false, state="COPY_PENDING"} end
+    return {done=false, id=copiedVerdict.id, record=copy,
+        source=copiedVerdict.source}
+end
+
+function Cursor.VectorRecordPage(state, root)
+    local verdict
+    if state.copyState == "COPY_PENDING" then
+        verdict = state.copyVerdict
+    else
+        local key = state.keys[state.nextIndex]
+        state.nextIndex = state.nextIndex + 1
+        verdict = key and root.rows[key] or nil
+        if not verdict then state.exhausted = true; return {done=true} end
+    end
+    local copy, copiedVerdict, complete = Cursor.CopyStep(state, verdict)
+    if not complete then return {done=false, state="COPY_PENDING"} end
+    return {done=false, id=copiedVerdict.id, record=copy,
+        source=copiedVerdict.source}
 end
 
 function Catalog.BeginRecordCursor()
@@ -3498,9 +4716,7 @@ function Catalog.RecordCursorNext(token)
     local state, why, root = CursorState(token, "record")
     if not state then return nil, why end
     if state.exhausted then return {done=true} end
-    local verdict = NextVerdict(state, root, Admitted)
-    if not verdict then return {done=true} end
-    return {done=false, id=verdict.id, record=PublicRecord(verdict), source=verdict.source}
+    return Cursor.RecordPage(state, root, Admitted)
 end
 
 function Catalog.BeginSummaryCursor()
@@ -3513,7 +4729,8 @@ function Catalog.SummaryCursorNext(token)
         return nil, true, why == "INVALID_CURSOR" and "invalid cursor" or "catalog changed"
     end
     if state.exhausted then return nil, true end
-    local verdict = NextVerdict(state, root, Admitted)
+    local verdict, pending = NextVerdict(state, root, Admitted)
+    if pending then return nil, false, nil, "COPY_PENDING" end
     if not verdict then return nil, true end
     return Summarize(verdict), false, nil, verdict.bundledRaw ~= nil, verdict.overlayRaw ~= nil
 end
@@ -3526,39 +4743,25 @@ function Catalog.DeltaCursorNext(token)
     local state, why, root = CursorState(token, "delta")
     if not state then return nil, why end
     if state.exhausted then return {done=true} end
-    local verdict = NextVerdict(state, root, SyncEligible)
-    if not verdict then return {done=true} end
-    return {done=false, id=verdict.id, record=PublicRecord(verdict)}
-end
-
-local function SavedMirrorKeys(root, author)
-    local bucket = root.index.saved[RelatedKey(author, "saved")]
-    local keys = {}
-    for key in pairs(bucket and bucket.ids or {}) do keys[#keys + 1] = key end
-    table.sort(keys)
-    return keys
+    return Cursor.RecordPage(state, root, SyncEligible)
 end
 
 function Catalog.BeginSavedMirrorCursor(author)
     local root, why = Gate()
     if not root then return nil, why end
     ST.debugStats.savedMirrorEnumerations = ST.debugStats.savedMirrorEnumerations + 1
-    return BeginCursor("saved-mirror", {keys=SavedMirrorKeys(root, author)})
+    local bucket = root.index.saved[RelatedKey(author, "saved")]
+    return BeginCursor("saved-mirror", {keys=bucket and bucket.idVector or {}})
 end
 
 function Catalog.SavedMirrorCursorNext(token)
     local state, why, root = CursorState(token, "saved-mirror")
     if not state then return nil, why end
-    while state.nextIndex <= #state.keys do
-        local key = state.keys[state.nextIndex]
-        state.nextIndex = state.nextIndex + 1
-        local verdict = root.rows[key]
-        if verdict and verdict.snapshot then
-            ST.debugStats.savedMirrorRows = ST.debugStats.savedMirrorRows + 1
-            return {done=false, id=verdict.id, record=PublicRecord(verdict)}
-        end
+    local page = Cursor.VectorRecordPage(state, root)
+    if page.record then
+        ST.debugStats.savedMirrorRows = ST.debugStats.savedMirrorRows + 1
     end
-    return {done=true}
+    return page
 end
 
 function Catalog.SavedMirrorIds(author)
@@ -3566,7 +4769,8 @@ function Catalog.SavedMirrorIds(author)
     if not root then return {}, why end
     ST.debugStats.savedMirrorEnumerations = ST.debugStats.savedMirrorEnumerations + 1
     local ids = {}
-    for _, key in ipairs(SavedMirrorKeys(root, author)) do
+    local bucket = root.index.saved[RelatedKey(author, "saved")]
+    for _, key in ipairs(bucket and bucket.idVector or {}) do
         local verdict = root.rows[key]
         if verdict then ids[#ids + 1] = verdict.id end
         if #ids > BUDGET.oneCallRows then return nil, "CURSOR_REQUIRED" end
@@ -3585,16 +4789,67 @@ function Catalog.DiagnosticCursorNext(token)
     local state, why, root = CursorState(token, "diagnostic")
     if not state then return nil, why end
     if state.exhausted then return {done=true} end
-    local verdict = NextVerdict(state, root, function(item)
-        if state.diagnostic == "tombstone" then return item.tombstone ~= nil end
-        return item.overlayRaw ~= nil and item.snapshot ~= nil
-    end)
-    if not verdict then return {done=true} end
-    if state.diagnostic == "tombstone" then
-        return {done=false, id=verdict.id, tombstone=CompatTombstone(verdict),
-            state=verdict.tombstone.state}
+    if state.diagnostic == "overlay" then
+        return Cursor.RecordPage(state, root, function(item)
+            return item.overlayRaw ~= nil and item.snapshot ~= nil
+        end)
     end
-    return {done=false, id=verdict.id, record=PublicRecord(verdict)}
+    local verdict, pending = NextVerdict(state, root, function(item)
+        return item.tombstone ~= nil
+    end)
+    if pending then return {done=false, state="COPY_PENDING"} end
+    if not verdict then return {done=true} end
+    return {done=false, id=verdict.id, tombstone=CompatTombstone(verdict),
+        state=verdict.tombstone.state}
+end
+
+function Cursor.PrepareRelated(state, root)
+    if state.parseDone then return true end
+    local steps = 0
+    while steps < BUDGET.oneCallRows do
+        local first, last, rawId, rawCount = state.query:find(
+            "(%d+)x(%d+)", state.parseIndex)
+        if not first then
+            state.parseDone = true
+            state.buckets[1], state.buckets[2], state.buckets[3] =
+                state.exactBucket, state.titleBucket,
+                state.queryTotal >= 6 and state.smallestBucket or nil
+            return true
+        end
+        state.parseIndex = last + 1
+        steps = steps + 1
+        local id, count = tonumber(rawId), tonumber(rawCount)
+        if id and count and count > 0 then
+            state.queryTotal = state.queryTotal + count
+            local bucket = root.index.spells[
+                RelatedKey(state.authorKey, tostring(id))]
+            if bucket and (not state.smallestBucket
+                or bucket.count < state.smallestBucket.count) then
+                state.smallestBucket = bucket
+            end
+        end
+    end
+    return false
+end
+
+function Cursor.RelatedVerdict(state, root)
+    local best
+    for index = 1, 3 do
+        local bucket = state.buckets[index]
+        local key = bucket and bucket.idVector[state.bucketPositions[index]] or nil
+        if key and (not best
+            or CompareSlots(root.rows[key], root.rows[best]) < 0) then
+            best = key
+        end
+    end
+    if not best then state.exhausted = true; return nil end
+    for index = 1, 3 do
+        local bucket = state.buckets[index]
+        if bucket and bucket.idVector[state.bucketPositions[index]] == best then
+            state.bucketPositions[index] = state.bucketPositions[index] + 1
+        end
+    end
+    return root.rows[best]
 end
 
 function Catalog.BeginRelatedCursor(author, title, fingerprint)
@@ -3602,32 +4857,14 @@ function Catalog.BeginRelatedCursor(author, title, fingerprint)
     if not root then return nil, why end
     ST.debugStats.relatedLookups = ST.debugStats.relatedLookups + 1
     local authorKey = RelatedText(author)
-    local buckets = {}
-    if authorKey ~= "" then
-        local index = root.index
-        local function Add(bucket) if bucket then buckets[#buckets + 1] = bucket end end
-        Add(index.fingerprints[RelatedKey(authorKey, fingerprint)])
-        Add(index.titles[RelatedKey(authorKey, RelatedText(title))])
-        local spells, total = FingerprintSpells(fingerprint)
-        if total >= 6 then
-            local smallest
-            for _, spellId in ipairs(spells) do
-                local bucket = index.spells[RelatedKey(authorKey, tostring(spellId))]
-                if bucket and (not smallest or bucket.count < smallest.count) then
-                    smallest = bucket
-                end
-            end
-            Add(smallest)
-        end
-    end
-    local keys, seen = {}, {}
-    for _, bucket in ipairs(buckets) do
-        for key in pairs(bucket.ids) do
-            if not seen[key] then seen[key] = true; keys[#keys + 1] = key end
-        end
-    end
-    table.sort(keys)
-    return BeginCursor("relationship", {keys=keys, returned=0})
+    local query = type(fingerprint) == "string" and fingerprint or ""
+    return BeginCursor("relationship", {
+        authorKey=authorKey, query=query, parseIndex=1, queryTotal=0,
+        exactBucket=root.index.fingerprints[RelatedKey(authorKey, query)],
+        titleBucket=root.index.titles[RelatedKey(authorKey, RelatedText(title))],
+        smallestBucket=nil, buckets={}, bucketPositions={1,1,1},
+        parseDone=authorKey == "", returned=0,
+    })
 end
 
 function Catalog.RelatedCursorNext(token)
@@ -3635,19 +4872,23 @@ function Catalog.RelatedCursorNext(token)
     if not state then
         return nil, true, why == "INVALID_CURSOR" and "invalid related cursor" or "catalog changed"
     end
-    while state.nextIndex <= #state.keys do
-        local key = state.keys[state.nextIndex]
-        state.nextIndex = state.nextIndex + 1
-        local verdict = root.rows[key]
-        if verdict and verdict.snapshot then
-            state.returned = state.returned + 1
-            ST.debugStats.relatedCandidates = ST.debugStats.relatedCandidates + 1
-            ST.debugStats.maxRelatedCandidates = math.max(
-                ST.debugStats.maxRelatedCandidates, state.returned)
-            return PublicRecord(verdict), false
-        end
+    if not Cursor.PrepareRelated(state, root) then
+        return nil, false, nil, "COPY_PENDING"
     end
-    return nil, true
+    local verdict, pending
+    if state.copyState == "COPY_PENDING" then
+        verdict = state.copyVerdict
+    else
+        verdict = Cursor.RelatedVerdict(state, root)
+        if not verdict then return nil, true end
+    end
+    local copy, _, complete = Cursor.CopyStep(state, verdict)
+    if not complete then return nil, false, nil, "COPY_PENDING" end
+    state.returned = state.returned + 1
+    ST.debugStats.relatedCandidates = ST.debugStats.relatedCandidates + 1
+    ST.debugStats.maxRelatedCandidates = math.max(
+        ST.debugStats.maxRelatedCandidates, state.returned)
+    return copy, false
 end
 
 function Catalog.RelatedCandidates(author, title, fingerprint)
@@ -3814,3 +5055,15 @@ function Catalog.IsAuthor(name)
     if not key then return false end
     return root.index.authors[key] ~= nil
 end
+
+------------------------------------------------------------------------
+-- Initial invalid-bootstrap serving install (MASTER-RC-001).
+--
+-- AuthorityCommitCoordinatorV1 constructs InvalidBootstrapServingRootV1 once
+-- under a fresh session owner before any authority API becomes reachable, and
+-- AuthorityServingRootWriterV1 installs it. Numeric zero never recreates session
+-- authority: all four domain fields hold the shared immutable invalid marker, so
+-- every authority API returns its fixed non-valid result until one complete root
+-- publishes through the final swap.
+------------------------------------------------------------------------
+AuthorityServingRootWriterV1("initial-invalid-install")

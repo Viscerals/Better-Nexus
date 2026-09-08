@@ -85,13 +85,19 @@ ExpectOneRecompute("settings", function()
 end, 5.2, 0)
 
 ExpectOneRecompute("association", function()
+    -- MASTER-RC-001: Store.State() is a DURABLE_READ returning a defensive
+    -- copy, so assigning through it would be a silent no-op. The write goes
+    -- through the architecture's counted private mutation entry. Only the write
+    -- path changes; the mutation and the assertion around it are unchanged.
     local state = assert(Nexus.Store.State())
     local associations = H.CloneValue(state.loadoutWishlists or {})
     associations[2] = {
         slot=2,name="Echo Refresh Association",
         echoes={{spellId=200100,quality=3,stacks=1}},
     }
-    state.loadoutWishlists = associations
+    Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)
+        row.loadoutWishlists = associations
+    end)
 end, 5.2, 0)
 
 local missedBefore = F.Snapshot()

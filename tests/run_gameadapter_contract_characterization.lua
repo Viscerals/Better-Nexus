@@ -157,7 +157,12 @@ assert(#serviceOrder == 0 and MutationSnapshot() == mutationBeforeReads,
 
 -- Association writes stay in Store and exact-loadout resolution follows the
 -- immutable Echo identity without touching Project Ebonhold mutations.
-local heroState = Store.State()
+-- MASTER-RC-001: Store.State() now returns a defensive copy, so a value
+-- captured once no longer aliases later writes. H.LiveStoreStateV1()
+-- re-resolves at the point of every access through the authorized
+-- StoreAuthorityOwnerV1.UpdateStateV1 entry. Only the read timing changes;
+-- every assertion below is unchanged.
+local heroState = H.LiveStoreStateV1()
 assert(A.SetLoadoutWishlist(1, 6), "loadout association fixture failed")
 local association = A.GetLoadoutWishlist(1)
 local wishlist = A.Wishlist()

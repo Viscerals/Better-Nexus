@@ -48,8 +48,15 @@ for _, msg in ipairs(H.sentChatMessages) do
     Sync.HandleIncoming(msg.text, "Alice-Ebonhold")
 end
 
-local stored = NexusDB.communityBuilds and NexusDB.communityBuilds["mine-1"]
+-- Legacy-to-bundle cutover (architecture 3b5de54f, state machine lines 394 and
+-- 4849): the durable authority payload is the bundle, and the exact PR #68
+-- location is read-only preserved input that ordinary receiving never writes.
+local stored = H.DurableBuilds()["mine-1"]
 assert(stored, "received build was not stored")
+assert(Nexus.BuildCatalog.Get("mine-1"),
+    "the public read seam did not serve the received build")
+assert(rawget(NexusDB, "communityBuilds") == nil,
+    "receiving wrote a legacy payload location")
 assert(stored.title == "Fire Mage AoE", "wrong title received")
 assert(stored.description == "Great farm build", "wrong description received")
 assert(#stored.echoes == 1 and stored.echoes[1].spellId == 200100, "wrong echoes received")

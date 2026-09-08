@@ -8,7 +8,21 @@ UnitName=function() return currentName end; UnitLevel=function() return 80 end
 local echoes={}; for i=1,79 do echoes[i]={spellId=210000+i,stacks=1} end
 local build={id="remote-record-build",title="Mesh Record",author="Origin",class="MAGE",echoes=echoes,postedAt=1,lastModified=1,isMine=false}
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
+H.AdmitCatalogV1(NexusDB)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({},Sync)
 local fp=DPS.GetEchoKey(echoes)
 local ownerRecord = {v=3,f=fp,e=echoes,c="dummy",d=31000000,u=65,
@@ -45,6 +59,8 @@ assert(#dpsMessages>0,"record owner produced no DPS chunks")
 
 -- Fresh receiver: the chunks reconstruct the exact authoritative record.
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
+H.AdmitCatalogV1(NexusDB)
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({},Sync)
 for _,text in ipairs(dpsMessages) do
     Sync.HandleIncoming(text,"Champion-Ebonhold")

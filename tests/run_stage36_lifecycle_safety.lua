@@ -48,8 +48,18 @@ local lifecycleOrder = {}
 local syncUpdates, dpsUpdates, automationUpdates = 0, 0, 0
 local combatStarts, combatEnds = 0, 0
 local syncFailure = "stage36 sync update failure"
+-- MASTER-RC-001, architecture 3b5de54f lines 1206 and 1519. Store.Init returns
+-- an explicit detached authority result and "a successful pcall is never
+-- interpreted as readiness"; Store releases dependents only on entering
+-- STORE_READY. This stub previously returned `true`, which the accepted
+-- architecture explicitly refuses, so the lifecycle correctly withheld every
+-- dependent and none of this file's own error-retention, isolation, ordering
+-- or episode-reset cases could execute at all. The stub now expresses the
+-- architecture's contract. The withheld outcomes it used to hide are not lost:
+-- they are covered distinctly by the readiness-boundary probes below,
+-- including `true` itself as an explicit negative control.
 local Store = {
-    Init=function() return true end,
+    Init=function() return {state="ready"} end,
     Settings=function() return {} end,
 }
 local Adapter = {
@@ -122,6 +132,122 @@ local lifecycle = lifecycleFactory.New({
     database=function() return {} end,
     now=function() return 100 end,
 })
+
+------------------------------------------------------------------------
+-- Readiness boundary (MASTER-RC-001, lines 1206/1519). Pending, ready and
+-- failure outcomes are covered distinctly. Neither a `true` return nor a
+-- successful pcall may ever establish STORE_READY, and no dependent may be
+-- released until the authority result itself says ready.
+------------------------------------------------------------------------
+local inertAutomation = {
+    Initialize=function() return true end,
+    JournalData=function() return {} end,
+    OnUpdate=function() end,
+    RunFullStep=function() return true end,
+    ToggleAuto=function() return false end,
+}
+
+local function ReadinessProbe(storeResult, raises)
+    local released, storeErrors = {}, {}
+    local probeNexus = {
+        VERSION="stage36probe", MainInternals={},
+        DiagnosticLogs={Init=function() return true end},
+    }
+    local probe = lifecycleFactory.New({
+        nexus=probeNexus,
+        bindDependencies=function()
+            return {
+                Store={
+                    Init=function()
+                        if raises then error("stage36 store init fault", 0) end
+                        return storeResult
+                    end,
+                    Settings=function() return {} end,
+                },
+                Adapter={
+                    Init=function()
+                        released[#released + 1] = "Adapter.Init"
+                    end,
+                    OnEvent=function()
+                        released[#released + 1] = "Adapter.OnEvent"
+                    end,
+                    SetSoloPicker=function() end,
+                    RequestSlots=function()
+                        released[#released + 1] = "Adapter.RequestSlots"
+                    end,
+                    Ready=function() return true end,
+                    RivalDetected=function() return false end,
+                },
+                Panel={Init=function()
+                    released[#released + 1] = "Panel.Init"
+                end},
+                Model={}, JournalTab=nil,
+            }
+        end,
+        ensureAutomation=function() return inertAutomation end,
+        print=function() end,
+        recordError=function() end,
+        recordStoreError=function(value)
+            storeErrors[#storeErrors + 1] = tostring(value)
+        end,
+        errorText=tostring,
+        requestRecompute=function() end,
+        refreshHud=function() return true end,
+        requestFirstHud=function() return true end,
+        database=function() return {} end,
+        now=function() return 100 end,
+    })
+    probe.OnEvent("ADDON_LOADED", "Nexus")
+    probe.OnEvent("PLAYER_ENTERING_WORLD")
+    -- Several scheduler turns: a withheld dependent must stay withheld, and a
+    -- released one must be released exactly once.
+    for _ = 1, 4 do probe.OnUpdate(0.2) end
+    return probe, released, storeErrors
+end
+
+local trueProbe, trueReleased, trueStoreErrors = ReadinessProbe(true)
+Check("lifecycle_true_return_is_not_ready",
+    trueProbe.IsInitialized() == false and #trueReleased == 0
+        and #trueStoreErrors > 0,
+    string.format("initialized=%s released=%s storeErrors=%d",
+        tostring(trueProbe.IsInitialized()),
+        table.concat(trueReleased, ","), #trueStoreErrors))
+
+local pendingProbe, pendingReleased = ReadinessProbe({state="pending"})
+Check("lifecycle_pending_withholds_dependents",
+    pendingProbe.IsInitialized() == false and #pendingReleased == 0,
+    string.format("initialized=%s released=%s",
+        tostring(pendingProbe.IsInitialized()),
+        table.concat(pendingReleased, ",")))
+
+local failedProbe, failedReleased, failedStoreErrors =
+    ReadinessProbe({state="failed", reason="STORE_INVALID"})
+Check("lifecycle_failed_withholds_dependents",
+    failedProbe.IsInitialized() == false and #failedReleased == 0
+        and #failedStoreErrors > 0,
+    string.format("initialized=%s released=%s storeErrors=%d",
+        tostring(failedProbe.IsInitialized()),
+        table.concat(failedReleased, ","), #failedStoreErrors))
+
+local raisingProbe, raisingReleased, raisingStoreErrors =
+    ReadinessProbe(nil, true)
+Check("lifecycle_raising_init_is_contained",
+    raisingProbe.IsInitialized() == false and #raisingReleased == 0
+        and #raisingStoreErrors > 0,
+    string.format("initialized=%s released=%s storeErrors=%d",
+        tostring(raisingProbe.IsInitialized()),
+        table.concat(raisingReleased, ","), #raisingStoreErrors))
+
+local readyProbe, readyReleased, readyStoreErrors =
+    ReadinessProbe({state="ready"})
+Check("lifecycle_ready_releases_dependents_once",
+    readyProbe.IsInitialized() == true
+        and table.concat(readyReleased, ",")
+            == "Adapter.Init,Panel.Init,Adapter.OnEvent,Adapter.RequestSlots"
+        and #readyStoreErrors == 0,
+    string.format("initialized=%s released=%s storeErrors=%d",
+        tostring(readyProbe.IsInitialized()),
+        table.concat(readyReleased, ","), #readyStoreErrors))
 
 lifecycle.OnEvent("PLAYER_ENTERING_WORLD")
 for _ = 1, 8 do

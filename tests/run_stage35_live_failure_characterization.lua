@@ -132,7 +132,7 @@ local navigationBundle = {
             echoes={{spellId=400002,stacks=1}}},
     },
 }
-Nexus.BuildCatalog.Init(collisionDb, navigationBundle)
+H.AdmitCatalogV1(collisionDb, navigationBundle)
 local resolvedId, resolvedBuild =
     Nexus.BuildCatalog.FindExactFingerprint(RECOVERED_FINGERPRINT)
 local fingerprintEpoch, fingerprintRevision =
@@ -278,7 +278,7 @@ Check(buildCount == 504 and echoRows == 36187
     "immutable bundled catalog receipt drifted")
 
 local baselineDb = {communityBuilds={},syncTombstones={}}
-local baselineSummary = Nexus.BuildCatalog.Init(baselineDb, bundled)
+local baselineSummary = H.AdmitCatalogV1(baselineDb, bundled)
 local admissibleBundled = 0
 for _, row in pairs(bundled.builds) do
     if Nexus.LoadoutEvidence.SemanticEnvelope(row.echoes).valid then

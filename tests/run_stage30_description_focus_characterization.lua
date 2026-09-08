@@ -348,7 +348,7 @@ if stopUiReady then
         "Stop Sharing mutated the build before confirmation")
     H.AcceptLastStaticPopup()
     assert(Nexus.BuildCatalog.Get(sharedId) == nil
-        and NexusDB.syncTombstones[sharedId]
+        and H.DurableTombstones()[sharedId]
         and deleteCalls == 1,
         "confirmed Stop Sharing did not use the owner tombstone path")
 end
@@ -371,7 +371,7 @@ assert(H.lastStaticPopup
     "stale-owner guard did not reach confirmation")
 assert(Nexus.BuildCatalog.Get(staleId),
     "stale-owner fixture vanished before confirmation")
-local staleStored = assert(NexusDB.communityBuilds[staleId],
+local staleStored = assert(H.DurableBuilds()[staleId],
     "stale-owner fixture has no authoritative overlay record")
 staleStored.ownerKey = "other@ebonhold"
 -- The ownership change must be admitted before it is authority: a raw write
@@ -385,14 +385,14 @@ H.AcceptLastStaticPopup()
 print = stalePrint
 local staleRetained = Nexus.BuildCatalog.Get(staleId)
 assert(staleRetained and staleRetained.ownerKey == "other@ebonhold"
-    and NexusDB.syncTombstones[staleId] == nil
+    and H.DurableTombstones()[staleId] == nil
     and deleteCalls == deletesBeforeStale
     and table.concat(stalePrinted, "\n"):find(
         "Stop Sharing refused", 1, true),
     string.format("ownership change after confirmation did not fail closed: "
         .. "retained=%s tombstone=%s calls=%d/%d text=%q",
         tostring(staleRetained ~= nil),
-        tostring(NexusDB.syncTombstones[staleId] ~= nil),
+        tostring(H.DurableTombstones()[staleId] ~= nil),
         deleteCalls,deletesBeforeStale,table.concat(stalePrinted, "\n")))
 
 local postedRejected, rejectedId = Community.PostCurrentWishlist(
@@ -421,7 +421,7 @@ assert(H.lastStaticPopup
 H.AcceptLastStaticPopup()
 print = rejectedPrint
 assert(Nexus.BuildCatalog.Get(rejectedId) == nil
-    and NexusDB.syncTombstones[rejectedId]
+    and H.DurableTombstones()[rejectedId]
     and table.concat(rejectedPrinted, "\n"):find(
         "withdrawal not queued: sync disabled", 1, true),
     "non-retry withdrawal rejection was not reported honestly")
@@ -456,14 +456,14 @@ Expect("withdrawal_reports_queue_admission",
         and retryText:find("Withdrawal retry is pending", 1, true)
         and deleteCalls == deletesBeforeRetry + 1
         and Nexus.BuildCatalog.Get(retryId) == nil
-        and NexusDB.syncTombstones[retryId]
+        and H.DurableTombstones()[retryId]
         and NexusDB.upstreamSavedBuilds == savedBuildsRef
         and NexusDB.upstreamWishlists == wishlistsRef
         and savedBuildsRef.keep and wishlistsRef.keep,
     string.format("confirmed=%s text=%q removed=%s tombstone=%s calls=%d",
         tostring(retryConfirmed),retryText,
         tostring(Nexus.BuildCatalog.Get(retryId) == nil),
-        tostring(NexusDB.syncTombstones[retryId] ~= nil),deleteCalls))
+        tostring(H.DurableTombstones()[retryId] ~= nil),deleteCalls))
 
 if #failures > 0 then
     error("Stage 30 Share/Edit and withdrawal regression ("

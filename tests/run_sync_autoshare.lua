@@ -87,7 +87,8 @@ for _, m in ipairs(postMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") en
 for _, m in ipairs(editMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") end
 for _, m in ipairs(updMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") end
 
-local peerCopy = NexusDB.communityBuilds[id]
+-- Legacy-to-bundle cutover: the peer's durable copy is the bundle payload.
+local peerCopy = H.DurableBuilds()[id]
 assert(peerCopy, "peer never received the build at all")
 assert(peerCopy.title == "Edited Title",
     "peer did not receive the EDITED title -- edits are not propagating (got '" .. tostring(peerCopy.title) .. "')")
@@ -96,22 +97,25 @@ assert(peerCopy.echoCount == 2,
 assert(not peerCopy.echoes or #peerCopy.echoes == 0,
     "automatic build sync should not include the full Echo list")
 local count = 0
-for _ in pairs(NexusDB.communityBuilds) do count = count + 1 end
+for _ in pairs(H.DurableBuilds()) do count = count + 1 end
 assert(count == 1, "edits created duplicate entries instead of updating in place (got " .. count .. ")")
 print("every successive edit propagates to peers, in place, with no duplicates -- OK")
 
 -- 5. Editing/updating someone ELSE'S build must be refused
-NexusDB.communityBuilds["theirs"] = { id = "theirs", title = "Theirs",
+-- An occupied bundle is authoritative, so the foreign build is admitted through
+-- the public write seam rather than a raw legacy write plus readmission.
+assert(Nexus.BuildCatalog.Put({ id = "theirs", title = "Theirs",
     description = "d", author = "Bob", class = "ROGUE",
     echoes = { { spellId = 1, quality = 0, stacks = 1 } },
     postedAt = 1, lastModified = 1, ownerKey = "bob@ebonhold",
-    ownerVerified = true, isMine = false }
-H.RebindCatalog()
+    ownerVerified = true, isMine = false },
+    {source="remote", sender="Bob-Ebonhold"}),
+    "fixture could not admit another player's build")
 local okE, errE = CB.EditBuild("theirs", "Hijacked", "nope")
 assert(not okE, "editing someone else's build must be refused")
 local okU, errU = CB.UpdateFromWishlist("theirs")
 assert(not okU, "updating someone else's build must be refused")
-assert(NexusDB.communityBuilds["theirs"].title == "Theirs",
+assert(H.DurableBuilds()["theirs"].title == "Theirs",
     "someone else's build was modified anyway")
 print("editing/updating another player's build is correctly refused -- OK")
 

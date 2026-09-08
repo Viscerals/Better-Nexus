@@ -25,6 +25,31 @@ local VALID_PHASE = {}
 for _, phase in ipairs(PHASES) do VALID_PHASE[phase] = true end
 
 local active
+
+-- Architecture 3b5de54f, docs/SYNC_TRUST_CATALOG_AUTHORITY_STATE_MACHINE.md
+-- lines 2983-2985: "Exact PR #68 LegacyDataMigration.Init/Pump/Finish and its
+-- writes in Store.lua are disabled before authority bootstrap." "The old
+-- module cannot resume a durable cursor or write accountCharacters, DPS
+-- tables, leaderboard, or migration metadata after Package B loads."
+--
+-- Package B therefore loads this module RETIRED. Its direct mutation entry
+-- points do nothing and write nothing until AuthorityBootstrapCoordinatorV1
+-- classifies the legacy recovery input and authorizes this exact database for
+-- the bounded conversion. Terminal metadata already in the database stays an
+-- exact read-only non-authoritative receipt; nothing here rewrites it, and
+-- Status still reports it while retired.
+local writerAuthority
+
+local function WriterArmed(database)
+    return writerAuthority ~= nil and database ~= nil
+        and writerAuthority.database == database
+end
+
+local function RetiredResult()
+    return {complete=true, pending=false, needed=false, readOnly=true,
+        retired=true, reason="LEGACY_WRITER_RETIRED_V1"}
+end
+
 local runtime = {
     requested=0,coalesced=0,jobs=0,pumps=0,workUnits=0,maxWork=0,
     restarts=0,failures=0,completed=0,pending=false,lastReason="none",
@@ -741,6 +766,8 @@ end
 
 function Migration.Pump(limit)
     if not active then return true end
+    -- A retired writer can never resume a durable cursor.
+    if not WriterArmed(active.database) then return true end
     limit = math.max(1, math.min(math.floor(tonumber(limit) or BATCH_SIZE),
         BATCH_SIZE))
     runtime.pumps = runtime.pumps + 1
@@ -801,6 +828,7 @@ function Migration.Init(database)
     database = type(database) == "table" and database
         or type(NexusDB) == "table" and NexusDB or nil
     if not database then return {complete=false,reason="database unavailable"} end
+    if not WriterArmed(database) then return RetiredResult() end
 
     local existing, metaError = Meta(database, false)
     if metaError then
@@ -895,10 +923,54 @@ function Migration.Status(database)
         state=type(meta) == "table" and meta.state or "not-needed",
         phase=type(meta) == "table" and meta.phase or nil,
         workUnits=type(meta) == "table" and tonumber(meta.workUnits) or 0,
+        retired=not WriterArmed(database),
         stats=type(meta) == "table" and DeepCopy(meta.stats) or {},
         lastResult=type(meta) == "table" and DeepCopy(meta.lastResult) or nil,
         runtime=DeepCopy(runtime),
     }
+end
+
+-- The only entry that may arm the retired writer. It is called by
+-- AuthorityBootstrapCoordinatorV1 before authority bootstrap, reads only the
+-- fixed top-level recovery metadata, never descends into staging, and writes
+-- nothing. A non-table marker is LEGACY_DATA_RECOVERY_INVALID and leaves the
+-- writer retired.
+function Migration.ClassifyLegacyWriterV1(database, coordinator)
+    database = type(database) == "table" and database
+        or type(NexusDB) == "table" and NexusDB or nil
+    writerAuthority = nil
+    if not database then
+        return {armed=false, classification="DATABASE_UNAVAILABLE"}
+    end
+    local meta = rawget(database, "legacyDataMigration")
+    local classification = "INACTIVE"
+    if meta ~= nil then
+        if type(meta) ~= "table" then
+            return {armed=false,
+                classification="LEGACY_DATA_RECOVERY_INVALID"}
+        elseif meta.state == "complete" then
+            classification = "TERMINAL_RECEIPT_PRESERVED"
+        else
+            classification = "RECOVERY_REQUIRED"
+        end
+    end
+    writerAuthority = {database=database, coordinator=coordinator}
+    return {armed=true, classification=classification}
+end
+
+-- Retires the writer again. No ordinary caller can resume the cursor after
+-- this, and any in-flight session job is abandoned without a durable write.
+function Migration.RetireLegacyWriterV1()
+    writerAuthority = nil
+    active = nil
+    runtime.pending = false
+    return true
+end
+
+function Migration.LegacyWriterRetired(database)
+    database = type(database) == "table" and database
+        or type(NexusDB) == "table" and NexusDB or nil
+    return not WriterArmed(database)
 end
 
 function Migration.BatchSize() return BATCH_SIZE end

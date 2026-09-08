@@ -39,7 +39,7 @@ for index=1,150 do
         lockedEchoes=locked,build=build}
     NexusDB.communityBuilds[buildId]=H.CloneValue(build)
 end
-Nexus.BuildCatalog.Init(NexusDB,Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB,Nexus.BundledBuilds)
 
 local boardReads=0
 Nexus.DpsCapture={

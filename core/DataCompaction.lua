@@ -57,6 +57,27 @@ local function Evidence()
     return Nexus and Nexus.LoadoutEvidence
 end
 
+-- The selected durable evidence payload after the accepted legacy-to-bundle
+-- cutover. State machine line 394 keeps the exact PR #68 `loadoutEvidence`
+-- location "Preserved legacy input when the bundle is absent. Never used as
+-- fallback after bundle occupancy", and RAW-01 (line 4849) makes one complete
+-- `authorityBundle` pointer the sole durable payload write. Reading the legacy
+-- location directly silently disabled this owner's future-schema guard once a
+-- bundle existed, so the selection is asked for here exactly as the evidence
+-- owner performs it. A detached database that is not the evidence owner's bound
+-- one falls through to its own bundle, never to this module's global state.
+local function DurableEvidenceStore(database)
+    if type(database) ~= "table" then return nil end
+    local owner = Evidence()
+    if owner and type(owner.DurableStore) == "function" then
+        local store = owner.DurableStore(database)
+        if type(store) == "table" then return store end
+    end
+    local bundle = rawget(database, "authorityBundle")
+    if type(bundle) == "table" then return rawget(bundle, "loadoutEvidence") end
+    return rawget(database, "loadoutEvidence")
+end
+
 local function Meta(database)
     database.dataCompaction = type(database.dataCompaction) == "table"
         and database.dataCompaction or {}
@@ -253,8 +274,9 @@ local function NewState(database, meta)
         error("loadout evidence pool unavailable")
     end
     local emptyOverlay, emptyDps, emptyEntries = {}, {}, {}
-    local evidenceStore = type(database.loadoutEvidence) == "table"
-        and database.loadoutEvidence or nil
+    local rawEvidenceStore = DurableEvidenceStore(database)
+    local evidenceStore = type(rawEvidenceStore) == "table"
+        and rawEvidenceStore or nil
     if evidenceStore and tonumber(evidenceStore.schemaVersion)
         and tonumber(evidenceStore.schemaVersion) > evidence.SchemaVersion() then
         error("future evidence schema is read-only")
@@ -324,7 +346,7 @@ local function RefreshOwners(state)
     if not (evidence and type(evidence.SchemaVersion) == "function") then
         return "blocked","loadout evidence pool unavailable",false
     end
-    local evidenceStore = rawget(database,"loadoutEvidence")
+    local evidenceStore = DurableEvidenceStore(database)
     if type(evidenceStore) == "table"
         and tonumber(evidenceStore.schemaVersion)
         and tonumber(evidenceStore.schemaVersion) > evidence.SchemaVersion() then
@@ -378,15 +400,21 @@ end
 -- Replacing a bound SavedVariables owner is current-source drift for the
 -- catalog root. The maintenance owner performs one explicit readmission from
 -- cursor zero so its next walk sees the exact new selected rows.
-local function ReadmitCatalog(database)
+local function ReadmitCatalog()
+    -- MASTER-RC-001, dependent-side prohibition of architecture lines
+    -- 1207-1211. This previously called catalog.BeginRootAdmission and then
+    -- drained catalog.PumpRootAdmission in an unbounded loop -- the literal
+    -- "call a domain recovery pump ... directly" the clause forbids, from a
+    -- maintenance owner that owns no part of the catalog root. It now
+    -- registers one idempotent dependency; the startup coordinator or the
+    -- MainLifecycle scheduler-turn rebind pump performs the readmission
+    -- inside its own bounded slice.
     local catalog = Nexus and Nexus.BuildCatalog
-    if not (catalog and type(catalog.BeginRootAdmission) == "function"
-        and type(catalog.PumpRootAdmission) == "function") then return end
-    catalog.BeginRootAdmission(database, Nexus.BundledBuilds)
-    for _ = 1, 10000000 do
-        local result = catalog.PumpRootAdmission()
-        if type(result) ~= "table" or result.state ~= "pending" then return end
+    if not (catalog
+        and type(catalog.RequestAuthorityRebindV1) == "function") then
+        return
     end
+    catalog.RequestAuthorityRebindV1("SOURCE_REBIND_REQUIRED")
 end
 
 local function RestartForExternalChange(state, ownersChanged)
@@ -401,7 +429,7 @@ local function RestartForExternalChange(state, ownersChanged)
     CancelOverlayCandidate(state)
     if ownersChanged and state.catalogOwnerChanged then
         state.catalogOwnerChanged = false
-        ReadmitCatalog(state.database)
+        ReadmitCatalog()
     end
     state.phase,state.cursor,state.done =
         ownersChanged and "pool-before" or "overlay",nil,false
@@ -724,7 +752,7 @@ function Compaction.Init(database)
         and tonumber(rawMeta.schemaVersion) > SCHEMA_VERSION then
         return {blocked=true, reason="future compaction schema is read-only"},false
     end
-    local evidenceStore = rawget(database,"loadoutEvidence")
+    local evidenceStore = DurableEvidenceStore(database)
     local evidence = Evidence()
     if type(evidenceStore) == "table" and tonumber(evidenceStore.schemaVersion)
         and evidence and type(evidence.SchemaVersion) == "function"

@@ -1,4 +1,21 @@
 -- Personal-best workflow: capture -> exact loadout -> auto build -> single public record.
+--
+-- Legacy-to-bundle cutover observation repoint (MASTER-RC-001, architecture
+-- 3b5de54f). State machine line 394 gives the exact PR #68 payload locations
+-- "No Package B writer | Legacy admission only | Preserved legacy input when
+-- the bundle is absent. Never used as fallback after bundle occupancy", and
+-- line 4849 (RAW-01) requires "one complete `authorityBundle` pointer is the
+-- sole durable payload write ... legacy payload locations are read-only
+-- inputs". This fixture picked the automatic build the capture had just
+-- created by enumerating `NexusDB.communityBuilds`; after the cutover a
+-- runtime-created build never appears there by construction. The row is
+-- therefore selected from the durable bundle payload through
+-- `H.DurableBuilds()`, and the same row is additionally required to be the one
+-- the public read seam serves. The behaviour under test is unchanged -- one
+-- automatic shareable build with a deterministic `dps-` id, dual-written exact
+-- evidence, one broadcast, no bloat on a lower pull -- and the preserved
+-- legacy input is now additionally asserted to keep its table identity and to
+-- take no write.
 local H = dofile("tests/harness.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
@@ -21,23 +38,53 @@ UnitGUID=function(u) return u=="target" and "Creature-0-1-0-1-36476-ABC" or nil 
 UnitName=function(unit) if unit=="player" then return "Recordmage" elseif unit=="target" then return "Training Dummy" end end
 
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+local legacyBuilds=NexusDB.communityBuilds
+-- Line 394: the legacy payload location is preserved input, never a Package B
+-- write target. Seeded empty here, it must stay the same empty table.
+local function legacyUntouched(what)
+    local n=0; for _ in pairs(rawget(NexusDB,"communityBuilds") or {}) do n=n+1 end
+    assert(rawget(NexusDB,"communityBuilds")==legacyBuilds and n==0,
+        "Package B wrote a legacy payload location ("..what..")")
+end
 H.playerLevel=5
 H.wishlist={name="Record Set",class="MAGE",echoes={{spellId=200100,quality=3,stacks=2},{spellId=200101,quality=3,stacks=1}}}
 H.granted={A={{spellId=200100,stack=2,maxStack=2,quality=3}},B={{spellId=200101,stack=1,maxStack=1,quality=3}}}
 H.FireEvent("SPELLS_CHANGED"); H.FireEvent("PLAYER_ENTERING_WORLD"); H.Advance(2)
 local sent={}
 local sync={BroadcastDpsRecord=function(r) sent[#sent+1]=r return true end,BroadcastBuild=function() return true end}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter,sync)
 
 DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
 local count, buildId, build=0
-for id,b in pairs(NexusDB.communityBuilds) do count=count+1; buildId=id; build=b end
+for id,b in pairs(H.DurableBuilds()) do count=count+1; buildId=id; build=b end
 assert(count==1 and build and build.autoDps, "a new exact loadout should create one automatic shareable build")
 assert(buildId:find("^dps%-"), "automatic build id should be deterministic")
+legacyUntouched("automatic build creation")
+local servedAuto=Nexus.BuildCatalog.Get(buildId)
+assert(servedAuto and servedAuto.autoDps and servedAuto.fingerprint==build.fingerprint,
+    "the durable automatic build is not the record the public seam serves")
 local fp=DPS.GetEchoKey(build.echoes)
-assert(build.evidenceKey and NexusDB.loadoutEvidence
-    and NexusDB.loadoutEvidence.entries[build.evidenceKey],
+-- Same cutover repoint as the build count above, applied to the evidence
+-- payload location. State machine line 394 gives the exact PR #68
+-- `loadoutEvidence` location no Package B writer and forbids it as a fallback
+-- after bundle occupancy; RAW-01 (line 4849) makes one complete
+-- `authorityBundle` pointer the sole durable payload write. The dual-write the
+-- test proves is unchanged -- the automatic page still carries an exact
+-- `evidenceKey` and that key still resolves in the durable evidence pool --
+-- only the pool's location moved into the bundle.
+local durableEvidence = H.DurablePayload("loadoutEvidence")
+assert(build.evidenceKey and type(durableEvidence) == "table"
+    and type(durableEvidence.entries) == "table"
+    and durableEvidence.entries[build.evidenceKey],
     "automatic page did not dual-write exact evidence")
+assert(rawget(NexusDB, "loadoutEvidence") == nil,
+    "Package B wrote the legacy evidence payload location")
 assert(NexusDB.dpsCapture.personalBest[fp].dummy.evidenceKey
     and NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"].evidenceKey,
     "personal/public DPS rows did not dual-write exact evidence")
@@ -47,8 +94,9 @@ assert(#sent==1 and sent[1].fingerprint==DPS.GetEchoKey(build.echoes), "the exac
 
 -- Lower pull: no new build, no public update, no additional broadcast.
 stubDps=20000000; DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
-local n=0; for _ in pairs(NexusDB.communityBuilds) do n=n+1 end
+local n=0; for _ in pairs(H.DurableBuilds()) do n=n+1 end
 assert(n==1 and DPS.GetLeaderboard(buildId,"dummy")[1].dps==24000000 and #sent==1, "lower pull must change nothing")
+legacyUntouched("lower pull")
 
 -- Higher pull: same build, replacement record.
 stubDps=26000000; DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()

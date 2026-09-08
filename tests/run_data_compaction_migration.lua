@@ -140,7 +140,7 @@ NexusDB = {
 local expectedBuild = DeepCopy(builds["scale-0001"].echoes)
 local _, samplePersonal = next(personalBest)
 local expectedDps = DeepCopy(samplePersonal.dummy.echoes)
-Store.Init()
+H.BootstrapStore()
 local firstPump = Compaction.Stats()
 assert(firstPump.pending == true
     and firstPump.lastPumpWork <= firstPump.workBudget
@@ -188,15 +188,19 @@ assert(stats.arraysCompacted >= 1275
     "scale migration did not collapse duplicate inline Echo storage")
 
 local autoPages, records = 0, 0
-for _, build in pairs(NexusDB.communityBuilds) do
+for _, build in pairs(H.DurableBuilds()) do
     records = records + 1
     if build.autoDps then autoPages = autoPages + 1 end
 end
 assert(records == 1000 and autoPages == 557,
     "automatic page or build retention changed during compaction")
-assert(NexusDB.buildFilters == filters and NexusDB.syncTombstones == tombstones,
+-- Legacy-to-bundle cutover: the exact PR #68 tombstone map keeps its identity as
+-- preserved bootstrap input, and the bundle carries an equal detached copy.
+assert(NexusDB.buildFilters == filters and NexusDB.syncTombstones == tombstones
+    and H.DurableTombstones().gone ~= nil
+    and H.DurableTombstones().gone.stamp == 9000,
     "filters or authorized tombstones changed during compaction")
-assert(NexusDB.communityBuilds["scale-0001"].echoes == nil
+assert(H.DurableBuilds()["scale-0001"].echoes == nil
     and Catalog.Get("scale-0001").title == "Scale 1 edited during migration"
     and DeepEqual(Catalog.Get("scale-0001").echoes, expectedBuild),
     "canonical build did not hydrate exactly after inline removal")
@@ -204,17 +208,17 @@ local _, firstPersonal = next(NexusDB.dpsCapture.personalBest)
 assert(firstPersonal.dummy.echoes == nil
     and DeepEqual(Evidence.ResolveDpsEchoes(firstPersonal.dummy), expectedDps),
     "canonical DPS row did not hydrate exactly after inline removal")
-assert(NexusDB.communityBuilds["scale-0998"].echoes
-    and NexusDB.communityBuilds["scale-0999"].echoes
-    and NexusDB.communityBuilds["scale-1000"].echoes
-    and NexusDB.communityBuilds["scale-1000"].echoes[1].spellId == 0
+assert(H.DurableBuilds()["scale-0998"].echoes
+    and H.DurableBuilds()["scale-0999"].echoes
+    and H.DurableBuilds()["scale-1000"].echoes
+    and H.DurableBuilds()["scale-1000"].echoes[1].spellId == 0
     and stats.retainedNonCanonical >= 1
     and stats.retainedConflicts >= 1,
     "unprovable rows were compacted or not counted")
 
 -- The migration stamp makes repeat Store.Init byte-for-byte stable.
 local beforeRepeat = DeepCopy(NexusDB)
-Store.Init()
+H.BootstrapStore()
 assert(DeepEqual(beforeRepeat, NexusDB),
     "repeat Store.Init changed an already compacted database")
 
@@ -225,7 +229,7 @@ assert(Catalog.Put({
     ownerKey="compactor@ebonhold", class="MAGE", postedAt=60000,
     lastModified=60000, fingerprint=Fingerprint(newEchoes), echoes=newEchoes,
 }))
-assert(NexusDB.communityBuilds["new-after-migration"].echoes == nil
+assert(H.DurableBuilds()["new-after-migration"].echoes == nil
     and DeepEqual(Catalog.Get("new-after-migration").echoes, newEchoes),
     "post-migration build writes retained duplicate inline evidence")
 
@@ -241,7 +245,7 @@ assert(Compaction.CompactDpsRow(newDps)
 
 -- GC preserves durable owners and transient retry providers, blocks on a
 -- failed provider, then removes only evidence proven unreachable.
-local durableReference = NexusDB.communityBuilds["scale-0001"].evidenceKey
+local durableReference = H.DurableBuilds()["scale-0001"].evidenceKey
 Sync.Init(Nexus.Codec, {})
 local retryEchoes = {{spellId=499900,quality=3,stacks=1}}
 assert(Catalog.Put({
@@ -250,7 +254,7 @@ assert(Catalog.Put({
     lastModified=60001, fingerprint=Fingerprint(retryEchoes),
     echoes=retryEchoes, ownerVerified=true,
 }))
-local retryReference = NexusDB.communityBuilds["outgoing-retry"].evidenceKey
+local retryReference = H.DurableBuilds()["outgoing-retry"].evidenceKey
 assert(Sync.BroadcastBuild(Catalog.Get("outgoing-retry"))
     and Catalog.RemoveOverlay("outgoing-retry"),
     "outgoing retry fixture did not enter Sync's retained hot-build path")
@@ -305,7 +309,7 @@ Catalog.Init(collisionDb, Nexus.BundledBuilds)
 local collisionResult = Compaction.Init(collisionDb)
 assert(not collisionResult.blocked
     and collisionResult.retainedConflicts == 1
-    and collisionDb.communityBuilds.collision.echoes
+    and H.DurableBuilds(collisionDb).collision.echoes
     and collisionDb.loadoutEvidence.entries[collisionKey][1].spellId == 499941,
     "stored evidence collision replaced or compacted independent inline data")
 
@@ -331,7 +335,7 @@ local interruptedResult = Compaction.Init(interruptedDb)
 -- transaction commits.
 assert(interruptedResult.blocked
     and not interruptedDb.dataCompaction.version
-    and DeepEqual(interruptedDb.communityBuilds.interrupt.echoes, interruptEchoes),
+    and DeepEqual(H.DurableBuilds(interruptedDb).interrupt.echoes, interruptEchoes),
     "failed migration mutated raw storage before its transaction committed")
 Evidence.RegisterReferenceProvider("test.interrupt", nil)
 local resumedResult, resumed = Compaction.Init(interruptedDb)
@@ -354,7 +358,7 @@ Catalog.Init(interruptedDb, {
     schemaVersion=1, catalogVersion="post-compaction-promotion",
     sourceVersion="test", builds={interrupt=promoted},
 })
-assert(interruptedDb.communityBuilds.interrupt == nil
+assert(H.DurableBuilds(interruptedDb).interrupt == nil
     and DeepEqual(Catalog.Get("interrupt").echoes, interruptEchoes),
     "pool-only redundant overlay survived a later baseline promotion")
 

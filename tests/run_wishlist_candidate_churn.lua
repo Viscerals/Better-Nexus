@@ -34,7 +34,8 @@ assert(ok and err == nil and A.Wishlist()
 
 -- The same server slot now represents different content. The stale rendered
 -- snapshot must not transfer its association to that recycled slot.
-Nexus.Store.State().loadoutWishlists = {}
+Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(
+    function(state) state.loadoutWishlists = {} end)
 local recycled = {slot=7,name="Stable",verified=false,
     echoes={{spellId=200104,quality=2,stacks=2}}}
 H.DeliverSlots({[1]=loadout,[7]=recycled}, 1)
@@ -110,7 +111,8 @@ assert(ok and err == nil,
     "exactly 79 Wishlist copies were incorrectly rejected")
 
 -- Duplicate names never override the exact stable identity.
-Nexus.Store.State().loadoutWishlists = {}
+Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(
+    function(state) state.loadoutWishlists = {} end)
 H.DeliverSlots({
     [1]=loadout,
     [8]={slot=8,name="Duplicate",verified=false,

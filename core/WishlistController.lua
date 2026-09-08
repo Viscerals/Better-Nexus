@@ -6,10 +6,48 @@ Nexus.WishlistInternals = Nexus.WishlistInternals or {}
 
 local Controller = {}
 
+
+-- MASTER-RC-001 (amendment 10). Store.State() is a DURABLE_READ returning a
+-- defensive copy; writes must go through StoreAuthorityOwnerV1.UpdateStateV1,
+-- the architecture's counted private mutation entry (lines 1907-1912).
+-- The constructor records the INJECTED store here. The helper lives at file
+-- scope (AutomationRuntime.New is already at the Lua 5.1 200-local ceiling),
+-- so it cannot close over the constructor-local `Store` directly.
+local boundStore
+
+local function UpdateStoreState(mutator)
+    local internals = Nexus and Nexus.MainInternals
+    local owner = type(internals) == "table" and internals.StoreAuthorityOwner
+    -- Honour the INJECTED Store. A stub Store must never resolve the real
+    -- durable writer -- writing through the global owner would bypass
+    -- dependency injection, which tests/run_wishlist_controller_parity.lua
+    -- exists to catch. A stub exposes only the surface it needs (typically
+    -- State/Settings); a real Store module exposes the full nine-export facade.
+    -- Identity alone is not usable here: fixtures re-`dofile` core/Store.lua,
+    -- which rebinds Nexus.Store and the owner while an already-initialized
+    -- consumer still holds the previous module, so a real Store legitimately
+    -- fails an identity check.
+    local Store = boundStore
+    local realStore = type(Store) == "table"
+        and type(Store.Init) == "function"
+        and type(Store.CurrentOwnerKey) == "function"
+    if realStore and type(owner) == "table"
+        and type(owner.UpdateStateV1) == "function" then
+        return owner.UpdateStateV1(mutator)
+    end
+    -- No authorized owner for THIS Store. Fall back to whatever state table the
+    -- injected facade exposes, which is exactly the pre-migration behaviour for
+    -- such a Store.
+    local injected = Store and Store.State and Store.State()
+    if type(injected) ~= "table" then return nil end
+    return true, mutator(injected)
+end
+
 function Controller.New(options)
     options = type(options) == "table" and options or {}
     local DraftModel = assert(options.model, "Wishlist controller requires WishlistModel")
     local Store = assert(options.store, "Wishlist controller requires Store")
+    boundStore = Store
     local notify = type(options.notify) == "function" and options.notify or print
     local Adapter
 
@@ -206,22 +244,29 @@ function Controller.New(options)
             and (state.currentLockKey == nil or state.currentLockKey == 0)
     end
 
+    -- Returns the LIVE per-slot target table, deliberately: callers mutate the
+    -- returned table in place, so a copy would silently discard their writes.
+    -- It is obtained THROUGH the authorized mutation entry rather than through
+    -- Store.State(), which is the distinction that matters -- the DURABLE_READ
+    -- no longer hands out writable durable state.
     local function LockDesignTargets()
         local account = AccountRoot()
-        local character = Store.State()
         local old = account.lockDesignTargets
-        character.lockDesignTargetsBySlot = character.lockDesignTargetsBySlot or {}
-        if type(old) == "table" then
-            local key = state.currentLockKey or 0
-            if not character.lockDesignTargetsBySlot[key] then
+        local key = state.currentLockKey or 0
+        local ok, targets = UpdateStoreState(function(character)
+            character.lockDesignTargetsBySlot =
+                character.lockDesignTargetsBySlot or {}
+            if type(old) == "table"
+                and not character.lockDesignTargetsBySlot[key] then
                 character.lockDesignTargetsBySlot[key] = old
             end
-            account.lockDesignTargets = nil
-        end
-        local key = state.currentLockKey or 0
-        character.lockDesignTargetsBySlot[key] =
-            character.lockDesignTargetsBySlot[key] or {}
-        return character.lockDesignTargetsBySlot[key]
+            character.lockDesignTargetsBySlot[key] =
+                character.lockDesignTargetsBySlot[key] or {}
+            return character.lockDesignTargetsBySlot[key]
+        end)
+        if type(old) == "table" then account.lockDesignTargets = nil end
+        if not ok or type(targets) ~= "table" then return {} end
+        return targets
     end
 
     local function PublishLoadMetrics()
@@ -976,13 +1021,15 @@ function Controller.New(options)
             state.candidateContext and {} or existing, lockedBySpell, Catalog())
         local nextKey = (Adapter and Adapter.WishlistKey
             and Adapter.WishlistKey(M.CanonicalEchoes())) or 0
-        local character = Store.State()
-        character.lockDesignTargetsBySlot = character.lockDesignTargetsBySlot or {}
-        character.lockDesignTargetsBySlot[nextKey] = fresh
-        if previousKey ~= nextKey
-            and character.lockDesignTargetsBySlot[previousKey] == existing then
-            character.lockDesignTargetsBySlot[previousKey] = nil
-        end
+        UpdateStoreState(function(character)
+            character.lockDesignTargetsBySlot =
+                character.lockDesignTargetsBySlot or {}
+            character.lockDesignTargetsBySlot[nextKey] = fresh
+            if previousKey ~= nextKey
+                and character.lockDesignTargetsBySlot[previousKey] == existing then
+                character.lockDesignTargetsBySlot[previousKey] = nil
+            end
+        end)
         state.currentLockKey = nextKey
         state.fulfilledDraftTargets = {}
         for id, value in pairs(fresh) do

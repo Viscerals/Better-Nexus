@@ -60,6 +60,12 @@ NexusDB.communityBuilds["saved-indexmage-1"] = {
 
 Nexus.Store.Init()
 dofile("core/DpsCapture.lua")
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Nexus.DpsCapture.Init({}, {})
 local Catalog = Nexus.BuildCatalog
 local beforeStats = Catalog.DebugStats()

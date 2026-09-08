@@ -55,7 +55,11 @@ builds[selectedId] = {
     lastModified=BUILD_ROWS,
 }
 
+-- Legacy-to-bundle cutover: these rows are the client's exact PR #68 legacy
+-- bytes, so the durable authority is discarded and rebuilt from them by the
+-- bootstrap route below (state machine line 374).
 NexusDB.communityBuilds = builds
+H.ResetDurableAuthority()
 NexusDB.dpsCapture = {
     characterBest={dummy={},lk={}},personalBest={},buildBest={},
 }
@@ -79,8 +83,8 @@ builds["stage28-0002"].fingerprint = builds[selectedId].fingerprint
 -- database so this post-bootstrap client-scale fixture rebuilds every index
 -- through the same Init boundary instead of mutating an indexed table behind
 -- the module's back.
-Nexus.BuildCatalog.Init({}, Nexus.BundledBuilds)
-Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+H.AdmitCatalogV1({}, Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB, Nexus.BundledBuilds)
 
 local counts = {
     catalogAll=0,catalogAllRows=0,selectedGets=0,selectedEchoCopies=0,

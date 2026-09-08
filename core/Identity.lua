@@ -6,6 +6,91 @@ Nexus = Nexus or {}
 local Identity = {}
 Nexus.Identity = Identity
 
+-- MASTER-RC-012. THE canonical typed-identity codec and comparator. Required
+-- repaired outcome: "one canonical codec and comparator: number-first numeric,
+-- then bytewise string." No module may define a second encoder, and no typed
+-- identity may be ordered through tostring, which makes numeric 1 and string
+-- "1" tie and sorts numeric 10 before numeric 2.
+--
+-- Strings are length-prefixed so the encoding stays collision free even when
+-- several identities are concatenated into one cache key.
+local TYPED_ID_MAXIMUM = 2147483647
+
+local function TypedInteger(value, minimum, maximum)
+    if type(value) ~= "number" or value ~= value or value == math.huge
+        or value == -math.huge or value % 1 ~= 0 then
+        return nil
+    end
+    if minimum and value < minimum then return nil end
+    if maximum and value > maximum then return nil end
+    return value
+end
+
+-- Total encoder: every Lua value maps to exactly one detached string.
+function Identity.TypedIdentity(value)
+    local kind = type(value)
+    if kind == "number" then
+        if value ~= value then return "n:nan" end
+        if value == math.huge then return "n:inf" end
+        if value == -math.huge then return "n:-inf" end
+        if value % 1 == 0 then return "n:" .. string.format("%d", value) end
+        return "n:" .. string.format("%.17g", value)
+    elseif kind == "string" then
+        return "s:" .. #value .. ":" .. value
+    elseif kind == "boolean" then
+        return value and "b:1" or "b:0"
+    elseif kind == "nil" then
+        return "z:"
+    end
+    return "x:" .. kind
+end
+
+-- Canonical order: numbers first and numerically, then strings bytewise, then
+-- the remaining kinds in a fixed order. Never a tostring comparison.
+local TYPED_RANK = {number=1, string=2, boolean=3, ["nil"]=4}
+
+function Identity.CompareTypedIds(left, right)
+    local leftKind, rightKind = type(left), type(right)
+    local leftRank = TYPED_RANK[leftKind] or 5
+    local rightRank = TYPED_RANK[rightKind] or 5
+    if leftRank ~= rightRank then
+        return leftRank < rightRank and -1 or 1
+    end
+    if leftKind == "number" then
+        if left ~= left or right ~= right then
+            if left ~= left and right ~= right then return 0 end
+            return left ~= left and 1 or -1
+        end
+        if left == right then return 0 end
+        return left < right and -1 or 1
+    elseif leftKind == "string" or leftKind == "boolean" then
+        local a = leftKind == "boolean" and (left and "1" or "0") or left
+        local c = leftKind == "boolean" and (right and "1" or "0") or right
+        if a == c then return 0 end
+        return a < c and -1 or 1
+    end
+    return 0
+end
+
+-- Validating catalog-id form. Byte-identical to the codec BuildCatalog carried
+-- privately, so admission, indexes, cursors and reload are unchanged.
+function Identity.TypedKey(id, maximumWidth)
+    local kind = type(id)
+    if kind == "number" then
+        if not TypedInteger(id, 1, TYPED_ID_MAXIMUM) then
+            return nil, "INVALID_TYPED_ID"
+        end
+        return "n:" .. string.format("%d", id), "number"
+    elseif kind == "string" then
+        if #id < 1 or (maximumWidth and #id > maximumWidth)
+            or id:find("[%c]") then
+            return nil, "INVALID_TYPED_ID"
+        end
+        return "s:" .. #id .. ":" .. id, "string"
+    end
+    return nil, "INVALID_TYPED_ID"
+end
+
 local function AsciiLower(value)
     return (value:gsub("[A-Z]", function(character)
         return string.char(character:byte() + 32)

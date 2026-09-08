@@ -203,6 +203,12 @@ NexusDB = {
 }
 
 dofile("core/DpsCapture.lua")
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Nexus.DpsCapture.Init({}, {})
 dofile("core/LegacyQualificationRepair.lua")
 
@@ -221,18 +227,26 @@ strictDummy.protocolVersion = 6.5
 assert(Repair.Classify({catalogAvailable=true,dummy=strictDummy,lk=strictLk}).reason
         == "insufficient-evidence",
     "fractional legacy protocol metadata was accepted")
-builds["opaque-future-id"] = "preserve opaque SavedVariables value"
+-- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 374, 394,
+-- 4849). `builds` above is the exact PR #68 legacy input this client starts
+-- with; bootstrap has admitted it into the first complete bundle. From here the
+-- durable overlay is the bundle payload, so occupied-identity fixtures are
+-- seeded there and every durable observation reads it.
+H.DurableBuilds()["opaque-future-id"] = "preserve opaque SavedVariables value"
 H.RebindCatalog()
 local opaqueOk = Catalog.PutDeferred({id="opaque-future-id"})
 assert(opaqueOk == false
-        and builds["opaque-future-id"] == "preserve opaque SavedVariables value",
+        and H.DurableBuilds()["opaque-future-id"]
+            == "preserve opaque SavedVariables value",
     "deferred repair overwrote a non-table occupied SavedVariables identity")
-builds["opaque-future-id"] = nil
+H.DurableBuilds()["opaque-future-id"] = nil
 H.RebindCatalog()
 local originals, dpsBefore = {}, Snapshot(NexusDB.dpsCapture)
-for _, id in ipairs(collisionIds) do originals[id] = Snapshot(builds[id]) end
-local identityCollisionBefore = Snapshot(builds[collisionSlotBase])
-local staleBefore = Snapshot(NexusDB.syncTombstones)
+for _, id in ipairs(collisionIds) do
+    originals[id] = Snapshot(H.DurableBuilds()[id])
+end
+local identityCollisionBefore = Snapshot(H.DurableBuilds()[collisionSlotBase])
+local staleBefore = Snapshot(H.DurableTombstones())
 local associationsBefore = Snapshot(NexusDB.buildAssociations)
 local futureBefore = Snapshot(NexusDB.futureRoot)
 local framesBefore = Count(H.frames)
@@ -261,8 +275,10 @@ repeat
         "partial repair unexpectedly completed before reload")
     partialPumps = partialPumps + 1
     partialRecovered = 0
-    for _, row in pairs(NexusDB.communityBuilds) do
-        if row.legacyRecovered then partialRecovered = partialRecovered + 1 end
+    for _, row in pairs(H.DurableBuilds()) do
+        if type(row) == "table" and row.legacyRecovered then
+            partialRecovered = partialRecovered + 1
+        end
     end
     assert(partialPumps < 1000, "repair never reached a persisted write")
 until partialRecovered >= 12
@@ -275,8 +291,10 @@ assert(interruptedMeta.inProgress and interruptedMeta.cursorVersion == 1
     "bounded writes were not persisted without early publication")
 local completedBuildEpochBefore = Catalog.RecordRevision("exact-current")
 local firstRecoveredId
-for id, row in pairs(NexusDB.communityBuilds) do
-    if row.legacyRecovered then firstRecoveredId = id; break end
+for id, row in pairs(H.DurableBuilds()) do
+    if type(row) == "table" and row.legacyRecovered then
+        firstRecoveredId = id; break
+    end
 end
 local pendingEpochBefore, pendingRecordBefore =
     Catalog.RecordRevision(firstRecoveredId)
@@ -334,14 +352,17 @@ assert(completedBuildEpochAfter == completedBuildEpochBefore + 1
         and pendingEpochAfter == pendingEpochBefore + 1
         and pendingRecordAfter == pendingRecordBefore,
     "deferred publication exposed a partial per-record revision")
+-- The preserved legacy input keeps its identity and its exact original row set;
+-- the recovered rows are published into the durable bundle payload.
 assert(NexusDB.communityBuilds == builds
-        and Count(NexusDB.communityBuilds) == initialBuildCount + RECOVERY_COUNT,
+        and Count(builds) == initialBuildCount
+        and Count(H.DurableBuilds()) == initialBuildCount + RECOVERY_COUNT,
     "repair replaced the build store or produced the wrong row count")
 
 local recovered, recoveredIds = 0, {}
 local sawUtf8, sawRelay, sawVerified = false, false, false
-for id, raw in pairs(NexusDB.communityBuilds) do
-    if raw.legacyRecovered then
+for id, raw in pairs(H.DurableBuilds()) do
+    if type(raw) == "table" and raw.legacyRecovered then
         recovered = recovered + 1
         recoveredIds[id] = true
         assert(raw.ownerKey == nil and raw.isMine == nil
@@ -376,18 +397,18 @@ for id, raw in pairs(NexusDB.communityBuilds) do
 end
 assert(recovered == RECOVERY_COUNT and sawUtf8 and sawRelay and sawVerified,
     "more-than-200 recovery or direct/relay/UTF-8 coverage was lost")
-assert(NexusDB.communityBuilds[collisionSlotBase .. "-2"]
-        and NexusDB.communityBuilds[collisionSlotBase .. "-2"].fingerprint
+assert(H.DurableBuilds()[collisionSlotBase .. "-2"]
+        and H.DurableBuilds()[collisionSlotBase .. "-2"].fingerprint
             == collisionSlotFingerprint
-        and Snapshot(NexusDB.communityBuilds[collisionSlotBase])
+        and Snapshot(H.DurableBuilds()[collisionSlotBase])
             == identityCollisionBefore,
     "deterministic identity collision/tombstone fallback was unsafe")
 for _, id in ipairs(collisionIds) do
-    assert(Snapshot(NexusDB.communityBuilds[id]) == originals[id],
+    assert(Snapshot(H.DurableBuilds()[id]) == originals[id],
         "repair rewrote colliding current build " .. id)
 end
 assert(Snapshot(NexusDB.dpsCapture) == dpsBefore
-        and Snapshot(NexusDB.syncTombstones) == staleBefore
+        and Snapshot(H.DurableTombstones()) == staleBefore
         and Snapshot(NexusDB.buildAssociations) == associationsBefore
         and Snapshot(NexusDB.futureRoot) == futureBefore
         and NexusDB.dataCompaction.future.keep
@@ -435,6 +456,7 @@ dofile("core/SyncInbound.lua")
 dofile("core/SyncDiagnostics.lua")
 dofile("core/SyncSession.lua")
 dofile("core/Sync.lua")
+H.AdmitCatalogV1(NexusDB)
 Nexus.Sync.Init(Nexus.Codec,{})
 H.sentChatMessages = {}
 local recoveredForRelay = Catalog.Get(firstRecoveredId)
@@ -525,13 +547,13 @@ assert(afterRestart.restarts == 2
         and afterRestart.recovered == RECOVERY_COUNT
         and afterRestart.published == 1
         and R.Get(buildRevision) == buildRevisionBefore + 1
-        and NexusDB.communityBuilds == builds
-        and Count(NexusDB.communityBuilds)
+        and NexusDB.communityBuilds == builds and Count(builds) == initialBuildCount
+        and Count(H.DurableBuilds())
             == initialBuildCount + RECOVERY_COUNT,
     string.format("interrupted replay duplicated identities or published another revision restarts=%d recovered=%d published=%d revision=%d expected=%d rows=%d expectedRows=%d",
         afterRestart.restarts,afterRestart.recovered,afterRestart.published,
         R.Get(buildRevision),buildRevisionBefore+1,
-        Count(NexusDB.communityBuilds),initialBuildCount+RECOVERY_COUNT))
+        Count(H.DurableBuilds()),initialBuildCount+RECOVERY_COUNT))
 
 for _, reason in ipairs({"refresh","import","migration","sync"}) do
     local ok, state = Repair.Request(reason)
@@ -552,7 +574,7 @@ assert(meta.schemaVersion == 1 and meta.version == 1
 -- A fresh module instance must not trust a persisted in-session revision from
 -- an older login. It runs one scheduled bounded pass, reuses every identity,
 -- and publishes nothing when represented data is unchanged.
-local loginRowsBefore = Count(NexusDB.communityBuilds)
+local loginRowsBefore = Count(H.DurableBuilds())
 local loginBuildRevisionBefore = R.Get(buildRevision)
 dofile("core/LegacyQualificationRepair.lua")
 Repair = Nexus.LegacyQualificationRepair
@@ -569,7 +591,7 @@ local loginStats = Repair.Stats()
 assert(loginStats.recovered == 0 and loginStats.published == 0
         and loginStats.maxWork <= 25
         and R.Get(buildRevision) == loginBuildRevisionBefore
-        and Count(NexusDB.communityBuilds) == loginRowsBefore,
+        and Count(H.DurableBuilds()) == loginRowsBefore,
     "repeated login duplicated rows or published unchanged data")
 
 local currentDb = NexusDB

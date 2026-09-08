@@ -9,16 +9,16 @@
 - Stage: 50
 - Checkpoint: 50.3
 - Status: IN_REVIEW
-- Branch: `bugfix/test19-catalog-authority-22-impl`
-- Starting head: exact PR #68 head `6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f`
-- Worktree: `C:\T3\BN\catalog-authority-22`
+- Branch: `bugfix/test19-catalog-authority-22-wave1`
+- Starting head: rejected candidate `e69497d248875d4b2ff69a658ca478247a0ea02b`
+- Worktree: `C:\T3\BN\catalog-authority-22-wave1`
 - Base: exact PR #68 head `6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f`
 
 ## Objective (current checkpoint)
 
-Implement the accepted Package B catalog authority state machine for issue #22
-directly on exact PR #68 and stop at one clean, locally validated candidate that
-is ready for later independent review.
+Complete `MASTER-RC-006`, the only open root in the accepted 19-root Catalog
+Authority Repair Wave 1 aggregate, then freeze one clean locally validated
+candidate for fresh independent review.
 
 ## Deliverables (current checkpoint)
 
@@ -30,24 +30,37 @@ is ready for later independent review.
 - Bounded identity/fingerprint indexes, cursors, and status accounting.
 - Retention and compaction as transactions bound to the exact database.
 - Rollback/restart, mixed-client, protocol-7, and Package A compatibility.
+- One-slice public admission and readmission, constant-work cursor Begin,
+  bounded Next and copy frontiers, persistent `nextIndex`, and zero variable
+  scans inside protected commit.
 
 ## Acceptance (current checkpoint)
 
 - [x] A behavioral expected-red matrix is recorded on exact PR #68 before any
   product edit, using only public seams that already exist on that base.
 - [x] The focused Package B matrix passes on real public production seams.
-- [x] The complete Lua inventory passes `229/229` with the single explicit
+- [x] The current complete Lua inventory passes `243/243` with the single explicit
   manual SavedVariables skip.
 - [x] Parse, integration, module contracts, upvalue, workflow policy, Release
   Policy, security, artifact, and diff checks pass.
 - [x] No rejected-candidate implementation is imported and no protected path is
   modified.
+- [x] `MASTER-RC-006` passes its `11/11` work-frontier matrix, including both
+  fail-capability controls, maximum-root, copy-frontier, persistent-index, and
+  protected-commit proofs.
 - [ ] Final exact-head Fast and Full on the frozen candidate.
 - [ ] Independent review of the frozen candidate.
 
 ## Evidence
 
-- path: `.vibe/EVIDENCE.md`
+- path: .vibe/EVIDENCE.md
+- Governing packet:
+  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-1-amendment-13.json`,
+  SHA-256 `292d3258f86986297b8eb55c6f9223010bc2bfdb4e4c4ffdf49b99337ab031b4`.
+- Takeover receipt:
+  `C:\T3\BN\receipts\wave1\CODEX_TAKEOVER_BLOCKED_2026-09-07.md`.
+- Coordinator closure ruling: 18 roots CLOSED, 0 IN PROGRESS, and only
+  `MASTER-RC-006` NOT STARTED.
 - Behavioral expected red on exact PR #68: `ENV-01`, `ENV-02`, `ENV-03`,
   `READ-01`, `SNAP-01`, and `TOMB-01` all fail on the base for their stated
   behavioral reasons, and the run proves product bytes unchanged.
@@ -75,6 +88,24 @@ is ready for later independent review.
   raw SavedVariables after binding, fixtures above the issue #22 semantic
   envelope, assertions expecting a remote delete to erase the raw row, and
   one-call collection reads above the bounded limit.
+- Repair Wave 1 closed `MASTER-RC-001` through `MASTER-RC-019` except
+  `MASTER-RC-006`; the current working inventory is 143 paths, all inside
+  Amendment 13, with zero protected paths.
+- User authorized temporary Codex implementation takeover after Claude reported
+  `You've hit your weekly limit · resets Sep 12, 1pm (America/New_York)`.
+- User then authorized this Vibe-state reconciliation and continuation of
+  `MASTER-RC-006`.
+- Implemented `MASTER-RC-006` with one V1 admission slice per public call,
+  persistent admission and cursor frontiers, precomputed ordered vectors, a
+  bounded defensive-copy frontier, fixed protected-commit work, and scoped
+  bootstrap allowance accounting.
+- Repaired all 16 affected fixture oracles. Their replay passes `16/16`; the
+  current Lua inventory passes `243/243`; Fast passes with 223 checks, no
+  failures or unavailable checks, and one expected no-`BaseRef` skip.
+- Current inventory is 147 tracked modifications plus 14 untracked files, 161
+  total. Amendment 13 covers 160. The user's prospective workflow
+  reconciliation authority covers `.vibe/CONTEXT.md`. Combined scope has zero
+  outside paths and zero protected changes.
 
 ## Workflow state
 
@@ -87,12 +118,13 @@ is ready for later independent review.
 
 ## Active issues
 
-- None known inside Package B after the complete Lua inventory reached
-  `229/229`.
+- `MASTER-RC-006` implementation is complete. Candidate freeze, exact-head
+  validation, and fresh independent acceptance review remain.
 
 ## Blockers
 
-- Independent review of the frozen candidate is required before any acceptance.
+- None for the authorized RC-006 implementation role. Independent review remains
+  a later acceptance gate after candidate freeze.
 
 ## Deferred work
 
@@ -120,12 +152,15 @@ is ready for later independent review.
 
 ## Last completed loop
 
-- Complete Lua inventory `229/229`, Lua 5.1 parse `303/303`, integration
-  `70/70`, module contracts `11/217/165/0`, upvalue boundary `0` violations,
-  workflow policy, Release Policy, security policy, artifact and diff checks,
-  and Fast `120/120` with the single manual SavedVariables skip.
+- `MASTER-RC-006` implementation at HEAD
+  `e69497d248875d4b2ff69a658ca478247a0ea02b`, tree
+  `2e2abfee55d741cd80b5ba82d13bca7b50a89d7e`: 161 changed paths,
+  zero outside the combined authorized scope, zero protected, focused proof
+  `11/11`, affected replay `16/16`, complete Lua inventory `243/243`, and Fast
+  223 passed with one expected no-`BaseRef` skip.
 
 ## Recommended next action
 
-- Freeze one clean local commit, run the exact-head Fast and Full gates on that
-  frozen candidate, and stop for independent review without publishing.
+- Freeze exactly one candidate commit. Record its parent, commit, tree, and exact
+  path inventory. Then run exact-head Fast and Full before dispatching fresh
+  independent SPEC, STANDARDS, and ADVERSARIAL reviewers.

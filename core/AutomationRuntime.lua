@@ -7,6 +7,48 @@ if type(Nexus.MainInternals) ~= "table" then Nexus.MainInternals = {} end
 local AutomationRuntime = {}
 Nexus.MainInternals.AutomationRuntime = AutomationRuntime
 
+-- MASTER-RC-001 (amendment 10). Store.State() is a DURABLE_READ and returns a
+-- defensive copy; writing through it would be a silent no-op. Every write to
+-- per-character state goes through StoreAuthorityOwnerV1.UpdateStateV1, the
+-- architecture's counted private mutation entry (lines 1907-1912). Read-only
+-- uses of Store.State() are unchanged.
+--
+-- Declared at FILE scope on purpose: AutomationRuntime.New is a single very
+-- large function already close to the Lua 5.1 200-local ceiling, and adding one
+-- more local inside it exceeded the limit (measured, not guessed).
+-- The constructor records the INJECTED store here. The helper lives at file
+-- scope (AutomationRuntime.New is already at the Lua 5.1 200-local ceiling),
+-- so it cannot close over the constructor-local `Store` directly.
+local boundStore
+
+local function UpdateStoreState(mutator)
+    local internals = Nexus and Nexus.MainInternals
+    local owner = type(internals) == "table" and internals.StoreAuthorityOwner
+    -- Honour the INJECTED Store. A stub Store must never resolve the real
+    -- durable writer -- writing through the global owner would bypass
+    -- dependency injection, which tests/run_wishlist_controller_parity.lua
+    -- exists to catch. A stub exposes only the surface it needs (typically
+    -- State/Settings); a real Store module exposes the full nine-export facade.
+    -- Identity alone is not usable here: fixtures re-`dofile` core/Store.lua,
+    -- which rebinds Nexus.Store and the owner while an already-initialized
+    -- consumer still holds the previous module, so a real Store legitimately
+    -- fails an identity check.
+    local Store = boundStore
+    local realStore = type(Store) == "table"
+        and type(Store.Init) == "function"
+        and type(Store.CurrentOwnerKey) == "function"
+    if realStore and type(owner) == "table"
+        and type(owner.UpdateStateV1) == "function" then
+        return owner.UpdateStateV1(mutator)
+    end
+    -- No authorized owner for THIS Store. Fall back to whatever state table the
+    -- injected facade exposes, which is exactly the pre-migration behaviour for
+    -- such a Store.
+    local injected = Store and Store.State and Store.State()
+    if type(injected) ~= "table" then return nil end
+    return true, mutator(injected)
+end
+
 function AutomationRuntime.New(options)
     options = options or {}
     local Nexus = assert(options.nexus, "AutomationRuntime requires Nexus")
@@ -15,6 +57,7 @@ function AutomationRuntime.New(options)
     local Ratchet = assert(options.ratchet, "AutomationRuntime requires Ratchet")
     local Strategy = assert(options.strategy, "AutomationRuntime requires Strategy")
     local Store = assert(options.store, "AutomationRuntime requires Store")
+    boundStore = Store
     local Adapter = assert(options.adapter, "AutomationRuntime requires GameAdapter")
     local Readout = assert(options.readout, "AutomationRuntime requires Readout")
     local DefaultProfile = assert(options.defaultProfile,
@@ -373,13 +416,14 @@ local function EffectiveFlags()
 end
 
 local function DemoteFlag(name, reason)
-    local st = Store.State()
-    st.flagDemotions = st.flagDemotions or {}
-    if not st.flagDemotions[name] then
-        st.flagDemotions[name] = reason
-        -- Log internally; this is an advisor-mode state change that players
-        -- don't need to see in chat.
-    end
+    UpdateStoreState(function(st)
+        st.flagDemotions = st.flagDemotions or {}
+        if not st.flagDemotions[name] then
+            st.flagDemotions[name] = reason
+            -- Log internally; this is an advisor-mode state change that players
+            -- don't need to see in chat.
+        end
+    end)
 end
 
 ------------------------------------------------------------------------
@@ -451,17 +495,26 @@ end
 -- over would just reintroduce the same cross-character bleed one more time.
 -- It's left in place, orphaned and never read again.
 local function LockDesignTargetsFor(wishlist, knownKey)
-    local state = Store.State()
-    if type(state) ~= "table" then return nil end
-    local old = NexusDB and NexusDB.lockDesignTargets
-    if type(old) == "table" then
-        state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
-        local key = LockSlotKey(wishlist, knownKey)
-        if not state.lockDesignTargetsBySlot[key] then
-            state.lockDesignTargetsBySlot[key] = old
-        end
+    local legacy = NexusDB and NexusDB.lockDesignTargets
+    if type(legacy) == "table" then
+        UpdateStoreState(function(state)
+            state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
+            local key = LockSlotKey(wishlist, knownKey)
+            if not state.lockDesignTargetsBySlot[key] then
+                state.lockDesignTargetsBySlot[key] = legacy
+            end
+        end)
         NexusDB.lockDesignTargets = nil
     end
+    -- Read LIVE, not from the defensive snapshot. lockDesignTargetsBySlot is
+    -- part of the live sub-tree protocol: WishlistController.LockDesignTargets
+    -- hands callers the live per-slot table and they mutate it in place AFTER
+    -- the authorized entry has returned, so those nested writes cannot
+    -- invalidate the read snapshot and a snapshot read here would observe stale
+    -- targets. Reading through the owner is free now that invalidation is
+    -- content-based: this reads and changes nothing, so it invalidates nothing.
+    local ok, state = UpdateStoreState(function(row) return row end)
+    if not ok or type(state) ~= "table" then return nil end
     local bySlot = state.lockDesignTargetsBySlot
     local key = LockSlotKey(wishlist, knownKey)
     -- Deliberately NOT promoting bucket 0 here the way WishlistEditor.lua's
@@ -793,8 +846,9 @@ local function WatchRerollHold(board)
         if pb.guaranteedIndex then prevG = pb.cards[pb.guaranteedIndex].spellId end
         if board.guaranteedIndex then curG = board.cards[board.guaranteedIndex].spellId end
         if prevG and prevG ~= curG then
-            local st = Store.State()
-            st.rerollHoldViolations = (st.rerollHoldViolations or 0) + 1
+            UpdateStoreState(function(st)
+                st.rerollHoldViolations = (st.rerollHoldViolations or 0) + 1
+            end)
             DemoteFlag("REROLL_HOLDS_GUARANTEED", "guaranteed head changed across a reroll")
         end
         lastBoardForRerollWatch = nil
@@ -1046,14 +1100,22 @@ local function AutoLockIdentity(baseKey, lockedRevision, lockedToken)
         .. "|state=" .. KeyPart(lockedToken)
 end
 
+-- Returns the LIVE bucket sub-table, deliberately: callers mutate
+-- `bucket.records` in place (retryRequested, supersession), so returning a copy
+-- here would silently discard those writes. It is obtained THROUGH the
+-- authorized mutation entry rather than through the read, which is the
+-- distinction that matters -- the DURABLE_READ no longer hands out writable
+-- durable state.
 local function AutoLockBucket(create)
-    local state = Store and Store.State and Store.State() or nil
-    if type(state) ~= "table" then return nil, "state_unavailable" end
-    local bucket = state.autoLockAttempts
-    if bucket == nil and create then
-        bucket = {version=AUTO_LOCK_STATE_VERSION,records={}}
-        state.autoLockAttempts = bucket
-    end
+    local ok, bucket = UpdateStoreState(function(state)
+        local existing = state.autoLockAttempts
+        if existing == nil and create then
+            existing = {version=AUTO_LOCK_STATE_VERSION,records={}}
+            state.autoLockAttempts = existing
+        end
+        return existing
+    end)
+    if not ok then return nil, "state_unavailable" end
     if type(bucket) ~= "table"
         or tonumber(bucket.version) ~= AUTO_LOCK_STATE_VERSION
         or type(bucket.records) ~= "table" then
@@ -2746,7 +2808,7 @@ end
 
 local function ClearStaleDemotions()
     if not demotionsClearedThisSession and Adapter.Ready() then
-        Store.State().flagDemotions = {}
+        UpdateStoreState(function(st) st.flagDemotions = {} end)
         demotionsClearedThisSession = true
     end
 end

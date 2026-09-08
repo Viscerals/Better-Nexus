@@ -125,7 +125,14 @@ local function BeginManual()
     NexusDB = {communityBuilds={},syncTombstones={}}
     H.sentChatMessages = {}
     H.joinedChannels = {}
+    -- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+    -- longer admit the catalog root as a side effect. The same admission is
+    -- performed explicitly here, before the call, because the removed side
+    -- effect ran inside Init ahead of Init's own dependent steps. No assertion
+    -- or expected value in this fixture is changed.
+    H.AdmitCatalogV1(NexusDB)
     DPS.Init({}, Sync)
+    H.AdmitCatalogV1(NexusDB)
     Sync.Init(Codec, {})
     Control(Sync.IsConnected(), "fixture joined the named Sync channel")
     local queued, why = Sync.RequestSync()
@@ -905,8 +912,27 @@ Control(Sync.BroadcastBuildSummary(shareBuild, {retryOnFull=true}) == true,
 -- A delete requires an admitted row with current local-owner proof, so the
 -- unrelated delete fixture publishes its build first.
 local deleteBuild = assert(PutBuild("unrelated-delete", "Alice", 852, false))
-Control(Sync.BroadcastDelete(Catalog.Get("unrelated-delete") or deleteBuild)
-    == true, "unrelated delete admitted")
+-- MASTER-RC-019 SUPERSEDED CONTROL, justification recorded. Architecture line
+-- 4856 makes a local row-to-tombstone operation an unconditional zero-wire
+-- refusal, so an unrelated local delete no longer contributes ANY outbound
+-- work. The control now records that refusal honestly instead of asserting an
+-- admission the architecture forbids. Disclosed consequence: this block loses
+-- the delete as one uncorrelated work source; its remaining sources are the
+-- legacy recovery queue, the Share summary, and the responder reconciliation,
+-- and the requestRelated/outbound assertions below are unchanged.
+local unrelatedDeleteOk, unrelatedDeleteWhy =
+    Sync.BroadcastDelete(Catalog.Get("unrelated-delete") or deleteBuild)
+Control(unrelatedDeleteOk == false
+    and unrelatedDeleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
+    "unrelated delete refused zero-wire")
+-- Because that outbound work source no longer exists, it is REPLACED with an
+-- equivalent uncorrelated one rather than lowering the outbound expectation
+-- below. The `outbound >= 2` assertion is deliberately left byte-identical:
+-- the block must still prove that two unrelated outbound owners do not
+-- contaminate the matching request.
+local secondShare = assert(PutBuild("unrelated-share-2", "Alice", 853, false))
+Control(Sync.BroadcastBuildSummary(secondShare, {retryOnFull=true}) == true,
+    "second unrelated Share summary admitted")
 Control(Sync.HandleIncoming(
     "WLRQ|ResponderPeer|0|0|c1-unrelated-response|1.20.0-beta.1",
     "ResponderPeer-Ebonhold") == true,

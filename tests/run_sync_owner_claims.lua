@@ -19,6 +19,12 @@ end
 -- this client once it is acting as the actual owner from answering.
 local echoes={{spellId=200100,stacks=1}}
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync); Pump(100); H.sentChatMessages={}
 local fp,hash=DPS.GetEchoKey(echoes),DPS.GetEchoHash(echoes)
 assert(DPS.ReceiveRecord({v=7,f=fp,h=hash,e=echoes,c="dummy",d=25000000,u=65,
@@ -49,9 +55,13 @@ NexusDB={communityBuilds={gone={id="gone",title="Gone",author="Origin",
   ownerKey="origin@ebonhold",ownerVerified=true,class="MAGE",
   echoes=echoes,postedAt=10,lastModified=10}},
   syncTombstones={},dpsCapture={}}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync); Pump(100); H.sentChatMessages={}
 Sync.HandleIncoming("WLRD|Origin|gone|20|Origin","Origin-Ebonhold")
+-- Legacy-to-bundle cutover: the deny-only reservation preserves the durable raw
+-- row inside the bundle, and the exact PR #68 bootstrap input stays untouched.
 assert(Nexus.BuildCatalog.Get("gone") == nil
+  and H.DurableBuilds().gone ~= nil
   and NexusDB.communityBuilds.gone ~= nil
   and Nexus.BuildCatalog.TombstoneState("gone").state == "OPAQUE_BLOCK_ALL",
   "relayed delete did not become a deny-only reservation")
@@ -68,8 +78,21 @@ NexusDB={communityBuilds={mine={id="mine",title="Mine",author="Origin",
   ownerKey="origin@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
   class="MAGE",echoes=echoes,postedAt=10,lastModified=10}},
   syncTombstones={},dpsCapture={}}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync); Pump(100); H.sentChatMessages={}
-assert(Sync.BroadcastDelete(Nexus.BuildCatalog.Get("mine")),
+-- MASTER-RC-019 SUPERSEDED EXPECTATION, architecture justification recorded.
+-- Line 4856 and the mixed-client tombstone rows make a local row-to-tombstone
+-- operation an UNCONDITIONAL zero-wire refusal with
+-- REMOTE_TOMBSTONE_ORDER_UNPROVEN: it "is not a Sync message". The truthy
+-- return this fixture required was the queued-to-wire result the architecture
+-- forbids. The local tombstone is still committed through the central owner,
+-- so every assertion about the durable tombstone below is unchanged; only the
+-- wire-success half is replaced, by the strictly stronger named refusal.
+local mineDeleteOk, mineDeleteWhy =
+  Sync.BroadcastDelete(Nexus.BuildCatalog.Get("mine"))
+assert(mineDeleteOk == false
+  and mineDeleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN"
+  and H.DurableTombstones()["mine"],
   "authoritative delete fixture failed")
 Pump(100); H.sentChatMessages={}
 local buildHash=select(1,Sync.GetCompatibilityHashes())
@@ -92,6 +115,7 @@ assert(not sawDeleteClaim,"tombstone bucket emitted a suppressible claim")
 local accented="Valentin"..string.char(0xC3,0xA9)
 currentName=accented; clock=clock+100
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{}); DPS.Init({},Sync)
 assert(DPS.ReceiveRecord({v=7,f=fp,h=hash,e=echoes,c="dummy",d=26000000,u=65,
   t=49001,p=accented,k="MAGE",o=accented:lower().."@ebonhold",
@@ -101,17 +125,19 @@ local projected=Nexus.ViewProjections.Leaderboard("dummy",{classFilter="ALL"})
 assert(projected and projected[1] and projected[1].player==accented,
   "Leaderboard projection changed exact UTF-8 player bytes")
 
-NexusDB.communityBuilds["utf8-gone"]={id="utf8-gone",title="Gone",
+-- An occupied bundle is authoritative, so this row is admitted through the
+-- public write seam instead of a raw legacy write plus readmission.
+assert(Nexus.BuildCatalog.Put({id="utf8-gone",title="Gone",
   author=accented,ownerKey=accented:lower().."@ebonhold",class="MAGE",
-  ownerVerified=true,echoes=echoes,postedAt=10,lastModified=10}
-H.RebindCatalog()
+  ownerVerified=true,echoes=echoes,postedAt=10,lastModified=10}),
+  "fixture could not admit the exact UTF-8 owned build")
 assert(not Sync.HandleIncoming("WLRD|Valentine|utf8-gone|20|Valentine","Valentine")
-  and NexusDB.communityBuilds["utf8-gone"],
+  and H.DurableBuilds()["utf8-gone"],
   "ASCII lookalike gained UTF-8 tombstone authority")
 assert(Sync.HandleIncoming("WLRD|"..accented.."|utf8-gone|21|"..accented,
   accented.."-Ebonhold") and Nexus.BuildCatalog.Get("utf8-gone") == nil
-  and NexusDB.communityBuilds["utf8-gone"] ~= nil
-  and NexusDB.syncTombstones["utf8-gone"].author==accented,
+  and H.DurableBuilds()["utf8-gone"] ~= nil
+  and H.DurableTombstones()["utf8-gone"].author==accented,
   "exact UTF-8 tombstone identity was changed or rejected")
 
 print("owner-only DPS and tombstone claims cannot suppress authoritative sync -- OK")

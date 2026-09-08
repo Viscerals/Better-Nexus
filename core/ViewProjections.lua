@@ -60,9 +60,8 @@ local function Part(value)
     return kind .. ":" .. tostring(#text) .. ":" .. text
 end
 
-local function TypedIdentity(value)
-    return type(value) .. ":" .. tostring(value == nil and "" or value)
-end
+-- MASTER-RC-012: the one canonical encoder, shared from core/Identity.lua.
+local TypedIdentity = Identity.TypedIdentity
 
 local function CacheKey(parts)
     local out = {}
@@ -447,7 +446,7 @@ local function BuildProjection(filters)
         local ln, rn = tostring(left.title or ""):lower(),
             tostring(right.title or ""):lower()
         if ln ~= rn then return ln < rn end
-        return TypedIdentity(left.id) < TypedIdentity(right.id)
+        return Identity.CompareTypedIds(left.id, right.id) < 0
     end)
     summary.filtered = #out
     summary.qualifyingCount = summary.qualifying
@@ -665,7 +664,7 @@ local function BuildBefore(left, right, filters, countComparison)
     local ln, rn = tostring(left.title or ""):lower(),
         tostring(right.title or ""):lower()
     if ln ~= rn then return ln < rn end
-    return TypedIdentity(left.id) < TypedIdentity(right.id)
+    return Identity.CompareTypedIds(left.id, right.id) < 0
 end
 
 local function LeaderboardBefore(left, right, combined, countComparison)

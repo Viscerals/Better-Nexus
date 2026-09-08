@@ -4,8 +4,21 @@ local S = {}
 
 S.results, S.failures, S.passed = {}, {}, 0
 
+-- Outstanding fixture fault occupants. Every case restores them, whether it
+-- passes or fails, so a hostile durable occupant can never leak into a later
+-- case or into a reported pass.
+S.pendingRestores = {}
+
+local function RestoreAll()
+    for index = #S.pendingRestores, 1, -1 do
+        pcall(S.pendingRestores[index])
+        S.pendingRestores[index] = nil
+    end
+end
+
 function S.Case(id, name, callback)
     local ok, err = pcall(callback)
+    RestoreAll()
     if ok then
         S.passed = S.passed + 1
         S.results[#S.results + 1] = string.format("%s PASS %s", id, name)
@@ -88,10 +101,89 @@ function S.Database(overlay, tombstones, extra)
     return db
 end
 
+-- The durable authority payload (MASTER-RC-001; architecture 3b5de54f state
+-- machine lines 374/394/4849). After the accepted legacy-to-bundle cutover the
+-- one durable payload write is `authorityDatabase.authorityBundle`, and the
+-- exact PR #68 locations are read-only preserved input: never written and never
+-- read again once a bundle exists. A fixture that inspected `db.communityBuilds`
+-- as storage inspects this seam instead; `db.communityBuilds` keeps its separate
+-- meaning as the preserved legacy bootstrap input.
+function S.Durable(db, field)
+    local database = db or NexusDB
+    if type(database) ~= "table" then return {} end
+    local bundle = rawget(database, "authorityBundle")
+    if type(bundle) ~= "table" then return {} end
+    return rawget(bundle, field or "communityBuilds") or {}
+end
+
+-- Fixture-only fault surface for the durable authority payload. No production
+-- fault seam exists or may exist (MASTER-RC-002): after the legacy-to-bundle
+-- cutover the one durable payload write is the bundle pointer, so the only
+-- durable state a fixture can make hostile is a bundle payload field. Returns a
+-- restore function; every caller restores it, including on failure.
+function S.PoisonDurableField(db, field, value)
+    local bundle = rawget(db or NexusDB, "authorityBundle")
+    if type(bundle) ~= "table" then
+        return function() end
+    end
+    local previous = rawget(bundle, field)
+    rawset(bundle, field, value)
+    local done = false
+    local function restore()
+        if done then return end
+        done = true
+        rawset(bundle, field, previous)
+    end
+    S.pendingRestores[#S.pendingRestores + 1] = restore
+    return restore
+end
+
+-- A raw write behind the published root grants no authority. After the
+-- legacy-to-bundle cutover the durable location is the bundle payload, so a
+-- fixture that used to seed SavedVariables directly seeds the payload and then
+-- performs one explicit supported readmission from cursor zero.
+function S.SeedDurable(db, field, key, value)
+    local payload = S.Durable(db, field)
+    payload[key] = value
+    return payload
+end
+
+-- Current-source drift on the selected authority input: a foreign replacement
+-- of the exact payload field the serving witness is bound to. Before bundle
+-- occupancy that is still the exact PR #68 location (state machine line 374);
+-- after occupancy it is the bundle payload field (line 394).
+-- `deep` reproduces a reload-shaped replacement in which no record table
+-- identity survives, which is what distinguishes a current-session reservation
+-- from a reloaded one.
+function S.DriftSelectedMap(db, field, deep)
+    local database = db or NexusDB
+    local bundle = rawget(database, "authorityBundle")
+    local owner = type(bundle) == "table" and bundle or database
+    local current = rawget(owner, field) or {}
+    local replacement = deep and S.DeepCopy(current) or nil
+    if not replacement then
+        replacement = {}
+        for key, value in pairs(current) do replacement[key] = value end
+    end
+    rawset(owner, field, replacement)
+    return replacement
+end
+
 function S.Bind(db, bundle)
     NexusDB = db
     Nexus.LoadoutEvidence.Init(db)
-    return Nexus.BuildCatalog.Init(db, bundle or S.Bundle())
+    local catalog = Nexus.BuildCatalog
+    local selected = bundle or S.Bundle()
+    local budget = catalog.Budget()
+    local limit = tonumber(budget.maximumPumps) or 0
+    local result = catalog.Init(db, selected)
+    local pumps = 1
+    while type(result) == "table" and result.state == "pending"
+        and pumps < limit do
+        pumps = pumps + 1
+        result = catalog.Init(db, selected)
+    end
+    return result
 end
 
 -- Simulate a client reload: every session table, cursor, claim, and root

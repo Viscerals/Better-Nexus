@@ -202,6 +202,11 @@ NexusDB = {dpsCapture={characterBest={dummy=crossedDummy,lk=crossedLk},
     personalBest={},buildBest={}}}
 dofile("core/Revisions.lua")
 dofile("core/DpsCapture.lua")
+-- MASTER-RC-009: a read no longer binds or admits an unbound SavedVariables
+-- root (core/BuildCatalog.lua Gate). A fixture that swaps the raw global must
+-- drive one explicit admission itself, exactly as the authority coordinator
+-- does at bootstrap.
+Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
 local synchronous = assert(Nexus.DpsCapture.GetCommunityEligibility()["983001x1"])
 local cachedQualification = assert(
     Nexus.DpsCapture.GetCachedCommunityQualification(
@@ -255,6 +260,9 @@ local restartDb = Clone(NexusDB)
 NexusDB = restartDb
 dofile("core/Revisions.lua")
 dofile("core/DpsCapture.lua")
+-- MASTER-RC-009: a simulated reload must drive one explicit admission;
+-- a read no longer binds the swapped raw global.
+Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
 local DPS = Nexus.DpsCapture
 local eligibilityCursor = DPS.BeginCommunityEligibilityCursor()
 local cursorSteps = 0
@@ -289,6 +297,9 @@ local syncReplacement = Clone(restartDb)
 NexusDB = syncReplacement
 dofile("core/Revisions.lua")
 dofile("core/DpsCapture.lua")
+-- MASTER-RC-009: a simulated reload must drive one explicit admission;
+-- a read no longer binds the swapped raw global.
+Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
 local syncRebuilt = assert(
     Nexus.DpsCapture.GetCommunityEligibility()["983001x1"])
 Desired(Signature(syncRebuilt) == Signature(synchronous),

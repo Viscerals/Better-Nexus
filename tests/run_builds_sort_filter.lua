@@ -35,6 +35,11 @@ H.FireEvent("SPELLS_CHANGED"); H.FireEvent("PLAYER_ENTERING_WORLD"); H.Advance(2
 
 local CB = Nexus.CommunityBuilds
 CB.Init(Nexus.GameAdapter, Nexus.Model)
+-- Legacy-to-bundle cutover (state machine line 374): fixture rows are seeded as
+-- exact PR #68 legacy input on a fresh database so bootstrap admits them and
+-- builds the first complete bundle. A raw legacy write after bundle occupancy
+-- is not an admission input (line 394).
+NexusDB = {syncTombstones={}, buildFilters=NexusDB.buildFilters}
 NexusDB.communityBuilds = {
     z1={id="z1",title="Rogue Build",class="ROGUE",fingerprint="1x1",
         echoes={{spellId=1,quality=3,stacks=1}},postedAt=100,lastModified=100,
@@ -46,7 +51,7 @@ NexusDB.communityBuilds = {
         echoes={{spellId=3,quality=3,stacks=1}},postedAt=300,lastModified=300,
         author="Carol",ownerKey="carol@unknown",description=""},
 }
-Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB, Nexus.BundledBuilds)
 Nexus.DpsCapture = Nexus.DpsCapture or {}
 Nexus.DpsCapture.GetCommunityEligibility = function()
     return {
@@ -160,7 +165,8 @@ onUpdate(frame, 8.1)
 assert(CB.VirtualStats().dataBinds == recovered.dataBinds,
     "unchanged recovered class published more than once")
 
-NexusDB.communityBuilds = {}
+NexusDB = {communityBuilds={}, syncTombstones={}, buildFilters=NexusDB.buildFilters}
+H.RebindCatalog()
 Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED, {scope="empty"})
 assert(pcall(CB.Refresh) and CB.VirtualStats().results == 0,
     "empty current-class library was not handled")

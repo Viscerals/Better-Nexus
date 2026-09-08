@@ -72,6 +72,13 @@ H.playerLevel = 1
 H.FireEvent("ADDON_LOADED", "Nexus")
 H.FireEvent("SPELLS_CHANGED")
 H.FireEvent("PLAYER_ENTERING_WORLD")
+-- Architecture 3b5de54f lines 1203-1204 and 1519: authority bootstrap
+-- advances at most one PumpAuthorityBootstrap slice per scheduler turn, so
+-- world entry completes on the turn the coordinator reaches STORE_READY.
+-- Drive ordinary scheduler turns under a closed bound and prove startup
+-- actually completed. Nothing else in this file changes: no expected count,
+-- tolerance, threshold or oracle below is adjusted.
+H.RequireStarted()
 -- 1.19.3 intentionally starts in manual mode; the integration run opts in to
 -- automation before exercising automatic board and tome behavior.
 SlashCmdList.NEXUS("auto")
@@ -463,7 +470,8 @@ A.RequestGranted()
 H.NotifyEchoDataChanged()
 -- Earlier editor scenarios intentionally commit locked targets. Clear that
 -- unrelated fixture state so this scenario remains a pure search-policy test.
-Nexus.Store.State().lockDesignTargetsBySlot = {}
+Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(
+    function(state) state.lockDesignTargetsBySlot = {} end)
 Nexus.RequestRecompute()
 H.Advance(0.3)
 local banishesB4 = #H.banishCalls

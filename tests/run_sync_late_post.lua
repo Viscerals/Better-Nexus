@@ -28,6 +28,12 @@ local mageB  = {id="m1",title="Fire Mage",author="explore",class="MAGE",
 
 -- 1. Both builds received in a single sync
 NexusDB = { communityBuilds={}, syncTombstones={} }
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, nil)
 H.sentChatMessages={}
 Sync.BroadcastBuild(rogueB); Sync.BroadcastBuild(mageB)
@@ -35,12 +41,18 @@ local allChunks = drain()
 assert(#allChunks > 0, "no chunks produced")
 Sync.RequestSync()
 deliver(allChunks)
-assert(NexusDB.communityBuilds["r1"], "rogue not received in single sync")
-assert(NexusDB.communityBuilds["m1"], "mage not received in single sync")
+-- Legacy-to-bundle cutover (state machine lines 394, 4849): received builds are
+-- durable in the authority bundle only.
+assert(H.DurableBuilds()["r1"], "rogue not received in single sync")
+assert(H.DurableBuilds()["m1"], "mage not received in single sync")
+assert(rawget(NexusDB, "communityBuilds") ~= nil
+    and next(rawget(NexusDB, "communityBuilds")) == nil,
+    "receiving wrote the preserved legacy input location")
 print("both builds received in a single sync -- OK")
 
 -- 2. Late post: mage posted after B's window closed, received on 2nd sync
 NexusDB = { communityBuilds={}, syncTombstones={} }
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, nil)
 
 -- Rogue broadcast (will be "hot")
@@ -50,7 +62,7 @@ local rogueChunks = drain()
 -- B opens window, receives rogue
 Sync.RequestSync()
 deliver(rogueChunks)
-assert(NexusDB.communityBuilds["r1"], "rogue not received on 1st sync")
+assert(H.DurableBuilds()["r1"], "rogue not received on 1st sync")
 
 -- Window expires
 clock = clock + 70
@@ -63,23 +75,25 @@ H.sentChatMessages={}
 Sync.BroadcastBuild(mageB)  -- marks mageB hot
 local mageChunks = drain()
 deliver(mageChunks)
-assert(NexusDB.communityBuilds["m1"],
+assert(H.DurableBuilds()["m1"],
     "valid direct-author mage build was dropped outside the status window")
 
 -- B presses Sync Now again
 clock = clock + 10
 Sync.RequestSync()
 -- Simulate A answering: BroadcastMine includes hot mageB
-NexusDB.communityBuilds["r1"] = rogueB  -- A has rogue in its DB
+-- A holds the rogue. After the cutover the durable store is the bundle, so the
+-- fixture seeds through the public admission seam rather than a raw legacy write.
+assert(Nexus.BuildCatalog.Put(rogueB), "fixture could not admit A's rogue build")
 H.sentChatMessages={}
 local n = Sync.BroadcastMine()
 local answer2 = drain()
-NexusDB.communityBuilds["r1"] = nil  -- restore B's view
+assert(Nexus.BuildCatalog.RemoveOverlay("r1"), "fixture could not restore B's view")
 assert(n >= 2, "BroadcastMine should include hot mage: got "..n)
 print("BroadcastMine answers 2nd sync with "..n.." builds ("..#answer2.." chunks) -- OK")
 
 deliver(answer2)
-assert(NexusDB.communityBuilds["m1"],
+assert(H.DurableBuilds()["m1"],
     "mage must arrive on B's 2nd sync -- this was the live bug")
 print("late direct-author build remains available across the next sync -- OK")
 
@@ -90,6 +104,7 @@ NexusDB = { communityBuilds={
             echoes={{spellId=200100,quality=3,stacks=1}},
             postedAt=50000,lastModified=50000,isMine=true}
 }, syncTombstones={} }
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, nil)
 Sync.ClearLog()
 H.sentChatMessages={}

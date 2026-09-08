@@ -65,7 +65,8 @@ print("send side is fully logged (broadcast + each wire message) -- OK")
 -- Sender identity must match the payload author.
 local msgs = {}
 for _, m in ipairs(H.sentChatMessages) do msgs[#msgs + 1] = m end
-NexusDB.communityBuilds = nil
+-- Legacy-to-bundle cutover: a fresh receiving client is a fresh database.
+NexusDB = {}
 H.RebindCatalog()
 Sync.ClearLog()
 clock = clock + 3600   -- ensure any window is closed
@@ -73,13 +74,13 @@ for _, m in ipairs(msgs) do
     H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice-Ebonhold", "Common",
         "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
 end
-assert(NexusDB.communityBuilds and NexusDB.communityBuilds[id],
+assert(H.DurableBuilds()[id],
     "a valid owner-authored update was dropped outside a sync window")
 assert(LogHas("STORED"), "outside-window owner update was not logged")
 print("valid owner update is accepted and logged outside a sync window -- OK")
 
 -- RECEIVE side, success: with a window open, the store must be logged
-NexusDB.communityBuilds = {}
+NexusDB = {}
 H.RebindCatalog()
 Sync.Init(Codec, Nexus.GameAdapter or {})
 Sync.ClearLog()

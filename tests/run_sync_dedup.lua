@@ -57,9 +57,14 @@ DeliverAll(BroadcastAndCollect(build))  -- identical rebroadcast
 assert(Sync.Stats().received == receivedAfterFirst,
     "identical rebroadcast should NOT count as a new receive")
 assert(Sync.Stats().duplicatesSkipped >= 1, "duplicate rebroadcast should be counted as skipped")
+-- Legacy-to-bundle cutover (architecture 3b5de54f, state machine lines 394,
+-- 4849): received builds are durable in the authority bundle only; the exact
+-- PR #68 location is preserved read-only input that receiving never writes.
 local count = 0
-for _ in pairs(NexusDB.communityBuilds) do count = count + 1 end
+for _ in pairs(H.DurableBuilds()) do count = count + 1 end
 assert(count == 1, "expected exactly 1 stored build after receiving the same one twice, got " .. count)
+assert(rawget(NexusDB, "communityBuilds") == nil,
+    "receiving wrote a legacy payload location")
 print("identical rebroadcast is correctly deduplicated, no double-entry -- OK")
 
 -- 2. A NEWER version of the same build (higher postedAt) must update the
@@ -68,12 +73,12 @@ local buildV2 = { id = "b1", title = "Build One (updated)", description = "d2", 
     ownerKey = "alice@ebonhold", ownerVerified = true, isMine = true, class = "MAGE",
     echoes = { { spellId = 200100, quality = 3, stacks = 2 } }, postedAt = 2000 }
 DeliverAll(BroadcastAndCollect(buildV2))
-assert(NexusDB.communityBuilds["b1"].title == "Build One (updated)",
+assert(H.DurableBuilds()["b1"].title == "Build One (updated)",
     "newer version should have updated the stored title")
-assert(NexusDB.communityBuilds["b1"].echoes[1].stacks == 2,
+assert(H.DurableBuilds()["b1"].echoes[1].stacks == 2,
     "newer version should have updated the stored echoes")
 count = 0
-for _ in pairs(NexusDB.communityBuilds) do count = count + 1 end
+for _ in pairs(H.DurableBuilds()) do count = count + 1 end
 assert(count == 1, "update should replace, not add a second entry")
 print("a newer version correctly updates the existing entry, still no duplicate -- OK")
 
@@ -83,7 +88,7 @@ local staleReplay = { id = "b1", title = "Build One (STALE)", description = "old
     ownerKey = "alice@ebonhold", ownerVerified = true, isMine = true, class = "MAGE",
     echoes = { { spellId = 200100, quality = 3, stacks = 1 } }, postedAt = 1000 }
 DeliverAll(BroadcastAndCollect(staleReplay))
-assert(NexusDB.communityBuilds["b1"].title == "Build One (updated)",
+assert(H.DurableBuilds()["b1"].title == "Build One (updated)",
     "a stale/older replay must NOT overwrite the newer stored version")
 print("stale/older replays are correctly rejected, newer data is protected -- OK")
 
@@ -92,7 +97,8 @@ NexusDB = {}
 local before = Sync.Stats().malformedRejected
 local ok1 = pcall(Sync.HandleIncoming, "WLRB|Alice|bad-id|1000|1/1|not-valid-base64!!!", "Alice")
 assert(ok1, "malformed base64 payload should not error")
-assert(NexusDB.communityBuilds == nil or NexusDB.communityBuilds["bad-id"] == nil,
+assert(H.DurableBuilds()["bad-id"] == nil
+    and rawget(NexusDB, "communityBuilds") == nil,
     "malformed payload must not be stored")
 local ok2 = pcall(Sync.HandleIncoming, "garbage that is not our protocol at all", "Mallory")
 assert(ok2, "unrecognized message format should not error")
@@ -109,7 +115,7 @@ local spoofPayload = Codec.JSONEncode({ id = "real-id", title = "T", echoes = {
     { spellId = 1, quality = 0, stacks = 1 } } })
 local spoofB64 = Codec.Base64Encode(spoofPayload)
 Sync.HandleIncoming("WLRB|Alice|different-envelope-id|1000|1/1|" .. spoofB64, "Alice")
-assert(NexusDB.communityBuilds == nil or
-    NexusDB.communityBuilds["different-envelope-id"] == nil,
+assert(H.DurableBuilds()["different-envelope-id"] == nil
+    and rawget(NexusDB, "communityBuilds") == nil,
     "mismatched envelope/payload id must be rejected, not silently accepted")
 print("mismatched envelope/payload id is correctly rejected -- OK")

@@ -47,10 +47,15 @@ for i = 1, maxLen do
     if msgsB[i] then Sync.HandleIncoming(msgsB[i].text, "Alice-Ebonhold") end
 end
 
-assert(NexusDB.communityBuilds["A"], "build A did not reassemble correctly when interleaved")
-assert(NexusDB.communityBuilds["B"], "build B did not reassemble correctly when interleaved")
-assert(NexusDB.communityBuilds["A"].title == "Build A")
-assert(NexusDB.communityBuilds["B"].title == "Build B")
+-- Legacy-to-bundle cutover (state machine lines 394, 4849): received builds are
+-- durable in the authority bundle, never in the exact PR #68 location.
+local durable = H.DurableBuilds()
+assert(durable["A"], "build A did not reassemble correctly when interleaved")
+assert(durable["B"], "build B did not reassemble correctly when interleaved")
+assert(durable["A"].title == "Build A")
+assert(durable["B"].title == "Build B")
+assert(rawget(NexusDB, "communityBuilds") == nil,
+    "receiving wrote a legacy payload location")
 print("interleaved multi-build chunk transfers reassemble independently and correctly -- OK")
 
 -- 2. An incomplete transfer (missing chunks) must eventually be cleaned
@@ -71,7 +76,7 @@ fakeTime = fakeTime + 10
 Sync.RequestSync()
 -- deliver only the FIRST chunk, never the rest
 Sync.HandleIncoming(H.sentChatMessages[1].text, "Alice-Ebonhold")
-assert(not (NexusDB.communityBuilds and NexusDB.communityBuilds["A2"]),
+assert(H.DurableBuilds()["A2"] == nil,
     "build should not be considered complete with only 1 of several chunks")
 -- advance fake time past the inflight timeout, then trigger cleanup via
 -- a harmless new incoming message (CleanupExpired runs on each chunked receive)
@@ -83,7 +88,7 @@ Sync.RequestSync()
 for _, msg in ipairs(H.sentChatMessages) do Sync.HandleIncoming(msg.text, "Alice-Ebonhold") end
 -- buildB2 should complete fine; buildA2's stale partial transfer should
 -- have been silently dropped rather than accumulating forever
-assert(NexusDB.communityBuilds["B2"], "buildB2 should complete normally after the timeout window")
+assert(H.DurableBuilds()["B2"], "buildB2 should complete normally after the timeout window")
 print("incomplete/expired transfers are cleaned up without blocking new ones -- OK")
 
 -- 3. Mesh rebroadcast sends every valid build held locally.
@@ -95,6 +100,11 @@ NexusDB = { communityBuilds = {
         class = "ROGUE", echoes = { { spellId = 2, quality = 0, stacks = 1 } },
         postedAt = 1, ownerKey = "bob@ebonhold", ownerVerified = true, isMine = false },
 } }
+-- MASTER-RC-009: a read no longer binds or admits an unbound SavedVariables
+-- root (core/BuildCatalog.lua Gate). A fixture that swaps the raw global must
+-- drive one explicit admission itself, exactly as the authority coordinator
+-- does at bootstrap.
+Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
 H.sentChatMessages = {}
 local n = Sync.BroadcastMine()
 assert(n >= 2, "BroadcastMine should redistribute both locally created and received builds")

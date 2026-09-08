@@ -171,6 +171,30 @@ local function MigrationInput()
     }
 end
 
+-- MASTER-RC-001, architecture 3b5de54f lines 2983-2985: the exact PR #68
+-- LegacyDataMigration.Init/Pump/Finish writer and its Store.lua writes are
+-- disabled before authority bootstrap, and the retired module cannot resume a
+-- durable cursor or write accountCharacters, DPS tables, leaderboard, or
+-- migration metadata afterwards. A reloaded module loads retired again.
+--
+-- This file previously drove that retired writer directly to place its own
+-- fixture state. It now goes through the replacement authorized route:
+-- AuthorityBootstrapCoordinatorV1 calls this exact classification before
+-- authority bootstrap, nothing else may arm the writer, and the classification
+-- itself writes nothing. The conversion is unchanged -- every account-identity,
+-- ambiguity, exact-bridge, restart, login-order, changed-source, NaN and
+-- future-schema assertion below still runs end to end. Only the entry point
+-- moved; the retired writer is never asked to mutate data merely to preserve
+-- an old test setup.
+local function Arm(database)
+    local classified = Nexus.LegacyDataMigration.ClassifyLegacyWriterV1(
+        database, {owner="authority-bootstrap-coordinator"})
+    assert(classified.armed,
+        "the coordinator refused to authorize the bounded conversion: "
+        .. tostring(classified.classification))
+    return classified
+end
+
 local function FinishMigration(database, realm, interrupt)
     currentRealm = realm
     NexusDB = database
@@ -178,11 +202,17 @@ local function FinishMigration(database, realm, interrupt)
         Nexus.Scheduler.Cancel("legacy-data-migration")
     end
     dofile("core/LegacyDataMigration.lua")
+    assert(Nexus.LegacyDataMigration.LegacyWriterRetired(database),
+        "a reloaded LegacyDataMigration did not load retired")
+    Arm(database)
     local summary = Nexus.LegacyDataMigration.Init(database)
     Check(summary.pending == true, "legacy account fixture did not enter staging")
     if interrupt then
         Nexus.LegacyDataMigration.Pump(1)
         dofile("core/LegacyDataMigration.lua")
+        assert(Nexus.LegacyDataMigration.LegacyWriterRetired(database),
+            "an interrupted reload did not load retired")
+        Arm(database)
         summary = Nexus.LegacyDataMigration.Init(database)
         Check(summary.pending == true, "interrupted migration did not resume")
     end
@@ -271,6 +301,13 @@ Check(Codec.JSONEncode(migratedA.accountCharacters)
 
 local encoded = Codec.JSONEncode(migratedA)
 dofile("core/LegacyDataMigration.lua")
+-- A completed conversion classifies as TERMINAL_RECEIPT_PRESERVED: the
+-- coordinator still authorizes the module, and the preserved terminal receipt
+-- must be reported without replaying any write.
+local replayClass = Arm(migratedA)
+assert(replayClass.classification == "TERMINAL_RECEIPT_PRESERVED",
+    "a completed conversion did not classify as a preserved terminal receipt: "
+        .. tostring(replayClass.classification))
 local replay = Nexus.LegacyDataMigration.Init(migratedA)
 Check(replay.complete == true and replay.pending ~= true
         and Codec.JSONEncode(migratedA) == encoded,
@@ -281,6 +318,7 @@ Check(replay.complete == true and replay.pending ~= true
 local changedDuringStaging = MigrationInput()
 NexusDB = changedDuringStaging
 dofile("core/LegacyDataMigration.lua")
+Arm(changedDuringStaging)
 local changedSummary = Nexus.LegacyDataMigration.Init(changedDuringStaging)
 Check(changedSummary.pending == true, "changed-source fixture did not stage")
 Nexus.LegacyDataMigration.Pump(1)
@@ -308,6 +346,7 @@ nanMigration.accountCharacters[3] = {
 }
 NexusDB = nanMigration
 dofile("core/LegacyDataMigration.lua")
+Arm(nanMigration)
 Check(Nexus.LegacyDataMigration.Init(nanMigration).pending == true,
     "NaN fixture did not enter migration")
 local nanDone = false

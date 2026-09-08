@@ -23,6 +23,12 @@ dofile("core/DpsCapture.lua")
 local Codec, Sync, DPS = Nexus.Codec, Nexus.Sync, Nexus.DpsCapture
 time = function() return 50000 end
 NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 
 local function BuildPacket(sender, id, ownerKey, stamp)
@@ -37,7 +43,7 @@ end
 assert(Sync.HandleIncoming(
     BuildPacket("Twin-RealmA", "twin-a", "twin@realma", 10),
     "Twin-RealmA"), "exact realm-qualified owner build was rejected")
-local exact = NexusDB.communityBuilds["twin-a"]
+local exact = H.DurableBuilds()["twin-a"]
 assert(exact and exact.ownerVerified == true
         and exact.ownerKey == "twin@realma",
     "exact realm-qualified owner build was not verified")
@@ -47,8 +53,8 @@ assert(Sync.HandleIncoming(
     "Twin-RealmA"), "qualified delete fixture was not stored")
 assert(not Sync.HandleIncoming(
         "WLRD|Twin-RealmA|qualified-delete|11|Twin-RealmB", "Twin-RealmA")
-        and NexusDB.communityBuilds["qualified-delete"]
-        and NexusDB.syncTombstones["qualified-delete"] == nil,
+        and H.DurableBuilds()["qualified-delete"]
+        and H.DurableTombstones()["qualified-delete"] == nil,
     "EXPECTED RED: qualified delete author contradicted the exact sender owner")
 
 local aliasConflictPayload = {
@@ -60,13 +66,13 @@ local aliasConflictPacket = table.concat({"WLRB","Twin-RealmA",
     aliasConflictPayload.id,"10","1/1",
     Codec.Base64Encode(Codec.JSONEncode(aliasConflictPayload))}, "|")
 assert(not Sync.HandleIncoming(aliasConflictPacket,"Twin-RealmA")
-        and NexusDB.communityBuilds[aliasConflictPayload.id] == nil,
+        and H.DurableBuilds()[aliasConflictPayload.id] == nil,
     "EXPECTED RED: conflicting build aliases gained canonical authority")
 
 assert(Sync.HandleIncoming(
     BuildPacket("Twin-RealmB", "twin-mismatch", "twin@realma", 11),
     "Twin-RealmB"), "cross-realm evidence was not retained")
-local mismatch = NexusDB.communityBuilds["twin-mismatch"]
+local mismatch = H.DurableBuilds()["twin-mismatch"]
 assert(mismatch and mismatch.ownerVerified == false
         and mismatch.ownerKey == nil
         and mismatch.claimedOwnerKey == "twin@realma"
@@ -85,7 +91,7 @@ end
 assert(Sync.HandleIncoming(
     SummaryPacket("Twin-RealmA", "summary-a", "twin@realma", 20),
     "Twin-RealmA"), "exact realm-qualified summary was rejected")
-local summary = NexusDB.communityBuilds["summary-a"]
+local summary = H.DurableBuilds()["summary-a"]
 assert(summary and summary.ownerVerified == true
         and summary.ownerKey == "twin@realma",
     "exact realm-qualified summary was not verified")
@@ -94,13 +100,13 @@ assert(not Sync.HandleIncoming(
     SummaryPacket("Twin-RealmB", "summary-mismatch", "twin@realma", 21),
     "Twin-RealmB"),
     "same-name cross-realm summary was accepted as direct-owner input")
-assert(NexusDB.communityBuilds["summary-mismatch"] == nil,
+assert(H.DurableBuilds()["summary-mismatch"] == nil,
     "same-name cross-realm summary entered durable state")
 
 assert(Sync.HandleIncoming(
     BuildPacket("Twin", "twin-short", "twin@realma", 22), "Twin"),
     "realm-less build evidence was not retained")
-local realmLess = NexusDB.communityBuilds["twin-short"]
+local realmLess = H.DurableBuilds()["twin-short"]
 assert(realmLess and realmLess.ownerVerified == false
         and realmLess.ownerKey == nil,
     "realm-less transport gained current-realm owner authority")
@@ -108,46 +114,46 @@ assert(realmLess and realmLess.ownerVerified == false
 assert(Sync.HandleIncoming(
     BuildPacket("Twin-RealmB", "twin-b", "twin@realmb", 23),
     "Twin-RealmB"), "exact RealmB build was rejected")
-assert(NexusDB.communityBuilds["twin-a"].ownerKey == "twin@realma"
-        and NexusDB.communityBuilds["twin-b"].ownerKey == "twin@realmb",
+assert(H.DurableBuilds()["twin-a"].ownerKey == "twin@realma"
+        and H.DurableBuilds()["twin-b"].ownerKey == "twin@realmb",
     "same-name verified realm builds did not coexist")
 
 assert(not Sync.HandleIncoming(
     BuildPacket("Twin-RealmB", "twin-mismatch", "twin@realmb", 25),
     "Twin-RealmB"),
     "RealmB replaced a retained RealmA owner claim")
-assert(NexusDB.communityBuilds["twin-mismatch"].ownerVerified == false
-        and NexusDB.communityBuilds["twin-mismatch"].claimedOwnerKey
+assert(H.DurableBuilds()["twin-mismatch"].ownerVerified == false
+        and H.DurableBuilds()["twin-mismatch"].claimedOwnerKey
             == "twin@realma"
-        and NexusDB.communityBuilds["twin-mismatch"].relaySender
+        and H.DurableBuilds()["twin-mismatch"].relaySender
             == "Twin-RealmB",
     "failed wrong-owner promotion changed retained provenance")
 assert(Sync.HandleIncoming(
     BuildPacket("Twin-RealmA", "twin-mismatch", "twin@realma", 25),
     "Twin-RealmA"),
     "the exact claimed owner could not promote retained evidence")
-assert(NexusDB.communityBuilds["twin-mismatch"].ownerVerified == true
-        and NexusDB.communityBuilds["twin-mismatch"].ownerKey
+assert(H.DurableBuilds()["twin-mismatch"].ownerVerified == true
+        and H.DurableBuilds()["twin-mismatch"].ownerKey
             == "twin@realma"
-        and NexusDB.communityBuilds["twin-mismatch"].claimedOwnerKey == nil,
+        and H.DurableBuilds()["twin-mismatch"].claimedOwnerKey == nil,
     "exact claimed-owner promotion did not establish canonical ownership")
 
 assert(Sync.HandleIncoming(
     BuildPacket("Mallory-RealmX", "relayed-twin", "twin@realma", 25),
     "Mallory-RealmX"),
     "ordinary third-party relay evidence was not retained")
-assert(NexusDB.communityBuilds["relayed-twin"].ownerVerified == false
-        and NexusDB.communityBuilds["relayed-twin"].claimedOwnerKey
+assert(H.DurableBuilds()["relayed-twin"].ownerVerified == false
+        and H.DurableBuilds()["relayed-twin"].claimedOwnerKey
             == "twin@realma"
-        and NexusDB.communityBuilds["relayed-twin"].relaySender
+        and H.DurableBuilds()["relayed-twin"].relaySender
             == "Mallory-RealmX",
     "ordinary relay unexpectedly gained owner authority")
 assert(Sync.HandleIncoming(
     BuildPacket("Twin-RealmA", "relayed-twin", "twin@realma", 25),
     "Twin-RealmA"),
     "exact owner could not promote matching third-party relay evidence")
-assert(NexusDB.communityBuilds["relayed-twin"].ownerVerified == true
-        and NexusDB.communityBuilds["relayed-twin"].ownerKey
+assert(H.DurableBuilds()["relayed-twin"].ownerVerified == true
+        and H.DurableBuilds()["relayed-twin"].ownerKey
             == "twin@realma",
     "exact owner promotion left relay evidence unverified")
 
@@ -163,7 +169,7 @@ assert(Sync.HandleIncoming(
 assert(Sync.WorkState().pendingReplacements == pendingBeforeSummary + 1,
     "exact owner summary did not queue a verified replacement")
 
-NexusDB.communityBuilds["legacy-nil-full"] = {
+H.DurableBuilds()["legacy-nil-full"] = {
     id="legacy-nil-full",title="Legacy Nil Full",author="Twin",
     ownerKey="twin@realma",isMine=false,class="MAGE",lastModified=31,
     echoes={{spellId=200100,quality=3,stacks=1}},
@@ -177,10 +183,10 @@ assert(Sync.HandleIncoming(
     BuildPacket("Twin-RealmA", "legacy-nil-full", "twin@realma", 32),
     "Twin-RealmA"),
     "exact owner could not refresh a legacy nil-verification claim")
-assert(NexusDB.communityBuilds["legacy-nil-full"].ownerVerified == true,
+assert(H.DurableBuilds()["legacy-nil-full"].ownerVerified == true,
     "fresh exact full packet did not verify the legacy owner claim")
 
-NexusDB.communityBuilds["legacy-nil-summary"] = {
+H.DurableBuilds()["legacy-nil-summary"] = {
     id="legacy-nil-summary",title="Legacy Nil Summary",author="Twin",
     ownerKey="twin@realma",isMine=false,class="MAGE",lastModified=32,
 }
@@ -189,10 +195,10 @@ assert(Sync.HandleIncoming(
     SummaryPacket("Twin-RealmA", "legacy-nil-summary", "twin@realma", 33),
     "Twin-RealmA"),
     "exact owner summary could not refresh a legacy nil-verification claim")
-assert(NexusDB.communityBuilds["legacy-nil-summary"].ownerVerified == true,
+assert(H.DurableBuilds()["legacy-nil-summary"].ownerVerified == true,
     "fresh exact summary did not verify the legacy owner claim")
 
-NexusDB.communityBuilds["stale-mine-full"] = {
+H.DurableBuilds()["stale-mine-full"] = {
     id="stale-mine-full",title="Stale Mine Full",author="Twin",
     ownerKey="twin@realma",ownerVerified=false,isMine=true,class="MAGE",
     lastModified=33,echoes={{spellId=200101,quality=3,stacks=1}},
@@ -202,11 +208,11 @@ assert(Sync.HandleIncoming(
     BuildPacket("Twin-RealmA", "stale-mine-full", "twin@realma", 34),
     "Twin-RealmA"),
     "EXPECTED RED: stale isMine blocked exact-owner full promotion")
-assert(NexusDB.communityBuilds["stale-mine-full"].ownerVerified == true
-        and NexusDB.communityBuilds["stale-mine-full"].isMine ~= true,
+assert(H.DurableBuilds()["stale-mine-full"].ownerVerified == true
+        and H.DurableBuilds()["stale-mine-full"].isMine ~= true,
     "exact remote owner promotion retained stale local ownership")
 
-NexusDB.communityBuilds["stale-mine-summary"] = {
+H.DurableBuilds()["stale-mine-summary"] = {
     id="stale-mine-summary",title="Stale Mine Summary",author="Twin",
     ownerKey="twin@realma",ownerVerified=false,isMine=true,class="MAGE",
     lastModified=34,
@@ -216,11 +222,11 @@ assert(Sync.HandleIncoming(
     SummaryPacket("Twin-RealmA", "stale-mine-summary", "twin@realma", 35),
     "Twin-RealmA"),
     "EXPECTED RED: stale isMine blocked exact-owner summary promotion")
-assert(NexusDB.communityBuilds["stale-mine-summary"].ownerVerified == true
-        and NexusDB.communityBuilds["stale-mine-summary"].isMine ~= true,
+assert(H.DurableBuilds()["stale-mine-summary"].ownerVerified == true
+        and H.DurableBuilds()["stale-mine-summary"].isMine ~= true,
     "exact remote owner summary retained stale local ownership")
 
-NexusDB.communityBuilds["stale-mine-delete"] = {
+H.DurableBuilds()["stale-mine-delete"] = {
     id="stale-mine-delete",title="Stale Mine Delete",author="Twin",
     ownerKey="twin@realma",ownerVerified=false,isMine=true,class="MAGE",
     lastModified=35,echoes={{spellId=200102,quality=3,stacks=1}},
@@ -233,9 +239,9 @@ assert(Sync.HandleIncoming(
 -- reservation: the row leaves every public surface, its admitted raw evidence
 -- is preserved, and the reservation records the exact owner claim.
 assert(Nexus.BuildCatalog.Get("stale-mine-delete") == nil
-        and NexusDB.communityBuilds["stale-mine-delete"] ~= nil
-        and NexusDB.syncTombstones["stale-mine-delete"]
-        and NexusDB.syncTombstones["stale-mine-delete"].ownerKey
+        and H.DurableBuilds()["stale-mine-delete"] ~= nil
+        and H.DurableTombstones()["stale-mine-delete"]
+        and H.DurableTombstones()["stale-mine-delete"].ownerKey
             == "twin@realma",
     "exact remote delete did not replace stale local evidence with a tomb")
 
@@ -253,7 +259,7 @@ local function MalformedTrue(id, stamp, complete)
         echoes=complete and {{spellId=200103,quality=3,stacks=1}} or nil,
     }
 end
-NexusDB.communityBuilds["malformed-true-full"] =
+H.DurableBuilds()["malformed-true-full"] =
     MalformedTrue("malformed-true-full",36,true)
 H.RebindCatalog()
 assert(not Sync.HandleIncoming(BuildPacket("Twin-RealmB",
@@ -263,29 +269,29 @@ assert(Sync.HandleIncoming(BuildPacket("Twin-RealmA",
         "malformed-true-full","twin@realma",37),"Twin-RealmA"),
     "EXPECTED RED: exact owner could not repair malformed raw-true build evidence")
 assert(Identity.VerifiedOwnerKey(
-        NexusDB.communityBuilds["malformed-true-full"])=="twin@realma"
-        and NexusDB.communityBuilds["malformed-true-full"].o==nil
-        and NexusDB.communityBuilds["malformed-true-full"].claimedOwnerKey==nil,
+        H.DurableBuilds()["malformed-true-full"])=="twin@realma"
+        and H.DurableBuilds()["malformed-true-full"].o==nil
+        and H.DurableBuilds()["malformed-true-full"].claimedOwnerKey==nil,
     "exact full repair retained malformed owner aliases")
 
-NexusDB.communityBuilds["malformed-true-summary"] =
+H.DurableBuilds()["malformed-true-summary"] =
     MalformedTrue("malformed-true-summary",37,false)
 H.RebindCatalog()
 assert(Sync.HandleIncoming(SummaryPacket("Twin-RealmA",
         "malformed-true-summary","twin@realma",38),"Twin-RealmA"),
     "EXPECTED RED: exact owner summary could not repair malformed raw-true evidence")
 assert(Identity.VerifiedOwnerKey(
-        NexusDB.communityBuilds["malformed-true-summary"])=="twin@realma",
+        H.DurableBuilds()["malformed-true-summary"])=="twin@realma",
     "exact summary repair did not establish coherent owner authority")
 
-NexusDB.communityBuilds["malformed-true-delete"] =
+H.DurableBuilds()["malformed-true-delete"] =
     MalformedTrue("malformed-true-delete",38,true)
 H.RebindCatalog()
 assert(Sync.HandleIncoming(
         "WLRD|Twin-RealmA|malformed-true-delete|39|Twin","Twin-RealmA")
         and Nexus.BuildCatalog.Get("malformed-true-delete")==nil
-        and NexusDB.communityBuilds["malformed-true-delete"]~=nil
-        and NexusDB.syncTombstones["malformed-true-delete"].ownerKey
+        and H.DurableBuilds()["malformed-true-delete"]~=nil
+        and H.DurableTombstones()["malformed-true-delete"].ownerKey
             =="twin@realma",
     "EXPECTED RED: exact owner delete could not replace malformed raw-true evidence")
 
@@ -297,9 +303,9 @@ assert(Sync.HandleIncoming(
     "WLRD|Twin-RealmA|relayed-delete|35|Twin", "Twin-RealmA"),
     "exact owner could not delete its third-party relayed evidence")
 assert(Nexus.BuildCatalog.Get("relayed-delete") == nil
-        and NexusDB.communityBuilds["relayed-delete"] ~= nil
-        and NexusDB.syncTombstones["relayed-delete"]
-        and NexusDB.syncTombstones["relayed-delete"].ownerKey
+        and H.DurableBuilds()["relayed-delete"] ~= nil
+        and H.DurableTombstones()["relayed-delete"]
+        and H.DurableTombstones()["relayed-delete"].ownerKey
             == "twin@realma",
     "relayed-evidence delete did not persist exact owner authority")
 
@@ -318,20 +324,20 @@ assert(not Sync.HandleIncoming(
     BuildPacket("Twin-RealmB", "twin-a", "twin@realmb", 26),
     "Twin-RealmB"),
     "same-name RealmB seized RealmA's verified build ID")
-assert(NexusDB.communityBuilds["twin-a"].ownerKey == "twin@realma",
+assert(H.DurableBuilds()["twin-a"].ownerKey == "twin@realma",
     "cross-realm owner change overwrote RealmA's verified build")
 
 assert(not Sync.HandleIncoming(
     SummaryPacket("Twin-RealmB", "summary-a", "twin@realmb", 27),
     "Twin-RealmB"),
     "same-name RealmB summary seized RealmA's verified build ID")
-assert(NexusDB.communityBuilds["summary-a"].ownerKey == "twin@realma",
+assert(H.DurableBuilds()["summary-a"].ownerKey == "twin@realma",
     "cross-realm summary changed the verified owner")
 
 assert(not Sync.HandleIncoming(
     BuildPacket("Twin-RealmA", "envelope-spoof", "twin@realma", 24),
     "Twin-RealmB"), "realm-mismatched envelope bypassed transport binding")
-assert(NexusDB.communityBuilds["envelope-spoof"] == nil,
+assert(H.DurableBuilds()["envelope-spoof"] == nil,
     "realm-mismatched envelope entered durable state")
 
 assert(Sync.HandleIncoming("WLNP|Twin-RealmA|1.20.0", "Twin-RealmA")
@@ -358,6 +364,7 @@ assert(Sync.GetPeerInfo("LocalTwin-RealmB") ~= nil,
 UnitName = function() return "Boganic" end
 GetNormalizedRealmName = function() return "Ebonhold" end
 
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 local function DpsRecord(spellId, ownerKey, realm, dps, stamp)
     local echoes = {{spellId=spellId,stacks=1}}
@@ -434,11 +441,13 @@ assert(shortDps and shortDps.ownerVerified == false
         and shortDps.ownerKey == nil and shortDps.realm == nil,
     "shadowed realm-less evidence was erased or borrowed payload realm authority")
 
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
-assert(NexusDB.communityBuilds["twin-a"].ownerVerified == true
-        and NexusDB.communityBuilds["twin-b"].ownerVerified == true
-        and NexusDB.communityBuilds["twin-short"].ownerVerified == false,
+assert(H.DurableBuilds()["twin-a"].ownerVerified == true
+        and H.DurableBuilds()["twin-b"].ownerVerified == true
+        and H.DurableBuilds()["twin-short"].ownerVerified == false,
     "reload recomputed build ownership from short-name resemblance")
 rows = DPS.GetDpsBoard("dummy")
 local verifiedRealms = {}
@@ -561,7 +570,7 @@ for _, build in ipairs(deniedSaved) do
     assert(not summaryQueued and summaryWhy == "relay unauthorized"
         and not fullQueued and fullWhy == "relay unauthorized"
         and not Sync.BroadcastDelete(build)
-        and NexusDB.syncTombstones[build.id] == nil,
+        and H.DurableTombstones()[build.id] == nil,
         "EXPECTED RED: pre-adoption or malformed Saved evidence crossed Sync: "
             .. build.id)
 end
@@ -570,11 +579,11 @@ local inboundSummarySaved = {}
 for key, value in pairs(preAdoptionSaved) do inboundSummarySaved[key] = value end
 inboundSummarySaved.id = "inbound-saved-summary"
 inboundSummarySaved.lastModified = 50
-NexusDB.communityBuilds[inboundSummarySaved.id] = inboundSummarySaved
+H.DurableBuilds()[inboundSummarySaved.id] = inboundSummarySaved
 H.RebindCatalog()
 assert(not Sync.HandleIncoming(SummaryPacket("Twin-RealmA",
         inboundSummarySaved.id,"twin@realma",51),"Twin-RealmA")
-        and NexusDB.communityBuilds[inboundSummarySaved.id]
+        and H.DurableBuilds()[inboundSummarySaved.id]
             .importedSavedBuild == true,
     "EXPECTED RED: exact owner summary converted private Saved evidence")
 
@@ -582,11 +591,11 @@ local inboundFullSaved = {}
 for key, value in pairs(foreignVerifiedSaved) do inboundFullSaved[key] = value end
 inboundFullSaved.id = "inbound-saved-full"
 inboundFullSaved.lastModified = 51
-NexusDB.communityBuilds[inboundFullSaved.id] = inboundFullSaved
+H.DurableBuilds()[inboundFullSaved.id] = inboundFullSaved
 H.RebindCatalog()
 assert(not Sync.HandleIncoming(BuildPacket("Twin-RealmB",
         inboundFullSaved.id,"twin@realmb",52),"Twin-RealmB")
-        and NexusDB.communityBuilds[inboundFullSaved.id]
+        and H.DurableBuilds()[inboundFullSaved.id]
             .importedSavedBuild == true,
     "EXPECTED RED: exact owner full packet converted private Saved evidence")
 
@@ -594,12 +603,12 @@ local inboundDeleteSaved = {}
 for key, value in pairs(foreignVerifiedSaved) do inboundDeleteSaved[key] = value end
 inboundDeleteSaved.id = "inbound-saved-delete"
 inboundDeleteSaved.lastModified = 52
-NexusDB.communityBuilds[inboundDeleteSaved.id] = inboundDeleteSaved
+H.DurableBuilds()[inboundDeleteSaved.id] = inboundDeleteSaved
 H.RebindCatalog()
 assert(not Sync.HandleIncoming(
         "WLRD|Twin-RealmB|inbound-saved-delete|53|Twin","Twin-RealmB")
-        and NexusDB.communityBuilds[inboundDeleteSaved.id]
-        and NexusDB.syncTombstones[inboundDeleteSaved.id] == nil,
+        and H.DurableBuilds()[inboundDeleteSaved.id]
+        and H.DurableTombstones()[inboundDeleteSaved.id] == nil,
     "EXPECTED RED: exact owner delete tombstoned private Saved evidence")
 
 local verifiedLocalSaved = {
@@ -621,7 +630,7 @@ assert(Identity.LocalOwnsBuild(verifiedLocalSaved, "twin@realma")
     and not savedSummary and savedSummaryWhy == "relay unauthorized"
     and not savedFull and savedFullWhy == "relay unauthorized"
     and not Sync.BroadcastDelete(verifiedLocalSaved)
-    and NexusDB.syncTombstones[verifiedLocalSaved.id] == nil,
+    and H.DurableTombstones()[verifiedLocalSaved.id] == nil,
     "EXPECTED RED: private verified Saved mirror crossed direct Sync egress")
 assert(Identity.SavedMirrorKind(explicitFalseOrdinary) == "ordinary"
     and Identity.LocalOwnsRecord(explicitFalseOrdinary, "twin@realma")
@@ -643,14 +652,15 @@ local dedupeQueued, dedupeWhy = Sync.BroadcastBuild(dedupeSaved)
 assert(not dedupeQueued and dedupeWhy == "relay unauthorized",
     "dedupe suppression bypassed Saved authority admission")
 
-local retainedBuilds, retainedTombstones =
-    NexusDB.communityBuilds, NexusDB.syncTombstones
-NexusDB.communityBuilds = {}
-for _, build in ipairs(deniedSaved) do
-    NexusDB.communityBuilds[build.id] = build
+local retainedDatabase = NexusDB
+-- Legacy-to-bundle cutover (state machine lines 374, 394): clearing the exact
+-- PR #68 location no longer resets durable state, so this exact store is seeded
+-- as legacy input on a fresh database and admitted by bootstrap.
+local deniedOverlay = {}
+for _, build in ipairs(deniedSaved) do deniedOverlay[build.id] = build end
+NexusDB = {communityBuilds=deniedOverlay, syncTombstones={}}
 H.RebindCatalog()
-end
-NexusDB.syncTombstones = {}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 H.sentChatMessages = {}
 assert(Sync.BroadcastMine() == 0,
@@ -670,11 +680,12 @@ for _, message in ipairs(H.sentChatMessages) do
                 .. build.id)
     end
 end
-NexusDB.communityBuilds = {
+NexusDB = {communityBuilds={
     [verifiedLocalSaved.id]=verifiedLocalSaved,
     [explicitFalseOrdinary.id]=explicitFalseOrdinary,
-}
-NexusDB.syncTombstones = {}
+}, syncTombstones={}}
+H.RebindCatalog()
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 H.sentChatMessages = {}
 assert(Sync.BroadcastMine() == 1,
@@ -702,17 +713,31 @@ for _, build in ipairs({verifiedLocalSaved, explicitFalseOrdinary}) do
                 .. build.id)
     end
 end
-assert(Sync.BroadcastDelete(explicitFalseOrdinary)
-    and NexusDB.syncTombstones[explicitFalseOrdinary.id]
-    and NexusDB.syncTombstones[explicitFalseOrdinary.id].ownerKey
+-- MASTER-RC-019 SUPERSEDED EXPECTATION, architecture justification recorded.
+-- Line 4856 and the mixed-client tombstone rows make a local row-to-tombstone
+-- operation an UNCONDITIONAL zero-wire refusal with
+-- REMOTE_TOMBSTONE_ORDER_UNPROVEN: it "is not a Sync message". The truthy
+-- return this fixture required was the queued-to-wire result the architecture
+-- forbids. The local tombstone is still committed through the central owner,
+-- so every assertion about the durable tombstone below is unchanged; only the
+-- wire-success half is replaced, by the strictly stronger named refusal.
+local ordinaryDeleteOk, ordinaryDeleteWhy =
+    Sync.BroadcastDelete(explicitFalseOrdinary)
+assert(ordinaryDeleteOk == false
+    and ordinaryDeleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN"
+    and H.DurableTombstones()[explicitFalseOrdinary.id]
+    and H.DurableTombstones()[explicitFalseOrdinary.id].ownerKey
         == "twin@realma",
     "verified exact local ordinary build lost owner-authorized deletion")
-NexusDB.communityBuilds, NexusDB.syncTombstones =
-    retainedBuilds, retainedTombstones
+NexusDB = retainedDatabase
+H.RebindCatalog()
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 
 NexusDB.dpsCapture = {}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 H.sentChatMessages = {}
 local injectedEchoes = {{spellId=200304,stacks=1}}
@@ -775,6 +800,7 @@ NexusDB.dpsCapture = {
     personalBest={},buildBest={},
 }
 UnitName = function() return "Ghost" end
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 local ghostBucket = DPS.SyncBucket("dummy", "Ghost")
 local ghostClaimable = DPS.ResponseBucketClaimInfo(ghostBucket)
@@ -795,6 +821,7 @@ NexusDB.dpsCapture = {
 }
 UnitName = function() return "Bob" end
 GetNormalizedRealmName = function() return "RealmA" end
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 local malformedBucket = DPS.SyncBucket("dummy", "Bob")
 assert(DPS.ResponseBucketClaimInfo(malformedBucket) == false,
@@ -821,19 +848,36 @@ assert(coherentSent == true,
 
 UnitName = function() return "Twin" end
 GetNormalizedRealmName = function() return "RealmB" end
-assert(not Sync.BroadcastDelete(NexusDB.communityBuilds["summary-a"]),
-    "same-name RealmB queued RealmA's owner-only deletion")
-assert(NexusDB.communityBuilds["summary-a"]
-        and NexusDB.syncTombstones["summary-a"] == nil,
+-- MASTER-RC-019. Both the non-owner and the owner path now return false,
+-- because a local row-to-tombstone operation is an unconditional zero-wire
+-- refusal (architecture 4856). The return value alone therefore no longer
+-- discriminates ownership, so the discrimination is asserted where it is
+-- actually observable and stronger: the non-owner is refused for lack of
+-- ownership BEFORE the tombstone store is reached, so it carries no reason and
+-- writes no tombstone, while the exact owner reaches the named
+-- REMOTE_TOMBSTONE_ORDER_UNPROVEN refusal and does commit its local tombstone.
+local foreignDeleteOk, foreignDeleteWhy =
+    Sync.BroadcastDelete(H.DurableBuilds()["summary-a"])
+assert(foreignDeleteOk == false
+    and foreignDeleteWhy ~= "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
+    "same-name RealmB reached the owner tombstone path for RealmA's row")
+assert(H.DurableBuilds()["summary-a"]
+        and H.DurableTombstones()["summary-a"] == nil,
     "cross-realm local delete changed RealmA's durable state")
 GetNormalizedRealmName = function() return "RealmA" end
-assert(Sync.BroadcastDelete(NexusDB.communityBuilds["summary-a"]),
-    "exact local RealmA owner could not queue its deletion")
-assert(NexusDB.syncTombstones["summary-a"]
-        and NexusDB.syncTombstones["summary-a"].ownerKey
+H.RebindAuthorityOwner()
+local realmADeleteOk, realmADeleteWhy =
+    Sync.BroadcastDelete(H.DurableBuilds()["summary-a"])
+assert(realmADeleteOk == false
+    and realmADeleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
+    "exact local RealmA owner did not reach the named zero-wire refusal: "
+        .. tostring(realmADeleteWhy))
+assert(H.DurableTombstones()["summary-a"]
+        and H.DurableTombstones()["summary-a"].ownerKey
             == "twin@realma",
     "local delete did not persist canonical tombstone authority")
 
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 H.sentChatMessages = {}
 GetNormalizedRealmName = function() return "RealmB" end
@@ -851,18 +895,19 @@ GetNormalizedRealmName = function() return "RealmA" end
 assert(not Sync.HandleIncoming(
     "WLRD|Twin-RealmB|twin-a|100|Twin", "Twin-RealmB"),
     "same-name RealmB transport deleted RealmA's verified build")
-assert(NexusDB.communityBuilds["twin-a"] ~= nil,
+assert(H.DurableBuilds()["twin-a"] ~= nil,
     "cross-realm delete removed verified RealmA state")
 
 assert(Sync.HandleIncoming(
     "WLRD|Twin-RealmA|twin-a|101|Twin", "Twin-RealmA"),
     "exact RealmA transport could not delete its verified build")
 assert(Nexus.BuildCatalog.Get("twin-a") == nil
-        and NexusDB.communityBuilds["twin-a"] ~= nil
-        and NexusDB.syncTombstones["twin-a"]
-        and NexusDB.syncTombstones["twin-a"].ownerKey == "twin@realma",
+        and H.DurableBuilds()["twin-a"] ~= nil
+        and H.DurableTombstones()["twin-a"]
+        and H.DurableTombstones()["twin-a"].ownerKey == "twin@realma",
     "exact delete did not persist canonical tombstone authority")
 
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 H.sentChatMessages = {}
 assert(Sync.RequestSync(), "canonical claim fixture could not start a request")
@@ -922,14 +967,28 @@ Nexus.BundledBuilds = {
         },
     },
 }
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
-assert(Sync.HandleIncoming(
+-- MASTER-RC-004. This previously asserted that a sender whose transport
+-- identity matches a BUNDLED row's author text may tombstone it. Architecture
+-- 3b5de54f line 193 admits from a bundled row "Content fields and immutable
+-- bundled source position only" and states that "Bundled author text never
+-- proves local ownership", and line 202 requires internally coherent tuples to
+-- obtain "zero verified-owner or mutation privilege". A bundled row's ownerKey
+-- is content, not an owner claim a sender can prove, so the delete is refused
+-- and no durable tombstone is written.
+--
+-- The guarantee this case exists for -- that only an exact canonical owner may
+-- delete, and that a same-name or cross-realm sender may not -- is unchanged
+-- and is still proven by the cross-realm cases immediately above. This is the
+-- SPEC lane's remote route from the preserved disagreement "Severity and
+-- reachable routes for bundled text becoming mutation authority"; the
+-- disagreement itself is recorded, not resolved, by this repair.
+assert(not Sync.HandleIncoming(
     "WLRD|Twin-RealmA|bundled-owner|200|Twin", "Twin-RealmA"),
-    "exact canonical owner could not tombstone its trusted bundled build")
-assert(NexusDB.syncTombstones["bundled-owner"]
-        and NexusDB.syncTombstones["bundled-owner"].ownerKey
-            == "twin@realma",
-    "bundled delete did not retain canonical tombstone authority")
+    "bundled author text still proved remote delete authority")
+assert(H.DurableTombstones()["bundled-owner"] == nil,
+    "a refused bundled delete still wrote a durable tombstone")
 
 UnitName = function() return "Relay" end
 GetNormalizedRealmName = function() return "RealmX" end
@@ -945,7 +1004,9 @@ NexusDB = {
     },
     syncTombstones={},dpsCapture={},
 }
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 H.sentChatMessages = {}
 local emptyBuildHash, emptyDpsHash = Sync.GetCompatibilityHashes()
@@ -968,7 +1029,9 @@ NexusDB = {
             ownerKey="origin@realmy",ownerVerified=true},
     },
 }
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 H.sentChatMessages = {}
 local _, tombDpsHash = Sync.GetCompatibilityHashes()
@@ -1003,7 +1066,9 @@ NexusDB = {
             o="other@realmx"},
     },
 }
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, Sync)
 H.sentChatMessages = {}
 local _, malformedTombDpsHash = Sync.GetCompatibilityHashes()

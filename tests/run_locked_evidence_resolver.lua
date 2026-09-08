@@ -114,8 +114,7 @@ NexusDB = {
     communityBuilds={[build.id]=Clone(build)},syncTombstones={},
     futureRoot={keep=true},
 }
-Nexus.Store.Init()
-Catalog.Init(NexusDB, Nexus.BundledBuilds)
+H.BootstrapStore()
 
 local resolvedId, resolvedBy = Catalog.ResolveFingerprintIdentity(
     "historical-stage36-id", build.fingerprint)

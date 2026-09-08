@@ -124,7 +124,13 @@ function Compatibility.New(options)
         if not token then return out end
         for _ = 1, 4096 do
             local page, err = catalog[nextName](token)
-            if err or type(page) ~= "table" or page.done then break end
+            -- MASTER-RC-018: a cursor error is NOT a clean done. Breaking on
+            -- both returned the accumulated prefix as if the collection were
+            -- complete, so a mid-walk fault silently produced a short result.
+            -- An error now yields the fixed empty result; only page.done ends a
+            -- complete walk.
+            if err then return {} end
+            if type(page) ~= "table" or page.done then break end
             if page.id ~= nil and page.record ~= nil then
                 out[page.id] = page.record
             end

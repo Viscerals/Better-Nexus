@@ -45,6 +45,12 @@ local adapter = {
     Slots=function() return {maxSlots=5, activeSlot=2} end,
     Wishlist=function() return {name="Contract Wishlist"} end,
 }
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, adapter)
 
 assert(Sync.ChannelName() == "wrbuildssync"
@@ -168,6 +174,7 @@ assert(Sync.SendStatusTo("Dave")
 assert(Sync.BroadcastDps("reset-probe", "Alice", 1234, 80, "dummy"),
     "session reset fixture could not admit a packet")
 assert(Sync.WorkState().outbound > 0, "session reset fixture has no queued work")
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec, adapter)
 assert(Sync.WorkState().outbound == 0 and Sync.LastSyncNewCount() == 0
     and Sync.Stats().sent == 0 and Sync.Stats().received == 0

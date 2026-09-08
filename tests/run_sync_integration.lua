@@ -58,7 +58,9 @@ print("messages from unrelated channels are correctly ignored -- OK")
 
 -- Now simulate it arriving on the REAL sync channel (as another client
 -- receiving Alice's broadcast) -- must be processed
-NexusDB.communityBuilds = nil  -- pretend this is Bob's fresh client
+-- Legacy-to-bundle cutover: after occupancy the durable payload is the bundle,
+-- so a fresh client is a fresh database, not a cleared legacy location.
+NexusDB = {}  -- pretend this is Bob's fresh client
 H.RebindCatalog()
 -- Receiving is opt-in: Bob must request a sync first.
 Nexus.Sync.RequestSync()
@@ -66,7 +68,9 @@ for _, msg in ipairs(H.sentChatMessages) do
     H.FireEvent("CHAT_MSG_CHANNEL", msg.text, "Alice-Ebonhold", "Common",
         Nexus.Sync.ChannelName())
 end
-assert(NexusDB.communityBuilds and NexusDB.communityBuilds[id],
+assert(H.DurableBuilds()[id],
     "a message on the real sync channel should have been processed and stored")
-assert(NexusDB.communityBuilds[id].title == "My Shared Build")
+assert(H.DurableBuilds()[id].title == "My Shared Build")
+assert(rawget(NexusDB, "communityBuilds") == nil,
+    "receiving wrote a legacy payload location")
 print("messages on the real sync channel are correctly processed end-to-end -- OK")

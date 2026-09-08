@@ -42,7 +42,7 @@ NexusDB = {
     chars={},communityBuilds={},syncTombstones={},dpsCapture={},
     updateNotice={version="99.0.0-rc.1",observedAt="bad",source=42},
 }
-Nexus.Store.Init()
+H.BootstrapStore()
 assert(NexusDB.settings.autoPick == false
     and NexusDB.settings.customPreference == "keep"
     and NexusDB.settings.updateNotifications == true

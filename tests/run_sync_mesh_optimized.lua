@@ -10,7 +10,14 @@ local build={id="manual-build",title="Real Build",description="Real description"
   author="Author",ownerKey="author@ebonhold",ownerVerified=true,
   class="MAGE",echoes=echoes,postedAt=10,lastModified=10,isMine=false}
 NexusDB={communityBuilds={[build.id]=build},syncTombstones={},dpsCapture={}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({},Sync)
 -- Let the login-time automatic sync fire and drain, then clear it before targeted claims.
 Pump(100)

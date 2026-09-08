@@ -13,6 +13,17 @@ UnitClass = function() return "Mage", "MAGE" end
 
 local function Catalog() return Nexus.BuildCatalog end
 
+-- Harness-only precommit fault: rebind a durable map to an equal-contents table.
+-- Map identity changes, so the production token drift guard refuses before any
+-- write, while every durable byte stays exactly as it was. No production hook.
+-- Legacy-to-bundle cutover (state machine line 394): the exact PR #68 locations
+-- are no longer the selected authority input or the serving witness, so drift is
+-- a foreign replacement of the bundle payload field the root was admitted from.
+local function DriftDurableMap(db, name)
+    return S.DriftSelectedMap(db, name)
+end
+
+
 Case("RET-01", "detached database with the same IDs is refused", function()
     local db = S.Database({ret01=S.Build("ret01", 2, 0, {autoDps=true})})
     S.Bind(db)
@@ -25,9 +36,11 @@ Case("RET-01", "detached database with the same IDs is refused", function()
     Nexus.Store = {IsAccountOwnerKey=function() return false end,
         IsAccountBuild=function() return false end}
     Nexus.DataRetention.Enforce(detached, "detached")
+    -- The detached database was never bootstrapped, so it holds no bundle and
+    -- its exact PR #68 location is still its whole durable state.
     Check(S.Encode(detached) == detachedBytes or detached.communityBuilds.ret01 ~= nil,
         "retention mutated a detached database's catalog state")
-    Check(db.communityBuilds.ret01 ~= nil, "bound catalog was mutated by a detached run")
+    Check(S.Durable(db).ret01 ~= nil, "bound catalog was mutated by a detached run")
 end)
 
 Case("RET-02", "hidden overlay survives eviction and compaction exactly", function()
@@ -41,18 +54,18 @@ Case("RET-02", "hidden overlay survives eviction and compaction exactly", functi
     local hiddenBytes = S.Encode(hidden)
     local handle = assert(catalog.BeginCatalogMaintenance({database=db, operation="retention"}))
     Check(catalog.MaintenanceEvictOverlay(handle, "other"))
-    catalog.InstallFaultInjector(function(boundary)
-        if boundary == "before-commit" then error("inject") end
-    end)
+    DriftDurableMap(db, "communityBuilds")
     local ok = catalog.CommitMaintenance(handle)
-    catalog.InstallFaultInjector(nil)
-    Check(ok == false and db.communityBuilds.other ~= nil
-        and db.communityBuilds.ret02 == hidden and S.Encode(hidden) == hiddenBytes,
+    Check(ok == false and S.Durable(db).other ~= nil
+        and S.Durable(db).ret02 == hidden and S.Encode(hidden) == hiddenBytes,
         "failed maintenance lost hidden or targeted state")
+    -- A drift refusal publishes the invalid sentinel; recovery is an explicit rebind.
+    S.Bind(db, S.Bundle({ret02=bundled}))
+    catalog = Catalog()
     handle = assert(catalog.BeginCatalogMaintenance({database=db, operation="retention"}))
     Check(catalog.MaintenanceEvictOverlay(handle, "other"))
     Check(catalog.CommitMaintenance(handle))
-    Check(db.communityBuilds.other == nil and db.communityBuilds.ret02 == hidden
+    Check(S.Durable(db).other == nil and S.Durable(db).ret02 == hidden
         and S.Encode(hidden) == hiddenBytes,
         "successful maintenance touched the hidden overlay")
 end)
@@ -94,7 +107,7 @@ Case("RET-04", "future rows and roots are never touched by maintenance", functio
     ok, why = catalog.MaintenanceReplaceRow(handle, "ret04", catalog.Get("plain"))
     Check(ok == false, "future row was replaced")
     catalog.CancelMaintenance(handle)
-    Check(S.Encode(future) == bytes and db.communityBuilds.ret04 == future,
+    Check(S.Encode(future) == bytes and S.Durable(db).ret04 == future,
         "future row bytes changed")
     local futureRoot = S.Database({}, {}, {buildCatalog={schemaVersion=99}})
     S.Bind(futureRoot)
@@ -114,19 +127,33 @@ Case("RET-05", "known and unknown fields survive replacement and rollback", func
     compacted.evidenceKey = "v1|100000:3:1:0|100001:3:1:0|100002:3:1:0"
     local handle = assert(catalog.BeginCatalogMaintenance({database=db, operation="compaction"}))
     Check(catalog.MaintenanceReplaceRow(handle, "ret05", compacted))
-    catalog.InstallFaultInjector(function(boundary)
-        if boundary == "after-raw-write" then error("inject") end
-    end)
+    -- Repair Wave 1 (MASTER-RC-002): the publication section is one callback-free
+    -- swap after all fallible preparation, so a mid-publication fault is no longer
+    -- reachable. A drift failure is the real boundary; it must publish the invalid
+    -- sentinel and leave every durable byte untouched, which is strictly stronger
+    -- than the rejected candidate's half-written bundle.
+    local rawBefore = S.Encode(db)
+    DriftDurableMap(db, "communityBuilds")
     local ok = catalog.CommitMaintenance(handle)
-    catalog.InstallFaultInjector(nil)
     Check(ok == false and S.Root().state == "ROOT_INVALIDATED",
-        "protected maintenance failure did not publish the sentinel")
-    Check(db.communityBuilds.ret05.futureA.nested == true
-        and db.communityBuilds.ret05.link == nil,
-        "raw destination after the protected write lost fields")
+        "maintenance failure did not publish the sentinel")
+    Check(S.Encode(db) == rawBefore,
+        "a failed maintenance changed durable bytes")
+    Check(S.Durable(db).ret05.futureA.nested == true
+        and S.Durable(db).ret05.link == "x",
+        "a failed replacement altered the raw destination")
+    -- Recover from the sentinel and complete the same replacement for real.
+    S.Bind(db)
+    local retry = assert(Catalog().BeginCatalogMaintenance({database=db,
+        operation="compaction"}))
+    local destination = Catalog().Get("ret05")
+    destination.link = nil
+    destination.evidenceKey = "v1|100000:3:1:0|100001:3:1:0|100002:3:1:0"
+    Check(Catalog().MaintenanceReplaceRow(retry, "ret05", destination))
+    Check(Catalog().CommitMaintenance(retry), "replacement retry refused")
     S.Bind(db)
     Check(Catalog().Get("ret05").link == nil
-        and db.communityBuilds.ret05.futureA.nested == true,
+        and S.Durable(db).ret05.futureA.nested == true,
         "readmitted replacement lost unknown or replaced known fields")
 end)
 
@@ -164,7 +191,7 @@ Case("RET-06", "1,000 records with one hostile row stay within slices", function
     local final = Nexus.DataCompaction.Stats(db)
     Check(final.maxPumpWork <= 32 and db.dataCompaction.version == 1,
         "compaction exceeded its work budget or did not complete")
-    Check(db.communityBuilds["ret06-hostile"] == hostile, "compaction rewrote the hostile row")
+    Check(S.Durable(db)["ret06-hostile"] == hostile, "compaction rewrote the hostile row")
 end)
 
 Case("RET-07", "drift during shadow work cancels the candidate", function()
@@ -175,7 +202,7 @@ Case("RET-07", "drift during shadow work cancels the candidate", function()
     Check(catalog.MaintenanceEvictOverlay(handle, "ret07"))
     Check(catalog.Put(S.Build("ret07-new", 1, 0)), "concurrent mutation refused")
     local ok, why = catalog.CommitMaintenance(handle)
-    Check(ok == false and why == "SOURCE_DRIFT" and db.communityBuilds.ret07 ~= nil,
+    Check(ok == false and why == "SOURCE_DRIFT" and S.Durable(db).ret07 ~= nil,
         "drifted candidate committed: " .. tostring(why))
     handle = assert(catalog.BeginCatalogMaintenance({database=db, operation="retention"}))
     S.Reload()
@@ -184,7 +211,7 @@ Case("RET-07", "drift during shadow work cancels the candidate", function()
     Check(reloadOk == false and reloadWhy == "INVALID_MAINTENANCE_HANDLE",
         "reload retained a maintenance candidate")
     handle = assert(Nexus.BuildCatalog.BeginCatalogMaintenance({database=db, operation="retention"}))
-    db.syncTombstones = {}
+    DriftDurableMap(db, "syncTombstones")
     local driftOk, driftWhy = Nexus.BuildCatalog.CommitMaintenance(handle)
     Check(driftOk == false and driftWhy == "ROOT_INVALIDATED",
         "backing replacement during maintenance was committed: " .. tostring(driftWhy))
@@ -235,7 +262,11 @@ Case("CUR-01", "six cursor families with bounded pages and supersession", functi
     Check(catalog.SavedMirrorCursorNext(savedToken).done == true, "saved cursor did not exhaust")
     -- diagnostic family: overlay and tombstone exports
     local diagToken = assert(catalog.BeginDiagnosticCursor("tombstone"))
-    local diag = catalog.DiagnosticCursorNext(diagToken)
+    local diag
+    for _ = 1, 500 do
+        diag = catalog.DiagnosticCursorNext(diagToken)
+        if diag and (diag.id ~= nil or diag.done) then break end
+    end
     Check(diag and diag.id == "gone" and diag.tombstone and diag.tombstone.stamp == 1,
         "diagnostic tombstone export lost the raw evidence")
     -- relationship family keeps its legacy tuple contract
@@ -278,7 +309,8 @@ Case("CUR-02", "collection reads complete only within one-call limits", function
         "single bounded record unavailable")
     -- tombstones: eight or fewer complete, nine require a cursor
     for index = 1, 9 do
-        db.syncTombstones["cur02-t" .. index] = {stamp=index, author="Peer"}
+        S.SeedDurable(db, "syncTombstones", "cur02-t" .. index,
+            {stamp=index, author="Peer"})
     end
     S.Bind(db)
     local tombs, whyTombs = Nexus.BuildCatalog.TombstoneSnapshot()

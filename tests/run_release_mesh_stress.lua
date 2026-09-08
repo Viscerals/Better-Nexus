@@ -6,6 +6,12 @@ local DPS=Nexus.DpsCapture
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={}}
 UnitName=function() return "Viewer" end
 local broadcasts={}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, {BroadcastDpsRecord=function(r) broadcasts[#broadcasts+1]=r return true end})
 for i=1,100 do
  local echoes={{spellId=300000+i,stacks=1},{spellId=310000+i,stacks=(i%3)+1}}
@@ -55,6 +61,7 @@ local responseSync={BroadcastDpsRecord=function(record)
  room=room-1; firstAdmitted=firstAdmitted or key
  return true
 end}
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, responseSync)
 local progress={}
 local admitted,complete=DPS.BroadcastAllBuildBests("0",nil,progress)
@@ -85,6 +92,7 @@ end
 local equivalentHash=DPS.GetSyncHash()
 local equivalentRevision=Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)
 NexusDB=rebound
+H.AdmitCatalogV1(NexusDB)
 DPS.Init({},responseSync)
 local reboundHash=DPS.GetSyncHash()
 local reboundRevision=Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)

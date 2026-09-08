@@ -917,6 +917,36 @@ local function CommandSync()
     end
 end
 
+-- MASTER-RC-001 (amendment 10). Store.State() is a DURABLE_READ returning a
+-- defensive copy; writes must go through StoreAuthorityOwnerV1.UpdateStateV1,
+-- the architecture's counted private mutation entry (lines 1907-1912).
+local function UpdateStoreState(mutator)
+    local internals = Nexus and Nexus.MainInternals
+    local owner = type(internals) == "table" and internals.StoreAuthorityOwner
+    -- Honour the INJECTED Store. A stub Store must never resolve the real
+    -- durable writer -- writing through the global owner would bypass
+    -- dependency injection, which tests/run_wishlist_controller_parity.lua
+    -- exists to catch. A stub exposes only the surface it needs (typically
+    -- State/Settings); a real Store module exposes the full nine-export facade.
+    -- Identity alone is not usable here: fixtures re-`dofile` core/Store.lua,
+    -- which rebinds Nexus.Store and the owner while an already-initialized
+    -- consumer still holds the previous module, so a real Store legitimately
+    -- fails an identity check.
+    local realStore = type(Store) == "table"
+        and type(Store.Init) == "function"
+        and type(Store.CurrentOwnerKey) == "function"
+    if realStore and type(owner) == "table"
+        and type(owner.UpdateStateV1) == "function" then
+        return owner.UpdateStateV1(mutator)
+    end
+    -- No authorized owner for THIS Store. Fall back to whatever state table the
+    -- injected facade exposes, which is exactly the pre-migration behaviour for
+    -- such a Store.
+    local injected = Store and Store.State and Store.State()
+    if type(injected) ~= "table" then return nil end
+    return true, mutator(injected)
+end
+
 local function CommandErr()
     local latest
     if Nexus.Errors and type(Nexus.Errors.Latest) == "function" then
@@ -1016,8 +1046,7 @@ EnsureMainCommands = function()
             end,
             err=function() CommandErr() end,
             undemote=function()
-                local state = Store.State()
-                state.flagDemotions = {}
+                UpdateStoreState(function(state) state.flagDemotions = {} end)
                 RequestRecompute()
                 Print("flag demotions cleared (they re-arm on fresh evidence)")
             end,

@@ -14,17 +14,23 @@ UnitClass=function() return "Mage", "MAGE" end
 
 local echoes={{spellId=200100,count=1},{spellId=200101,count=1}}
 NexusDB={communityBuilds={},syncTombstones={},dpsCapture={personalBest={},characterBest={dummy={},lk={}}}}
+-- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
+-- longer admit the catalog root as a side effect. The same admission is
+-- performed explicitly here, before the call, because the removed side
+-- effect ran inside Init ahead of Init's own dependent steps. No assertion
+-- or expected value in this fixture is changed.
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(A,nil)
 local fp=DPS.GetEchoKey(echoes)
 local id="dps-old-shaman"
-NexusDB.communityBuilds[id]={id=id,title="Shaman Record Loadout",author="Explore",ownerKey="explore@ebonhold",ownerVerified=true,class="SHAMAN",echoes=echoes,autoDps=true,postedAt=1,lastModified=1}
+H.DurableBuilds()[id]={id=id,title="Shaman Record Loadout",author="Explore",ownerKey="explore@ebonhold",ownerVerified=true,class="SHAMAN",echoes=echoes,autoDps=true,postedAt=1,lastModified=1}
 local row={player="Explore",ownerKey="explore@ebonhold",ownerVerified=true,realm="ebonhold",class="SHAMAN",dps=24000000,duration=60,ts=100,level=80,buildId=id,echoes=echoes,fingerprint=fp}
 NexusDB.dpsCapture.characterBest.dummy["explore@ebonhold"]=row
 NexusDB.dpsCapture.personalBest[fp]={dummy={player="Explore",ownerKey="explore@ebonhold",ownerVerified=true,realm="ebonhold",class="SHAMAN",dps=24000000,buildId=id,fingerprint=fp}}
 
 local poisonFp=DPS.GetEchoKey({{spellId=200102,count=1}})
 local poisonId="dps-owner-poison"
-NexusDB.communityBuilds[poisonId]={id=poisonId,title="Poison Record Loadout",
+H.DurableBuilds()[poisonId]={id=poisonId,title="Poison Record Loadout",
     author="Explore",ownerKey="explore@ebonhold",ownerVerified=true,
     realm="ebonhold",claimedOwnerKey="other@ebonhold",class="ROGUE",
     echoes={{spellId=200102,count=1}},autoDps=true,postedAt=1,lastModified=1}
@@ -42,11 +48,11 @@ H.RebindCatalog()
 
 local board=DPS.GetDpsBoard("dummy")
 assert(#board==1 and board[1].class=="MAGE", "local historical row must repair to current character class")
-assert(NexusDB.communityBuilds[id].class=="MAGE", "linked automatic record page class must repair")
-assert(NexusDB.communityBuilds[id].title=="Mage Record Loadout", "untouched default title must repair")
+assert(H.DurableBuilds()[id].class=="MAGE", "linked automatic record page class must repair")
+assert(H.DurableBuilds()[id].title=="Mage Record Loadout", "untouched default title must repair")
 assert(poison.class=="ROGUE"
         and NexusDB.dpsCapture.personalBest[poisonFp].dummy.class=="ROGUE"
-        and NexusDB.communityBuilds[poisonId].class=="ROGUE",
+        and H.DurableBuilds()[poisonId].class=="ROGUE",
     "EXPECTED RED: contradictory owner provenance gained local class repair")
 
 local twin={player="Explore",class="SHAMAN",dps=23000000,duration=60,

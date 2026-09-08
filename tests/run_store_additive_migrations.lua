@@ -77,7 +77,7 @@ local legacy = {
 }
 WishlistRealizerDB = legacy
 NexusDB = nil
-Store.Init()
+H.BootstrapStore()
 
 assert(NexusDB == legacy and WishlistRealizerDB == nil,
     "old SavedVariables name was not adopted exactly once")
@@ -118,9 +118,22 @@ assert(type(NexusDB.chars.Partial.tomeTogglePending) == "table"
 
 local originalUnitName = UnitName
 UnitName = function() return "Hero" end
+-- MASTER-RC-001: Store.State() is a detached DURABLE_READ and no longer creates
+-- the durable row; creation moved to StoreAuthorityOwnerV1.UpdateStateV1. The
+-- identity assertion `NexusDB.chars[key] == Store.State()` is therefore
+-- structurally unsatisfiable. The properties are unchanged and none needed
+-- reference identity: the canonical realm-qualified row is distinct from the
+-- ambiguous short-name row, the short-name row is preserved byte-for-byte, and
+-- Settings identity is untouched.
 local canonicalState = Store.State()
+local owner = Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
+assert(owner and owner.UpdateStateV1, "StoreAuthorityOwnerV1 unavailable")
+owner.UpdateStateV1(function(row) row.canonicalMarker = "hero@ebonhold" end)
+local canonicalRow = NexusDB.chars["hero@ebonhold"]
 assert(canonicalState ~= state
-    and NexusDB.chars["hero@ebonhold"] == canonicalState
+    and type(canonicalRow) == "table"
+    and canonicalRow.canonicalMarker == "hero@ebonhold"
+    and canonicalRow ~= NexusDB.chars.Hero
     and NexusDB.chars.Hero == state and state.futureSafetyState.token == "keep"
     and Store.Settings() == settings,
     "Store accessors claimed ambiguous short state or lost canonical persistence")
@@ -128,7 +141,7 @@ UnitName = originalUnitName
 
 local converted = pending[17]
 local afterFirst = Copy(NexusDB)
-Store.Init()
+H.BootstrapStore()
 assert(Equal(NexusDB, afterFirst),
     "repeat initialization changed a completed current-version save")
 assert(pending[17] == converted,
@@ -143,16 +156,26 @@ local emptyPathLegacy = {
 }
 NexusDB = emptyCurrent
 WishlistRealizerDB = emptyPathLegacy
-Store.Init()
+H.BootstrapStore()
 assert(NexusDB == emptyPathLegacy and WishlistRealizerDB == nil
     and NexusDB.settings.autoPick == false
     and NexusDB.settings.legacyPreference == "keep"
     and NexusDB.legacyRoot == "keep",
     "empty current SavedVariables path did not adopt the legacy save")
 
--- When both names exist, the current Nexus save remains authoritative. The
--- legacy global is released only after the completed current-wins decision;
--- the distinct table itself is never mutated or merged speculatively.
+-- When both names exist, the current Nexus save remains authoritative and the
+-- distinct legacy table is never mutated or merged speculatively.
+--
+-- INTENTIONAL COMPATIBILITY BREAK, MASTER-RC-001. Architecture 3b5de54f,
+-- docs/SYNC_TRUST_CATALOG_AUTHORITY_STATE_MACHINE.md lines 1200-1330: the
+-- terminal legacy class of a distinct NONEMPTY legacy table is FOREIGN_BLOCK,
+-- which "preserves the value and enters
+-- STORE_LEGACY_DISPOSITION_REAUTH_REQUIRED". Only SELECTED_ALIAS performs a
+-- verified nil write. PR #68 deleted this table unconditionally; V1 refuses to
+-- delete a nonempty database it never adopted and fails closed for explicit
+-- reauthorization instead. Current-wins authority, unknown-field preservation
+-- and the durable decision receipt are all retained below, and preservation of
+-- the legacy table is now asserted rather than assumed.
 local current = {
     settingsVersion=2,
     settings={autoPick=false,currentOnly="keep",anchorNames={}},
@@ -161,14 +184,21 @@ local current = {
 local staleLegacy = {settings={autoPick=true},legacyOnly="keep"}
 NexusDB = current
 WishlistRealizerDB = staleLegacy
-Store.Init()
-assert(NexusDB == current and WishlistRealizerDB == nil
+local staleSettings = staleLegacy.settings
+local collision = H.BootstrapStore()
+assert(type(collision) == "table" and collision.state == "failed"
+    and collision.reason == "LEGACY_DISPOSITION_REAUTH_REQUIRED"
+    and collision.legacyClass == "FOREIGN_BLOCK",
+    "a distinct nonempty legacy database was not blocked for reauthorization")
+assert(NexusDB == current
     and NexusDB.currentRoot and NexusDB.settings.currentOnly == "keep"
     and next(NexusDB.settings.anchorNames) == nil
-    and staleLegacy.legacyOnly == "keep"
     and NexusDB.nexusStoreMigrations.wishlistRealizerDB.completed == true
     and NexusDB.nexusStoreMigrations.wishlistRealizerDB.decision == "keptCurrent",
-    "current and legacy SavedVariables collision clobbered one owner or stayed pending")
+    "current and legacy SavedVariables collision clobbered the current owner")
+assert(WishlistRealizerDB == staleLegacy and staleLegacy.settings == staleSettings
+    and staleLegacy.legacyOnly == "keep" and staleLegacy.settings.autoPick == true,
+    "the preserved legacy database was deleted, replaced, or mutated")
 
 -- Future settings/character owners are opaque. Runtime callers receive
 -- transient current defaults without any init-time or read-time writes into
@@ -182,7 +212,7 @@ NexusDB = {
 }
 local futureSettingsBefore = Copy(NexusDB.settings)
 local futureCharsBefore = Copy(NexusDB.chars)
-Store.Init()
+H.BootstrapStore()
 assert(NexusDB.settingsVersion == 99 and NexusDB.settings.autoPick == false
     and NexusDB.settings.autoSave == nil
     and NexusDB.settings.futurePreference == "keep"
@@ -204,7 +234,7 @@ assert(futureRuntimeSettings ~= NexusDB.settings
     "future owner was exposed or mutated by a runtime accessor")
 UnitName = savedUnitName
 local futureOnce = Copy(NexusDB)
-Store.Init()
+H.BootstrapStore()
 assert(Equal(NexusDB, futureOnce),
     "repeat initialization changed a future-version save")
 
