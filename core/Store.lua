@@ -769,6 +769,11 @@ end
 
 local function BootstrapSlice(C)
     local state = C.state
+    if state ~= SS.UNBOUND and NexusDB ~= C.database then
+        C.state = SS.INVALID
+        C.result = {state="failed", reason="STORE_INVALID", detail="SOURCE_DRIFT"}
+        return
+    end
     if state == SS.UNBOUND then
         local token = SelectAuthorityDatabaseV1()
         C.token = token
@@ -905,9 +910,12 @@ local function BootstrapSlice(C)
         if AccountWritesAllowed(db) and not readOnly then
             db.accountCharacters = type(db.accountCharacters) == "table"
                 and db.accountCharacters or {}
-            if not OwnerCall(C, "Store.RegisterCurrentCharacter",
-                Store.RegisterCurrentCharacter) then
-                return
+            if not C.accountRegistrationDone then
+                if not OwnerCall(C, "Store.RegisterCurrentCharacter",
+                    Store.RegisterCurrentCharacter) then
+                    return
+                end
+                C.accountRegistrationDone = true
             end
             -- MASTER-RC-009. The current-character owner proof is an admission
             -- input, and it only became available now -- after BuildCatalog was
@@ -942,10 +950,12 @@ local function BootstrapSlice(C)
                         return
                     end
                     -- AUTHORITY-COORDINATOR-DRIVE END
-                    if not OwnerCall(C, "BuildCatalog.PumpAuthorityRebindV1",
-                        catalog.PumpAuthorityRebindV1) then
-                        return
-                    end
+                    local ok, rebound = OwnerCall(C, "BuildCatalog.PumpAuthorityRebindV1",
+                        catalog.PumpAuthorityRebindV1)
+                    if not ok then return end
+                    C.catalogSummary = type(rebound) == "table" and rebound.summary or nil
+                    if type(C.catalogSummary) == "table"
+                        and C.catalogSummary.state == "pending" then return end
                 end
             end
         end
@@ -1167,17 +1177,35 @@ end
 -- The final commit. Exactly one durable route action, then the post-publication
 -- notification outcome is read.
 local function StoreMutationFinalCommit(C, mutation)
-    local before = NotificationFailureCount()
+    if mutation.notificationBefore == nil then
+        mutation.notificationBefore = NotificationFailureCount()
+    end
+    local before = mutation.notificationBefore
     local committed
     if mutation.route == "RegisterCurrentCharacter" then
         committed = CommitAccountRowCandidate(C.database, mutation.candidate) ~= nil
     elseif mutation.route == "Retention" then
         local owner = mutation.candidate.owner
-        committed = type(owner.Enforce) ~= "function"
-            or pcall(owner.Enforce, C.database, "post-ready mutation")
+        if type(owner.Enforce) ~= "function" then return false, "CANDIDATE_FAILED" end
+        local ok, result = pcall(owner.Enforce, C.database, "post-ready mutation")
+        if not ok or type(result) ~= "table" then return false, "CANDIDATE_FAILED" end
+        mutation.ownerTicket = result.mutationTicket or mutation.ownerTicket
+        if result.blocked or result.readOnly or result.state == "failed" then
+            return false, result.reason or "CANDIDATE_FAILED"
+        end
+        if result.pending == true or result.state == "pending" then return nil end
+        committed = true
     else
         local owner = mutation.candidate.owner
-        committed = type(owner.Pump) ~= "function" or pcall(owner.Pump)
+        if type(owner.Pump) ~= "function" then return false, "CANDIDATE_FAILED" end
+        local ok, result = pcall(owner.Pump)
+        if not ok or type(result) ~= "table" then return false, "CANDIDATE_FAILED" end
+        mutation.ownerTicket = result.mutationTicket or mutation.ownerTicket
+        if result.blocked or result.readOnly or result.state == "failed" then
+            return false, result.reason or "CANDIDATE_FAILED"
+        end
+        if result.pending == true or result.state == "pending" then return nil end
+        committed = true
     end
     if not committed then return false, "CANDIDATE_FAILED" end
     local after = NotificationFailureCount()
@@ -1188,6 +1216,14 @@ end
 local function StoreMutationSlice(C)
     local mutation = C.mutation
     if not mutation then return C.result end
+    local ticket = mutation.ownerTicket
+    if ticket and ticket.state == "committed" and ticket.committed == true
+        and ticket.database == C.database and NexusDB == C.database
+        and rawget(C.database, "authorityBundle") == ticket.bundle then
+        -- Only the retained owner's exact terminal receipt can advance the
+        -- token after its own publication. An unrelated bundle never rebinds it.
+        mutation.token.bundle = ticket.bundle
+    end
     if not StoreMutationTokenIsExact(C, mutation.token) then
         C.mutation, C.state = nil, SS.READY
         C.result = {state="ready", result="SOURCE_DRIFT"}
@@ -1205,6 +1241,10 @@ local function StoreMutationSlice(C)
         return C.result
     end
     local ok, why, faulted = StoreMutationFinalCommit(C, mutation)
+    if ok == nil then
+        C.result = {state="pending", store=C.state}
+        return C.result
+    end
     C.mutation, C.state = nil, SS.READY
     if not ok then
         C.result = {state="ready", result=why}
@@ -1226,7 +1266,7 @@ function AuthorityBootstrap.New()
     function C:Database() return self.database end
     function C:Settle()
         if self.state ~= SS.READY and self.result.state ~= "failed" then
-            local catalogPending = self.state == SS.AUTHORITY
+            local catalogPending = (self.state == SS.AUTHORITY or self.state == SS.COMPACTION)
                 and type(self.catalogSummary) == "table"
                 and self.catalogSummary.state == "pending"
             self.result = {state="pending", store=self.state,

@@ -30,6 +30,55 @@ local localName, localRealm
 UnitName = function() return localName end
 GetNormalizedRealmName = function() return localRealm end
 
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return true end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    local ok, why, ticket = Nexus.BuildCatalog.Put(record, options)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        SettleCatalog()
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local function EnsureTerminal(echoes, category, record)
+    SettleCatalog()
+    local completedId, completedBuild, completedWhy
+    local priorCompletion = record and record._catalogBuildCompletion
+    if type(record) == "table" then
+        record._catalogBuildCompletion = function(id, build, why)
+            completedId, completedBuild, completedWhy = id, build, why
+        end
+    end
+    local id, build, why = Community.EnsureDpsBuildForEchoes(
+        echoes, category, record)
+    if type(record) == "table" then
+        record._catalogBuildCompletion = priorCompletion
+    end
+    if why == "ROOT_MUTATION_PENDING"
+        or Nexus.BuildCatalog.RootState().candidate then
+        SettleCatalog()
+        return completedId, completedBuild, completedWhy
+    end
+    return id, build, why
+end
+
+local rawReceiveRecord = DPS.ReceiveRecord
+DPS.ReceiveRecord = function(...)
+    SettleCatalog()
+    local ok, why = rawReceiveRecord(...)
+    SettleCatalog()
+    return ok, why
+end
+
 local function Reset(name, realm)
     localName, localRealm = name, realm
     NexusDB = {communityBuilds={}, syncTombstones={}, dpsCapture={}}
@@ -161,7 +210,7 @@ AssertNotMineInLibrary(crossId)
 -- explicitly false, even if an older producer also left isMine=true.
 local staleEchoes = {{spellId=720003, quality=1, stacks=1}}
 local staleFingerprint = DPS.GetEchoKey(staleEchoes)
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="stale-local-looking", title="Stale", description="evidence",
     author="Twin", ownerKey="twin@realma", ownerVerified=false,
     isMine=true, autoDps=true, class="MAGE", echoes=staleEchoes,
@@ -300,7 +349,7 @@ for _, row in ipairs({
     -- A source presenting two aliases for one field with unequal normalized
     -- values fails admission outright; an admitted row must still grant no
     -- summary-control authority.
-    local storedOk, storedWhy = Nexus.BuildCatalog.Put(row)
+    local storedOk, storedWhy = PutTerminal(row)
     if storedOk then
         assert(not Community.IsOwnBuild(row.id),
             "full catalog row unexpectedly granted summary-control authority")
@@ -358,7 +407,7 @@ qualifiedBuild.p = "Other"
 qualifiedBuild.player = "Other"
 qualifiedBuild.r = "RealmB"
 qualifiedBuild.realm = "RealmB"
-assert(Nexus.BuildCatalog.Put(qualifiedBuild),
+assert(PutTerminal(qualifiedBuild),
     "explicit promotion alias control was not persisted")
 
 -- Later exact evidence may promote the same retained page, but it must replace
@@ -389,7 +438,7 @@ assert(promotedQualified.ownerVerified == true
 -- Fingerprint-based promotion follows the same atomic identity normalization
 -- as the explicit build-ID path.
 local reuseEchoes = {{spellId=720021, quality=2, stacks=1}}
-local reuseId, reuseBuild = Community.EnsureDpsBuildForEchoes(
+local reuseId, reuseBuild = EnsureTerminal(
     reuseEchoes, "dummy", {
         player="Twin", class="MAGE", realm="RealmA",
         ownerVerified=false, relaySender="Twin-RealmA",
@@ -407,9 +456,9 @@ reuseBuild.realm = "RealmB"
 -- The author alias is left at its stored value: a compact alias that
 -- contradicts its verbose field is refused at admission, and one that
 -- agrees is a no-op, so author text cannot be used to poison this row.
-assert(Nexus.BuildCatalog.Put(reuseBuild),
+assert(PutTerminal(reuseBuild),
     "fingerprint promotion alias control was not persisted")
-local reusedId, promotedReuse = Community.EnsureDpsBuildForEchoes(
+local reusedId, promotedReuse = EnsureTerminal(
     reuseEchoes, "dummy", {
         player="Twin", class="MAGE", ownerKey="twin@realma",
         realm="RealmA", ownerVerified=true,
@@ -439,7 +488,7 @@ for index, provenance in ipairs({
         "authority provenance incorrectly invalidated a coherent DPS tuple")
     assert(DPS.VerifiedOwnerKey(record) == nil,
         "retained DPS provenance remained verified owner authority")
-    local id, build = Community.EnsureDpsBuildForEchoes(
+    local id, build = EnsureTerminal(
         echoes, "dummy", record)
     assert(id and build and build.ownerVerified == false
             and build.ownerKey == nil and build.isMine ~= true
@@ -448,7 +497,7 @@ for index, provenance in ipairs({
 end
 
 -- A verified RealmA record cannot promote the page retained from RealmB.
-local wrongId = Community.EnsureDpsBuildForEchoes(crossEchoes, "dummy", {
+local wrongId = EnsureTerminal(crossEchoes, "dummy", {
     player="Twin", class="MAGE", ownerKey="twin@realma", realm="realma",
     ownerVerified=true, buildId=crossId,
 })
@@ -515,7 +564,7 @@ assert(promotedSolo.ownerVerified == true
         and Community.IsOwnBuild(promotedSolo),
     "exact local authority did not restore legitimate owner actions")
 
-local claimlessId = Community.EnsureDpsBuildForEchoes(
+local claimlessId = EnsureTerminal(
     soloEchoes, "dummy", {player="Solo", class="WARLOCK"})
 local afterClaimless = assert(StoredBuild(soloId))
 assert(claimlessId == nil and afterClaimless.ownerVerified == true
@@ -524,7 +573,7 @@ assert(claimlessId == nil and afterClaimless.ownerVerified == true
         and afterClaimless.title == "Mage Record Loadout",
     "claimless realm-less evidence overwrote a verified Community page")
 
-local unchangedId = Community.EnsureDpsBuildForEchoes(
+local unchangedId = EnsureTerminal(
     soloEchoes, "dummy", {
         player="Solo", class="WARLOCK", ownerKey="solo@realma",
         realm="realma", ownerVerified=false,
@@ -543,7 +592,7 @@ assert(Community.IsOwnBuild(soloId),
 -- claim only, even when the player and current character names match exactly.
 Reset("Nilowner", "RealmA")
 local nilEchoes = {{spellId=720004, quality=2, stacks=1}}
-local nilId, nilBuild = Community.EnsureDpsBuildForEchoes(
+local nilId, nilBuild = EnsureTerminal(
     nilEchoes, "dummy", {
         player="Nilowner", class="MAGE", ownerKey="nilowner@realma",
         realm="realma",
@@ -591,7 +640,7 @@ NexusDB.dpsCapture.characterBest.dummy["twin@realma"] = storedProvenance
 local bucket = assert(DPS.SyncBucket("dummy", "Twin"))
 assert(not DPS.LocalOwnsDpsBucket(bucket),
     "retained DPS provenance regained local bucket ownership")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="provenance-build", title="Provenance", author="Twin",
     ownerKey="twin@realma", ownerVerified=true, class="MAGE",
     echoes=outboundEchoes, fingerprint=outboundFingerprint,
@@ -663,7 +712,7 @@ for _, build in ipairs(invalidBuilds) do
     -- A row whose compact and verbose aliases disagree is refused at
     -- admission, so it never becomes durable state that a response could
     -- serve. A row that is admitted must still never reach the wire.
-    local storedOk, storedWhy = Nexus.BuildCatalog.Put(build)
+    local storedOk, storedWhy = PutTerminal(build)
     if not storedOk then
         assert((storedWhy == "ALIAS_DISAGREEMENT"                    or storedWhy == "MALFORMED_ROW")
                 and Nexus.BuildCatalog.Get(build.id) == nil,
@@ -700,7 +749,7 @@ assert(Nexus.Sync.BroadcastBuildSummary(verifiedRemote)
 
 local legacyLocal = BuildVariant("authority-local-legacy", {})
 legacyLocal.ownerVerified = nil
-assert(Nexus.BuildCatalog.Put(legacyLocal),
+assert(PutTerminal(legacyLocal),
     "coherent local legacy evidence was not retained")
 assert(not Nexus.Identity.LocalOwnsRecord(legacyLocal, "twin@realma")
         and not Community.IsOwnBuild(legacyLocal.id),

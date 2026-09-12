@@ -450,12 +450,12 @@ end
 
 -- One retention transaction evicts every marked overlay row and installs
 -- its replay barrier atomically; nothing is removed unless all of it commits.
-local function EvictOverlayIds(catalog, database, ids)
+local function EvictOverlayIds(catalog, database, ids, transaction)
     if #ids == 0 then return 0, 0 end
     table.sort(ids, function(left, right)
         return Identity.CompareTypedIds(left, right) < 0
     end)
-    local handle = catalog.BeginCatalogMaintenance({database=database,
+    local handle = transaction or catalog.BeginCatalogMaintenance({database=database,
         operation="retention"})
     if not handle then return 0, 0 end
     local staged = 0
@@ -464,14 +464,18 @@ local function EvictOverlayIds(catalog, database, ids)
         if ok and why ~= "BARRIER_REPLAY_NOOP" then staged = staged + 1 end
     end
     if staged == 0 then
-        catalog.CancelMaintenance(handle)
+        if not transaction then catalog.CancelMaintenance(handle) end
         return 0, 0
     end
-    if not catalog.CommitMaintenance(handle) then return 0, 0 end
+    if not transaction then
+        local ok, why, ticket = catalog.CommitMaintenance(handle)
+        if ok == nil and why == "ROOT_MUTATION_PENDING" then return 0, 0, ticket end
+        if not ok then return 0, 0 end
+    end
     return staged, staged
 end
 
-local function PruneOverlay(database, referenced, limits)
+local function PruneOverlay(database, referenced, limits, transaction)
     local catalog = CatalogFor(database)
     if not catalog then
         return {before=0, after=0, removed=0, orphaned=0, perClass=0,
@@ -537,7 +541,7 @@ local function PruneOverlay(database, referenced, limits)
 
     local ids = {}
     for id in pairs(marked) do ids[#ids + 1] = id end
-    local removed, markersAdded = EvictOverlayIds(catalog, database, ids)
+    local removed, markersAdded = EvictOverlayIds(catalog, database, ids, transaction)
     return {
         before=remoteBefore,
         after=math.max(0, remoteBefore - removed),
@@ -555,10 +559,10 @@ end
 -- central transaction may expire a current-session barrier or retire a
 -- current-session tombstone by trusted local age; reloaded and opaque
 -- reservations stay block-all, and capacity pressure never prunes a winner.
-local function ExpireReservations(database, stepName, expireName)
+local function ExpireReservations(database, stepName, expireName, transaction)
     local catalog = CatalogFor(database)
     if not catalog then return 0 end
-    local handle = catalog.BeginCatalogMaintenance({database=database,
+    local handle = transaction or catalog.BeginCatalogMaintenance({database=database,
         operation="retention"})
     if not handle then return 0 end
     local cursor, staged = nil, 0
@@ -569,14 +573,14 @@ local function ExpireReservations(database, stepName, expireName)
         cursor = id
     end
     if staged == 0 then
-        catalog.CancelMaintenance(handle)
+        if not transaction then catalog.CancelMaintenance(handle) end
         return 0
     end
-    if not catalog.CommitMaintenance(handle) then return 0 end
+    if not transaction and not catalog.CommitMaintenance(handle) then return 0 end
     return staged
 end
 
-local function PruneEvictionMarkers(database)
+local function PruneEvictionMarkers(database, transaction)
     local before = Count(database.communityRetentionEvictions)
     -- Retention suppression is exact-ID authority. Older schema versions
     -- compacted removed markers into a global timestamp floor, which allowed
@@ -585,21 +589,21 @@ local function PruneEvictionMarkers(database)
     -- build may re-enter and converge normally.
     database.communityBuildRetentionFloor = nil
     local removed = ExpireReservations(database, "BarrierNext",
-        "MaintenanceExpireBarrier")
+        "MaintenanceExpireBarrier", transaction)
     return {
         before=before, after=math.max(0, before - removed), removed=removed,
         floor=0,
     }
 end
 
-local function PruneTombstones(database)
+local function PruneTombstones(database, transaction)
     local exactBefore = Count(database.syncTombstones)
     -- As with eviction markers, a deleted build's exact tombstone cannot act
     -- as a namespace-wide watermark. Immutable baseline masks remain exact and
     -- are never candidates here.
     database.syncTombstoneFloor = nil
     local removed = ExpireReservations(database, "TombstoneNext",
-        "MaintenanceRetireTombstone")
+        "MaintenanceRetireTombstone", transaction)
     return {
         before=exactBefore, after=math.max(0, exactBefore - removed),
         removed=removed, floor=0,
@@ -627,6 +631,58 @@ local function BumpDpsAndViews(reason)
     if refresh and type(refresh.Request) == "function" then pcall(refresh.Request) end
 end
 
+local pendingEnforcements = setmetatable({}, {__mode="k"})
+
+local function FinishEnforcement(database, catalog, transaction, summary, now, changed)
+    local function Finish()
+        local collect = (summary.characterBestRemoved or 0)
+            + (summary.personalRemoved or 0) + (summary.buildBestRemoved or 0)
+            + (summary.overlayRemoved or 0) + (summary.tombstonesRemoved or 0) > 0
+        if collect then
+            summary.evidenceRemoved, summary.evidenceGcBlocked = CollectEvidence(database)
+        end
+        if (summary.characterBestRemoved or 0) + (summary.personalRemoved or 0)
+            + (summary.buildBestRemoved or 0) > 0 then
+            BumpDpsAndViews(summary.reason)
+        end
+        summary.pending = false
+        if changed or (summary.evidenceRemoved or 0) > 0
+            or type(database.dataRetention.last) ~= "table" then
+            database.dataRetention.lastRun = now
+            database.dataRetention.last = Copy(summary)
+        end
+        if summary.contentUnlimited then
+            database.dataRetention.nextMaintenanceAt = now > 0 and now + 300 or 0
+        end
+        return summary
+    end
+    if not transaction then return Finish() end
+    local committed, why, ticket = catalog.CommitMaintenance(transaction)
+    if committed == true then return Finish() end
+    if committed ~= nil or why ~= "ROOT_MUTATION_PENDING"
+        or type(ticket) ~= "table" then
+        return {pending=false, blocked=true, reason=why or "CANDIDATE_FAILED"}
+    end
+    local job = {ticket=ticket, result={pending=true, mutationTicket=ticket,
+        overlayRemoved=0, perAuthorRemoved=0, tombstonesRemoved=0,
+        evictionMarkersRemoved=0, evictionMarkersAdded=0}}
+    pendingEnforcements[database] = job
+    local bound = catalog.BindMutationCompletion(ticket, function(outcome)
+        if outcome.committed == true and outcome.state == "committed"
+            and outcome.database == database and CatalogFor(database) == catalog
+            and rawget(database, "authorityBundle") == outcome.bundle then
+            job.result = Finish()
+        else
+            job.result = {pending=false, blocked=true,
+                reason=outcome.reason or "SOURCE_DRIFT"}
+        end
+    end)
+    if not bound then
+        job.result = {pending=false, blocked=true, reason="INVALID_MUTATION_TICKET"}
+    end
+    return Copy(job.result)
+end
+
 function Retention.Enforce(database, reason)
     -- MASTER-RC-008 / RAW-01: an unsupplied database resolves to the exact
     -- bound authority, never to the raw NexusDB global. A database supplied
@@ -636,6 +692,12 @@ function Retention.Enforce(database, reason)
     -- AllowsRemoteRevision.
     database = AuthorityDatabase(database)
     if type(database) ~= "table" then return nil, "database required" end
+    local pending = pendingEnforcements[database]
+    if pending then
+        local result = Copy(pending.result)
+        if not result.pending then pendingEnforcements[database] = nil end
+        return result
+    end
     local priorMeta = type(database.dataRetention) == "table"
         and database.dataRetention or nil
     local storedVersion = priorMeta and tonumber(priorMeta.schemaVersion) or nil
@@ -692,12 +754,15 @@ function Retention.Enforce(database, reason)
         local overlayCount = Count(database.communityBuilds)
         local evictionCount = Count(database.communityRetentionEvictions)
         local tombstoneCount = Count(database.syncTombstones)
-        local evictions = PruneEvictionMarkers(database)
-        local tombstones = PruneTombstones(database)
-        local evidenceRemoved, evidenceBlocked = 0, false
-        if tombstones.removed > 0 then
-            evidenceRemoved, evidenceBlocked = CollectEvidence(database)
+        local owner = CatalogFor(database)
+        local transaction = owner and owner.BeginCatalogMaintenance({database=database,
+            operation="retention"})
+        if owner and not transaction then
+            return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
         end
+        local evictions = PruneEvictionMarkers(database, transaction)
+        local tombstones = PruneTombstones(database, transaction)
+        local evidenceRemoved, evidenceBlocked = 0, false
         local summary = {
             schemaVersion=SCHEMA_VERSION,
             reason=tostring(reason or "maintenance"):sub(1,80),
@@ -723,13 +788,14 @@ function Retention.Enforce(database, reason)
         local prior = database.dataRetention.last
         local modeChanged = type(prior) ~= "table"
             or prior.contentUnlimited ~= true
-        if modeChanged or evictions.removed > 0 or tombstones.removed > 0
-            or evidenceRemoved > 0 then
-            database.dataRetention.lastRun = now
-            database.dataRetention.last = Copy(summary)
-        end
-        database.dataRetention.nextMaintenanceAt = now > 0 and now + 300 or 0
-        return summary
+        return FinishEnforcement(database, owner, transaction, summary, now,
+            modeChanged or evictions.removed > 0 or tombstones.removed > 0)
+    end
+    local owner = CatalogFor(database)
+    local transaction = owner and owner.BeginCatalogMaintenance({database=database,
+        operation="retention"})
+    if owner and not transaction then
+        return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
     end
     local selected, fingerprints, selectedBuildIds, categoryCounts =
         SelectCharacterBest(dps, limits, database.communityBuilds)
@@ -739,16 +805,12 @@ function Retention.Enforce(database, reason)
     local buildBestRemoved = dps and TrimFingerprintMap(
         dps.buildBest, limits.buildBestFingerprints, fingerprints) or 0
     local referenced = CollectBuildReferences(dps, selectedBuildIds)
-    local overlay = PruneOverlay(database, referenced, limits)
+    local overlay = PruneOverlay(database, referenced, limits, transaction)
     local now = EpochNow()
-    local evictions = PruneEvictionMarkers(database)
-    local tombstones = PruneTombstones(database)
+    local evictions = PruneEvictionMarkers(database, transaction)
+    local tombstones = PruneTombstones(database, transaction)
     local dpsRemoved = characterRemoved + personalRemoved + buildBestRemoved
     local evidenceRemoved, evidenceBlocked = 0, false
-    if dpsRemoved > 0 or overlay.removed > 0 or tombstones.removed > 0 then
-        evidenceRemoved, evidenceBlocked = CollectEvidence(database)
-    end
-    if dpsRemoved > 0 then BumpDpsAndViews(reason or "data retention") end
 
     local summary = {
         schemaVersion=SCHEMA_VERSION,
@@ -783,11 +845,7 @@ function Retention.Enforce(database, reason)
     local changed = dpsRemoved > 0 or overlay.removed > 0
         or evictions.removed > 0 or tombstones.removed > 0
         or evidenceRemoved > 0
-    if changed or type(database.dataRetention.last) ~= "table" then
-        database.dataRetention.lastRun = now
-        database.dataRetention.last = Copy(summary)
-    end
-    return summary
+    return FinishEnforcement(database, owner, transaction, summary, now, changed)
 end
 
 function Retention.Init(database)
@@ -836,7 +894,17 @@ function Retention.ReleaseSupersededAutoBuild(buildId, database)
         return false
     end
     if CollectBuildReferences(database.dpsCapture)[buildId] then return false end
-    local removed = EvictOverlayIds(catalog, database, { buildId })
+    local removed, _, ticket = EvictOverlayIds(catalog, database, { buildId })
+    if ticket then
+        catalog.BindMutationCompletion(ticket, function(outcome)
+            if outcome.committed == true and outcome.database == database
+                and rawget(database, "authorityBundle") == outcome.bundle
+                and CatalogFor(database) == catalog then
+                CollectEvidence(database)
+            end
+        end)
+        return nil, "ROOT_MUTATION_PENDING", ticket
+    end
     if removed > 0 then CollectEvidence(database); return true end
     return false
 end

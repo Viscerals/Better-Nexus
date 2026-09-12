@@ -7,6 +7,23 @@ dofile("core/Codec.lua")
 local S = dofile("tests/catalog_authority_support.lua")
 local Case, Check = S.Case, S.Check
 
+-- Fixture assertions inspect terminal catalog transactions. This uses the real
+-- admission scheduler and never turns a pending acknowledgement into success.
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+
 local now = 2000000000
 time = function() return now end
 
@@ -207,7 +224,7 @@ Case("ADM-11", "drift, supersession, and cancellation during scan", function()
     -- owner-routed mutation during initial admission is refused, never mixed
     Catalog().BeginRootAdmission(db, S.Bundle())
     Catalog().PumpRootAdmission()
-    local ok, why = Catalog().Put(S.Build("adm11-new", 1, 0))
+    local ok, why = AwaitMutation(Catalog().Put(S.Build("adm11-new", 1, 0)))
     Check(ok == false and why == "ROOT_ADMISSION_PENDING",
         "mutation during admission was not refused: " .. tostring(why))
     -- backing-table replacement is current-source drift
@@ -283,7 +300,7 @@ Case("BUD-02", "continuous mutation keeps one candidate and monotonic epochs", f
     local root = S.Root()
     local lastEpoch, lastGeneration = root.reservationEpoch, root.generation
     for index = 1, 60 do
-        Check(Nexus.BuildCatalog.Put(S.Build("bud02-" .. index, 2, 0)),
+        Check(AwaitMutation(Nexus.BuildCatalog.Put(S.Build("bud02-" .. index, 2, 0))),
             "mutation " .. index .. " refused")
         local state = S.Root()
         Check(state.candidate == false, "candidate retained after commit")
@@ -301,9 +318,9 @@ Case("PROV-01", "spoofed ownership tuples grant zero privilege", function()
     S.Bind(S.Database({}))
     local catalog = Nexus.BuildCatalog
     -- remote row claiming verification without transport proof
-    Check(catalog.Put(S.Build("prov-remote", 3, 0, {
+    Check(AwaitMutation(catalog.Put(S.Build("prov-remote", 3, 0, {
         ownerKey="peer@ebonhold", ownerVerified=true, isMine=true,
-    }), {source="remote", sender="Other-Ebonhold"}),
+    }), {source="remote", sender="Other-Ebonhold"})),
         "remote row refused outright")
     local remote = catalog.Get("prov-remote")
     Check(remote.ownerVerified == false and remote.isMine == false
@@ -312,18 +329,18 @@ Case("PROV-01", "spoofed ownership tuples grant zero privilege", function()
     Check(Nexus.Identity.VerifiedOwnerKey(remote) == nil,
         "spoofed remote row became a verified owner")
     -- exact transport owner proves ownership
-    Check(catalog.Put(S.Build("prov-owner", 3, 0), {source="remote",
-        sender="Peer-Ebonhold"}), "owned remote row refused")
+    Check(AwaitMutation(catalog.Put(S.Build("prov-owner", 3, 0), {source="remote",
+        sender="Peer-Ebonhold"})), "owned remote row refused")
     Check(Nexus.Identity.VerifiedOwnerKey(catalog.Get("prov-owner"))
         == "peer@ebonhold", "transport-owned row was not verified")
     -- local row belonging to another character is never mine
-    Check(catalog.Put(S.Build("prov-local", 3, 0, {
+    Check(AwaitMutation(catalog.Put(S.Build("prov-local", 3, 0, {
         ownerKey="peer@ebonhold", ownerVerified=true, isMine=true,
-    }), {source="local"}), "local row refused")
+    }), {source="local"})), "local row refused")
     local localRow = catalog.Get("prov-local")
     Check(localRow.isMine == false and localRow.ownerVerified == false,
         "foreign local row claimed local ownership")
-    Check(catalog.Put(S.LocalBuild("prov-mine", 3), {source="local"}),
+    Check(AwaitMutation(catalog.Put(S.LocalBuild("prov-mine", 3), {source="local"})),
         "own local row refused")
     Check(catalog.Get("prov-mine").isMine == true
         and catalog.Get("prov-mine").ownerVerified == true,
@@ -353,11 +370,11 @@ Case("FUT-01", "future row is deny-only and byte-preserved", function()
     Check(catalog.Get("fut01") == nil and catalog.Count() == 1
         and catalog.FindExactFingerprintId("100000x1,100001x1,100002x1") == nil,
         "future row gained current authority")
-    Check(select(1, catalog.Put(S.Build("fut01", 1, 0))) == false,
+    Check(select(1, AwaitMutation(catalog.Put(S.Build("fut01", 1, 0)))) == false,
         "future row slot accepted a current write")
-    Check(select(1, catalog.RemoveOverlay("fut01")) == false
-        and select(1, catalog.SetTombstone("fut01", {stamp=1,author="Peer"},
-            {source="local"})) == false,
+    Check(select(1, AwaitMutation(catalog.RemoveOverlay("fut01"))) == false
+        and select(1, AwaitMutation(catalog.SetTombstone("fut01", {stamp=1,author="Peer"},
+            {source="local"}))) == false,
         "future row accepted deletion or tombstone")
     Check(S.Durable(db).fut01 == future and S.Encode(future) == bytes,
         "future row was cloned, pruned, or normalized")
@@ -380,9 +397,9 @@ Case("FUT-02", "future root reserves the whole catalog deny-only", function()
         and catalog.Status().availableCount == 0 and catalog.Status().readOnly == true,
         "future root served current authority")
     for _, call in ipairs({
-        function() return catalog.Put(S.Build("blocked", 1, 0)) end,
-        function() return catalog.RemoveOverlay("fut02") end,
-        function() return catalog.SetTombstone("fut02", {stamp=99}, {source="local"}) end,
+        function() return AwaitMutation(catalog.Put(S.Build("blocked", 1, 0))) end,
+        function() return AwaitMutation(catalog.RemoveOverlay("fut02")) end,
+        function() return AwaitMutation(catalog.SetTombstone("fut02", {stamp=99}, {source="local"})) end,
         function() return catalog.ClearTombstone("gone") end,
     }) do
         local ok, reason = call()
@@ -407,10 +424,10 @@ Case("UNK-01", "unknown scalar survives update, restart, and maintenance", funct
     local db = S.Database({})
     S.Bind(db)
     local catalog = Nexus.BuildCatalog
-    Check(catalog.Put(S.Build("unk01", 3, 0, {futureScalar="keep me"})))
+    Check(AwaitMutation(catalog.Put(S.Build("unk01", 3, 0, {futureScalar="keep me"}))))
     Check(S.Durable(db).unk01.futureScalar == "keep me",
         "unknown scalar was dropped on store")
-    Check(catalog.Put(S.Build("unk01", 4, 0, {title="Updated"})))
+    Check(AwaitMutation(catalog.Put(S.Build("unk01", 4, 0, {title="Updated"}))))
     Check(S.Durable(db).unk01.futureScalar == "keep me"
         and S.Durable(db).unk01.title == "Updated",
         "unknown scalar was lost on update")
@@ -437,7 +454,7 @@ Case("UNK-02", "nested unknown scope follows its tuple or refuses", function()
     local catalog = Nexus.BuildCatalog
     local row = S.Build("unk02", 3, 0)
     row.echoes[2].futureTag = {kind="rune", level=3}
-    Check(catalog.Put(row))
+    Check(AwaitMutation(catalog.Put(row)))
     local stored = S.Durable(db).unk02
     local owner
     for _, echo in ipairs(stored.echoes) do
@@ -448,7 +465,7 @@ Case("UNK-02", "nested unknown scope follows its tuple or refuses", function()
     -- reorder the same rows: scope moves with the tuple
     local reordered = S.Build("unk02", 3, 0)
     reordered.echoes = {reordered.echoes[3], reordered.echoes[1], reordered.echoes[2]}
-    Check(catalog.Put(reordered))
+    Check(AwaitMutation(catalog.Put(reordered)))
     owner = nil
     for _, echo in ipairs(S.Durable(db).unk02.echoes) do
         if echo.futureTag then owner = echo end
@@ -458,13 +475,13 @@ Case("UNK-02", "nested unknown scope follows its tuple or refuses", function()
     -- duplicate tuples with any unknown subtree are ambiguous
     local ambiguous = S.Build("unk02b", 2, 0)
     ambiguous.echoes[2] = {spellId=100000, quality=3, stacks=1, futureTag={a=1}}
-    local okAmbiguous, whyAmbiguous = catalog.Put(ambiguous)
+    local okAmbiguous, whyAmbiguous = AwaitMutation(catalog.Put(ambiguous))
     Check(okAmbiguous == false and whyAmbiguous == "AMBIGUOUS_NESTED_UNKNOWN_SCOPE",
         "duplicate unknown-owning tuples were merged: " .. tostring(whyAmbiguous))
     -- removing an unknown-owning tuple requires a schema migration
     local removal = S.Build("unk02", 3, 0)
     removal.echoes = {removal.echoes[1], removal.echoes[3]}
-    local okRemoval, whyRemoval = catalog.Put(removal)
+    local okRemoval, whyRemoval = AwaitMutation(catalog.Put(removal))
     Check(okRemoval == false
         and whyRemoval == "UNKNOWN_TUPLE_SCHEMA_MIGRATION_REQUIRED",
         "unknown-owning tuple was removed: " .. tostring(whyRemoval))
@@ -482,7 +499,7 @@ Case("UNK-03", "over-budget unknown evidence invalidates without truncation", fu
     Check(S.Encode(row) == bytes and S.Durable(db).unk03 == row,
         "over-budget row was truncated or replaced")
     local inbound = S.Build("unk03b", 3, 0, {futureBlob=string.rep("z", 4097)})
-    local ok, why = Nexus.BuildCatalog.Put(inbound)
+    local ok, why = AwaitMutation(Nexus.BuildCatalog.Put(inbound))
     Check(ok == false and why == "UNKNOWN_EVIDENCE_BUDGET"
         and S.Durable(db).unk03b == nil,
         "over-budget inbound row reached durable storage")
@@ -511,12 +528,12 @@ Case("UNK-05", "update replaces known fields exactly and keeps unknown scope", f
     local db = S.Database({})
     S.Bind(db)
     local catalog = Nexus.BuildCatalog
-    Check(catalog.Put(S.Build("unk05", 3, 0, {
+    Check(AwaitMutation(catalog.Put(S.Build("unk05", 3, 0, {
         link="https://example/x", description="d", futureA="a",
-    })))
+    }))))
     local update = S.Build("unk05", 3, 0, {futureB="b"})
     update.link, update.description = nil, nil
-    Check(catalog.Put(update))
+    Check(AwaitMutation(catalog.Put(update)))
     local stored = S.Durable(db).unk05
     Check(stored.link == nil and stored.description == nil,
         "omitted known fields retained stale authority")
@@ -537,7 +554,7 @@ Case("API-01", "unbound and invalid roots serve fixed non-valid results", functi
         and catalog.FindExactFingerprintId("1x1") == nil
         and catalog.HasBaseline("x") == false,
         "unbound root granted authority")
-    local ok, why = catalog.Put(S.Build("api", 1, 0))
+    local ok, why = AwaitMutation(catalog.Put(S.Build("api", 1, 0)))
     Check(ok == false and why == "ROOT_UNBOUND", "unbound Put not refused: " .. tostring(why))
     local occupancy, represented, advisory = catalog.AllocationOccupancy("api")
     Check(occupancy == "opaque" and represented == nil and advisory.blocked == true,
@@ -548,14 +565,14 @@ Case("API-01", "unbound and invalid roots serve fixed non-valid results", functi
     local db = S.Database({})
     S.Bind(db)
     catalog = Nexus.BuildCatalog
-    Check(catalog.Put(S.Build("api-copy", 2, 0)))
+    Check(AwaitMutation(catalog.Put(S.Build("api-copy", 2, 0))))
     local copy = catalog.Get("api-copy")
     copy.title = "mutated"; copy.echoes[1].stacks = 99
     Check(catalog.Get("api-copy").title == "Build api-copy"
         and catalog.Get("api-copy").echoes[1].stacks == 1,
         "returned record was not defensive")
     -- maximum-root legacy collections return only CURSOR_REQUIRED
-    for index = 1, 9 do Check(catalog.Put(S.Build("api-" .. index, 1, 0))) end
+    for index = 1, 9 do Check(AwaitMutation(catalog.Put(S.Build("api-" .. index, 1, 0)))) end
     local all, allWhy = catalog.All()
     Check(all == nil and allWhy == "CURSOR_REQUIRED",
         "All returned a partial or complete over-limit collection")
@@ -583,7 +600,7 @@ Case("API-01", "unbound and invalid roots serve fixed non-valid results", functi
     local newer = assert(catalog.BeginRecordCursor())
     local _, olderErr = catalog.RecordCursorNext(older)
     Check(olderErr == "INVALID_CURSOR", "superseded cursor still served")
-    Check(catalog.Put(S.Build("api-drift", 1, 0)))
+    Check(AwaitMutation(catalog.Put(S.Build("api-drift", 1, 0))))
     local _, driftErr = catalog.RecordCursorNext(newer)
     Check(driftErr == "STALE_CURSOR", "root drift did not stale the cursor")
     local _, afterErr = catalog.RecordCursorNext(newer)
@@ -599,18 +616,18 @@ Case("IDX-01", "index parity, winner promotion, and stale invalidation", functio
     local catalog = Nexus.BuildCatalog
     local key = "100000x1,100001x1,100002x1"
     for index = 1, 300 do
-        Check(catalog.Put(S.Build(string.format("idx-%03d", index), 3, 0, {
+        Check(AwaitMutation(catalog.Put(S.Build(string.format("idx-%03d", index), 3, 0, {
             autoDps=index > 1 or nil,
-        })))
+        }))))
     end
     Check(catalog.FindExactFingerprintId(key) == "idx-001",
         "explicit build did not win the exact bucket")
-    Check(catalog.RemoveOverlay("idx-001"))
+    Check(AwaitMutation(catalog.RemoveOverlay("idx-001")))
     Check(catalog.FindExactFingerprintId(key) == "idx-002",
         "stale representative was not promoted deterministically")
     local related = catalog.BeginRelatedCursor("Peer", "Build idx-002", key)
     Check(related, "related cursor unavailable")
-    Check(catalog.Put(S.Build("idx-mutate", 1, 0)))
+    Check(AwaitMutation(catalog.Put(S.Build("idx-mutate", 1, 0))))
     local _, done, err = catalog.RelatedCursorNext(related)
     Check(done == true and err == "catalog changed",
         "mutation did not invalidate the related cursor")
@@ -624,4 +641,5 @@ Case("IDX-01", "index parity, winner promotion, and stale invalidation", functio
         "status count disagrees with count")
 end)
 
+Check(#S.results > 0, "no selected admission case ran")
 S.Finish("catalog authority admission matrix")

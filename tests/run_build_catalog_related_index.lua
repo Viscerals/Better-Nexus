@@ -68,6 +68,53 @@ dofile("core/DpsCapture.lua")
 H.AdmitCatalogV1(NexusDB)
 Nexus.DpsCapture.Init({}, {})
 local Catalog = Nexus.BuildCatalog
+
+local function SettleCatalog()
+    for _ = 1, Catalog.Budget().maximumPumps do
+        if not Catalog.RootState().candidate then return true end
+        Catalog.PumpRootAdmission()
+    end
+    assert(not Catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        for _ = 1, Catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            Catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    return AwaitMutation(Catalog.Put(record, options))
+end
+
+local function RemoveOverlayTerminal(id)
+    SettleCatalog()
+    return AwaitMutation(Catalog.RemoveOverlay(id))
+end
+
+local function ImportSavedTerminal(owner, force)
+    SettleCatalog()
+    local changed, pending = owner.ImportCurrentSavedLoadouts(force)
+    local total = changed or 0
+    for _ = 1, Catalog.Budget().maximumPumps do
+        if not pending and not owner.HasPendingSavedLoadoutImport() then
+            return total
+        end
+        SettleCatalog()
+        changed, pending = owner.PumpSavedLoadoutImport(25)
+        total = total + (changed or 0)
+    end
+    assert(false, "saved-loadout fixture did not settle")
+end
+
 local beforeStats = Catalog.DebugStats()
 
 local exactKey = Nexus.DpsCapture.GetEchoKey(Echoes(810001, 6))
@@ -106,6 +153,7 @@ controller.Initialize({
     end,
     GetLoadoutWishlist=function() return nil end,
 }, nil)
+SettleCatalog()
 local fullReads = 0
 local originalAll = Catalog.All
 Catalog.All = function(...)
@@ -124,7 +172,7 @@ assert(exactId == "index-exact" and exactRecord.id == exactId
 exactRecord.title = "mutated"
 assert(Catalog.Get(exactId).title ~= "mutated",
     "exact fingerprint index leaked a mutable represented row")
-assert(Catalog.Put({
+assert(PutTerminal({
     id="000-saved-exact",title="Private Saved Exact",serverTitle="Private Saved Exact",
     author="IndexMage",ownerKey="indexmage@ebonhold",ownerVerified=true,
     realm="ebonhold",class="ROGUE",postedAt=1997,lastModified=1997,
@@ -137,11 +185,11 @@ assert(Catalog.FindExactFingerprintId(exactKey) == "index-exact"
     and savedRawResolution == "index-exact"
     and savedRawReason == "fingerprint",
     "private Saved mirror hid or became the public exact-content winner")
-assert(Catalog.RemoveOverlay("000-saved-exact"),
+assert(RemoveOverlayTerminal("000-saved-exact"),
     "private Saved exact-index control could not be removed")
 -- Non-finite or non-positive Echo data is refused at admission; it never
 -- reaches durable storage or any index.
-local invalidOk, invalidWhy = Catalog.Put({
+local invalidOk, invalidWhy = PutTerminal({
     id="invalid-exact",title="Invalid Exact",author="Other",
     ownerKey="other@ebonhold",class="MAGE",postedAt=1998,
     lastModified=1998,echoes={
@@ -156,7 +204,7 @@ assert(Catalog.FindExactFingerprintId("0x1") == nil
     and Catalog.FindExactFingerprintId("810001xinf") == nil,
     "non-finite/non-positive Echo data entered the exact index")
 
-assert(Catalog.Put({
+assert(PutTerminal({
     id="000-auto",title="Auto Collision",author="IndexMage",
     ownerKey="indexmage@ebonhold",class="MAGE",postedAt=1999,
     lastModified=1999,autoDps=true,echoes=Echoes(810001, 6),
@@ -172,7 +220,7 @@ assert(autoCollisionWinner == "index-exact"
         tostring(exactEpoch),tostring(exactRevisionAfterAuto),
         tostring(exactRevision),fullReads))
 
-assert(Catalog.Put({
+assert(PutTerminal({
     id="000-explicit",title="Explicit Collision",author="IndexMage",
     ownerKey="indexmage@ebonhold",class="MAGE",postedAt=2000,
     lastModified=2000,echoes=Echoes(810001, 6),
@@ -184,7 +232,7 @@ assert(Catalog.FindExactFingerprintId(exactKey) == "000-explicit"
     and exactRevisionAfterExplicit > exactRevisionAfterAuto,
     "explicit exact-match collision did not use deterministic id ordering")
 
-assert(Catalog.Put({
+assert(PutTerminal({
     id="exact-unrelated",title="Unrelated Exact Revision",author="Other",
     ownerKey="other@ebonhold",class="ROGUE",postedAt=2000,
     lastModified=2000,echoes=Echoes(899500, 1),
@@ -196,17 +244,22 @@ local exactEpochAfterUnrelated, exactRevisionAfterUnrelated =
 assert(recordEpochAfter == recordEpoch and recordRevisionAfter == recordRevision
     and exactEpochAfterUnrelated == exactEpoch
     and exactRevisionAfterUnrelated == exactRevisionAfterExplicit,
-    "unrelated build mutation invalidated selected/exact scalar revisions")
+    string.format("unrelated build mutation invalidated selected/exact scalar revisions: record=%s/%s -> %s/%s exact=%s/%s -> %s/%s",
+        tostring(recordEpoch), tostring(recordRevision),
+        tostring(recordEpochAfter), tostring(recordRevisionAfter),
+        tostring(exactEpoch), tostring(exactRevisionAfterExplicit),
+        tostring(exactEpochAfterUnrelated),
+        tostring(exactRevisionAfterUnrelated)))
 
-assert(Catalog.RemoveOverlay("000-explicit"))
+assert(RemoveOverlayTerminal("000-explicit"))
 local _, exactRevisionAfterRemove = Catalog.ExactFingerprintRevision(exactKey)
 assert(Catalog.FindExactFingerprintId(exactKey) == "index-exact"
     and exactRevisionAfterRemove > exactRevisionAfterExplicit,
     "exact index removal did not restore/revise the deterministic winner")
-assert(Catalog.RemoveOverlay("000-auto"))
-assert(Catalog.RemoveOverlay("exact-unrelated"))
+assert(RemoveOverlayTerminal("000-auto"))
+assert(RemoveOverlayTerminal("exact-unrelated"))
 
-assert(controller.ImportCurrentSavedLoadouts(true) == 1,
+assert(ImportSavedTerminal(controller, true) == 1,
     "indexed saved-slot import did not update the stale mirror")
 local mirror = assert(Catalog.Get("saved-indexmage-1"))
 assert(mirror.recordBuildId == "index-exact"
@@ -215,7 +268,7 @@ assert(mirror.recordBuildId == "index-exact"
 
 local revisionBeforeWarm = Nexus.Revisions.Get(
     Nexus.Revisions.BUILD_LIBRARY_CHANGED)
-assert(controller.ImportCurrentSavedLoadouts(true) == 0
+assert(ImportSavedTerminal(controller, true) == 0
     and Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)
         == revisionBeforeWarm and fullReads == 0,
     "unchanged indexed import wrote, revised, or read the full catalog")
@@ -226,7 +279,7 @@ local newRecord = {
     lastModified=3000,echoes=Echoes(810001, 6),
 }
 local rebuildsBeforeMutation = Catalog.DebugStats().relatedIndexRebuilds
-assert(Catalog.Put(newRecord))
+assert(PutTerminal(newRecord))
 local afterPut = assert(Catalog.RelatedCandidates(
     "IndexMage", "Saved Target", exactKey))
 local foundNew = false
@@ -236,7 +289,7 @@ end
 assert(foundNew and Catalog.DebugStats().relatedIndexRebuilds
     == rebuildsBeforeMutation,
     "record Put failed to maintain the related index incrementally")
-assert(Catalog.RemoveOverlay("index-new"))
+assert(RemoveOverlayTerminal("index-new"))
 local afterRemove = assert(Catalog.RelatedCandidates(
     "IndexMage", "Saved Target", exactKey))
 for _, row in ipairs(afterRemove) do
@@ -256,7 +309,7 @@ assert(narrowStats.relatedIndexRebuilds == beforeStats.relatedIndexRebuilds
 -- A collision-heavy same-title bucket cannot be capped without changing the
 -- winner contract. It must instead resume across fixed 25-candidate pumps.
 for index = 1, 80 do
-    assert(Catalog.Put({
+    assert(PutTerminal({
         id="wide-"..index,title="Wide Target",author="IndexMage",
         ownerKey="indexmage@ebonhold",ownerVerified=true,realm="ebonhold",
         class="MAGE",postedAt=4000+index,
@@ -268,20 +321,23 @@ slots.bySlot[2] = {
 }
 assert(controller.BeginSavedLoadoutImport(true))
 local _, pending = controller.PumpSavedLoadoutImport(25)
+SettleCatalog()
 local pumps = 1
 assert(pending, "wide candidate collision completed without exercising resume")
 local restartsBeforeMutation = controller.SavedImportStats().restarts
-assert(Catalog.Put({
+assert(PutTerminal({
     id="mid-job-revision",title="Unrelated Revision",author="Other",
     ownerKey="other@ebonhold",class="ROGUE",postedAt=5000,
     lastModified=5000,echoes=Echoes(899900, 1),
 }), "mid-job revision fixture did not change the catalog")
 slotSnapshot = nil
 local _, unavailablePending = controller.PumpSavedLoadoutImport(25)
+SettleCatalog()
 assert(unavailablePending and controller.HasPendingSavedLoadoutImport(),
     "EXPECTED RED: unavailable restart source dropped the pending last-good job")
 slotSnapshot = slots
 _, pending = controller.PumpSavedLoadoutImport(25)
+SettleCatalog()
 pumps = pumps + 1
 assert(pending, "catalog restart completed before the slot-generation probe")
 slotSnapshot = {activeSlot=2,bySlot={
@@ -291,6 +347,7 @@ slotSnapshot = {activeSlot=2,bySlot={
 slotGeneration = slotGeneration + 1
 while pending and pumps < 20 do
     _, pending = controller.PumpSavedLoadoutImport(25)
+    SettleCatalog()
     pumps = pumps + 1
 end
 local importStats = controller.SavedImportStats()

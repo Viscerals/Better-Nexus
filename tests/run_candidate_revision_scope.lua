@@ -217,8 +217,61 @@ end
 local Catalog = assert(Nexus.BuildCatalog, "BuildCatalog unavailable")
 local Revisions = assert(Nexus.Revisions, "Revisions unavailable")
 
+-- Assertions below inspect terminal mutations. Drive only the exact public
+-- ticket returned by Put, and fail if the scheduler changes tickets, stalls,
+-- exhausts its bound, or returns an unknown outcome.
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil then
+        assert(why == "ROOT_MUTATION_PENDING",
+            "fixture mutation returned unknown pending result: " .. tostring(why))
+        assert(type(ticket) == "table" and ticket.state == "pending",
+            "pending mutation returned no live ticket")
+        local previous = tonumber(ticket.pumps) or -1
+        for _ = 1, Catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            local observed = Catalog.PumpRootAdmission()
+            assert(observed == ticket, "fixture mutation changed tickets")
+            local current = tonumber(ticket.pumps)
+            assert(current and current > previous,
+                "fixture mutation made no scheduler progress")
+            previous = current
+        end
+        assert(ticket.state ~= "pending", "fixture mutation exhausted its pump bound")
+        assert(ticket.state == "committed" or ticket.state == "failed",
+            "fixture mutation ended in unknown state: " .. tostring(ticket.state))
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    assert(ok == true or ok == false,
+        "fixture mutation returned unknown result: " .. tostring(ok))
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    -- Community rendering may queue its own catalog repair before this fixture
+    -- replaces the current row. Finish that exact mutation first; a second Put
+    -- must never reinterpret its pending-owner refusal as terminal success.
+    if Catalog.RootState().candidate then
+        assert(Catalog.RootState().state == "ROOT_ADMITTED",
+            "fixture found non-mutation catalog work before Put")
+        local pending = Catalog.PumpRootAdmission()
+        assert(type(pending) == "table",
+            "fixture catalog work returned no result")
+        if pending.state == "pending" then
+            local committed, pendingWhy = AwaitMutation(nil,
+                "ROOT_MUTATION_PENDING", pending)
+            assert(committed, pendingWhy)
+        else
+            assert(pending.state == "committed" and pending.committed,
+                pending.reason or "fixture catalog work did not commit")
+        end
+        assert(not Catalog.RootState().candidate,
+            "fixture catalog work remained pending after terminal result")
+    end
+    return AwaitMutation(Catalog.Put(record, options))
+end
+
 local function RestoreBuild()
-    local ok = Catalog.Put(Copy(build))
+    local ok = PutTerminal(Copy(build))
     Check(ok == true, "selected build fixture could not be restored")
 end
 
@@ -273,8 +326,10 @@ local changedBuild = Copy(build)
 changedBuild.echoes[1].spellId = 710099
 changedBuild.fingerprint = EchoKey(changedBuild.echoes)
 changedBuild.lastModified = 2
-Check(Catalog.Put(changedBuild) == true,
-    "selected-record change did not enter the catalog fixture")
+local changedOk, changedWhy = PutTerminal(changedBuild)
+Check(changedOk == true,
+    "selected-record change did not enter the catalog fixture: "
+        .. tostring(changedWhy))
 local selectedData, selectedReason = selectedController.PrepareApply("Selected")
 Check(selectedData == nil and selectedReason == "stale_candidate"
         and selectedWrites.upload == 0 and selectedWrites.association == 0,
@@ -305,7 +360,7 @@ local changedOwner = Copy(build)
 changedOwner.ownerKey = "other@ebonhold"
 changedOwner.ownerVerified = false
 changedOwner.lastModified = 3
-Check(Catalog.Put(changedOwner) == true,
+Check(PutTerminal(changedOwner) == true,
     "selected owner change did not enter the catalog fixture")
 local ownerOk, ownerReason = ownerController.AcceptApply(ownerData)
 Check(ownerOk == false and ownerReason == "stale_candidate"
@@ -350,7 +405,7 @@ end
 local unrelatedBuildCandidate = OpenCandidate()
 local unrelatedBuildController, unrelatedBuildWrites =
     NewSession(unrelatedBuildCandidate)
-Check(Catalog.Put({
+Check(PutTerminal({
     id="stage36-unrelated",title="Unrelated",author="Other",
     ownerKey="other@ebonhold",ownerVerified=true,class="WARRIOR",
     echoes={{spellId=730001,quality=1,stacks=1}},

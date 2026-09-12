@@ -327,6 +327,42 @@ assert(not controller.DeleteBuild("remote")
     and records.remote,
     "non-owner deletion reached catalog mutation")
 
+-- A large-root catalog returns nil/reason/ticket. The controller must retain
+-- that ticket, return pending instead of a truthy success, and refresh only
+-- after the catalog settles the exact ticket as committed.
+local pendingTicket = {state="pending",committed=false}
+local pendingCallback, pendingRefreshes = nil, 0
+local pendingRecord = CopyScalars(records.remote)
+pendingRecord.id, pendingRecord.author = "pending-owner", "Owner"
+pendingRecord.ownerKey, pendingRecord.ownerVerified = "owner@ebonhold", true
+pendingRecord.isMine = true
+pendingRecord.echoes = {{spellId=200100,quality=3,stacks=1}}
+local pendingCatalog = {
+    Get=function(id) return id == pendingRecord.id and pendingRecord or nil end,
+    Put=function() return nil, "ROOT_MUTATION_PENDING", pendingTicket end,
+    BindMutationCompletion=function(ticket, callback)
+        assert(ticket == pendingTicket and pendingCallback == nil,
+            "controller bound the wrong ticket or bound it more than once")
+        pendingCallback = callback
+        return true
+    end,
+}
+local pendingController = factory.New({
+    catalog=function() return pendingCatalog end,
+    refresh=function() pendingRefreshes = pendingRefreshes + 1 end,
+    notify=function() end,
+})
+pendingController.BindAdapter(Adapter)
+local pendingOk, pendingWhy = pendingController.EditBuild(
+    pendingRecord.id, "Pending edit", "detached", nil)
+assert(pendingOk == false and pendingWhy == "ROOT_MUTATION_PENDING"
+        and type(pendingCallback) == "function" and pendingRefreshes == 0,
+    "controller acknowledged or dropped a pending catalog mutation")
+pendingTicket.state, pendingTicket.committed = "committed", true
+pendingCallback(pendingTicket)
+assert(pendingRefreshes == 1,
+    "controller did not acknowledge the terminal committed ticket")
+
 local function Read(path)
     local handle = assert(io.open(path, "rb"))
     local value = handle:read("*a")

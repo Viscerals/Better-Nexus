@@ -113,6 +113,7 @@ Nexus.Panel = {
 }
 
 local CB = Nexus.CommunityBuilds
+local Catalog = assert(Nexus.BuildCatalog, "BuildCatalog unavailable")
 local boundSavedResolver
 local bindSavedResolver = Nexus.ViewProjections.BindSavedRelationResolver
 Nexus.ViewProjections.BindSavedRelationResolver = function(resolver)
@@ -136,9 +137,52 @@ for _, name in ipairs({
     assert(type(CB[name]) == "function", "Community facade lost " .. name)
 end
 
+local function AwaitCatalog()
+    local candidates = 0
+    while Catalog.RootState().candidate do
+        candidates = candidates + 1
+        assert(candidates <= 8,
+            "fixture catalog work exceeded its sequential candidate bound")
+        assert(Catalog.RootState().state == "ROOT_ADMITTED",
+            "fixture found catalog work outside ROOT_ADMITTED")
+        local ticket = Catalog.PumpRootAdmission()
+        assert(type(ticket) == "table",
+            "fixture catalog work returned no ticket")
+        local previous = tonumber(ticket.pumps) or -1
+        for _ = 1, Catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            local observed = Catalog.PumpRootAdmission()
+            assert(observed == ticket, "fixture catalog work changed tickets")
+            local current = tonumber(ticket.pumps)
+            assert(current and current > previous,
+                "fixture catalog work made no scheduler progress")
+            previous = current
+        end
+        assert(ticket.state == "committed" and ticket.committed,
+            ticket.reason or "fixture catalog work did not commit")
+    end
+end
+
+local function PublishImportedTerminal(id)
+    AwaitCatalog()
+    local ok, value = CB.PublishImportedBuild(id)
+    if ok == nil then
+        assert(value == "ROOT_MUTATION_PENDING",
+            "saved-loadout publication returned unknown pending result: "
+                .. tostring(value))
+        AwaitCatalog()
+        ok, value = CB.PublishImportedBuild(id)
+    end
+    assert(ok ~= nil and value ~= "ROOT_MUTATION_PENDING",
+        "saved-loadout publication " .. tostring(id)
+            .. " did not expose its terminal result: ok=" .. tostring(ok)
+            .. " value=" .. tostring(value))
+    return ok, value
+end
+
 -- Publishing a local Saved Build mirror uses one stable public identity,
 -- preserves locked Echo intent, and broadcasts only the admitted record.
-local ok, publishedId = CB.PublishImportedBuild("saved-owner-1")
+local ok, publishedId = PublishImportedTerminal("saved-owner-1")
 assert(ok and publishedId == "published-saved-owner-1",
     "saved-loadout publication identity changed")
 local published = Nexus.BuildCatalog.Get(publishedId)
@@ -147,7 +191,7 @@ assert(published and published.sourceSavedBuildId == "saved-owner-1"
     and published.lockedEchoes[1].locked == true
     and broadcasts[1] == publishedId,
     "published mirror lost provenance, lock intent, or admission ordering")
-local okAgain, sameId = CB.PublishImportedBuild("saved-owner-1")
+local okAgain, sameId = PublishImportedTerminal("saved-owner-1")
 assert(okAgain and sameId == publishedId
     and Nexus.BuildCatalog.Get("saved-owner-1").publishedBuildId == publishedId,
     "re-publishing a mirror created a second public identity")

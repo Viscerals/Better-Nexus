@@ -104,6 +104,58 @@ local function Expect(name, condition, detail)
     if not condition then failures[#failures + 1] = name .. ": " .. detail end
 end
 
+local Catalog = assert(Nexus.BuildCatalog, "BuildCatalog unavailable")
+
+local function AwaitCatalog()
+    local candidates = 0
+    while Catalog.RootState().candidate do
+        candidates = candidates + 1
+        assert(candidates <= 8,
+            "fixture catalog work exceeded its sequential candidate bound")
+        assert(Catalog.RootState().state == "ROOT_ADMITTED",
+            "fixture found catalog work outside ROOT_ADMITTED")
+        local ticket = Catalog.PumpRootAdmission()
+        assert(type(ticket) == "table",
+            "fixture catalog work returned no ticket")
+        local previous = tonumber(ticket.pumps) or -1
+        for _ = 1, Catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            local observed = Catalog.PumpRootAdmission()
+            assert(observed == ticket, "fixture catalog work changed tickets")
+            local current = tonumber(ticket.pumps)
+            assert(current and current > previous,
+                "fixture catalog work made no scheduler progress")
+            previous = current
+        end
+        assert(ticket.state == "committed" and ticket.committed,
+            ticket.reason or "fixture catalog work did not commit")
+    end
+end
+
+local function PostTerminal(...)
+    AwaitCatalog()
+    local ok, value, outcome = Community.PostCurrentWishlist(...)
+    if not ok and value == "ROOT_MUTATION_PENDING" then
+        assert(type(outcome) == "table" and type(outcome.id) == "string",
+            "pending post returned no stable publication identity")
+        AwaitCatalog()
+        assert(Catalog.Get(outcome.id),
+            "pending post did not reach terminal catalog publication")
+        return true, outcome.id, outcome
+    end
+    return ok, value, outcome
+end
+
+local function EditTerminal(...)
+    AwaitCatalog()
+    local ok, why = Community.EditBuild(...)
+    if not ok and why == "ROOT_MUTATION_PENDING" then
+        AwaitCatalog()
+        return true
+    end
+    return ok, why
+end
+
 local function ClickAndType(box, text)
     local click = box:GetScript("OnMouseDown")
     if click then click(box, "LeftButton") end
@@ -191,7 +243,7 @@ assert(post:IsShown() and postDescription:GetText() == ""
     "Share description did not reopen with the same keyboard contract")
 if postEscape then postEscape(postDescription) end
 
-local posted, sharedId = Community.PostCurrentWishlist(
+local posted, sharedId = PostTerminal(
     "Stage 30 Editable", "seed", slot, "MAGE")
 assert(posted and sharedId, "fixture could not seed an owned shared build")
 Community.ToggleEditPopup(sharedId)
@@ -243,7 +295,7 @@ Community.ToggleEditPopup(sharedId)
 local suffix = "\nSecond line: exact boundary."
 local exact2000 = string.rep("x", 2000 - #suffix) .. suffix
 assert(#exact2000 == 2000, "fixture description boundary drifted")
-local exactOk, exactErr = Community.EditBuild(
+local exactOk, exactErr = EditTerminal(
     sharedId, "Stage 30 Editable", exact2000)
 Expect("multiline_description_round_trips_exact_2000_characters",
     exactOk and Nexus.BuildCatalog.Get(sharedId).description == exact2000,
@@ -283,14 +335,14 @@ local utf8Multiline = "First line\nSecond line: caf"
 wireBuild.description = utf8Multiline
 local utf8Received = protocol.ValidateNetworkPayload(
     protocol.CompactEncode(wireBuild))
-assert(Community.EditBuild(sharedId, "Stage 30 Editable", utf8Multiline)
+assert(EditTerminal(sharedId, "Stage 30 Editable", utf8Multiline)
     and Nexus.BuildCatalog.Get(sharedId).description == utf8Multiline
     and utf8Received and utf8Received.description == utf8Multiline,
     "valid UTF-8 multiline description changed in local or wire handling")
 wireBuild.description = ""
 local emptyTree = protocol.CompactEncode(wireBuild)
 local emptyReceived = protocol.ValidateNetworkPayload(emptyTree)
-assert(Community.EditBuild(sharedId, "Stage 30 Editable", "")
+assert(EditTerminal(sharedId, "Stage 30 Editable", "")
     and Nexus.BuildCatalog.Get(sharedId).description == ""
     and emptyTree.d == nil and emptyReceived
     and emptyReceived.description == "",
@@ -303,7 +355,7 @@ wireBuild.description = "malformed" .. string.char(0xC3)
 assert(protocol.ValidateNetworkPayload(
         protocol.CompactEncode(wireBuild)) == nil,
     "multiline receiver accepted malformed UTF-8")
-assert(Community.EditBuild(sharedId, "Stage 30 Editable", exact2000),
+assert(EditTerminal(sharedId, "Stage 30 Editable", exact2000),
     "fixture could not restore the exact boundary description")
 local beforeTooLong = Nexus.BuildCatalog.Get(sharedId).description
 assert(not Community.EditBuild(sharedId, "Stage 30 Editable",
@@ -315,7 +367,7 @@ assert(not Community.EditBuild(sharedId, "Stage 30 Editable",
 -- Sharing action. Accepting it uses the existing tombstone path and leaves
 -- upstream Saved Build/Wishlist state untouched.
 if exactOk then
-    assert(Community.EditBuild(sharedId, "Stage 30 Editable", exact2000))
+    assert(EditTerminal(sharedId, "Stage 30 Editable", exact2000))
 end
 Community.Show()
 Community.Select(sharedId)
@@ -346,14 +398,16 @@ if stopUiReady then
         and H.lastStaticPopup.which == "NEXUS_STOP_SHARING_BUILD"
         and Nexus.BuildCatalog.Get(sharedId),
         "Stop Sharing mutated the build before confirmation")
+    AwaitCatalog()
     H.AcceptLastStaticPopup()
+    AwaitCatalog()
     assert(Nexus.BuildCatalog.Get(sharedId) == nil
         and H.DurableTombstones()[sharedId]
         and deleteCalls == 1,
         "confirmed Stop Sharing did not use the owner tombstone path")
 end
 
-local postedStale, staleId = Community.PostCurrentWishlist(
+local postedStale, staleId = PostTerminal(
     "Stage 30 Stale Owner", "stale owner", slot, "MAGE")
 assert(postedStale and staleId,
     "fixture could not seed the stale-owner withdrawal guard")
@@ -381,7 +435,9 @@ local deletesBeforeStale = deleteCalls
 local stalePrinted = {}
 local stalePrint = print
 print = function(message) stalePrinted[#stalePrinted + 1] = tostring(message) end
+AwaitCatalog()
 H.AcceptLastStaticPopup()
+AwaitCatalog()
 print = stalePrint
 local staleRetained = Nexus.BuildCatalog.Get(staleId)
 assert(staleRetained and staleRetained.ownerKey == "other@ebonhold"
@@ -395,7 +451,7 @@ assert(staleRetained and staleRetained.ownerKey == "other@ebonhold"
         tostring(H.DurableTombstones()[staleId] ~= nil),
         deleteCalls,deletesBeforeStale,table.concat(stalePrinted, "\n")))
 
-local postedRejected, rejectedId = Community.PostCurrentWishlist(
+local postedRejected, rejectedId = PostTerminal(
     "Stage 30 Rejected Withdrawal", "rejected", slot, "MAGE")
 assert(postedRejected and rejectedId,
     "fixture could not seed rejected withdrawal reporting")
@@ -418,7 +474,9 @@ assert(detail.deleteBtn:GetScript("OnClick"))()
 assert(H.lastStaticPopup
     and H.lastStaticPopup.which == "NEXUS_STOP_SHARING_BUILD",
     "rejected withdrawal did not reach confirmation")
+AwaitCatalog()
 H.AcceptLastStaticPopup()
+AwaitCatalog()
 print = rejectedPrint
 assert(Nexus.BuildCatalog.Get(rejectedId) == nil
     and H.DurableTombstones()[rejectedId]
@@ -426,7 +484,7 @@ assert(Nexus.BuildCatalog.Get(rejectedId) == nil
         "withdrawal not queued: sync disabled", 1, true),
     "non-retry withdrawal rejection was not reported honestly")
 
-local postedRetry, retryId = Community.PostCurrentWishlist(
+local postedRetry, retryId = PostTerminal(
     "Stage 30 Retry", "retry", slot, "MAGE")
 assert(postedRetry and retryId, "fixture could not seed withdrawal retry")
 local deletesBeforeRetry = deleteCalls
@@ -448,7 +506,9 @@ H.lastStaticPopup = nil
 assert(detail.deleteBtn:GetScript("OnClick"))()
 local retryConfirmed = H.lastStaticPopup
     and H.lastStaticPopup.which == "NEXUS_STOP_SHARING_BUILD"
+AwaitCatalog()
 H.AcceptLastStaticPopup()
+AwaitCatalog()
 print = realPrint
 local retryText = table.concat(printed, "\n")
 Expect("withdrawal_reports_queue_admission",

@@ -71,6 +71,8 @@ function Controller.New(options)
         and options.refresh or function() end
     local notify = type(options.notify) == "function"
         and options.notify or print
+    local pendingCatalogMutations = setmetatable({}, {__mode="k"})
+    local pendingPublications = {}
 
     local function PeerRecord(kind, fields)
         local debugOwner = Nexus and Nexus.PeerDebug
@@ -90,6 +92,45 @@ function Controller.New(options)
     local function Catalog()
         if type(options.catalog) == "function" then return options.catalog() end
         return Nexus and Nexus.BuildCatalog
+    end
+
+    local function RetainCatalogMutation(catalog, operation, onComplete,
+                                         ok, why, ticket)
+        if ok ~= nil or why ~= "ROOT_MUTATION_PENDING"
+            or type(ticket) ~= "table" then
+            return ok, why
+        end
+        pendingCatalogMutations[ticket] = {
+            operation=operation,onComplete=onComplete,
+        }
+        if type(catalog.BindMutationCompletion) ~= "function" then
+            pendingCatalogMutations[ticket] = nil
+            return false, "INVALID_MUTATION_TICKET"
+        end
+        local bound = catalog.BindMutationCompletion(ticket, function(outcome)
+                local retained = pendingCatalogMutations[outcome]
+                pendingCatalogMutations[outcome] = nil
+                if outcome.committed == true then
+                    refreshView()
+                else
+                    notify("Catalog " .. tostring(retained
+                        and retained.operation or "mutation")
+                        .. " failed: " .. tostring(outcome.reason or "unknown"))
+                end
+                if retained and type(retained.onComplete) == "function" then
+                    local completed, completeWhy = pcall(
+                        retained.onComplete, outcome)
+                    if not completed then
+                        notify("Catalog completion failed: "
+                            .. tostring(completeWhy or "unknown"))
+                    end
+                end
+            end)
+        if not bound then
+            pendingCatalogMutations[ticket] = nil
+            return false, "INVALID_MUTATION_TICKET"
+        end
+        return nil, why, ticket
     end
 
     local function BuildRevision()
@@ -165,12 +206,13 @@ function Controller.New(options)
         return firstFree, nil
     end
 
-    local function SaveBuild(build)
+    local function SaveBuild(build, onComplete)
         local catalog = Catalog()
         if not (catalog and catalog.Put) then
             return false, "build catalog unavailable"
         end
-        return catalog.Put(build)
+        return RetainCatalogMutation(catalog, "put", onComplete,
+            catalog.Put(build))
     end
 
     local function CatalogStats()
@@ -201,18 +243,20 @@ function Controller.New(options)
         end
     end
 
-    local function RemoveOverlay(id)
+    local function RemoveOverlay(id, onComplete)
         local catalog = Catalog()
         if catalog and type(catalog.RemoveOverlay) == "function" then
-            return catalog.RemoveOverlay(id)
+            return RetainCatalogMutation(catalog, "remove-overlay", onComplete,
+                catalog.RemoveOverlay(id))
         end
         return false, "build catalog unavailable"
     end
 
-    local function SetTombstone(id, tombstone, options)
+    local function SetTombstone(id, tombstone, options, onComplete)
         local catalog = Catalog()
         if catalog and type(catalog.SetTombstone) == "function" then
-            return catalog.SetTombstone(id, tombstone, options)
+            return RetainCatalogMutation(catalog, "set-tombstone", onComplete,
+                catalog.SetTombstone(id, tombstone, options))
         end
         return false, "build catalog unavailable"
     end
@@ -1276,13 +1320,33 @@ function Controller.New(options)
                     }
             if RefreshBuildIdentity(record) then
                 local catalogBefore = CatalogStats()
+                local completionBefore
                 savedImportStats.catalogPuts = savedImportStats.catalogPuts + 1
-                local saved = SaveBuild(record)
+                local saved, saveWhy, ticket = SaveBuild(record,
+                    function(outcome)
+                        if job.pendingCatalog == outcome then
+                            job.pendingCatalog = nil
+                        end
+                        if savedImportJob ~= job then return end
+                        RecordCatalogDelta(completionBefore or CatalogStats())
+                        if outcome.committed == true then
+                            job.changed = job.changed + 1
+                            job.unreportedChanged =
+                                (job.unreportedChanged or 0) + 1
+                            job.buildRevision = BuildRevision()
+                            savedImportStats.writes =
+                                savedImportStats.writes + 1
+                        end
+                    end)
                 RecordCatalogDelta(catalogBefore)
+                completionBefore = CatalogStats()
                 if saved then
                     job.changed = job.changed + 1
                     job.buildRevision = BuildRevision()
                     savedImportStats.writes = savedImportStats.writes + 1
+                elseif saveWhy == "ROOT_MUTATION_PENDING"
+                    and type(ticket) == "table" then
+                    job.pendingCatalog = ticket
                 end
             end
         end
@@ -1291,6 +1355,7 @@ function Controller.New(options)
     local function PumpSavedImport(limit)
         local job = savedImportJob
         if not job then return 0, false end
+        if job.pendingCatalog then return 0, true end
         local receiving = Nexus and Nexus.Sync and Nexus.Sync.IsReceiving
             and Nexus.Sync.IsReceiving() or false
         if receiving then
@@ -1304,10 +1369,13 @@ function Controller.New(options)
             if not restarted then return 0, true end
         end
         limit = math.max(1, math.min(25, tonumber(limit) or 25))
+        local unreported = job.unreportedChanged or 0
+        job.unreportedChanged = 0
         local changedBefore, candidates = job.changed, 0
         savedImportStats.pumps = savedImportStats.pumps + 1
         local work = 0
-        while work < limit and savedImportJob == job do
+        while work < limit and savedImportJob == job
+            and not job.pendingCatalog do
             if job.phase == "slots" then
                 if not job.current then
                     local slot = job.keys[job.index]
@@ -1381,7 +1449,8 @@ function Controller.New(options)
         savedImportStats.workUnits = savedImportStats.workUnits + work
         savedImportStats.maxWorkPerPump = math.max(
             savedImportStats.maxWorkPerPump, work)
-        return job.changed - changedBefore, savedImportJob ~= nil
+        return unreported + job.changed - changedBefore,
+            savedImportJob ~= nil
     end
 
     -- Mirror the current character's server Saved Builds into the personal
@@ -1606,9 +1675,13 @@ function Controller.New(options)
     -- Ensure a personal-best Echo snapshot has a copyable community build page.
     -- Existing manual or automatic builds with the exact fingerprint are reused;
     -- a new deterministic record-loadout page is created only when none exists.
-    function M.EnsureDpsBuildForEchoes(echoes, category, record)
+    function M.EnsureDpsBuildForEchoes(echoes, category, record, onComplete)
         local D = Nexus.DpsCapture
         if not (D and D.GetEchoKey) then return nil end
+        if type(onComplete) ~= "function" and type(record) == "table"
+            and type(record._catalogBuildCompletion) == "function" then
+            onComplete = record._catalogBuildCompletion
+        end
         for _, echo in ipairs(type(echoes) == "table" and echoes or {}) do
             if type(echo) == "table" and (echo.locked
                 or (echo.sourceRole ~= nil
@@ -1626,6 +1699,25 @@ function Controller.New(options)
         local explicitId = record and (record.buildId or record.b)
         if type(explicitId) ~= "string" or explicitId == "" then explicitId = nil end
         local catalog = Catalog()
+        local function SavedCompletion(id, build, broadcastOnComplete)
+            if not broadcastOnComplete
+                and type(onComplete) ~= "function" then return nil end
+            return function(outcome)
+                if outcome.committed == true then
+                    if broadcastOnComplete
+                        and Identity.VerifiedOwnerKey(build) then
+                        BroadcastIfPossible(build)
+                    end
+                    if type(onComplete) == "function" then
+                        onComplete(id, build)
+                    end
+                else
+                    if type(onComplete) == "function" then
+                        onComplete(nil, nil, outcome.reason)
+                    end
+                end
+            end
+        end
         if catalog and type(catalog.FindExactFingerprint) == "function" then
             local recoveredId, recovered = catalog.FindExactFingerprint(key)
             local evidence = Nexus and Nexus.LoadoutEvidence
@@ -1746,8 +1838,9 @@ function Controller.New(options)
                 explicitExisting.description = "Automatically completed from a compatible DPS record. Exact Echo IDs and stack quantities are preserved for copying and comparison."
                 explicitExisting.lastModified = NextStamp(
                     explicitExisting.lastModified or explicitExisting.postedAt or 0)
-                local saved = SaveBuild(explicitExisting)
-                if not saved then return nil end
+                local saved, saveWhy = SaveBuild(explicitExisting,
+                    SavedCompletion(explicitId, explicitExisting, true))
+                if not saved then return nil, nil, saveWhy end
                 if Identity.VerifiedOwnerKey(explicitExisting) then
                     BroadcastIfPossible(explicitExisting)
                 end
@@ -1755,8 +1848,9 @@ function Controller.New(options)
                 explicitExisting.lastModified = NextStamp(
                     explicitExisting.lastModified
                         or explicitExisting.postedAt or 0)
-                local saved = SaveBuild(explicitExisting)
-                if not saved then return nil end
+                local saved, saveWhy = SaveBuild(explicitExisting,
+                    SavedCompletion(explicitId, explicitExisting, true))
+                if not saved then return nil, nil, saveWhy end
                 BroadcastIfPossible(explicitExisting)
             end
             return explicitId, explicitExisting
@@ -1832,8 +1926,9 @@ function Controller.New(options)
             if changed then
                 ownAutoBuild.lastModified = NextStamp(
                     ownAutoBuild.lastModified or ownAutoBuild.postedAt)
-                local saved = SaveBuild(ownAutoBuild)
-                if not saved then return nil end
+                local saved, saveWhy = SaveBuild(ownAutoBuild,
+                    SavedCompletion(ownAutoId, ownAutoBuild, true))
+                if not saved then return nil, nil, saveWhy end
                 if Identity.VerifiedOwnerKey(ownAutoBuild) then
                     BroadcastIfPossible(ownAutoBuild)
                 end
@@ -1875,8 +1970,9 @@ function Controller.New(options)
             end
         end
         if not RefreshBuildIdentity(build) then return nil end
-        local saved = SaveBuild(build)
-        if not saved then return nil end
+        local saved, saveWhy = SaveBuild(build,
+            SavedCompletion(id, build, true))
+        if not saved then return nil, nil, saveWhy end
         if Identity.VerifiedOwnerKey(build) then BroadcastIfPossible(build) end
         return id, build
     end
@@ -2301,6 +2397,14 @@ function Controller.New(options)
     end
 
     function M.PublishImportedBuild(id)
+        local prior = pendingPublications[id]
+        if prior then
+            if prior.state == "pending" then
+                return nil, "ROOT_MUTATION_PENDING"
+            end
+            pendingPublications[id] = nil
+            return prior.ok, prior.value
+        end
         local source = LoadBuild(id)
         if Identity.SavedMirrorKind(source) ~= "saved" then
             return false, "not a saved loadout"
@@ -2355,21 +2459,58 @@ function Controller.New(options)
         if #lockedEchoes > 0 then record.lockedEchoes = lockedEchoes end
         local identityOk, identityErr = RefreshBuildIdentity(record)
         if not identityOk then return false, identityErr end
-        local recordSaved, recordSaveWhy = SaveBuild(record)
-        if not recordSaved then
-            return false, recordSaveWhy or "build storage refused"
-        end
         source.publishedBuildId = publishedId
         source.recordBuildId = publishedId
         source.lastPublishedAt = stamp
-        local sourceSaved, sourceSaveWhy = SaveBuild(source)
-        if not sourceSaved then
-            return false, sourceSaveWhy or "saved-loadout storage refused"
+        local operation = {state="pending",ok=nil,value=nil,finalized=false}
+        local function Finish(ok, value)
+            if operation.finalized then return end
+            operation.finalized = true
+            operation.state, operation.ok, operation.value = "complete", ok,
+                value
+            if not ok then return end
+            BroadcastIfPossible(record)
+            local D = Nexus.DpsCapture
+            if D and D.BroadcastBestForBuild then
+                pcall(D.BroadcastBestForBuild, publishedId)
+            end
         end
-        BroadcastIfPossible(record)
-        local D = Nexus.DpsCapture
-        if D and D.BroadcastBestForBuild then pcall(D.BroadcastBestForBuild, publishedId) end
-        return true, publishedId
+        local function SaveSource()
+            local sourceSaved, sourceSaveWhy = SaveBuild(source,
+                function(outcome)
+                    if outcome.committed == true then
+                        Finish(true, publishedId)
+                    else
+                        Finish(false, outcome.reason
+                            or "saved-loadout storage refused")
+                    end
+                end)
+            if sourceSaved then
+                Finish(true, publishedId)
+                return true, publishedId
+            end
+            if sourceSaveWhy == "ROOT_MUTATION_PENDING" then
+                pendingPublications[id] = operation
+                return nil, sourceSaveWhy
+            end
+            Finish(false, sourceSaveWhy or "saved-loadout storage refused")
+            return false, operation.value
+        end
+        local recordSaved, recordSaveWhy = SaveBuild(record,
+            function(outcome)
+                if outcome.committed == true then
+                    SaveSource()
+                else
+                    Finish(false, outcome.reason or "build storage refused")
+                end
+            end)
+        if recordSaved then return SaveSource() end
+        if recordSaveWhy == "ROOT_MUTATION_PENDING" then
+            pendingPublications[id] = operation
+            return nil, recordSaveWhy
+        end
+        Finish(false, recordSaveWhy or "build storage refused")
+        return false, operation.value
     end
 
     function M.EditBuild(id, title, description, discordLink)
@@ -2510,6 +2651,10 @@ function Controller.New(options)
                 author=tostring(b.author or ""),
                 localOnly=not owner or nil,
             }, {source="local"})
+            if tombstoned == nil and tombstoneWhy == "ROOT_MUTATION_PENDING" then
+                outcome.storageReason = tombstoneWhy
+                return false, outcome
+            end
             if tombstoned then tombstoneWhy = nil end
         end
         local _, removeWhy = RemoveOverlay(id)

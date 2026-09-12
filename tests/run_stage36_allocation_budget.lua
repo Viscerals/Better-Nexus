@@ -292,6 +292,25 @@ local Store = Nexus.Store
 local Catalog = Nexus.BuildCatalog
 local Compaction = Nexus.DataCompaction
 
+local function AwaitCatalogMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        Control(type(ticket) == "table",
+            "pending catalog edit returned no mutation ticket")
+        for _ = 1, Catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            Catalog.PumpRootAdmission()
+        end
+        Control(ticket.state ~= "pending",
+            "represented-data edit did not reach a terminal catalog result")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local function PumpCatalogSlice()
+    if Catalog.RootState().candidate then Catalog.PumpRootAdmission() end
+end
+
 local function Copy(value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -364,10 +383,11 @@ Desired(Scheduler.Pending("data-compaction") ~= nil,
 
 local edited = assert(Catalog.Get("budget-001"))
 edited.title,edited.lastModified = "Edited during compaction",800
-Control(Catalog.Put(edited),
+Control(AwaitCatalogMutation(Catalog.Put(edited)),
     "represented-data edit was refused during incremental compaction")
 local pumpGuard = 0
 while Compaction.Stats().pending do
+    PumpCatalogSlice()
     local state = Compaction.Pump()
     pumpGuard = pumpGuard + 1
     Control(state.lastPumpWork <= state.workBudget,
@@ -508,6 +528,7 @@ do
     H.RebindAuthorityV1("SOURCE_REBIND_REQUIRED")
     local guard = 0
     while Compaction.Stats().pending do
+        PumpCatalogSlice()
         Compaction.Pump()
         guard = guard + 1
         Control(guard < 1000,"owner replacement migration did not converge")
@@ -557,7 +578,9 @@ do
         sourceVersion="test",builds={}}
     H.BootstrapStore()
     local providerGuard = 0
-    while Compaction.Stats().pending do
+    while Compaction.Stats().pending
+        and Catalog.RootState().state ~= "ROOT_INVALIDATED" do
+        PumpCatalogSlice()
         Compaction.Pump()
         providerGuard = providerGuard + 1
         Control(providerGuard < 1000,"provider verification did not converge")
@@ -588,7 +611,15 @@ do
             and providerRaw.evidenceKey == nil
             and Catalog.Get("provider-row") == nil
             and Catalog.RootState().state == "ROOT_INVALIDATED",
-        "post-provider raw write was not caught as current-source drift")
+        string.format(
+            "post-provider raw write was not caught as current-source drift: inserted=%s version=%s row=%s echoes=%s evidenceKey=%s public=%s root=%s reason=%s",
+            tostring(inserted), tostring(providerDb.dataCompaction.version),
+            tostring(providerRaw ~= nil),
+            tostring(providerRaw and type(providerRaw.echoes)),
+            tostring(providerRaw and providerRaw.evidenceKey),
+            tostring(Catalog.Get("provider-row") ~= nil),
+            tostring(Catalog.RootState().state),
+            tostring(Catalog.RootState().reason)))
     H.RebindCatalog(providerDb)
     local providerHydrated = Catalog.Get("provider-row")
     Desired(providerHydrated
@@ -625,6 +656,7 @@ do
     Compaction.Init(providerDb)
     local providerGuard = 0
     while Compaction.Stats().pending do
+        PumpCatalogSlice()
         Compaction.Pump()
         providerGuard = providerGuard + 1
         Control(providerGuard < 1000,
@@ -662,6 +694,7 @@ do
     H.BootstrapStore()
     local futureGuard = 0
     while not futureSnapshot and Compaction.Stats().pending do
+        PumpCatalogSlice()
         Compaction.Pump()
         futureGuard = futureGuard + 1
         Control(futureGuard < 1000,
@@ -705,6 +738,7 @@ do
     H.BootstrapStore()
     local firstGuard = 0
     while healthChecks == 0 do
+        PumpCatalogSlice()
         Compaction.Pump()
         firstGuard = firstGuard + 1
         Control(firstGuard < 1000,
@@ -718,6 +752,7 @@ do
         end)
     local lateGuard = 0
     while Compaction.Stats().pending do
+        PumpCatalogSlice()
         Compaction.Pump()
         lateGuard = lateGuard + 1
         Control(lateGuard < 1000,
@@ -734,6 +769,7 @@ do
     Compaction.Init(providerDb)
     local recoveryGuard = 0
     while Compaction.Stats().pending do
+        PumpCatalogSlice()
         Compaction.Pump()
         recoveryGuard = recoveryGuard + 1
         Control(recoveryGuard < 1000,
@@ -780,6 +816,7 @@ do
     Compaction.Init(schemaDb)
     local metaGuard = 0
     while Compaction.Stats().pending do
+        PumpCatalogSlice()
         Compaction.Pump()
         metaGuard = metaGuard + 1
         Control(metaGuard < 1000,"restored compaction owner did not resume")
@@ -838,6 +875,7 @@ do
     H.BootstrapStore()
     local realNext, maxNextCalls, deepGuard = next,0,0
     while Compaction.Stats().pending do
+        PumpCatalogSlice()
         local calls = 0
         next = function(...)
             calls = calls + 1
@@ -855,7 +893,11 @@ do
     next = realNext
     Desired(maxNextCalls <= 32
             and deepDb.dataCompaction.version == 1,
-        "deep DFS traversal exceeded its declared per-pump work budget")
+        string.format(
+            "deep DFS traversal exceeded its declared per-pump work budget: nextCalls=%d version=%s root=%s phase=%s",
+            maxNextCalls, tostring(deepDb.dataCompaction.version),
+            tostring(Catalog.RootState().state),
+            tostring(Compaction.Stats().phase)))
 end
 
 local summary = string.format(

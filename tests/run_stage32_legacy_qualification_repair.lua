@@ -86,6 +86,55 @@ local function DpsRow(player, category, buildId, fingerprint, echoes, fields)
     return row
 end
 
+local function PendingOwnerDriftProof()
+    for _, direction in ipairs({"database", "bundle"}) do
+        local rows = {}
+        for index = 1, 9 do
+            local id = "pending-owner-" .. index
+            rows[id] = Build(id, Fingerprint(850000 + index * 10), Echoes(850000 + index * 10))
+        end
+        local fingerprint, echoes = Fingerprint(860000), Echoes(860000)
+        local db = {communityBuilds=rows, syncTombstones={},
+            dpsCapture={characterBest={
+                dummy={owner=DpsRow("PendingPeer", "dummy", "missing", fingerprint, echoes)},
+                lk={owner=DpsRow("PendingPeer", "lk", "missing", fingerprint, echoes)},
+            }, personalBest={}, buildBest={}}}
+        NexusDB = db
+        dofile("core/DpsCapture.lua")
+        H.AdmitCatalogV1(db)
+        Nexus.DpsCapture.Init({}, {})
+        dofile("core/LegacyQualificationRepair.lua")
+        local repair, catalog = Nexus.LegacyQualificationRepair, Nexus.BuildCatalog
+        assert(repair.Request("pending-owner-drift"), "pending owner fixture did not start")
+        for _ = 1, 1000 do
+            repair.Pump(25)
+            if catalog.RootState().candidate then break end
+        end
+        assert(catalog.RootState().candidate, "pending owner fixture reached no catalog transaction")
+        local ticket
+        for _ = 1, catalog.Budget().maximumPumps do
+            ticket = catalog.PumpRootAdmission()
+            if ticket.state ~= "pending" then break end
+        end
+        assert(ticket.state == "committed" and ticket.database == db,
+            "pending owner fixture did not commit its exact catalog ticket")
+        if direction == "database" then NexusDB = {detached=true}
+        else db.authorityBundle = {replaced=true} end
+        local before, otherBefore = Snapshot(db), Snapshot(NexusDB)
+        repair.Pump(25)
+        assert(Snapshot(db) == before and Snapshot(NexusDB) == otherBefore,
+            "legacy pending completion wrote metadata after " .. direction .. " drift")
+        assert(repair.Stats().pending == false and repair.Stats().lastReason == "SOURCE_DRIFT",
+            "legacy pending owner did not stop on " .. direction .. " drift")
+    end
+    print("Legacy pending owner: exact database and bundle drift preserve bytes -- 2/2 OK")
+end
+
+if os.getenv("BN_LEGACY_PENDING_DRIFT_ONLY") == "1" then
+    PendingOwnerDriftProof()
+    return
+end
+
 local builds, dummy, lk = {}, {}, {}
 local collisionIds = {}
 local RECOVERY_COUNT = 225
@@ -214,6 +263,22 @@ dofile("core/LegacyQualificationRepair.lua")
 
 local R, Catalog = Nexus.Revisions, Nexus.BuildCatalog
 local Repair = Nexus.LegacyQualificationRepair
+local function PumpRepair(limit)
+    Catalog.PumpRootAdmission()
+    local done = Repair.Pump(limit)
+    -- One logical owner step may await a catalog transaction. Model each
+    -- intervening scheduler turn explicitly: one catalog slice, then one
+    -- repair slice. The existing 1,000-step owner bounds remain unchanged.
+    local bound = Catalog.Budget().maximumPumps
+    local turns = 0
+    while not done and Catalog.RootState().candidate do
+        assert(turns < bound, "pending repair exceeded the catalog construction bound")
+        Catalog.PumpRootAdmission()
+        done = Repair.Pump(limit)
+        turns = turns + 1
+    end
+    return done
+end
 local buildRevision = R.BUILD_LIBRARY_CHANGED
 local dpsRevision = R.DPS_CHANGED
 local strictDummy = Copy(dummy[utf8Player:lower()])
@@ -271,8 +336,9 @@ local requested, why = Repair.Request("login")
 assert(requested and why == "scheduled", "initial repair was not scheduled")
 local partialPumps, partialRecovered = 0, 0
 repeat
-    assert(Repair.Pump(25) == false,
-        "partial repair unexpectedly completed before reload")
+    assert(PumpRepair(25) == false,
+        "partial repair unexpectedly completed before reload: "
+            .. Snapshot(Repair.Stats()))
     partialPumps = partialPumps + 1
     partialRecovered = 0
     for _, row in pairs(H.DurableBuilds()) do
@@ -280,7 +346,12 @@ repeat
             partialRecovered = partialRecovered + 1
         end
     end
-    assert(partialPumps < 1000, "repair never reached a persisted write")
+    -- Root reconstruction is now metered by the normative 64-edge, 64-node,
+    -- 2,048-byte ledgers. This guard proves convergence, not one-call speed;
+    -- per-call work remains enforced by the catalog work-budget fixture.
+    assert(partialPumps < 1000, "repair never reached a persisted write: "
+        .. Snapshot(Repair.Stats()) .. " catalog="
+        .. Snapshot(Catalog.RootState()))
 until partialRecovered >= 12
 local interruptedMeta = NexusDB.legacyQualificationRepair
 local interruptedWorkUnits = interruptedMeta.workUnits
@@ -311,20 +382,22 @@ assert(resumed and resumedWhy == "scheduled"
 local pumps = 0
 while (tonumber(NexusDB.legacyQualificationRepair.pendingWrites) or 0)
         <= partialRecovered do
-    assert(Repair.Pump(25) == false,
-        "resumed repair completed before exercising write interruption")
+    assert(PumpRepair(25) == false,
+        "resumed repair completed before exercising write interruption: "
+            .. Snapshot(Repair.Stats()) .. " meta="
+            .. Snapshot(NexusDB.legacyQualificationRepair))
     pumps = pumps + 1
     assert(pumps < 1000, "resumed repair never reached another staged write")
 end
 local pendingBeforeRevisionRestart =
     NexusDB.legacyQualificationRepair.pendingWrites
 assert(R.Advance(dpsRevision,{scope="metadata",reason="partial write interrupt"}))
-assert(Repair.Pump(1) == false
+assert(PumpRepair(1) == false
         and NexusDB.legacyQualificationRepair.pendingWrites
             == pendingBeforeRevisionRestart
         and Repair.Stats().restarts == 1,
     "revision restart lost or published already staged writes")
-while not Repair.Pump(25) do
+while not PumpRepair(25) do
     pumps = pumps + 1
     assert(pumps < 1000, "bounded legacy repair did not terminate")
 end
@@ -345,7 +418,8 @@ assert(catalogAllCalls == 0
         and catalogAfter.summarySnapshots == catalogBefore.summarySnapshots,
     "repair copied the complete catalog instead of using indexed lookups")
 assert(R.Get(buildRevision) == buildRevisionBefore + 1,
-    "recovered identities did not publish exactly one build revision")
+    string.format("recovered identities published build revision %d, expected %d",
+        R.Get(buildRevision), buildRevisionBefore + 1))
 local completedBuildEpochAfter = Catalog.RecordRevision("exact-current")
 local pendingEpochAfter, pendingRecordAfter = Catalog.RecordRevision(firstRecoveredId)
 assert(completedBuildEpochAfter == completedBuildEpochBefore + 1
@@ -534,10 +608,10 @@ local refreshRequested = Repair.Stats()
 assert(refreshRequested.requested == requestsBeforeRefresh + 1
         and refreshRequested.pending,
     "coalesced post-receive refresh did not schedule legacy repair")
-assert(Repair.Pump(5) == false)
+assert(PumpRepair(5) == false)
 assert(R.Advance(dpsRevision,{scope="metadata",reason="interrupt again"}))
-assert(Repair.Pump(5) == false)
-while not Repair.Pump(25) do
+assert(PumpRepair(5) == false)
+while not PumpRepair(25) do
     pumps = pumps + 1
     assert(pumps < 2000, "revision-restarted repair did not terminate")
 end
@@ -615,3 +689,5 @@ print(string.format(
     "Stage 32.2 legacy repair: recovered=%d (>200) reused=%d rejected=%d restarts=%d publications=%d maxWork=%d pages=20+5 -- OK",
     afterRestart.recovered,afterRestart.reused,afterRestart.rejected,
     afterRestart.restarts,afterRestart.published,afterRestart.maxWork))
+
+PendingOwnerDriftProof()

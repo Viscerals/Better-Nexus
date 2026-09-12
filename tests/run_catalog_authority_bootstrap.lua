@@ -1030,7 +1030,7 @@ end
 -- Holds a LIVE coordinator and a LIVE catalog and samples the catalog's public
 -- surface between pumps. `interceptor` runs after each pump so a case can
 -- perturb the source mid-bootstrap.
-local function PublicationTrace(db, interceptor)
+local function PublicationTrace(db, interceptor, turnBound)
     NexusDB, WishlistRealizerDB = db, nil
     local Store = Nexus.Store
     local coordinator = Nexus.MainInternals.AuthorityBootstrap.New()
@@ -1051,7 +1051,7 @@ local function PublicationTrace(db, interceptor)
     local result = Store.Init(coordinator)
     Sample()
     while type(result) == "table" and result.state == "pending"
-        and turns < H.BOOTSTRAP_TURN_BOUND do
+        and turns < (turnBound or H.BOOTSTRAP_TURN_BOUND) do
         turns = turns + 1
         result = coordinator:PumpAuthorityBootstrap()
         Sample()
@@ -1238,10 +1238,10 @@ local SMT_ROW = "smtRetention"
 -- can pass or fail for the wrong reason. Accepts either a row count (the shared
 -- PublicationDatabase) or an explicit database, so a case needing special rows
 -- does not have to perturb the fixture PUB-01..04 assert against.
-local function ReadyCoordinator(rowsOrDb)
+local function ReadyCoordinator(rowsOrDb, turnBound)
     local db = type(rowsOrDb) == "table" and rowsOrDb
         or PublicationDatabase(rowsOrDb or 3)
-    local trace, result, coordinator = PublicationTrace(db)
+    local trace, result, coordinator = PublicationTrace(db, nil, turnBound)
     Check(type(result) == "table" and result.state == "ready"
         and coordinator ~= nil
         and tostring(coordinator:State()) == "STORE_READY",
@@ -1317,6 +1317,114 @@ function()
     if lastSeenBefore ~= nil then
         Check(accountsAfter[ownerKey].lastSeen >= lastSeenBefore,
             "the committed registration moved lastSeen backwards")
+    end
+end)
+
+Case("SMT-W2-01", "Store waits for each pending maintenance owner", function()
+    for _, route in ipairs({"Retention", "Compaction"}) do
+        local coordinator = ReadyCoordinator(3)
+        local begin, pump = StoreMutationEntries(coordinator)
+        local field = route == "Retention" and "DataRetention" or "DataCompaction"
+        local saved, calls = Nexus[field], 0
+        S.pendingRestores[#S.pendingRestores + 1] = function() Nexus[field] = saved end
+        local function OwnerStep()
+            calls = calls + 1
+            return {pending=calls < 3}, calls == 3
+        end
+        Nexus[field] = {Enforce=OwnerStep, Pump=OwnerStep}
+        Check(begin(coordinator, {route=route}).state == "pending",
+            route .. " did not submit")
+        Check(pump(coordinator).state == "pending" and calls == 0,
+            route .. " build phase ran the commit owner")
+        for expected = 1, 2 do
+            local result = pump(coordinator)
+            Check(result.state == "pending" and calls == expected
+                    and coordinator:State() == "STORE_MUTATION_FINAL_COMMIT_PENDING",
+                route .. " acknowledged pcall success before terminal owner completion")
+            Check(begin(coordinator, {route=route}).reason == "STORE_MUTATION_BUSY",
+                route .. " released the pending mutation to a second request")
+        end
+        local result = pump(coordinator)
+        Check(calls == 3 and result.state == "ready"
+                and result.result == "MUTATION_COMMITTED",
+            route .. " did not settle its terminal owner result")
+        pump(coordinator)
+        Check(calls == 3, route .. " repeated a terminal owner action")
+        Nexus[field] = saved
+    end
+end)
+
+Case("SMT-W2-02", "Store refuses failed maintenance owner results", function()
+    for _, route in ipairs({"Retention", "Compaction"}) do
+        local coordinator = ReadyCoordinator(3)
+        local begin, pump = StoreMutationEntries(coordinator)
+        local field = route == "Retention" and "DataRetention" or "DataCompaction"
+        local saved = Nexus[field]
+        S.pendingRestores[#S.pendingRestores + 1] = function() Nexus[field] = saved end
+        local function Refuse() return {pending=false, blocked=true, reason="CANDIDATE_FAILED"}, false end
+        Nexus[field] = {Enforce=Refuse, Pump=Refuse}
+        begin(coordinator, {route=route})
+        pump(coordinator)
+        local result = pump(coordinator)
+        Check(result.state == "ready" and result.result == "CANDIDATE_FAILED",
+            route .. " acknowledged a refused owner result as committed")
+        Nexus[field] = saved
+    end
+end)
+
+Case("SMT-W2-03", "Store binds the exact terminal retention bundle", function()
+    S.pendingRestores[#S.pendingRestores + 1] = function() S.Reload() end
+    for _, tamper in ipairs({false, true}) do
+        S.Reload()
+        local db = PublicationDatabase(96)
+        db.communityBuilds[SMT_ROW] = {id=SMT_ROW, title="Pending retention row",
+            author="Boganic", class="MAGE", ownerKey="boganic@ebonhold",
+            realm="ebonhold", ownerVerified=true, isMine=true,
+            postedAt=10, lastModified=10, echoes={{spellId=410099, stacks=1}}}
+        local coordinator = ReadyCoordinator(db, 20000)
+        local catalog = Nexus.BuildCatalog
+        local ok, why, ticket = catalog.SetTombstone(SMT_ROW,
+            {stamp=now, author="Boganic", ownerKey="boganic@ebonhold", ownerVerified=true},
+            {source="local"})
+        if ok == nil and why == "ROOT_MUTATION_PENDING" then
+            for _ = 1, 20000 do
+                if ticket.state ~= "pending" then break end
+                catalog.PumpRootAdmission()
+            end
+            ok = ticket.committed
+        end
+        Check(ok == true, "pending retention fixture could not create its tombstone")
+        local originalNow = now
+        S.pendingRestores[#S.pendingRestores + 1] = function() now = originalNow end
+        now = now + 180 * 24 * 60 * 60 + 1
+        local before = rawget(db, "authorityBundle")
+        local begin, pump = StoreMutationEntries(coordinator)
+        begin(coordinator, {route="Retention"})
+        pump(coordinator)
+        local pending = pump(coordinator)
+        Check(pending.state == "pending" and rawget(db, "authorityBundle") == before,
+            "Store did not retain the real pending retention transaction: "
+                .. tostring(pending.state) .. "/" .. tostring(pending.result)
+                .. " root=" .. tostring(catalog.RootState().state))
+        local observed
+        for _ = 1, 20000 do
+            observed = catalog.PumpRootAdmission()
+            if type(observed) == "table" and observed.state ~= "pending" then break end
+        end
+        Check(observed.committed == true and observed.bundle == rawget(db, "authorityBundle")
+                and observed.database == db and observed.bundle ~= before,
+            "retention did not settle one exact bundle receipt")
+        if tamper then
+            local replacement = {}
+            for key, value in pairs(observed.bundle) do replacement[key] = value end
+            rawset(db, "authorityBundle", replacement)
+        end
+        local result = pump(coordinator)
+        Check(result.result == (tamper and "SOURCE_DRIFT" or "MUTATION_COMMITTED"),
+            "Store accepted the wrong bundle or refused its own completed owner")
+        Check(observed.bundle.transactionGeneration == before.transactionGeneration + 1,
+            "retention advanced the bundle generation more than once")
+        now = originalNow
     end
 end)
 

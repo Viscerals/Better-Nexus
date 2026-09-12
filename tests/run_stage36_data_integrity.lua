@@ -36,6 +36,91 @@ local function Control(ok, label)
     assert(ok, "green control failed: " .. tostring(label))
 end
 
+local scheduledCatalogTicket
+local scheduledCatalogPumps = -1
+
+local function PumpCatalogSlice()
+    if not Catalog.RootState().candidate then
+        scheduledCatalogTicket, scheduledCatalogPumps = nil, -1
+        return false
+    end
+    local outcome = Catalog.PumpRootAdmission()
+    assert(type(outcome) == "table",
+        "fixture catalog work returned no result")
+    if outcome.committed ~= nil then
+        if scheduledCatalogTicket then
+            assert(outcome == scheduledCatalogTicket,
+                "fixture catalog work changed tickets")
+            local current = tonumber(outcome.pumps)
+            assert(current and current > scheduledCatalogPumps,
+                "fixture catalog work made no scheduler progress")
+            scheduledCatalogPumps = current
+        elseif outcome.state == "pending" then
+            scheduledCatalogTicket = outcome
+            scheduledCatalogPumps = tonumber(outcome.pumps) or -1
+        end
+        assert(outcome.state ~= "failed" and outcome.committed ~= false
+                or outcome.state == "pending",
+            outcome.reason or "fixture catalog mutation failed")
+        if outcome.state ~= "pending" then
+            scheduledCatalogTicket, scheduledCatalogPumps = nil, -1
+        end
+    else
+        assert(outcome.state ~= "failed",
+            outcome.reason or "fixture catalog admission failed")
+    end
+    return outcome
+end
+
+local function AwaitCatalog()
+    local limit = Catalog.Budget().maximumPumps
+    local pumps = 0
+    while Catalog.RootState().candidate do
+        pumps = pumps + 1
+        assert(pumps <= limit,
+            "fixture catalog work exhausted its pump bound")
+        PumpCatalogSlice()
+    end
+    assert(not Catalog.RootState().candidate,
+        "fixture catalog work retained a candidate after its pump bound")
+    return Catalog.RootState()
+end
+
+local function AwaitCatalogMutation(ok, why, ticket)
+    if ok == nil then
+        assert(why == "ROOT_MUTATION_PENDING",
+            "fixture mutation returned unknown pending result: " .. tostring(why))
+        assert(type(ticket) == "table" and ticket.state == "pending",
+            "pending mutation returned no live ticket")
+        scheduledCatalogTicket = ticket
+        scheduledCatalogPumps = tonumber(ticket.pumps) or -1
+        AwaitCatalog()
+        assert(ticket.state == "committed" or ticket.state == "failed",
+            "fixture mutation ended in unknown state: " .. tostring(ticket.state))
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    assert(ok == true or ok == false,
+        "fixture mutation returned unknown result: " .. tostring(ok))
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    AwaitCatalog()
+    return AwaitCatalogMutation(Catalog.Put(record, options))
+end
+
+local function EnsureDpsBuildTerminal(controller, ...)
+    AwaitCatalog()
+    local id, build, why = controller.EnsureDpsBuildForEchoes(...)
+    if id == nil and build == nil and why == "ROOT_MUTATION_PENDING" then
+        AwaitCatalog()
+        id, build, why = controller.EnsureDpsBuildForEchoes(...)
+    end
+    assert(why ~= "ROOT_MUTATION_PENDING",
+        "DPS build fixture did not expose its terminal result")
+    return id, build, why
+end
+
 local clock = 1000
 GetTime = function() return clock end
 time = function() return 50000 end
@@ -49,6 +134,7 @@ local function Pump(seconds, step)
     while clock < target - 0.000001 do
         local elapsed = math.min(step, target - clock)
         clock = clock + elapsed
+        PumpCatalogSlice()
         Sync.OnUpdate(elapsed)
     end
 end
@@ -129,7 +215,11 @@ local function DeliverSummary(sender, payload, context)
     if context then
         wire = wire .. "|" .. context.requester .. "|" .. context.requestId
     end
-    return Sync.HandleIncoming(wire, ActualSender(sender))
+    local result = Sync.HandleIncoming(wire, ActualSender(sender))
+    local pending = Catalog.RootState().candidate
+    AwaitCatalog()
+    if pending and Catalog.Get(payload.id) then result = true end
+    return result
 end
 
 local function DeliverBuild(sender, payload, context)
@@ -147,6 +237,9 @@ local function DeliverBuild(sender, payload, context)
         Control(#wire <= 255, "build fixture remains inside the real wire cap")
         result = Sync.HandleIncoming(wire, ActualSender(sender)) or result
     end
+    local pending = Catalog.RootState().candidate
+    AwaitCatalog()
+    if pending and Catalog.Get(payload.id) then result = true end
     return result
 end
 
@@ -166,6 +259,7 @@ local function DeliverDps(sender, transferId, record, context)
         Control(#wire <= 255, "DPS fixture remains inside the real wire cap")
         result = Sync.HandleIncoming(wire, ActualSender(sender)) or result
     end
+    AwaitCatalog()
     return result
 end
 
@@ -198,7 +292,7 @@ for _, case in ipairs(replacementCases) do
     local db = {communityBuilds={},syncTombstones={}}
     NexusDB = db
     Catalog.Init(db, Nexus.BundledBuilds)
-    Control(Catalog.Put(BuildRecord(id, completeEchoes, 1)) == true,
+    Control(PutTerminal(BuildRecord(id, completeEchoes, 1)) == true,
         case.name .. " setup stored complete record")
     -- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 394 and
     -- 4849). The durable row is the bundle's payload row; `db.communityBuilds`
@@ -213,7 +307,8 @@ for _, case in ipairs(replacementCases) do
             and Catalog.SyncState(id).delta ~= nil,
         case.name .. " setup warmed complete summary/index/Sync state")
     if case.refused then
-        local refusedOk, refusedWhy = Catalog.Put(BuildRecord(id, case.echoes, 2))
+        local refusedOk, refusedWhy = PutTerminal(
+            BuildRecord(id, case.echoes, 2))
         -- A refused candidate performs no durable payload write at all, so the
         -- bundle pointer, its payload map, and the row are all unchanged.
         Control(refusedOk == false and refusedWhy == case.refused
@@ -230,7 +325,7 @@ for _, case in ipairs(replacementCases) do
         -- are both replacements while the superseded graph stays byte-exact and
         -- the preserved legacy input is never written.
         local previousEchoes = rawIdentity.echoes
-        Control(Catalog.Put(BuildRecord(id, case.echoes, 2)) == true
+        Control(PutTerminal(BuildRecord(id, case.echoes, 2)) == true
                 and rawget(db, "authorityBundle") ~= bundleBefore
                 and H.DurableBuilds(db) ~= backing
                 and H.DurableBuilds(db)[id] ~= rawIdentity
@@ -264,14 +359,14 @@ do
     local db = {communityBuilds={},syncTombstones={}}
     NexusDB = db
     Catalog.Init(db, Nexus.BundledBuilds)
-    Control(Catalog.Put(BuildRecord(id, {}, 1)) == true,
+    Control(PutTerminal(BuildRecord(id, {}, 1)) == true,
         "incomplete setup stored")
     local legacyBacking = db.communityBuilds
     local backing = H.DurableBuilds(db)
     local rawIdentity = backing[id]
     Control(Catalog.GetSummary(id).ordinaryComplete == false,
         "incomplete setup was characterized before recovery")
-    Control(Catalog.Put(BuildRecord(id, completeEchoes, 2)) == true
+    Control(PutTerminal(BuildRecord(id, completeEchoes, 2)) == true
             and H.DurableBuilds(db) ~= backing
             and H.DurableBuilds(db)[id] ~= rawIdentity
             and backing[id] == rawIdentity
@@ -294,7 +389,7 @@ do
     local record = BuildRecord(id, completeEchoes, 3)
     record.ownerVerified = false
     record.relaySender = "RelayOne"
-    Control(Catalog.Put(record) == true,
+    Control(PutTerminal(record) == true,
         "unverified catalog fixture stored")
 
     local visible = Catalog.Get(id)
@@ -1162,7 +1257,7 @@ local community = Nexus.CommunityInternals.Controller.New({
 })
 local communityEchoes = {{spellId=651000,quality=3,stacks=1}}
 local communityKey = DPS.GetEchoKey(communityEchoes)
-local relayCommunityId = community.EnsureDpsBuildForEchoes(
+local relayCommunityId = EnsureDpsBuildTerminal(community,
     communityEchoes, "dummy", {
         player="CommunityOrigin",class="MAGE",
         ownerKey="communityorigin@ebonhold",ownerVerified=false,
@@ -1183,7 +1278,7 @@ Desired("provenance", relayCommunity
 
 -- An exact fingerprint is not ownership. A different direct sender may share
 -- the same loadout, but cannot use that collision to promote the ambient row.
-local collisionCommunityId = community.EnsureDpsBuildForEchoes(
+local collisionCommunityId = EnsureDpsBuildTerminal(community,
     communityEchoes, "dummy", {
     player="DifferentOwner",class="MAGE",
     ownerKey="differentowner@ebonhold",ownerVerified=true,
@@ -1205,7 +1300,7 @@ Desired("provenance", afterCommunityCollision
 -- The original direct owner can later establish authority over that exact
 -- Community row. Promotion clears relay provenance and restores normal Sync.
 local broadcastsBeforePromotion = #communityBroadcasts
-local promotedCommunityId = community.EnsureDpsBuildForEchoes(
+local promotedCommunityId = EnsureDpsBuildTerminal(community,
     communityEchoes, "dummy", {
         player="CommunityOrigin",class="MAGE",
         ownerKey="communityorigin@ebonhold",ownerVerified=true,
@@ -1268,7 +1363,8 @@ local function PumpSavedImport(label)
     Control(savedController.BeginSavedLoadoutImport(true) == true,
         label .. " began")
     local changed, pending = 0, true
-    for _ = 1, 20 do
+    for _ = 1, Catalog.Budget().maximumPumps do
+        PumpCatalogSlice()
         local delta
         delta, pending = savedController.PumpSavedLoadoutImport(25)
         changed = changed + (tonumber(delta) or 0)
@@ -1349,7 +1445,7 @@ Catalog.Init(claimDb, Nexus.BundledBuilds)
 H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, nil)
 local victimId = "victim-incomplete-build"
-Control(Catalog.Put({
+Control(PutTerminal({
         id=victimId,title="Victim Pending",author="VictimOwner",
         class="MAGE",postedAt=1,lastModified=1,echoes={},
         needsFullBuild=true,loadoutAvailable=false,
@@ -1372,12 +1468,14 @@ Nexus.CommunityBuilds = {
 }
 local claimantEchoes = {{spellId=653001,quality=3,stacks=1}}
 local claimantFingerprint = DPS.GetEchoKey(claimantEchoes)
-Control(DPS.ReceiveRecord({
+local claimantAccepted = DPS.ReceiveRecord({
         v=7,f=claimantFingerprint,h=DPS.GetEchoHash(claimantEchoes),
         e=claimantEchoes,c="dummy",d=275000,u=30,t=51001,
         p="DpsClaimant",l=80,k="MAGE",b=victimId,
         o="dpsclaimant@ebonhold",r="ebonhold",
-    }, "DpsClaimant-Ebonhold") == true,
+    }, "DpsClaimant-Ebonhold")
+AwaitCatalog()
+Control(claimantAccepted == true,
     "verified ownerless direct DPS fixture reached normal storage")
 local claimantRow = DPS.GetCharacterBest("dummy", "DpsClaimant")
 local claimantBuild = claimantRow and claimantRow.buildId

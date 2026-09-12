@@ -13,6 +13,10 @@ local SCHEMA_VERSION = 1
 local MAX_ENTRIES = 256
 local MAX_TOTAL_STACKS = 10000
 local MAX_CONFLICTS = 40
+-- One catalog pump may copy only this many existing pool memberships into a
+-- detached candidate. The catalog calls the existing CandidateStore seam once
+-- per bounded pump until it returns the complete replacement store.
+local CANDIDATE_COPY_SLICE = 64
 local boundDb, boundReadOnly
 local readOnlyEmptyStore = {schemaVersion=SCHEMA_VERSION + 1,entries={}}
 -- MASTER-RC-005: an open detached evidence candidate. While one is open this
@@ -162,28 +166,54 @@ end
 local function CandidateStore()
     if not candidate then return nil end
     if candidate.store then return candidate.store end
-    local live = CurrentDurableStore()
-    local replacement = {schemaVersion=SCHEMA_VERSION, entries={}}
-    if type(live) == "table" then
-        for key, value in pairs(live) do replacement[key] = value end
-        replacement.entries = {}
-        local entries = type(live.entries) == "table" and live.entries or {}
-        for key, value in pairs(entries) do replacement.entries[key] = value end
+    if not candidate.copy then
+        local live = CurrentDurableStore()
+        candidate.copy = {
+            live=type(live) == "table" and live or {},
+            replacement={schemaVersion=SCHEMA_VERSION, entries={}},
+            phase="store", cursor=nil, entries=nil,
+        }
     end
-    candidate.store = replacement
-    return replacement
+    local copy = candidate.copy
+    local copied = 0
+    for _ = 1, CANDIDATE_COPY_SLICE do
+        if copy.phase == "store" then
+            local key, value = next(copy.live, copy.cursor)
+            if key == nil then
+                copy.entries = type(copy.live.entries) == "table"
+                    and copy.live.entries or {}
+                copy.phase, copy.cursor = "entries", nil
+            else
+                copy.cursor = key
+                if key ~= "entries" then copy.replacement[key] = value end
+                copied = copied + 1
+            end
+        else
+            local key, value = next(copy.entries, copy.cursor)
+            if key == nil then
+                if copy.replacement.schemaVersion == nil then
+                    copy.replacement.schemaVersion = SCHEMA_VERSION
+                end
+                candidate.store, candidate.copy = copy.replacement, nil
+                return candidate.store, nil, copied
+            end
+            copy.cursor = key
+            copy.replacement.entries[key] = value
+            copied = copied + 1
+        end
+    end
+    return nil, "EVIDENCE_CANDIDATE_PENDING", copied
 end
 
-local function Store()
+local function Store(useCandidate)
     if type(NexusDB) == "table" and NexusDB ~= boundDb then
         Evidence.Init(NexusDB)
     elseif type(boundDb) ~= "table" then
         NexusDB = type(NexusDB) == "table" and NexusDB or {}
         Evidence.Init(NexusDB)
     end
-    if candidate and not boundReadOnly then
-        local staged = CandidateStore()
-        if staged then return staged end
+    if useCandidate and candidate and not boundReadOnly then
+        return CandidateStore()
     end
     if boundReadOnly and type(SelectedDurableStore()) ~= "table" then
         return readOnlyEmptyStore
@@ -244,14 +274,15 @@ function Evidence.CanonicalTupleOrder(left, right)
 end
 
 function Evidence.BeginCandidate()
-    if not candidate then candidate = {store=nil} end
+    if not candidate then candidate = {store=nil, copy=nil} end
     return true
 end
 
 -- The complete detached replacement store, or nil when this transaction interned
 -- nothing and the current durable store is carried through unchanged.
 function Evidence.CandidateStore()
-    return candidate and candidate.store or nil
+    if not candidate then return nil end
+    return CandidateStore()
 end
 
 -- The coordinator has already installed this exact table inside the published
@@ -410,7 +441,8 @@ function Evidence.Intern(source, claimedReference, options)
     if claimedReference ~= nil and tostring(claimedReference) ~= exact then
         RecordConflict("reference mismatch", claimedReference, exact)
     end
-    local store = Store()
+    local store, storeWhy = Store(true)
+    if not store then return nil, storeWhy end
     if boundReadOnly or tonumber(store.schemaVersion)
         and tonumber(store.schemaVersion) > SCHEMA_VERSION then
         return nil, "future evidence schema is read-only"
@@ -444,8 +476,10 @@ function Evidence.Resolve(reference, inline, options)
     end
     local storedNormalized
     if type(reference) == "string" and reference ~= "" then
-        local store = Store()
-        local entries = type(store.entries) == "table" and store.entries or {}
+        local store = Store(type(options) == "table"
+            and options.useCandidate == true)
+        local entries = type(store) == "table" and type(store.entries) == "table"
+            and store.entries or {}
         local stored = entries[reference]
         if stored ~= nil then
             storedNormalized = Evidence.Normalize(stored)
@@ -522,11 +556,12 @@ function Evidence.ReferenceDpsRow(row)
     return changed
 end
 
-function Evidence.ResolveDpsEchoes(row, locked)
+function Evidence.ResolveDpsEchoes(row, locked, useCandidate)
     if type(row) ~= "table" then return nil end
     local inlineField = locked and "lockedEchoes" or "echoes"
     local referenceField = locked and "lockedEvidenceKey" or "evidenceKey"
-    local options = locked and {forceLocked=true} or nil
+    local options = locked and {forceLocked=true} or {}
+    if useCandidate then options.useCandidate = true end
     local normalized = Evidence.Resolve(
         row[referenceField], row[inlineField], options)
     return ToDpsRows(normalized, locked == true)
@@ -560,7 +595,7 @@ end
 -- and a reference token alone are never completeness evidence. The returned
 -- row is fixed-shape and defensive; callers may project it but must not store
 -- it back as an implicit migration.
-function Evidence.OrdinaryCompleteness(row)
+function Evidence.OrdinaryCompleteness(row, options)
     local out = {
         complete=false,reason="absent",echoes=nil,evidenceKey=nil,
         fingerprint=nil,echoCount=0,
@@ -613,7 +648,7 @@ function Evidence.OrdinaryCompleteness(row)
         end
     end
     if not normalized then
-        normalized, exactOrWhy = Evidence.Resolve(row.evidenceKey, nil)
+        normalized, exactOrWhy = Evidence.Resolve(row.evidenceKey, nil, options)
     end
     if not normalized then
         if type(inline) == "table" and next(inline) == nil
@@ -814,10 +849,10 @@ function Evidence.ValidateLegacyFingerprintClaim(record, represented)
     }
 end
 
-function Evidence.ResolveBuildRow(row)
+function Evidence.ResolveBuildRow(row, options)
     if type(row) ~= "table" then return nil end
     local copy = DeepCopy(row)
-    local verdict = Evidence.OrdinaryCompleteness(row)
+    local verdict = Evidence.OrdinaryCompleteness(row, options)
     if verdict.complete then
         copy.echoes = type(row.echoes) == "table"
             and DeepCopy(row.echoes) or verdict.echoes

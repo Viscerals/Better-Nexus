@@ -46,7 +46,32 @@ NexusDB.dpsCapture.personalBest[poisonFp]={dummy={player="Explore",
 -- Raw seeding grants no authority: readmit the complete root once.
 H.RebindCatalog()
 
+local function AwaitCatalogIdle()
+ local catalog=Nexus.BuildCatalog
+ for _=1,4 do
+  local state=catalog.RootState()
+  if not state.candidate then return true end
+  assert(state.state=="ROOT_ADMITTED","class repair started outside an admitted root")
+  local ticket=catalog.PumpRootAdmission()
+  assert(type(ticket)=="table","class repair returned no mutation ticket")
+  local previous=tonumber(ticket.pumps) or -1
+  for _=1,catalog.Budget().maximumPumps do
+   if ticket.state~="pending" then break end
+   local observed=catalog.PumpRootAdmission()
+   assert(observed==ticket,"class repair changed tickets")
+   local current=tonumber(ticket.pumps)
+   assert(current and current>previous,"class repair made no scheduler progress")
+   previous=current
+  end
+  assert(ticket.state~="pending","class repair exhausted its pump bound")
+  assert(ticket.state=="committed" and ticket.committed,
+   ticket.reason or "class repair did not commit")
+ end
+ error("class repair produced too many sequential catalog candidates")
+end
+
 local board=DPS.GetDpsBoard("dummy")
+AwaitCatalogIdle()
 assert(#board==1 and board[1].class=="MAGE", "local historical row must repair to current character class")
 assert(H.DurableBuilds()[id].class=="MAGE", "linked automatic record page class must repair")
 assert(H.DurableBuilds()[id].title=="Mage Record Loadout", "untouched default title must repair")

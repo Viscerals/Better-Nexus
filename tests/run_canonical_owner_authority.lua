@@ -21,6 +21,53 @@ dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("core/DpsCapture.lua")
 
 local Codec, Sync, DPS = Nexus.Codec, Nexus.Sync, Nexus.DpsCapture
+
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then break end
+        catalog.PumpRootAdmission()
+    end
+    local state = catalog.RootState()
+    assert(not state.candidate and state.state == "ROOT_ADMITTED",
+        state.reason or "fixture catalog did not settle")
+end
+
+local rawHandleIncoming = Sync.HandleIncoming
+Sync.HandleIncoming = function(...)
+    SettleCatalog()
+    local ok, why = rawHandleIncoming(...)
+    if why == "ROOT_MUTATION_PENDING"
+        or Nexus.BuildCatalog.RootState().candidate then
+        SettleCatalog()
+        return true, why
+    end
+    return ok, why
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    local ok, why, ticket = Nexus.BuildCatalog.Put(record, options)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        SettleCatalog()
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local rawBroadcastDelete = Sync.BroadcastDelete
+Sync.BroadcastDelete = function(build)
+    SettleCatalog()
+    local ok, why, status = rawBroadcastDelete(build)
+    if why == "ROOT_MUTATION_PENDING" then
+        SettleCatalog()
+        status = Sync.GetDeleteStatus(build and build.id)
+        return status and status.accepted or false,
+            status and status.reason or why, status
+    end
+    return ok, why, status
+end
+
 time = function() return 50000 end
 NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={}}
 -- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
@@ -1095,7 +1142,7 @@ local stalePrepared = {
     class="MAGE",postedAt=400,lastModified=400,
     echoes={{spellId=200700,quality=3,stacks=1}},
 }
-assert(Catalog.Put(stalePrepared),
+assert(PutTerminal(stalePrepared),
     "stale prepared-build control could not seed its ordinary record")
 stalePrepared = assert(Catalog.Get(stalePrepared.id))
 local realRecordRevision = Catalog.RecordRevision
@@ -1108,7 +1155,7 @@ Catalog.RecordRevision = function(id)
         for key, value in pairs(stalePrepared) do private[key] = value end
         private.importedSavedBuild = true
         private.serverSlot = 77
-        assert(Catalog.Put(private),
+        assert(PutTerminal(private),
             "stale prepared-build control could not install its private replacement")
     end
     return epoch, revision

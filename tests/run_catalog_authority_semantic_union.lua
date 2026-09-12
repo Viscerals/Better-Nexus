@@ -32,6 +32,39 @@ GetRealmName = GetNormalizedRealmName
 
 local function Catalog() return Nexus.BuildCatalog end
 
+-- Assertions below inspect terminal mutations. Drive only the exact public
+-- ticket returned by Put, and fail if the scheduler changes tickets, stalls,
+-- exhausts its bound, or returns an unknown outcome.
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil then
+        assert(why == "ROOT_MUTATION_PENDING",
+            "fixture mutation returned unknown pending result: " .. tostring(why))
+        assert(type(ticket) == "table" and ticket.state == "pending",
+            "pending mutation returned no live ticket")
+        local previous = tonumber(ticket.pumps) or -1
+        for _ = 1, Catalog().Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            local observed = Catalog().PumpRootAdmission()
+            assert(observed == ticket, "fixture mutation changed tickets")
+            local current = tonumber(ticket.pumps)
+            assert(current and current > previous,
+                "fixture mutation made no scheduler progress")
+            previous = current
+        end
+        assert(ticket.state ~= "pending", "fixture mutation exhausted its pump bound")
+        assert(ticket.state == "committed" or ticket.state == "failed",
+            "fixture mutation ended in unknown state: " .. tostring(ticket.state))
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    assert(ok == true or ok == false,
+        "fixture mutation returned unknown result: " .. tostring(ok))
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    return AwaitMutation(Catalog().Put(record, options))
+end
+
 local function LocalRecord(id, echoes, lockedEchoes)
     return {
         id=id, title="Union " .. id, author="Boganic",
@@ -72,7 +105,7 @@ Case("SEM-01",
     "a cross-array duplicate canonicalizes to exactly one union member",
 function()
     S.Bind(S.Database())
-    Check(Catalog().Put(LocalRecord("sem01",
+    Check(PutTerminal(LocalRecord("sem01",
         {{spellId=200100, quality=3, stacks=2, locked=true}},
         {{spellId=200100, quality=3, stacks=3}})),
         "the cross-array fixture was refused")
@@ -120,7 +153,7 @@ Case("SEM-04",
     "GUARD: the locked role remains part of canonical identity",
 function()
     S.Bind(S.Database())
-    Check(Catalog().Put(LocalRecord("sem04",
+    Check(PutTerminal(LocalRecord("sem04",
         {{spellId=200200, quality=3, stacks=1}},
         {{spellId=200200, quality=3, stacks=1}})),
         "the mixed-role fixture was refused")
@@ -136,12 +169,12 @@ Case("SEM-05",
     "GUARD: exactly 79 ordinary and 6 locked admit, and 80 ordinary refuses",
 function()
     S.Bind(S.Database())
-    Check(Catalog().Put(LocalRecord("sem05",
+    Check(PutTerminal(LocalRecord("sem05",
             S.Echoes(79, 0), S.Rows(6, {firstSpell=300000}))),
         "the exact 79/6/85 envelope was refused")
     local stored = Catalog().Get("sem05")
     Check(type(stored) == "table", "the 79/6/85 record was not admitted")
-    local ok = Catalog().Put(LocalRecord("sem05over",
+    local ok = PutTerminal(LocalRecord("sem05over",
         S.Echoes(80, 0), S.Rows(6, {firstSpell=300000})))
     Check(ok == false,
         "80 ordinary stacks were admitted past the 79/6/85 envelope")

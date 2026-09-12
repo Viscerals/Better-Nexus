@@ -3,6 +3,23 @@
 
 local H=dofile("tests/harness.lua")
 
+-- Fixture assertions inspect terminal catalog transactions. This uses the real
+-- admission scheduler and never turns a pending acknowledgement into success.
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+
 local function Equal(left,right,seen)
     if left==right then return true end
     if type(left)~=type(right) or type(left)~="table" then return false end
@@ -144,13 +161,13 @@ local currentTargetBefore=H.CloneValue(currentTarget)
 currentTarget.echoes=nil
 currentTarget.lockedEchoes={{spellId=980081,stacks=1}}
 currentTarget.lastModified=11
-assert(Nexus.BuildCatalog.Put(currentTarget))
+assert(AwaitMutation(Nexus.BuildCatalog.Put(currentTarget)))
 copied=nil
 detail.copy:GetScript("OnClick")()
 assert(copied==nil and not detail.copy:IsEnabled()
         and detail.more:GetText():find("evidence changed",1,true),
     "recovered current locked change did not stale the candidate")
-assert(Nexus.BuildCatalog.Put(currentTargetBefore))
+assert(AwaitMutation(Nexus.BuildCatalog.Put(currentTargetBefore)))
 -- MASTER-RC-014. The superseded oracle compared ONE restored record and called
 -- the result "display, Open, or Copy mutated SavedVariables". A one-record
 -- comparison cannot observe a mutation anywhere else in SavedVariables, so it
@@ -193,9 +210,9 @@ assert(Equal(NexusDB, rawBaseline),
 
 -- A represented catalog revision invalidates the projection exactly once.
 Nexus.BuildCatalog.All=originalAll
-assert(Nexus.BuildCatalog.Put({id="legacy-dps-resolved-080",
+assert(AwaitMutation(Nexus.BuildCatalog.Put({id="legacy-dps-resolved-080",
     title="Changed identity",class="PALADIN",fingerprint="999999x1",
-    echoes={{spellId=999999,stacks=1}},lastModified=30}))
+    echoes={{spellId=999999,stacks=1}},lastModified=30})))
 opened=nil
 detail.open:GetScript("OnClick")()
 assert(opened==nil and not detail.open:IsEnabled()
@@ -224,12 +241,12 @@ assert(missing==nil and missingReason=="exact build identity is unavailable"
     "missing or malformed navigation identity did not fail closed")
 
 local ambiguousFingerprint="881000x1"
-assert(Nexus.BuildCatalog.Put({id="ambiguous-a",title="Ambiguous A",
+assert(AwaitMutation(Nexus.BuildCatalog.Put({id="ambiguous-a",title="Ambiguous A",
     fingerprint=ambiguousFingerprint,echoes={{spellId=881000,stacks=1}},
-    lastModified=40})
-    and Nexus.BuildCatalog.Put({id="ambiguous-b",title="Ambiguous B",
+    lastModified=40}))
+    and AwaitMutation(Nexus.BuildCatalog.Put({id="ambiguous-b",title="Ambiguous B",
         fingerprint=ambiguousFingerprint,
-        echoes={{spellId=881000,stacks=1}},lastModified=40}))
+        echoes={{spellId=881000,stacks=1}},lastModified=40})))
 local ambiguous,ambiguousReason=Nexus.BuildCatalog.ResolveFingerprintIdentity(
     "obsolete-ambiguous",ambiguousFingerprint)
 assert(ambiguous==nil
@@ -243,18 +260,18 @@ local tombstoneTarget = assert(Nexus.BuildCatalog.Get("legacy-dps-resolved-081")
 local tombstoneOwner = Nexus.Identity.VerifiedOwnerKey(tombstoneTarget)
     or tombstoneTarget.ownerKey
 local tombstoneSender = tostring(tombstoneOwner):gsub("@", "-")
-assert(Nexus.BuildCatalog.SetTombstone("legacy-dps-resolved-081",
+assert(AwaitMutation(Nexus.BuildCatalog.SetTombstone("legacy-dps-resolved-081",
     {author=tombstoneTarget.author,stamp=50},
-    {source="remote", sender=tombstoneSender}))
+    {source="remote", sender=tombstoneSender})))
 local tombstoned,tombstoneReason=Nexus.BuildCatalog.ResolveFingerprintIdentity(
     "raw-collision-081","880081x1")
 assert(tombstoned==nil
         and tombstoneReason=="exact build identity is unavailable",
     "tombstoned resolved identity remained navigable")
 
-assert(Nexus.BuildCatalog.Put({id="tombstone-fallback",
+assert(AwaitMutation(Nexus.BuildCatalog.Put({id="tombstone-fallback",
     title="Tombstone fallback",fingerprint="881001x1",
-    echoes={{spellId=881001,stacks=1}},lastModified=50})
+    echoes={{spellId=881001,stacks=1}},lastModified=50}))
     )
 -- Persisted legacy tombstone evidence: preserved raw and reserved deny-only
 -- on reload; it grants no current-session authority.

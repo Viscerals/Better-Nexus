@@ -13,6 +13,26 @@ local broadcasts={}
 -- or expected value in this fixture is changed.
 H.AdmitCatalogV1(NexusDB)
 DPS.Init({}, {BroadcastDpsRecord=function(r) broadcasts[#broadcasts+1]=r return true end})
+local function AwaitMutation(ok, why, ticket)
+ if ok==nil then
+  assert(why=="ROOT_MUTATION_PENDING","unknown mutation result: "..tostring(why))
+  assert(type(ticket)=="table" and ticket.state=="pending","pending mutation returned no live ticket")
+  local previous=tonumber(ticket.pumps) or -1
+  for _=1,Nexus.BuildCatalog.Budget().maximumPumps do
+   if ticket.state~="pending" then break end
+   local observed=Nexus.BuildCatalog.PumpRootAdmission()
+   assert(observed==ticket,"mutation changed tickets")
+   local current=tonumber(ticket.pumps)
+   assert(current and current>previous,"mutation made no scheduler progress")
+   previous=current
+  end
+  assert(ticket.state~="pending","mutation exhausted its pump bound")
+  assert(ticket.state=="committed" or ticket.state=="failed","mutation ended in an unknown state")
+  return ticket.committed,ticket.storedAs or ticket.reason,ticket
+ end
+ assert(ok==true or ok==false,"mutation returned an unknown terminal result")
+ return ok,why,ticket
+end
 for i=1,100 do
  local echoes={{spellId=300000+i,stacks=1},{spellId=310000+i,stacks=(i%3)+1}}
  local id="stress-"..i
@@ -32,10 +52,10 @@ local rows=DPS.GetDpsBoard("dummy")
 assert(#rows==100,"100 distinct characters should produce 100 rows")
 -- Same character, stronger different exact loadout: still 100 rows.
 local better={{spellId=400050,stacks=2},{spellId=410050,stacks=1}}
-assert(Nexus.BuildCatalog.Put({id="stress-50b",title="Winner 50",
+assert(AwaitMutation(Nexus.BuildCatalog.Put({id="stress-50b",title="Winner 50",
  author="Player50",ownerKey="player50@ebonhold",ownerVerified=true,
  realm="ebonhold",class="MAGE",echoes=better,lastModified=200,
- postedAt=200,isMine=false}))
+ postedAt=200,isMine=false})))
 assert(DPS.ReceiveRecord({
  v=6,f=DPS.GetEchoKey(better),e=better,c="dummy",d=9000000,u=65,
  t=200,p="Player50",o="player50@ebonhold",r="ebonhold",

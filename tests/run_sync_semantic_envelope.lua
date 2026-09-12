@@ -16,11 +16,62 @@ time = function() return now end
 
 local function Catalog() return Nexus.BuildCatalog end
 
+-- Isolated peers use their own public scheduler seams. Setup waits for its
+-- mutation ticket; receive assertions inspect only the settled durable state.
+local function PumpSide(side)
+    local catalog = side.nexus.BuildCatalog
+    if type(catalog.PumpRootAdmission) == "function" then
+        catalog.PumpRootAdmission()
+    end
+    side.nexus.Sync.OnUpdate(0.2)
+end
+
+local function SettleSide(side)
+    local catalog = side.nexus.BuildCatalog
+    if type(catalog.RootState) ~= "function" then return end
+    local limit = catalog.Budget().maximumPumps
+    for _ = 1, limit do
+        if not catalog.RootState().candidate then return end
+        PumpSide(side)
+    end
+    Check(not catalog.RootState().candidate, "isolated peer catalog did not settle")
+end
+
+local function PutSide(side, record, options)
+    local ok, why, ticket = side.nexus.BuildCatalog.Put(record, options)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        SettleSide(side)
+        Check(ticket and ticket.state ~= "pending", "setup mutation did not settle")
+        return ticket.committed, ticket.reason
+    end
+    return ok, why
+end
+
+local function ReplaySide(side, wire, sender, pumps)
+    local result = H.ReplayIntoReceiverV1(side, wire, sender, 0)
+    for _ = 1, (pumps or 20) do PumpSide(side) end
+    SettleSide(side)
+    result.after = side.nexus.Codec.JSONEncode(side.env.NexusDB)
+    result.mutated = result.before ~= result.after
+    return result
+end
+
 local function Pump(seconds)
     for _ = 1, math.ceil((seconds or 10) / 0.2) do
         clock = clock + 0.2
+        Catalog().PumpRootAdmission()
         Sync.OnUpdate(0.2)
     end
+end
+
+local function SettleCatalog()
+    local catalog = Catalog()
+    local limit = catalog.Budget().maximumPumps
+    for _ = 1, limit do
+        if not catalog.RootState().candidate then return end
+        catalog.PumpRootAdmission()
+    end
+    Check(not catalog.RootState().candidate, "catalog did not settle")
 end
 
 -- Only build, summary, delete, and loadout-request envelopes are mutation
@@ -96,12 +147,39 @@ end
 local function ResetSync(db)
     NexusDB = db
     Nexus.LoadoutEvidence.Init(db)
+    H.AdmitCatalogV1(db, Nexus.BundledBuilds)
     Sync.Init(Codec, {})
     H.sentChatMessages = {}
     return db
 end
 
 -- Protocol boundary ---------------------------------------------------------
+
+Case("SYN-W2-01", "Sync accounts for a received build only after commit", function()
+    local rows = {}
+    for index = 1, 9 do
+        local id = "pending-seed-" .. tostring(index)
+        rows[id] = S.LocalBuild(id, 1)
+    end
+    local db = ResetSync(S.Database(rows))
+    local before = rawget(db, "authorityBundle")
+    local received = Sync.Stats().received
+    Deliver(BuildWire(Payload("pending-received", 1, 0)))
+    Check(rawget(db, "authorityBundle") == before
+            and Catalog().Get("pending-received") == nil,
+        "pending receive already changed the serving bundle")
+    Check(Sync.Stats().received == received,
+        "Sync counted a received build before its pending catalog commit")
+    local outcome
+    for _ = 1, Catalog().Budget().maximumPumps do
+        outcome = Catalog().PumpRootAdmission()
+        if outcome.state ~= "pending" then break end
+    end
+    Check(outcome.committed == true and Catalog().Get("pending-received") ~= nil,
+        "received build did not commit through its retained catalog candidate")
+    Check(Sync.Stats().received == received + 1,
+        "Sync did not account for the terminal committed receive exactly once")
+end)
 
 Case("PRO-01", "one semantic envelope owner at every wire boundary", function()
     local limits = Nexus.LoadoutEvidence.SemanticLimits()
@@ -227,7 +305,7 @@ end
 -- combination because the caller loops the quadrants.
 local function MixDrive(side, key, record)
     local wire, ok, accepted, why = H.CaptureWireV1(side, function(s)
-        pcall(s.nexus.BuildCatalog.Put, record, {source="local"})
+        pcall(PutSide, s, record, {source="local"})
         if key == "WLRB" then
             return s.nexus.Sync.BroadcastBuild(record)
         elseif key == "WLBI" then
@@ -305,7 +383,7 @@ Case("MIX-06", "numeric 1 and string \"1\" never collide; numeric never reaches 
             -- end up holding the numeric row aliased under the string key.
             if #emitted > 0 then
                 local receiver = H.IsolatedSideV1(q.receiver)
-                local got = H.ReplayIntoReceiverV1(receiver, emitted, "Boganic")
+                local got = ReplaySide(receiver, emitted, "Boganic")
                 Check(got.Durable("1") == nil,
                     q.name .. "/" .. key
                         .. ": a numeric id converged aliased to the string key")
@@ -415,12 +493,14 @@ end)
 Case("SYN-02", "inbound 79 plus 6 explicit locked converges once", function()
     local db = ResetSync(S.Database({}))
     Deliver(BuildWire(Payload("syn02", 79, 6)))
+    SettleCatalog()
     local record = Catalog().Get("syn02")
     Check(record and #record.echoes == 85, "79/6 payload was not stored")
     Check(S.State("syn02").semantic.locked == 6, "locked role evidence was lost")
     Check(S.Durable(db).syn02 ~= nil, "durable row missing")
     local generation = S.Root().generation
     Deliver(BuildWire(Payload("syn02", 79, 6)))
+    SettleCatalog()
     Check(S.Root().generation == generation, "exact replay republished the root")
 end)
 
@@ -603,7 +683,7 @@ function()
     local side = H.IsolatedSideV1(".")
     local record = SndRecord(79, 6)
     local wire = H.CaptureWireV1(side, function(s)
-        s.nexus.BuildCatalog.Put(record, {source="local"})
+        PutSide(s, record, {source="local"})
         return s.nexus.Sync.BroadcastBuild(record)
     end, 60)
     local chunks = H.WireOfCodeV1(wire, "WLRB")
@@ -647,7 +727,7 @@ function()
             local side = H.IsolatedSideV1(root)
             local record = SndRecord(spec.o, spec.l)
             local wire = H.CaptureWireV1(side, function(s)
-                s.nexus.BuildCatalog.Put(record, {source="local"})
+                PutSide(s, record, {source="local"})
                 return s.nexus.Sync.BroadcastBuildSummary(record,
                     {retryOnFull=true})
             end, 60)
@@ -675,7 +755,7 @@ function()
     local side = H.IsolatedSideV1(".")
     local record = SndRecord(79, 0)
     local wire = H.CaptureWireV1(side, function(s)
-        s.nexus.BuildCatalog.Put(record, {source="local"})
+        PutSide(s, record, {source="local"})
         return s.nexus.Sync.BroadcastBuild(record)
     end, 60)
     local chunks = H.WireOfCodeV1(wire, "WLRB")
@@ -755,7 +835,7 @@ function()
     local sender = H.IsolatedSideV1(".", nil, {playerName="Sender"})
     local record = KeyRecord(79, "Sender")
     local wire = H.CaptureWireV1(sender, function(s)
-        s.nexus.BuildCatalog.Put(record, {source="local"})
+        PutSide(s, record, {source="local"})
         return s.nexus.Sync.BroadcastBuild(record)
     end, 90)
     local chunks = H.WireOfCodeV1(wire, "WLRB")
@@ -777,7 +857,8 @@ function()
 
     -- The missing piece arrives through the real receive path.
     pcall(receiver.nexus.Sync.HandleIncoming, chunks[#chunks], "Sender")
-    for _ = 1, 60 do pcall(receiver.nexus.Sync.OnUpdate, 0.2) end
+    for _ = 1, 60 do PumpSide(receiver) end
+    SettleSide(receiver)
     local durable = receiver.nexus.BuildCatalog.Get(record.id)
     Check(durable ~= nil,
         "the completed transfer did not reach a durable terminal")
@@ -812,7 +893,7 @@ function()
                            {name="old", root=baseRoot}}) do
         local responder = H.IsolatedSideV1(spec.root, nil,
             {playerName="Bravo" .. spec.name})
-        responder.nexus.BuildCatalog.Put(KeyRecord(3, "Bravo"),
+        PutSide(responder, KeyRecord(3, "Bravo"),
             {source="local"})
         local before = responder.nexus.Codec.JSONEncode(responder.env.NexusDB)
         local channelBefore = responder.nexus.Sync.ChannelName()
@@ -853,7 +934,7 @@ function()
                            {name="old", root=baseRoot}}) do
         local side = H.IsolatedSideV1(spec.root, nil,
             {playerName="Claimer" .. spec.name})
-        side.nexus.BuildCatalog.Put(KeyRecord(3, "Claimer"), {source="local"})
+        PutSide(side, KeyRecord(3, "Claimer"), {source="local"})
         local hashes = side.nexus.Sync.GetCompatibilityHashes()
         Check(type(hashes) == "string" and hashes ~= "",
             spec.name .. ": no compatibility hashes to claim against")
@@ -963,7 +1044,7 @@ function()
     -- SIDE ONE: the new responder's outbound behaviour.
     local owner = H.IsolatedSideV1(".", nil, {playerName="Owner"})
     local pushed = H.CaptureWireV1(owner, function(s)
-        s.nexus.BuildCatalog.Put(record, {source="local"})
+        PutSide(s, record, {source="local"})
         return s.nexus.Sync.BroadcastBuild(record)
     end, 90)
     local pushedChunks = H.WireOfCodeV1(pushed, "WLRB")
@@ -1063,7 +1144,7 @@ function()
     -- converges once on a new receiver and an exact replay does not mutate it
     -- a second time.
     local newReceiver = H.IsolatedSideV1(".", nil, {playerName="NewPeer"})
-    local converged = H.ReplayIntoReceiverV1(newReceiver, pushedChunks,
+    local converged = ReplaySide(newReceiver, pushedChunks,
         "Owner", 80)
     local newRow = converged.Durable(record.id)
     Check(newRow ~= nil, "new -> new: the 85-stack payload did not converge")
@@ -1078,7 +1159,7 @@ function()
                 .. locked .. " locked rows, required 85 and 6")
     end
     local settled = converged.after
-    local replayed = H.ReplayIntoReceiverV1(newReceiver, pushedChunks,
+    local replayed = ReplaySide(newReceiver, pushedChunks,
         "Owner", 60)
     Check(replayed.after == settled,
         "new -> new: an exact replay mutated durable state a second time")
@@ -1134,7 +1215,7 @@ function()
     for _, spec in ipairs(invalid) do
         local side = H.IsolatedSideV1(".", nil, {playerName="Envelope"})
         local record = C3Record(spec.ordinary, spec.locked, "Envelope")
-        pcall(side.nexus.BuildCatalog.Put, record, {source="local"})
+        pcall(PutSide, side, record, {source="local"})
         local held = side.nexus.BuildCatalog.Get(record.id)
         Check(held == nil,
             spec.label .. ": an over-envelope record was admitted to storage")
@@ -1152,7 +1233,7 @@ function()
     -- refusals above cannot be a blanket refusal of large payloads.
     local ok = H.IsolatedSideV1(".", nil, {playerName="Envelope"})
     local valid = C3Record(79, 6, "Envelope")
-    pcall(ok.nexus.BuildCatalog.Put, valid, {source="local"})
+    pcall(PutSide, ok, valid, {source="local"})
     Check(ok.nexus.BuildCatalog.Get(valid.id) ~= nil,
         "the exact 79+6=85 envelope was refused")
 
@@ -1162,7 +1243,7 @@ function()
     local baseRoot = H.MaterializeBaseTreeV1(C3_COMMIT)
     local old = H.IsolatedSideV1(baseRoot, nil, {playerName="OldEnvelope"})
     local oldRecord = C3Record(80, 0, "OldEnvelope")
-    pcall(old.nexus.BuildCatalog.Put, oldRecord, {source="local"})
+    pcall(PutSide, old, oldRecord, {source="local"})
     Check(old.nexus.BuildCatalog.Get(oldRecord.id) ~= nil,
         "CHARACTERIZATION CHANGED: PR #68 now refuses 80 ordinary locally. "
             .. "The new-side envelope guarantee above is unaffected, but this "
@@ -1346,7 +1427,7 @@ function()
                 {spellId=340002, quality=3, stacks=1}},
     }
     local wire = H.CaptureWireV1(sender, function(s)
-        s.nexus.BuildCatalog.Put(record, {source="local"})
+        PutSide(s, record, {source="local"})
         return s.nexus.Sync.BroadcastBuild(record)
     end, 90)
     local chunks = H.WireOfCodeV1(wire, "WLRB")
@@ -1354,11 +1435,11 @@ function()
         "a 96-byte id emitted no chunks [window: " .. H.WireCodesV1(wire) .. "]")
     if #chunks == 0 then return end
     local receiver = H.IsolatedSideV1(".", nil, {playerName="WideRecv"})
-    local got = H.ReplayIntoReceiverV1(receiver, chunks, "Wide", 80)
+    local got = ReplaySide(receiver, chunks, "Wide", 80)
     Check(got.Durable(exact) ~= nil,
         "a 96-byte id did not converge across " .. #chunks .. " chunk(s)")
     local settled = got.after
-    local again = H.ReplayIntoReceiverV1(receiver, chunks, "Wide", 60)
+    local again = ReplaySide(receiver, chunks, "Wide", 60)
     Check(again.after == settled,
         "an exact replay of a 96-byte id mutated durable state a second time")
 end)
@@ -1397,4 +1478,5 @@ function()
     Check(type(Sync.BroadcastDpsRecord) == "function",
         "Sync.BroadcastDpsRecord is not a public entry")
 end)
+Check(#S.results > 0, "no selected Sync test case executed")
 S.Finish("sync semantic envelope and protocol-7 identity matrix")

@@ -709,3 +709,388 @@ Record concise command/result receipts here. A skipped or unavailable command is
 - Validation on the candidate: complete Lua inventory `229/229` with the single explicit manual SavedVariables skip; Lua 5.1 parse `303/303`; integration `70/70`; module contracts `11` modules, `217` surfaces, `165` callback sites, `0` unmapped; upvalue boundary `0` violations with a `60`-upvalue maximum at `ui/Panel.lua:390`; quality workflow policy, package metadata, bundled-build export, SavedVariables analyzer, security policy, Release Policy, and `git diff --check` all pass; Fast `120/120` passed with `0` failed, `0` unavailable, and `1` explicit skip (`lua-suite-manual-legacy-backup`).
 - Rejected-candidate isolation: an added-line comparison over `core/BuildCatalog.lua` shows `9` shared lines longer than 40 characters out of `2455` added lines; `8` already exist verbatim in the exact base file and the ninth is a two-field assignment of base-existing summary fields. No protected path was modified.
 - Boundaries held: no push, no pull request creation or update, no GitHub change, no merge, no release, no addon install or packaging, no live SavedVariables access, no native WoW testing, no Test 18 change, and no PR #59 work. Full on the frozen candidate and independent review remain outstanding.
+
+## Stage 50.3 — Wave 2 successor writer and pending owners (2026-09-09)
+
+- Direct user handoff replaced the stopped temporary writer with sole Codex writer `01a0895c-84ed-72e3-96b8-27573a831e91`. Session metadata verifies `openai`, `gpt-6-astra`, reasoning `high`; subscription billing and successor native T3 identity remain unverified. Exact prompt receipt SHA-256 `73ebb2121971332de6707265387f5625c99957f36572cbeb46b89d876bf83492` and successor handoff receipt SHA-256 `b1af13b06ae164564588f140ba968b5997d0c21e6167ae098e82710c9ab11795` reside in `C:/T3/BN/receipts/wave2`.
+- Before either added path changed, prospective Amendment 2 was created at `C:/T3/BN/task-packets/catalog-authority-22-repair-wave-2-amendment-2.json`, SHA-256 `0e3cc02a266cc650d3a907750e34b71e2ac50f0a962e48f080035f3f528ff567`, with authorization receipt SHA-256 `21407b2299d9e34ffa112d57aeefb213b372cddcbb8ac4aaf2e1a4b2dc17a2a1`. It adds only `core/Store.lua` and `tests/run_catalog_authority_bootstrap.lua` for RC-006, RC-002, and RC-007.
+- Pre-edit Store SHA-256 was `82c723c9104c042cf765dda0d6aa8548aee7de4fa670e9bca708d10ac955a37e`; bootstrap SHA-256 was `e87a0077cdfbfa9ffaba5cdaa69a1ce248be11c89b9e48108362f6cb96776c5a`. Starting HEAD/tree/parent remained `22c1553a018af9543c9b596d49cf5a9e7d776ffd` / `b0225f21853ba04023fc42bdd7a018da23cfd87c` / `e69497d248875d4b2ff69a658ca478247a0ea02b`, with 17 inherited tracked modifications and zero untracked, staged, protected, or outside-intended paths.
+- Vibe strict validation passed before and after scope reconciliation. A checked RESOLVED BLOCKER remained actionable in the installed parser, so its complete record moved to `Resolved scope issues`; no acceptance flag was cleared. Installed `next` then selected `implement`, `prompt.checkpoint_implementation`, reason `Checkpoint status is IN_PROGRESS.` at 2026-09-10 03:47 UTC. Two administrative triage loops were recorded; the interrupted old loop was not counted as implementation. Reconciliation receipt: `CODEX_WAVE2_SUCCESSOR_VIBE_RECONCILIATION_2026-09-09.md`, SHA-256 `b634e5927d19ba3299c3e30a81bad55bbbec713dce7c28cb65b5c63120f6cbc6`.
+- All Lua commands used a fresh shell with read-only `NODE_PATH=C:/T3/BN/catalog-authority-22/node_modules`. Initial `node tools/run-lua.js tests/run_data_retention.lua` exited 1 at line 206: `one remote author exceeded the per-author cap`.
+- Expected red before the Store product edit: `node tools/run-lua.js tests/run_catalog_authority_bootstrap.lua` exited 1, 34/38 passed, 4 red. New `SMT-W2-01` failed on `Retention acknowledged pcall success before terminal owner completion`; new `SMT-W2-02` failed on `Retention acknowledged a refused owner result as committed`. Existing `DEP-01` and `PUB-04` also failed. After the owner-result repair, 36/38 passed with only those two existing failures. After preserving the coordinator drive annotation and rejecting a changed bootstrap database, the same command exited 0, 38/38 passed, 0 red; both pending-owner tests, notification replay, and `SRP-STORE-STATE-01` passed.
+- Store now retains a pending maintenance owner, keeps second requests busy, and refuses failed owner results. Bootstrap preserves pending rebind work and does not register the account again on each rebind slice. This is focused partial proof only. Real pending retention/compaction bundle settlement, other owner repairs, all five roots, Fast, freeze, exact-head Full, independent acceptance, and delivery remain incomplete. Repair waves remain 2/2, remaining 0; evidence-only corrections remain 1/1, remaining 0. The inherited architecture literal is `MUTATION_COMMITTED`; no new literal or semantic is authorized.
+- Successor focused progress (2026-09-10, before final freeze): bootstrap reached 39/39, including real 97-row pending Store maintenance and two-direction source replacement refusal. Retention first failed its pending-count assertion, then passed the complete retention fixture. DPS first failed its pending class-repair assertion, then passed the original scenarios and terminal-once case. Legacy repair passed with recovered=225, reused=254, rejected=14, restarts=2, publications=1, maxWork=25, pages=20+5. Compaction passed with 276 pumps and max=32. These are working-tree observations, not exact-head acceptance.
+- Additional expected-red cases: GEN-13 failed before generation exhaustion settled a pending ticket, then generation exhaustion passed 13/13. ATOM-10 failed before cancellation, supersession, and invalidation settled their pending owners, then the fault matrix passed 10/10. ATOM-11 subsequently failed with `publication error escaped: test pending publication fault`; after protecting the pending durable publication, the fault matrix passed 11/11, including faults before and after the sole durable pointer write. Each command exited 1 on red and 0 on its stated pass.
+- The work-budget public-call observer now counts direct `next` traversal as well as `pairs` and `ipairs`; 14/14 passed, exit 0. Earlier current focused checks passed typed IDs 6/6, witness drift 9/9, MainLifecycle parity, and CommunityController parity. Lua parse passed 69/69 for its default TOC inventory; the upvalue check inspected 68 TOC files and 3575 functions, maximum 60 at ui/Panel.lua:390, zero violations. These checks require the final candidate gate; they do not establish a complete suite result.
+- Sync pending receive proof and SYN-01 through SYN-05 passed individually. Full Sync attempts were interrupted and are not passes. The first attempt encountered sandbox Git ownership isolation; subsequent fixture materialization uses process-local GIT_CONFIG_COUNT/GIT_CONFIG_KEY_0/GIT_CONFIG_VALUE_0 with the exact worktree safe.directory. Temporary instruction probes located expensive current-peer bootstrap admission; their diagnostic exit-0 output is explicitly not accepted proof because the probe interrupted owner initialization. All instruction hooks were removed. The current full test is still running with case/side progress only. No Fast, freeze commit, final Full, acceptance review, or delivery has started.
+- Further successor failure-path proofs: compaction completion after a replaced database first failed; the exact database/bundle guard then passed both replacement directions without a completion stamp. Legacy repair passed again after restoring the original 1000-step partial-progress guard. Sync's full diagnostic completed 19/23 with MIX-16, RCONF-01, MIX-19, and MIX-24 red (exit 1). Isolated fixture setup and receive turns now await real terminal catalog work; MIX-24 subsequently passed 1/1 (exit 0). The full Sync diagnostic read working-tree modules while authorized repairs continued, so it is not an immutable candidate proof.
+- WB-15 first failed with `bundle copy exceeded byte slice: 8276`; persistent scalar-byte copying then passed. WB-16 first failed with `baseline pruning performed unbounded work in one pump: 314679`; metered baseline admission/comparison and reuse of the detached verdict then passed. Work budget now reports 16/16, exit 0. WIT-10 first failed on unchanged NaN evidence (`SOURCE_DRIFT`), and WIT-11 first failed on opaque metatable evidence (`SOURCE_WITNESS_INVALID`); exact scalar/metatable witness repairs then passed 11/11, exit 0. After baseline pruning changed, migration, bootstrap 39/39, fault matrix 11/11, generation 13/13, and witness 11/11 passed again.
+- Broader invariant diagnostics still fail in five unchanged, unmapped intended test paths: admission 20/24; cursor lifetime 5/6; maintenance 8/10; read purity 7/8; tombstones 27/28. Pending scheduler handling is absent from their synchronous fixture assumptions. The original hostile admission fixture also assumes row-level rejection where bounded exact-source construction refuses the whole root. Its raw-byte and zero-authority proof must remain intact. These are failures, not acceptance exceptions.
+- Automatic approval review rejected a prospective five-test Amendment 3 creation before process creation. No amendment or authorization receipt was created, and no proposed test path was edited. The writer did not retry or bypass the rejection. Rejection receipt: C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT3_APPROVAL_REJECTION_2026-09-10.md, SHA-256 9ba2e3f49fa0080ac532746f879d4ccc7b734269891a5763239ed5b899f5d7ac, 3565 bytes. A direct user approval question is pending for those five existing tests plus tests/run_sync_mixed_client_matrix.lua, whose isolated peers have the same missing catalog scheduler seam. All six paths remain unchanged. Unaffected Fast validation continues; no elapsed wait is authorization.
+- Fast mixed-client diagnostic completed 9/14 with MIX-02, MIX-04, MIX-08, MIX-13, and MIX-14 red. The captured old-old golden bytes and new-old wire-byte compatibility passed; new receivers and local delete assertions did not wait for pending catalog work. This confirms the sixth unchanged requested test path, tests/run_sync_mixed_client_matrix.lua. Fast has advanced to the updated semantic-envelope fixture. Scope approval remains pending; no proposed path was edited.
+- ATOM-12 exposed a synchronous notification re-entry defect: after the durable mutation published, a revision subscriber started a replacement admission and changed the old ticket's terminal receipt. The new case first reported 11/12, exit 1. Mutation completion now closes and binds the old receipt before notifications, then invokes the retained owner callback without consuming any newly started ST.candidate. The fault matrix passed 12/12, exit 0. Bootstrap 39/39, CommunityController, retention, DPS, and compaction all passed again after this change.
+- The original pre-product Wave 2 expected-red receipt was re-read and hashed: C:/T3/BN/receipts/wave2/CODEX_WAVE2_EXPECTED_RED_2026-09-08.md, SHA-256 1b01ad4e91b293fb216c6872301e67d190be99aef69732d7aa71fa3f7aab3486. It binds all five root regressions to unchanged BuildCatalog Git object 97536e4e6cbc69111bfb0e9477195293a01a7b84 before production edits. The historical EVIDENCE.md prefix remains byte-exact against HEAD (169668 bytes).
+- Completed successor Fast diagnostic: 79/87 checks passed, 8 failed, 0 skipped/unavailable; mapped commands 50/58, exit 1, duration 3726.08 seconds. The full updated Sync semantic-envelope matrix passed 23/23. Failure scan confirmed the six previously requested fixture commands plus module contract and recovered build navigation. After making the new Sync completion helper/identity private, the unchanged contract test passed (11 modules, 217 surfaces, 14 assigned members, 165 callback sites, 18 groups, 0 unmapped) and SYN-W2-01 passed 1/1. Seven unchanged fixture commands remain unresolved. This mixed-working-byte Fast run is not exact-head proof.
+- Latest post-re-entry focused checks passed generation 13/13, witness 11/11, work budget 16/16 and AutoLock with postExpiry=3. Final parse passed 317/317; upvalue scan found zero violations across 68 TOC files/3578 functions, maximum 60 at ui/Panel.lua:390. Modified mapped Lua files were normalized to CRLF; the 169668-byte historical evidence prefix remains unchanged. No proposed seventh-path edit occurred.
+- Automatic review separately rejected copying generated log directories to external receipts. The destination does not exist; local build/verify and build/wave2-successor-final-checks remain preserved. The permitted summary-only boundary receipt is C:/T3/BN/receipts/wave2/CODEX_WAVE2_SUCCESSOR_SCOPE_BOUNDARY_2026-09-10.md, SHA-256 45bef93cb111a53cb0ab504089c39ebab44974d475892707d26b1047f39cd343, 7253 bytes. It records both rejections, all seven pending paths/pre-edit hashes, diagnostic counts and remaining requirements before changing workflow fields.
+- The same checkpoint now records BLOCKED and human DECISION_REQUIRED issue ISSUE-W2-TEST-PENDING. Only the legitimate all-five-root expected-red checkbox advanced from its verified pre-product receipt. No historical acceptance flag was cleared. Repair/evidence counters remain 2/2 and 1/1. The next action is installed human-input dispatch; no no-progress loop, amendment, final Full, freeze, acceptance, or delivery is claimed.
+- Pre-dispatch strict Vibe validation passed with zero errors and three unchanged advisory warnings. Final accounting still has 26 mapped tracked modifications, zero staged/untracked/protected/outside paths, and all seven proposed test paths unchanged against HEAD. Amendment 3 and the rejected external log archive remain absent. Diff whitespace passes. The next installed dispatch is the human decision boundary; no product or test work continues while that decision is pending.
+- Actual post-implementation next dispatch selected issues_triage because installed BLOCKED status routing precedes the human-owned issue check. Triage confirms the same seven-test authority boundary and external-log preservation decision, with no remaining independent implementation. The triage loop is administrative and will be completed before invoking the installed explicit stop command. This preserves the actual dispatch instead of claiming a returned human stop that did not occur. No product or test bytes changed during this triage.
+- Direct user approval on 2026-09-10 superseded the stale six-test question and authorized exactly seven existing offline tests plus LOCAL failed-log preservation. Prospective Amendment 3 was written before all seven edits: C:/T3/BN/task-packets/catalog-authority-22-repair-wave-2-amendment-3.json, SHA-256 0080c1f1847d653c24680d66c8695de7aa149b91827a0b51bff8654e33ebfc09, 10295 bytes. Authorization receipt: C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT3_AUTHORIZATION_2026-09-10.md, SHA-256 e8e8d19e494006b73470d999ae1a37497d2ef9a2a355eeacbb12a146c246bb74, 3547 bytes. All seven pre-edit hashes matched; no product/test edit occurred this turn. Admission maps only to RC-006/017, other six only RC-006. No new production path/root/semantic/wave/evidence correction or relaxed acceptance gate.
+- Local diagnostic preservation completed 99/99 hash-verified files under C:/T3/BN/receipts/wave2/CODEX_SUCCESSOR_FAST_DIAGNOSTIC_2026-09-10; MANIFEST.json SHA-256 5cab452dd9d3f35c127bafea58dcd3a03e3de55adcbcee7d4a672236560418dc. Originals remain present and hash-verified. Both prior rejection reasons were resolved by new direct authority; no new rejection occurred. No GitHub log publication or raw Claude output.
+- Model-routing check found current turn 01a08c6b-6bd8-7b02-b05b-59fb337cefa9 at 2026-09-10T17:44:06.680Z reports openai/gpt-6-astra/medium, unlike the prior high implementation turn. The same writer remains sole owner. Product/test work is gated on actual high verification; an asynchronous request asks the user to change this same chat setting. Scope is resolved, but ISSUE-W2-REASONING-SETTING is human DECISION_REQUIRED. Administrative reconciliation only; requested settings are not represented as verified.
+- Amendment 3 resumption receipt: C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT3_RESUME_2026-09-10.md, SHA-256 6ff98e6380571baa859203aa9a5c2c5ae20eb55db22539f37d36d613cd8e41a9, 3158 bytes. Actual resume cleared RUN_STOPPED; next initially required administrative acknowledgement, then selected issues_triage / prompt.issues_triage because status is BLOCKED. Final model recheck still reports medium. All seven pre-edit hashes and every existing product/test hash match the prior archived inventory. No implementation dispatch or product/test edit occurred. The current short triage is administrative; the old human-wait interval is not implementation time. Scope and local-log authority are resolved; only required high reasoning remains gated.
+- Same-writer continuation at 2026-09-10T18:16:38.806Z verifies actual openai/gpt-6-astra/high in turn 01a08c89-34fa-70e3-8000-852b5efb3909. Separate immutable receipt: C:/T3/BN/receipts/wave2/CODEX_WAVE2_HIGH_REASONING_VERIFIED_2026-09-10.json, SHA-256 240aacdc2115a9e50ccac12eae911140f2d0af875d43d7d8e3b04a497ea22a07, 3188 bytes. A3, authorization and medium-turn resume hashes remain unchanged; all seven tests still match pre-edit hashes. Only ISSUE-W2-REASONING-SETTING is newly resolved. Stage 50 checkpoint 50.3 returns to IN_PROGRESS without changing any acceptance flag or counter. Installed resume, strict validation and actual implementation dispatch remain prerequisites to edits.
+- Actual high-turn dispatch selected implement / prompt.checkpoint_implementation after strict validation and resolved settings triage. All seven A3 tests then received local terminal scheduler waits before assertions; production methods were not replaced. ADM-08 retains its original INVALIDATED, raw-byte and slice assertions. Accepted architecture makes an unprovable complete source root-fatal and withholds every product; AuthorityState now reports a fixed INVALIDATED denial for ROOT_INVALIDATED, without asserting ID existence. New WIT-12 first failed (11/12, exit 1) on the former UNADMITTED diagnostic, then passed (12/12, exit 0), proving root-fatal refusal, no partial neighbour authority, and exact retained hostile bytes. Selected unchanged ADM-08 assertions pass 1/1, exit 0. No V1 source-depth limit was relaxed.
+- A3 oracle accounting preserves all 530 original Check/assert expressions across the seven files, after removing only the terminal AwaitMutation wrapper for comparison. Focused admission passes 24/24, maintenance 10/10, cursor lifetime 6/6, read purity 8/8, tombstones 28/28 and recovered navigation. Current Store bootstrap passes 39/39, typed identity 6/6, fault 12/12, generation 13/13 and witness 12/12. Mixed-client and remaining owner checks are still running; these are working-tree diagnostics, not exact-head acceptance.
+- RC-006 residual index proof: WB-17 first failed on 83 edges/82 nodes/4071 bytes in one rich-row slice. Index construction now retains its row phase, membership position and partial byte charge. The final complete-ordinary fixture passes the original 64/64/2048 limits and exact lookup. An executed in-memory old-index control fails WB-17 at 84 edges/83 nodes/4799 bytes (exit 1; five injected module loads; product hash unchanged). Earlier loader controls with zero executed loads are not fail-capability proof and remain preserved. The initial locked-inline positive lookup fixture was not exact-lookup eligible; its failed log is retained.
+- RC-006 aggregate-source decision now checks the already captured witness byte/edge/node totals as well as row count before taking the synchronous mutation path. WB-18 uses eight rich source rows and a one-row simple replacement; it requires an explicit pending ticket, no partial publication, bounded pumps and complete terminal replacement. Final work budget passes 18/18, exit 0. The executed old row-count-only control fails exactly WB-18 at the missing pending contract (exit 1; five injected loads; product bytes unchanged). Initial rich-input diagnostic failures remain preserved; the final fixture isolates source-wide replacement work from single-record normalization. No budget limit was raised.
+- Current accounting: 33 mapped tracked modifications, zero staged/untracked/outside/protected paths, ordinal LF path-list SHA-256 50cc52bfb59d0847c1267ea7da9e037a320a4d096e413680b3b742f6843e98a4. Historical EVIDENCE.md prefix remains byte-exact for 169668 bytes. Strict installed Vibe validation passes with zero errors and three unchanged advisories. Parse passes 317/317; upvalue scan has zero violations. Six unintended Sync comment encoding changes were removed by restoring exact HEAD comment bytes. No immutable packet, prior metadata, historical receipt or acceptance flag changed.
+- Pending legacy-owner regression: a real nine-row catalog transaction committed, then replacing NexusDB before owner acknowledgement caused a stale metadata write (legacy-owner-red.log, exit 1). Completion now checks the exact retained catalog, database and terminal bundle before acknowledging; drift abandons only session work and writes neither database. Both database and bundle replacement cases pass 2/2, exit 0. The long legacy diagnostic recovered 225 rows, reused 254, rejected 14, restarted twice, published once and kept maxWork=25; that run began before the new tail test and is not the complete current test proof. Module contracts pass 11 modules/217 surfaces/14 assigned members/165 callback sites/18 groups/0 unmapped. The next complete current Lua inventory must include the new default two-direction tail proof.
+
+
+## Stage 50.3 - same High writer: complete inventory and new prospective scope gate - 2026-09-10
+
+Actual writer remains 01a0895c-84ed-72e3-96b8-27573a831e91, turn
+01a08c89-34fa-70e3-8000-852b5efb3909, openai/gpt-6-astra/high. Initial and latest
+turn_context observations confirm High; the separate immutable settings receipt,
+A3 packet, authorization, and prior medium evidence remain unchanged. Actual
+productive dispatch was implement / prompt.checkpoint_implementation.
+
+The complete source-stable pre-freeze inventory ran all 243 runnable tests:
+228/243 passed, 15 failures, exit 1, elapsed 5940.7800365 seconds. The one manual
+SavedVariables skip remained explicit. All 33 captured tracked file hashes still
+matched after termination. Mixed-client 14/14 and semantic-envelope 23/23 passed.
+This is not Fast, Full, an exact-head gate, or acceptance. The final footer added
+the allocation-budget fixture to the fourteen failures observed earlier.
+
+After that run, the authorized publication-fault guard and two fault regressions
+were applied. Exceptions settle the detached owner once, clear evidence-candidate
+state, and permit callback rebind without consuming the new candidate. Expected
+red 12/14; actual green 14/14. Current generation 13/13, witness 12/12, bootstrap
+39/39, typed ID 6/6, and module contracts pass. All Lua parse 317/317; upvalues
+remain at max 60 with zero violations and the unchanged Panel advisory.
+
+Two persistent work-budget regressions now expose the remaining RC-006 repair:
+WB-19 observes 1909 steps for 100 entries and 11809 for 10000 valid entries;
+WB-20 observes 40534 steps for a valid 79-row incoming record. Limit remains 8192.
+Current work budget is 18 passed, 2 red, exit 1. No bound or original assertion was
+relaxed. The earlier in-memory pool probe measured 2290/12190 with a different
+one-row fixture; both probes show exactly 9900 additional steps for 9900 entries.
+
+All 22 completed logs under build/wave2-successor-final-checks/a3-current have
+verified local copies, with every original retained, under
+C:/T3/BN/receipts/wave2/CODEX_WAVE2_A3_HIGH_DIAGNOSTICS_2026-09-10.
+Manifest SHA-256: 5cd622dd1adcd3751ccc37f3067404d28b405e9ad7e3b256ae04dbc75b3f752f.
+No raw Claude output or GitHub log publication was used.
+
+The final prospective scope boundary was created and hashed BEFORE this workflow
+reconciliation: CODEX_WAVE2_POST_A3_SCOPE_BOUNDARY_2026-09-10.json, SHA-256
+f5b3759dc06f4712f4f78a335072dc52652c068c0a5d226706d449ecec08115d. It requests
+exactly core/LoadoutEvidence.lua for RC-006/002 and fifteen existing offline tests
+for RC-006 only. All sixteen paths remain unchanged. It supersedes the explicitly
+partial fifteen-path request d1fc508d282884edd4f4a34222f4414b8279dff4e4de9be0f84bbfb56a5067a0,
+which is preserved unchanged. No Amendment 4 or new authority exists yet.
+
+Only ISSUE-W2-EVIDENCE-FIXTURE-SCOPE is newly active. A3 and High remain resolved.
+Stage 50 / checkpoint 50.3, all legitimate acceptance flags, earlier evidence,
+repair counters 2/2/0, and evidence-correction counters 1/1/0 are preserved.
+Current inventory remains 33 tracked paths with zero protected/outside/staged or
+untracked changes; ordinal LF path-list SHA-256
+50cc52bfb59d0847c1267ea7da9e037a320a4d096e413680b3b742f6843e98a4.
+No freeze, Wave 2 Fast/Full, independent acceptance, or delivery has started.
+This is a new prospective scope gate, not a verified no-progress loop or a third
+repair wave. No native supervisor message tool is available; durable receipts
+are prepared for supervisory review, and direct delivery is not claimed.
+
+
+Stage 50.3 scope-triage closure: strict validation returned zero errors and the
+three unchanged advisories. Installed Vibe selected issues_triage /
+prompt.issues_triage, which was executed and acknowledged as blocked. Its
+continuous BLOCKED override selected one additional issues_triage dispatch. That
+repeat was not executed or counted as a verified no-progress cycle. The writer
+used supported vibe.py stop for the human scope gate; subsequent installed next
+returned role stop and reason "Vibe was explicitly stopped in repository state."
+This was an agent-invoked scope stop, not a user cancellation or workflow reset.
+Terminal dispatcher output supplies no timing fields; completion ETA unavailable.
+No human wait is claimed as implementation. A3 and High remain resolved. The
+new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
+
+## Stage 50.3 - Amendment 4 authority and provider exception - 2026-09-10
+
+- Direct user authority resolves ISSUE-W2-EVIDENCE-FIXTURE-SCOPE and permits
+  this same task `01a0895c-84ed-72e3-96b8-27573a831e91` to act as sole writer
+  on verified openai/gpt-5.6-sol/max. The bounded routing-exception source is
+  `<user-home>/.codex/attachments/876863d0-8718-48fc-925a-9e4db14766bb/pasted-text.txt`,
+  SHA-256 `d5d64daca37e436910f21d1edb33cbb8d80335281afc6acf8c909233e1aedd4e`,
+  6446 bytes. Current turn `01a08d52-66f7-77a0-bd32-37c60b6273ad` reports
+  openai/gpt-5.6-sol/max at 2026-09-10T21:56:22.983Z. Prior medium and
+  Astra/high evidence remains unchanged.
+- Prospective immutable Amendment 4 was created before any added-path edit at
+  `C:/T3/BN/task-packets/catalog-authority-22-repair-wave-2-amendment-4.json`,
+  SHA-256 `9870cd7356b5d99ade5a93ee7b625c3ebebbe70c03a9fc4fd22bd582a17dea8b`,
+  15607 bytes. Its authorization receipt is
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT4_AUTHORIZATION_2026-09-10.md`,
+  SHA-256 `a0e820e967c7121f2856092fd8e4528e7f43095a2acbefa9744fff972961c505`,
+  5907 bytes. The packet parses and its 16 path entries match the approved final
+  boundary paths, pre-edit hashes, byte counts, and root maps with zero differences.
+- Starting Git evidence remains HEAD/tree/parent
+  `22c1553a018af9543c9b596d49cf5a9e7d776ffd` /
+  `b0225f21853ba04023fc42bdd7a018da23cfd87c` /
+  `e69497d248875d4b2ff69a658ca478247a0ea02b`. Exactly 33 tracked paths were
+  modified before reconciliation; zero staged/untracked paths and no index lock.
+  Ordinal LF path-list SHA-256 remains
+  `50cc52bfb59d0847c1267ea7da9e037a320a4d096e413680b3b742f6843e98a4`.
+- The supervisor verified the existing task idle. Local process inspection found
+  no Lua, Claude, or Git process. No competing implementation writer or test
+  process was observed. No reset, clean, stash, rebase, cherry-pick, discard,
+  history change, product edit, or test edit occurred before the packet and
+  authorization receipt were created.
+- Repair counters remain 2/2/0 and evidence-correction counters remain 1/1/0.
+  No acceptance flag changed. No third wave, new root, architecture semantic,
+  protected path, wildcard scope, evidence correction, GitHub mutation,
+  publication, packaging, installation, native test, or live SavedVariables
+  authority was added.
+
+## Stage 50.3 - current dirty Fast and Amendment 5 decision boundary - 2026-09-11
+
+- The current dirty-tree Fast gate completed against unchanged HEAD
+  `22c1553a018af9543c9b596d49cf5a9e7d776ffd` in `5047.359s`: 105 checks
+  passed, 4 failed, 1 nonblocking range check skipped because no BaseRef was
+  supplied, and 0 checks were unavailable. Changed-path planning passed 49/49.
+  This failed run is diagnostic evidence, not exact-head validation or
+  acceptance.
+- Both expensive Sync invariants passed in that run. Mixed-client passed 14/14
+  in `1881.454s`; semantic-envelope passed 23/23 in `2620.477s`. The exact
+  failure identities were `artifact-paths`,
+  `mapped-run_catalog_authority_semantic_union`,
+  `mapped-run_locked_evidence_resolver`, and
+  `mapped-run_stage32_leaderboard_locked_fidelity`.
+- The artifact failure was
+  `private-content:.vibe/EVIDENCE.md`. The already-authorized workflow evidence
+  now uses `<user-home>` for that one local attachment prefix. A direct policy
+  probe over all 49 changed paths reports 0 violations. The original failed log
+  remains unchanged in the local archive.
+- The three product-invariant failures are exact pending-owner fixture gaps:
+  semantic-union reported that its exact 79/6/85 envelope was refused;
+  locked-evidence raised `ROOT_MUTATION_PENDING`; Stage 32 reported that its
+  current locked-authority fixture did not initialize. Production correctly
+  returns a stable pending ticket when detached bounded work requires further
+  pumps. Making those mutations synchronous would violate `MASTER-RC-006`.
+- The failed run's summary, four failure logs, nonblocking range-skip log, and
+  two long Sync proofs were copied byte-exact before any later run. All nine
+  source/destination hashes matched. Archive manifest:
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_DIRTY_FAST_2026-09-11/MANIFEST.json`,
+  SHA-256 `05f3232736dec93bd9330d170762ebfc3201ff2c3c81377499756d2f92adcb96`,
+  2599 bytes.
+- The three affected tests are outside the exact intended maps of the parent
+  packet and Amendments 1-4. They remain unchanged from HEAD. A bounded
+  prospective Amendment 5 request names exactly those three existing tests,
+  maps each only to `MASTER-RC-006`, preserves every assertion and measurement,
+  and grants no authority:
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT5_SCOPE_REQUEST_2026-09-11.md`,
+  SHA-256 `ad5271c5ea4c8756c9f5f90449a58be8549d4494e5c665bae4a7ffff9c5f91b5`,
+  6500 bytes. No Amendment 5 packet or authorization receipt exists.
+- Direct user authority for a local tester package, installation, and native
+  WoW testing only after exact-head validation and valid independent acceptance
+  is recorded separately at
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_LOCAL_DELIVERY_AUTHORIZATION_2026-09-11.md`,
+  SHA-256 `3510642c806ea6755d2cad923bd6311a023c035fecb1ee4ab8a9c60b26e6d981`,
+  1775 bytes. GitHub mutation, live SavedVariables
+  access, game restart/reload, and legacy-campaign mutation remain unauthorized.
+- Current inventory is 49 tracked paths, with no staged or untracked path.
+  Ordinal LF path-list SHA-256 is
+  `62d585a724554cae4513f8174fae612b0a70335f070ab420cb2a1253e096d94f`.
+  Repair counters remain 2/2/0 and evidence-correction counters remain 1/1/0.
+  No acceptance flag changed.
+- Strict installed Vibe validation passed after reconciliation with zero errors
+  and zero warnings at Stage 50 / checkpoint 50.3, status BLOCKED. Supported
+  `vibe.py stop` set RUN_STOPPED, and the subsequent installed `next` returned
+  role `stop` with reason `Vibe was explicitly stopped in repository state.`
+  This is a human scope boundary, not a workflow reset, implementation result,
+  acceptance result, or verified no-progress loop. Runnable automation is none;
+  completion ETA is unavailable; human wait is excluded from timing.
+
+## Stage 50.3 - Amendment 5 authority and standing automation - 2026-09-11
+
+- The supervisor asked exactly `Do you authorize the exact Amendment 5 request—three existing tests, only MASTER-RC-006, all assertions preserved, and no third repair wave?`. The user answered exactly `yes`.
+- Prospective immutable Amendment 5 was created before any target test edit at
+  `C:/T3/BN/task-packets/catalog-authority-22-repair-wave-2-amendment-5.json`,
+  SHA-256 `97e9748b9b96573f4e15f729657c362253d237a4690450ff0cb9e6a33a27b2d9`,
+  10858 bytes. It parses, adds no production path, contains exactly
+  `tests/run_catalog_authority_semantic_union.lua`,
+  `tests/run_locked_evidence_resolver.lua`, and
+  `tests/run_stage32_leaderboard_locked_fidelity.lua`, and maps each only to
+  `MASTER-RC-006`.
+- Durable authorization receipt:
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT5_AUTHORIZATION_2026-09-11.md`,
+  SHA-256 `e794c7b8e2c99a0050c99c47e1af966d871cbada93e6f7aeef5492a4f1e0be68`,
+  6025 bytes. All three target tests still matched their bound HEAD hashes when
+  both artifacts were created. No target edit occurred first.
+- The user's exact standing instruction `Why do i need to give approval, you should have full automation authorization until we reach a wow live test` is recorded at
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_STANDING_AUTOMATION_AUTHORIZATION_2026-09-11.md`,
+  SHA-256 `7bb84443ac2b912fd2a5d32d11b0612f3919a92d83d19e16ca57cc3e334c5b11`,
+  2989 bytes. Routine implementation, necessary exact prospective path
+  bookkeeping within the accepted five-root architecture, validation,
+  independent review, clean packaging, and recoverable installation remain
+  automatic. Live WoW testing is the next human checkpoint.
+- Starting Git evidence remains HEAD/tree/parent
+  `22c1553a018af9543c9b596d49cf5a9e7d776ffd` /
+  `b0225f21853ba04023fc42bdd7a018da23cfd87c` /
+  `e69497d248875d4b2ff69a658ca478247a0ea02b`. Before Amendment 5 edits there
+  were exactly 49 tracked modified paths, zero staged/untracked/protected/outside
+  paths, no index lock, and ordinal LF path-list SHA-256
+  `62d585a724554cae4513f8174fae612b0a70335f070ab420cb2a1253e096d94f`.
+- Actual writer metadata remains openai/gpt-5.6-sol/max in task
+  `01a0895c-84ed-72e3-96b8-27573a831e91`, turn
+  `01a09122-dc75-7c32-8dc6-027d61652f9d`. Prior medium and Astra/high evidence
+  remains unchanged. Repair counters remain 2/2/0 and evidence-only corrections
+  remain 1/1/0. No acceptance flag or architecture semantic changed.
+- ISSUE-W2-AMENDMENT5-FIXTURE-SCOPE is resolved. RUN_STOPPED remains set until
+  the supported installed resume operation clears it. Strict validation and
+  actual `implement / prompt.checkpoint_implementation` dispatch remain required
+  before the first Amendment 5 test edit.
+
+## Stage 50.3 - Amendment 8 prospective reconciliation - 2026-09-11
+
+- The later direct provider-routing exception was reverified from its complete
+  source at `<user-home>/.codex/attachments/876863d0-8718-48fc-925a-9e4db14766bb/pasted-text.txt`,
+  SHA-256 `d5d64daca37e436910f21d1edb33cbb8d80335281afc6acf8c909233e1aedd4e`,
+  6446 bytes. It postdates the A3 Astra/high instruction and authorizes this
+  same task on openai/gpt-5.6-sol/max for implementation, local validation, and
+  final candidate preparation. Current turn
+  `01a091b6-0728-7c42-9980-65d64f01763d` reports that exact route at
+  2026-09-11T18:23:40.935Z. Prior medium and Astra/high evidence is unchanged.
+- Valid prospective Amendment 8 is preserved at
+  `C:/T3/BN/task-packets/catalog-authority-22-repair-wave-2-amendment-8.json`,
+  SHA-256 `da1d269326a7f66bb4536ec75acb38b78a2d8e47104081162e93fee9965082ee`,
+  5713 bytes. Its durable authorization receipt is
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT8_AUTHORIZATION_2026-09-11.md`,
+  SHA-256 `3d14ef7b5116025d09f17c4b0c7edd731acc7ecbfd08b7213e429610d313547a`,
+  5470 bytes. Both preceded any target edit.
+- Amendment 8 parses, is immutable, adds zero production paths, and adds exactly
+  `tests/run_candidate_revision_scope.lua` for `MASTER-RC-006`. Its valid parent
+  Amendment 5, Amendment 5 authorization receipt, and standing authority receipt
+  rehash to their embedded values. The target remains byte-identical to HEAD at
+  SHA-256 `5f8d837b0053565014fd8a2ef401c07370e0dc624f51fd65ecd5741af6493beb`,
+  15705 bytes.
+- Amendment 6 remains unchanged at SHA-256
+  `f5e1c5862e03fbbff3e9baefeafdfef6e4f5b6b96ce39223822981f51f063156`,
+  9645 bytes. Its embedded Amendment 5 authorization digest is wrong, so it was
+  never consumed. Amendment 7 remains unchanged at SHA-256
+  `c919c8b9ab7680764f868e529793bb508603e2c19c63a0efebeb1514d630a6ad`,
+  1587 bytes, and still fails JSON parsing. It grants no authority. No target
+  edit relied on either artifact.
+- Amendment 8 classifies this as a prospective pre-edit packet replacement.
+  It is not an evidence-only correction. Repair counters remain 2/2/0 and
+  evidence-correction counters remain 1/1/0. No root, architecture semantic,
+  production path, third repair wave, protected path, or acceptance gate changed.
+- Before this workflow reconciliation, Git remained at HEAD/tree/parent
+  `22c1553a018af9543c9b596d49cf5a9e7d776ffd` /
+  `b0225f21853ba04023fc42bdd7a018da23cfd87c` /
+  `e69497d248875d4b2ff69a658ca478247a0ea02b`, with 52 tracked modified paths,
+  zero staged or untracked paths, no index lock, zero protected paths, and zero
+  paths outside the 53-path valid prospective union. The current 52-path ordinal
+  LF list SHA-256 was
+  `52d1eef6100c45649f6159e761dfcf1a53911033c0fcf3003f214291df6fefb2`.
+- Process inspection found only Codex runtime Node processes and the active
+  command shell. No Lua, test-runner, Python, or separate implementation process
+  was active. Strict installed validation and an actual
+  `implement / prompt.checkpoint_implementation` dispatch remain mandatory
+  before the one target edit.
+
+## Stage 50.3 - Amendment 8 result and Amendment 9 prospective scope - 2026-09-11
+
+- Strict validation and actual `implement / prompt.checkpoint_implementation`
+  dispatch preceded the Amendment 8 target edit. Its four original direct
+  `Catalog.Put` sites now use one bounded exact-ticket terminal helper. The
+  focused proof passes 30 checks, and the affected candidate, Wishlist,
+  Community, semantic-union, locked-evidence, leaderboard, integration,
+  security, and module-contract invariants pass.
+- Current target SHA-256 for `tests/run_candidate_revision_scope.lua` is
+  `c7bf36208ac597da8a01bb6ea31580f0e53518f7e7b0f1b257f6d008163c7de2`,
+  18417 bytes. The working inventory then had 53 tracked modified paths, zero
+  staged or untracked paths, no index lock, zero protected paths, and zero paths
+  outside the valid prospective union. Its ordinal LF-terminated path-list
+  SHA-256 was
+  `95739893cffaba85887e7e1a0e69a438cd31cc812167110166c4926a0ebf8ad2`.
+- A complete current Lua inventory passed 232/243 and exited 1, with the one
+  explicit manual SavedVariables skip. No source changed during the run. Its
+  failed log and manifest are preserved byte-exact under
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_A8_DIRTY_LUA_INVENTORY_2026-09-11`.
+  The log SHA-256 is
+  `b6c0878d894ff7161346c9350b613e15c5196e442d931f63cc79414cc9e1d8e6`,
+  69077 bytes. The manifest SHA-256 is
+  `e3322c323a8122776963df3f6b181f26c1030bd66dc5af4570735ca8fe99996b`,
+  2471 bytes. Source and destination hashes matched; originals remain intact.
+- The inventory omitted Git safe-directory injection. The resulting failures in
+  `tests/run_sync_mixed_client_matrix.lua` and
+  `tests/run_sync_semantic_envelope.lua` are environment-invalidated and are not
+  accepted or waived. Both require a correct-environment proof.
+- The other nine failures are unchanged offline fixtures that observe a catalog
+  mutation before its bounded owner reaches terminal state. The shipped
+  lifecycle already pumps one catalog slice before dependent consumers. No new
+  production path or semantic change is needed. Their original failure messages
+  are preserved in the diagnostic log.
+- Prospective immutable Wave 2 Amendment 9 was created before any of those nine
+  target tests changed at
+  `C:/T3/BN/task-packets/catalog-authority-22-repair-wave-2-amendment-9.json`,
+  SHA-256 `1777dba0a396770c3f45051cf9188d96668794fd4c991e74120f4a25245c56d8`,
+  10811 bytes. Its durable authorization receipt is
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT9_AUTHORIZATION_2026-09-11.md`,
+  SHA-256 `c232df236846039e9245143d4074801ea422c6997616a8eb117ab236a5f92720`,
+  8155 bytes. Staging and destination hashes matched. The packet parses, is
+  immutable, adds zero production paths, and maps exactly nine unique existing
+  tests only to `MASTER-RC-006`. All nine matched `HEAD` through packet and
+  receipt creation.
+- Amendment 9 is prospective exact-path bookkeeping under the standing user
+  authority. It is not an evidence correction or third repair wave. Repair
+  counters remain 2/2/0; evidence-correction counters remain 1/1/0. All
+  assertions, expected values, refusal cases, byte-preservation checks, and
+  coverage must remain.
+- The supervisor later conveyed direct user authority for scoped GitHub and CI
+  writes in this task. That decision is preserved separately at
+  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_GITHUB_CI_AUTHORIZATION_2026-09-11.md`,
+  SHA-256 `e5f5df8c45abeac2cf58d92e8361e9be4ed3e10d272ae154f04f1c50794a8ab9`,
+  2598 bytes. It does not rewrite earlier immutable constraints or change the
+  exact-head, independent-acceptance, or pre-live-test human gates.
+- Strict installed Vibe validation and a fresh actual implementation dispatch
+  remain required before the first Amendment 9 target edit. Human wait and the
+  complete inventory duration do not count as an implementation timing reset.
+
+## Stage 50.3 - final implementation proof and freeze boundary - 2026-09-12
+
+- Strict installed Vibe validation passed before Amendment 9 implementation.
+  The actual dispatcher result was
+  `implement / prompt.checkpoint_implementation`. No competing writer or test
+  process was active when the nine authorized fixture edits began.
+- All nine Amendment 9 fixtures now wait for the exact terminal catalog ticket.
+  They retain every original assertion, expected value, refusal case,
+  byte-preservation check, and mixed-peer oracle. The modified focused batch
+  passes 46/46. Its 23035-byte log SHA-256 is
+  `2630f045f1e87a68ee59c64ffa929fe72be6d37685f3a59d989e12ff81459c88`.
+- The complete current Lua inventory passes 243/243. The manual
+  `tests/run_legacy_backup_smoke.lua` runner remains skipped because it requires
+  an explicitly authorized SavedVariables backup path. The 64736-byte log
+  SHA-256 is
+  `12edc2500a6444e50618fac24107f08cbf24a66c893ca92cf6dc6304336fde2d`.
+- Pre-freeze Fast against base
+  `6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f` passes 230/230 in
+  4851.799 seconds with zero failed, unavailable, or skipped checks. All 230
+  check IDs are unique and every referenced log exists. A refined scan of the
+  69 non-parse logs found zero failure marker.
+- Fast summary SHA-256 is
+  `2a453b5d5d15e8d532de21e1b57799f3d140e55826cc9fb703c7c174a1839d5d`
+  for 76736 bytes. Wrapper log SHA-256 is
+  `bfdb06894ee7c10757896c9e6940c709a264bcb8036b24eeff208bc9a83de3bd`
+  for 164 bytes. Mixed-client passed 14/14 and semantic-envelope passed 23/23
+  in the same gate.
+- Exact scope accounting reports 62 authorized and 62 modified paths. There
+  are zero outside, protected, staged, untracked, or authorized-but-unmodified
+  paths. The ordinal LF-terminated path-list SHA-256 is
+  `fe67a7868304a03bb23114ba784d5d95412489d48de78dc73beadf97dea396ee`.
+- All five authorized repair roots and affected original-root invariants pass.
+  This tracked state is the single Wave 2 freeze boundary. The external freeze
+  receipt will record commit, tree, parent, and the exact 62 paths immediately
+  after commit. Exact-head Fast, one Full, and fresh independent acceptance
+  remain open; no delivery has started.

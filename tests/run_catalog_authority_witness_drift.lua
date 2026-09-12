@@ -41,6 +41,25 @@ GetRealmName = GetNormalizedRealmName
 
 local function Catalog() return Nexus.BuildCatalog end
 
+local function VerifyToTerminal(catalog)
+    local pump = catalog.PumpSourceVerificationV1
+    Check(type(pump) == "function",
+        "the scheduler-only exact source verifier is missing")
+    local result, calls = pump(), 1
+    while type(result) == "table" and result.state == "pending"
+        and calls < 4096 do
+        Check((result.edges or math.huge) <= 64
+                and (result.nodes or math.huge) <= 64
+                and (result.bytes or math.huge) <= 2048,
+            "one exact source verification pump exceeded its V1 slice")
+        result = pump()
+        calls = calls + 1
+    end
+    Check(calls < 4096,
+        "bounded source verification did not reach a terminal result")
+    return result, calls
+end
+
 -- Bind a fresh admitted root and return its durable payload map.
 local function AdmitWith(rows)
     local bound = S.Database(rows)
@@ -67,6 +86,7 @@ function()
         "fixture replaced the map instead of one row")
     Check(not rawequal(payload.witA, original),
         "fixture did not actually replace the row identity")
+    VerifyToTerminal(Catalog())
     local after = Catalog().RootState()
     Check(after.state == "ROOT_INVALIDATED",
         "a replaced row behind the published root did not invalidate it: "
@@ -82,6 +102,7 @@ function()
     payload.witBintruder = S.LocalBuild("witBintruder", 3)
     Check(rawequal(S.Durable(bound, "communityBuilds"), mapIdentity),
         "fixture replaced the map instead of adding one row")
+    VerifyToTerminal(Catalog())
     local after = Catalog().RootState()
     Check(after.state == "ROOT_INVALIDATED",
         "an added row behind the published root did not invalidate it: "
@@ -102,6 +123,7 @@ function()
     payload[removedKey] = nil
     Check(rawequal(S.Durable(bound, "communityBuilds"), mapIdentity),
         "fixture replaced the map instead of removing one row")
+    VerifyToTerminal(Catalog())
     local after = Catalog().RootState()
     Check(after.state == "ROOT_INVALIDATED",
         "a removed row behind the published root did not invalidate it: "
@@ -222,6 +244,7 @@ function()
         "fixture replaced the builds map instead of one row")
     Check(not rawequal(bundle.builds.bundledG, original),
         "fixture did not actually replace the bundled row identity")
+    VerifyToTerminal(Catalog())
     local after = Catalog().RootState()
     Check(after.state == "ROOT_INVALIDATED",
         "a replaced bundled row behind the published root did not invalidate "
@@ -247,6 +270,87 @@ function()
     Check(final.state == "ROOT_ADMITTED",
         "repeated authority-bearing reads invalidated an untouched bundled "
             .. "baseline")
+end)
+
+-- Wave 2 MASTER-W1-004 expected red. Preserve both the selected map and row
+-- identities, then change one nested selected scalar. The optional diagnostic
+-- verifier is scheduler-driven and may span bounded pumps.
+Case("WIT-09",
+    "nested in-place mutation under the same row identity invalidates on verification",
+function()
+    local bound, payload = AdmitWith({
+        witNested=S.LocalBuild("witNested", 2),
+    })
+    local mapIdentity = payload
+    local rowIdentity = payload.witNested
+    local echoesIdentity = rowIdentity.echoes
+    rowIdentity.echoes[1].stacks = rowIdentity.echoes[1].stacks + 1
+    Check(rawequal(S.Durable(bound, "communityBuilds"), mapIdentity),
+        "fixture replaced the selected map")
+    Check(rawequal(payload.witNested, rowIdentity)
+            and rawequal(payload.witNested.echoes, echoesIdentity),
+        "fixture replaced the row or nested array instead of mutating in place")
+
+    local catalog = Catalog()
+    VerifyToTerminal(catalog)
+    local after = catalog.RootState()
+    Check(after.state == "ROOT_INVALIDATED",
+        "nested selected value changed behind the published root without "
+            .. "invalidation: " .. tostring(after.state))
+end)
+
+Case("WIT-10", "unchanged rejected NaN evidence does not report source drift", function()
+    local row = S.LocalBuild("nanWitness", 1)
+    row.echoes[1].stacks = 0/0
+    local db = S.Database({nanWitness=row})
+    local summary = S.Bind(db)
+    Check(summary.state == "ROOT_ADMITTED",
+        "unchanged NaN evidence invalidated the complete root: " .. tostring(summary.reason))
+    Check(S.State("nanWitness").state == "INVALIDATED"
+            and Catalog().Get("nanWitness") == nil,
+        "NaN evidence gained row authority")
+end)
+
+Case("WIT-11", "opaque metatable evidence retains an exact bounded witness", function()
+    local metadata = {note="before"}
+    local tomb = setmetatable({stamp=1}, metadata)
+    local db = S.Database({}, {opaqueMeta=tomb})
+    local summary = S.Bind(db)
+    Check(summary.state == "ROOT_ADMITTED",
+        "opaque metatable evidence invalidated the complete root: " .. tostring(summary.reason))
+    Check(Catalog().TombstoneState("opaqueMeta").state == "OPAQUE_BLOCK_ALL",
+        "metatable evidence gained tombstone authority")
+    VerifyToTerminal(Catalog())
+    Check(Catalog().RootState().state == "ROOT_ADMITTED",
+        "unchanged metatable evidence drifted")
+    metadata.note = "after"
+    VerifyToTerminal(Catalog())
+    Check(Catalog().RootState().state == "ROOT_INVALIDATED",
+        "in-place metatable change escaped the exact source witness")
+end)
+
+Case("WIT-12", "root-fatal witness limits expose only invalidated authority", function()
+    local hostile = S.LocalBuild("witnessDepth", 1)
+    hostile.futureNested = {}
+    local cursor = hostile.futureNested
+    for depth = 1, 12 do
+        cursor.child = {depth=depth}
+        cursor = cursor.child
+    end
+    local bytes = S.Encode(hostile)
+    local db = S.Database({witnessDepth=hostile,
+        witnessNeighbour=S.LocalBuild("witnessNeighbour", 1)})
+    local result = S.Bind(db)
+    Check(result.state == "ROOT_INVALIDATED"
+            and result.reason == "SOURCE_WITNESS_INVALID",
+        "unprovable source graph did not refuse the complete root")
+    Check(S.State("witnessDepth").state == "INVALIDATED",
+        "root-fatal refusal was reported as unadmitted row authority")
+    Check(S.State("witnessNeighbour").state == "INVALIDATED"
+            and Catalog().Get("witnessNeighbour") == nil and Catalog().Count() == 0,
+        "root-fatal refusal exposed a partial admitted neighbour")
+    Check(S.Encode(hostile) == bytes and db.communityBuilds.witnessDepth == hostile,
+        "root-fatal refusal rewrote the rejected row")
 end)
 
 S.Finish("catalog authority serving witness drift")

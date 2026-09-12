@@ -361,6 +361,23 @@ function Lifecycle.New(options)
         if not ok then RecordError("Store.PumpStoreMutationV1", err) end
     end
 
+    -- MASTER-RC-006: a max-root catalog mutation returns an explicit pending
+    -- ticket. Drive exactly one bounded construction slice per scheduler turn,
+    -- before any consumer reads the catalog. The catalog owns the candidate;
+    -- MainLifecycle only owns the scheduler dispatch.
+    -- AUTHORITY-COORDINATOR-DRIVE BEGIN. The lifecycle scheduler advances the
+    -- catalog-owned pending candidate once before dependent consumers run.
+    local function PumpCatalogRootAdmissionSlice()
+        local catalog = Nexus and Nexus.BuildCatalog
+        if type(catalog) ~= "table"
+            or type(catalog.PumpRootAdmission) ~= "function" then
+            return
+        end
+        local ok, err = pcall(catalog.PumpRootAdmission)
+        if not ok then RecordError("BuildCatalog.PumpRootAdmission", err) end
+    end
+    -- AUTHORITY-COORDINATOR-DRIVE END
+
     function CompleteWorldEntry(event)
         local Adapter = dependencies.Adapter
         local Store = dependencies.Store
@@ -528,6 +545,7 @@ function Lifecycle.New(options)
         PumpAuthorityRebind()
         -- One post-ready Store mutation slice per turn, before consumer reads.
         PumpStoreMutationSlice()
+        PumpCatalogRootAdmissionSlice()
         local Adapter = dependencies.Adapter
         if not Adapter.Ready() then return end
         if Nexus.Sync then

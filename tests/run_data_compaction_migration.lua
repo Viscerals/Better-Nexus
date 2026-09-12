@@ -16,6 +16,29 @@ time = function() return 50000 end
 UnitName = function() return "Compactor" end
 GetNormalizedRealmName = function() return "Ebonhold" end
 
+local function AwaitCatalogMutation(ok, why, ticket)
+    if ok ~= nil then return ok, why end
+    assert(why == "ROOT_MUTATION_PENDING" and type(ticket) == "table",
+        "catalog mutation did not return an explicit pending ticket")
+    for _ = 1, 100000 do
+        if ticket.state ~= "pending" then break end
+        assert(Catalog.PumpRootAdmission() == ticket,
+            "catalog pump replaced the retained mutation ticket")
+    end
+    assert(ticket.state ~= "pending", "catalog mutation did not settle")
+    return ticket.committed, ticket.reason
+end
+
+local function AwaitCatalogAdmission(result)
+    for _ = 1, 100000 do
+        if type(result) ~= "table" or result.state ~= "pending" then break end
+        result = Catalog.PumpRootAdmission()
+    end
+    assert(type(result) == "table" and result.state == "ROOT_ADMITTED",
+        "catalog admission did not settle")
+    return result
+end
+
 local function DeepCopy(value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -149,10 +172,13 @@ assert(firstPump.pending == true
 local concurrentEdit = assert(Catalog.Get("scale-0001"))
 concurrentEdit.title = "Scale 1 edited during migration"
 concurrentEdit.lastModified = 70001
-assert(Catalog.Put(concurrentEdit),
+assert(AwaitCatalogMutation(Catalog.Put(concurrentEdit)),
     "concurrent catalog edit was refused during compaction")
 local migrationPumps = 1
 while Compaction.Stats().pending do
+    -- MainLifecycle owns one catalog admission slice before the Store mutation
+    -- owner runs. Mirror that public scheduler order in this isolated fixture.
+    Catalog.PumpRootAdmission()
     local _, completed = Compaction.Pump()
     migrationPumps = migrationPumps + 1
     assert(migrationPumps < 10000,
@@ -160,6 +186,7 @@ while Compaction.Stats().pending do
     if completed then break end
 end
 local stats = Compaction.Stats()
+
 print(string.format(
     "compaction migration stats: overlay=%s/%s dps=%s/%s arrays=%s removed=%s retained=%s/%s/%s pumps=%s max=%s",
     tostring(stats.overlayRecordsBefore), tostring(stats.overlayRecordsAfter),
@@ -224,14 +251,18 @@ assert(DeepEqual(beforeRepeat, NexusDB),
 
 -- New canonical writes compact immediately after the migration is enabled.
 local newEchoes = {{spellId=499001,quality=3,stacks=2}}
-assert(Catalog.Put({
+assert(AwaitCatalogMutation(Catalog.Put({
     id="new-after-migration", title="New", author="Compactor",
     ownerKey="compactor@ebonhold", class="MAGE", postedAt=60000,
     lastModified=60000, fingerprint=Fingerprint(newEchoes), echoes=newEchoes,
-}))
-assert(H.DurableBuilds()["new-after-migration"].echoes == nil
-    and DeepEqual(Catalog.Get("new-after-migration").echoes, newEchoes),
-    "post-migration build writes retained duplicate inline evidence")
+})))
+local newRaw = H.DurableBuilds()["new-after-migration"]
+local newView = Catalog.Get("new-after-migration")
+assert(newRaw.echoes == nil and DeepEqual(newView.echoes, newEchoes),
+    string.format(
+        "post-migration build writes retained duplicate inline evidence: rawEchoes=%s evidenceKey=%s viewEchoes=%s",
+        tostring(type(newRaw.echoes)), tostring(newRaw.evidenceKey),
+        tostring(type(newView and newView.echoes))))
 
 local newDps = {
     dps=3000000, duration=60, ts=60000, player="New",
@@ -248,15 +279,15 @@ assert(Compaction.CompactDpsRow(newDps)
 local durableReference = H.DurableBuilds()["scale-0001"].evidenceKey
 Sync.Init(Nexus.Codec, {})
 local retryEchoes = {{spellId=499900,quality=3,stacks=1}}
-assert(Catalog.Put({
+assert(AwaitCatalogMutation(Catalog.Put({
     id="outgoing-retry", title="Retry", author="Compactor",
     ownerKey="compactor@ebonhold", class="MAGE", postedAt=60001,
     lastModified=60001, fingerprint=Fingerprint(retryEchoes),
     echoes=retryEchoes, ownerVerified=true,
-}))
+})))
 local retryReference = H.DurableBuilds()["outgoing-retry"].evidenceKey
 assert(Sync.BroadcastBuild(Catalog.Get("outgoing-retry"))
-    and Catalog.RemoveOverlay("outgoing-retry"),
+    and AwaitCatalogMutation(Catalog.RemoveOverlay("outgoing-retry")),
     "outgoing retry fixture did not enter Sync's retained hot-build path")
 local gcWithRetry = Compaction.CollectGarbage(NexusDB)
 assert(not gcWithRetry.blocked
@@ -305,8 +336,16 @@ local collisionDb = {
 }
 NexusDB = collisionDb
 Evidence.Init(collisionDb)
-Catalog.Init(collisionDb, Nexus.BundledBuilds)
+AwaitCatalogAdmission(Catalog.Init(collisionDb, Nexus.BundledBuilds))
 local collisionResult = Compaction.Init(collisionDb)
+local collisionGuard = 0
+while Compaction.Stats(collisionDb).pending do
+    Catalog.PumpRootAdmission()
+    collisionResult = Compaction.Pump()
+    collisionGuard = collisionGuard + 1
+    assert(collisionGuard < 100,
+        "collision migration did not reach a terminal catalog result")
+end
 assert(not collisionResult.blocked
     and collisionResult.retainedConflicts == 1
     and H.DurableBuilds(collisionDb).collision.echoes
@@ -325,7 +364,7 @@ local interruptedDb = {communityBuilds={interrupt={
 }}, dpsCapture={}}
 NexusDB = interruptedDb
 Evidence.Init(interruptedDb)
-Catalog.Init(interruptedDb, Nexus.BundledBuilds)
+AwaitCatalogAdmission(Catalog.Init(interruptedDb, Nexus.BundledBuilds))
 Evidence.RegisterReferenceProvider("test.interrupt", function()
     error("forced migration interruption")
 end)
@@ -341,6 +380,7 @@ Evidence.RegisterReferenceProvider("test.interrupt", nil)
 local resumedResult, resumed = Compaction.Init(interruptedDb)
 local resumeGuard = 0
 while Compaction.Stats(interruptedDb).pending do
+    Catalog.PumpRootAdmission()
     resumedResult, resumed = Compaction.Pump()
     resumeGuard = resumeGuard + 1
     assert(resumeGuard < 100,
@@ -354,13 +394,51 @@ assert(resumed and not resumedResult.blocked
 -- A later bundled-catalog version can still identify and prune an exact
 -- redundant overlay after the overlay's inline evidence has been compacted.
 local promoted = Catalog.Get("interrupt")
-Catalog.Init(interruptedDb, {
+AwaitCatalogAdmission(Catalog.Init(interruptedDb, {
     schemaVersion=1, catalogVersion="post-compaction-promotion",
     sourceVersion="test", builds={interrupt=promoted},
-})
+}))
 assert(H.DurableBuilds(interruptedDb).interrupt == nil
     and DeepEqual(Catalog.Get("interrupt").echoes, interruptEchoes),
     "pool-only redundant overlay survived a later baseline promotion")
+
+for _, tamper in ipairs({"database", "bundle"}) do
+    local pendingDb = {communityBuilds={}, dpsCapture={}}
+    for index = 1, 9 do
+        local id = "pending-compaction-" .. index
+        local echoes = BuildEchoes(index)
+        pendingDb.communityBuilds[id] = {
+            id=id, title=id, author="Compactor", ownerKey="compactor@ebonhold",
+            class="MAGE", postedAt=60002, lastModified=60002,
+            fingerprint=Fingerprint(echoes), echoes=echoes,
+        }
+    end
+    NexusDB = pendingDb
+    Evidence.Init(pendingDb)
+    AwaitCatalogAdmission(Catalog.Init(pendingDb, Nexus.BundledBuilds))
+    local pendingResult = Compaction.Init(pendingDb)
+    for _ = 1, 1000 do
+        if pendingResult.mutationTicket then break end
+        pendingResult = Compaction.Pump()
+    end
+    local ticket = assert(pendingResult.mutationTicket,
+        "compaction did not retain a pending commit")
+    assert(not pendingDb.dataCompaction.version,
+        "compaction stamped completion before its catalog commit")
+    for _ = 1, Catalog.Budget().maximumPumps do
+        if ticket.state ~= "pending" then break end
+        Catalog.PumpRootAdmission()
+    end
+    assert(ticket.state == "committed", "compaction catalog ticket did not commit")
+    local metaBefore = DeepCopy(pendingDb.dataCompaction)
+    if tamper == "database" then NexusDB = {foreign=true}
+    else pendingDb.authorityBundle = {foreign=true} end
+    local refused, changed = Compaction.Pump()
+    assert(refused.blocked and not changed
+            and DeepEqual(pendingDb.dataCompaction, metaBefore),
+        "compaction completed against a replaced " .. tamper)
+end
+
 
 print(string.format(
     "data compaction: builds=%d auto=%d DPS=%d rows removed=%d pool=%d -- OK",

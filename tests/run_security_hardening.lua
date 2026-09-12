@@ -212,6 +212,9 @@ NexusDB = {
 local adapter = { Wishlist=function()
     return {entries={{spellId=200301, quality=3, stacks=2}}}
 end }
+local admitted = H.RebindCatalog()
+assert(admitted and admitted.state == "ROOT_ADMITTED",
+    "legacy security fixture did not reach terminal catalog admission")
 Builds.Init(adapter, {})
 -- `backing` is the preserved legacy input map and `mine` the exact legacy row
 -- bootstrap admitted from it. Both must survive every later publication

@@ -104,7 +104,9 @@ NexusDB = { communityBuilds = {
 -- root (core/BuildCatalog.lua Gate). A fixture that swaps the raw global must
 -- drive one explicit admission itself, exactly as the authority coordinator
 -- does at bootstrap.
-Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+local admitted = H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
+assert(admitted and admitted.state == "ROOT_ADMITTED",
+    "BroadcastMine fixture did not reach terminal catalog admission")
 H.sentChatMessages = {}
 local n = Sync.BroadcastMine()
 assert(n >= 2, "BroadcastMine should redistribute both locally created and received builds")

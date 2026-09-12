@@ -42,6 +42,15 @@ dofile("core/DpsCapture.lua")
 -- or expected value in this fixture is changed.
 Nexus.DpsCapture.Init({}, {})
 
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return true end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
 local slots = {activeSlot=1,bySlot={}}
 for slot = 1, 3 do
     slots.bySlot[slot] = {
@@ -91,9 +100,9 @@ end
 
 local catalogPuts = 0
 local originalPut = Nexus.BuildCatalog.Put
-Nexus.BuildCatalog.Put = function(...)
+Nexus.BuildCatalog.Put = function(record, ...)
     catalogPuts = catalogPuts + 1
-    return originalPut(...)
+    return originalPut(record, ...)
 end
 
 local dpsJoins = 0
@@ -117,6 +126,7 @@ end
 dofile("ui/CommunityBuilds.lua")
 local C, P, Performance = Nexus.CommunityBuilds,
     Nexus.ViewProjections, Nexus.Performance
+SettleCatalog()
 C.Init(Adapter, nil)
 for _, category in ipairs({"dummy", "lk"}) do
     for _, row in pairs(NexusDB.dpsCapture.characterBest[category]) do
@@ -125,6 +135,7 @@ for _, category in ipairs({"dummy", "lk"}) do
             "fixture build fingerprint unavailable")
     end
 end
+SettleCatalog()
 
 allSnapshots, fullWalks, fullCopies = 0, 0, 0
 relatedLookups, relatedChecks, catalogPuts = 0, 0, 0
@@ -167,21 +178,39 @@ local function Delta(after, before)
     return out
 end
 
-local function PumpUntilBinds(frame, target)
+local function PumpUntilBinds(frame, target, expectedCatalogCount)
     local onUpdate = assert(frame and frame:GetScript("OnUpdate"),
         "Community frame did not install an update handler")
-    for _ = 1, 160 do
-        if (C.VirtualStats().dataBinds or 0) >= target then return end
+    for _ = 1, 1000 do
+        local virtual = C.VirtualStats()
+        if (virtual.dataBinds or 0) >= target
+            and not virtual.savedImport.pending
+            and (not expectedCatalogCount
+                or Nexus.BuildCatalog.Count() == expectedCatalogCount) then
+            return
+        end
+        SettleCatalog()
         onUpdate(frame, 0.05)
+        SettleCatalog()
     end
-    error("Community projection did not publish within the fixture pump bound")
+    local virtual = C.VirtualStats()
+    local saved = virtual.savedImport
+    error(string.format(
+        "Community projection did not publish within the fixture pump bound: binds=%d pending=%s phase=%s catalog=%d expected=%s jobs=%d starts=%d pumps=%d preparations=%d finalizations=%d puts=%d writes=%d restarts=%d",
+        virtual.dataBinds or 0, tostring(saved.pending),
+        tostring(saved.pendingPhase), Nexus.BuildCatalog.Count(),
+        tostring(expectedCatalogCount), saved.jobs or 0,
+        saved.jobStarts or 0, saved.pumps or 0,
+        saved.slotPreparations or 0, saved.finalizations or 0,
+        saved.catalogPuts or 0, saved.writes or 0,
+        saved.restarts or 0))
 end
 
 local zero = Snapshot()
 C.Show()
 local frame = assert(NexusCommunityBuildsFrame,
     "real CommunityBuilds.Show did not create the established frame")
-PumpUntilBinds(frame, 1)
+PumpUntilBinds(frame, 1, 1003)
 local afterCold = Snapshot()
 local cold = Delta(afterCold, zero)
 
@@ -195,7 +224,9 @@ Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED,
     {scope="community",reason="show-budget-sync"})
 C.Show()
 local onUpdate = frame:GetScript("OnUpdate")
+SettleCatalog()
 onUpdate(frame, 8.1)
+SettleCatalog()
 local duringSync = Snapshot()
 assert(duringSync.publications == afterWarm.publications
     and duringSync.rebuilds == afterWarm.rebuilds
@@ -211,7 +242,9 @@ assert(duringSync.publications == afterWarm.publications
     "active Sync performed Builds work or stopped updating its status")
 
 receiving = false
+SettleCatalog()
 onUpdate(frame, 0.25)
+SettleCatalog()
 PumpUntilBinds(frame, (C.VirtualStats().dataBinds or 0) + 1)
 local afterSync = Snapshot()
 local sync = Delta(afterSync, duringSync)
@@ -253,7 +286,11 @@ assert(warm.rebuilds == 0 and warm.publications == 0
     and warm.catalogPuts == 0 and warm.dpsJoins == 0
     and warm.sorts == 0 and warm.buildRevision == 0
     and warm.indexRebuilds == 0,
-    "warm Show repeated catalog, DPS, projection, write, revision, publication, or frame work")
+    string.format("warm Show repeated catalog, DPS, projection, write, revision, publication, or frame work: rebuilds=%d publications=%d frames=%d mainFrames=%d snapshots=%d walks=%d copies=%d lookups=%d checks=%d puts=%d joins=%d sorts=%d revision=%d indexRebuilds=%d",
+        warm.rebuilds,warm.publications,warm.frames,warm.mainFrames,
+        warm.snapshots,warm.walks,warm.copies,warm.relatedLookups,
+        warm.relatedChecks,warm.catalogPuts,warm.dpsJoins,warm.sorts,
+        warm.buildRevision,warm.indexRebuilds))
 assert(sync.rebuilds == 1 and sync.publications == 1,
     "quiet Sync completion did not publish exactly one Builds projection")
 local importStats = C.VirtualStats().savedImport

@@ -136,4 +136,41 @@ function()
         "numeric and string ids collapsed into one slot")
 end)
 
+-- Wave 2 MASTER-W1-001 expected red. Distinct typed IDs can share one exact
+-- content fingerprint. Winner selection must not depend on mutation history.
+Case("TID-06",
+    "numeric/string exact winner is stable after removal, reinsertion, and reload",
+function()
+    local db = S.Database()
+    S.Bind(db)
+    local catalog = Nexus.BuildCatalog
+    Check(catalog.Put(S.LocalBuild(1, 2, {id=1})), "numeric id was refused")
+    Check(catalog.Put(S.LocalBuild("1", 2, {id="1"})), "string id was refused")
+    local numericState = catalog.AuthorityState(1)
+    local stringState = catalog.AuthorityState("1")
+    Check(type(numericState.fingerprint) == "string"
+            and numericState.fingerprint == stringState.fingerprint,
+        "fixture did not create one shared exact fingerprint")
+    local fingerprint = numericState.fingerprint
+    local initial = catalog.FindExactFingerprintId(fingerprint)
+    Check(type(initial) == "number" and initial == 1,
+        "number-first order did not select numeric 1 initially")
+
+    Check(catalog.RemoveOverlay(1), "numeric winner removal was refused")
+    local afterRemoval = catalog.FindExactFingerprintId(fingerprint)
+    Check(type(afterRemoval) == "string" and afterRemoval == "1",
+        "string id did not become winner after numeric removal")
+
+    Check(catalog.Put(S.LocalBuild(1, 2, {id=1})), "numeric reinsertion was refused")
+    local afterReinsert = catalog.FindExactFingerprintId(fingerprint)
+    Check(type(afterReinsert) == "number" and afterReinsert == 1,
+        "numeric 1 did not regain the winner after reinsertion")
+
+    S.Reload()
+    S.Bind(db)
+    local reconstructed = Nexus.BuildCatalog.FindExactFingerprintId(fingerprint)
+    Check(type(reconstructed) == "number" and reconstructed == 1,
+        "exact-index reconstruction selected a different typed winner")
+end)
+
 S.Finish("typed identity parity")

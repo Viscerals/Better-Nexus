@@ -193,7 +193,12 @@ function()
     Check(rawget(replacement, "authorityBundle") == nil,
         "the rebind request itself admitted the replacement")
 
-    local rebound = catalog.PumpAuthorityRebindV1(replacement, S.Bundle())
+    local selected = S.Bundle()
+    local rebound = catalog.PumpAuthorityRebindV1(replacement, selected)
+    for _ = 1, catalog.Budget().maximumPumps do
+        if catalog.RebindRequired() == nil then break end
+        rebound = catalog.PumpAuthorityRebindV1(replacement, selected)
+    end
     Check(rebound and rebound.rebound == true,
         "the coordinator rebind did not run")
     Check(catalog.RebindRequired() == nil,

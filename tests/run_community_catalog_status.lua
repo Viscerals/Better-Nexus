@@ -1,6 +1,50 @@
 -- Stage 35.8: the immutable baseline, overlay, active filters, and displayed
 -- window must remain separate fixed facts through the real Community owners.
 local H = dofile("tests/harness.lua")
+
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return true end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    return AwaitMutation(Nexus.BuildCatalog.Put(record, options))
+end
+
+local function PutDeferredTerminal(record)
+    SettleCatalog()
+    return AwaitMutation(Nexus.BuildCatalog.PutDeferred(record))
+end
+
+local function SetTombstoneTerminal(id, tombstone, options)
+    SettleCatalog()
+    return AwaitMutation(Nexus.BuildCatalog.SetTombstone(id, tombstone, options))
+end
+
+local function ClearTombstoneTerminal(id)
+    SettleCatalog()
+    return AwaitMutation(Nexus.BuildCatalog.ClearTombstone(id))
+end
+
 dofile("data/BundledBuilds.lua")
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
@@ -157,7 +201,7 @@ assert(not cleared.searchActive and cleared.availableCount == 346
 -- A real owner mutation updates the O(1) status and the revision-keyed
 -- projection once; it neither copies the bundle into SavedVariables nor
 -- changes the immutable baseline count.
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="stage35-overlay",title="Stage 35 Overlay",description="status",
     author="Peer",ownerKey="peer@ebonhold",class="MAGE",
     postedAt=2000000000,lastModified=2000000000,
@@ -177,7 +221,7 @@ assert(bundledRows == 504 and Nexus.BundledBuilds.builds["stage35-overlay"] == n
 
 -- The deferred row is locally owned so the trusted local delete below can
 -- publish a current-session tombstone and retire it again.
-assert(Nexus.BuildCatalog.PutDeferred({
+assert(PutDeferredTerminal({
     id="stage35-deferred",title="Deferred Overlay",author="StatusMage",
     ownerKey="statusmage@ebonhold",realm="ebonhold",ownerVerified=true,
     isMine=true,class="MAGE",postedAt=2000000001,
@@ -191,13 +235,13 @@ assert(Nexus.BuildCatalog.PublishDeferred(1,"status fixture"))
 local afterPublish = Nexus.BuildCatalog.Status()
 assert(afterPublish.overlayCount == 2 and afterPublish.availableCount == 348,
     "deferred publication changed already represented catalog status")
-assert(Nexus.BuildCatalog.SetTombstone("stage35-deferred",
+assert(SetTombstoneTerminal("stage35-deferred",
     {stamp=2000000002,author="StatusMage"},{source="local"}))
 local tombstoned = Nexus.BuildCatalog.Status()
 assert(tombstoned.overlayCount == 1 and tombstoned.tombstoneCount == 1
     and tombstoned.availableCount == 347,
     "tombstone status did not remove overlay availability exactly once")
-assert(Nexus.BuildCatalog.ClearTombstone("stage35-deferred"))
+assert(ClearTombstoneTerminal("stage35-deferred"))
 local clearedTombstone = Nexus.BuildCatalog.Status()
 assert(clearedTombstone.overlayCount == 1
     and clearedTombstone.tombstoneCount == 0

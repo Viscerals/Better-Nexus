@@ -29,6 +29,23 @@ dofile("core/Codec.lua")
 local S = dofile("tests/catalog_authority_support.lua")
 local Case, Check = S.Case, S.Check
 
+-- Fixture assertions inspect terminal catalog transactions. This uses the real
+-- admission scheduler and never turns a pending acknowledgement into success.
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+
 local now = 2000000000
 time = function() return now end
 UnitClass = function() return "Mage", "MAGE" end
@@ -78,7 +95,7 @@ function()
         retained[#retained + 1] = catalog.BeginRecordCursor()
         retained[#retained + 1] = catalog.BeginSummaryCursor()
         retained[#retained + 1] = catalog.BeginDeltaCursor()
-        Check(catalog.Put(S.LocalBuild("curGen" .. generation, generation + 1)),
+        Check(AwaitMutation(catalog.Put(S.LocalBuild("curGen" .. generation, generation + 1))),
             "publication fixture refused at generation " .. generation)
     end
     Check(#retained == 36, "fixture did not retain one token per family per generation")
@@ -99,7 +116,7 @@ function()
     local token = catalog.BeginRecordCursor()
     Check(catalog.RecordCursorNext(token).done == false,
         "the cursor served no row before supersession")
-    Check(catalog.Put(S.LocalBuild("curB", 3)), "publication fixture refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild("curB", 3))), "publication fixture refused")
 
     local result, why = catalog.RecordCursorNext(token)
     Check(result == nil, "a stale token served a page after its root was superseded")

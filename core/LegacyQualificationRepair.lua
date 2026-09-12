@@ -427,7 +427,13 @@ local function ClassifyPair(job, fingerprint, pair)
         end
         return
     end
-    local ok, _, changed = catalog.PutDeferred(recovered)
+    local ok, why, changed = catalog.PutDeferred(recovered)
+    if ok == nil and why == "ROOT_MUTATION_PENDING"
+        and type(changed) == "table" then
+        job.pendingCatalog = {ticket=changed, recovered=recovered, catalog=catalog}
+        job.phase = "catalog-pending"
+        return
+    end
     if not ok then
         Reject(job, "catalog-write-failed")
         return
@@ -441,6 +447,40 @@ local function ClassifyPair(job, fingerprint, pair)
     else
         Reuse(job)
     end
+end
+
+local function CompletePendingCatalog(job)
+    local pending = job.pendingCatalog
+    if not pending then
+        job.phase = "classify"
+        return true
+    end
+    local ticket = pending.ticket
+    if ticket.state == "pending" then return false end
+    local catalog = pending.catalog
+    if ticket.state == "committed" and (ticket.database ~= job.database
+        or NexusDB ~= job.database or Nexus.BuildCatalog ~= catalog
+        or catalog.BoundDatabase() ~= job.database
+        or rawget(job.database, "authorityBundle") ~= ticket.bundle) then
+        -- A terminal ticket acknowledges only its exact owner and publication.
+        -- Abandon session work without stamping either database after drift.
+        active, runtime.pending = nil, false
+        runtime.failures = runtime.failures + 1
+        runtime.lastReason = "SOURCE_DRIFT"
+        return true
+    end
+    job.pendingCatalog = nil
+    job.phase = "classify"
+    if ticket.state ~= "committed" or ticket.committed ~= true then
+        Reject(job, "catalog-write-failed")
+        return true
+    end
+    job.changed = job.changed + 1
+    job.recovered = job.recovered + 1
+    runtime.recovered = runtime.recovered + 1
+    local meta = Meta(job.database)
+    if meta then meta.pendingWrites = job.changed end
+    return true
 end
 
 local function Finish(job)
@@ -489,6 +529,16 @@ function Repair.Pump(limit)
     local work = 0
     while active and work < limit do
         work = work + 1
+        if active.phase == "catalog-pending" then
+            -- Settle the retained operation before a revision restart can
+            -- replace its owner. Start the next operation on a later turn.
+            CompletePendingCatalog(active)
+            break
+        end
+        local catalog = Nexus.BuildCatalog
+        local root = catalog and type(catalog.RootState) == "function"
+            and catalog.RootState() or nil
+        if type(root) == "table" and root.candidate == true then break end
         if active.dpsRevision ~= CurrentDpsRevision() then
             local database = active.database
             -- Rejections have no durable side effect. Discard the abandoned

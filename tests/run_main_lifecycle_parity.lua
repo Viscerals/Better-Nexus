@@ -135,6 +135,14 @@ Nexus.DpsCapture = {
     OnCombatStart=function() Note("DpsCapture.OnCombatStart") end,
     OnCombatEnd=function() Note("DpsCapture.OnCombatEnd") end,
 }
+local rootAdmissionPumps = 0
+Nexus.BuildCatalog = {
+    PumpRootAdmission=function()
+        rootAdmissionPumps = rootAdmissionPumps + 1
+        Note("BuildCatalog.PumpRootAdmission")
+        return {state="pending"}
+    end,
+}
 
 local printed, recorded, storeErrors = {}, {}, {}
 local lifecycle = factory.New({
@@ -162,7 +170,8 @@ local lifecycle = factory.New({
 assert(lifecycle.IsInitialized()==false and lifecycle.RefreshPanel()==false,
     "pre-init lifecycle state or refresh gate changed")
 lifecycle.OnUpdate(0.2)
-assert(#trace==0, "pre-init update reached services")
+assert(#trace==0 and rootAdmissionPumps==0,
+    "pre-init update reached services or pumped root admission")
 
 -- ======================================================================
 -- Readiness boundary. Only the explicit STORE_READY authority result may
@@ -247,12 +256,15 @@ assert(bindCount==repeatBinds and table.concat(trace,",",initTraceEnd+1)==table.
 local updateStart = #trace
 lifecycle.OnUpdate(0.2)
 assert(table.concat(trace,",",updateStart+1)==table.concat({
-    "Adapter.Ready","Sync.OnUpdate:0.2","DpsCapture.OnUpdate:0.2",
+    "BuildCatalog.PumpRootAdmission","Adapter.Ready",
+    "Sync.OnUpdate:0.2","DpsCapture.OnUpdate:0.2",
     "Automation.OnUpdate:0.2",
-}, ","), "per-frame owner order changed")
+}, ",") and rootAdmissionPumps==1,
+    "per-frame root-admission or owner order changed")
 local lagStart = #trace
 lifecycle.OnUpdate(2)
-assert(Nexus.lastLagElapsed==2 and #trace==lagStart+4,
+assert(Nexus.lastLagElapsed==2 and #trace==lagStart+5
+    and rootAdmissionPumps==2,
     "lifecycle lost bounded lag observation or changed update continuation")
 
 local eventStart = #trace

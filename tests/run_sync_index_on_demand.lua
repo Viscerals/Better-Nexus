@@ -5,6 +5,29 @@ dofile('core/Codec.lua'); dofile('core/SyncProtocol.lua'); dofile('core/SyncTran
 local Sync=Nexus.Sync
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
 local function Pump(steps) for _=1,steps do clock=clock+0.2; Sync.OnUpdate(0.2) end end
+local function AwaitCatalog()
+    local catalog=Nexus.BuildCatalog
+    for _=1,4 do
+        if not catalog.RootState().candidate then return true end
+        assert(catalog.RootState().state=='ROOT_ADMITTED',
+            'index fixture found non-mutation catalog work')
+        local ticket=catalog.PumpRootAdmission()
+        assert(type(ticket)=='table','index catalog work returned no ticket')
+        local previous=tonumber(ticket.pumps) or -1
+        for _=1,catalog.Budget().maximumPumps do
+            if ticket.state~='pending' then break end
+            local observed=catalog.PumpRootAdmission()
+            assert(observed==ticket,'index catalog work changed tickets')
+            local current=tonumber(ticket.pumps)
+            assert(current and current>previous,'index catalog work made no progress')
+            previous=current
+        end
+        assert(ticket.state~='pending','index catalog work exhausted its bound')
+        assert(ticket.state=='committed' and ticket.committed,
+            ticket.reason or 'index catalog work failed')
+    end
+    error('index fixture produced too many catalog candidates')
+end
 local who='Source'; UnitName=function() return who end
 -- Exactly 79 ordinary copies: the valid maximum under issue #22, still a
 -- 79-row payload that must chunk.
@@ -37,6 +60,7 @@ clock=1200; Sync.Init(Nexus.Codec,{})
 for _,m in ipairs(complete) do
     Sync.HandleIncoming(m.text,'Source-Ebonhold')
 end
+AwaitCatalog()
 -- Legacy-to-bundle cutover: durable rows live in the bundle payload.
 local loaded=H.DurableBuilds()['build-79']
 assert(loaded and loaded.echoes and #loaded.echoes==79,'complete loadout did not reassemble')
@@ -55,6 +79,7 @@ Sync.Init(Nexus.Codec,{})
 for _,m in ipairs(summaries) do
     Sync.HandleIncoming(m.text,'Source-Ebonhold')
 end
+AwaitCatalog()
 local placeholder=H.DurableBuilds()['build-79']
 assert(placeholder and not placeholder.loadoutAvailable and not placeholder.echoes,
     'legacy summary was incorrectly treated as exact evidence')

@@ -158,6 +158,7 @@ local RelayEligible
 local recentBuildBroadcast = {}
 local BUILD_BROADCAST_DEDUPE = 2
 local Responder = {}
+local catalogMutationIdentity
 local PendingDeleteCount
 
 local function Catalog()
@@ -182,6 +183,22 @@ local function CatalogSetTombstone(id, tomb, options)
     local catalog = Catalog()
     if not (catalog and catalog.SetTombstone) then return false end
     return catalog.SetTombstone(id, tomb, options)
+end
+
+local function BindCatalogCompletion(ticket, callback)
+    local catalog = Catalog()
+    local identity = catalogMutationIdentity
+    local database = catalog and catalog.BoundDatabase()
+    if not (catalog and type(catalog.BindMutationCompletion) == "function") then
+        return false
+    end
+    return catalog.BindMutationCompletion(ticket, function(outcome)
+        if catalogMutationIdentity ~= identity or Catalog() ~= catalog then return end
+        local committed = outcome.committed == true and outcome.state == "committed"
+            and outcome.database == database and catalog.BoundDatabase() == database
+            and rawget(database, "authorityBundle") == outcome.bundle
+        callback(committed, committed and outcome.storedAs or outcome.reason)
+    end)
 end
 
 -- The catalog's fixed state reason when its root is not serving. Inbound
@@ -1608,45 +1625,54 @@ local function StoreSummary(data, transportSender, context)
         linkHash=newLinkHash, needsFullBuild=linkChanged or nil,
         ownerVerified=true,
     }
-    local stored, storedAs = CatalogPut(record, {source="remote",
+    local function Complete(stored, storedAs)
+        if not stored then
+            stats.storageRejected = (stats.storageRejected or 0) + 1
+            Responder.NoteContextOutcome(context, "rejected", "storage")
+            PeerObserve("receiver_commit", {id=id,peer=transportSender,
+                outcome="store_failed",reason="storage"})
+            LogEvent("RX", "REJECT summary '%s': local storage refused",
+                tostring(data.t))
+            return false, false, "storage"
+        end
+        if storedAs == "baseline" then
+            stats.baselineSkipped = (stats.baselineSkipped or 0) + 1
+        end
+        seenRemoteIds[id] = stamp
+        stats.received = stats.received + 1
+        if old then
+            stats.updated = (stats.updated or 0) + 1
+            if storedAs == "baseline" then
+                Responder.NoteContextOutcome(context, "baseline", "bundled")
+            else
+                Session.NoteReceived(Responder.ContextRequestId(context), "updated")
+            end
+            LogEvent("RX","UPDATED summary '%s' by %s%s", tostring(data.t), tostring(data.a or "Unknown"),
+                keepEchoes and " (loadout unchanged)" or " (loadout needed)")
+        else
+            if storedAs == "baseline" then
+                Responder.NoteContextOutcome(context, "baseline", "bundled")
+            else
+                Session.NoteReceived(Responder.ContextRequestId(context), "new")
+            end
+            LogEvent("RX","STORED legacy summary '%s' by %s (%d Echo entries pending full sync)",
+                tostring(data.t), tostring(data.a or "Unknown"), tonumber(data.n) or 0)
+        end
+        if not keepEchoes or linkChanged then
+            Session.QueueReplacement(id, replacement, recoveryRequestId)
+        end
+        RequestRetention("build summary received")
+        return true, true
+    end
+    local stored, storedAs, ticket = CatalogPut(record, {source="remote",
         sender=transportSender})
-    if stored == false then
-        stats.storageRejected = (stats.storageRejected or 0) + 1
-        Responder.NoteContextOutcome(context, "rejected", "storage")
-        PeerObserve("receiver_commit", {id=id,peer=transportSender,
-            outcome="store_failed",reason="storage"})
-        LogEvent("RX", "REJECT summary '%s': local storage refused",
-            tostring(data.t))
-        return false, false, "storage"
-    end
-    if storedAs == "baseline" then
-        stats.baselineSkipped = (stats.baselineSkipped or 0) + 1
-    end
-    seenRemoteIds[id] = stamp
-    stats.received = stats.received + 1
-    if old then
-        stats.updated = (stats.updated or 0) + 1
-        if storedAs == "baseline" then
-            Responder.NoteContextOutcome(context, "baseline", "bundled")
-        else
-            Session.NoteReceived(Responder.ContextRequestId(context), "updated")
+    if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then
+        if not BindCatalogCompletion(ticket, Complete) then
+            return Complete(false, "INVALID_MUTATION_TICKET")
         end
-        LogEvent("RX","UPDATED summary '%s' by %s%s", tostring(data.t), tostring(data.a or "Unknown"),
-            keepEchoes and " (loadout unchanged)" or " (loadout needed)")
-    else
-        if storedAs == "baseline" then
-            Responder.NoteContextOutcome(context, "baseline", "bundled")
-        else
-            Session.NoteReceived(Responder.ContextRequestId(context), "new")
-        end
-        LogEvent("RX","STORED legacy summary '%s' by %s (%d Echo entries pending full sync)",
-            tostring(data.t), tostring(data.a or "Unknown"), tonumber(data.n) or 0)
+        return false, false, storedAs
     end
-    if not keepEchoes or linkChanged then
-        Session.QueueReplacement(id, replacement, recoveryRequestId)
-    end
-    RequestRetention("build summary received")
-    return true, true
+    return Complete(stored, storedAs)
 end
 
 function Sync.RequestLoadout(buildId)
@@ -2510,41 +2536,50 @@ function Sync.BroadcastDelete(build)
             stamp=tonumber((time and time()) or 0) or 0,author=author,
             ownerKey=localOwner,ownerVerified=true,
         }
-    local tombStored, tombStoreWhy = CatalogSetTombstone(id, tomb, {source="local"})
-    if tombStored == false then
-        stats.storageRejected = (stats.storageRejected or 0) + 1
-        local refused = Operation.NewDelete(id, tomb)
-        Operation.latestDelete = refused
-        Operation.Transition(refused, "rejected",
-            tombStoreWhy or "tombstone storage refused")
-        return false, tombStoreWhy or "tombstone storage refused",
-            Operation.Copy(refused)
+    local function Complete(tombStored, tombStoreWhy)
+        if not tombStored then
+            stats.storageRejected = (stats.storageRejected or 0) + 1
+            local refused = Operation.NewDelete(id, tomb)
+            Operation.latestDelete = refused
+            Operation.Transition(refused, "rejected",
+                tombStoreWhy or "tombstone storage refused")
+            return false, tombStoreWhy or "tombstone storage refused",
+                Operation.Copy(refused)
+        end
+        tomb = CatalogTombstoneView(id) or tomb
+        hotBuilds[id] = nil
+        RequestRetention("local delete stored")
+        -- MASTER-RC-019. Architecture line 4856 and the mixed-client tombstone
+        -- rows: "Refuse before encoder invocation with
+        -- REMOTE_TOMBSTONE_ORDER_UNPROVEN; emit zero bytes, retain the exact local
+        -- serving root, create no outbound ownership claim, and produce zero
+        -- relay", and for new->new "Same local refusal and zero-wire result ... A
+        -- local row-to-tombstone operation is not a Sync message."
+        --
+        -- The refusal is UNCONDITIONAL. It is not conditioned on a peer protocol
+        -- version, and it cannot be: no per-peer protocol-capability tracking
+        -- exists anywhere in this codebase. Session.MarkPeer stores the parsed
+        -- addon version, core/SyncCompatibility.lua carries no protocol/release/
+        -- legacy concept, and protocolVersion is a DPS payload field.
+        --
+        -- The local tombstone was already committed through the central owner
+        -- above and is RETAINED: only the wire is refused. This returns before
+        -- DeleteWireMessage is constructed and before Transport.Enqueue, and the
+        -- status registers no active delete claim.
+        local status = Operation.NewDelete(id, tomb, false)
+        Operation.latestDelete = status
+        Operation.Transition(status, "rejected", "REMOTE_TOMBSTONE_ORDER_UNPROVEN")
+        ClearPendingDelete(id, tomb)
+        return false, "REMOTE_TOMBSTONE_ORDER_UNPROVEN", Operation.Copy(status)
     end
-    tomb = CatalogTombstoneView(id) or tomb
-    hotBuilds[id] = nil
-    RequestRetention("local delete stored")
-    -- MASTER-RC-019. Architecture line 4856 and the mixed-client tombstone
-    -- rows: "Refuse before encoder invocation with
-    -- REMOTE_TOMBSTONE_ORDER_UNPROVEN; emit zero bytes, retain the exact local
-    -- serving root, create no outbound ownership claim, and produce zero
-    -- relay", and for new->new "Same local refusal and zero-wire result ... A
-    -- local row-to-tombstone operation is not a Sync message."
-    --
-    -- The refusal is UNCONDITIONAL. It is not conditioned on a peer protocol
-    -- version, and it cannot be: no per-peer protocol-capability tracking
-    -- exists anywhere in this codebase. Session.MarkPeer stores the parsed
-    -- addon version, core/SyncCompatibility.lua carries no protocol/release/
-    -- legacy concept, and protocolVersion is a DPS payload field.
-    --
-    -- The local tombstone was already committed through the central owner
-    -- above and is RETAINED: only the wire is refused. This returns before
-    -- DeleteWireMessage is constructed and before Transport.Enqueue, and the
-    -- status registers no active delete claim.
-    local status = Operation.NewDelete(id, tomb, false)
-    Operation.latestDelete = status
-    Operation.Transition(status, "rejected", "REMOTE_TOMBSTONE_ORDER_UNPROVEN")
-    ClearPendingDelete(id, tomb)
-    return false, "REMOTE_TOMBSTONE_ORDER_UNPROVEN", Operation.Copy(status)
+    local tombStored, tombStoreWhy, ticket = CatalogSetTombstone(id, tomb, {source="local"})
+    if tombStored == nil and tombStoreWhy == "ROOT_MUTATION_PENDING" then
+        if not BindCatalogCompletion(ticket, Complete) then
+            return Complete(false, "INVALID_MUTATION_TICKET")
+        end
+        return false, tombStoreWhy
+    end
+    return Complete(tombStored, tombStoreWhy)
 end
 
 function Sync.GetDeleteStatus(id)
@@ -2592,7 +2627,7 @@ local function ShouldStore(id, lastMod, author, ownerKey, transportSender)
 end
 
 local function StoreReceivedBuild(payload, ownerVerified, relaySender,
-        matchedReplacement, canonicalFingerprint)
+        matchedReplacement, canonicalFingerprint, onComplete)
     local existing = CatalogGet(payload.id)
     -- A matching current summary makes an absent link authoritative. Legacy
     -- unsolicited full payloads retain the established local-link fallback.
@@ -2620,17 +2655,26 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
         ownerVerified=ownerVerified and true or false,
         relaySender=not ownerVerified and relaySender or nil,
     }
-    local stored, storedAs = CatalogPut(record, {source="remote",
-        sender=relaySender})
-    if stored == false then return false, storedAs end
-    if storedAs == "baseline" then
-        stats.baselineSkipped = (stats.baselineSkipped or 0) + 1
+    local function Complete(stored, storedAs)
+        if not stored then return false, storedAs end
+        if storedAs == "baseline" then
+            stats.baselineSkipped = (stats.baselineSkipped or 0) + 1
+        end
+        seenRemoteIds[payload.id] = payload.lastModified
+        Session.ClearRequestedLoadout(payload.id, payload.lastModified)
+        stats.received = stats.received + 1
+        RequestRetention("full build received")
+        return true, storedAs
     end
-    seenRemoteIds[payload.id] = payload.lastModified
-    Session.ClearRequestedLoadout(payload.id, payload.lastModified)
-    stats.received = stats.received + 1
-    RequestRetention("full build received")
-    return true, storedAs
+    local stored, storedAs, ticket = CatalogPut(record, {source="remote",
+        sender=relaySender})
+    if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then
+        if not BindCatalogCompletion(ticket, function(ok, why)
+            onComplete(Complete(ok, why))
+        end) then return false, "INVALID_MUTATION_TICKET" end
+        return nil, storedAs
+    end
+    return Complete(stored, storedAs)
 end
 
 local function CommitReceivedBuild(payload, transportSender, context)
@@ -2754,40 +2798,46 @@ local function CommitReceivedBuild(payload, transportSender, context)
         Responder.NoteContextOutcome(context, "rejected", "ownership")
         return false
     end
+    local function Complete(stored, storedWhy)
+        if not stored then
+            stats.storageRejected = (stats.storageRejected or 0) + 1
+            Responder.NoteContextOutcome(context, "rejected", "storage")
+            PeerObserve("receiver_commit", {id=payload.id,peer=transportSender,
+                outcome="store_failed",reason="storage",echoes=#payload.echoes})
+            LogEvent("RX", "REJECT '%s': local storage refused",
+                tostring(payload.title))
+            return false
+        end
+        if why == "updated" then
+            stats.updated = (stats.updated or 0) + 1
+            LogEvent("RX","UPDATED '%s' by %s (%d echoes, %s->%s)",
+                tostring(payload.title), tostring(payload.author), #payload.echoes,
+                tostring(previousRemoteStamp), tostring(payload.lastModified))
+        elseif why == "loadout" then
+            LogEvent("RX","LOADED exact Echo list for '%s' by %s (%d echoes)",
+                tostring(payload.title), tostring(payload.author), #payload.echoes)
+        else
+            LogEvent("RX","STORED (new) '%s' by %s (%d echoes)",
+                tostring(payload.title), tostring(payload.author), #payload.echoes)
+        end
+        local outcome = why == "new" and "new" or "updated"
+        if storedWhy == "baseline" then
+            Responder.NoteContextOutcome(context, "baseline", "bundled")
+        else
+            Session.NoteReceived(Responder.ContextRequestId(context), outcome)
+        end
+        PeerObserve("receiver_commit", {id=payload.id,peer=transportSender,
+            outcome=why or "stored",echoes=#payload.echoes})
+        Sync.RequestDataViewRefresh()
+        return true
+    end
     local stored, storedWhy = StoreReceivedBuild(
         payload, directOwner, transportSender, matchedReplacement,
-        replacementFingerprint)
-    if not stored then
-        stats.storageRejected = (stats.storageRejected or 0) + 1
-        Responder.NoteContextOutcome(context, "rejected", "storage")
-        PeerObserve("receiver_commit", {id=payload.id,peer=transportSender,
-            outcome="store_failed",reason="storage",echoes=#payload.echoes})
-        LogEvent("RX", "REJECT '%s': local storage refused",
-            tostring(payload.title))
-        return false
+        replacementFingerprint, Complete)
+    if stored == nil and storedWhy == "ROOT_MUTATION_PENDING" then
+        return false, storedWhy
     end
-    if why == "updated" then
-        stats.updated = (stats.updated or 0) + 1
-        LogEvent("RX","UPDATED '%s' by %s (%d echoes, %s->%s)",
-            tostring(payload.title), tostring(payload.author), #payload.echoes,
-            tostring(previousRemoteStamp), tostring(payload.lastModified))
-    elseif why == "loadout" then
-        LogEvent("RX","LOADED exact Echo list for '%s' by %s (%d echoes)",
-            tostring(payload.title), tostring(payload.author), #payload.echoes)
-    else
-        LogEvent("RX","STORED (new) '%s' by %s (%d echoes)",
-            tostring(payload.title), tostring(payload.author), #payload.echoes)
-    end
-    local outcome = why == "new" and "new" or "updated"
-    if storedWhy == "baseline" then
-        Responder.NoteContextOutcome(context, "baseline", "bundled")
-    else
-        Session.NoteReceived(Responder.ContextRequestId(context), outcome)
-    end
-    PeerObserve("receiver_commit", {id=payload.id,peer=transportSender,
-        outcome=why or "stored",echoes=#payload.echoes})
-    Sync.RequestDataViewRefresh()
-    return true
+    return Complete(stored, storedWhy)
 end
 
 local function HandleRequest(requester, peerBuildHash, peerDpsHash, requestId)
@@ -2927,24 +2977,31 @@ local function HandleDelete(sender, buildId, stamp, originAuthor, context)
         ownerKey=existingOwner,
         ownerVerified=true,
     }
-    local tombStored = CatalogSetTombstone(buildId, tomb,
-        {source="remote", sender=sender})
-    if tombStored == false then
-        stats.storageRejected = (stats.storageRejected or 0) + 1
-        Responder.NoteContextOutcome(context, "rejected", "storage")
-        LogEvent("RX", "REJECT delete of '%s': local storage refused",
-            tostring(existing.title))
-        return false
+    local function Complete(tombStored)
+        if not tombStored then
+            stats.storageRejected = (stats.storageRejected or 0) + 1
+            Responder.NoteContextOutcome(context, "rejected", "storage")
+            LogEvent("RX", "REJECT delete of '%s': local storage refused",
+                tostring(existing.title))
+            return false
+        end
+        seenRemoteIds[buildId] = nil
+        hotBuilds[buildId] = nil
+        Session.ClearRequestedLoadout(buildId)
+        LogEvent("RX","DELETED '%s' from origin %s (relay %s)",
+            tostring(existing.title), author, tostring(sender))
+        Sync.RequestDataViewRefresh()
+        RequestRetention("remote delete received")
+        Responder.NoteContextOutcome(context, "updated", "accepted")
+        return true
     end
-    seenRemoteIds[buildId] = nil
-    hotBuilds[buildId] = nil
-    Session.ClearRequestedLoadout(buildId)
-    LogEvent("RX","DELETED '%s' from origin %s (relay %s)",
-        tostring(existing.title), author, tostring(sender))
-    Sync.RequestDataViewRefresh()
-    RequestRetention("remote delete received")
-    Responder.NoteContextOutcome(context, "updated", "accepted")
-    return true
+    local tombStored, why, ticket = CatalogSetTombstone(buildId, tomb,
+        {source="remote", sender=sender})
+    if tombStored == nil and why == "ROOT_MUTATION_PENDING" then
+        if not BindCatalogCompletion(ticket, Complete) then return Complete(false) end
+        return false, why
+    end
+    return Complete(tombStored)
 end
 
 -- CHAT_MSG_CHANNEL handler. The wire has | escaped to || on send;
@@ -3338,6 +3395,7 @@ function Sync.SendStatusTo(target)
 end
 
 function Sync.Init(codec, adapter)
+    catalogMutationIdentity = {}
     Codec, Adapter = codec, adapter
     -- Explicit Init remains the destructive session boundary. Publish exact
     -- terminal ownership before clearing queues; ordinary world transitions

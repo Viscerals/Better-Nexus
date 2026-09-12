@@ -1,6 +1,54 @@
 -- Saved Build relationship metadata must be selected by verified canonical
 -- owner authority before exact-fingerprint, title, or subset similarity.
 local H = dofile("tests/harness.lua")
+
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return true end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    local put = Nexus.BuildCatalog.Put
+    return AwaitMutation(put(record, options))
+end
+
+local function RemoveOverlayTerminal(id)
+    SettleCatalog()
+    return AwaitMutation(Nexus.BuildCatalog.RemoveOverlay(id))
+end
+
+local function PublishImportedTerminal(owner, id)
+    SettleCatalog()
+    local ok, value = owner.PublishImportedBuild(id)
+    for _ = 1, 4 do
+        if ok ~= nil or value ~= "ROOT_MUTATION_PENDING" then
+            return ok, value
+        end
+        SettleCatalog()
+        ok, value = owner.PublishImportedBuild(id)
+    end
+    return ok, value
+end
+
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
 
@@ -71,12 +119,14 @@ end
 local controller = NewController()
 
 local function ImportAll(owner)
+    SettleCatalog()
     assert(owner.BeginSavedLoadoutImport(true),
         "Saved Build import did not start")
     local changed, pending, total = 0, true, 0
     local pumps = 0
     while pending do
         changed, pending = owner.PumpSavedLoadoutImport(25)
+        SettleCatalog()
         total = total + changed
         pumps = pumps + 1
         assert(pumps < 50, "Saved Build import did not converge")
@@ -95,7 +145,7 @@ assert(mirror.recordBuildId == "realm-a-exact" and mirror.class == "MAGE",
 -- server-slot reconciliation runs.
 mirror.recordBuildId = "realm-b-exact"
 mirror.lastModified = mirror.lastModified + 1
-assert(Nexus.BuildCatalog.Put(mirror),
+assert(PutTerminal(mirror),
     "stale related-ID fixture did not enter the represented catalog")
 local stale = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
 local originalLeaderboard = Nexus.DpsCapture.GetLeaderboard
@@ -122,7 +172,7 @@ Nexus.DpsCapture.GetLeaderboardForEchoes = originalEchoLeaderboard
 -- remain usable before the next slot reconciliation even when recordBuildId
 -- is absent, while an arbitrary same-owner published pointer remains invalid.
 local publishedOnlyId = "published-only-local"
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=publishedOnlyId,title="Saved Target",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",
     class="MAGE",postedAt=18,lastModified=18,echoes=exactEchoes,
@@ -131,7 +181,7 @@ assert(Nexus.BuildCatalog.Put({
 stale.recordBuildId = nil
 stale.publishedBuildId = publishedOnlyId
 stale.lastModified = stale.lastModified + 1
-assert(Nexus.BuildCatalog.Put(stale),
+assert(PutTerminal(stale),
     "published-only Saved relationship did not initialize")
 stale = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
 local qualificationReads = 0
@@ -154,10 +204,10 @@ Nexus.DpsCapture.GetLeaderboard = originalLeaderboard
 Nexus.DpsCapture.GetCommunityQualification = originalQualification
 stale.publishedBuildId = nil
 stale.lastModified = stale.lastModified + 1
-assert(Nexus.BuildCatalog.Put(stale),
+assert(PutTerminal(stale),
     "published-only relationship cleanup failed")
 
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="realm-a-unrelated",title="Different Local Build",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",
     class="MAGE",postedAt=20,lastModified=20,
@@ -165,7 +215,7 @@ assert(Nexus.BuildCatalog.Put({
 }), "same-owner stale relationship fixture did not initialize")
 stale.recordBuildId = "realm-a-unrelated"
 stale.lastModified = stale.lastModified + 1
-assert(Nexus.BuildCatalog.Put(stale),
+assert(PutTerminal(stale),
     "same-owner stale related ID did not enter the catalog")
 stale = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
 assert(controller.RecordBuildId(stale) == nil,
@@ -174,7 +224,7 @@ assert(controller.RecordBuildId(stale) == nil,
 stale.recordBuildId = "realm-b-exact"
 stale.publishedBuildId = "realm-b-exact"
 stale.lastModified = stale.lastModified + 1
-assert(Nexus.BuildCatalog.Put(stale),
+assert(PutTerminal(stale),
     "projection stale related-ID fixture did not initialize")
 stale = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
 
@@ -219,7 +269,7 @@ assert(detail.actionText == "Upload Build"
 -- A stale publishedBuildId must not become write authority. Keep the occupied
 -- foreign record intact and publish the valid local mirror to a safe identity.
 local occupiedId = "published-saved-twin-1"
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=occupiedId,title="RealmB Publication",author="Twin",
     ownerKey="twin@realmb",ownerVerified=true,realm="realmb",
     class="ROGUE",postedAt=30,lastModified=30,
@@ -228,10 +278,11 @@ assert(Nexus.BuildCatalog.Put({
 stale = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
 stale.publishedBuildId = occupiedId
 stale.lastModified = stale.lastModified + 1
-assert(Nexus.BuildCatalog.Put(stale),
+assert(PutTerminal(stale),
     "stale published-ID relationship did not initialize")
 Nexus.Sync = {BroadcastBuildSummary=function() return true end}
-local published, publishedId = controller.PublishImportedBuild("saved-twin-1")
+local published, publishedId = PublishImportedTerminal(
+    controller, "saved-twin-1")
 local occupied = assert(Nexus.BuildCatalog.Get(occupiedId))
 local publishedRecord = publishedId and Nexus.BuildCatalog.Get(publishedId)
 local savedAfterPublish = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
@@ -243,7 +294,7 @@ assert(published and publishedId ~= occupiedId
     and savedAfterPublish.publishedBuildId == publishedId,
     "EXPECTED RED: stale published ID overwrote another canonical owner")
 local publishedAgain, samePublishedId =
-    controller.PublishImportedBuild("saved-twin-1")
+    PublishImportedTerminal(controller, "saved-twin-1")
 assert(publishedAgain and samePublishedId == publishedId
     and Nexus.Identity.VerifiedOwnerKey(
         Nexus.BuildCatalog.Get(occupiedId)) == "twin@realmb",
@@ -256,7 +307,7 @@ local stable = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
 assert(stable.publishedBuildId == publishedId
     and stable.recordBuildId == publishedId,
     "valid publication did not become the Saved Build relation")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="000-equal-local",title="Saved Target",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",
     class="MAGE",postedAt=35,lastModified=35,echoes=exactEchoes,
@@ -274,7 +325,7 @@ assert(stable.publishedBuildId == publishedId
     "source-bound publication changed after a fresh controller reload")
 stable.publishedBuildId = occupiedId
 stable.lastModified = stable.lastModified + 1
-assert(Nexus.BuildCatalog.Put(stable),
+assert(PutTerminal(stable),
     "post-publication stale ID fixture did not initialize")
 ImportAll(controller)
 local reloadedPublishedId = Nexus.BuildCatalog.Get("saved-twin-1").publishedBuildId
@@ -288,13 +339,13 @@ assert(reloadedPublishedId == publishedId,
 -- nor be swept as an obsolete RealmA mirror during cleanup.
 local foreignMirrorId = "saved-twin-2"
 local foreignOrphanId = "saved-twin-3"
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=foreignMirrorId,title="RealmB Saved Slot",serverTitle="RealmB Saved Slot",
     author="Twin",ownerKey="twin@realmb",ownerVerified=true,realm="realmb",
     class="ROGUE",postedAt=40,lastModified=40,echoes=Echoes(985001, 6),
     importedSavedBuild=true,isMine=false,serverSlot=2,
 }), "foreign Saved mirror collision fixture did not initialize")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=foreignOrphanId,title="RealmB Orphan",serverTitle="RealmB Orphan",
     author="Twin",ownerKey="twin@realmb",ownerVerified=true,realm="realmb",
     class="ROGUE",postedAt=41,lastModified=41,echoes=Echoes(986001, 6),
@@ -317,7 +368,7 @@ assert(Nexus.Identity.VerifiedOwnerKey(foreignMirror) == "twin@realmb"
     and Nexus.BuildCatalog.Get(foreignOrphanId) ~= nil
     and localSlotTwo and localSlotTwo ~= foreignMirrorId,
     "EXPECTED RED: short-name Saved mirror collision overwrote or deleted RealmB")
-assert(Nexus.BuildCatalog.RemoveOverlay(foreignMirrorId),
+assert(RemoveOverlayTerminal(foreignMirrorId),
     "foreign base mirror removal failed")
 ImportAll(controller)
 local stableLocalSlotTwo
@@ -333,18 +384,18 @@ assert(stableLocalSlotTwo == localSlotTwo,
 local ambiguousMirrorId = "saved-twin-4"
 local ambiguousOrphanId = "saved-twin-8"
 local explicitLegacyOrphanId = "saved-twin-14"
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=ambiguousMirrorId,title="Ambiguous Private",userTitle="Ambiguous Private",
     serverTitle="Ambiguous Private",author="Twin",isMine=true,
     class="ROGUE",postedAt=45,lastModified=45,echoes=Echoes(987501, 6),
     importedSavedBuild=true,serverSlot=4,
 }), "ambiguous Saved mirror collision fixture did not initialize")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=ambiguousOrphanId,title="Ambiguous Orphan",author="Twin",isMine=true,
     class="ROGUE",postedAt=46,lastModified=46,echoes=Echoes(987601, 6),
     importedSavedBuild=true,serverSlot=8,
 }), "ambiguous Saved mirror cleanup fixture did not initialize")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=explicitLegacyOrphanId,title="Explicit Legacy Orphan",
     serverTitle="Explicit Legacy Orphan",author="Twin",
     ownerKey="twin@realma",realm="realma",isMine=true,
@@ -375,13 +426,13 @@ assert(ambiguousMirror.ownerVerified ~= true
 -- so hash-table traversal order cannot change a cold relationship.
 local tieEchoes = Echoes(988001, 6)
 for _, id in ipairs({"tie-z", "tie-a"}) do
-    assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
         id=id,title="Tie Target",author="Twin",
         ownerKey="twin@realma",ownerVerified=true,realm="realma",
         class="MAGE",postedAt=50,lastModified=50,echoes=tieEchoes,
     }), "deterministic tie candidate did not initialize: " .. id)
 end
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="saved-twin-5",title="Old Tie Mirror",serverTitle="Old Tie Mirror",
     author="Twin",ownerKey="twin@realma",ownerVerified=true,realm="realma",
     class="MAGE",postedAt=51,lastModified=51,echoes=tieEchoes,
@@ -401,24 +452,24 @@ assert(Nexus.BuildCatalog.Get("saved-twin-7").recordBuildId == "tie-a",
 -- title/subset candidate is the only admissible relation; a realm-less exact
 -- match and a verified RealmB title/subset match remain ambient evidence.
 local subsetEchoes = Echoes(989001, 8)
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="unverified-exact",title="Subset Target",author="Twin",
     ownerKey="twin@realma",ownerVerified=false,realm="realma",
     class="ROGUE",postedAt=60,lastModified=60,
     echoes=subsetEchoes,
 }), "explicitly unverified exact candidate did not initialize")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="realm-less-exact",title="Subset Target",author="Twin",
     ownerVerified=true,class="ROGUE",postedAt=60,lastModified=60,
     echoes=subsetEchoes,
 }), "realm-less exact candidate did not initialize")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="realm-b-subset",title="Subset Target",author="Twin",
     ownerKey="twin@realmb",ownerVerified=true,realm="realmb",
     class="ROGUE",postedAt=61,lastModified=61,
     echoes=Echoes(989001, 10),
 }), "RealmB subset candidate did not initialize")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="realm-a-subset",title="Subset Target",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",
     class="MAGE",postedAt=62,lastModified=62,
@@ -434,9 +485,9 @@ assert(subsetMirror.recordBuildId == "realm-a-subset"
 -- A catalog revision must invalidate the warm relation cache. Once the only
 -- verified local candidate changes owner, the durable relationship clears;
 -- recreating the controller must not resurrect it from persisted metadata.
-assert(Nexus.BuildCatalog.RemoveOverlay("realm-a-subset"),
+assert(RemoveOverlayTerminal("realm-a-subset"),
     "valid subset candidate removal failed")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="realm-a-subset",title="Subset Target",author="Twin",
     ownerKey="twin@realmb",ownerVerified=true,realm="realmb",
     class="ROGUE",postedAt=62,lastModified=63,
@@ -451,10 +502,10 @@ ImportAll(reloadedController)
 assert(Nexus.BuildCatalog.Get("saved-twin-6").recordBuildId == nil,
     "stale persisted relation returned after controller reload")
 
-assert(Nexus.BuildCatalog.RemoveOverlay("realm-a-subset"),
+assert(RemoveOverlayTerminal("realm-a-subset"),
     "wrong-owner subset candidate removal failed")
 local restoredSubsetEchoes = Echoes(989001, 10)
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="realm-a-subset",title="Subset Target",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",
     class="MAGE",postedAt=62,lastModified=64,
@@ -476,7 +527,7 @@ local malformedSourceSummary = Nexus.BuildCatalog.GetSummary(restoredSubset.id)
 malformedSourceSummary.fingerprint = "989001x8,malformed"
 assert(reloadedController.SavedProjectionRelation(malformedSourceSummary) == nil,
     "malformed compact Saved fingerprint entered relationship scoring")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="malformed-compact-target",title="Subset Target",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",
     class="MAGE",postedAt=65,lastModified=65,
@@ -558,7 +609,7 @@ local staleProjectionFingerprint =
     assert(Nexus.DpsCapture.GetEchoKey(staleProjectionEchoes))
 local staleProjectionHash =
     assert(Nexus.DpsCapture.GetEchoHash(staleProjectionEchoes))
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="realm-b-stale-projection",title="Stale Projection Candidate",
     author="Twin",ownerKey="twin@realmb",ownerVerified=true,realm="realmb",
     class="ROGUE",postedAt=66,lastModified=66,echoes=staleProjectionEchoes,
@@ -566,7 +617,7 @@ assert(Nexus.BuildCatalog.Put({
     fingerprintHash=staleProjectionHash,
 }), "stale projection wrong-owner candidate did not initialize")
 local staleProjectionId = "saved-stale-projection"
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=staleProjectionId,title="Stale Projection Mirror",
     serverTitle="Stale Projection Candidate",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",isMine=true,
@@ -649,13 +700,13 @@ assert(Nexus.ViewProjections.ExplainBuild(staleProjectionId, {
 local changedPublicationId = "published-content-changed"
 local changedSavedId = "saved-content-changed"
 local changedSavedEchoes = Echoes(990701, 6)
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=changedPublicationId,title="Old Published Content",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",class="MAGE",
     postedAt=68,lastModified=68,echoes=Echoes(990801, 6),
     sourceSavedBuildId=changedSavedId,
 }), "content-changed publication target did not initialize")
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=changedSavedId,title="Changed Local Content",
     serverTitle="Changed Local Content",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",isMine=true,
@@ -687,7 +738,7 @@ assert(changedDetail.build.recordBuildId == nil
     and changedDetail.actionText == "Update Upload",
     "content-changed valid publication lost its projected upload state")
 local changedPublished, changedPublishedId =
-    controller.PublishImportedBuild(changedSavedId)
+    PublishImportedTerminal(controller, changedSavedId)
 local changedPublishedBuild = changedPublishedId
     and Nexus.BuildCatalog.Get(changedPublishedId) or nil
 assert(changedPublished and changedPublishedId == changedPublicationId
@@ -696,7 +747,7 @@ assert(changedPublished and changedPublishedId == changedPublicationId
 
 local explicitLegacyId = "saved-twin-9"
 local explicitLegacyEchoes = Echoes(990001, 6)
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=explicitLegacyId,title="Legacy Local Private",
     userTitle="Legacy Local Private",serverTitle="Legacy Before Import",
     author="Twin",ownerKey="twin@realma",realm="realma",
@@ -706,7 +757,7 @@ assert(Nexus.BuildCatalog.Put({
 }), "explicit-owner legacy Saved mirror fixture did not initialize")
 local explicitLegacyBefore = assert(Nexus.BuildCatalog.Get(explicitLegacyId))
 local explicitLegacyPublished, explicitLegacyWhy =
-    controller.PublishImportedBuild(explicitLegacyId)
+    PublishImportedTerminal(controller, explicitLegacyId)
 local explicitLegacyRows = ProjectMine("legacy local private", false)
 assert(not controller.IsOwnBuild(explicitLegacyBefore)
     and not explicitLegacyPublished and explicitLegacyWhy == "not your build"
@@ -731,7 +782,7 @@ local ambiguousProjected = assert(controller.ProjectBuild(ambiguousBefore))
 assert(not controller.IsOwnBuild(ambiguousBefore),
     "EXPECTED RED: claimless isMine Saved mirror granted owner authority")
 local ambiguousPublished, ambiguousWhy =
-    controller.PublishImportedBuild(ambiguousMirrorId)
+    PublishImportedTerminal(controller, ambiguousMirrorId)
 assert(not ambiguousPublished and ambiguousWhy == "not your build"
     and ambiguousProjected.class == "UNKNOWN"
     and ambiguousProjected.recordBuildId == nil
@@ -761,7 +812,7 @@ for index, marker in ipairs({"true", 1, {future=true}}) do
     local malformedId = "malformed-saved-marker-" .. index
     -- A malformed marker type is refused at admission, so the row never
     -- becomes durable state; an admitted row must still cross no boundary.
-    local markerOk, markerWhy = Nexus.BuildCatalog.Put({
+    local markerOk, markerWhy = PutTerminal({
         id=malformedId,title="Malformed Saved Marker " .. index,
         serverTitle="Malformed Saved Marker " .. index,author="Twin",
         class="MAGE",postedAt=80 + index,lastModified=80 + index,
@@ -775,7 +826,7 @@ for index, marker in ipairs({"true", 1, {future=true}}) do
                 .. index .. "/" .. tostring(markerWhy))
     else
         local malformed = assert(Nexus.BuildCatalog.Get(malformedId))
-        local published, why = controller.PublishImportedBuild(malformedId)
+        local published, why = PublishImportedTerminal(controller, malformedId)
         local rows = ProjectMine("malformed saved marker " .. index, false)
         local malformedDetail = changedDetailProjection.Detail(malformedId, {
             ownerKey="twin@realma",player="Twin",currentClass="MAGE",
@@ -793,7 +844,7 @@ for index, marker in ipairs({"true", 1, {future=true}}) do
 end
 
 local explicitOrdinaryId = "explicit-false-ordinary"
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=explicitOrdinaryId,title="Explicit False Ordinary",author="Twin",
     ownerKey="twin@realma",ownerVerified=true,realm="realma",isMine=true,
     class="MAGE",postedAt=90,lastModified=90,
@@ -801,7 +852,7 @@ assert(Nexus.BuildCatalog.Put({
 }), "explicit false ordinary fixture did not initialize")
 local explicitOrdinary = assert(Nexus.BuildCatalog.Get(explicitOrdinaryId))
 local falsePublished, falseWhy =
-    controller.PublishImportedBuild(explicitOrdinaryId)
+    PublishImportedTerminal(controller, explicitOrdinaryId)
 assert(controller.IsOwnBuild(explicitOrdinary)
     and not falsePublished and falseWhy == "not a saved loadout"
     and ProjectedBuild(ProjectMine("explicit false ordinary", false),
@@ -830,7 +881,7 @@ local foreignFingerprint =
     assert(Nexus.DpsCapture.GetEchoKey(foreignFingerprintEchoes))
 local foreignFingerprintHash =
     assert(Nexus.DpsCapture.GetEchoHash(foreignFingerprintEchoes))
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id=foreignFingerprintId,title="Foreign Fingerprint Only",author="Twin",
     ownerKey="twin@realmb",ownerVerified=true,realm="realmb",
     class="ROGUE",postedAt=80,lastModified=80,
@@ -958,7 +1009,7 @@ H.RebindCatalog()
 assert(Nexus.BuildCatalog.TombstoneState(tombstonePublicationBase).state
     == "OPAQUE_BLOCK_ALL", "publication tombstone fixture did not initialize")
 local tombstonePublished, tombstonePublishedId =
-    controller.PublishImportedBuild(tombstoneMirrorId)
+    PublishImportedTerminal(controller, tombstoneMirrorId)
 local tombstonePublicationState =
     Nexus.BuildCatalog.SyncState(tombstonePublicationBase)
 local tombstonePublication = tombstonePublishedId
@@ -982,7 +1033,7 @@ assert(Nexus.BuildCatalog.AllocationOccupancy(opaquePublicationBase)
         == "opaque",
     "opaque publication fixture was not observable as occupied")
 local opaquePublished, opaquePublishedId =
-    controller.PublishImportedBuild(opaqueMirrorId)
+    PublishImportedTerminal(controller, opaqueMirrorId)
 local opaquePublication = opaquePublishedId
     and Nexus.BuildCatalog.Get(opaquePublishedId) or nil
 assert(opaquePublished and opaquePublishedId ~= opaquePublicationBase
@@ -999,7 +1050,7 @@ local stablePublication = assert(Nexus.BuildCatalog.Get(publishedId))
 assert(stablePublication.sourceSavedBuildId == "saved-twin-1"
     and Nexus.Identity.VerifiedOwnerKey(stablePublication) == "twin@realma",
     "stable publication control disappeared before the vacancy regression")
-assert(Nexus.BuildCatalog.RemoveOverlay(occupiedId),
+assert(RemoveOverlayTerminal(occupiedId),
     "foreign publication base did not vacate for the stability regression")
 assert(Nexus.BuildCatalog.Get(occupiedId) == nil,
     "vacated publication base remained represented")
@@ -1007,10 +1058,10 @@ local stableSource = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
 stableSource.publishedBuildId = occupiedId
 stableSource.recordBuildId = publishedId
 stableSource.lastModified = stableSource.lastModified + 1
-assert(Nexus.BuildCatalog.Put(stableSource),
+assert(PutTerminal(stableSource),
     "stale publication hint did not enter the stability fixture")
 local republished, reusedPublicationId =
-    controller.PublishImportedBuild("saved-twin-1")
+    PublishImportedTerminal(controller, "saved-twin-1")
 local sourceAfterReuse = assert(Nexus.BuildCatalog.Get("saved-twin-1"))
 assert(republished and reusedPublicationId == publishedId
     and sourceAfterReuse.publishedBuildId == publishedId

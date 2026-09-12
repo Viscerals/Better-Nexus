@@ -23,6 +23,40 @@ local function Check(value, message)
     assert(value, message)
 end
 
+-- Assertions below inspect terminal mutations. Drive only the exact public
+-- ticket returned by Put, and fail if the scheduler changes tickets, stalls,
+-- exhausts its bound, or returns an unknown outcome.
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil then
+        assert(why == "ROOT_MUTATION_PENDING",
+            "fixture mutation returned unknown pending result: " .. tostring(why))
+        assert(type(ticket) == "table" and ticket.state == "pending",
+            "pending mutation returned no live ticket")
+        local catalog = Nexus.BuildCatalog
+        local previous = tonumber(ticket.pumps) or -1
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            local observed = catalog.PumpRootAdmission()
+            assert(observed == ticket, "fixture mutation changed tickets")
+            local current = tonumber(ticket.pumps)
+            assert(current and current > previous,
+                "fixture mutation made no scheduler progress")
+            previous = current
+        end
+        assert(ticket.state ~= "pending", "fixture mutation exhausted its pump bound")
+        assert(ticket.state == "committed" or ticket.state == "failed",
+            "fixture mutation ended in unknown state: " .. tostring(ticket.state))
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    assert(ok == true or ok == false,
+        "fixture mutation returned unknown result: " .. tostring(ok))
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    return AwaitMutation(Nexus.BuildCatalog.Put(record, options))
+end
+
 local function Clone(value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -241,7 +275,7 @@ row.echoes = validOrdinary
 row.fingerprint = EchoKey(validOrdinary)
 historicalBuild.fingerprint = row.fingerprint
 row.build = Clone(historicalBuild)
-Check(Nexus.BuildCatalog.Put({
+Check(PutTerminal({
     id=row.buildId,title="Current direct record",author="Fixture",
     ownerKey="fixture@ebonhold",ownerVerified=true,realm="ebonhold",
     class="MAGE",fingerprint=row.fingerprint,
@@ -320,13 +354,13 @@ Check(not EditorShown() and uploadCalls == 0,
 -- that exact record still invalidates the preview before the click.
 row.build = Clone(historicalBuild)
 row.buildIdentityMismatch = nil
-Check(Nexus.BuildCatalog.Put({
+Check(PutTerminal({
     id=row.buildId,title="Selected direct record",author="Fixture",
     ownerKey="fixture@ebonhold",ownerVerified=true,realm="ebonhold",
     class="MAGE",fingerprint=row.fingerprint,
     echoes=Clone(validOrdinary),lockedEchoes=Clone(locked),
     lockedAuthorityProven=true,lastModified=10,
-}) and Nexus.BuildCatalog.Put({
+}) and PutTerminal({
     id="unrelated-same-fingerprint",title="Unrelated exact record",
     author="Other",class="MAGE",fingerprint=row.fingerprint,
     echoes=Clone(validOrdinary),lastModified=10,
@@ -354,7 +388,7 @@ Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,{source="between render and 
 local unrelatedCurrent = Nexus.CandidateEvidence.Validate(detail.copyCandidate)
 Check(unrelatedCurrent ~= nil,
     "unrelated DPS revision invalidated the selected candidate")
-Check(Nexus.BuildCatalog.Put({
+Check(PutTerminal({
     id="unrelated-same-fingerprint",title="Unrelated title changed",
     author="Other",class="MAGE",fingerprint=row.fingerprint,
     echoes=Clone(validOrdinary),lastModified=11,

@@ -7,6 +7,23 @@ dofile("core/Codec.lua")
 local S = dofile("tests/catalog_authority_support.lua")
 local Case, Check = S.Case, S.Check
 
+-- Fixture assertions inspect terminal catalog transactions. This uses the real
+-- admission scheduler and never turns a pending acknowledgement into success.
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+
 local DAY = 24 * 60 * 60
 local now = 2000000000
 time = function() return now end
@@ -36,7 +53,7 @@ Case("TMB-01", "current-session, persisted V1, and legacy tombstones", function(
     local db = S.Database({tmb01=S.LocalBuild("tmb01", 3)}, {legacy=legacy})
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.SetTombstone("tmb01", LocalTomb(), {source="local"}),
+    Check(AwaitMutation(catalog.SetTombstone("tmb01", LocalTomb(), {source="local"})),
         "local row-to-tombstone refused")
     local state = S.State("tmb01")
     Check(state.state == "TOMBSTONED"
@@ -87,7 +104,7 @@ Case("TMB-02", "malformed and opaque tombstones grant nothing", function()
         local view = Catalog().TombstoneState(id)
         Check(view.state == "OPAQUE_BLOCK_ALL" and view.localOwned == false
             and view.pending == nil, "opaque tombstone exposed pending or ownership: " .. id)
-        local ok, why = Catalog().Put(S.LocalBuild(id, 1), {source="local"})
+        local ok, why = AwaitMutation(Catalog().Put(S.LocalBuild(id, 1), {source="local"}))
         Check(ok == false and why == "TOMBSTONE_RESERVATION",
             "opaque reservation accepted a row: " .. id)
     end
@@ -161,7 +178,7 @@ Case("TMB-05", "row to tombstone is one prepared root publish", function()
                 count=catalog.Count(),
             }
         end)
-    Check(catalog.SetTombstone("tmb05", LocalTomb(), {source="local"}))
+    Check(AwaitMutation(catalog.SetTombstone("tmb05", LocalTomb(), {source="local"})))
     unsubscribe()
     Check(observed and observed.row == nil and observed.tombstone == "CURRENT_DENY"
         and observed.count == 0,
@@ -181,7 +198,7 @@ Case("TMB-06", "failure and termination boundaries preserve one coherent state",
     -- precommit, because publication is one callback-free swap after all fallible
     -- preparation. Drift is that real boundary.
     DriftDurableMap(db, "communityBuilds")
-    local ok = catalog.SetTombstone("tmb06", LocalTomb(), {source="local"})
+    local ok = AwaitMutation(catalog.SetTombstone("tmb06", LocalTomb(), {source="local"}))
     Check(ok == false and S.Encode(db) == rawBytes
         and S.Root().generation == generation,
         "pre-commit failure changed raw or public state")
@@ -207,8 +224,8 @@ Case("TMB-06", "failure and termination boundaries preserve one coherent state",
     local realAdvance = Nexus.Revisions.Advance
     Nexus.Revisions.Advance = function() error("notification collaborator failed") end
     local before = Nexus.BuildCatalog.DebugStats().notificationFailures or 0
-    local committed = Nexus.BuildCatalog.SetTombstone("tmb06b", LocalTomb(),
-        {source="local"})
+    local committed = AwaitMutation(Nexus.BuildCatalog.SetTombstone("tmb06b", LocalTomb(),
+        {source="local"}))
     Nexus.Revisions.Advance = realAdvance
     unsubscribe()
     Check(committed, "notification failure undid the mutation")
@@ -298,7 +315,7 @@ function()
     local attempts, restore = CountingAdvance(1)
 
     local relayBefore = #H.sentChatMessages
-    local committed = catalog.SetTombstone("ntf01", LocalTomb(), {source="local"})
+    local committed = AwaitMutation(catalog.SetTombstone("ntf01", LocalTomb(), {source="local"}))
     Check(committed, "notification failure undid the mutation")
     Check(catalog.TombstoneState("ntf01").state == "CURRENT_DENY"
         and S.Durable(db, "syncTombstones").ntf01 ~= nil,
@@ -363,7 +380,7 @@ function()
     local before = catalog.DebugStats()
 
     -- Generation G: the notification fails and a replay is queued for it.
-    Check(catalog.SetTombstone("ntf03a", LocalTomb(), {source="local"}),
+    Check(AwaitMutation(catalog.SetTombstone("ntf03a", LocalTomb(), {source="local"})),
         "notification failure undid the mutation")
     Check(#attempts == 1 and attempts[1].id == "ntf03a",
         "the failed notification was not the ntf03a commit")
@@ -372,7 +389,7 @@ function()
         "the failed notification recorded no bounded NOTIFICATION_FAILED receipt")
 
     -- Generation G+1 publishes BEFORE the queued replay dispatches.
-    Check(catalog.SetTombstone("ntf03b", LocalTomb(), {source="local"}),
+    Check(AwaitMutation(catalog.SetTombstone("ntf03b", LocalTomb(), {source="local"})),
         "the superseding mutation refused")
     Check(#attempts == 2 and attempts[2].id == "ntf03b",
         "the newer publication did not notify for itself")
@@ -413,7 +430,7 @@ end)
 Case("TMB-07", "backing replacement invalidates suppression until recovery", function()
     local db = S.Database({tmb07=S.LocalBuild("tmb07", 3)})
     S.Bind(db)
-    Check(Catalog().SetTombstone("tmb07", LocalTomb(), {source="local"}))
+    Check(AwaitMutation(Catalog().SetTombstone("tmb07", LocalTomb(), {source="local"})))
     S.DriftSelectedMap(db, "syncTombstones", true)
     Check(S.Root().state == "ROOT_INVALIDATED",
         "tombstone backing replacement was not detected")
@@ -431,20 +448,20 @@ Case("TMB-08", "replay, refresh, local claim, and remote resurrection", function
     S.Bind(db)
     local catalog = Catalog()
     local tomb = LocalTomb()
-    Check(catalog.SetTombstone("tmb08", tomb, {source="local"}))
+    Check(AwaitMutation(catalog.SetTombstone("tmb08", tomb, {source="local"})))
     local generation = S.Root().generation
-    local okReplay, whyReplay = catalog.SetTombstone("tmb08", LocalTomb(), {source="local"})
+    local okReplay, whyReplay = AwaitMutation(catalog.SetTombstone("tmb08", LocalTomb(), {source="local"}))
     Check(okReplay == true and whyReplay == "TOMBSTONE_REPLAY_NOOP"
         and S.Root().generation == generation,
         "exact replay was not a no-op: " .. tostring(whyReplay))
-    local okRefresh, whyRefresh = catalog.SetTombstone("tmb08", LocalTomb(now + 5),
-        {source="local"})
+    local okRefresh, whyRefresh = AwaitMutation(catalog.SetTombstone("tmb08", LocalTomb(now + 5),
+        {source="local"}))
     Check(okRefresh == false and whyRefresh == "TOMBSTONE_REPLAY_CONFLICT"
         and catalog.TombstoneState("tmb08").stamp == now,
         "changed replay refreshed the tombstone: " .. tostring(whyRefresh))
     -- remote resurrection always fails closed
-    local okRemote, whyRemote = catalog.Put(S.Build("tmb08", 3, 0, {lastModified=now + 9}),
-        {source="remote", sender="Boganic-Ebonhold"})
+    local okRemote, whyRemote = AwaitMutation(catalog.Put(S.Build("tmb08", 3, 0, {lastModified=now + 9}),
+        {source="remote", sender="Boganic-Ebonhold"}))
     Check(okRemote == false and whyRemote == "TOMBSTONE_RESERVATION",
         "remote row resurrected a tombstone: " .. tostring(whyRemote))
     -- copied, fabricated, stale, and twice-used claims refuse
@@ -454,7 +471,7 @@ Case("TMB-08", "replay, refresh, local claim, and remote resurrection", function
     local okCopy, whyCopy = catalog.PutWithClaim(copied, S.LocalBuild("tmb08", 2),
         {source="local"})
     Check(okCopy == false and whyCopy == "INVALID_CLAIM", "copied claim accepted")
-    Check(catalog.Put(S.Build("tmb08-other", 1, 0)))
+    Check(AwaitMutation(catalog.Put(S.Build("tmb08-other", 1, 0))))
     local okStale, whyStale = catalog.PutWithClaim(claim, S.LocalBuild("tmb08", 2),
         {source="local"})
     Check(okStale == false and whyStale == "STALE_CLAIM", "stale claim accepted: "
@@ -483,7 +500,7 @@ Case("TMB-09", "only current-session tombstones retire by trusted age", function
     local db = S.Database({tmb09=S.LocalBuild("tmb09", 3)}, {old=persisted})
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.SetTombstone("tmb09", LocalTomb(), {source="local"}))
+    Check(AwaitMutation(catalog.SetTombstone("tmb09", LocalTomb(), {source="local"})))
     local function Retire(id)
         local handle = catalog.BeginCatalogMaintenance({database=db, operation="retention"})
         Check(handle, "maintenance handle unavailable")
@@ -508,8 +525,8 @@ Case("TMB-09", "only current-session tombstones retire by trusted age", function
         and S.Durable(db, "syncTombstones").old == persisted,
         "reloaded tombstone expired: " .. tostring(whyReloaded))
     -- clock rollback makes trusted time unavailable for the session
-    Check(catalog.Put(S.LocalBuild("tmb09b", 2), {source="local"}))
-    Check(catalog.SetTombstone("tmb09b", LocalTomb(now), {source="local"}))
+    Check(AwaitMutation(catalog.Put(S.LocalBuild("tmb09b", 2), {source="local"})))
+    Check(AwaitMutation(catalog.SetTombstone("tmb09b", LocalTomb(now), {source="local"})))
     now = now - 10
     Check(catalog.TrustedServerTime() == nil, "clock rollback was trusted")
     now = now + 200 * DAY
@@ -554,8 +571,8 @@ Case("EVC-01", "exact typed keys: numeric 1 and string \"1\" are distinct", func
     Check(advisory.blocked == true, "barrier-only ID reported vacant")
     Check(S.State(1).occupancy == "BLOCKED" and S.State("1").occupancy == "OCCUPIED",
         "occupancy verdicts disagree with typed reservations")
-    local ok, why = catalog.Put(S.Build(1, 2, 0, {lastModified=99}),
-        {source="remote", sender="Peer-Ebonhold"})
+    local ok, why = AwaitMutation(catalog.Put(S.Build(1, 2, 0, {lastModified=99}),
+        {source="remote", sender="Peer-Ebonhold"}))
     Check(ok == false and why == "BARRIER_RESERVATION", "barrier admitted an inbound row")
 end)
 
@@ -567,8 +584,8 @@ Case("EVC-02", "legacy markers load as opaque block-all", function()
     for _, id in ipairs({"legacyTable", "legacyNumber"}) do
         Check(Catalog().BarrierState(id).state == "BARRIER_OPAQUE_BLOCK_ALL",
             "legacy marker was interpreted: " .. id)
-        local ok = Catalog().Put(S.Build(id, 1, 0, {lastModified=999}),
-            {source="remote", sender="Peer-Ebonhold"})
+        local ok = AwaitMutation(Catalog().Put(S.Build(id, 1, 0, {lastModified=999}),
+            {source="remote", sender="Peer-Ebonhold"}))
         Check(ok == false, "legacy marker admitted a newer revision: " .. id)
     end
     now = now + 400 * DAY
@@ -639,7 +656,7 @@ Case("EVC-06", "30-day expiry uses trusted local observation only", function()
     Check(Expire(db, "evc06") and S.Durable(db, "communityRetentionEvictions").evc06 == nil,
         "current barrier did not expire at 30 days")
     -- reloaded barriers restart their interval at each reload
-    Check(Catalog().Put(S.Build("evc06b", 2, 0, {autoDps=true})))
+    Check(AwaitMutation(Catalog().Put(S.Build("evc06b", 2, 0, {autoDps=true}))))
     Check(Evict(db, "evc06b"))
     S.Reload()
     local reloadedAt = now
@@ -662,8 +679,8 @@ Case("EVC-07", "authenticated inbound rows never clear a barrier", function()
     S.Bind(db)
     Check(Evict(db, "evc07"))
     for _, stamp in ipairs({5, 10, 999999}) do
-        local ok = Catalog().Put(S.Build("evc07", 2, 0, {lastModified=stamp}),
-            {source="remote", sender="Peer-Ebonhold"})
+        local ok = AwaitMutation(Catalog().Put(S.Build("evc07", 2, 0, {lastModified=stamp}),
+            {source="remote", sender="Peer-Ebonhold"}))
         Check(ok == false and S.Durable(db).evc07 == nil,
             "authenticated inbound revision cleared a barrier: " .. stamp)
     end
@@ -690,7 +707,7 @@ Case("ALC-01", "advisory vacancy never authorizes a write", function()
     local _, _, advisory = catalog.AllocationOccupancy("alc01")
     Check(advisory.blocked == false, "fresh typed ID was blocked")
     local claim = assert(catalog.BeginAllocationClaim("alc01"))
-    Check(catalog.Put(S.Build("alc01-other", 1, 0)), "intervening mutation refused")
+    Check(AwaitMutation(catalog.Put(S.Build("alc01-other", 1, 0))), "intervening mutation refused")
     local ok, why = catalog.PutWithClaim(claim, S.Build("alc01", 1, 0))
     Check(ok == false and why == "STALE_CLAIM", "stale claim authorized a write: "
         .. tostring(why))
@@ -698,7 +715,7 @@ Case("ALC-01", "advisory vacancy never authorizes a write", function()
     Check(catalog.PutWithClaim(claim, S.Build("alc01", 1, 0)), "fresh claim refused")
     -- create/remove/create ABA: a stale occupancy result cannot reuse the slot
     local stale = select(3, catalog.AllocationOccupancy("alc01"))
-    Check(catalog.RemoveOverlay("alc01"))
+    Check(AwaitMutation(catalog.RemoveOverlay("alc01")))
     local vacant = select(3, catalog.AllocationOccupancy("alc01"))
     Check(stale.blocked == true and vacant.blocked == false
         and vacant.generation ~= stale.generation,
@@ -740,10 +757,10 @@ Case("MUT-03", "row replacement requires complete readmission", function()
     local catalog = Catalog()
     local oldKey = "100000x1,100001x1,100002x1"
     Check(catalog.FindExactFingerprintId(oldKey) == "mut03")
-    Check(catalog.Put(S.Build("mut03", 2, 0, {firstSpell=300000, lastModified=20})))
+    Check(AwaitMutation(catalog.Put(S.Build("mut03", 2, 0, {firstSpell=300000, lastModified=20}))))
     local replacement = S.Build("mut03", 2, 0, {lastModified=20})
     replacement.echoes = S.Echoes(2, 0, {firstSpell=300000})
-    Check(catalog.Put(replacement))
+    Check(AwaitMutation(catalog.Put(replacement)))
     Check(catalog.FindExactFingerprintId(oldKey) == nil
         and catalog.FindExactFingerprintId("300000x1,300001x1") == "mut03",
         "replacement inherited a stale index membership")
@@ -756,7 +773,7 @@ Case("MUT-04", "backing-table replacement fails the token", function()
     DriftDurableMap(db, "communityBuilds")
     Check(S.Root().state == "ROOT_INVALIDATED" and Catalog().Get("mut04") == nil,
         "overlay replacement was served from a stale root")
-    local ok, why = Catalog().Put(S.Build("mut04b", 1, 0))
+    local ok, why = AwaitMutation(Catalog().Put(S.Build("mut04b", 1, 0)))
     Check(ok == false and why == "ROOT_INVALIDATED", "invalid root accepted a write")
     S.Bind(db)
     Check(Catalog().Get("mut04") ~= nil, "explicit recovery did not restart at zero")
@@ -766,10 +783,10 @@ Case("MUT-05", "provenance collision refuses without tie-break", function()
     local db = S.Database({})
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.Put(S.Build("mut05", 3, 0), {source="remote", sender="Peer-Ebonhold"}))
-    local ok, why = catalog.Put(S.Build("mut05", 3, 0, {ownerKey="other@ebonhold",
+    Check(AwaitMutation(catalog.Put(S.Build("mut05", 3, 0), {source="remote", sender="Peer-Ebonhold"})))
+    local ok, why = AwaitMutation(catalog.Put(S.Build("mut05", 3, 0, {ownerKey="other@ebonhold",
         author="Other", lastModified=99, title="Newer title"}),
-        {source="remote", sender="Other-Ebonhold"})
+        {source="remote", sender="Other-Ebonhold"}))
     Check(ok == false and why == "PROVENANCE_COLLISION",
         "different verified owner replaced a row by newer stamp: " .. tostring(why))
     Check(catalog.Get("mut05").author == "Peer", "collision changed the row")
@@ -779,7 +796,7 @@ Case("MUT-06", "explicit readmission publishes exactly one generation", function
     local db = S.Database({mut06=S.Build("mut06", 3, 0)})
     S.Bind(db)
     local generation = S.Root().generation
-    Check(Catalog().Put(S.Build("mut06", 4, 0, {lastModified=11})))
+    Check(AwaitMutation(Catalog().Put(S.Build("mut06", 4, 0, {lastModified=11}))))
     Check(S.Root().generation == generation + 1 and S.State("mut06").state == "READMITTED",
         "readmission did not publish exactly once")
 end)
@@ -805,7 +822,7 @@ Case("ROOT-01", "one public pointer, no mixed generations", function()
     S.Bind(db)
     local catalog = Catalog()
     for index = 1, 20 do
-        Check(catalog.Put(S.Build("root01-" .. index, 1, 0)))
+        Check(AwaitMutation(catalog.Put(S.Build("root01-" .. index, 1, 0))))
         local generation = S.Root().generation
         local count, status = catalog.Count(), catalog.Status()
         Check(count == index and status.availableCount == index
@@ -842,9 +859,9 @@ Case("TRN-01", "row-state transition table: legal edges only", function()
     for _, state in ipairs(states) do ids[state] = Prepare(state) end
     S.Bind(db)
     catalog = Catalog()
-    Check(catalog.SetTombstone(ids.TOMBSTONED, LocalTomb(), {source="local"}))
-    Check(catalog.Put(S.LocalBuild(ids.READMITTED, 3), {source="local"}))
-    Check(catalog.Put(S.LocalBuild(ids.READMITTED, 4, {lastModified=12}), {source="local"}))
+    Check(AwaitMutation(catalog.SetTombstone(ids.TOMBSTONED, LocalTomb(), {source="local"})))
+    Check(AwaitMutation(catalog.Put(S.LocalBuild(ids.READMITTED, 3), {source="local"})))
+    Check(AwaitMutation(catalog.Put(S.LocalBuild(ids.READMITTED, 4, {lastModified=12}), {source="local"})))
     local expected = {
         UNADMITTED={state="UNADMITTED"},
         ADMITTED={state="ADMITTED"},
@@ -859,22 +876,22 @@ Case("TRN-01", "row-state transition table: legal edges only", function()
     end
     -- Operation matrix: {operation, from -> expected to}
     local matrix = {
-        {name="local put", op=function(id) return catalog.Put(S.LocalBuild(id, 5,
-            {lastModified=50}), {source="local"}) end,
+        {name="local put", op=function(id) return AwaitMutation(catalog.Put(S.LocalBuild(id, 5,
+            {lastModified=50}), {source="local"})) end,
             UNADMITTED="ADMITTED", ADMITTED="READMITTED", INVALIDATED="READMITTED",
             READ_ONLY_FUTURE_SCHEMA="READ_ONLY_FUTURE_SCHEMA", TOMBSTONED="TOMBSTONED",
             READMITTED="READMITTED"},
-        {name="remote put", op=function(id) return catalog.Put(S.Build(id, 5, 0,
-            {lastModified=60}), {source="remote", sender="Peer-Ebonhold"}) end,
+        {name="remote put", op=function(id) return AwaitMutation(catalog.Put(S.Build(id, 5, 0,
+            {lastModified=60}), {source="remote", sender="Peer-Ebonhold"})) end,
             UNADMITTED="ADMITTED", ADMITTED="PROVENANCE", INVALIDATED="READMITTED",
             READ_ONLY_FUTURE_SCHEMA="READ_ONLY_FUTURE_SCHEMA", TOMBSTONED="TOMBSTONED",
             READMITTED="PROVENANCE"},
-        {name="remove overlay", op=function(id) return catalog.RemoveOverlay(id) end,
+        {name="remove overlay", op=function(id) return AwaitMutation(catalog.RemoveOverlay(id)) end,
             UNADMITTED="UNADMITTED", ADMITTED="UNADMITTED", INVALIDATED="INVALIDATED",
             READ_ONLY_FUTURE_SCHEMA="READ_ONLY_FUTURE_SCHEMA", TOMBSTONED="TOMBSTONED",
             READMITTED="UNADMITTED"},
-        {name="local tombstone", op=function(id) return catalog.SetTombstone(id,
-            LocalTomb(now + 1), {source="local"}) end,
+        {name="local tombstone", op=function(id) return AwaitMutation(catalog.SetTombstone(id,
+            LocalTomb(now + 1), {source="local"})) end,
             UNADMITTED="UNADMITTED", ADMITTED="TOMBSTONED", INVALIDATED="INVALIDATED",
             READ_ONLY_FUTURE_SCHEMA="READ_ONLY_FUTURE_SCHEMA", TOMBSTONED="TOMBSTONED",
             READMITTED="TOMBSTONED"},
@@ -896,12 +913,12 @@ Case("TRN-01", "row-state transition table: legal edges only", function()
                         S.LocalBuild(id, 2, {schemaVersion=2}))
                     S.Bind(prepared)
                 else
-                    Check(catalog.Put(S.LocalBuild(id, 2), {source="local"}))
+                    Check(AwaitMutation(catalog.Put(S.LocalBuild(id, 2), {source="local"})))
                     if state == "READMITTED" then
-                        Check(catalog.Put(S.LocalBuild(id, 3, {lastModified=12}),
-                            {source="local"}))
+                        Check(AwaitMutation(catalog.Put(S.LocalBuild(id, 3, {lastModified=12}),
+                            {source="local"})))
                     elseif state == "TOMBSTONED" then
-                        Check(catalog.SetTombstone(id, LocalTomb(), {source="local"}))
+                        Check(AwaitMutation(catalog.SetTombstone(id, LocalTomb(), {source="local"})))
                     end
                 end
             end

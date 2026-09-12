@@ -64,6 +64,14 @@ time = function() return now end
 UnitClass = function() return "Mage", "MAGE" end
 
 local function Catalog() return Nexus.BuildCatalog end
+local function CatalogState()
+    for index = 1, 64 do
+        local name, value = debug.getupvalue(Catalog().RootState, index)
+        if name == "ST" then return value end
+        if name == nil then break end
+    end
+    error("unable to locate module-private catalog state", 2)
+end
 local function LocalTomb(stamp)
     return {stamp=stamp or now, author="Boganic", ownerKey="boganic@ebonhold",
         ownerVerified=true}
@@ -307,8 +315,16 @@ function()
     local evidenceBefore = rawget(bundleBefore, "loadoutEvidence")
     local evidenceBytes = S.Encode(evidenceBefore)
 
-    Check(catalog.Put(S.LocalBuild("evAtomic", 9,
-        {title="Atomic", firstSpell=880000})), "publication refused")
+    local ok, why, ticket = catalog.Put(S.LocalBuild("evAtomic", 9,
+        {title="Atomic", firstSpell=880000}))
+    if ok == nil and why == "ROOT_MUTATION_PENDING" and ticket then
+        for _ = 1, catalog.Budget().maximumPumps do
+            catalog.PumpRootAdmission()
+            if ticket.state ~= "pending" then break end
+        end
+        ok = ticket.state == "committed" and ticket.committed == true
+    end
+    Check(ok, "publication refused")
 
     local bundleAfter = rawget(db, "authorityBundle")
     Check(bundleAfter ~= bundleBefore,
@@ -367,6 +383,303 @@ function()
         "both staged operations did not become durable together")
     Check(S.Encode(rawget(db, "communityBuilds")) == legacyBytes,
         "the transaction wrote a legacy payload location")
+end)
+
+-- Wave 2 MASTER-W1-003 expected red. A source-drift refusal may replace the
+-- public pointer with the invalid sentinel, but the retained superseded serving
+-- graph itself must stay byte- and identity-exact.
+Case("ATOM-09",
+    "failed maintenance preparation preserves the exact retained serving graph",
+function()
+    local db = S.Database({
+        atomRetire=S.LocalBuild("atomRetire", 2),
+        atomBarrier=S.LocalBuild("atomBarrier", 3),
+    })
+    S.Bind(db)
+    local catalog = Catalog()
+    Check(catalog.SetTombstone("atomRetire", LocalTomb(), {source="local"}),
+        "retirement tombstone fixture refused")
+    local evict = catalog.BeginCatalogMaintenance({database=db,
+        operation="retention"})
+    Check(evict and catalog.MaintenanceEvictOverlay(evict, "atomBarrier"),
+        "barrier fixture would not stage")
+    Check(catalog.CommitMaintenance(evict), "barrier fixture would not commit")
+
+    now = now + 180 * DAY + 1
+    local handle = catalog.BeginCatalogMaintenance({database=db,
+        operation="retention"})
+    Check(handle and catalog.MaintenanceRetireTombstone(handle, "atomRetire"),
+        "expired tombstone would not stage")
+    Check(catalog.MaintenanceExpireBarrier(handle, "atomBarrier"),
+        "expired barrier would not stage")
+
+    local state = CatalogState()
+    local servingBefore = state.currentServingRoot
+    local rootBefore = servingBefore.catalogRoot
+    local retireKey = assert(Nexus.Identity.TypedKey("atomRetire", 256))
+    local barrierKey = assert(Nexus.Identity.TypedKey("atomBarrier", 256))
+    local retireSlot = rootBefore.slots[retireKey]
+    local retireVerdict = rootBefore.rows[retireKey]
+    local barrierSlot = rootBefore.slots[barrierKey]
+    local barrierVerdict = rootBefore.rows[barrierKey]
+    local tombstoneObject = retireSlot.tombstone
+    local barrierObject = barrierSlot.barrier
+    local barrierVerdictObject = barrierVerdict.barrier
+    local rowsBefore, slotsBefore = rootBefore.rows, rootBefore.slots
+    local indexBefore, countsBefore = rootBefore.index, rootBefore.counts
+    local vectorBefore = rootBefore.slotVector
+    local rootBytes = S.Encode({
+        retireSlot=retireSlot, retireVerdict=retireVerdict,
+        barrierSlot=barrierSlot, barrierVerdict=barrierVerdict,
+    })
+
+    local restore = S.PoisonDurableField(db, "communityRetentionEvictions",
+        "occupied-by-an-incompatible-value")
+    local ok = catalog.CommitMaintenance(handle)
+    restore()
+
+    Check(ok == false, "source-drift candidate unexpectedly committed")
+    Check(rawequal(rootBefore.rows, rowsBefore)
+            and rawequal(rootBefore.slots, slotsBefore)
+            and rawequal(rootBefore.index, indexBefore)
+            and rawequal(rootBefore.counts, countsBefore)
+            and rawequal(rootBefore.slotVector, vectorBefore),
+        "failed preparation replaced a retained root container")
+    Check(rawequal(rootBefore.slots[retireKey], retireSlot)
+            and rawequal(rootBefore.rows[retireKey], retireVerdict)
+            and rawequal(rootBefore.slots[barrierKey], barrierSlot)
+            and rawequal(rootBefore.rows[barrierKey], barrierVerdict),
+        "failed preparation replaced a retained slot or verdict identity")
+    Check(rawequal(retireSlot.tombstone, tombstoneObject)
+            and rawequal(barrierSlot.barrier, barrierObject)
+            and rawequal(barrierVerdict.barrier, barrierVerdictObject),
+        "failed preparation changed retained tombstone or barrier identity")
+    Check(S.Encode({
+            retireSlot=retireSlot, retireVerdict=retireVerdict,
+            barrierSlot=barrierSlot, barrierVerdict=barrierVerdict,
+        }) == rootBytes,
+        "failed preparation changed retained serving bytes")
+end)
+
+Case("ATOM-10", "cancelled, superseded, and invalidated candidates settle once", function()
+    for _, action in ipairs({"cancel", "supersede", "invalidate"}) do
+        S.Reload()
+        local rows = {}
+        for index = 1, 9 do
+            local id = "pendingFault" .. tostring(index)
+            rows[id] = S.LocalBuild(id, 1)
+        end
+        local db = S.Database(rows)
+        S.Bind(db)
+        local catalog = Catalog()
+        local bundle = rawget(db, "authorityBundle")
+        local bytes = S.Encode(bundle)
+        local ok, why, ticket = catalog.Put(S.LocalBuild("pendingFault1", 2), {source="local"})
+        Check(ok == nil and why == "ROOT_MUTATION_PENDING", "fixture did not open a pending mutation")
+        local callbacks = 0
+        catalog.BindMutationCompletion(ticket, function(outcome)
+            callbacks = callbacks + 1
+            Check(outcome == ticket and outcome.committed == false,
+                "abandoned mutation callback claimed a commit")
+        end)
+        if action == "cancel" then catalog.CancelRootAdmission()
+        elseif action == "supersede" then catalog.BeginRootAdmission(db, Nexus.BundledBuilds)
+        else
+            local restore = S.PoisonDurableField(db, "communityBuilds", {})
+            catalog.Get("pendingFault1")
+            restore()
+        end
+        Check(ticket.state == "failed" and ticket.committed == false and callbacks == 1,
+            action .. " abandoned the pending owner without a terminal receipt")
+        Check(rawget(db, "authorityBundle") == bundle and S.Encode(bundle) == bytes,
+            action .. " changed the retained durable bundle")
+    end
+end)
+
+Case("ATOM-11", "pending publication faults settle once and fail closed", function()
+    for _, afterWrite in ipairs({false, true}) do
+        S.Reload()
+        local rows = {}
+        for index = 1, 9 do
+            local id = "publishFault" .. tostring(index)
+            rows[id] = S.LocalBuild(id, 1)
+        end
+        local db = S.Database(rows)
+        S.Bind(db)
+        local catalog = Catalog()
+        local before = rawget(db, "authorityBundle")
+        local beforeBytes = S.Encode(before)
+        local ok, why, ticket = catalog.Put(
+            S.LocalBuild("publishFault1", 2), {source="local"})
+        Check(ok == nil and why == "ROOT_MUTATION_PENDING" and ticket,
+            "publication fixture did not retain a pending ticket")
+        local completions = 0
+        catalog.BindMutationCompletion(ticket, function()
+            completions = completions + 1
+        end)
+        local originalRawset, injected = rawset, false
+        _G.rawset = function(target, key, value)
+            if target == db and key == "authorityBundle" then
+                injected = true
+                if afterWrite then originalRawset(target, key, value) end
+                error("test pending publication fault", 0)
+            end
+            return originalRawset(target, key, value)
+        end
+        local pumpOk, pumpError = pcall(function()
+            for _ = 1, catalog.Budget().maximumPumps do
+                catalog.PumpRootAdmission()
+                if ticket.state ~= "pending" then break end
+            end
+        end)
+        _G.rawset = originalRawset
+        Check(injected, "fixture never reached the durable publication")
+        Check(pumpOk, "publication error escaped: " .. tostring(pumpError))
+        Check(ticket.state == "failed" and ticket.committed == false
+                and completions == 1,
+            "publication fault did not settle its owner once")
+        Check(catalog.RootState().state == "ROOT_INVALIDATED"
+                and catalog.Get("publishFault1") == nil,
+            "publication fault left serving authority live")
+        Check(S.Encode(before) == beforeBytes,
+            "publication fault changed the retained old bundle")
+        local selected = rawget(db, "authorityBundle")
+        Check(afterWrite and selected ~= before or not afterWrite and selected == before,
+            "publication fault restored or replaced the selected bundle")
+        if afterWrite then
+            Check(selected.transactionGeneration == before.transactionGeneration + 1
+                    and selected.communityBuilds.publishFault1 ~= nil
+                    and selected.communityBuilds.publishFault9 ~= nil,
+                "publication fault left an incomplete new bundle")
+        end
+        catalog.PumpRootAdmission()
+        Check(completions == 1, "publication failure callback repeated")
+    end
+end)
+
+Case("ATOM-12", "notification rebind cannot replace the completed mutation ticket", function()
+    S.Reload()
+    local rows = {}
+    for index = 1, 9 do
+        local id = "reentrant" .. index
+        rows[id] = S.LocalBuild(id, 1)
+    end
+    local db = S.Database(rows)
+    S.Bind(db)
+    local catalog = Catalog()
+    local before = rawget(db, "authorityBundle")
+    local ok, why, ticket = catalog.Put(S.LocalBuild("reentrant1", 2), {source="local"})
+    Check(ok == nil and why == "ROOT_MUTATION_PENDING", "reentrant fixture did not pend")
+    local callbacks, completedDatabase, completedBundle = 0, nil, nil
+    catalog.BindMutationCompletion(ticket, function(result)
+        callbacks = callbacks + 1
+        completedDatabase, completedBundle = result.database, result.bundle
+    end)
+    local replacement = S.Database({nextRoot=S.LocalBuild("nextRoot", 3)})
+    local advance, triggered = Nexus.Revisions.Advance, false
+    Nexus.Revisions.Advance = function(event, payload)
+        if event == Nexus.Revisions.BUILD_LIBRARY_CHANGED and not triggered then
+            triggered = true
+            NexusDB = replacement
+            catalog.BeginRootAdmission(replacement, S.Bundle())
+        end
+        return advance(event, payload)
+    end
+    local pumpOk, pumpError = pcall(function()
+        for _ = 1, catalog.Budget().maximumPumps do
+            catalog.PumpRootAdmission()
+            if ticket.state ~= "pending" then break end
+        end
+    end)
+    Nexus.Revisions.Advance = advance
+    Check(pumpOk, tostring(pumpError))
+    Check(triggered and rawget(db, "authorityBundle") ~= before,
+        "notification did not rebind after durable publication")
+    Check(ticket.state == "committed" and ticket.committed == true and callbacks == 1
+            and completedDatabase == db and completedBundle == rawget(db, "authorityBundle"),
+        "notification rebind changed the old commit's terminal receipt")
+    Check(catalog.RootState().candidate == true,
+        "old completion consumed the newly started admission candidate")
+    local result
+    for _ = 1, catalog.Budget().maximumPumps do
+        result = catalog.PumpRootAdmission()
+        if result.state ~= "pending" then break end
+    end
+    Check(result.state == "ROOT_ADMITTED" and catalog.Get("nextRoot") ~= nil,
+        "replacement admission did not complete independently")
+end)
+
+Case("ATOM-13", "evidence publication faults settle once before and after release", function()
+    for _, afterRelease in ipairs({false,true}) do
+        S.Reload()
+        local rows={}
+        for index=1,9 do local id="evidenceFault"..index; rows[id]=S.LocalBuild(id,1) end
+        local db=S.Database(rows); S.Bind(db); local catalog=Catalog()
+        local before=rawget(db,"authorityBundle"); local bytes=S.Encode(before)
+        local ok,why,ticket=catalog.Put(S.LocalBuild("evidenceFault1",2),{source="local"})
+        Check(ok==nil and why=="ROOT_MUTATION_PENDING" and ticket,"fixture did not pend")
+        local callbacks=0
+        catalog.BindMutationCompletion(ticket,function() callbacks=callbacks+1 end)
+        local original=Nexus.LoadoutEvidence.PublishCandidate; local injected=false
+        Nexus.LoadoutEvidence.PublishCandidate=function()
+            injected=true
+            if afterRelease then original() end
+            error("test evidence publication fault",0)
+        end
+        local pumpOk,pumpError=pcall(function()
+            for _=1,catalog.Budget().maximumPumps do
+                catalog.PumpRootAdmission(); if ticket.state~="pending" then break end
+            end
+        end)
+        Nexus.LoadoutEvidence.PublishCandidate=original
+        Check(injected,"publication hook was not reached")
+        Check(pumpOk,"publication error escaped: "..tostring(pumpError))
+        Check(ticket.state=="failed" and ticket.committed==false and callbacks==1,
+            "publication fault did not settle its owner once")
+        Check(catalog.RootState().state=="ROOT_INVALIDATED" and catalog.Get("evidenceFault1")==nil,
+            "publication fault left serving authority live")
+        Check(S.Encode(before)==bytes,"publication fault changed the retained old bundle")
+        local selected=rawget(db,"authorityBundle")
+        Check(selected~=before and selected.transactionGeneration==before.transactionGeneration+1
+                and selected.communityBuilds.evidenceFault1 and selected.communityBuilds.evidenceFault9,
+            "publication fault left an incomplete new bundle")
+        Check(not Nexus.LoadoutEvidence.CandidateOpen(),"failed publication retained evidence candidate")
+        catalog.PumpRootAdmission(); Check(callbacks==1,"publication failure callback repeated")
+    end
+end)
+
+Case("ATOM-14", "failure callback rebind cannot consume the replacement candidate", function()
+    S.Reload()
+    local rows={}
+    for index=1,9 do local id="failedRebind"..index; rows[id]=S.LocalBuild(id,1) end
+    local db=S.Database(rows); S.Bind(db); local catalog=Catalog()
+    local ok,why,ticket=catalog.Put(S.LocalBuild("failedRebind1",2),{source="local"})
+    Check(ok==nil and why=="ROOT_MUTATION_PENDING" and ticket,"fixture did not pend")
+    local replacement=S.Database({nextRoot=S.LocalBuild("nextRoot",3)})
+    local callbacks=0
+    catalog.BindMutationCompletion(ticket,function()
+        callbacks=callbacks+1
+        NexusDB=replacement
+        catalog.BeginRootAdmission(replacement,S.Bundle())
+    end)
+    local original=Nexus.LoadoutEvidence.PublishCandidate; local injected=false
+    Nexus.LoadoutEvidence.PublishCandidate=function() injected=true; error("test rebind publication fault",0) end
+    local pumpOk,pumpError=pcall(function()
+        for _=1,catalog.Budget().maximumPumps do
+            catalog.PumpRootAdmission(); if ticket.state~="pending" then break end
+        end
+    end)
+    Nexus.LoadoutEvidence.PublishCandidate=original
+    Check(injected and pumpOk,"failure escaped or never injected: "..tostring(pumpError))
+    Check(ticket.state=="failed" and callbacks==1,"failed owner receipt was not stable")
+    local result
+    for _=1,catalog.Budget().maximumPumps do
+        result=catalog.PumpRootAdmission()
+        if result.state~="pending" then break end
+    end
+    Check(result.state=="ROOT_ADMITTED" and catalog.Get("nextRoot")~=nil,
+        "failed owner consumed its callback's replacement candidate")
+    Check(callbacks==1 and ticket.state=="failed","replacement replayed old failure completion")
 end)
 
 S.Finish("catalog authority commit fault matrix")

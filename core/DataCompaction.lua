@@ -164,12 +164,12 @@ local function CompactField(row, inlineField, referenceField, options,
     if style == "build" then
         local materialized = evidence.ResolveBuildRow({
             evidenceKey=reference,
-        })
+        }, {useCandidate=true})
         resolved = materialized and materialized.echoes
     else
         resolved = evidence.ResolveDpsEchoes({
             [referenceField]=reference,
-        }, inlineField == "lockedEchoes")
+        }, inlineField == "lockedEchoes", true)
     end
     if not DeepEqual(inline, resolved) then
         Add(stats, "retainedNonCanonical")
@@ -290,7 +290,8 @@ local function NewState(database, meta)
     local state = {
         database=database,meta=meta,phase="pool-before",cursor=nil,
         overlay=overlay,dps=dps,entries=entries,dpsStack=nil,dpsSeen=nil,
-        evidenceStore=evidenceStore,maintenance=nil,
+        evidenceStore=evidenceStore,maintenance=nil,pendingCommit=nil,
+        sourceVerificationPending=false,
         catalogOwner=type(database.buildCatalog) == "table"
             and database.buildCatalog or nil,
         emptyOverlay=emptyOverlay,emptyDps=emptyDps,emptyEntries=emptyEntries,
@@ -647,6 +648,53 @@ end
 function Compaction.Pump()
     local state = active
     if not state then return Compaction.Stats(), false end
+    if state.pendingCommit then
+        local ticket = state.pendingCommit
+        if ticket.state == "pending" then
+            state.stats.pending, state.stats.phase = true, "commit-pending"
+            local result = DeepCopy(state.stats)
+            result.mutationTicket = ticket
+            return result, false
+        end
+        state.pendingCommit = nil
+        if ticket.state ~= "committed" or ticket.committed ~= true then
+            local why = ticket.reason or "catalog maintenance unavailable"
+            if why == "SOURCE_DRIFT" or why == "CANDIDATE_FAILED" then
+                RestartForExternalChange(state,true)
+                return DeepCopy(state.stats),false
+            end
+            return Fail(state,why)
+        end
+        if ticket.database ~= state.database or NexusDB ~= state.database
+            or rawget(state.database, "authorityBundle") ~= ticket.bundle then
+            return StopWithoutWrite("SOURCE_DRIFT")
+        end
+        local finishOk, result, changed = pcall(Finish,state)
+        if not finishOk then return Fail(state,result) end
+        return result,changed
+    end
+    if state.sourceVerificationPending then
+        local catalog = Nexus and Nexus.BuildCatalog
+        if not (catalog
+            and type(catalog.PumpSourceVerificationV1) == "function") then
+            return Fail(state,"catalog source verification unavailable")
+        end
+        local verified = catalog.PumpSourceVerificationV1({
+            edges=MAX_WORK_PER_PUMP,
+            nodes=MAX_WORK_PER_PUMP,
+            bytes=2048,
+        })
+        if type(verified) ~= "table" or verified.state == "pending" then
+            state.stats.pending,state.stats.phase = true,"source-verification"
+            return DeepCopy(state.stats),false
+        end
+        state.sourceVerificationPending = false
+        if verified.state ~= "current" then
+            return StopWithoutWrite(verified.reason or "SOURCE_DRIFT")
+        end
+        state.stats.pending,state.stats.phase = true,state.phase
+        return DeepCopy(state.stats),false
+    end
     local ownerStatus, ownerValue, ownersChanged = RefreshOwners(state)
     if ownerStatus == "blocked" then return StopWithoutWrite(ownerValue) end
     if ownerStatus == "complete" then return CompleteWithoutWrite(ownerValue) end
@@ -703,11 +751,14 @@ function Compaction.Pump()
             state.stats.retainedNonCanonical = 0
             state.stats.retainedUnavailable = 0
             RestartForExternalChange(state,true)
-            local verifyOk, verifyResult = pcall(RunWork,state,work)
-            if not verifyOk then return Fail(state,verifyResult) end
-            work = verifyResult
-            UpdatePumpStats(state,work,false)
-            if not state.done then return DeepCopy(state.stats),false end
+            -- A provider callback is an external event boundary. Yield before
+            -- the verification walk and let the catalog's bounded exact source
+            -- verifier reach a terminal result. A raw change behind the
+            -- published root must invalidate it before compaction can stamp
+            -- completion.
+            state.sourceVerificationPending = true
+            state.stats.pending,state.stats.phase = true,"source-verification"
+            return DeepCopy(state.stats),false
         end
         ownerStatus,ownerValue,ownersChanged = RefreshOwners(state)
         if ownerStatus == "blocked" then return StopWithoutWrite(ownerValue) end
@@ -722,7 +773,15 @@ function Compaction.Pump()
         state.maintenance = nil
         if handle then
             local catalog = Nexus and Nexus.BuildCatalog
-            local committed, commitWhy = catalog.CommitMaintenance(handle)
+            local committed, commitWhy, ticket = catalog.CommitMaintenance(handle)
+            if committed == nil and commitWhy == "ROOT_MUTATION_PENDING"
+                and type(ticket) == "table" then
+                state.pendingCommit = ticket
+                state.stats.pending, state.stats.phase = true, "commit-pending"
+                local result = DeepCopy(state.stats)
+                result.mutationTicket = ticket
+                return result,false
+            end
             if not committed then
                 if commitWhy == "SOURCE_DRIFT" or commitWhy == "CANDIDATE_FAILED" then
                     RestartForExternalChange(state,true)

@@ -2,6 +2,35 @@
 -- independently authorize ordinary completeness, navigation, Copy/EBH1,
 -- qualification, build manufacture, storage, or Sync publication.
 local H = dofile("tests/harness.lua")
+
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return true end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    return AwaitMutation(Nexus.BuildCatalog.Put(record, options))
+end
+
 dofile("core/Codec.lua")
 dofile("core/WishlistModel.lua")
 local WishlistModel = Nexus.WishlistModel.New()
@@ -330,11 +359,18 @@ local poisoned = {
         spellId=ordinaryControl[1].spellId,quality=2,stacks=1,locked=true,
     }},postedAt=2,lastModified=2,
 }
-assert(Nexus.BuildCatalog.Put(poisoned))
+assert(PutTerminal(poisoned))
 local safeId, safeBuild = controller.EnsureDpsBuildForEchoes(
     Copy(ordinaryControl),"dummy",{
         player="Fixture",class="MAGE",ownerKey="fixture@ebonhold",
     })
+if not safeId and Nexus.BuildCatalog.RootState().candidate then
+    SettleCatalog()
+    safeId, safeBuild = controller.EnsureDpsBuildForEchoes(
+        Copy(ordinaryControl),"dummy",{
+            player="Fixture",class="MAGE",ownerKey="fixture@ebonhold",
+        })
+end
 local safeVerdict = safeBuild
     and Nexus.LoadoutEvidence.OrdinaryCompleteness(safeBuild)
 Check(safeId ~= nil and safeId ~= poisoned.id
@@ -351,7 +387,7 @@ completed.fingerprint = ordinaryFingerprint
 completed.echoCount = 1
 completed.loadoutAvailable = true
 completed.needsFullBuild = false
-assert(Nexus.BuildCatalog.Put(completed))
+assert(PutTerminal(completed))
 local afterLater = assert(Nexus.BuildCatalog.GetSummary("later"))
 local afterLaterEpoch, afterLaterRevision =
     Nexus.BuildCatalog.RecordRevision("later")

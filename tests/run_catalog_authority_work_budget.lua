@@ -20,6 +20,9 @@ local Case, Check = S.Case, S.Check
 local now = 2000000000
 time = function() return now end
 UnitClass = function() return "Mage", "MAGE" end
+UnitName = function() return "Boganic" end
+GetNormalizedRealmName = function() return "Ebonhold" end
+GetRealmName = GetNormalizedRealmName
 
 local function ReadSource(path)
     local handle = assert(io.open(path, "rb"), "cannot open " .. path)
@@ -275,6 +278,336 @@ Case("WB-11", "missing bundle preserves one multi-slice admission handle", funct
         "a missing optional bundle restarted multi-slice admission: calls="
             .. calls .. " state=" .. tostring(type(result) == "table"
                 and result.state or result))
+end)
+
+-- Count every table-iteration step reached from one public call. This observes
+-- the complete call graph, including helpers reached through Gate or commit
+-- preparation, instead of scanning only selected source blocks.
+local function CountedCall(call)
+    local oldPairs, oldIpairs, oldNext = pairs, ipairs, next
+    local steps = 0
+    next = function(value, key)
+        local nextKey, nextValue = oldNext(value, key)
+        if nextKey ~= nil then steps = steps + 1 end
+        return nextKey, nextValue
+    end
+    pairs = function(value)
+        local iterator, state, key = oldPairs(value)
+        return function(innerState, innerKey)
+            local nextKey, nextValue = iterator(innerState, innerKey)
+            if nextKey ~= nil then steps = steps + 1 end
+            return nextKey, nextValue
+        end, state, key
+    end
+    ipairs = function(value)
+        local iterator, state, key = oldIpairs(value)
+        return function(innerState, innerKey)
+            local nextKey, nextValue = iterator(innerState, innerKey)
+            if nextKey ~= nil then steps = steps + 1 end
+            return nextKey, nextValue
+        end, state, key
+    end
+    local results = {pcall(call)}
+    pairs, ipairs, next = oldPairs, oldIpairs, oldNext
+    if not results[1] then error(results[2], 2) end
+    return steps, unpack(results, 2)
+end
+
+local function MaximumDatabase()
+    local rows = {
+        wbRead=S.LocalBuild("wbRead", 1),
+        wbPut=S.LocalBuild("wbPut", 1),
+        wbRemove=S.LocalBuild("wbRemove", 1),
+        wbTomb=S.LocalBuild("wbTomb", 1),
+        wbMaintain=S.LocalBuild("wbMaintain", 1),
+    }
+    for index = 6, 2048 do
+        local id = string.format("wb-future-%04d", index)
+        rows[id] = {id=id, schemaVersion=99}
+    end
+    return S.Database(rows)
+end
+
+-- This observer counts every fixed-schema helper loop in addition to raw source
+-- edges. 8,192 is a conservative fixed ceiling below one complete maximum-root
+-- clone; the V1 ledgers below remain the normative 64/64/2,048 slice proof.
+local PUBLIC_STEP_MAXIMUM = 8192
+
+Case("WB-12",
+    "maximum-root admission finalization stays inside one measured slice",
+function()
+    local db = MaximumDatabase()
+    NexusDB, WishlistRealizerDB = db, nil
+    Nexus.LoadoutEvidence.Init(db)
+    local catalog = Nexus.BuildCatalog
+    local result, calls, maximum = nil, 0, 0
+    repeat
+        local steps
+        steps, result = CountedCall(function()
+            return catalog.Init(db, Nexus.BundledBuilds)
+        end)
+        calls = calls + 1
+        if steps > maximum then maximum = steps end
+    until type(result) == "table" and result.state ~= "pending" or calls >= 4096
+    Check(type(result) == "table" and result.state == "ROOT_ADMITTED",
+        "maximum-root admission did not reach a terminal admitted root")
+    Check(maximum <= PUBLIC_STEP_MAXIMUM,
+        "one admission call performed " .. maximum
+            .. " table-iteration steps; finalization or witness work escaped "
+            .. "the persistent slice")
+end)
+
+Case("WB-13",
+    "maximum-root reads, Begin, mutations, and maintenance stay bounded",
+function()
+    local db = MaximumDatabase()
+    S.Bind(db)
+    local catalog = Nexus.BuildCatalog
+    local offenders = {}
+    local function Measure(name, call)
+        local steps, first, second, third = CountedCall(call)
+        if steps > PUBLIC_STEP_MAXIMUM then
+            offenders[#offenders + 1] = name .. "=" .. steps
+        end
+        return first, second, third
+    end
+    local function Drain(name, result, why, ticket)
+        Check(result == nil and why == "ROOT_MUTATION_PENDING"
+                and type(ticket) == "table" and ticket.state == "pending",
+            name .. " did not return the explicit nil/reason/ticket pending contract")
+        local callbacks = 0
+        Check(catalog.BindMutationCompletion(ticket, function(settled)
+            callbacks = callbacks + 1
+            Check(settled == ticket and settled.state == "committed",
+                name .. " completion callback received the wrong ticket state")
+        end) == true, name .. " pending ticket rejected its owner callback")
+        local calls = 0
+        while ticket.state == "pending"
+            and calls < 4096 do
+            local pumped = Measure(name .. ".pump", function()
+                return catalog.PumpRootAdmission()
+            end)
+            Check(pumped == ticket,
+                name .. " pump did not return the retained completion ticket")
+            calls = calls + 1
+        end
+        Check(calls < 4096, name .. " candidate did not reach a terminal state")
+        Check(ticket.state == "committed" and ticket.committed == true,
+            name .. " did not preserve and settle one explicit completion ticket")
+        Check(callbacks == 1,
+            name .. " completion callback count was " .. tostring(callbacks))
+        return ticket.state == "committed"
+    end
+
+    Measure("Get", function() return catalog.Get("wbRead") end)
+    Measure("Count", function() return catalog.Count() end)
+    local token = Measure("BeginRecordCursor", function()
+        return catalog.BeginRecordCursor()
+    end)
+    Check(type(token) == "table", "bounded cursor Begin was refused")
+    Check(Drain("Put", Measure("Put", function()
+        return catalog.Put(S.LocalBuild("wbPut", 2, {lastModified=2}),
+            {source="local"})
+    end)), "bounded Put was refused")
+    Check(Drain("RemoveOverlay", Measure("RemoveOverlay", function()
+        return catalog.RemoveOverlay("wbRemove")
+    end)), "bounded overlay removal was refused")
+    Check(Drain("SetTombstone", Measure("SetTombstone", function()
+        return catalog.SetTombstone("wbTomb", {
+            stamp=now, author="Boganic", ownerKey="boganic@ebonhold",
+            ownerVerified=true,
+        }, {source="local"})
+    end)), "bounded tombstone was refused")
+    local handle = Measure("BeginCatalogMaintenance", function()
+        return catalog.BeginCatalogMaintenance({database=db,
+            operation="retention"})
+    end)
+    Check(type(handle) == "table", "bounded maintenance Begin was refused")
+    Check(Measure("MaintenanceEvictOverlay", function()
+        return catalog.MaintenanceEvictOverlay(handle, "wbMaintain")
+    end), "bounded maintenance staging was refused")
+    Check(Drain("CommitMaintenance", Measure("CommitMaintenance", function()
+        return catalog.CommitMaintenance(handle)
+    end)), "bounded maintenance commit was refused")
+    Check(#offenders == 0,
+        "public maximum-root calls performed proportional work: "
+            .. table.concat(offenders, ", "))
+end)
+
+Case("WB-14", "NEGATIVE CONTROL: public-call meter detects a planted root scan", function()
+    local values = {}
+    for index = 1, 16384 do values[index] = index end
+    local steps = CountedCall(function()
+        local total = 0
+        for _, value in ipairs(values) do total = total + value end
+        return total
+    end)
+    Check(steps > PUBLIC_STEP_MAXIMUM,
+        "public-call meter did not detect a planted maximum-root scan")
+end)
+
+Case("WB-15", "bundle copy splits a long scalar across byte slices", function()
+    S.Reload()
+    local db = WideDatabase(9)
+    db.dataRetention = {note=string.rep("x", 8193)}
+    local summary = S.Bind(db)
+    local catalog = Nexus.BuildCatalog
+    Check(summary.state == "ROOT_ADMITTED", "long-scalar fixture did not admit")
+    local counters = catalog.BudgetCounters()
+    Check(counters.maxPerPump.bytesInspected <= 2048,
+        "bundle copy exceeded byte slice: " .. tostring(counters.maxPerPump.bytesInspected))
+    Check(rawget(db, "authorityBundle").dataRetention.note == db.dataRetention.note,
+        "bounded copy changed the long scalar")
+end)
+
+Case("WB-16", "baseline pruning does not drain full rows inside finalization", function()
+    S.Reload()
+    local rows, baseline = {}, {}
+    for index = 1, 32 do
+        local id = "prune-budget-" .. index
+        local row = S.Build(id, 79, 6)
+        rows[id], baseline[id] = row, row
+    end
+    local db, bundle = S.Database(rows), S.Bundle(baseline)
+    NexusDB = db
+    Nexus.LoadoutEvidence.Init(db)
+    local catalog, maximum, result = Nexus.BuildCatalog, 0, nil
+    for _ = 1, catalog.Budget().maximumPumps do
+        local steps
+        steps, result = CountedCall(function() return catalog.Init(db, bundle) end)
+        maximum = math.max(maximum, steps)
+        if result.state ~= "pending" then break end
+    end
+    Check(result.state == "ROOT_ADMITTED", "redundant overlay fixture did not admit")
+    Check(maximum <= PUBLIC_STEP_MAXIMUM,
+        "baseline pruning performed unbounded work in one pump: " .. maximum)
+    Check(S.Count(S.Durable(db)) == 0 and catalog.Count() == 32,
+        "bounded pruning changed the visible baseline or retained redundant rows")
+end)
+
+Case("WB-17", "rich-row index construction obeys every index slice", function()
+    S.Reload()
+    local row = S.Build("index-budget", 79, 0, {title=string.rep("t", 1024)})
+    local db = S.Database({[row.id]=row})
+    local result = S.Bind(db)
+    local catalog = Nexus.BuildCatalog
+    Check(result.state == "ROOT_ADMITTED" and catalog.Count() == 1,
+        "valid rich index fixture was not admitted")
+    local counters = catalog.BudgetCounters().maxPerPump
+    Check(counters.indexEdges <= 64 and counters.indexNodes <= 64
+            and counters.indexBytes <= 2048,
+        string.format("rich row exceeded index slice: edges=%d nodes=%d bytes=%d",
+            counters.indexEdges, counters.indexNodes, counters.indexBytes))
+    Check(catalog.FindExactFingerprintId(catalog.AuthorityState(row.id).fingerprint) == row.id,
+        "bounded index construction lost exact lookup")
+end)
+
+Case("WB-18", "small rich roots cannot bypass the public mutation work bound", function()
+    S.Reload()
+    local rows = {}
+    for index = 1, 8 do
+        local id = "small-rich-" .. index
+        rows[id] = S.LocalBuild(id, 79)
+    end
+    local db = S.Database(rows)
+    Check(S.Bind(db).state == "ROOT_ADMITTED", "small rich source did not admit")
+    local catalog, maximum = Nexus.BuildCatalog, 0
+    local steps, ok, why, ticket = CountedCall(function()
+        return catalog.Put(S.LocalBuild("small-rich-1", 1, {title="updated"}),
+            {source="local"})
+    end)
+    maximum = math.max(maximum, steps)
+    Check(ok == nil and why == "ROOT_MUTATION_PENDING" and type(ticket) == "table",
+        "eight rich source rows bypassed the aggregate one-call bounds")
+    Check(catalog.Get("small-rich-1").title ~= "updated",
+        "pending rich-source mutation exposed a partial replacement")
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        Check(type(ticket) == "table", "small rich mutation omitted its ticket")
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            steps = CountedCall(function() return catalog.PumpRootAdmission() end)
+            maximum = math.max(maximum, steps)
+        end
+        ok = ticket.committed
+    end
+    Check(ok == true and catalog.Get("small-rich-1").title == "updated",
+        "small rich mutation did not publish the complete replacement")
+    Check(maximum <= PUBLIC_STEP_MAXIMUM,
+        "small rich mutation escaped the public work bound: " .. maximum)
+end)
+
+Case("WB-19", "evidence pool size cannot escape the public mutation work bound", function()
+    for _, poolSize in ipairs({100,10000}) do
+        S.Reload()
+        local entries={}
+        for index=1,poolSize do
+            local key,normalized=Nexus.LoadoutEvidence.Fingerprint({
+                {spellId=700000+index,quality=1,stacks=1},
+            })
+            Check(key~=nil,"canonical pool fixture was refused")
+            entries[key]=normalized
+        end
+        local db=S.Database({poolSource=S.LocalBuild("poolSource",1)})
+        db.loadoutEvidence={schemaVersion=1,entries=entries}
+        Check(S.Bind(db).state=="ROOT_ADMITTED","evidence pool fixture did not admit")
+        local catalog,maximum=Nexus.BuildCatalog,0
+        local steps,ok,why,ticket=CountedCall(function()
+            return catalog.Put(S.LocalBuild("poolSource",1,{title="pool updated"}),{source="local"})
+        end)
+        maximum=math.max(maximum,steps)
+        if ok==nil and why=="ROOT_MUTATION_PENDING" then
+            Check(type(ticket)=="table","evidence mutation omitted its ticket")
+            for _=1,catalog.Budget().maximumPumps do
+                if ticket.state~="pending" then break end
+                steps=CountedCall(function() return catalog.PumpRootAdmission() end)
+                maximum=math.max(maximum,steps)
+            end
+            ok=ticket.committed
+        end
+        Check(ok==true and catalog.Get("poolSource").title=="pool updated",
+            "evidence mutation did not publish the complete replacement")
+        local selected=rawget(db,"authorityBundle").loadoutEvidence.entries
+        for key,value in pairs(entries) do
+            Check(S.Encode(selected[key])==S.Encode(value),"evidence mutation lost or changed a retained entry")
+        end
+        print("WB-19 OBSERVED pool="..poolSize.." maximum="..maximum)
+        Check(maximum<=PUBLIC_STEP_MAXIMUM,
+            "evidence pool escaped the public work bound: "..maximum.." for "..poolSize.." entries")
+    end
+end)
+
+Case("WB-20", "rich incoming rows cannot drain preparation synchronously", function()
+    S.Reload()
+    local rows = {}
+    for index = 1, 8 do
+        local id = "small-rich-" .. index
+        rows[id] = S.LocalBuild(id, 79)
+    end
+    local db = S.Database(rows)
+    Check(S.Bind(db).state == "ROOT_ADMITTED", "small rich source did not admit")
+    local catalog, maximum = Nexus.BuildCatalog, 0
+    local steps, ok, why, ticket = CountedCall(function()
+        return catalog.Put(S.LocalBuild("small-rich-1", 79, {title="updated"}),
+            {source="local"})
+    end)
+    maximum = math.max(maximum, steps)
+    Check(ok == nil and why == "ROOT_MUTATION_PENDING" and type(ticket) == "table",
+        "eight rich source rows bypassed the aggregate one-call bounds")
+    Check(catalog.Get("small-rich-1").title ~= "updated",
+        "pending rich-source mutation exposed a partial replacement")
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        Check(type(ticket) == "table", "small rich mutation omitted its ticket")
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            steps = CountedCall(function() return catalog.PumpRootAdmission() end)
+            maximum = math.max(maximum, steps)
+        end
+        ok = ticket.committed
+    end
+    Check(ok == true and catalog.Get("small-rich-1").title == "updated",
+        "small rich mutation did not publish the complete replacement")
+    Check(maximum <= PUBLIC_STEP_MAXIMUM,
+        "small rich mutation escaped the public work bound: " .. maximum)
 end)
 
 S.Finish("catalog authority work budget")

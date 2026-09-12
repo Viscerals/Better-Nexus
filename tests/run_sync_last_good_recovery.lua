@@ -2,6 +2,35 @@
 -- replace the last complete public build. Only the still-current exact full
 -- payload may advance represented data.
 local H = dofile("tests/harness.lua")
+
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return true end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    return AwaitMutation(Nexus.BuildCatalog.Put(record, options))
+end
+
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua")
 dofile("core/SyncTransport.lua")
@@ -150,7 +179,7 @@ end
 -- A remains represented while B and then C recover. The scalar short hash is
 -- never sufficient to reuse A's exact evidence.
 local db = Reset()
-assert(Catalog.Put(CompleteRecord("last-good", 10, echoesA)))
+assert(PutTerminal(CompleteRecord("last-good", 10, echoesA)))
 local exactA = Catalog.Get("last-good").evidenceKey
 local epochA, revisionA = Catalog.RecordRevision("last-good")
 local collisionB = Summary("last-good", 20, echoesB, {
@@ -214,7 +243,7 @@ assert(epochC == epochA and revisionC == revisionA + 1,
 
 -- A partial replacement transfer expires without touching its independent
 -- last-good row or pending identity.
-assert(Catalog.Put(CompleteRecord("expiry", 10, echoesA)))
+assert(PutTerminal(CompleteRecord("expiry", 10, echoesA)))
 assert(DeliverSummary("Owner", Summary("expiry", 20, echoesB)))
 DeliverBuild("Owner", Full("expiry", 20, echoesB), true)
 clock = clock + 301
@@ -227,7 +256,7 @@ assert(Pending("expiry").lastModified == 20,
 -- A restart loses only session metadata; the durable complete A-equivalent
 -- remains public and a repeated summary can safely resume recovery.
 local restartDb = Reset()
-assert(Catalog.Put(CompleteRecord("restart", 10, echoesA)))
+assert(PutTerminal(CompleteRecord("restart", 10, echoesA)))
 assert(DeliverSummary("Owner", Summary("restart", 20, echoesB)))
 AssertPublic("restart", 10, echoesA, "restart setup replaced A")
 Sync.Init(Codec, {})
@@ -244,7 +273,7 @@ Reset()
 local linkedA = CompleteRecord("link-removed", 10, echoesA)
 linkedA.link = "https://example.invalid/old"
 linkedA.linkHash = HashText(linkedA.link)
-assert(Catalog.Put(linkedA))
+assert(PutTerminal(linkedA))
 assert(DeliverSummary("Owner", Summary("link-removed", 20, echoesB)))
 assert(DeliverBuild("Owner", Full("link-removed", 20, echoesB)),
     "no-link replacement could not promote over linked A")
@@ -268,7 +297,7 @@ AssertPublic("new-hidden", 40, echoesB,
 
 -- An authorized tombstone wins durably and cancels pending replacement work.
 Reset()
-assert(Catalog.Put(CompleteRecord("deleted", 10, echoesA)))
+assert(PutTerminal(CompleteRecord("deleted", 10, echoesA)))
 assert(DeliverSummary("Owner", Summary("deleted", 20, echoesB)))
 assert(Sync.HandleIncoming(
     "WLRD|Owner-Ebonhold|deleted|25|Owner", "Owner-Ebonhold"))
@@ -297,14 +326,14 @@ Reset()
 local replacementCap = assert(Sync.WorkState().maxRecoveryQueue)
 for index = 1, replacementCap do
     local id = "bounded-" .. tostring(index)
-    assert(Catalog.Put(CompleteRecord(id, 1, echoesA)))
+    assert(PutTerminal(CompleteRecord(id, 1, echoesA)))
     assert(DeliverSummary("Owner", Summary(id, 2, echoesB)))
 end
 assert(Sync.WorkState().pendingReplacements == replacementCap,
     "pending replacement owner exceeded or underfilled its fixed cap: "
         .. tostring(Sync.WorkState().pendingReplacements) .. "/"
         .. tostring(replacementCap))
-assert(Catalog.Put(CompleteRecord("bounded-overflow", 1, echoesA)))
+assert(PutTerminal(CompleteRecord("bounded-overflow", 1, echoesA)))
 assert(not DeliverSummary("Owner",
         Summary("bounded-overflow", 2, echoesB))
         and Sync.WorkState().pendingReplacements == replacementCap,

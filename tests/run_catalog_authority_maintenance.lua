@@ -7,6 +7,23 @@ dofile("core/Codec.lua")
 local S = dofile("tests/catalog_authority_support.lua")
 local Case, Check = S.Case, S.Check
 
+-- Fixture assertions inspect terminal catalog transactions. This uses the real
+-- admission scheduler and never turns a pending acknowledgement into success.
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+
 local now = 2000000000
 time = function() return now end
 UnitClass = function() return "Mage", "MAGE" end
@@ -121,7 +138,7 @@ Case("RET-05", "known and unknown fields survive replacement and rollback", func
     local db = S.Database({})
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.Put(S.Build("ret05", 3, 0, {futureA={nested=true}, link="x"})))
+    Check(AwaitMutation(catalog.Put(S.Build("ret05", 3, 0, {futureA={nested=true}, link="x"}))))
     local compacted = catalog.Get("ret05")
     compacted.link = nil
     compacted.evidenceKey = "v1|100000:3:1:0|100001:3:1:0|100002:3:1:0"
@@ -185,6 +202,11 @@ Case("RET-06", "1,000 records with one hostile row stay within slices", function
     local pumps = 0
     while Nexus.DataCompaction.Stats(db).pending do
         Nexus.DataCompaction.Pump()
+        -- Catalog slices are a separate owner frontier. Keep the original
+        -- compaction-pump guard and await its real pending transaction.
+        if Catalog().RootState().candidate then
+            S.PumpUntilTerminal(Catalog().Budget().maximumPumps)
+        end
         pumps = pumps + 1
         Check(pumps < 5000, "compaction did not converge")
     end
@@ -200,7 +222,7 @@ Case("RET-07", "drift during shadow work cancels the candidate", function()
     local catalog = Catalog()
     local handle = assert(catalog.BeginCatalogMaintenance({database=db, operation="retention"}))
     Check(catalog.MaintenanceEvictOverlay(handle, "ret07"))
-    Check(catalog.Put(S.Build("ret07-new", 1, 0)), "concurrent mutation refused")
+    Check(AwaitMutation(catalog.Put(S.Build("ret07-new", 1, 0))), "concurrent mutation refused")
     local ok, why = catalog.CommitMaintenance(handle)
     Check(ok == false and why == "SOURCE_DRIFT" and S.Durable(db).ret07 ~= nil,
         "drifted candidate committed: " .. tostring(why))
@@ -289,13 +311,13 @@ Case("CUR-02", "collection reads complete only within one-call limits", function
     local db = S.Database({})
     S.Bind(db)
     local catalog = Catalog()
-    for index = 1, 8 do Check(catalog.Put(S.Build("cur02-" .. index, 1, 0))) end
+    for index = 1, 8 do Check(AwaitMutation(catalog.Put(S.Build("cur02-" .. index, 1, 0)))) end
     local all = catalog.All()
     Check(all and S.Count(all) == 8, "eight-row All was refused")
     local summaries = catalog.Summaries()
     Check(summaries and S.Count(summaries) == 8, "eight-row Summaries was refused")
     Check(catalog.ForEach(function() end) == 8, "eight-row ForEach was refused")
-    Check(catalog.Put(S.Build("cur02-9", 1, 0)))
+    Check(AwaitMutation(catalog.Put(S.Build("cur02-9", 1, 0))))
     local nineAll, whyAll = catalog.All()
     Check(nineAll == nil and whyAll == "CURSOR_REQUIRED", "nine-row All escaped")
     local delta, whyDelta = catalog.DeltaSnapshot()
@@ -304,7 +326,7 @@ Case("CUR-02", "collection reads complete only within one-call limits", function
     Check(overlay == nil and whyOverlay == "CURSOR_REQUIRED", "nine-row OverlaySnapshot escaped")
     local big = S.Build("cur02-big", 1, 0, {description=string.rep("d", 4000),
         link=string.rep("l", 2000)})
-    Check(catalog.Put(big))
+    Check(AwaitMutation(catalog.Put(big)))
     Check(catalog.Get("cur02-big").description == big.description,
         "single bounded record unavailable")
     -- tombstones: eight or fewer complete, nine require a cursor

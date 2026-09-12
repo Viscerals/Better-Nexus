@@ -36,6 +36,30 @@ GetTime = function() return clock end
 local function Pump(steps)
     for _ = 1, steps do clock = clock + 0.2; Sync.OnUpdate(0.2) end
 end
+local function AwaitCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, 4 do
+        if not catalog.RootState().candidate then return true end
+        assert(catalog.RootState().state == "ROOT_ADMITTED",
+            "wire fixture found non-mutation catalog work")
+        local ticket = catalog.PumpRootAdmission()
+        assert(type(ticket) == "table", "wire catalog work returned no ticket")
+        local previous = tonumber(ticket.pumps) or -1
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            local observed = catalog.PumpRootAdmission()
+            assert(observed == ticket, "wire catalog work changed tickets")
+            local current = tonumber(ticket.pumps)
+            assert(current and current > previous,
+                "wire catalog work made no progress")
+            previous = current
+        end
+        assert(ticket.state ~= "pending", "wire catalog work exhausted its bound")
+        assert(ticket.state == "committed" and ticket.committed,
+            ticket.reason or "wire catalog work failed")
+    end
+    error("wire fixture produced too many catalog candidates")
+end
 time = function() return 50000 end
 UnitName = function() return "Boganicc" end   -- realistic long-ish name
 GetNormalizedRealmName = function() return "Ebonhold" end
@@ -105,6 +129,7 @@ for _, m in ipairs(msgs) do
         nil, nil, nil, 5,                  -- arg5..arg8
         Sync.ChannelName())                -- arg9, bare
 end
+AwaitCatalog()
 
 local got = Nexus.BuildCatalog.Get("mine-1784886552-123456")
 assert(got, "the build was NOT received -- the 3.3.5 channel arg layout still isn't matched")
@@ -139,6 +164,7 @@ for _, m in ipairs(msgs2) do
     H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Boganicc-Ebonhold", "Common",
         "12. " .. Sync.ChannelName())      -- arg4 only, no arg9
 end
+AwaitCatalog()
 assert(H.DurableBuilds()["mine-1784886552-123456"],
     "delivery failed when only the numbered arg4 form was present")
 print("delivery also works when only the numbered channel form is available -- OK")
@@ -157,6 +183,7 @@ for _, m in ipairs(msgs3) do
     H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Boganicc", "Common",
         "2. Trade", nil, nil, nil, 2, "Trade")
 end
+AwaitCatalog()
 assert(H.DurableBuilds()["mine-1784886552-123456"] == nil,
     "traffic from an unrelated channel was processed -- filter is too loose now")
 print("unrelated channel traffic is still correctly ignored -- OK")

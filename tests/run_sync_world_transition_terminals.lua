@@ -21,6 +21,57 @@ local function Check(ok, name)
     if not ok then failures[#failures + 1] = name end
 end
 
+local Catalog = assert(Nexus.BuildCatalog, "BuildCatalog unavailable")
+
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil then
+        assert(why == "ROOT_MUTATION_PENDING",
+            "fixture mutation returned unknown pending result: " .. tostring(why))
+        assert(type(ticket) == "table" and ticket.state == "pending",
+            "pending mutation returned no live ticket")
+        local previous = tonumber(ticket.pumps) or -1
+        for _ = 1, Catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            local observed = Catalog.PumpRootAdmission()
+            assert(observed == ticket, "fixture mutation changed tickets")
+            local current = tonumber(ticket.pumps)
+            assert(current and current > previous,
+                "fixture mutation made no scheduler progress")
+            previous = current
+        end
+        assert(ticket.state ~= "pending",
+            "fixture mutation exhausted its pump bound")
+        assert(ticket.state == "committed" or ticket.state == "failed",
+            "fixture mutation ended in unknown state: " .. tostring(ticket.state))
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    assert(ok == true or ok == false,
+        "fixture mutation returned unknown result: " .. tostring(ok))
+    return ok, why, ticket
+end
+
+local function AwaitCatalog()
+    local candidates = 0
+    while Catalog.RootState().candidate do
+        candidates = candidates + 1
+        assert(candidates <= 8,
+            "fixture catalog work exceeded its sequential candidate bound")
+        assert(Catalog.RootState().state == "ROOT_ADMITTED",
+            "fixture found catalog work outside ROOT_ADMITTED")
+        local ticket = Catalog.PumpRootAdmission()
+        assert(type(ticket) == "table",
+            "fixture catalog work returned no ticket")
+        if ticket.state == "pending" then
+            local committed, reason = AwaitMutation(nil,
+                "ROOT_MUTATION_PENDING", ticket)
+            assert(committed, reason)
+        else
+            assert(ticket.state == "committed" and ticket.committed,
+                ticket.reason or "fixture catalog work did not commit")
+        end
+    end
+end
+
 local STATUS_FIELDS = {
     kind=true,id=true,version=true,operationKey=true,generation=true,
     attempt=true,outcome=true,terminal=true,reason=true,accepted=true,
@@ -134,7 +185,7 @@ end
 -- broadcasting the tombstone.
 local function DeleteBuild(id)
     local build = ShareBuild(id)
-    local stored, storeWhy = Nexus.BuildCatalog.Put(build)
+    local stored, storeWhy = AwaitMutation(Nexus.BuildCatalog.Put(build))
     Check(stored == true, id .. " delete fixture was not admitted: "
         .. tostring(storeWhy))
     return build
@@ -793,6 +844,7 @@ local inflightAfter = Sync.WorkState().buildInflight
 for index = 2, #chunks do
     Sync.HandleIncoming(chunks[index].text, "ChunkSender")
 end
+AwaitCatalog()
 local received = Nexus.BuildCatalog.Get("zoned-chunks")
 Check(inflightBefore == 1 and inflightAfter == 1,
     "world entry discarded the admitted partial WLRB transfer")

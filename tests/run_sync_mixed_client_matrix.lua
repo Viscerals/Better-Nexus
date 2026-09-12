@@ -187,6 +187,35 @@ local function Boot(root)
     return env, harness, loaded, failed
 end
 
+-- Each isolated peer drives only its own real catalog scheduler. The reference
+-- tree has no pending-root API, so its original synchronous behavior is retained.
+local function SettleCatalog(nexus)
+    local catalog = nexus.BuildCatalog
+    if type(catalog.RootState) ~= "function" then return end
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "isolated catalog did not settle")
+end
+
+local function PumpSide(nexus)
+    if type(nexus.BuildCatalog.PumpRootAdmission) == "function" then
+        nexus.BuildCatalog.PumpRootAdmission()
+    end
+    nexus.Sync.OnUpdate(0.2)
+end
+
+local function PutSide(nexus, record, options)
+    local called, ok, why, ticket = pcall(nexus.BuildCatalog.Put, record, options)
+    if called and ok == nil and why == "ROOT_MUTATION_PENDING" then
+        SettleCatalog(nexus)
+        assert(ticket and ticket.state ~= "pending", "setup mutation did not settle")
+        return called, ticket.committed, ticket.storedAs or ticket.reason
+    end
+    return called, ok, why
+end
+
 local function Side(root)
     local env, harness = Boot(root)
     env.NexusDB = {communityBuilds={}, syncTombstones={}, dpsCapture={}}
@@ -196,6 +225,7 @@ local function Side(root)
     end
     pcall(nexus.LoadoutEvidence.Init, env.NexusDB)
     pcall(nexus.BuildCatalog.Init, env.NexusDB, nexus.BundledBuilds)
+    SettleCatalog(nexus)
     pcall(nexus.Sync.Init, nexus.Codec, {})
     return env, harness, nexus
 end
@@ -214,10 +244,11 @@ end
 local function CaptureBuildWire(root, id)
     local env, harness, nexus = Side(root)
     local record = FixtureBuild(id)
-    pcall(nexus.BuildCatalog.Put, record)
+    PutSide(nexus, record)
     harness.sentChatMessages = {}
     pcall(nexus.Sync.BroadcastBuild, record)
-    for _ = 1, 40 do pcall(nexus.Sync.OnUpdate, 0.2) end
+    for _ = 1, 40 do PumpSide(nexus) end
+    SettleCatalog(nexus)
     for _, message in ipairs(harness.sentChatMessages) do
         local text = message.text or ""
         if text:find("^WLRB") then return text, env, nexus end
@@ -231,7 +262,8 @@ local function DeliverTo(root, wire, sender)
     local env, harness, nexus = Side(root)
     local before = nexus.Codec.JSONEncode(env.NexusDB)
     local ok, accepted = pcall(nexus.Sync.HandleIncoming, wire, sender or "Boganic")
-    for _ = 1, 20 do pcall(nexus.Sync.OnUpdate, 0.2) end
+    for _ = 1, 20 do PumpSide(nexus) end
+    SettleCatalog(nexus)
     local after = nexus.Codec.JSONEncode(env.NexusDB)
     return {
         env=env, nexus=nexus, harness=harness,
@@ -342,7 +374,8 @@ function()
     -- Replaying the exact same bytes converges once, not twice.
     local replay = received.after
     pcall(received.nexus.Sync.HandleIncoming, first, "Boganic")
-    for _ = 1, 20 do pcall(received.nexus.Sync.OnUpdate, 0.2) end
+    for _ = 1, 20 do PumpSide(received.nexus) end
+    SettleCatalog(received.nexus)
     Check(received.nexus.Codec.JSONEncode(received.env.NexusDB) == replay,
         "an exact replay mutated durable state a second time")
 end)
@@ -395,10 +428,18 @@ end)
 local function CaptureDeleteWire(root, id)
     local env, harness, nexus = Side(root)
     local record = FixtureBuild(id)
-    pcall(nexus.BuildCatalog.Put, record)
+    PutSide(nexus, record)
     harness.sentChatMessages = {}
     local ok, queued, why = pcall(nexus.Sync.BroadcastDelete, record)
-    for _ = 1, 40 do pcall(nexus.Sync.OnUpdate, 0.2) end
+    for _ = 1, 40 do PumpSide(nexus) end
+    SettleCatalog(nexus)
+    -- The immediate return is pending. Assert the unchanged refusal oracle
+    -- against the real terminal operation record after catalog completion.
+    if ok and why == "ROOT_MUTATION_PENDING" then
+        local terminal = nexus.Sync.GetDeleteStatus(id)
+        assert(terminal and terminal.terminal, "delete did not reach a terminal")
+        queued, why = terminal.queueAdmitted, terminal.reason
+    end
     local deletes = {}
     for _, message in ipairs(harness.sentChatMessages) do
         local text = message.text or ""
@@ -546,10 +587,11 @@ local QUADRANTS = {
 -- cannot express it.
 local function CaptureAllWire(root, record)
     local env, harness, nexus = Side(root)
-    pcall(nexus.BuildCatalog.Put, record, {source="local"})
+    PutSide(nexus, record, {source="local"})
     harness.sentChatMessages = {}
     pcall(nexus.Sync.BroadcastBuild, record)
-    for _ = 1, 40 do pcall(nexus.Sync.OnUpdate, 0.2) end
+    for _ = 1, 40 do PumpSide(nexus) end
+    SettleCatalog(nexus)
     local texts = {}
     for _, message in ipairs(harness.sentChatMessages) do
         texts[#texts + 1] = message.text or ""
@@ -836,10 +878,11 @@ end
 -- whole sequence; a truncated chunk set is a fixture fault, not a verdict.
 local function ClsSend(sideRoot, record)
     local _, harness, nexus = Side(sideRoot)
-    pcall(nexus.BuildCatalog.Put, record, {source="local"})
+    PutSide(nexus, record, {source="local"})
     harness.sentChatMessages = {}
     pcall(nexus.Sync.BroadcastBuild, record)
-    for _ = 1, 90 do pcall(nexus.Sync.OnUpdate, 0.2) end
+    for _ = 1, 90 do PumpSide(nexus) end
+    SettleCatalog(nexus)
     local texts = {}
     for _, message in ipairs(harness.sentChatMessages) do
         texts[#texts + 1] = message.text or ""
@@ -855,7 +898,8 @@ local function ClsReceive(sideRoot, chunks)
     for _, chunk in ipairs(chunks) do
         pcall(nexus.Sync.HandleIncoming, chunk, "Boganic")
     end
-    for _ = 1, 60 do pcall(nexus.Sync.OnUpdate, 0.2) end
+    for _ = 1, 60 do PumpSide(nexus) end
+    SettleCatalog(nexus)
     local after = nexus.Codec.JSONEncode(env.NexusDB)
     return {
         env=env, nexus=nexus, before=before, after=after,
@@ -870,7 +914,8 @@ local function ClsReceive(sideRoot, chunks)
             for _, chunk in ipairs(more) do
                 pcall(nexus.Sync.HandleIncoming, chunk, "Boganic")
             end
-            for _ = 1, 60 do pcall(nexus.Sync.OnUpdate, 0.2) end
+            for _ = 1, 60 do PumpSide(nexus) end
+            SettleCatalog(nexus)
             return nexus.Codec.JSONEncode(env.NexusDB)
         end,
     }

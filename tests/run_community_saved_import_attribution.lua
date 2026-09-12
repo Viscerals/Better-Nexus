@@ -67,6 +67,26 @@ end
 H.BootstrapStore()
 dofile("core/DpsCapture.lua")
 Nexus.DpsCapture.Init({}, {})
+
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return true end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    local ok, why, ticket = Nexus.BuildCatalog.Put(record, options)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        SettleCatalog()
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
 for _, category in ipairs({"dummy", "lk"}) do
     for _, row in pairs(NexusDB.dpsCapture.characterBest[category]) do
         local build = assert(Nexus.BuildCatalog.Get(row.buildId))
@@ -79,6 +99,7 @@ end
 -- owner before capturing catalog compaction/reference attribution.
 local compactionGuard = 0
 while Nexus.DataCompaction.Stats().pending do
+    SettleCatalog()
     local state = Nexus.DataCompaction.Pump()
     assert(state.lastPumpWork <= state.workBudget,
         "saved-import setup exceeded the compaction work budget")
@@ -175,6 +196,11 @@ local frame = assert(NexusCommunityBuildsFrame,
     "Community frame was not assembled for attribution")
 local onUpdate = assert(frame:GetScript("OnUpdate"),
     "Community frame did not expose its bounded pump")
+local function PumpFrame(elapsed)
+    SettleCatalog()
+    onUpdate(frame, elapsed)
+    SettleCatalog()
+end
 local deferred = CopyStats()
 assert(deferred.pending and Delta(deferred, zero, "syncDeferrals") >= 1
     and Delta(deferred, zero, "workUnits") == 0,
@@ -183,29 +209,29 @@ assert(deferred.pending and Delta(deferred, zero, "syncDeferrals") >= 1
 -- A Sync-owned library revision lands while the saved import is deferred.
 -- The saved-import job must attribute its later restart to that indirect
 -- source revision without claiming Sync performed the import work.
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="sync-attribution",title="Synced Attribution",author="Peer",
     ownerKey="peer@ebonhold",class="MAGE",postedAt=9000,
     lastModified=9000,echoes={{spellId=990001,quality=3,stacks=1}},
 }))
 receiveCount = 1
 receiving = false
-onUpdate(frame, 0.25)
+PumpFrame(0.25)
 assert(Community.VirtualStats().savedImport.pending,
     "collision-heavy source completed before restart attribution")
 
 -- A later semantic slot generation changes independently. This is a second
 -- source restart, not a packet log and not direct Sync ownership.
 slotGeneration = slotGeneration + 1
-onUpdate(frame, 0.25)
+PumpFrame(0.25)
 local pumps = 2
 while Community.VirtualStats().savedImport.pending and pumps < 40 do
-    onUpdate(frame, 0.25)
+    PumpFrame(0.25)
     pumps = pumps + 1
 end
 for _ = 1, 160 do
     if (Community.VirtualStats().dataBinds or 0) >= 1 then break end
-    onUpdate(frame, 0.05)
+    PumpFrame(0.05)
 end
 
 local cold = CopyStats()
@@ -272,7 +298,7 @@ local revisionBeforeWarm = Nexus.Revisions.Get(
 Community.Show()
 local warmPumps = 0
 while Community.VirtualStats().savedImport.pending and warmPumps < 40 do
-    onUpdate(frame, 0.25)
+    PumpFrame(0.25)
     warmPumps = warmPumps + 1
 end
 local warm = CopyStats()
@@ -293,12 +319,12 @@ assert(Delta(warm, beforeWarm, "jobs") == 1
 local fallbackBefore = Nexus.BuildCatalog.DebugStats()
 NexusDB.dataCompaction = nil
 local fallbackEchoes = {{spellId=999991,quality=3,stacks=1}}
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="fallback-reference-a",title="Fallback Reference A",author="Peer",
     ownerKey="peer@ebonhold",class="MAGE",postedAt=9100,
     lastModified=9100,echoes=fallbackEchoes,
 }))
-assert(Nexus.BuildCatalog.Put({
+assert(PutTerminal({
     id="fallback-reference-b",title="Fallback Reference B",author="Peer",
     ownerKey="peer@ebonhold",class="MAGE",postedAt=9101,
     lastModified=9101,echoes=fallbackEchoes,

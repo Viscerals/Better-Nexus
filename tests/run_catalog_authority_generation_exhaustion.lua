@@ -45,6 +45,23 @@ local MAX = 9007199254740991
 local function Catalog() return Nexus.BuildCatalog end
 local function Bundle(db) return rawget(db, "authorityBundle") end
 
+local function CatalogState()
+    for index = 1, 64 do
+        local name, value = debug.getupvalue(Catalog().RootState, index)
+        if name == "ST" then return value end
+        if name == nil then break end
+    end
+    error("unable to locate module-private catalog state", 2)
+end
+
+local function Fresh(rows)
+    S.Reload()
+    local db = S.Database(rows or {genSession=S.LocalBuild("genSession", 2)})
+    S.Bind(db)
+    Check(S.Root().state == "ROOT_ADMITTED", "fresh counter fixture did not admit")
+    return db, Catalog(), CatalogState()
+end
+
 -- Bind once so the durable bundle exists, then place an exact durable counter
 -- value and rebind through a reload. Only SavedVariables bytes are edited.
 --
@@ -196,6 +213,145 @@ function()
         "byte equality restored authority after exhaustion")
     Check(catalog.Put(S.LocalBuild("genE", 6)) == false,
         "byte equality restored mutation authority after exhaustion")
+end)
+
+-- Wave 2 MASTER-W1-005 expected-red matrix. Setup uses Lua's debug library only
+-- to place otherwise unreachable session counters at their exact boundary. Each
+-- observed operation still runs through its real public production seam.
+Case("GEN-06", "cursor counter refuses before increment at MAX", function()
+    local _, catalog, state = Fresh()
+    state.cursorSequence = MAX
+    local token, why = catalog.BeginRecordCursor()
+    Check(token == nil and why == "GENERATION_EXHAUSTED",
+        "cursor creation at MAX was not refused before increment")
+    Check(state.cursorSequence == MAX
+            and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "cursor exhaustion changed the counter or failed to latch")
+end)
+
+Case("GEN-07", "binding counter refuses before increment at MAX", function()
+    local db, catalog, state = Fresh()
+    state.bindingGeneration = MAX
+    local result = catalog.BeginRootAdmission(db, Nexus.BundledBuilds)
+    Check(type(result) == "table" and result.reason == "GENERATION_EXHAUSTED",
+        "root admission incremented a binding counter at MAX")
+    Check(state.bindingGeneration == MAX
+            and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "binding exhaustion changed the counter or failed to latch")
+end)
+
+Case("GEN-08", "reservation counter refuses before increment at MAX", function()
+    local _, catalog, state = Fresh()
+    state.reservationEpoch = MAX
+    local claim, why = catalog.BeginAllocationClaim("genVacant")
+    Check(claim == nil and why == "GENERATION_EXHAUSTED",
+        "claim issuance incremented a reservation counter at MAX")
+    Check(state.reservationEpoch == MAX
+            and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "reservation exhaustion changed the counter or failed to latch")
+end)
+
+Case("GEN-09", "receipt counter refuses before tombstone creation at MAX", function()
+    local _, catalog, state = Fresh()
+    state.receiptRevision = MAX
+    local ok, why = catalog.SetTombstone("genSession", {
+        stamp=now, author="Boganic", ownerKey="boganic@ebonhold",
+        ownerVerified=true,
+    }, {source="local"})
+    Check(ok == false and why == "GENERATION_EXHAUSTED",
+        "tombstone creation incremented a receipt counter at MAX")
+    Check(state.receiptRevision == MAX
+            and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "receipt exhaustion changed the counter or failed to latch")
+end)
+
+Case("GEN-10", "all revision epochs refuse before their MAX increment", function()
+    local counters = {"recordEpoch", "exactEpoch", "exactRevisionClock"}
+    for _, counter in ipairs(counters) do
+        local _, catalog, state = Fresh()
+        state[counter] = MAX
+        local ok, why
+        if counter == "recordEpoch" or counter == "exactEpoch" then
+            ok, why = catalog.PublishDeferred(1, "counter boundary")
+        else
+            ok, why = catalog.Put(S.LocalBuild("genSession", 3,
+                {lastModified=3}), {source="local"})
+        end
+        Check(ok == false and why == "GENERATION_EXHAUSTED",
+            counter .. " increment at MAX was not refused")
+        Check(state[counter] == MAX
+                and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+            counter .. " exhaustion changed the counter or failed to latch")
+    end
+end)
+
+Case("GEN-11", "per-record revision refuses before increment at MAX", function()
+    local _, catalog, state = Fresh()
+    state.recordRevisions.genSession = MAX
+    local ok, why = catalog.Put(S.LocalBuild("genSession", 3,
+        {lastModified=3}), {source="local"})
+    Check(ok == false and why == "GENERATION_EXHAUSTED",
+        "per-record revision incremented past MAX")
+    Check(state.recordRevisions.genSession == MAX
+            and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "per-record exhaustion changed the counter or failed to latch")
+end)
+
+Case("GEN-12", "multi-item commit preflights its complete increment count", function()
+    local db, catalog, state = Fresh({
+        genBatchA=S.LocalBuild("genBatchA", 2),
+        genBatchB=S.LocalBuild("genBatchB", 3),
+    })
+    state.generation = MAX - 1
+    state.committedMutationRevision = MAX - 1
+    state.semanticGeneration = MAX - 1
+    state.exactRevisionClock = MAX - 1
+    state.recordRevisions.genBatchA = MAX - 1
+    state.recordRevisions.genBatchB = MAX - 1
+    local handle = catalog.BeginCatalogMaintenance({database=db,
+        operation="compaction"})
+    Check(handle, "multi-item maintenance handle unavailable")
+    Check(catalog.MaintenanceReplaceRow(handle, "genBatchA",
+        S.LocalBuild("genBatchA", 4, {lastModified=4})),
+        "first batch replacement would not stage")
+    Check(catalog.MaintenanceReplaceRow(handle, "genBatchB",
+        S.LocalBuild("genBatchB", 5, {lastModified=5})),
+        "second batch replacement would not stage")
+    local ok, why = catalog.CommitMaintenance(handle)
+    Check(ok == false and why == "GENERATION_EXHAUSTED",
+        "two-item MAX-1 batch was not refused before its first increment")
+    Check(state.generation == MAX - 1
+            and state.committedMutationRevision == MAX - 1
+            and state.semanticGeneration == MAX - 1
+            and state.exactRevisionClock == MAX - 1,
+        "refused multi-item batch changed a shared counter")
+    Check(S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "multi-item exhaustion did not latch the deny-only state")
+end)
+
+Case("GEN-13", "exhaustion settles a retained pending mutation once", function()
+    local rows = {}
+    for index = 1, 9 do
+        local id = "genPending" .. tostring(index)
+        rows[id] = S.LocalBuild(id, 1)
+    end
+    local db, catalog, state = Fresh(rows)
+    local bundle = Bundle(db)
+    local ok, why, ticket = catalog.Put(S.LocalBuild("genPending1", 2), {source="local"})
+    Check(ok == nil and why == "ROOT_MUTATION_PENDING", "fixture did not open a pending mutation")
+    local callbacks = 0
+    Check(catalog.BindMutationCompletion(ticket, function(outcome)
+        callbacks = callbacks + 1
+        Check(outcome == ticket and outcome.committed == false,
+            "exhaustion callback changed the retained ticket or claimed a commit")
+    end), "pending mutation refused its callback")
+    state.cursorSequence = MAX
+    catalog.BeginRecordCursor()
+    Check(ticket.state == "failed" and ticket.reason == "GENERATION_EXHAUSTED"
+            and callbacks == 1 and Bundle(db) == bundle,
+        "exhaustion abandoned the pending ticket or changed the durable bundle")
+    catalog.PumpRootAdmission()
+    Check(callbacks == 1, "exhaustion repeated the terminal callback")
 end)
 
 S.Finish("catalog authority generation exhaustion")

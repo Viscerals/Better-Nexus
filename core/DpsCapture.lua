@@ -249,8 +249,11 @@ end
 
 local function CatalogPut(build)
     local catalog = Catalog()
-    return catalog and catalog.Put and catalog.Put(build) or false
+    if not (catalog and catalog.Put) then return false end
+    return catalog.Put(build)
 end
+
+local pendingClassRepairs = {}
 
 local ReferenceEvidence, StoredEchoes
 
@@ -414,12 +417,31 @@ local function RepairCurrentCharacterClass()
                             local corrected = (CLASS_LABEL[class] or class) .. " Record Loadout"
                             if title ~= corrected then build.title = corrected; buildChanged = true end
                         end
-                        if buildChanged then
+                        local pendingClass = pendingClassRepairs[build.id]
+                        if buildChanged and not (pendingClass
+                            and pendingClass.database == NexusDB) then
                             local now = (time and time()) or 0
                             local old = tonumber(build.lastModified or build.postedAt) or 0
                             build.lastModified = now > old and now or old + 1
-                            CatalogPut(build)
-                            changed = true
+                            local ok, why, ticket = CatalogPut(build)
+                            if ok == nil and why == "ROOT_MUTATION_PENDING"
+                                and type(ticket) == "table" then
+                                local catalog, database = Catalog(), NexusDB
+                                local retained = {database=database, ticket=ticket}
+                                pendingClassRepairs[build.id] = retained
+                                local bound = catalog.BindMutationCompletion(ticket, function(outcome)
+                                    if pendingClassRepairs[build.id] ~= retained then return end
+                                    pendingClassRepairs[build.id] = nil
+                                    if outcome.committed == true and outcome.database == database
+                                        and Catalog() == catalog and NexusDB == database
+                                        and rawget(database, "authorityBundle") == outcome.bundle then
+                                        BumpDps("local class repaired", {scope="metadata"})
+                                    end
+                                end)
+                                if not bound then pendingClassRepairs[build.id] = nil end
+                            elseif ok == true then
+                                changed = true
+                            end
                         end
                     end
                 end
@@ -2939,7 +2961,19 @@ local function CommitSession(category)
         if becameCharacterBest then
             local C = Nexus.CommunityBuilds
             if C and C.EnsureDpsBuildForEchoes then
-                local ok, ensuredId, ensuredBuild = pcall(C.EnsureDpsBuildForEchoes, snap, category, personalRow)
+                local function CompleteBuild(ensuredId, ensuredBuild)
+                    if not ensuredId then return end
+                    buildId, build = ensuredId, ensuredBuild or build
+                    personalRow.buildId = ensuredId
+                    BumpDps("personal record build linked", {
+                        scope="record",category=category,player=player,
+                        ownerKey=personalRow.ownerKey,realm=personalRow.realm,
+                        characterKey=pk,
+                    })
+                end
+                local ok, ensuredId, ensuredBuild = pcall(
+                    C.EnsureDpsBuildForEchoes, snap, category, personalRow,
+                    CompleteBuild)
                 if ok and ensuredId then buildId, build = ensuredId, ensuredBuild or build end
                 personalRow.buildId = buildId
             end
@@ -3351,16 +3385,30 @@ local function ReceiveRecord(record, transportSender, relayed)
     -- when the DPS chunks arrive before the corresponding build broadcast.
     local C = Nexus.CommunityBuilds
     if echoes and C and C.EnsureDpsBuildForEchoes then
-        local ok, ensuredId = pcall(C.EnsureDpsBuildForEchoes, echoes, category, row)
+        local function CompleteBuild(ensuredId)
+            if not ensuredId then return end
+            row.buildId = ensuredId
+            BumpDps("public record build linked", {
+                scope="record",category=category,player=player,
+                ownerKey=row.ownerKey,realm=row.realm,
+                characterKey=characterKey,
+            })
+            RequestDataViewRefresh()
+        end
+        row._catalogBuildCompletion = CompleteBuild
+        local ok, ensuredId, _, ensureWhy = pcall(
+            C.EnsureDpsBuildForEchoes, echoes, category, row, CompleteBuild)
+        row._catalogBuildCompletion = nil
         if ok and ensuredId then
             row.buildId = ensuredId
-        elseif row.buildId then
+        elseif ensureWhy ~= "ROOT_MUTATION_PENDING" and row.buildId then
             -- The claimed opaque ID collided with a different loadout or
             -- owner. Retry without it so the exact evidence receives a safe,
             -- deterministic record page instead of attaching to that build.
             row.buildId = nil
             local safeOk, safeId = pcall(
-                C.EnsureDpsBuildForEchoes, echoes, category, row)
+                C.EnsureDpsBuildForEchoes, echoes, category, row,
+                CompleteBuild)
             if safeOk and safeId then row.buildId = safeId end
         end
     end

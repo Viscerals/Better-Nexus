@@ -226,7 +226,9 @@ NexusDB.communityBuilds = { ["victim"] = { id = "victim",
     class = "ROGUE", echoes = { { spellId = 1, quality = 0, stacks = 1 } },
     postedAt = 1, lastModified = 1, isMine = false } }
 NexusDB.syncTombstones = {}
-Catalog.Init(NexusDB, Nexus.BundledBuilds)
+local victimAdmission = H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
+assert(victimAdmission and victimAdmission.state == "ROOT_ADMITTED",
+    "non-author delete fixture did not reach terminal catalog admission")
 Sync.ClearLog()
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Griefer||victim||99999",
     "Griefer-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
@@ -247,7 +249,9 @@ NexusDB.communityBuilds = { ["mine"] = { id = "mine", title = "My Build",
     echoes = { { spellId = 1, quality = 0, stacks = 1 } },
     postedAt = 1, lastModified = 1, isMine = true } }
 NexusDB.syncTombstones = {}
-Catalog.Init(NexusDB, Nexus.BundledBuilds)
+local localAdmission = H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
+assert(localAdmission and localAdmission.state == "ROOT_ADMITTED",
+    "local-owner delete fixture did not reach terminal catalog admission")
 Sync.ClearLog()
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Solkr||mine||99999",
     "Solkr-Ebonhold", "Common", "5. " .. Sync.ChannelName(),

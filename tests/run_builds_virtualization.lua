@@ -1,5 +1,34 @@
 -- Community Builds fixed-height virtualization at live-library scale.
 local H = dofile("tests/harness.lua")
+
+local function SettleCatalog()
+    local catalog = Nexus.BuildCatalog
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then return true end
+        catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+end
+
+local function AwaitMutation(ok, why, ticket)
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        assert(type(ticket) == "table", "pending mutation returned no ticket")
+        local catalog = Nexus.BuildCatalog
+        for _ = 1, catalog.Budget().maximumPumps do
+            if ticket.state ~= "pending" then break end
+            catalog.PumpRootAdmission()
+        end
+        assert(ticket.state ~= "pending", "fixture mutation did not settle")
+        return ticket.committed, ticket.storedAs or ticket.reason, ticket
+    end
+    return ok, why, ticket
+end
+
+local function PutTerminal(record, options)
+    SettleCatalog()
+    return AwaitMutation(Nexus.BuildCatalog.Put(record, options))
+end
+
 dofile("ui/Theme.lua")
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
@@ -109,7 +138,7 @@ local original = Nexus.BuildCatalog.Get("virtual-0001")
 local broken = {}
 for key, value in pairs(original) do broken[key] = value end
 broken.title = original.title.." changed"
-assert(Nexus.BuildCatalog.Put(broken))
+assert(PutTerminal(broken))
 local catalogGet = Nexus.BuildCatalog.Get
 Nexus.BuildCatalog.Get = function(id)
     local row, source = catalogGet(id)
@@ -127,7 +156,7 @@ assert(not badOk and C.VirtualStats().active == 0
     and C.VirtualStats().created == beforeFailure,
     "failed row binding leaked or retained a checked-out card")
 broken.title = original.title
-assert(Nexus.BuildCatalog.Put(broken))
+assert(PutTerminal(broken))
 C.Refresh()
 local recovered = C.VirtualStats()
 assert(recovered.active <= 4 and recovered.created == beforeFailure,

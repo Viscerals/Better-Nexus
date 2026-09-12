@@ -1,5 +1,28 @@
 local H = dofile("tests/harness.lua")
 
+local function AwaitMutation(ok, why, ticket)
+    if ok ~= nil then return ok, why end
+    assert(why == "ROOT_MUTATION_PENDING" and type(ticket) == "table",
+        "missing pending mutation ticket")
+    for _ = 1, 20000 do
+        if ticket.state ~= "pending" then break end
+        assert(Nexus.BuildCatalog.PumpRootAdmission() == ticket,
+            "pending mutation ticket changed")
+    end
+    assert(ticket.state ~= "pending", "pending mutation did not terminate")
+    return ticket.committed, ticket.reason
+end
+
+local function Enforce(database, reason)
+    local result = Nexus.DataRetention.Enforce(database, reason)
+    for _ = 1, 20000 do
+        if not (type(result) == "table" and result.pending) then return result end
+        Nexus.BuildCatalog.PumpRootAdmission()
+        result = Nexus.DataRetention.Enforce(database, reason)
+    end
+    error("pending retention did not terminate")
+end
+
 local now = 2000000000
 time = function() return now end
 UnitName = function() return "Boganic" end
@@ -183,7 +206,25 @@ assert(limits.topPerCategory == 120 and limits.minPerClassPerCategory == 10
     and limits.remotePerAuthor == 8,
     "configured retention limits were not resolved")
 assert(limits.enabled == true, "explicit ranked retention mode was not enabled")
+local retentionBefore = NexusDB.dataRetention and NexusDB.dataRetention.last
 local summary = assert(Nexus.DataRetention.Enforce(NexusDB, "focused test"))
+assert(summary.pending == true and summary.overlayRemoved == 0
+        and summary.perAuthorRemoved == 0
+        and NexusDB.dataRetention.last == retentionBefore,
+    "retention reported planned removal or stamped completion before catalog commit")
+local retainedTicket = summary.mutationTicket
+assert(type(retainedTicket) == "table" and retainedTicket.state == "pending",
+    "retention dropped its pending transaction ticket")
+local retentionPumps = 0
+while summary.pending == true do
+    assert(Nexus.BuildCatalog.PumpRootAdmission() == retainedTicket,
+        "retention restarted or replaced its pending transaction")
+    retentionPumps = retentionPumps + 1
+    assert(retentionPumps < 20000, "retention transaction did not terminate")
+    summary = assert(Nexus.DataRetention.Enforce(NexusDB, "focused test"))
+end
+assert(retainedTicket.committed == true and summary.blocked ~= true,
+    "retention did not observe a committed transaction")
 
 local remoteCount, floodCount, localCount = 0, 0, 0
 local classCounts = {}
@@ -294,40 +335,40 @@ assert(Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerOne,"B")
         and Nexus.DataRetention.AllowsRemoteRevision("Peer",150,peerTwo,"B"),
     "peers did not converge after exact suppression was forgotten")
 
-assert(Nexus.BuildCatalog.Put({
+assert(AwaitMutation(Nexus.BuildCatalog.Put({
     id="superseded", title="Old DPS page", author="Remote",
     autoDps=true, lastModified=now,
-}))
-assert(Nexus.DataRetention.ReleaseSupersededAutoBuild("superseded", NexusDB)
+})))
+assert(AwaitMutation(Nexus.DataRetention.ReleaseSupersededAutoBuild("superseded", NexusDB))
     and overlay.superseded == nil,
     "direct superseded-page cleanup did not remove an unreferenced remote page")
 
 local markerAge = 30 * 24 * 60 * 60
-assert(Nexus.BuildCatalog.Put({
+assert(AwaitMutation(Nexus.BuildCatalog.Put({
     id="old-evicted-today",title="Old revision evicted today",author="Remote",
     autoDps=true,lastModified=now - 90 * 24 * 60 * 60,
-}))
-assert(Nexus.DataRetention.ReleaseSupersededAutoBuild(
-        "old-evicted-today", NexusDB),
+})))
+assert(AwaitMutation(Nexus.DataRetention.ReleaseSupersededAutoBuild(
+        "old-evicted-today", NexusDB)),
     "old remote build was not evicted")
 local freshMarker = H.DurablePayload("communityRetentionEvictions")["old-evicted-today"]
 assert(type(freshMarker) == "table" and freshMarker.schemaVersion == 1
         and freshMarker.receiptAtServerTime == now,
     "eviction barrier did not record its trusted local creation time")
-Nexus.DataRetention.Enforce(NexusDB, "same-pass marker aging")
+Enforce(NexusDB, "same-pass marker aging")
 assert(H.DurablePayload("communityRetentionEvictions")["old-evicted-today"] ~= nil,
     "new marker for an old revision expired in its creation pass")
 now = now + markerAge - 1
-Nexus.DataRetention.Enforce(NexusDB, "marker before expiry")
+Enforce(NexusDB, "marker before expiry")
 assert(H.DurablePayload("communityRetentionEvictions")["old-evicted-today"] ~= nil,
     "marker expired before its creation-time lifetime")
 now = now + 2
-Nexus.DataRetention.Enforce(NexusDB, "marker after expiry")
+Enforce(NexusDB, "marker after expiry")
 assert(H.DurablePayload("communityRetentionEvictions")["old-evicted-today"] == nil,
     "marker did not expire according to creation time")
 now = 2000000000
 
-local again = Nexus.DataRetention.Enforce(NexusDB, "idempotence")
+local again = Enforce(NexusDB, "idempotence")
 assert(again.overlayRemoved == 0 and again.characterBestRemoved == 0
     and again.personalRemoved == 0 and again.buildBestRemoved == 0
     and again.tombstonesRemoved == 0,

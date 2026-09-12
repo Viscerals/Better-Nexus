@@ -152,4 +152,43 @@ assert(#lb3 == 1 and lb3[1].player == "Alice" and lb3[1].dps == 120000,
     "lower remote submissions must not replace the record")
 print("single-record leaderboard rejects lower data -- OK")
 
+-- Catalog class repair must retain a pending write and publish its metadata
+-- revision only after that exact write commits.
+local S = dofile("tests/catalog_authority_support.lua")
+local classRows = {}
+for index = 1, 9 do
+    local id = string.format("pending-class-%02d", index)
+    classRows[id] = S.LocalBuild(id, 1, {author="Solkr",
+        ownerKey="solkr@ebonhold", realm="ebonhold", class="ROGUE",
+        autoDps=true, title="Rogue Record Loadout"})
+end
+NexusDB = S.Database(classRows)
+GetNormalizedRealmName = function() return "Ebonhold" end
+UnitClass = function() return "Rogue", "ROGUE" end
+H.AdmitCatalogV1(NexusDB, Nexus.BundledBuilds)
+DPS.Init(Adapter, nil)
+local classRow = {player="Solkr", ownerKey="solkr@ebonhold", realm="ebonhold",
+    ownerVerified=true, class="MAGE", buildId="pending-class-01",
+    fingerprint="100000x1", echoes={{spellId=100000,quality=3,stacks=1}},
+    lockedEchoes={}, dps=100, duration=30, category="dummy", ts=wall}
+NexusDB.dpsCapture.characterBest.dummy["solkr@ebonhold"] = classRow
+UnitClass = function() return "Mage", "MAGE" end
+local revisions, revisionKey = Nexus.Revisions, Nexus.Revisions.DPS_CHANGED
+local revisionBefore = revisions.Get(revisionKey)
+DPS.GetDpsBoard("dummy")
+assert(Nexus.BuildCatalog.RootState().candidate == true
+        and Nexus.BuildCatalog.Get("pending-class-01").class == "ROGUE",
+    "DPS class repair did not enter its real pending catalog path")
+assert(revisions.Get(revisionKey) == revisionBefore,
+    "DPS published class repair before the catalog mutation committed")
+local outcome
+for _ = 1, Nexus.BuildCatalog.Budget().maximumPumps do
+    outcome = Nexus.BuildCatalog.PumpRootAdmission()
+    if outcome.state ~= "pending" then break end
+end
+assert(outcome.committed == true
+        and Nexus.BuildCatalog.Get("pending-class-01").class == "MAGE"
+        and revisions.Get(revisionKey) == revisionBefore + 1,
+    "DPS did not publish its terminal class repair exactly once")
+print("DPS pending class repair settles once -- OK")
 print("All DPS capture tests passed.")

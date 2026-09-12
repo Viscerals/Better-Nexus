@@ -204,7 +204,7 @@ local ST = {
     -- over every root/domain/API state. It is session state; a reload re-detects
     -- the maximum durable counter during bundle admission.
     exhausted=false,
-    candidate=nil, futureToken=nil,
+    candidate=nil, futureToken=nil, sourceVerification=nil,
     bindingGeneration=0, committedMutationRevision=0, preparationEpoch=0,
     reservationEpoch=0, semanticGeneration=0, generation=0,
     sessionTombstones=setmetatable({}, {__mode="k"}),
@@ -214,6 +214,7 @@ local ST = {
     cursorRegistry=setmetatable({}, {__mode="k"}), activeCursors={},
     cursorSequence=0,
     maintenanceRegistry=setmetatable({}, {__mode="k"}), activeMaintenance=nil,
+    mutationTickets=setmetatable({}, {__mode="k"}),
     recordEpoch=0, exactEpoch=0, exactRevisionClock=0,
     recordRevisions={}, exactRevisions={},
     trustedHigh=nil, trustedUntrusted=false,
@@ -234,6 +235,7 @@ local ST = {
         notificationFailures=0, notificationReplays=0,
         notificationReplaysStale=0,
         maintenanceCommits=0, claimsIssued=0,
+        mutationCompletionFailures=0,
         cursorsBegun=0, driftInvalidations=0,
         bundleWrites=0, servingSwaps=0, cursorSentinels=0,
         cursorRowsInspected=0, maxCursorRowsPerCall=0,
@@ -925,12 +927,15 @@ end
 -- Resolve pool-only evidence through the shared evidence owner. The catalog
 -- never touches the evidence store itself; a resolved record is re-proved
 -- under the same semantic envelope as inline evidence.
-local function ResolveEvidence(known)
+local function ResolveEvidence(known, options)
     local evidence = Nexus and Nexus.LoadoutEvidence
     if not (evidence and type(evidence.Resolve) == "function") then return nil end
     local rows = {}
+    local candidateOptions = options and options.candidateEvidence
+        and {useCandidate=true} or nil
     if type(known.evidenceKey) == "string" and known.evidenceKey ~= "" then
-        local ok, resolved = pcall(evidence.Resolve, known.evidenceKey, nil)
+        local ok, resolved = pcall(evidence.Resolve, known.evidenceKey, nil,
+            candidateOptions)
         if ok and type(resolved) == "table" then
             for _, row in ipairs(resolved) do
                 rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
@@ -939,8 +944,10 @@ local function ResolveEvidence(known)
         end
     end
     if type(known.lockedEvidenceKey) == "string" and known.lockedEvidenceKey ~= "" then
+        local lockedOptions = {forceLocked=true}
+        if candidateOptions then lockedOptions.useCandidate = true end
         local ok, resolved = pcall(evidence.Resolve, known.lockedEvidenceKey, nil,
-            {forceLocked=true})
+            lockedOptions)
         if ok and type(resolved) == "table" then
             for _, row in ipairs(resolved) do
                 rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
@@ -1049,7 +1056,7 @@ local function BuildSnapshot(walker, slot, source, options)
     -- reference, and the union is re-proved against the semantic envelope.
     local wantsInline, wantsLockedRole = #inline == 0, #lockedArray == 0
     if wantsInline or wantsLockedRole then
-        local resolvedRows = ResolveEvidence(known)
+        local resolvedRows = ResolveEvidence(known, options)
         for _, row in ipairs(resolvedRows or {}) do
             local isLocked = row.origin == "lockedArray"
             if (isLocked and wantsLockedRole) or (not isLocked and wantsInline) then
@@ -1175,7 +1182,9 @@ end
 local function ClassifyTombstone(raw, slot, work)
     local view = {stamp=0, author="", ownerKey=nil, ownerVerified=false,
         sourceKind=nil, localOwned=false}
-    if ST.sessionTombstones[raw] then
+    local sessionTombstones = ST.candidate and ST.candidate.sessionTombstones
+        or ST.sessionTombstones
+    if sessionTombstones[raw] then
         view.state = "CURRENT_DENY"
         view.stamp = tonumber(raw.remoteStampEvidence) or 0
         local provenance = type(raw.targetRowProvenance) == "table"
@@ -1230,7 +1239,9 @@ end
 
 local function ClassifyBarrier(raw, slot, work)
     local view = {}
-    if ST.sessionBarriers[raw] then
+    local sessionBarriers = ST.candidate and ST.candidate.sessionBarriers
+        or ST.sessionBarriers
+    if sessionBarriers[raw] then
         Charge(work, "barrierEdges", 7)
         Charge(work, "barrierNodes", 8)
         view.state = "BARRIER_CURRENT_DENY"
@@ -1464,7 +1475,7 @@ local function BetterExactCandidate(id, verdict, currentId, currentVerdict)
     local auto = verdict.snapshot.autoDps and true or false
     local currentAuto = currentVerdict.snapshot.autoDps and true or false
     if auto ~= currentAuto then return not auto end
-    return tostring(id) < tostring(currentId)
+    return Identity.CompareTypedIds(id, currentId) < 0
 end
 
 local function RecomputeExactWinner(rows, bucket)
@@ -1480,14 +1491,14 @@ local function RecomputeExactWinner(rows, bucket)
     end
 end
 
-local function AddBucket(index, map, bucketKey, key, work, rows)
+local function AddBucket(index, map, bucketKey, key, work, rows, prepaid)
     if not bucketKey then return nil end
     local bucket = OwnBucket(index, map, bucketKey)
     if not bucket then
         bucket = {ids={}, idVector={}, count=0}
         index.owned[bucket] = true
         map[bucketKey] = bucket
-        if work then Charge(work, "indexNodes", 1) end
+        if work and not prepaid then Charge(work, "indexNodes", 1) end
     end
     if not bucket.ids[key] then
         bucket.ids[key] = true
@@ -1502,7 +1513,7 @@ local function AddBucket(index, map, bucketKey, key, work, rows)
             end
         end
         table.insert(bucket.idVector, position, key)
-        if work then
+        if work and not prepaid then
             Charge(work, "indexEdges", 1)
             Charge(work, "indexBytes", #bucketKey + 18)
         end
@@ -1656,10 +1667,31 @@ local function ExactGeneration(value)
     return math.floor(value) == value
 end
 
+local function SettleMutationTicket(handle, state, committed, reason, deferCallback)
+    local ticket = handle.ticket or {}
+    ticket.state, ticket.committed = state, committed
+    ticket.reason, ticket.pumps = reason, handle.pumps
+    if committed then
+        ticket.generation = ST.generation
+        ticket.database, ticket.bundle = ST.db, ST.durableBundle
+        ticket.storedAs = handle.storedAs
+    end
+    ST.mutationTickets[ticket] = nil
+    local callback = ticket.completionCallback
+    ticket.completionCallback = nil
+    if deferCallback then return ticket, callback end
+    if callback and not pcall(callback, ticket) then
+        ST.debugStats.mutationCompletionFailures =
+            ST.debugStats.mutationCompletionFailures + 1
+    end
+    return ticket
+end
+
 -- Latch the outer deny-only state. It publishes no candidate, permits no read
 -- that can grant authority, and is never cleared by byte equality: only a fresh
 -- session (module reload) plus a durable counter below the maximum clears it.
 local function LatchGenerationExhausted()
+    local abandoned = ST.candidate
     ST.exhausted = true
     ST.rootState = "AUTHORITY_GENERATION_EXHAUSTED"
     ST.rootReason = "GENERATION_EXHAUSTED"
@@ -1668,18 +1700,70 @@ local function LatchGenerationExhausted()
     ST.activeCursors = {}
     ST.activeMaintenance = nil
     ST.cursorRegistry = setmetatable({}, {__mode="k"})
+    if abandoned and abandoned.mode == "mutation" then
+        SettleMutationTicket(abandoned, "failed", false, "GENERATION_EXHAUSTED")
+    end
 end
 
--- True when the named counter cannot take one more required increment. The
--- check runs before the increment, never after it.
-local function IncrementWouldExhaust(...)
-    for index = 1, select("#", ...) do
-        local value = select(index, ...)
-        if not ExactGeneration(value) or value >= GENERATION_MAXIMUM then
-            return true
+-- One guarded counter authority owns every durable and session increment.
+-- Plans are checked in full before the first counter changes, including the
+-- per-item increments of a multi-row commit.
+local Generation = {}
+
+function Generation.Preflight(plan)
+    for _, entry in ipairs(plan or {}) do
+        local amount = tonumber(entry.amount) or 1
+        local value = type(entry.owner) == "table" and entry.owner[entry.key] or nil
+        if value == nil and entry.zeroDefault then value = 0 end
+        if not ExactGeneration(value) or not ExactGeneration(amount)
+            or amount < 1 or value > GENERATION_MAXIMUM - amount then
+            LatchGenerationExhausted()
+            return false, "GENERATION_EXHAUSTED"
         end
     end
-    return false
+    return true
+end
+
+function Generation.Advance(owner, key, amount, zeroDefault)
+    amount = amount or 1
+    local ok, why = Generation.Preflight({
+        {owner=owner, key=key, amount=amount, zeroDefault=zeroDefault},
+    })
+    if not ok then return nil, why end
+    owner[key] = (owner[key] or 0) + amount
+    return owner[key]
+end
+
+function Generation.Next(owner, key, amount, zeroDefault)
+    amount = amount or 1
+    local ok, why = Generation.Preflight({
+        {owner=owner, key=key, amount=amount, zeroDefault=zeroDefault},
+    })
+    if not ok then return nil, why end
+    return (owner[key] or 0) + amount
+end
+
+function Generation.MutationPlan(items)
+    local count = #items
+    local plan = {
+        {owner=ST, key="durableBundleGeneration", amount=1},
+        {owner=ST, key="preparationEpoch", amount=1},
+        {owner=ST, key="servingGeneration", amount=1},
+        {owner=ST, key="generation", amount=count},
+        {owner=ST, key="committedMutationRevision", amount=count},
+        {owner=ST, key="semanticGeneration", amount=count},
+        {owner=ST, key="exactRevisionClock", amount=count},
+    }
+    local perRecord = {}
+    for _, item in ipairs(items) do
+        local id = item.slot.id
+        perRecord[id] = (perRecord[id] or 0) + 1
+    end
+    for id, amount in pairs(perRecord) do
+        plan[#plan + 1] = {owner=ST.recordRevisions, key=id,
+            amount=amount, zeroDefault=true}
+    end
+    return plan
 end
 
 ------------------------------------------------------------------------
@@ -1718,7 +1802,8 @@ local function AuthorityServingRootWriterV1(mode, serving)
     end
     if mode ~= "final-swap" then return false end
     if type(serving) ~= "table" then return false end
-    ST.servingGeneration = ST.servingGeneration + 1
+    local generation, why = Generation.Advance(ST, "servingGeneration")
+    if not generation then return false, why end
     serving.generation = ST.servingGeneration
     ST.currentServingRoot = serving
     ST.debugStats.servingSwaps = ST.debugStats.servingSwaps + 1
@@ -1931,7 +2016,8 @@ end
 -- nothing and the current durable store is carried unchanged.
 local function EvidenceCandidateStore()
     local evidence = EvidenceOwner()
-    return evidence and evidence.CandidateStore() or nil
+    if not evidence then return nil end
+    return evidence.CandidateStore()
 end
 
 local function EvidencePublishCandidate()
@@ -2016,21 +2102,12 @@ end
 -- One file-level local is spent on purpose: core/BuildCatalog.lua is close to
 -- the Lua 5.1 200 file-level local ceiling, so the capture and recheck helpers
 -- are fields of one table rather than two more locals.
-local Witness = {KEY_MAXIMUM=4096}
-
-function Witness.Capture(map)
-    if type(map) ~= "table" then return nil end
-    local keys, count = {}, 0
-    for key, value in pairs(map) do
-        count = count + 1
-        -- A source larger than the bound cannot be exactly witnessed, so it is
-        -- recorded as unprovable and fails closed on every recheck rather than
-        -- being silently trusted.
-        if count > Witness.KEY_MAXIMUM then return {overflow=true} end
-        keys[key] = value
-    end
-    return {keys=keys, count=count}
-end
+local Witness = {
+    EDGE_MAXIMUM=BUDGET.edges,
+    NODE_MAXIMUM=BUDGET.nodes,
+    BYTE_MAXIMUM=BUDGET.bytesInspected,
+    DEPTH_MAXIMUM=BUDGET.depth + 2,
+}
 
 -- MASTER-RC-017 REOPENED ELEMENT: the bundled baseline is an admitted source.
 -- The bundled `builds` map is what the root is admitted FROM, so architecture
@@ -2047,37 +2124,486 @@ function Witness.BaselineMap()
     return builds
 end
 
-function Witness.Drifted(witness, map)
-    if witness == nil then return type(map) == "table" end
-    if witness.overflow then return true end
-    if type(map) ~= "table" then return true end
-    local count = 0
-    for key, value in pairs(map) do
-        count = count + 1
-        if witness.keys[key] ~= value then return true end
+function Witness.SelectedRoots(source)
+    return {
+        {name="communityBuilds", value=rawget(source, "communityBuilds")},
+        {name="syncTombstones", value=rawget(source, "syncTombstones")},
+        {name="buildCatalog", value=rawget(source, "buildCatalog")},
+        {name="communityRetentionEvictions",
+            value=rawget(source, "communityRetentionEvictions")},
+        {name="bundledBuilds", value=Witness.BaselineMap()},
+    }
+end
+-- Persistent shallow bundle construction. Each pump copies no more than the
+-- V1 edge/node/byte slice. Nested catalog rows remain immutable identities;
+-- the evidence entries map receives its own detached top-level map.
+local Candidate = {}
+Candidate.EvidenceCandidateStore = EvidenceCandidateStore
+
+function Candidate.SourceValue(db, source, field)
+    if field == "dpsAuthority" then
+        local internals = Nexus and Nexus.MainInternals
+        local owner = type(internals) == "table" and internals.DpsAuthority or nil
+        return owner and type(owner.Sidecar) == "function" and owner.Sidecar(db) or nil
     end
-    return count ~= witness.count
+    if field == "storeData" then
+        local internals = Nexus and Nexus.MainInternals
+        local owner = type(internals) == "table"
+            and internals.AuthorityBootstrap or nil
+        return owner and type(owner.DurableStoreData) == "function"
+            and owner.DurableStoreData(db) or nil
+    end
+    if field == "loadoutEvidence" then
+        local owner = Nexus and Nexus.LoadoutEvidence
+        local owned = owner and type(owner.DurableStore) == "function"
+            and owner.DurableStore(db) or nil
+        if type(owned) == "table" then return owned end
+    end
+    local origin = (BUNDLE_CATALOG_MAPS[field] or field == "buildCatalog")
+        and source or db
+    return rawget(origin, field)
 end
 
-local function CaptureToken(db, selectedBundle)
+function Candidate.NewBundle(db, source, generation, overrides, drops, writes)
+    return {db=db, source=source, generation=generation,
+        overrides=overrides or {}, drops=drops or {}, fieldIndex=1,
+        bundle={schemaVersion=BUNDLE_SCHEMA_VERSION,
+            transactionGeneration=generation}, current=nil, nested=nil,
+        writes=writes or {}, writeIndex=1}
+end
+
+function Candidate.PumpCopy(task, work)
+    while not Exhausted(work.budget) do
+        local pending = task.pending
+        if not pending then
+            local ok, key, value = pcall(next, task.source, task.cursor)
+            if not ok then return false, "ROOT_MAP_MALFORMED" end
+            if key == nil then return true end
+            pending = {key=key, value=value,
+                bytes=ScalarBytes(key) + ScalarBytes(value)}
+            task.pending = pending
+            Charge(work, "edges", 1)
+            Charge(work, "nodes", 1)
+        end
+        local bytes = math.min(pending.bytes,
+            SLICE.bytesInspected - work.budget.bytesInspected)
+        if bytes > 0 then
+            Charge(work, "bytesInspected", bytes)
+            pending.bytes = pending.bytes - bytes
+        end
+        if pending.bytes > 0 then return nil end
+        task.cursor = pending.key
+        if not (task.drop and task.drop[pending.key]) then
+            task.target[pending.key] = pending.value
+        end
+        task.pending = nil
+    end
+    return nil
+end
+
+function Candidate.PumpBundle(handle, work)
+    while handle.fieldIndex <= #BUNDLE_PAYLOAD_FIELDS do
+        if handle.nested then
+            local complete, reason = Candidate.PumpCopy(handle.nested, work)
+            if complete == false then return false, reason end
+            if not complete then return nil end
+            handle.nested = nil
+            handle.fieldIndex = handle.fieldIndex + 1
+        elseif handle.current then
+            local complete, reason = Candidate.PumpCopy(handle.current, work)
+            if complete == false then return false, reason end
+            if not complete then return nil end
+            if handle.current.field == "loadoutEvidence" then
+                local entries = rawget(handle.current.source, "entries")
+                if type(entries) == "table" then
+                    local target = {}
+                    handle.current.target.entries = target
+                    handle.nested = {source=entries, target=target, cursor=nil}
+                end
+            end
+            handle.current = nil
+            if not handle.nested then handle.fieldIndex = handle.fieldIndex + 1 end
+        else
+            local field = BUNDLE_PAYLOAD_FIELDS[handle.fieldIndex]
+            local override = handle.overrides[field]
+            if override ~= nil then
+                handle.bundle[field] = override
+                handle.fieldIndex = handle.fieldIndex + 1
+                Charge(work, "nodes", 1)
+            else
+                local source = Candidate.SourceValue(handle.db, handle.source, field)
+                if type(source) ~= "table" or getmetatable(source) ~= nil then
+                    source = {}
+                end
+                local target = {}
+                handle.bundle[field] = target
+                handle.current = {field=field, source=source, target=target,
+                    cursor=nil, drop=handle.drops[field]}
+                Charge(work, "nodes", 1)
+            end
+        end
+        if handle.nested == nil and handle.current == nil
+            and handle.fieldIndex <= #BUNDLE_PAYLOAD_FIELDS then
+            -- The just-finished field has no nested copy.
+        elseif Exhausted(work.budget) then
+            return nil
+        end
+    end
+    while handle.writeIndex <= #handle.writes do
+        if Exhausted(work.budget) then return nil end
+        local write = handle.writes[handle.writeIndex]
+        local map = handle.bundle[write.map]
+        if type(map) ~= "table" then return false, "ROOT_MAP_MALFORMED" end
+        map[write.id] = write.value
+        handle.writeIndex = handle.writeIndex + 1
+        Charge(work, "edges", 1)
+        Charge(work, "nodes", 1)
+        Charge(work, "bytesInspected", ScalarBytes(write.id)
+            + ScalarBytes(write.value))
+    end
+    return true
+end
+
+function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
+                               existingHandle)
+    local generation, why = Generation.Next(ST, "durableBundleGeneration")
+    if not generation then return nil, why end
+    local writes = {}
+    for _, item in ipairs(items) do
+        for _, write in ipairs(item.writes) do writes[#writes + 1] = write end
+    end
+    local overrides = {}
+    local stagedEvidence = Candidate.EvidenceCandidateStore()
+    if stagedEvidence ~= nil then overrides.loadoutEvidence = stagedEvidence end
+    local handle = existingHandle or {}
+    local ticket = handle.ticket
+    if not ticket then
+        ticket = {state="pending", committed=false, pumps=handle.pumps or 0}
+        ST.mutationTickets[ticket] = true
+    end
+    handle.mode, handle.phase = "mutation", "mutation-bundle"
+    handle.counters = handle.counters or NewCounters()
+    handle.pumps, handle.failure = handle.pumps or 0, nil
+    handle.token, handle.originalRoot, handle.ticket = root.token, root, ticket
+    handle.items, handle.reason = items, reason
+    handle.deferred, handle.notifyScope = deferred, notifyScope
+    handle.bundleClass, handle.bundleGeneration = "current", ST.durableBundleGeneration
+    handle.bundleWrite, handle.source = true, ST.durableBundle
+    handle.slots, handle.slotVector, handle.slotCount = {}, {}, 0
+    handle.mapIndex, handle.mapCursor, handle.rootMapEdges = 1, nil, 0
+    handle.verdicts, handle.index, handle.rowIndex = {}, NewIndex(), 0
+    handle.indexIndex, handle.counts, handle.mapCounts = 0, nil, {}
+    handle.sessionTombstones = setmetatable({}, {__mode="k"})
+    handle.sessionBarriers = setmetatable({}, {__mode="k"})
+    handle.put = nil
+    handle.bundleBuilder = Candidate.NewBundle(ST.db, ST.durableBundle,
+        generation, overrides, nil, writes)
+    handle.sessionCopy = {source=ST.sessionTombstones,
+        target=handle.sessionTombstones, cursor=nil}
+    return handle
+end
+
+function Candidate.ConfigureMutationAdmission(handle)
+    local source = handle.finalBundle
+    handle.source, handle.bundleRaw = source, source
+    handle.bundleGeneration = source.transactionGeneration
+    local classification, reason, _, version =
+        Candidate.ClassifyMetadata(rawget(source, "buildCatalog"))
+    if classification ~= "current" then
+        return false, reason or (classification == "future"
+            and "FUTURE_SCHEMA" or "ROOT_MAP_MALFORMED")
+    end
+    handle.metaVersion = version
+    local okOverlay, overlay = Candidate.PlainMapOrNil(rawget(source, "communityBuilds"))
+    local okTomb, tombstones = Candidate.PlainMapOrNil(rawget(source, "syncTombstones"))
+    local okEvict, evictions = Candidate.PlainMapOrNil(
+        rawget(source, "communityRetentionEvictions"))
+    local okBundle, bundledMap = Candidate.PlainMapOrNil(ST.baseline)
+    if not (okOverlay and okTomb and okEvict and okBundle) then
+        return false, "ROOT_MAP_MALFORMED"
+    end
+    handle.maps = {overlay=overlay, bundled=bundledMap,
+        tombstone=tombstones, barrier=evictions}
+    handle.phase = "collect"
+    return true
+end
+
+function Witness.ScalarEdge(value)
+    local kind = type(value)
+    if kind == "nil" then return {kind="nil"} end
+    if kind ~= "string" and kind ~= "number" and kind ~= "boolean" then
+        return nil
+    end
+    return {kind=kind, value=value}
+end
+
+function Witness.NewCapture(source)
+    return {mode="capture", roots=Witness.SelectedRoots(source), rootIndex=1,
+        witness={roots={}, nodes={}, edgeCount=0, nodeCount=0, byteCount=0},
+        sourceToNode={}, frames={}, pending=nil, done=false}
+end
+
+function Witness.Fail(handle, reason)
+    handle.done, handle.failure = true, reason or "SOURCE_WITNESS_INVALID"
+    return {state="failed", reason=handle.failure}
+end
+
+function Witness.EnqueueCaptureTable(handle, value, depth)
+    if depth > Witness.DEPTH_MAXIMUM then
+        return nil, "SOURCE_WITNESS_INVALID"
+    end
+    local existing = handle.sourceToNode[value]
+    if existing then return {kind="table", node=existing} end
+    local witness = handle.witness
+    if witness.nodeCount >= Witness.NODE_MAXIMUM then
+        return nil, "SOURCE_WITNESS_LIMIT"
+    end
+    local id = witness.nodeCount + 1
+    witness.nodeCount = id
+    local record = {identity=value, edges={}, count=0}
+    witness.nodes[id] = record
+    handle.sourceToNode[value] = id
+    handle.frames[#handle.frames + 1] = {
+        source=value, record=record, cursor=nil, depth=depth,
+    }
+    return {kind="table", node=id}, nil, true
+end
+
+function Witness.CaptureValue(handle, value, depth)
+    if type(value) == "table" then
+        return Witness.EnqueueCaptureTable(handle, value, depth)
+    end
+    local edge = Witness.ScalarEdge(value)
+    if not edge then return nil, "SOURCE_WITNESS_INVALID" end
+    return edge
+end
+
+function Witness.BeginVerify(witness, source)
+    if type(witness) ~= "table" or type(witness.roots) ~= "table"
+        or type(witness.nodes) ~= "table" then
+        return {mode="verify", done=true, failure="SOURCE_WITNESS_MISSING"}
+    end
+    return {mode="verify", witness=witness,
+        roots=Witness.SelectedRoots(source), rootIndex=1,
+        sourceToNode={}, nodeToSource={}, frames={}, pending=nil, done=false}
+end
+
+function Witness.EnqueueVerifyTable(handle, value, expectedNode, depth)
+    if type(value) ~= "table" or depth > Witness.DEPTH_MAXIMUM then
+        return false, "SOURCE_DRIFT"
+    end
+    local mapped = handle.sourceToNode[value]
+    if mapped and mapped ~= expectedNode then return false, "SOURCE_DRIFT" end
+    local reverse = handle.nodeToSource[expectedNode]
+    if reverse and reverse ~= value then return false, "SOURCE_DRIFT" end
+    if mapped then return true end
+    local record = handle.witness.nodes[expectedNode]
+    if type(record) ~= "table" or record.identity ~= value then
+        return false, "SOURCE_DRIFT"
+    end
+    handle.sourceToNode[value], handle.nodeToSource[expectedNode] =
+        expectedNode, value
+    handle.frames[#handle.frames + 1] = {
+        source=value, record=record, cursor=nil, count=0, depth=depth,
+    }
+    return true, nil, true
+end
+
+function Witness.VerifyValue(handle, value, expected, depth)
+    if type(expected) ~= "table" then return false, "SOURCE_DRIFT" end
+    if expected.kind == "table" then
+        return Witness.EnqueueVerifyTable(handle, value, expected.node, depth)
+    end
+    local sameNaN = expected.kind == "number" and type(value) == "number"
+        and value ~= value and expected.value ~= expected.value
+    if type(value) ~= expected.kind or (value ~= expected.value and not sameNaN) then
+        return false, "SOURCE_DRIFT"
+    end
+    return true
+end
+
+function Witness.ResumePending(handle, budget)
+    local pending = handle.pending
+    if not pending then return true end
+    local charged = math.min(budget.maximumBytes - budget.bytes, pending.bytes)
+    budget.bytes = budget.bytes + charged
+    pending.bytes = pending.bytes - charged
+    if pending.bytes > 0 then return false end
+    handle.pending = nil
+    local ok, reason, created = pending.finish()
+    if not ok then Witness.Fail(handle, reason); return false end
+    budget.edges = budget.edges + 1
+    if created then budget.nodes = budget.nodes + 1 end
+    return true
+end
+
+function Witness.Defer(handle, budget, byteCost, finish)
+    handle.pending = {bytes=byteCost, finish=finish}
+    return Witness.ResumePending(handle, budget)
+end
+
+function Witness.Pump(handle, limits)
+    if type(handle) ~= "table" then
+        return {state="failed", reason="SOURCE_WITNESS_MISSING"}
+    end
+    if handle.done then
+        return handle.failure and {state="failed", reason=handle.failure}
+            or {state="complete"}
+    end
+    limits = limits or {}
+    local budget = {edges=0, nodes=0, bytes=0,
+        maximumEdges=limits.edges or 64,
+        maximumNodes=limits.nodes or 64,
+        maximumBytes=limits.bytes or 2048}
+    if not Witness.ResumePending(handle, budget) then
+        if handle.failure then return {state="failed", reason=handle.failure} end
+        return {state="pending", edges=budget.edges, nodes=budget.nodes,
+            bytes=budget.bytes}
+    end
+    while budget.edges < budget.maximumEdges
+        and budget.nodes < budget.maximumNodes
+        and budget.bytes < budget.maximumBytes do
+        if handle.rootIndex <= #handle.roots then
+            local index = handle.rootIndex
+            local actual = handle.roots[index]
+            local expected = handle.mode == "verify"
+                and handle.witness.roots[index] or nil
+            handle.rootIndex = index + 1
+            local function FinishRoot()
+                if handle.mode == "capture" then
+                    local edge, reason, created = Witness.CaptureValue(
+                        handle, actual.value, 1)
+                    if not edge then return false, reason end
+                    handle.witness.roots[index] = {name=actual.name, edge=edge}
+                    return true, nil, created
+                end
+                if type(expected) ~= "table" or expected.name ~= actual.name then
+                    return false, "SOURCE_DRIFT"
+                end
+                return Witness.VerifyValue(handle, actual.value, expected.edge, 1)
+            end
+            if not Witness.Defer(handle, budget,
+                ScalarBytes(actual.name) + ScalarBytes(actual.value), FinishRoot) then
+                if handle.failure then return {state="failed", reason=handle.failure} end
+                return {state="pending", edges=budget.edges, nodes=budget.nodes,
+                    bytes=budget.bytes}
+            end
+        else
+            local frame = handle.frames[#handle.frames]
+            if not frame then
+                handle.done = true
+                return {state="complete", edges=budget.edges,
+                    nodes=budget.nodes, bytes=budget.bytes}
+            end
+            local metatable = getmetatable(frame.source)
+            if not frame.metadataDone and (metatable ~= nil
+                or frame.record.metatable ~= nil) then
+                frame.metadataDone = true
+                local function FinishMetatable()
+                    if handle.mode == "capture" then
+                        if handle.witness.edgeCount >= Witness.EDGE_MAXIMUM then
+                            return false, "SOURCE_WITNESS_LIMIT"
+                        end
+                        local edge, reason, created = Witness.CaptureValue(
+                            handle, metatable, frame.depth + 1)
+                        if not edge then return false, reason end
+                        frame.record.metatable = edge
+                        handle.witness.edgeCount = handle.witness.edgeCount + 1
+                        handle.witness.byteCount = handle.witness.byteCount
+                            + ScalarBytes(metatable)
+                        if handle.witness.byteCount > Witness.BYTE_MAXIMUM then
+                            return false, "SOURCE_WITNESS_LIMIT"
+                        end
+                        return true, nil, created
+                    end
+                    return Witness.VerifyValue(handle, metatable,
+                        frame.record.metatable, frame.depth + 1)
+                end
+                if not Witness.Defer(handle, budget, ScalarBytes(metatable),
+                    FinishMetatable) then
+                    if handle.failure then return {state="failed", reason=handle.failure} end
+                    return {state="pending", edges=budget.edges, nodes=budget.nodes,
+                        bytes=budget.bytes}
+                end
+            else
+                frame.metadataDone = true
+                local ok, key, value = pcall(next, frame.source, frame.cursor)
+                if not ok then return Witness.Fail(handle, "SOURCE_WITNESS_INVALID") end
+                if key == nil then
+                    if handle.mode == "verify" and frame.count ~= frame.record.count then
+                        return Witness.Fail(handle, "SOURCE_DRIFT")
+                    end
+                    handle.frames[#handle.frames] = nil
+                else
+                    frame.cursor = key
+                    if type(key) ~= "string" and type(key) ~= "number"
+                        and type(key) ~= "boolean" then
+                        return Witness.Fail(handle, "SOURCE_WITNESS_INVALID")
+                    end
+                    local function FinishEdge()
+                        if handle.mode == "capture" then
+                            local witness = handle.witness
+                            if witness.edgeCount >= Witness.EDGE_MAXIMUM then
+                                return false, "SOURCE_WITNESS_LIMIT"
+                            end
+                            local edge, reason, created = Witness.CaptureValue(
+                                handle, value, frame.depth + 1)
+                            if not edge then return false, reason end
+                            frame.record.edges[key] = edge
+                            frame.record.count = frame.record.count + 1
+                            witness.edgeCount = witness.edgeCount + 1
+                            witness.byteCount = witness.byteCount
+                                + ScalarBytes(key) + ScalarBytes(value)
+                            if witness.byteCount > Witness.BYTE_MAXIMUM then
+                                return false, "SOURCE_WITNESS_LIMIT"
+                            end
+                            return true, nil, created
+                        end
+                        local expected = frame.record.edges[key]
+                        if expected == nil then return false, "SOURCE_DRIFT" end
+                        local verified, reason, created = Witness.VerifyValue(
+                            handle, value, expected, frame.depth + 1)
+                        if not verified then return false, reason end
+                        frame.count = frame.count + 1
+                        return true, nil, created
+                    end
+                    if not Witness.Defer(handle, budget,
+                        ScalarBytes(key) + ScalarBytes(value), FinishEdge) then
+                        if handle.failure then return {state="failed", reason=handle.failure} end
+                        return {state="pending", edges=budget.edges, nodes=budget.nodes,
+                            bytes=budget.bytes}
+                    end
+                end
+            end
+        end
+    end
+    return {state="pending", edges=budget.edges, nodes=budget.nodes,
+        bytes=budget.bytes}
+end
+
+function Witness.Capture(source)
+    local handle = Witness.NewCapture(source)
+    local result = Witness.Pump(handle)
+    while result.state == "pending" do result = Witness.Pump(handle) end
+    if result.state ~= "complete" then return nil, result.reason end
+    return handle.witness
+end
+
+local function CaptureToken(db, selectedBundle, sourceWitness)
     local bundle = selectedBundle or rawget(db, "authorityBundle")
     local source = type(bundle) == "table" and bundle or db
+    local witness = sourceWitness
+    if witness == nil then witness = Witness.Capture(source)
+    elseif witness == false then witness = nil end
     return {
         databaseIdentity=db, bundleIdentity=bundle,
         overlayIdentity=rawget(source, "communityBuilds"),
         tombstoneIdentity=rawget(source, "syncTombstones"),
         metadataIdentity=rawget(source, "buildCatalog"),
         evictionIdentity=rawget(source, "communityRetentionEvictions"),
-        -- Bounded per-key witnesses over the exact admitted payload maps.
-        overlayWitness=Witness.Capture(rawget(source, "communityBuilds")),
-        tombstoneWitness=Witness.Capture(rawget(source, "syncTombstones")),
-        metadataWitness=Witness.Capture(rawget(source, "buildCatalog")),
-        evictionWitness=Witness.Capture(
-            rawget(source, "communityRetentionEvictions")),
+        sourceWitness=witness,
         bundledIdentity=ST.bundled,
-        -- MASTER-RC-017: a bounded per-key witness over the bundled baseline,
-        -- the same shape WIT-01..03 established for the payload maps.
-        baselineWitness=Witness.Capture(Witness.BaselineMap()),
+        baselineIdentity=Witness.BaselineMap(),
         ownerIdentity=CurrentOwnerKey(),
         bindingGeneration=ST.bindingGeneration,
         committedMutationRevision=ST.committedMutationRevision,
@@ -2100,24 +2626,8 @@ local function TokenDrifted(token)
         or (Nexus and Nexus.Revisions) ~= token.callbackOwnerIdentity then
         return "SOURCE_DRIFT"
     end
-    -- Per-key recheck. This runs on every authority-bearing operation, which is
-    -- what line 137 requires: a row replaced, added, or removed behind the
-    -- published root is current-source drift even when every map identity is
-    -- unchanged.
-    if Witness.Drifted(token.overlayWitness, rawget(source, "communityBuilds"))
-        or Witness.Drifted(token.tombstoneWitness,
-            rawget(source, "syncTombstones"))
-        or Witness.Drifted(token.metadataWitness, rawget(source, "buildCatalog"))
-        or Witness.Drifted(token.evictionWitness,
-            rawget(source, "communityRetentionEvictions")) then
-        return "SOURCE_DRIFT"
-    end
     if token.bundledIdentity ~= ST.bundled then return "SOURCE_DRIFT" end
-    -- MASTER-RC-017: per-key recheck of the bundled baseline, re-read from the
-    -- bundle. This replaces an identity-only comparison against the cached
-    -- ST.baseline, which was blind both to a replaced nested builds map and to
-    -- a row replaced, added or removed inside an unchanged one.
-    if Witness.Drifted(token.baselineWitness, Witness.BaselineMap()) then
+    if Witness.BaselineMap() ~= token.baselineIdentity then
         return "SOURCE_DRIFT"
     end
     if ST.bindingGeneration ~= token.bindingGeneration then return "SOURCE_DRIFT" end
@@ -2125,6 +2635,8 @@ local function TokenDrifted(token)
 end
 
 local function Invalidate(reason)
+    local abandoned = ST.candidate
+    ST.candidate = nil
     if ST.rootState ~= "ROOT_INVALIDATED" then
         ST.debugStats.driftInvalidations = ST.debugStats.driftInvalidations + 1
     end
@@ -2133,6 +2645,59 @@ local function Invalidate(reason)
     ST.activeClaim = nil
     ST.activeCursors = {}
     ST.activeMaintenance = nil
+    ST.sourceVerification = nil
+    if abandoned and abandoned.mode == "mutation" then
+        EvidenceCancelCandidate()
+        SettleMutationTicket(abandoned, "failed", false, reason)
+    end
+end
+
+-- Diagnostic exact-source comparison. Ordinary authority APIs use only the
+-- detached published root plus fixed token identities. They never start or
+-- drain this multi-pump task. The scheduler alone advances this frontier.
+function Catalog.PumpSourceVerificationV1(limits)
+    if ST.exhausted then
+        return {state="failed", reason="GENERATION_EXHAUSTED"}
+    end
+    local root = ServingCatalogRoot()
+    if ST.rootState ~= "ROOT_ADMITTED" or not root then
+        ST.sourceVerification = nil
+        return {state="failed", reason=ST.rootReason or ST.rootState}
+    end
+    local token = root.token
+    local drift = TokenDrifted(token)
+    if drift then
+        Invalidate(drift)
+        return {state="invalidated", reason=drift}
+    end
+    local source = type(token.bundleIdentity) == "table"
+        and token.bundleIdentity or token.databaseIdentity
+    local handle = ST.sourceVerification
+    if not handle or handle.token ~= token then
+        handle = Witness.BeginVerify(token.sourceWitness, source)
+        handle.token = token
+        ST.sourceVerification = handle
+    end
+    local result = Witness.Pump(handle, limits)
+    if result.state == "failed" then
+        ST.sourceVerification = nil
+        Invalidate(result.reason == "SOURCE_WITNESS_MISSING"
+            and result.reason or "SOURCE_DRIFT")
+        return {state="invalidated", reason=ST.rootReason,
+            edges=result.edges or 0, nodes=result.nodes or 0,
+            bytes=result.bytes or 0}
+    end
+    if result.state == "complete" then
+        ST.sourceVerification = nil
+        local finalDrift = TokenDrifted(token)
+        if finalDrift then
+            Invalidate(finalDrift)
+            return {state="invalidated", reason=finalDrift}
+        end
+        return {state="current", edges=result.edges or 0,
+            nodes=result.nodes or 0, bytes=result.bytes or 0}
+    end
+    return result
 end
 
 -- Every authority API first proves the published root is still bound to the
@@ -2245,6 +2810,8 @@ end
 -- never trigger one.
 local function MutationGate()
     if ST.rebindRequired then Catalog.PumpAuthorityRebindV1() end
+    if ST.candidate then return nil, ST.candidate.mode == "mutation"
+        and "ROOT_MUTATION_PENDING" or "ROOT_ADMISSION_PENDING" end
     return Gate()
 end
 
@@ -2285,17 +2852,20 @@ local function PlainMapOrNil(value)
 end
 
 local function NewAdmission(db)
-    ST.bindingGeneration = ST.bindingGeneration + 1
+    local binding, why = Generation.Advance(ST, "bindingGeneration")
+    if not binding then return nil, why end
     local handle = {
         mode="admission", phase="capture", counters=NewCounters(),
         slots={}, slotVector={}, slotCount=0, mapIndex=1, mapCursor=nil,
         rootMapEdges=0, verdicts={}, index=NewIndex(),
         rowIndex=0, indexIndex=0, counts=nil, mapCounts={},
-        pumps=0, failure=nil, token=CaptureToken(db),
+        pumps=0, failure=nil, token=CaptureToken(db, nil, false),
     }
     ST.counters = handle.counters
     return handle
 end
+Candidate.ClassifyMetadata = ClassifyMetadata
+Candidate.PlainMapOrNil = PlainMapOrNil
 
 local MAP_ORDER = {"overlay", "bundled", "tombstone", "barrier"}
 
@@ -2381,12 +2951,15 @@ local function AdmitSlot(handle, slot, work)
             Charge(work, "nodes", 1)
             return verdict
         end
-        slot.walker = NewWalker(raw, {})
+        slot.admissionOptions = handle.mode == "mutation"
+            and {candidateEvidence=true} or {}
+        slot.walker = NewWalker(raw, slot.admissionOptions)
         Charge(work, "rows", 1)
     end
     local status = WalkRow(slot.walker, work)
     if status == "pending" then return nil end
-    return FinishRowVerdict(slot.walker, slot, slot.selectedSource, {})
+    return FinishRowVerdict(slot.walker, slot, slot.selectedSource,
+        slot.admissionOptions or {})
 end
 
 local function ProcessRows(handle, work)
@@ -2409,16 +2982,140 @@ local function ProcessRows(handle, work)
     return "ok"
 end
 
+-- Admission owns a fresh private index. Retain both the row phase and the
+-- current membership charge so a rich row or a long key cannot drain a slice.
+function Candidate.IndexCharge(state, work, bytes, nodes, edges)
+    state.bytesRemaining = state.bytesRemaining or bytes
+    local take = math.min(state.bytesRemaining,
+        SLICE.indexBytes - work.budget.indexBytes)
+    if take > 0 then
+        Charge(work, "indexBytes", take)
+        state.bytesRemaining = state.bytesRemaining - take
+    end
+    if state.bytesRemaining > 0
+        or work.budget.indexNodes + nodes > SLICE.indexNodes
+        or work.budget.indexEdges + edges > SLICE.indexEdges then return false end
+    Charge(work, "indexNodes", nodes)
+    Charge(work, "indexEdges", edges)
+    state.bytesRemaining = nil
+    return true
+end
+
+function Candidate.PumpIndexRow(handle, verdict, work)
+    local index, key, snapshot = handle.index, verdict.typedKey, verdict.snapshot
+    local state = handle.indexRow
+    if not state then
+        state = {phase="exact", membership={}, spellPosition=1}
+        handle.indexRow = state
+    end
+    local membership = state.membership
+    while not Exhausted(work.budget) do
+        local phase = state.phase
+        local map, bucketKey, nextPhase
+        if phase == "exact" then
+            bucketKey = verdict.savedKind == "ordinary" and verdict.complete
+                and verdict.exactFingerprint or nil
+            map, nextPhase = index.exact, "owner"
+        elseif phase == "owner" then
+            local ownerKey = verdict.savedKind == "ordinary" and verdict.verifiedOwner
+            local class = ownerKey and NormalizedClass(snapshot.class)
+            if class then
+                local owner = index.ownerClasses[ownerKey]
+                if not Candidate.IndexCharge(state, work, #ownerKey + 18,
+                    owner and 0 or 1, 1) then return false end
+                if not owner then
+                    owner = {ids={}, classes={}, count=0}
+                    index.owned[owner], index.ownerClasses[ownerKey] = true, owner
+                end
+                owner.ids[key] = class
+                owner.classes[class] = (owner.classes[class] or 0) + 1
+                owner.count = owner.count + 1
+                membership.classOwner = ownerKey
+            end
+            state.phase = "author"
+        elseif phase == "author" then
+            local authorKey = AuthorKey(snapshot.author)
+            if authorKey then
+                local author = index.authors[authorKey]
+                if not Candidate.IndexCharge(state, work, #authorKey + 18,
+                    author and 0 or 1, 1) then return false end
+                if not author then
+                    author = {}
+                    index.owned[author], index.authors[authorKey] = true, author
+                end
+                author[key], membership.author = true, authorKey
+            end
+            state.author = RelatedText(snapshot.author)
+            state.phase = state.author == "" and "done"
+                or (verdict.savedKind == "saved" and "saved" or "spell")
+            if state.phase == "spell" then membership.spells = {} end
+        elseif phase == "spell" then
+            if not state.spellKey then
+                local fingerprint = verdict.relatedFingerprint or ""
+                local _, finish, rawId, rawCount = fingerprint:find(
+                    "(%d+)x(%d+)", state.spellPosition)
+                if finish then
+                    state.spellPosition = finish + 1
+                    if tonumber(rawCount) > 0 then
+                        state.spellKey = RelatedKey(state.author, tostring(tonumber(rawId)))
+                    end
+                else state.phase = "fingerprint" end
+            end
+            bucketKey, map, nextPhase = state.spellKey, index.spells, state.phase
+        elseif phase == "fingerprint" then
+            bucketKey = RelatedKey(state.author, verdict.relatedFingerprint)
+            map, nextPhase = index.fingerprints, "title"
+        elseif phase == "title" then
+            bucketKey = RelatedKey(state.author,
+                RelatedText(snapshot.title or snapshot.serverTitle))
+            map, nextPhase = index.titles, "done"
+        elseif phase == "saved" then
+            bucketKey = RelatedKey(state.author, "saved")
+            map, nextPhase = index.saved, "done"
+        else
+            if not Candidate.IndexCharge(state, work, 0, 1, 0) then return false end
+            index.memberships[key] = membership
+            handle.indexRow = nil
+            return true
+        end
+        if map then
+            if bucketKey then
+                local bucket = map[bucketKey]
+                local added = not bucket or not bucket.ids[key]
+                if not Candidate.IndexCharge(state, work,
+                    added and (#bucketKey + 18) or 0, bucket and 0 or 1,
+                    added and 1 or 0) then return false end
+                bucket = AddBucket(index, map, bucketKey, key, work, handle.verdicts, true)
+                if phase == "exact" then
+                    membership.exact, membership.exactAuto = bucketKey, snapshot.autoDps == true
+                    local field = membership.exactAuto and "autoCount" or "explicitCount"
+                    bucket[field] = (bucket[field] or 0) + 1
+                    if BetterExactCandidate(verdict.id, verdict, bucket.winnerId,
+                        bucket.winnerKey and handle.verdicts[bucket.winnerKey]) then
+                        bucket.winnerKey, bucket.winnerId = key, verdict.id
+                    end
+                elseif phase == "spell" then
+                    membership.spells[#membership.spells + 1] = bucketKey
+                    state.spellKey = nil
+                else membership[phase] = bucketKey end
+            end
+            state.phase = nextPhase
+        end
+    end
+    return false
+end
+
 local function BuildIndexes(handle, work)
     while handle.indexIndex < handle.slotCount do
         if Exhausted(work.budget) then return "pending" end
-        handle.indexIndex = handle.indexIndex + 1
-        local slot = handle.slotVector[handle.indexIndex]
+        local slot = handle.slotVector[handle.indexIndex + 1]
         local verdict = handle.verdicts[slot.key]
         if verdict and verdict.snapshot then
-            IndexAdd(handle.index, handle.verdicts, verdict, work)
+            if not Candidate.PumpIndexRow(handle, verdict, work) then return "pending" end
+        else
+            Charge(work, "indexNodes", 1)
         end
-        Charge(work, "indexNodes", 1)
+        handle.indexIndex = handle.indexIndex + 1
     end
     return "ok"
 end
@@ -2455,13 +3152,12 @@ end
 
 -- Known-field baseline equivalence: an overlay that duplicates its bundled
 -- row may be pruned only when it owns no unknown evidence.
-local function BaselineEquivalent(snapshot, hasUnknown, overlayRaw, bundledRaw, slot)
-    if not (snapshot and bundledRaw) or hasUnknown or RawLocalMarker(overlayRaw) then
+local function BaselineVerdictEquivalent(snapshot, hasUnknown, overlayRaw,
+                                          bundledVerdict)
+    if not (snapshot and bundledVerdict and bundledVerdict.snapshot)
+        or hasUnknown or RawLocalMarker(overlayRaw) then
         return false
     end
-    local bundledVerdict = AdmitRaw(bundledRaw, {key=slot.key, id=slot.id,
-        kind=slot.kind}, "bundled", {})
-    if not bundledVerdict.snapshot then return false end
     local left, right = DeepCopy(snapshot), DeepCopy(bundledVerdict.snapshot)
     for _, key in ipairs({"isMine", "ownerVerified", "needsFullBuild", "linkHash",
         "fingerprintHash", "ordinaryCompletenessReason", "claimedOwnerKey",
@@ -2565,103 +3261,34 @@ end
 
 local function PublishRoot(handle)
     local db = handle.token.databaseIdentity
-    -- The exact selected authority input: the occupied bundle, or the legacy
-    -- locations only while the bundle is absent (state machine lines 374, 394).
-    local source = handle.source or db
-    local classification, metaReason, meta, metaVersion =
-        ClassifyMetadata(rawget(source, "buildCatalog"))
-    if classification == "invalid" then return AdmissionFail(handle, metaReason) end
-    local catalogVersion = tostring(ST.bundled and ST.bundled.catalogVersion or "unversioned")
-    local needsMigration = meta == nil
-        or tonumber(rawget(meta, "schemaVersion")) ~= STORAGE_SCHEMA_VERSION
-        or tostring(rawget(meta, "catalogVersion") or "") ~= catalogVersion
-    local prune = {}
-    if needsMigration then
-        for _, slot in ipairs(handle.slotVector) do
-            local verdict = handle.verdicts[slot.key]
-            if verdict.source == "overlay" and verdict.snapshot
-                and BaselineEquivalent(verdict.snapshot, verdict.hasUnknown,
-                    verdict.overlayRaw, verdict.bundledRaw, slot) then
-                prune[#prune + 1] = slot
-            end
-        end
-    end
     local drift = TokenDrifted(handle.token)
     if drift then return AdmissionFail(handle, drift) end
-    ST.preparationEpoch = ST.preparationEpoch + 1
-    -- Off-state preparation of the migrated catalog metadata and the pruned
-    -- overlay. No legacy payload location is written here or anywhere else:
-    -- line 394 gives those locations no Package B writer, so the schema and
-    -- catalog-version migration lands only inside the bundle candidate.
-    local overrides = nil
-    local ok = pcall(function()
-        if needsMigration then
-            local migrated = ShallowSnapshot(meta)
-            migrated.schemaVersion = STORAGE_SCHEMA_VERSION
-            migrated.catalogVersion = catalogVersion
-            migrated.sourceVersion = tostring(ST.bundled
-                and ST.bundled.sourceVersion or "unknown")
-            overrides = {buildCatalog=migrated}
-            if #prune > 0 then
-                local overlay = ShallowSnapshot(rawget(source, "communityBuilds"))
-                for _, slot in ipairs(prune) do overlay[slot.id] = nil end
-                overrides.communityBuilds = overlay
-            end
-            for _, slot in ipairs(prune) do
-                slot.overlay = nil
-                local replacement = AdmitRaw(slot.bundled, slot, "bundled", {})
-                replacement.overlayRaw, replacement.bundledRaw = nil, slot.bundled
-                IndexRemove(handle.index, handle.verdicts, slot.key)
-                handle.verdicts[slot.key] = replacement
-                IndexAdd(handle.index, handle.verdicts, replacement, nil)
-            end
-        end
-    end)
-    if not ok then
-        ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
-        return AdmissionFail(handle, "PROTECTED_COMMIT_FAILED")
-    end
-    -- Durable bundle disposition. An absent bundle is the legacy migration
-    -- route: admit the exact PR #68 legacy inputs and write the first complete
-    -- bundle with transactionGeneration=1. An occupied bundle whose selected
-    -- catalog metadata already matches is the zero-delta route: it is adopted
-    -- with no bundle allocation, no bundle write and no generation advance. An
-    -- occupied bundle that still needs the schema/catalog-version migration is
-    -- the architecture's authorized startup delta: one detached replacement
-    -- bundle and one bundle write before disposition and serving publication.
-    if handle.bundleClass == "absent" then
-        overrides = overrides or {}
-        if overrides.loadoutEvidence == nil then
-            overrides.loadoutEvidence = EvidenceCandidateStore()
-        end
-        local candidate = BuildDurableBundleCandidate(db, db, 1, overrides)
-        if not CommitDurableBundle(db, candidate) then
-            return AdmissionFail(handle, "AUTHORITY_BUNDLE_WRITE_FAILED")
-        end
-    elseif overrides ~= nil then
-        local generation = handle.bundleGeneration or 0
-        if IncrementWouldExhaust(generation) then
-            LatchGenerationExhausted()
-            return AdmissionFail(handle, "GENERATION_EXHAUSTED")
-        end
-        if overrides.loadoutEvidence == nil then
-            overrides.loadoutEvidence = EvidenceCandidateStore()
-        end
-        local candidate = BuildDurableBundleCandidate(db, handle.bundleRaw,
-            generation + 1, overrides)
-        if not CommitDurableBundle(db, candidate) then
-            return AdmissionFail(handle, "AUTHORITY_BUNDLE_WRITE_FAILED")
+    local prepared, prepareWhy = Generation.Advance(ST, "preparationEpoch")
+    if not prepared then return AdmissionFail(handle, prepareWhy) end
+    if handle.bundleWrite then
+        local committed, verified = pcall(CommitDurableBundle, db, handle.finalBundle)
+        if not committed or not verified then
+            ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
+            return AdmissionFail(handle, "PROTECTED_COMMIT_FAILED")
         end
     else
-        ST.durableBundle = handle.bundleRaw
-        ST.durableBundleGeneration = handle.bundleGeneration or 0
+        ST.durableBundle = handle.finalBundle
+        ST.durableBundleGeneration = handle.finalBundle.transactionGeneration or 0
     end
     EvidencePublishCandidate()
-    handle.token = CaptureToken(db)
-    handle.counts = ComputeCounts(handle)
-    local overlayKeys, tombstoneKeys, barrierKeys = OverlayVectors(handle)
-    ST.generation = ST.generation + 1
-    ST.semanticGeneration = ST.semanticGeneration + 1
+    if handle.mode == "mutation" then
+        ST.sessionTombstones = handle.sessionTombstones
+        ST.sessionBarriers = handle.sessionBarriers
+        for _, item in ipairs(handle.items) do
+            item.previous = handle.originalRoot.rows[item.slot.key]
+            Candidate.BumpRevisions(handle.verdicts[item.slot.key],
+                item.previous, item.slot.id)
+        end
+    else
+        Generation.Advance(ST, "generation")
+        Generation.Advance(ST, "semanticGeneration")
+    end
+    handle.token = CaptureToken(db, handle.finalBundle, handle.sourceWitness)
     -- One pointer swap publishes the complete root by installing it inside a
     -- replacement currentServingRoot. The domain root has no separately
     -- consumable public pointer.
@@ -2672,22 +3299,38 @@ local function PublishRoot(handle)
     local sealedServing = NewServingRoot({
         generation=ST.generation, token=handle.token, rows=handle.verdicts,
         slots=handle.slots, slotVector=handle.slotVector, slotCount=handle.slotCount,
-        index=handle.index, counts=handle.counts, overlayKeys=overlayKeys,
-        tombstoneKeys=tombstoneKeys, barrierKeys=barrierKeys,
-        catalogVersion=catalogVersion,
-        schemaVersion=metaVersion or STORAGE_SCHEMA_VERSION,
-        migrated=needsMigration, redundantRemoved=#prune,
+        index=handle.index, counts=handle.counts, overlayKeys=handle.overlayKeys,
+        tombstoneKeys=handle.tombstoneKeys, barrierKeys=handle.barrierKeys,
+        catalogVersion=handle.catalogVersion,
+        schemaVersion=handle.metaVersion or STORAGE_SCHEMA_VERSION,
+        migrated=handle.needsMigration, redundantRemoved=#handle.prune,
     }, ST.durableBundleGeneration)
     if ST.bootstrapSeal then
         ST.sealedServing = sealedServing
     else
-        AuthorityServingRootWriterV1("final-swap", sealedServing)
+        local swapped, swapWhy = AuthorityServingRootWriterV1("final-swap", sealedServing)
+        if not swapped then return AdmissionFail(handle, swapWhy) end
     end
     ST.rootState, ST.rootReason = "ROOT_ADMITTED", nil
     ST.activeCursors = {}
     ReleaseSupersededCursors()
-    ST.debugStats.relatedIndexRebuilds = ST.debugStats.relatedIndexRebuilds + 1
-    ST.debugStats.authorIndexRebuilds = ST.debugStats.authorIndexRebuilds + 1
+    -- Mutation candidates are resumed through the same bounded constructor as
+    -- admission, but they remain one logical incremental index update per item.
+    -- Keep rebuild telemetry for explicit root admission; BumpRevisions owns
+    -- mutation update accounting.
+    if handle.mode ~= "mutation" then
+        ST.debugStats.relatedIndexRebuilds = ST.debugStats.relatedIndexRebuilds + 1
+        ST.debugStats.authorIndexRebuilds = ST.debugStats.authorIndexRebuilds + 1
+    end
+    if handle.mode == "mutation" and handle.claim then
+        local released, releaseWhy = Candidate.ReleaseClaim(handle.claim)
+        if not released then return AdmissionFail(handle, releaseWhy) end
+    end
+    if handle.completion == "put" then
+        ST.debugStats.putChanges = ST.debugStats.putChanges + 1
+    elseif handle.completion == "maintenance" then
+        ST.debugStats.maintenanceCommits = ST.debugStats.maintenanceCommits + 1
+    end
     handle.phase = "published"
     return "published"
 end
@@ -2697,6 +3340,71 @@ local function PumpAdmission(handle)
     handle.pumps = handle.pumps + 1
     ST.debugStats.rootPumps = ST.debugStats.rootPumps + 1
     local result
+    if handle.phase == "put-prepare" then
+        local prepared, prepareWhy = Candidate.PumpPutPreparation(handle, work)
+        if prepared == "failed" then
+            result = AdmissionFail(handle, prepareWhy)
+        elseif prepared == "noop" then
+            ClosePump(work)
+            return "noop"
+        elseif prepared == "pending" then
+            result = "pending"
+        else
+            result = "ok"
+        end
+    end
+    if handle.phase == "mutation-bundle" then
+        local complete, why = Candidate.PumpBundle(handle.bundleBuilder, work)
+        if complete == false then result = AdmissionFail(handle, why)
+        elseif not complete then result = "pending"
+        else
+            handle.finalBundle = handle.bundleBuilder.bundle
+            handle.phase, result = "mutation-session-tombstones", "ok"
+        end
+    end
+    if handle.phase == "mutation-session-tombstones" and result ~= "pending" then
+        local complete, why = Candidate.PumpCopy(handle.sessionCopy, work)
+        if complete == false then result = AdmissionFail(handle, why)
+        elseif not complete then result = "pending"
+        else
+            handle.sessionCopy = {source=ST.sessionBarriers,
+                target=handle.sessionBarriers, cursor=nil}
+            handle.phase, result = "mutation-session-barriers", "ok"
+        end
+    end
+    if handle.phase == "mutation-session-barriers" and result ~= "pending" then
+        local complete, why = Candidate.PumpCopy(handle.sessionCopy, work)
+        if complete == false then result = AdmissionFail(handle, why)
+        elseif not complete then result = "pending"
+        else
+            handle.sessionWriteItem, handle.sessionWriteIndex = 1, 1
+            handle.phase, result = "mutation-session-writes", "ok"
+        end
+    end
+    if handle.phase == "mutation-session-writes" and result ~= "pending" then
+        while handle.sessionWriteItem <= #handle.items and not Exhausted(work.budget) do
+            local item = handle.items[handle.sessionWriteItem]
+            local write = item.writes[handle.sessionWriteIndex]
+            if not write then
+                handle.sessionWriteItem = handle.sessionWriteItem + 1
+                handle.sessionWriteIndex = 1
+            else
+                if write.session == "sessionTombstones" then
+                    handle.sessionTombstones[write.value] = true
+                elseif write.session == "sessionBarriers" then
+                    handle.sessionBarriers[write.value] = true
+                end
+                handle.sessionWriteIndex = handle.sessionWriteIndex + 1
+                Charge(work, "edges", 1)
+            end
+        end
+        if handle.sessionWriteItem <= #handle.items then result = "pending"
+        else
+            local configured, why = Candidate.ConfigureMutationAdmission(handle)
+            if not configured then result = AdmissionFail(handle, why)
+            else result = "ok" end
+        end
+    end
     if handle.phase == "capture" then
         local db = handle.token.databaseIdentity
         -- A selected database's nonnil raw authorityBundle is classified before
@@ -2768,14 +3476,106 @@ local function PumpAdmission(handle)
     end
     if handle.phase == "rows" and result ~= "pending" then
         result = ProcessRows(handle, work)
-        if result == "ok" then handle.phase = "index" end
+        if result == "ok" then
+            local begun, why = Candidate.BeginAdmissionFinalization(handle)
+            if not begun then result = AdmissionFail(handle, why)
+            else result = "ok" end
+        end
+    end
+    if handle.phase == "finalize-scan" and result ~= "pending" then
+        if Candidate.PumpAdmissionFinalization(handle, work) then
+            result = "ok"
+        else
+            result = "pending"
+        end
+    end
+    if handle.phase == "finalize-prune" and result ~= "pending" then
+        if Candidate.PumpAdmissionPrune(handle, work) then result = "ok"
+        else result = "pending" end
     end
     if handle.phase == "index" and result ~= "pending" then
         result = BuildIndexes(handle, work)
-        if result == "ok" then handle.phase = "publish" end
+        if result == "ok" then
+            local begun, why = Candidate.BeginAdmissionBundle(handle)
+            if not begun then result = AdmissionFail(handle, why)
+            else result = "ok" end
+        end
+    end
+    if handle.phase == "bundle" and result ~= "pending" then
+        local complete, why = Candidate.PumpBundle(handle.bundleBuilder, work)
+        if complete == false then result = AdmissionFail(handle, why)
+        elseif not complete then result = "pending"
+        else
+            handle.finalBundle = handle.bundleBuilder.bundle
+            handle.phase = "witness-capture"
+            result = "ok"
+        end
+    end
+    if handle.phase == "witness-capture" and result ~= "pending" then
+        handle.witnessHandle = handle.witnessHandle
+            or Witness.NewCapture(handle.finalBundle)
+        local remaining = {edges=SLICE.edges - work.budget.edges,
+            nodes=SLICE.nodes - work.budget.nodes,
+            bytes=SLICE.bytesInspected - work.budget.bytesInspected}
+        local witnessResult = remaining.edges > 0 and remaining.nodes > 0
+            and remaining.bytes > 0
+            and Witness.Pump(handle.witnessHandle, remaining)
+            or {state="pending", edges=0, nodes=0, bytes=0}
+        if (witnessResult.edges or 0) > 0 then
+            Charge(work, "edges", witnessResult.edges)
+        end
+        if (witnessResult.nodes or 0) > 0 then
+            Charge(work, "nodes", witnessResult.nodes)
+        end
+        if (witnessResult.bytes or 0) > 0 then
+            Charge(work, "bytesInspected", witnessResult.bytes)
+        end
+        if witnessResult.state == "failed" then
+            result = AdmissionFail(handle, witnessResult.reason)
+        elseif witnessResult.state == "complete" then
+            handle.sourceWitness = handle.witnessHandle.witness
+            handle.witnessHandle = Witness.BeginVerify(
+                handle.sourceWitness, handle.finalBundle)
+            handle.phase, result = "witness-verify", "ok"
+        else
+            result = "pending"
+        end
+    end
+    if handle.phase == "witness-verify" and result ~= "pending" then
+        local remaining = {edges=SLICE.edges - work.budget.edges,
+            nodes=SLICE.nodes - work.budget.nodes,
+            bytes=SLICE.bytesInspected - work.budget.bytesInspected}
+        local witnessResult = remaining.edges > 0 and remaining.nodes > 0
+            and remaining.bytes > 0
+            and Witness.Pump(handle.witnessHandle, remaining)
+            or {state="pending", edges=0, nodes=0, bytes=0}
+        if (witnessResult.edges or 0) > 0 then
+            Charge(work, "edges", witnessResult.edges)
+        end
+        if (witnessResult.nodes or 0) > 0 then
+            Charge(work, "nodes", witnessResult.nodes)
+        end
+        if (witnessResult.bytes or 0) > 0 then
+            Charge(work, "bytesInspected", witnessResult.bytes)
+        end
+        if witnessResult.state == "failed" then
+            result = AdmissionFail(handle, witnessResult.reason)
+        elseif witnessResult.state == "complete" then
+            handle.phase, result = "publish", "ok"
+        else
+            result = "pending"
+        end
     end
     if handle.phase == "publish" and result ~= "pending" then
-        result = PublishRoot(handle)
+        -- FinishAdmission owns failure settlement after it detaches this handle,
+        -- so a completion callback may safely begin a replacement candidate.
+        local published, outcome = pcall(PublishRoot, handle)
+        if published then
+            result = outcome
+        else
+            ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
+            result = AdmissionFail(handle, "ROOT_PUBLICATION_FAILED")
+        end
     end
     ClosePump(work)
     if result == "pending" and not work.progress then
@@ -2805,6 +3605,7 @@ local function SummaryOf(handle, state, reason)
     }
 end
 
+
 local function FinishAdmission(result)
     local handle = ST.candidate
     -- The generation-exhaustion latch discards the candidate, so there is no
@@ -2812,10 +3613,44 @@ local function FinishAdmission(result)
     if not handle then
         return {state=ST.rootState, reason=ST.rootReason, pumps=0}
     end
-    if result == "pending" then return {state="pending", pumps=handle.pumps} end
+    if result == "pending" then
+        if handle.mode == "mutation" and handle.ticket then
+            handle.ticket.pumps = handle.pumps
+            return handle.ticket
+        end
+        return {state="pending", pumps=handle.pumps}
+    end
     ST.candidate = nil
     ST.lastCounters = handle.counters
-    if result == "published" then
+    if result == "noop" and handle.mode == "mutation" then
+        local ticket, callback = SettleMutationTicket(handle,
+            "committed", true, nil, true)
+        if callback and not pcall(callback, ticket) then
+            ST.debugStats.mutationCompletionFailures =
+                ST.debugStats.mutationCompletionFailures + 1
+        end
+        return ticket
+    elseif result == "published" then
+        if handle.mode == "mutation" then
+            -- Close and bind this receipt before a subscriber can start another
+            -- candidate. Notifications and owner callbacks may re-enter safely;
+            -- none of the remaining completion work consumes ST.candidate.
+            local ticket, callback = SettleMutationTicket(handle,
+                "committed", true, nil, true)
+            if not handle.deferred then
+                pcall(NotifyBuild, handle.reason, handle.notifyScope == "all" and nil
+                    or (handle.items[1] and handle.items[1].slot.id), handle.notifyScope)
+            end
+            if handle.completion == "maintenance" then
+                pcall(NotifyBuild, handle.maintenanceOperation == "compaction"
+                    and "exact evidence compaction" or "catalog maintenance", nil, "all")
+            end
+            if callback and not pcall(callback, ticket) then
+                ST.debugStats.mutationCompletionFailures =
+                    ST.debugStats.mutationCompletionFailures + 1
+            end
+            return ticket
+        end
         ST.lastInitSummary = SummaryOf(handle, "ROOT_ADMITTED")
         NotifyBuild("catalog initialized")
         return {state="ROOT_ADMITTED", pumps=handle.pumps, generation=ST.generation}
@@ -2825,6 +3660,16 @@ local function FinishAdmission(result)
         ST.futureToken = handle.token
         ST.lastInitSummary = SummaryOf(handle, "ROOT_READ_ONLY_FUTURE_SCHEMA", "FUTURE_SCHEMA")
         return {state="ROOT_READ_ONLY_FUTURE_SCHEMA", reason="FUTURE_SCHEMA", pumps=handle.pumps}
+    end
+    if handle.mode == "mutation" then
+        if handle.failure == "SOURCE_DRIFT"
+            or handle.failure == "PROTECTED_COMMIT_FAILED"
+            or handle.failure == "ROOT_PUBLICATION_FAILED" then
+            Invalidate(handle.failure)
+        end
+        EvidenceCancelCandidate()
+        return SettleMutationTicket(handle, "failed", false,
+            handle.failure or "ROOT_CONSTRUCTION_FAILED")
     end
     Invalidate(handle.failure or "ROOT_CONSTRUCTION_FAILED")
     ST.lastInitSummary = SummaryOf(handle, "ROOT_INVALIDATED", ST.rootReason)
@@ -2836,11 +3681,19 @@ end
 ------------------------------------------------------------------------
 
 function Catalog.BeginRootAdmission(database, bundle)
+    local abandoned = ST.candidate
     local db = type(database) == "table" and database or {}
     local bundled = type(bundle) == "table" and bundle
         or type(Nexus.BundledBuilds) == "table" and Nexus.BundledBuilds or {}
     local baseline = type(bundled.builds) == "table" and bundled.builds or {}
     if ST.exhausted then
+        return {state=ST.rootState, reason="GENERATION_EXHAUSTED", pumps=0}
+    end
+    local countersOk = Generation.Preflight({
+        {owner=ST, key="bindingGeneration", amount=1},
+        {owner=ST, key="servingGeneration", amount=1},
+    })
+    if not countersOk then
         return {state=ST.rootState, reason="GENERATION_EXHAUSTED", pumps=0}
     end
     ST.db, ST.bundled, ST.baseline = db, bundled, baseline
@@ -2852,6 +3705,10 @@ function Catalog.BeginRootAdmission(database, bundle)
     ST.cursorRegistry = setmetatable({}, {__mode="k"})
     ST.candidate = NewAdmission(db)
     ST.debugStats.rootAdmissions = ST.debugStats.rootAdmissions + 1
+    if abandoned and abandoned.mode == "mutation" then
+        EvidenceCancelCandidate()
+        SettleMutationTicket(abandoned, "failed", false, "SUPERSEDED")
+    end
     return {state="pending", pumps=0}
 end
 
@@ -2869,11 +3726,26 @@ function Catalog.PumpRootAdmission()
     return FinishAdmission(PumpAdmission(handle))
 end
 
+function Catalog.BindMutationCompletion(ticket, callback)
+    if type(ticket) ~= "table" or ST.mutationTickets[ticket] ~= true
+        or ticket.state ~= "pending" or type(callback) ~= "function"
+        or ticket.completionCallback ~= nil then
+        return false, "INVALID_MUTATION_TICKET"
+    end
+    ticket.completionCallback = callback
+    return true
+end
+
 function Catalog.CancelRootAdmission()
     if ST.candidate then
+        local abandoned = ST.candidate
         ST.candidate = nil
         ST.rootState, ST.rootReason = "ROOT_UNBOUND", "CANCELLED"
         PublishInvalidServing()
+        if abandoned.mode == "mutation" then
+            EvidenceCancelCandidate()
+            SettleMutationTicket(abandoned, "failed", false, "CANCELLED")
+        end
     end
     return {state=ST.rootState, reason=ST.rootReason}
 end
@@ -2981,7 +3853,12 @@ function Catalog.AuthorityState(id)
     local typedKey = TypedKey(id)
     local out = {state="UNADMITTED", reason=ST.rootState, typedKey=typedKey,
         occupancy="BLOCKED", generation=ST.generation}
-    if not root then return out end
+    if not root then
+        -- A root-fatal source refusal invalidates every authority query. This
+        -- fixed deny-only result does not assert that the typed ID exists.
+        if ST.rootState == "ROOT_INVALIDATED" then out.state = "INVALIDATED" end
+        return out
+    end
     local verdict = typedKey and root.rows[typedKey] or nil
     if not verdict then
         out.reason = typedKey and "no source" or "INVALID_TYPED_ID"
@@ -3386,29 +4263,247 @@ function Catalog.AllocationOccupancy(id)
 end
 
 local function AdvanceReservation()
-    ST.reservationEpoch = ST.reservationEpoch + 1
+    return Generation.Advance(ST, "reservationEpoch")
+end
+
+function Candidate.BeginAdmissionFinalization(handle)
+    local source = handle.source or handle.token.databaseIdentity
+    local classification, metaReason, meta, metaVersion =
+        ClassifyMetadata(rawget(source, "buildCatalog"))
+    if classification == "invalid" then return false, metaReason end
+    local catalogVersion = tostring(ST.bundled
+        and ST.bundled.catalogVersion or "unversioned")
+    local needsMigration = handle.mode ~= "mutation" and (meta == nil
+        or tonumber(rawget(meta, "schemaVersion")) ~= STORAGE_SCHEMA_VERSION
+        or tostring(rawget(meta, "catalogVersion") or "") ~= catalogVersion)
+    local publishPlan = handle.mode == "mutation"
+        and Generation.MutationPlan(handle.items) or {
+        {owner=ST, key="preparationEpoch", amount=1},
+        {owner=ST, key="generation", amount=1},
+        {owner=ST, key="semanticGeneration", amount=1},
+        {owner=ST, key="servingGeneration", amount=1},
+    }
+    if handle.mode == "mutation" and handle.claim then
+        publishPlan[#publishPlan + 1] = {
+            owner=ST, key="reservationEpoch", amount=1,
+        }
+    end
+    if handle.bundleClass == "absent" or needsMigration then
+        publishPlan[#publishPlan + 1] = {
+            owner=ST, key="durableBundleGeneration", amount=1,
+        }
+    end
+    local countersOk, countersWhy = Generation.Preflight(publishPlan)
+    if not countersOk then return false, countersWhy end
+    handle.meta, handle.metaVersion = meta, metaVersion
+    handle.catalogVersion, handle.needsMigration = catalogVersion, needsMigration
+    handle.counts = {bundled=handle.mapCounts.bundled or 0,
+        overlay=0, tombstones=0, barriers=0, available=0, invalid=0, future=0}
+    handle.overlayKeys, handle.tombstoneKeys, handle.barrierKeys = {}, {}, {}
+    handle.finalizeIndex, handle.prune, handle.pruneIndex = 1, {}, 1
+    handle.pruneDrops = {}
+    handle.phase = "finalize-scan"
+    return true
+end
+
+Candidate.BASELINE_IGNORED_FIELDS = {
+    isMine=true, ownerVerified=true, needsFullBuild=true, linkHash=true,
+    fingerprintHash=true, ordinaryCompletenessReason=true,
+    claimedOwnerKey=true, relaySender=true,
+}
+
+function Candidate.PumpBaselineComparison(task, work)
+    while not Exhausted(work.budget) do
+        local pending = task.pending
+        if pending then
+            local bytes = math.min(pending.bytes,
+                SLICE.bytesInspected - work.budget.bytesInspected)
+            if bytes > 0 then
+                Charge(work, "bytesInspected", bytes)
+                pending.bytes = pending.bytes - bytes
+            end
+            if pending.bytes > 0 then return nil end
+            task.pending = nil
+            local frame, key = pending.frame, pending.key
+            if not (frame.top and Candidate.BASELINE_IGNORED_FIELDS[key]) then
+                local left, right = pending.left, pending.right
+                if type(left) ~= type(right) then return true, false end
+                if type(left) == "table" then
+                    if task.seen[left] then
+                        if task.seen[left] ~= right then return true, false end
+                    else
+                        task.seen[left] = right
+                        task.frames[#task.frames + 1] = {
+                            left=left, right=right, phase="left",
+                        }
+                        Charge(work, "nodes", 1)
+                    end
+                elseif left ~= right then return true, false end
+            end
+        else
+            local frame = task.frames[#task.frames]
+            if not frame then return true, true end
+            local source = frame.phase == "left" and frame.left or frame.right
+            local key, value = next(source, frame.cursor)
+            if key == nil then
+                if frame.phase == "left" then
+                    frame.phase, frame.cursor = "right", nil
+                else task.frames[#task.frames] = nil end
+            else
+                frame.cursor = key
+                local left = frame.phase == "left" and value or rawget(frame.left, key)
+                local right = frame.phase == "right" and value or rawget(frame.right, key)
+                task.pending = {frame=frame, key=key, left=left, right=right,
+                    bytes=ScalarBytes(key) + ScalarBytes(left) + ScalarBytes(right)}
+                Charge(work, "edges", 1)
+            end
+        end
+    end
+    return nil
+end
+
+function Candidate.PumpBaseline(handle, slot, verdict, work)
+    if not slot.bundled or verdict.hasUnknown or RawLocalMarker(slot.overlay) then
+        return true, false
+    end
+    local task = handle.baselineTask
+    if not task then
+        task = {walker=NewWalker(slot.bundled, {})}
+        handle.baselineTask = task
+        Charge(work, "rows", 1)
+    end
+    if task.walker then
+        if WalkRow(task.walker, work) == "pending" then return nil end
+        task.verdict = FinishRowVerdict(task.walker, slot, "bundled", {})
+        task.walker = nil
+        if not task.verdict.snapshot then
+            handle.baselineTask = nil
+            return true, false
+        end
+        task.frames = {{left=verdict.snapshot, right=task.verdict.snapshot,
+            phase="left", top=true}}
+        task.seen = {[verdict.snapshot]=task.verdict.snapshot}
+    end
+    local complete, equivalent = Candidate.PumpBaselineComparison(task, work)
+    if not complete then return nil end
+    if equivalent then slot.pruneVerdict = task.verdict end
+    handle.baselineTask = nil
+    return true, equivalent
+end
+
+function Candidate.PumpAdmissionFinalization(handle, work)
+    while handle.finalizeIndex <= handle.slotCount do
+        if Exhausted(work.budget) then return nil end
+        local slot = handle.slotVector[handle.finalizeIndex]
+        local verdict = handle.verdicts[slot.key]
+        local prune = false
+        if handle.needsMigration and verdict.source == "overlay" and verdict.snapshot then
+            local complete
+            complete, prune = Candidate.PumpBaseline(handle, slot, verdict, work)
+            if not complete then return nil end
+        end
+        local counts = handle.counts
+        if verdict.snapshot then counts.available = counts.available + 1
+        elseif verdict.state == "READ_ONLY_FUTURE_SCHEMA" then
+            counts.future = counts.future + 1
+        elseif verdict.state == "INVALIDATED" and not verdict.tombstone then
+            counts.invalid = counts.invalid + 1
+        end
+        if verdict.tombstone then
+            counts.tombstones = counts.tombstones + 1
+            handle.tombstoneKeys[#handle.tombstoneKeys + 1] = slot.key
+        end
+        if verdict.overlayRaw ~= nil then counts.overlay = counts.overlay + 1 end
+        if verdict.barrier then
+            counts.barriers = counts.barriers + 1
+            handle.barrierKeys[#handle.barrierKeys + 1] = slot.key
+        end
+        if verdict.source == "overlay" and verdict.snapshot then
+            handle.overlayKeys[#handle.overlayKeys + 1] = slot.key
+        end
+        if prune then
+            handle.prune[#handle.prune + 1] = slot
+        end
+        handle.finalizeIndex = handle.finalizeIndex + 1
+        Charge(work, "rows", 1)
+    end
+    handle.phase = "finalize-prune"
+    return true
+end
+
+function Candidate.PumpAdmissionPrune(handle, work)
+    while handle.pruneIndex <= #handle.prune do
+        if Exhausted(work.budget) then return nil end
+        local slot = handle.prune[handle.pruneIndex]
+        slot.overlay = nil
+        local replacement = slot.pruneVerdict
+        slot.pruneVerdict = nil
+        replacement.overlayRaw, replacement.bundledRaw = nil, slot.bundled
+        handle.verdicts[slot.key] = replacement
+        handle.counts.overlay = math.max(0, handle.counts.overlay - 1)
+        handle.pruneDrops[slot.id] = true
+        handle.pruneIndex = handle.pruneIndex + 1
+        Charge(work, "rows", 1)
+    end
+    handle.index, handle.indexIndex = NewIndex(), 0
+    handle.phase = "index"
+    return true
+end
+
+function Candidate.BeginAdmissionBundle(handle)
+    if handle.mode == "mutation" then
+        handle.phase = "witness-capture"
+        return true
+    end
+    if handle.bundleClass ~= "absent" and not handle.needsMigration then
+        handle.finalBundle, handle.bundleWrite = handle.bundleRaw, false
+        handle.phase = "witness-capture"
+        return true
+    end
+    local migrated = ShallowSnapshot(handle.meta)
+    migrated.schemaVersion = STORAGE_SCHEMA_VERSION
+    migrated.catalogVersion = handle.catalogVersion
+    migrated.sourceVersion = tostring(ST.bundled
+        and ST.bundled.sourceVersion or "unknown")
+    local overrides = {buildCatalog=migrated}
+    local evidence = EvidenceCandidateStore()
+    if evidence ~= nil then overrides.loadoutEvidence = evidence end
+    local generation = 1
+    if handle.bundleClass ~= "absent" then
+        generation = Generation.Next(ST, "durableBundleGeneration")
+        if not generation then return false, "GENERATION_EXHAUSTED" end
+    end
+    local drops = {communityBuilds=handle.pruneDrops}
+    handle.bundleBuilder = Candidate.NewBundle(handle.token.databaseIdentity,
+        handle.source or handle.token.databaseIdentity, generation, overrides, drops)
+    handle.bundleWrite = true
+    handle.phase = "bundle"
+    return true
 end
 
 local function IssueClaim(kind, typedKey, id, extra)
     if ST.activeClaim and ST.claimRegistry[ST.activeClaim] then
         return nil, "CLAIM_ACTIVE"
     end
+    local reservationEpoch = ST.reservationEpoch
+    local advanced, advanceWhy = AdvanceReservation()
+    if not advanced then return nil, advanceWhy end
     local claim = {kind=kind, typedKey=typedKey, generation=ST.generation,
-        reservationEpoch=ST.reservationEpoch}
+        reservationEpoch=reservationEpoch}
     ST.claimRegistry[claim] = {kind=kind, typedKey=typedKey, id=id,
-        generation=ST.generation, reservationEpoch=ST.reservationEpoch,
+        generation=ST.generation, reservationEpoch=reservationEpoch,
         extra=extra}
     ST.activeClaim = claim
-    AdvanceReservation()
     ST.debugStats.claimsIssued = ST.debugStats.claimsIssued + 1
     return claim
 end
 
 local function ReleaseClaim(claim)
     if ST.claimRegistry[claim] then
+        local advanced, advanceWhy = AdvanceReservation()
+        if not advanced then return false, advanceWhy end
         ST.claimRegistry[claim] = nil
         if ST.activeClaim == claim then ST.activeClaim = nil end
-        AdvanceReservation()
         return true
     end
     return false
@@ -3547,11 +4642,22 @@ end
 -- MASTER-RC-005: preparation may intern evidence, so it opens a detached
 -- evidence candidate first. Nothing interned here is durable until the authority
 -- commit coordinator installs the candidate inside the complete bundle.
-local function CompactDestination(destination)
+local function CompactDestination(destination, work)
     local compaction = Nexus and Nexus.DataCompaction
     local evidence = Nexus and Nexus.LoadoutEvidence
     local compacted = false
+    if not (evidence and type(destination.echoes) == "table"
+        and #destination.echoes > 0) then return true end
     EvidenceBeginCandidate()
+    local _, candidateWhy, copied = EvidenceCandidateStore()
+    copied = tonumber(copied) or 0
+    if work and copied > 0 then
+        Charge(work, "edges", copied)
+        Charge(work, "nodes", copied)
+    end
+    if candidateWhy == "EVIDENCE_CANDIDATE_PENDING" then
+        return nil, candidateWhy
+    end
     if compaction and type(compaction.Enabled) == "function"
         and compaction.Enabled(ST.db)
         and type(compaction.CompactBuildRow) == "function" then
@@ -3562,8 +4668,7 @@ local function CompactDestination(destination)
             ST.debugStats.compactionWrites = ST.debugStats.compactionWrites + 1
         end
     end
-    if not compacted and evidence and type(evidence.Reference) == "function"
-        and type(destination.echoes) == "table" and #destination.echoes > 0 then
+    if not compacted and type(evidence.Reference) == "function" then
         ST.debugStats.referenceCalls = ST.debugStats.referenceCalls + 1
         local ok, reference, created = pcall(evidence.Reference, destination,
             "echoes", "evidenceKey")
@@ -3571,14 +4676,15 @@ local function CompactDestination(destination)
             ST.debugStats.referenceStores = ST.debugStats.referenceStores + 1
         end
     end
+    return true
 end
 
 local function BumpRevisions(verdict, previous, id)
-    ST.generation = ST.generation + 1
-    ST.committedMutationRevision = ST.committedMutationRevision + 1
-    ST.semanticGeneration = ST.semanticGeneration + 1
-    ST.recordRevisions[id] = (ST.recordRevisions[id] or 0) + 1
-    ST.exactRevisionClock = ST.exactRevisionClock + 1
+    Generation.Advance(ST, "generation")
+    Generation.Advance(ST, "committedMutationRevision")
+    Generation.Advance(ST, "semanticGeneration")
+    Generation.Advance(ST.recordRevisions, id, 1, true)
+    Generation.Advance(ST, "exactRevisionClock")
     local before = previous and previous.snapshot and previous.exactFingerprint or nil
     local after = verdict and verdict.snapshot and verdict.exactFingerprint or nil
     if before then ST.exactRevisions[before] = ST.exactRevisionClock end
@@ -3698,8 +4804,18 @@ local function DetachedSlot(slot)
     return {key=slot.key, id=slot.id, kind=slot.kind, overlay=slot.overlay,
         bundled=slot.bundled, tombstone=slot.tombstone, barrier=slot.barrier}
 end
+Candidate.ReleaseClaim = ReleaseClaim
+Candidate.BumpRevisions = BumpRevisions
 
-local function CommitBatch(root, items, reason, deferred, notifyScope)
+local function DetachedVerdict(verdict)
+    if type(verdict) ~= "table" then return verdict end
+    local copy = {}
+    for key, value in pairs(verdict) do copy[key] = value end
+    return copy
+end
+
+local function CommitBatch(root, items, reason, deferred, notifyScope,
+                           existingHandle)
     local drift = TokenDrifted(root.token)
     if drift then
         EvidenceCancelCandidate()
@@ -3729,13 +4845,41 @@ local function CommitBatch(root, items, reason, deferred, notifyScope)
         end
     end
 
-    -- Every required increment is refused before any one of them is performed.
-    if IncrementWouldExhaust(ST.durableBundleGeneration, ST.generation,
-        ST.committedMutationRevision, ST.semanticGeneration,
-        ST.preparationEpoch, ST.servingGeneration) then
+    -- Every required increment, including every per-item revision, is refused
+    -- before any one of them is performed.
+    local countersOk, countersWhy = Generation.Preflight(
+        Generation.MutationPlan(items))
+    if not countersOk then
         EvidenceCancelCandidate()
-        LatchGenerationExhausted()
-        return false, "GENERATION_EXHAUSTED"
+        return false, countersWhy
+    end
+
+    -- Row count alone does not bound rich catalog rows.
+    -- Use the already captured exact source totals as well; this decision never
+    -- scans the root. Larger sources use the persistent mutation scheduler.
+    local sourceSize = root.token.sourceWitness
+    if existingHandle or root.slotCount > BUDGET.oneCallRows or not sourceSize
+        or sourceSize.byteCount > BUDGET.oneCallBytes
+        or sourceSize.edgeCount > BUDGET.oneCallNodes
+        or sourceSize.nodeCount > BUDGET.oneCallNodes then
+        local handle, handleWhy = Candidate.NewMutation(root, items, reason,
+            deferred, notifyScope, existingHandle)
+        if not handle then
+            EvidenceCancelCandidate()
+            return false, handleWhy
+        end
+        ST.candidate = handle
+        if existingHandle then
+            return handle, "ROOT_MUTATION_PENDING"
+        end
+        local outcome = Catalog.PumpRootAdmission()
+        if type(outcome) == "table" and outcome.state == "committed" then
+            return true
+        end
+        if type(outcome) == "table" and outcome.state == "failed" then
+            return false, outcome.reason
+        end
+        return outcome, "ROOT_MUTATION_PENDING"
     end
 
     -- Off-state construction of the complete detached bundle payload. Each
@@ -3806,7 +4950,7 @@ local function CommitBatch(root, items, reason, deferred, notifyScope)
             end
         end
     end
-    ST.preparationEpoch = ST.preparationEpoch + 1
+    Generation.Advance(ST, "preparationEpoch")
     local replacementToken = CaptureToken(db, bundle)
     -- Protected section: allocation-free and callback-free. The single durable
     -- bundle rawset and its identity verification are the only authority
@@ -3861,7 +5005,9 @@ end
 local function SlotFor(root, id)
     local typedKey, kind = TypedKey(id)
     if not typedKey then return nil, nil, "INVALID_TYPED_ID" end
-    local slot = root.slots[typedKey] or {key=typedKey, id=id, kind=kind}
+    local published = root.slots[typedKey]
+    local slot = published and DetachedSlot(published)
+        or {key=typedKey, id=id, kind=kind}
     return slot, root.rows[typedKey]
 end
 
@@ -3871,7 +5017,8 @@ local function ConsumeClaim(claim, typedKey, kind)
     if entry.typedKey ~= typedKey then return false, "TYPED_ID_MISMATCH" end
     if entry.superseded or entry.generation ~= ST.generation
         or entry.reservationEpoch + 1 ~= ST.reservationEpoch then
-        ReleaseClaim(claim)
+        local released, releaseWhy = ReleaseClaim(claim)
+        if not released and releaseWhy then return false, releaseWhy end
         return false, "STALE_CLAIM"
     end
     return true, entry
@@ -3882,16 +5029,203 @@ end
 local function SupersedeActiveClaim()
     local active = ST.activeClaim
     if active and ST.claimRegistry[active] then
+        local advanced, advanceWhy = AdvanceReservation()
+        if not advanced then return false, advanceWhy end
         ST.claimRegistry[active].superseded = true
         ST.activeClaim = nil
-        AdvanceReservation()
     end
+    return true
 end
 
 local function BundledRawFor(slot)
     if slot.bundled ~= nil then return slot.bundled end
     if type(ST.baseline) == "table" then return rawget(ST.baseline, slot.id) end
     return nil
+end
+
+function Candidate.ReleasePreparedPutClaim(handle)
+    local put = handle and handle.put
+    local claim = put and put.claim
+    if not claim then return true end
+    local released, why = ReleaseClaim(claim)
+    if released then put.claim = nil end
+    return released, why or "INVALID_CLAIM"
+end
+
+function Candidate.FinishPreparedPutWithoutCommit(handle, success, value)
+    EvidenceCancelCandidate()
+    local released, releaseWhy = Candidate.ReleasePreparedPutClaim(handle)
+    if not released then return "failed", releaseWhy end
+    handle.storedAs = handle.put and handle.put.storedAs or value
+    if success then return "noop", value end
+    return "failed", value
+end
+
+function Candidate.NewPutPreparation(root, record, options, claim, deferred, slot,
+                                     existing, readmitTombstone, carriedUnknown)
+    return {
+        mode="mutation", phase="put-prepare", counters=NewCounters(), pumps=1,
+        failure=nil, token=root.token, originalRoot=root, ticket=nil,
+        reason="build put", deferred=deferred, notifyScope=nil,
+        put={
+            phase="row", root=root, record=record, options=options,
+            claim=claim, slot=slot, existing=existing,
+            readmitTombstone=readmitTombstone,
+            carriedUnknown=carriedUnknown,
+            walker=NewWalker(record, options), storedAs="overlay",
+        },
+    }
+end
+
+function Candidate.ActivatePutPreparation(handle)
+    local ticket = {state="pending", committed=false, pumps=handle.pumps}
+    handle.ticket = ticket
+    ST.mutationTickets[ticket] = true
+    ST.candidate = handle
+    return nil, "ROOT_MUTATION_PENDING", ticket
+end
+
+function Candidate.PumpPutPreparation(handle, work)
+    local put = handle.put
+    while not Exhausted(work.budget) do
+        if put.phase == "row" then
+            if WalkRow(put.walker, work) == "pending" then return "pending" end
+            put.phase = "finish"
+        elseif put.phase == "finish" then
+            local verdict = FinishRowVerdict(put.walker, put.slot, "overlay",
+                put.options)
+            if verdict.state ~= "ADMITTED" then
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    verdict.reason)
+            end
+            if put.readmitTombstone and not (verdict.verifiedOwner ~= nil
+                and verdict.verifiedOwner == CurrentOwnerKey()) then
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    "LOCAL_OWNER_REQUIRED")
+            end
+            local existingRow = put.existing and put.existing.snapshot
+                and put.existing or nil
+            if existingRow and existingRow.verifiedOwner
+                and verdict.verifiedOwner ~= existingRow.verifiedOwner
+                and (verdict.verifiedOwner or put.options.source == "remote") then
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    "PROVENANCE_COLLISION")
+            end
+            local destination, destinationWhy = BuildDestination(verdict,
+                put.walker, existingRow and existingRow.source == "overlay"
+                    and existingRow or nil, put.carriedUnknown)
+            if not destination then
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    destinationWhy)
+            end
+            put.verdict, put.destination, put.existingRow = verdict, destination,
+                existingRow
+            put.bundledRaw = BundledRawFor(put.slot)
+            verdict.bundledRaw, verdict.overlayRaw = put.bundledRaw, destination
+            if put.bundledRaw ~= nil and verdict.snapshot
+                and not verdict.hasUnknown and not RawLocalMarker(destination) then
+                put.baselineWalker = NewWalker(put.bundledRaw, {})
+                put.phase = "baseline"
+            else
+                put.phase = "compact"
+            end
+        elseif put.phase == "baseline" then
+            if WalkRow(put.baselineWalker, work) == "pending" then
+                return "pending"
+            end
+            local bundledVerdict = FinishRowVerdict(put.baselineWalker,
+                put.slot, "bundled", {})
+            if BaselineVerdictEquivalent(put.verdict.snapshot,
+                put.verdict.hasUnknown, put.destination, bundledVerdict) then
+                put.storedAs = "baseline"
+                put.rawWrites = {
+                    {map="communityBuilds", id=put.slot.id, value=nil},
+                }
+                put.slot.overlay, put.slot.bundled, put.slot.tombstone = nil,
+                    put.bundledRaw, nil
+                put.verdict = bundledVerdict
+                bundledVerdict.bundledRaw, bundledVerdict.overlayRaw =
+                    put.bundledRaw, nil
+                if not (put.existing and put.existing.overlayRaw ~= nil)
+                    and not put.readmitTombstone and put.existing
+                    and put.existing.snapshot
+                    and put.existing.source == "bundled" then
+                    return Candidate.FinishPreparedPutWithoutCommit(handle, true,
+                        put.storedAs)
+                end
+                put.phase = "finalize"
+            else
+                put.phase = "compact"
+            end
+        elseif put.phase == "compact" then
+            local complete, compactWhy = CompactDestination(put.destination, work)
+            if not complete then
+                if compactWhy == "EVIDENCE_CANDIDATE_PENDING" then
+                    return "pending"
+                end
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    compactWhy)
+            end
+            put.phase = "finalize"
+        elseif put.phase == "finalize" then
+            local verdict, existingRow = put.verdict, put.existingRow
+            if put.storedAs ~= "baseline" then
+                if existingRow and existingRow.source == "overlay"
+                    and not put.readmitTombstone
+                    and type(existingRow.overlayRaw) == "table"
+                    and DeepEqual(verdict.snapshot, existingRow.snapshot)
+                    and DeepEqual(put.destination, existingRow.overlayRaw) then
+                    return Candidate.FinishPreparedPutWithoutCommit(handle, true,
+                        put.storedAs)
+                end
+                put.rawWrites = {
+                    {map="communityBuilds", id=put.slot.id,
+                        value=put.destination},
+                }
+                put.slot.overlay, put.slot.bundled, put.slot.tombstone =
+                    put.destination, put.bundledRaw, nil
+            end
+            if put.readmitTombstone then
+                put.rawWrites[#put.rawWrites + 1] = {
+                    map="syncTombstones", id=put.slot.id, value=nil,
+                }
+            end
+            if existingRow or put.readmitTombstone
+                or (put.existing and put.existing.state == "INVALIDATED") then
+                verdict.state = "READMITTED"
+            end
+            if put.existing and put.existing.barrier then
+                verdict.barrier = put.existing.barrier
+            end
+            if put.claim then
+                local releaseReady, releaseWhy = Generation.Preflight({
+                    {owner=ST, key="reservationEpoch", amount=1},
+                })
+                if not releaseReady then
+                    return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                        releaseWhy)
+                end
+            end
+            put.item = {slot=put.slot, verdict=verdict, writes=put.rawWrites}
+            put.phase = "commit"
+        elseif put.phase == "commit" then
+            if not handle.ticket then return "prepared" end
+            local claim, storedAs = put.claim, put.storedAs
+            local outcome, commitWhy = CommitBatch(put.root, {put.item},
+                "build put", handle.deferred, nil, handle)
+            if type(outcome) ~= "table" then
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    commitWhy)
+            end
+            handle.claim, handle.completion, handle.storedAs = claim, "put",
+                storedAs
+            return "ready"
+        else
+            return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                "ROOT_CONSTRUCTION_FAILED")
+        end
+    end
+    return "pending"
 end
 
 local function PutInternal(record, options, claim, deferred)
@@ -3930,83 +5264,51 @@ local function PutInternal(record, options, claim, deferred)
             return false, "FUTURE_SCHEMA_RESERVATION"
         end
         if Occupancy(existing) == "VACANT" then
-            SupersedeActiveClaim()
+            local superseded, supersedeWhy = SupersedeActiveClaim()
+            if not superseded then return false, supersedeWhy end
             local issued, issueWhy = IssueClaim("allocation", slot.key, record.id)
             if not issued then return false, issueWhy end
             claim = issued
         end
     end
-    local function Fail(reason)
-        if claim then ReleaseClaim(claim) end
-        return false, reason
-    end
     if readmitTombstone and options.source ~= "local" and options.source ~= "import" then
-        return Fail("LOCAL_OWNER_REQUIRED")
+        if claim then
+            local released, releaseWhy = ReleaseClaim(claim)
+            if not released then return false, releaseWhy end
+        end
+        return false, "LOCAL_OWNER_REQUIRED"
     end
     local candidateSlot = {key=slot.key, id=slot.id, kind=slot.kind}
-    local verdict, walker = AdmitRaw(record, candidateSlot, "overlay", options)
-    if verdict.state ~= "ADMITTED" then return Fail(verdict.reason) end
-    if readmitTombstone and not (verdict.verifiedOwner ~= nil
-        and verdict.verifiedOwner == CurrentOwnerKey()) then
-        return Fail("LOCAL_OWNER_REQUIRED")
+    local handle = Candidate.NewPutPreparation(root, record, options, claim,
+        deferred,
+        candidateSlot, existing, readmitTombstone, carriedUnknown)
+    local work = NewWork(handle.counters)
+    local prepared, prepareWhy = Candidate.PumpPutPreparation(handle, work)
+    ClosePump(work)
+    if prepared == "pending" then
+        return Candidate.ActivatePutPreparation(handle)
     end
-    local existingRow = existing and existing.snapshot and existing or nil
-    if existingRow and existingRow.verifiedOwner
-        and verdict.verifiedOwner ~= existingRow.verifiedOwner
-        and (verdict.verifiedOwner or options.source == "remote") then
-        return Fail("PROVENANCE_COLLISION")
+    if prepared == "failed" then return false, prepareWhy end
+    if prepared == "noop" then return true, prepareWhy end
+    if prepared ~= "prepared" then
+        return false, prepareWhy or "ROOT_CONSTRUCTION_FAILED"
     end
-    local destination, destinationWhy = BuildDestination(verdict, walker,
-        existingRow and existingRow.source == "overlay" and existingRow or nil,
-        carriedUnknown)
-    if not destination then return Fail(destinationWhy) end
-    local rawWrites = {}
-    local storedAs = "overlay"
-    local bundledRaw = BundledRawFor(slot)
-    verdict.bundledRaw, verdict.overlayRaw = bundledRaw, destination
-    if bundledRaw ~= nil and BaselineEquivalent(verdict.snapshot, verdict.hasUnknown,
-        destination, bundledRaw, slot) then
-        storedAs = "baseline"
-        if not (existing and existing.overlayRaw ~= nil) and not readmitTombstone
-            and existing and existing.snapshot and existing.source == "bundled" then
-            -- The bundled row already serves this exact content: nothing
-            -- durable or public changes, so no generation publishes.
-            if claim then ReleaseClaim(claim) end
-            return true, storedAs
-        end
-        rawWrites[#rawWrites + 1] = {map="communityBuilds", id=slot.id, value=nil}
-        slot.overlay, slot.bundled, slot.tombstone = nil, bundledRaw, nil
-        verdict = AdmitRaw(bundledRaw, slot, "bundled", {})
-        verdict.bundledRaw, verdict.overlayRaw = bundledRaw, nil
-    else
-        CompactDestination(destination)
-        -- Nothing represented changed only when the admitted snapshot and the
-        -- durable bytes both already match: no raw write, no generation.
-        if existingRow and existingRow.source == "overlay" and not readmitTombstone
-            and type(existingRow.overlayRaw) == "table"
-            and DeepEqual(verdict.snapshot, existingRow.snapshot)
-            and DeepEqual(destination, existingRow.overlayRaw) then
-            if claim then ReleaseClaim(claim) end
-            -- Nothing publishes, so nothing this preparation interned may become
-            -- durable: the detached evidence candidate is discarded.
-            EvidenceCancelCandidate()
-            return true, storedAs
-        end
-        rawWrites[#rawWrites + 1] = {map="communityBuilds", id=slot.id, value=destination}
-        slot.overlay, slot.bundled, slot.tombstone = destination, bundledRaw, nil
+    local put = handle.put
+    local ok, commitWhy = CommitSlot(root, put.item.slot, put.item.verdict,
+        put.item.writes, "build put", deferred)
+    if type(ok) == "table" and ok.state == "pending" then
+        ST.candidate.claim = put.claim
+        ST.candidate.completion = "put"
+        ST.candidate.storedAs = put.storedAs
+        return nil, commitWhy, ok
     end
-    if readmitTombstone then
-        rawWrites[#rawWrites + 1] = {map="syncTombstones", id=slot.id, value=nil}
+    if put.claim then
+        local released, releaseWhy = ReleaseClaim(put.claim)
+        if not released then return false, releaseWhy end
     end
-    if existingRow or readmitTombstone or (existing and existing.state == "INVALIDATED") then
-        verdict.state = "READMITTED"
-    end
-    if existing and existing.barrier then verdict.barrier = existing.barrier end
-    local ok, commitWhy = CommitSlot(root, slot, verdict, rawWrites, "build put", deferred)
-    if claim then ReleaseClaim(claim) end
     if not ok then return false, commitWhy end
     ST.debugStats.putChanges = ST.debugStats.putChanges + 1
-    return true, storedAs
+    return true, put.storedAs
 end
 
 function Catalog.Put(record, options)
@@ -4038,7 +5340,10 @@ function Catalog.PutDeferred(record)
         or existing.snapshot) then
         return false, "deferred build id unavailable"
     end
-    local ok, storedAs = PutInternal(record, {}, nil, true)
+    local ok, storedAs, ticket = PutInternal(record, {}, nil, true)
+    if ok == nil and storedAs == "ROOT_MUTATION_PENDING" then
+        return nil, storedAs, ticket
+    end
     if not ok then return false, storedAs end
     return true, storedAs, true
 end
@@ -4048,8 +5353,13 @@ function Catalog.PublishDeferred(changed, reason)
     if not root then return false, why end
     changed = math.max(0, math.floor(tonumber(changed) or 0))
     if changed == 0 then return true, 0 end
-    ST.recordEpoch = ST.recordEpoch + 1
-    ST.exactEpoch = ST.exactEpoch + 1
+    local countersOk, countersWhy = Generation.Preflight({
+        {owner=ST, key="recordEpoch", amount=1},
+        {owner=ST, key="exactEpoch", amount=1},
+    })
+    if not countersOk then return false, countersWhy end
+    Generation.Advance(ST, "recordEpoch")
+    Generation.Advance(ST, "exactEpoch")
     NotifyBuild(reason or "deferred builds published", nil, "all")
     return true, 1
 end
@@ -4089,6 +5399,9 @@ function Catalog.RemoveOverlay(id)
     local ok, commitWhy = CommitSlot(root, slot, replacement, {
         {map="communityBuilds", id=slot.id, value=nil},
     }, "overlay removed", false)
+    if type(ok) == "table" and ok.state == "pending" then
+        return nil, commitWhy, ok
+    end
     if not ok then return false, commitWhy end
     return true
 end
@@ -4106,7 +5419,8 @@ end
 
 local function TombstoneRecord(slot, existing, tombstone)
     local snapshot = existing.snapshot
-    ST.receiptRevision = ST.receiptRevision + 1
+    local receipt, why = Generation.Advance(ST, "receiptRevision")
+    if not receipt then return nil, why end
     return {
         schemaVersion=TOMBSTONE_SCHEMA_VERSION,
         typedId={luaType=slot.kind, exactValue=slot.id},
@@ -4119,7 +5433,7 @@ local function TombstoneRecord(slot, existing, tombstone)
             ownerKey=existing.verifiedOwner or snapshot.ownerKey,
             realm=snapshot.realm, ownerVerified=existing.verifiedOwner ~= nil,
         },
-        receiptRevision=ST.receiptRevision,
+        receiptRevision=receipt,
         receiptAtServerTime=TrustedServerTime() or 0,
         remoteStampEvidence=tonumber(tombstone.stamp) or 0,
         -- MASTER-RC-016: the replaced row's unknown evidence travels with the
@@ -4168,6 +5482,7 @@ function Catalog.SetTombstone(id, tombstone, options)
             return false, "LOCAL_OWNER_REQUIRED"
         end
         local record = TombstoneRecord(slot, existing, tombstone)
+        if not record then return false, "GENERATION_EXHAUSTED" end
         local verdict = NewVerdict(slot, "TOMBSTONED", "TOMBSTONE_CURRENT_DENY")
         verdict.reservation = "TOMBSTONE_CURRENT_DENY"
         local view = {state="CURRENT_DENY", stamp=stamp,
@@ -4182,6 +5497,9 @@ function Catalog.SetTombstone(id, tombstone, options)
             {map="syncTombstones", id=slot.id, value=record, session="sessionTombstones"},
             {map="communityBuilds", id=slot.id, value=nil},
         }, "build tombstoned", false)
+        if type(ok) == "table" and ok.state == "pending" then
+            return nil, commitWhy, ok
+        end
         if not ok then return false, commitWhy end
         return true
     end
@@ -4231,6 +5549,9 @@ function Catalog.SetTombstone(id, tombstone, options)
     local ok, commitWhy = CommitSlot(root, slot, verdict, {
         {map="syncTombstones", id=slot.id, value=payload},
     }, "build tombstoned", false)
+    if type(ok) == "table" and ok.state == "pending" then
+        return nil, commitWhy, ok
+    end
     if not ok then return false, commitWhy end
     return true, "REMOTE_TOMBSTONE_ORDER_UNPROVEN"
 end
@@ -4258,6 +5579,9 @@ function Catalog.ClearTombstone(id)
     local ok, commitWhy = CommitSlot(root, slot, RetiredReplacement(slot, existing), {
         {map="syncTombstones", id=slot.id, value=nil},
     }, "tombstone cleared", false)
+    if type(ok) == "table" and ok.state == "pending" then
+        return nil, commitWhy, ok
+    end
     if not ok then return false, commitWhy end
     return true
 end
@@ -4290,7 +5614,8 @@ local function MaintenanceOpen(handle)
 end
 
 local function BarrierRecord(slot, existing)
-    ST.receiptRevision = ST.receiptRevision + 1
+    local receipt, why = Generation.Advance(ST, "receiptRevision")
+    if not receipt then return nil, why end
     return {
         schemaVersion=BARRIER_SCHEMA_VERSION,
         typedId={luaType=slot.kind, exactValue=slot.id},
@@ -4298,7 +5623,7 @@ local function BarrierRecord(slot, existing)
         evictedSourceIdentity=existing.source or "overlay",
         evictedProvenanceIdentity=existing.verifiedOwner
             or (existing.snapshot and existing.snapshot.claimedOwnerKey) or "",
-        receiptRevision=ST.receiptRevision,
+        receiptRevision=receipt,
         receiptAtServerTime=TrustedServerTime() or 0,
     }
 end
@@ -4316,9 +5641,11 @@ function Catalog.MaintenanceEvictOverlay(handle, id)
     if existing.tombstone then return false, "TOMBSTONE_RESERVATION" end
     if existing.state == "READ_ONLY_FUTURE_SCHEMA" then return false, "FUTURE_SCHEMA_RESERVATION" end
     if not existing.snapshot then return false, "INVALID_RESERVATION" end
+    local barrier, barrierWhy = BarrierRecord(slot, existing)
+    if not barrier then return false, barrierWhy end
     handle.seen[slot.key] = true
     handle.ops[#handle.ops + 1] = {kind="evict", slot=slot, existing=existing,
-        barrier=BarrierRecord(slot, existing)}
+        barrier=barrier}
     return true
 end
 
@@ -4477,7 +5804,7 @@ function Catalog.CommitMaintenance(handle)
             if existing.snapshot or existing.tombstone
                 or existing.state == "READ_ONLY_FUTURE_SCHEMA"
                 or existing.state == "INVALIDATED" then
-                replacement = existing
+                replacement = DetachedVerdict(existing)
                 replacement.barrier = nil
             end
             slot.barrier = nil
@@ -4496,6 +5823,12 @@ function Catalog.CommitMaintenance(handle)
         batch[index] = {slot=item.op.slot, verdict=item.verdict, writes=item.writes}
     end
     local ok, commitWhy = CommitBatch(root, batch, nil, true)
+    if type(ok) == "table" and ok.state == "pending" then
+        ST.candidate.completion = "maintenance"
+        ST.candidate.maintenanceOperation = handle.operation
+        ST.candidate.applied = #batch
+        return nil, commitWhy, ok
+    end
     if not ok then return false, commitWhy end
     ST.debugStats.maintenanceCommits = ST.debugStats.maintenanceCommits + 1
     pcall(NotifyBuild, handle.operation == "compaction" and "exact evidence compaction"
@@ -4621,10 +5954,11 @@ end
 local function BeginCursor(family, state)
     local root, why = Gate()
     if not root then return nil, why end
+    local sequence, sequenceWhy = Generation.Advance(ST, "cursorSequence")
+    if not sequence then return nil, sequenceWhy end
     local previous = ST.activeCursors[family]
     if previous then ST.cursorRegistry[previous] = nil end
-    ST.cursorSequence = ST.cursorSequence + 1
-    local token = {kind=family, cursorId=ST.cursorSequence, generation=ST.generation}
+    local token = {kind=family, cursorId=sequence, generation=ST.generation}
     state = state or {}
     -- MASTER-RC-011: the entry binds the serving generation it was issued
     -- against. It holds no root wrapper, so a superseded root is released at
@@ -4775,7 +6109,9 @@ function Catalog.SavedMirrorIds(author)
         if verdict then ids[#ids + 1] = verdict.id end
         if #ids > BUDGET.oneCallRows then return nil, "CURSOR_REQUIRED" end
     end
-    table.sort(ids, function(left, right) return tostring(left) < tostring(right) end)
+    table.sort(ids, function(left, right)
+        return Identity.CompareTypedIds(left, right) < 0
+    end)
     ST.debugStats.savedMirrorRows = ST.debugStats.savedMirrorRows + #ids
     return ids
 end
