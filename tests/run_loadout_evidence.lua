@@ -1,6 +1,7 @@
 -- Canonical exact-loadout evidence: additive storage, defensive reads, and
 -- established build/DPS wire materialization.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("core/DpsCapture.lua")
@@ -29,7 +30,11 @@ Nexus.BundledBuilds = {
 }
 NexusDB = {communityBuilds={}, syncTombstones={}, dpsCapture={}}
 Evidence.Init(NexusDB)
-Catalog.Init(NexusDB, Nexus.BundledBuilds)
+H.AdmitCatalogV1(NexusDB, Nexus.BundledBuilds)
+local function AwaitMutation(ok, why, ticket)
+    return S.AwaitCatalogMutation(ok, why, ticket,
+        "loadout-evidence catalog mutation", 200000)
+end
 
 local sameA = {
     {spellId=200101,quality=3,stacks=1},
@@ -60,20 +65,21 @@ local legacyLockedKey = Evidence.Intern({
 })
 assert(legacyLockedKey == lockedKey,
     "legacy truthy locked evidence canonicalized as ordinary")
+H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
 
 local beforeBuildRevision = Revisions.Get(Revisions.BUILD_LIBRARY_CHANGED)
-assert(Catalog.Put({
+assert(AwaitMutation(Catalog.Put({
     id="short-a", title="Short A", author="Peer", class="MAGE",
     ownerKey="peer@ebonhold", ownerVerified=true,
     postedAt=10, lastModified=10, fingerprintHash="deadbeef", echoes=sameA,
-}))
+})))
 assert(Revisions.Get(Revisions.BUILD_LIBRARY_CHANGED) == beforeBuildRevision + 1,
     "one evidence-backed build write did not retain one build revision")
-assert(Catalog.Put({
+assert(AwaitMutation(Catalog.Put({
     id="short-b", title="Short B", author="Peer", class="MAGE",
     postedAt=11, lastModified=11, fingerprintHash="deadbeef",
     echoes={{spellId=200102,quality=3,stacks=1}},
-}))
+})))
 -- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 374,
 -- 394, 4849): the durable authority payload is `authorityBundle`; the exact
 -- PR #68 locations are read-only preserved bootstrap input.
@@ -99,6 +105,7 @@ assert(not Evidence.Intern({[2]={spellId=200104,stacks=1}})
     and not Evidence.Intern({{spellId=0,stacks=1}})
     and Evidence.Stats().entries == entriesBeforeMalformed,
     "malformed evidence entered the pool")
+H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
 
 -- Public reads serve the admitted canonical evidence record (one unique
 -- sorted tuple order with grouped stacks) and are defensive. A synthetic
@@ -163,6 +170,7 @@ assert(not Evidence.Intern(sameA)
     "corrupt full-key evidence was overwritten")
 NexusDB = primaryDb
 Evidence.Init(NexusDB)
+H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
 
 local function Pump(seconds)
     for _ = 1, math.ceil(seconds / 0.2) do
@@ -203,9 +211,17 @@ local function DecodeChunks(messages, code, indexField, dataField)
 end
 
 Sync.Init(Codec, {})
+H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
 H.sentChatMessages = {}
-assert(Sync.BroadcastBuild(Catalog.Get("short-a")),
-    "pool-only build could not enter the established wire path")
+local shortForWire = Catalog.Get("short-a")
+local buildBroadcast, buildBroadcastWhy = Sync.BroadcastBuild(
+    shortForWire)
+assert(buildBroadcast,
+    "pool-only build could not enter the established wire path: "
+        .. tostring(buildBroadcastWhy) .. " row=" .. tostring(shortForWire)
+        .. " echoes=" .. tostring(shortForWire and shortForWire.echoes)
+        .. " root=" .. tostring(Catalog.RootState().state) .. "/"
+        .. tostring(Catalog.RootState().reason))
 Pump(10)
 local buildPayload = DecodeChunks(H.sentChatMessages, "WLRB", 5, 6)
 assert(type(buildPayload.e) == "table" and #buildPayload.e == 2
@@ -242,13 +258,21 @@ assert(Revisions.Get(Revisions.DPS_CHANGED) == beforeDpsRevision + 1,
 local storedRow = NexusDB.dpsCapture.characterBest.dummy["peer@ebonhold"]
 assert(storedRow.evidenceKey and not Catalog.Get("missing-page"),
     "missing-page DPS fixture unexpectedly gained a catalog row")
+-- MASTER-W2-011: a DPS row written outside a catalog candidate binds only its
+-- self-verifying key and keeps its inline bytes; the pool entry is written
+-- later inside a compaction transaction. Seed that exact pool entry here as
+-- durable input before the complete readmission below, so the pool-only row
+-- oracle keeps its meaning without a raw write behind an admitted root.
+assert(Evidence.Intern(storedRow.echoes) == storedRow.evidenceKey,
+    "fixture could not seed the exact pool entry for the DPS winner")
 storedRow.echoes = nil
 local collisionEchoes = {{spellId=200299,quality=3,stacks=1}}
-assert(Catalog.Put({
+H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
+assert(AwaitMutation(Catalog.Put({
     id="missing-page", title="Colliding page", author="Other", class="MAGE",
     postedAt=20, lastModified=20, echoes=collisionEchoes,
     fingerprint=DPS.GetEchoKey(collisionEchoes),
-}))
+})))
 local board = DPS.GetDpsBoard("dummy")
 assert(#board == 1 and board[1].player == "Peer"
     and #board[1].echoes == 2 and board[1].build == nil,

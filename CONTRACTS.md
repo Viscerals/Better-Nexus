@@ -372,9 +372,18 @@ perform no catalog/DPS walk or ordering pass, and every caller receives a
 defensive copy. Status, timers, visibility, Sync queues, and diagnostic activity
 are not cache inputs.
 
-Construction is publish-after-success. If a represented revision changes while
-a projection is building, the module retries once against the new snapshot; an
-error or second unstable pass publishes nothing. The module owns no frames,
+Construction is publish-after-success. A cold `Builds(filters)` read never
+walks the catalog in one call: it returns `nil, nil, "pending"` and retains one
+persistent job that `RequestBuilds`/`PumpBuilds` advance through the bounded
+BuildCatalog summary cursor and the resumable DpsCapture eligibility cursor;
+only an atomically published result is served, and a represented-revision
+change or cursor error cancels the job and publishes nothing. A publication
+made by the retained job counts as current for `BuildsCurrent` only after a
+`Builds`/`RequestBuilds` read has served it, so a consumer's last-good copy
+is reported stale until it re-reads. Leaderboard
+construction keeps the synchronous retry-once form: if a represented revision
+changes while it builds, the module retries once against the new snapshot, and
+an error or second unstable pass publishes nothing. The module owns no frames,
 SavedVariables, revisions, transport, GameAdapter access, scheduler work, or
 automation authority.
 

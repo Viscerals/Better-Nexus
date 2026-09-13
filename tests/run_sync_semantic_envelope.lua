@@ -6,7 +6,54 @@ dofile("data/DefaultProfile.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local S = dofile("tests/catalog_authority_support.lua")
-local Case, Check = S.Case, S.Check
+local BaseCase, Check = S.Case, S.Check
+local caseFilter = os.getenv("BN_SYNC_CASE")
+local function Case(id, name, body)
+    if caseFilter and caseFilter ~= ""
+        and not ("," .. caseFilter .. ","):find("," .. id .. ",", 1, true) then
+        return
+    end
+    return BaseCase(id, name, body)
+end
+
+-- The sandbox runs as a different Windows identity from the worktree owner.
+-- Keep fixture Git reads local to this exact checkout and never alter global
+-- Git configuration.
+local materializedTrees = {}
+local function ReadMaterialized(path)
+    local handle = io.open(path, "rb")
+    if not handle then return nil end
+    local value = handle:read("*a")
+    handle:close()
+    return value
+end
+function H.MaterializeBaseTreeV1(commit)
+    assert(type(commit) == "string" and #commit >= 7,
+        "MaterializeBaseTreeV1 requires an exact commit")
+    local cached = materializedTrees[commit]
+    if cached then return cached.root, cached.tree end
+    local temp = (os.getenv("TEMP") or os.getenv("TMPDIR") or ".")
+    local dir = (temp:gsub("\\", "/")) .. "/bn-mix-" .. commit:sub(1, 12)
+    local windows = dir:gsub("/", "\\")
+    os.execute('rmdir /s /q "' .. windows .. '" 2>nul')
+    os.execute('mkdir "' .. windows .. '" 2>nul')
+    local cwdPath = dir .. "/.mix-cwd"
+    os.execute('cd > "' .. cwdPath .. '"')
+    local safeRoot = ReadMaterialized(cwdPath)
+    safeRoot = safeRoot and safeRoot:gsub("%s+$", ""):gsub("\\", "/")
+    assert(type(safeRoot) == "string" and safeRoot ~= "",
+        "could not resolve the active fixture checkout")
+    local safeGit = 'git -c safe.directory="' .. safeRoot .. '"'
+    os.execute(safeGit .. ' archive ' .. commit
+        .. ' | tar -x -C "' .. dir .. '"')
+    local hashPath = dir .. "/.mix-tree"
+    os.execute(safeGit .. ' log -1 --format=%T ' .. commit
+        .. ' > "' .. hashPath .. '"')
+    local tree = ReadMaterialized(hashPath)
+    tree = tree and tree:gsub("%s+$", "") or nil
+    materializedTrees[commit] = {root=dir, tree=tree}
+    return dir, tree
+end
 
 local Codec, Sync = Nexus.Codec, Nexus.Sync
 local clock = 1000
@@ -23,18 +70,54 @@ local function PumpSide(side)
     if type(catalog.PumpRootAdmission) == "function" then
         catalog.PumpRootAdmission()
     end
+    if type(catalog.RootState) == "function" then
+        local root = catalog.RootState()
+        if root.state ~= "ROOT_ADMITTED" or root.candidate == true then
+            return false, "catalog"
+        end
+    end
+    local cache = side.nexus.BuildHashCache
+    if type(cache) == "table" and type(cache.Pump) == "function"
+        and cache.Pump() ~= true then
+        return false, "hash-cache"
+    end
     side.nexus.Sync.OnUpdate(0.2)
+    return true
 end
 
 local function SettleSide(side)
     local catalog = side.nexus.BuildCatalog
     if type(catalog.RootState) ~= "function" then return end
-    local limit = catalog.Budget().maximumPumps
+    local budget = type(catalog.Budget) == "function" and catalog.Budget() or {}
+    local limit = math.min(tonumber(budget.maximumPumps) or 200000, 200000)
     for _ = 1, limit do
         if not catalog.RootState().candidate then return end
-        PumpSide(side)
+        catalog.PumpRootAdmission()
     end
     Check(not catalog.RootState().candidate, "isolated peer catalog did not settle")
+end
+
+local OriginalIsolatedSide = H.IsolatedSideV1
+H.IsolatedSideV1 = function(root, database, identity)
+    local side = OriginalIsolatedSide(root, database, identity)
+    local catalog = side.nexus and side.nexus.BuildCatalog
+    if type(catalog) == "table" and type(catalog.Init) == "function"
+        and type(catalog.RootState) == "function" then
+        catalog.Init(side.env.NexusDB, side.nexus.BundledBuilds)
+        SettleSide(side)
+        local state = catalog.RootState()
+        assert(state.state == "ROOT_ADMITTED" and state.candidate ~= true,
+            "isolated peer catalog did not reach ROOT_ADMITTED")
+    end
+    local cache = side.nexus and side.nexus.BuildHashCache
+    if type(cache) == "table" and type(cache.Pump) == "function" then
+        for pumps = 0, 200000 do
+            if cache.Pump() == true then break end
+            assert(pumps < 200000,
+                "isolated peer compatibility hashes did not converge")
+        end
+    end
+    return side
 end
 
 local function PutSide(side, record, options)
@@ -59,8 +142,14 @@ end
 local function Pump(seconds)
     for _ = 1, math.ceil((seconds or 10) / 0.2) do
         clock = clock + 0.2
-        Catalog().PumpRootAdmission()
-        Sync.OnUpdate(0.2)
+        local catalog = Catalog()
+        catalog.PumpRootAdmission()
+        local root = catalog.RootState()
+        if root.state == "ROOT_ADMITTED" and root.candidate ~= true then
+            local cache = Nexus.BuildHashCache
+            if type(cache) ~= "table" or type(cache.Pump) ~= "function"
+                or cache.Pump() == true then Sync.OnUpdate(0.2) end
+        end
     end
 end
 
@@ -323,8 +412,12 @@ end
 Case("MIX-06", "numeric 1 and string \"1\" never collide; numeric never reaches wire", function()
     local db = ResetSync(S.Database({}))
     local catalog = Catalog()
-    Check(catalog.Put(S.LocalBuild(1, 2), {source="local"}), "numeric local ID refused")
-    Check(catalog.Put(S.LocalBuild("1", 3), {source="local"}), "string local ID refused")
+    Check(S.CatalogMutation(function()
+        return catalog.Put(S.LocalBuild(1, 2), {source="local"})
+    end, "numeric typed-id admission"), "numeric local ID refused")
+    Check(S.CatalogMutation(function()
+        return catalog.Put(S.LocalBuild("1", 3), {source="local"})
+    end, "string typed-id admission"), "string local ID refused")
     Check(catalog.Get(1).echoCount == 2 and catalog.Get("1").echoCount == 3,
         "typed IDs collided in the catalog")
     Check(S.State(1).typedKey == "n:1" and S.State("1").typedKey == "s:1:1",
@@ -399,9 +492,15 @@ Case("MIX-07", "only exact 1..96-byte UTF-8 identifiers send", function()
     local exact = string.rep("b", 96)
     local invalidUtf8 = "id\255x"
     local control = "id\1x"
-    Check(catalog.Put(S.LocalBuild(wide, 1), {source="local"}), "97-byte local ID refused")
-    Check(catalog.Put(S.LocalBuild(exact, 1), {source="local"}), "96-byte local ID refused")
-    Check(catalog.Put(S.LocalBuild(invalidUtf8, 1), {source="local"}), "invalid UTF-8 local ID refused")
+    Check(S.CatalogMutation(function()
+        return catalog.Put(S.LocalBuild(wide, 1), {source="local"})
+    end, "97-byte id admission"), "97-byte local ID refused")
+    Check(S.CatalogMutation(function()
+        return catalog.Put(S.LocalBuild(exact, 1), {source="local"})
+    end, "96-byte id admission"), "96-byte local ID refused")
+    Check(S.CatalogMutation(function()
+        return catalog.Put(S.LocalBuild(invalidUtf8, 1), {source="local"})
+    end, "invalid UTF-8 id admission"), "invalid UTF-8 local ID refused")
     Check(select(1, catalog.Put(S.LocalBuild(control, 1), {source="local"})) == false,
         "control-byte ID entered local storage")
     local okWide, whyWide = Sync.BroadcastBuild(catalog.Get(wide))
@@ -507,11 +606,14 @@ end)
 Case("SYN-03", "remote tombstone: opaque block-all, replay, conflict, no resurrection", function()
     local db = ResetSync(S.Database({}))
     local catalog = Catalog()
-    Check(catalog.Put(S.Build("syn03", 3, 0), {source="remote", sender="Peer-Ebonhold"}))
+    Check(S.CatalogMutation(function()
+        return catalog.Put(S.Build("syn03", 3, 0),
+            {source="remote", sender="Peer-Ebonhold"})
+    end, "remote tombstone seed"))
     local raw = S.Durable(db).syn03
     local rawBytes = S.Encode(raw)
-    Check(Sync.HandleIncoming("WLRD|Peer|syn03|30|Peer", "Peer-Ebonhold"),
-        "owner delete was refused")
+    Sync.HandleIncoming("WLRD|Peer|syn03|30|Peer", "Peer-Ebonhold")
+    SettleCatalog()
     Check(catalog.Get("syn03") == nil and catalog.Count() == 0,
         "deleted row remained publicly available")
     Check(S.Durable(db).syn03 == raw and S.Encode(raw) == rawBytes,
@@ -531,7 +633,10 @@ Case("SYN-03", "remote tombstone: opaque block-all, replay, conflict, no resurre
     Check(catalog.Get("syn03") == nil, "remote resurrection succeeded")
     Check(Sync.TombstoneCount() == 1, "tombstone count disagrees with the catalog")
     -- a peer other than the owner still cannot delete
-    Check(catalog.Put(S.Build("syn03b", 3, 0), {source="remote", sender="Peer-Ebonhold"}))
+    Check(S.CatalogMutation(function()
+        return catalog.Put(S.Build("syn03b", 3, 0),
+            {source="remote", sender="Peer-Ebonhold"})
+    end, "non-owner tombstone seed"))
     Check(Sync.HandleIncoming("WLRD|Griefer|syn03b|40|Griefer", "Griefer-Ebonhold") == false
         and catalog.Get("syn03b") ~= nil, "non-owner delete was applied")
 end)
@@ -539,7 +644,9 @@ end)
 Case("SYN-04", "local delete uses the V1 tombstone and session-only pending", function()
     local db = ResetSync(S.Database({}))
     local catalog = Catalog()
-    Check(catalog.Put(S.LocalBuild("syn04", 3), {source="local"}))
+    Check(S.CatalogMutation(function()
+        return catalog.Put(S.LocalBuild("syn04", 3), {source="local"})
+    end, "local tombstone seed"))
     -- MASTER-RC-019 SUPERSEDED EXPECTATION, with its architecture
     -- justification written down rather than silently satisfied.
     -- Architecture line 4856 and the mixed-client tombstone rows fix the
@@ -559,6 +666,13 @@ Case("SYN-04", "local delete uses the V1 tombstone and session-only pending", fu
     -- unchanged, including the V1 durable tombstone shape, CURRENT_DENY
     -- authority, session-only pending, and the readmission claim.
     local ok, why = Sync.BroadcastDelete(catalog.Get("syn04"))
+    if why == "ROOT_MUTATION_PENDING" then
+        SettleCatalog()
+        local terminal = Sync.GetDeleteStatus("syn04")
+        Check(type(terminal) == "table" and terminal.terminal == true,
+            "local delete did not publish one terminal refusal")
+        ok, why = false, terminal and terminal.reason or why
+    end
     Check(ok == false and why == "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
         "local delete was not the named zero-wire refusal: "
             .. tostring(ok) .. "/" .. tostring(why))
@@ -577,8 +691,10 @@ Case("SYN-04", "local delete uses the V1 tombstone and session-only pending", fu
     Check(Sync.WorkState().pendingDeletes == 0, "pending state leaked after send")
     -- the original author may readmit only through the explicit local claim
     local claim = assert(catalog.BeginTombstoneReadmissionClaim("syn04"))
-    Check(catalog.PutWithClaim(claim, S.LocalBuild("syn04", 2, {lastModified=99}),
-        {source="local"}), "local readmission refused")
+    Check(S.CatalogMutation(function()
+        return catalog.PutWithClaim(claim,
+            S.LocalBuild("syn04", 2, {lastModified=99}), {source="local"})
+    end, "local tombstone readmission"), "local readmission refused")
     Check(catalog.Get("syn04") and S.Durable(db, "syncTombstones").syn04 == nil,
         "local readmission did not replace the tombstone")
 end)
@@ -596,8 +712,15 @@ Case("SYN-05", "summary n is request evidence only; n>85 never requests", functi
     Check((Sync.WorkState().pendingReplacements or 0) == pendingBefore
         and Catalog().Get("syn05-over") == nil,
         "n=86 summary queued a request or stored a row")
-    Check(Sync.HandleIncoming(SummaryWire("syn05-max", 85), "Peer-Ebonhold"),
-        "n=85 summary was refused")
+    local acceptedMax = Sync.HandleIncoming(SummaryWire("syn05-max", 85),
+        "Peer-Ebonhold")
+    if not acceptedMax and Catalog().RootState().candidate then
+        -- The accepted summary is one retained catalog mutation; its terminal
+        -- commit is the only acceptance evidence, so settle and read the row.
+        S.PumpCatalogToIdle("n=85 summary admission")
+        acceptedMax = Catalog().Get("syn05-max") ~= nil
+    end
+    Check(acceptedMax, "n=85 summary was refused")
     local stored = Catalog().Get("syn05-max")
     Check(stored == nil or stored.loadoutAvailable ~= true,
         "summary scalar n proved loadout availability")
@@ -1400,7 +1523,13 @@ function()
     local catalog = Catalog()
     local tomb = {stamp=50, author="Boganic", ownerKey="boganic@ebonhold",
         ownerVerified=true}
-    local ok = catalog.SetTombstone(id, tomb, {source="local"})
+    -- The row-to-tombstone transaction is one retained catalog mutation
+    -- (MASTER-RC-006); its terminal commit is the acceptance evidence.
+    local ok, why, ticket = catalog.SetTombstone(id, tomb, {source="local"})
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        S.PumpCatalogToIdle("clean tombstone replacement")
+        ok = type(ticket) == "table" and ticket.committed == true
+    end
     Check(ok == true, "a clean tombstone replacement was refused")
     Check(catalog.Get(id) == nil, "the row survived its tombstone")
     Check(tostring((catalog.TombstoneState(id) or {}).state) == "CURRENT_DENY",
@@ -1408,6 +1537,7 @@ function()
     -- Replays once: the same tombstone again changes no durable byte.
     local settled = S.Encode(db)
     catalog.SetTombstone(id, tomb, {source="local"})
+    S.PumpCatalogToIdle("replayed tombstone")
     Check(S.Encode(db) == settled,
         "replaying the same tombstone re-applied the mutation")
 end)

@@ -47,6 +47,9 @@ local BUNDLE_PAYLOAD_FIELDS = {
 local BUNDLE_CATALOG_MAPS = {
     communityBuilds=true, syncTombstones=true, communityRetentionEvictions=true,
 }
+local BUNDLE_MUTATION_OVERRIDES = {
+    dpsCapture=true, dataRetention=true, dataCompaction=true,
+}
 local BUNDLE_KNOWN_FIELDS = {schemaVersion=true, transactionGeneration=true}
 for _, field in ipairs(BUNDLE_PAYLOAD_FIELDS) do BUNDLE_KNOWN_FIELDS[field] = true end
 
@@ -1743,8 +1746,40 @@ function Generation.Next(owner, key, amount, zeroDefault)
     return (owner[key] or 0) + amount
 end
 
+-- The caller preflights the complete plan before entering the callback-free
+-- publication section. Applying that same plan then consists only of writes to
+-- private, plain owner tables and cannot discover a new refusal midway.
+function Generation.ApplyPlan(plan, skipServing)
+    for _, entry in ipairs(plan or {}) do
+        if not (skipServing and entry.owner == ST
+            and entry.key == "servingGeneration") then
+            entry.owner[entry.key] = (entry.owner[entry.key] or 0)
+                + (entry.amount or 1)
+        end
+    end
+end
+
+-- The three other resettable authority owners resolve this seam at the point
+-- of each increment. A BuildCatalog reload therefore gives them a fresh guard
+-- owner and the same outer deny-only latch; no module can continue incrementing
+-- behind an exhausted catalog session.
+Nexus.MainInternals = type(Nexus.MainInternals) == "table"
+    and Nexus.MainInternals or {}
+Nexus.MainInternals.CatalogAuthorityCounters = {owner=Catalog}
+function Nexus.MainInternals.CatalogAuthorityCounters.Preflight(plan)
+    return Generation.Preflight(plan)
+end
+function Nexus.MainInternals.CatalogAuthorityCounters.Advance(
+        owner, key, amount, zeroDefault)
+    return Generation.Advance(owner, key, amount, zeroDefault)
+end
+function Nexus.MainInternals.CatalogAuthorityCounters.Next(
+        owner, key, amount, zeroDefault)
+    return Generation.Next(owner, key, amount, zeroDefault)
+end
+
 function Generation.MutationPlan(items)
-    local count = #items
+    local count = math.max(1, #items)
     local plan = {
         {owner=ST, key="durableBundleGeneration", amount=1},
         {owner=ST, key="preparationEpoch", amount=1},
@@ -1755,15 +1790,41 @@ function Generation.MutationPlan(items)
         {owner=ST, key="exactRevisionClock", amount=count},
     }
     local perRecord = {}
+    local receiptCount = 0
     for _, item in ipairs(items) do
         local id = item.slot.id
         perRecord[id] = (perRecord[id] or 0) + 1
+        receiptCount = receiptCount + #(item.receiptRecords or {})
     end
     for id, amount in pairs(perRecord) do
         plan[#plan + 1] = {owner=ST.recordRevisions, key=id,
             amount=amount, zeroDefault=true}
     end
+    if receiptCount > 0 then
+        plan[#plan + 1] = {owner=ST, key="receiptRevision",
+            amount=receiptCount}
+    end
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    local evidencePlan = evidence
+        and type(evidence.CandidateRevisionPlanV1) == "function"
+        and evidence.CandidateRevisionPlanV1() or nil
+    for _, entry in ipairs(type(evidencePlan) == "table"
+            and evidencePlan or {}) do
+        plan[#plan + 1] = entry
+    end
     return plan
+end
+
+function Generation.PrepareReceiptRecords(items)
+    local revision = ST.receiptRevision
+    local count = 0
+    for _, item in ipairs(items or {}) do
+        for _, record in ipairs(item.receiptRecords or {}) do
+            count = count + 1
+            record.receiptRevision = revision + count
+        end
+    end
+    return count
 end
 
 ------------------------------------------------------------------------
@@ -1801,12 +1862,9 @@ local function AuthorityServingRootWriterV1(mode, serving)
         return true
     end
     if mode ~= "final-swap" then return false end
-    if type(serving) ~= "table" then return false end
-    local generation, why = Generation.Advance(ST, "servingGeneration")
-    if not generation then return false, why end
-    serving.generation = ST.servingGeneration
+    if type(serving) ~= "table" or not ExactGeneration(serving.generation)
+        or serving.generation == 0 then return false end
     ST.currentServingRoot = serving
-    ST.debugStats.servingSwaps = ST.debugStats.servingSwaps + 1
     return true
 end
 
@@ -1838,7 +1896,14 @@ function Catalog.PublishSealedServingV1()
     local sealed = ST.sealedServing
     ST.sealedServing = nil
     if type(sealed) ~= "table" then return false end
-    return AuthorityServingRootWriterV1("final-swap", sealed)
+    local generation, why = Generation.Advance(ST, "servingGeneration")
+    if not generation then return false, why end
+    sealed.generation = generation
+    local published = AuthorityServingRootWriterV1("final-swap", sealed)
+    if published then
+        ST.debugStats.servingSwaps = ST.debugStats.servingSwaps + 1
+    end
+    return published
 end
 
 function Catalog.SealedServingPendingV1()
@@ -1858,7 +1923,15 @@ end
 -- Publish the ordinary invalid sentinel. This never restores slots and never
 -- republishes a prior token.
 local function PublishInvalidServing()
-    AuthorityServingRootWriterV1("final-swap", NewInvalidServingRoot())
+    local generation = Generation.Advance(ST, "servingGeneration")
+    if not generation then return false, "GENERATION_EXHAUSTED" end
+    local serving = NewInvalidServingRoot()
+    serving.generation = generation
+    local published = AuthorityServingRootWriterV1("final-swap", serving)
+    if published then
+        ST.debugStats.servingSwaps = ST.debugStats.servingSwaps + 1
+    end
+    return published
 end
 
 ------------------------------------------------------------------------
@@ -2076,10 +2149,15 @@ end
 local function CommitDurableBundle(db, bundle)
     rawset(db, "authorityBundle", bundle)
     if rawget(db, "authorityBundle") ~= bundle then return false end
-    ST.durableBundle = bundle
-    ST.durableBundleGeneration = bundle.transactionGeneration
-    ST.debugStats.bundleWrites = ST.debugStats.bundleWrites + 1
     return true
+end
+
+function Generation.EvidenceCandidateChanged()
+    local evidence = EvidenceOwner()
+    local plan = evidence
+        and type(evidence.CandidateRevisionPlanV1) == "function"
+        and evidence.CandidateRevisionPlanV1() or nil
+    return type(plan) == "table" and #plan > 0
 end
 
 -- The serving witness binds the exact authority input the root was admitted
@@ -2137,7 +2215,7 @@ end
 -- Persistent shallow bundle construction. Each pump copies no more than the
 -- V1 edge/node/byte slice. Nested catalog rows remain immutable identities;
 -- the evidence entries map receives its own detached top-level map.
-local Candidate = {}
+local Candidate, Cursor = {}, {}
 Candidate.EvidenceCandidateStore = EvidenceCandidateStore
 
 function Candidate.SourceValue(db, source, field)
@@ -2159,17 +2237,19 @@ function Candidate.SourceValue(db, source, field)
             and owner.DurableStore(db) or nil
         if type(owned) == "table" then return owned end
     end
-    local origin = (BUNDLE_CATALOG_MAPS[field] or field == "buildCatalog")
-        and source or db
+    -- Once a complete bundle exists, every unchanged payload field is carried
+    -- from that bundle. Legacy database fields remain preserved bootstrap
+    -- input and can never overwrite a newer accepted bundle value.
+    local origin = type(source) == "table" and source or db
     return rawget(origin, field)
 end
 
-function Candidate.NewBundle(db, source, generation, overrides, drops, writes)
+function Candidate.NewBundle(db, source, generation, overrides, drops, items)
     return {db=db, source=source, generation=generation,
         overrides=overrides or {}, drops=drops or {}, fieldIndex=1,
         bundle={schemaVersion=BUNDLE_SCHEMA_VERSION,
             transactionGeneration=generation}, current=nil, nested=nil,
-        writes=writes or {}, writeIndex=1}
+        items=items or {}, writeItemIndex=1, writeIndex=1}
 end
 
 function Candidate.PumpCopy(task, work)
@@ -2249,30 +2329,37 @@ function Candidate.PumpBundle(handle, work)
             return nil
         end
     end
-    while handle.writeIndex <= #handle.writes do
+    while handle.writeItemIndex <= #handle.items do
         if Exhausted(work.budget) then return nil end
-        local write = handle.writes[handle.writeIndex]
-        local map = handle.bundle[write.map]
-        if type(map) ~= "table" then return false, "ROOT_MAP_MALFORMED" end
-        map[write.id] = write.value
-        handle.writeIndex = handle.writeIndex + 1
-        Charge(work, "edges", 1)
-        Charge(work, "nodes", 1)
-        Charge(work, "bytesInspected", ScalarBytes(write.id)
-            + ScalarBytes(write.value))
+        local item = handle.items[handle.writeItemIndex]
+        local write = item and item.writes[handle.writeIndex] or nil
+        if write then
+            local map = handle.bundle[write.map]
+            if type(map) ~= "table" then return false, "ROOT_MAP_MALFORMED" end
+            map[write.id] = write.value
+            handle.writeIndex = handle.writeIndex + 1
+            Charge(work, "edges", 1)
+            Charge(work, "nodes", 1)
+            Charge(work, "bytesInspected", ScalarBytes(write.id)
+                + ScalarBytes(write.value))
+        else
+            handle.writeItemIndex = handle.writeItemIndex + 1
+            handle.writeIndex = 1
+        end
     end
     return true
 end
 
 function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
-                               existingHandle)
+                               existingHandle, bundleOverrides, publishPlan)
     local generation, why = Generation.Next(ST, "durableBundleGeneration")
     if not generation then return nil, why end
-    local writes = {}
-    for _, item in ipairs(items) do
-        for _, write in ipairs(item.writes) do writes[#writes + 1] = write end
-    end
     local overrides = {}
+    for _, field in ipairs(BUNDLE_PAYLOAD_FIELDS) do
+        if bundleOverrides and bundleOverrides[field] ~= nil then
+            overrides[field] = bundleOverrides[field]
+        end
+    end
     local stagedEvidence = Candidate.EvidenceCandidateStore()
     if stagedEvidence ~= nil then overrides.loadoutEvidence = stagedEvidence end
     local handle = existingHandle or {}
@@ -2287,17 +2374,19 @@ function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
     handle.token, handle.originalRoot, handle.ticket = root.token, root, ticket
     handle.items, handle.reason = items, reason
     handle.deferred, handle.notifyScope = deferred, notifyScope
+    handle.publishPlan = publishPlan
     handle.bundleClass, handle.bundleGeneration = "current", ST.durableBundleGeneration
     handle.bundleWrite, handle.source = true, ST.durableBundle
     handle.slots, handle.slotVector, handle.slotCount = {}, {}, 0
     handle.mapIndex, handle.mapCursor, handle.rootMapEdges = 1, nil, 0
     handle.verdicts, handle.index, handle.rowIndex = {}, NewIndex(), 0
+    handle.mutationStates = {}
     handle.indexIndex, handle.counts, handle.mapCounts = 0, nil, {}
     handle.sessionTombstones = setmetatable({}, {__mode="k"})
     handle.sessionBarriers = setmetatable({}, {__mode="k"})
     handle.put = nil
     handle.bundleBuilder = Candidate.NewBundle(ST.db, ST.durableBundle,
-        generation, overrides, nil, writes)
+        generation, overrides, nil, items)
     handle.sessionCopy = {source=ST.sessionTombstones,
         target=handle.sessionTombstones, cursor=nil}
     return handle
@@ -2589,12 +2678,17 @@ function Witness.Capture(source)
     return handle.witness
 end
 
-local function CaptureToken(db, selectedBundle, sourceWitness)
+local function CaptureToken(db, selectedBundle, sourceWitness, future,
+                            includeCandidateEvidence)
     local bundle = selectedBundle or rawget(db, "authorityBundle")
     local source = type(bundle) == "table" and bundle or db
     local witness = sourceWitness
     if witness == nil then witness = Witness.Capture(source)
     elseif witness == false then witness = nil end
+    local evidenceOwner = Nexus and Nexus.LoadoutEvidence
+    local evidenceToken = evidenceOwner
+        and type(evidenceOwner.AuthorityTokenV1) == "function"
+        and evidenceOwner.AuthorityTokenV1(includeCandidateEvidence) or {}
     return {
         databaseIdentity=db, bundleIdentity=bundle,
         overlayIdentity=rawget(source, "communityBuilds"),
@@ -2606,10 +2700,18 @@ local function CaptureToken(db, selectedBundle, sourceWitness)
         baselineIdentity=Witness.BaselineMap(),
         ownerIdentity=CurrentOwnerKey(),
         bindingGeneration=ST.bindingGeneration,
-        committedMutationRevision=ST.committedMutationRevision,
-        preparationEpoch=ST.preparationEpoch,
+        committedMutationRevision=future
+            and future.committedMutationRevision
+            or ST.committedMutationRevision,
+        preparationEpoch=future and future.preparationEpoch
+            or ST.preparationEpoch,
         reservationEpoch=ST.reservationEpoch,
         callbackOwnerIdentity=Nexus and Nexus.Revisions or nil,
+        evidenceOwnerIdentity=evidenceOwner,
+        evidenceAuthorityIdentity=evidenceToken.ownerIdentity,
+        evidenceAppendRevision=evidenceToken.appendRevision,
+        evidenceRemovalRevision=evidenceToken.removalRevision,
+        evidenceProviderRevision=evidenceToken.providerRevision,
     }
 end
 
@@ -2624,6 +2726,17 @@ local function TokenDrifted(token)
         or rawget(source, "buildCatalog") ~= token.metadataIdentity
         or rawget(source, "communityRetentionEvictions") ~= token.evictionIdentity
         or (Nexus and Nexus.Revisions) ~= token.callbackOwnerIdentity then
+        return "SOURCE_DRIFT"
+    end
+    local evidenceOwner = Nexus and Nexus.LoadoutEvidence
+    if evidenceOwner ~= token.evidenceOwnerIdentity then return "SOURCE_DRIFT" end
+    local evidenceToken = evidenceOwner
+        and type(evidenceOwner.AuthorityTokenV1) == "function"
+        and evidenceOwner.AuthorityTokenV1() or {}
+    if evidenceToken.ownerIdentity ~= token.evidenceAuthorityIdentity
+        or evidenceToken.appendRevision ~= token.evidenceAppendRevision
+        or evidenceToken.removalRevision ~= token.evidenceRemovalRevision
+        or evidenceToken.providerRevision ~= token.evidenceProviderRevision then
         return "SOURCE_DRIFT"
     end
     if token.bundledIdentity ~= ST.bundled then return "SOURCE_DRIFT" end
@@ -2808,7 +2921,18 @@ end
 
 -- A mutation may require the coordinator rebind before it runs. A read may
 -- never trigger one.
-local function MutationGate()
+local function MutationGate(maintenanceHandle)
+    -- A long-lived maintenance walk is optimistic. A direct product mutation
+    -- takes precedence, cancels the detached maintenance candidate, and lets
+    -- that owner restart from the next published root.
+    if ST.activeMaintenance
+        and ST.activeMaintenance ~= maintenanceHandle then
+        local displaced = ST.activeMaintenance
+        displaced.state = "cancelled"
+        ST.maintenanceRegistry[displaced] = nil
+        ST.activeMaintenance = nil
+        EvidenceCancelCandidate()
+    end
     if ST.rebindRequired then Catalog.PumpAuthorityRebindV1() end
     if ST.candidate then return nil, ST.candidate.mode == "mutation"
         and "ROOT_MUTATION_PENDING" or "ROOT_ADMISSION_PENDING" end
@@ -2976,6 +3100,11 @@ local function ProcessRows(handle, work)
         end
         verdict.overlayRaw = slot.overlay
         verdict.bundledRaw = slot.bundled
+        local mutationState = handle.mutationStates
+            and handle.mutationStates[slot.key] or nil
+        if verdict.snapshot and mutationState == "READMITTED" then
+            verdict.state = mutationState
+        end
         handle.verdicts[slot.key] = verdict
         handle.rowIndex = handle.rowIndex + 1
     end
@@ -3263,53 +3392,114 @@ local function PublishRoot(handle)
     local db = handle.token.databaseIdentity
     local drift = TokenDrifted(handle.token)
     if drift then return AdmissionFail(handle, drift) end
-    local prepared, prepareWhy = Generation.Advance(ST, "preparationEpoch")
-    if not prepared then return AdmissionFail(handle, prepareWhy) end
-    if handle.bundleWrite then
-        local committed, verified = pcall(CommitDurableBundle, db, handle.finalBundle)
-        if not committed or not verified then
-            ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
-            return AdmissionFail(handle, "PROTECTED_COMMIT_FAILED")
-        end
-    else
-        ST.durableBundle = handle.finalBundle
-        ST.durableBundleGeneration = handle.finalBundle.transactionGeneration or 0
+    local publishPlan = handle.publishPlan
+    if type(publishPlan) ~= "table" then
+        publishPlan = handle.mode == "mutation"
+            and Generation.MutationPlan(handle.items) or {
+                {owner=ST, key="preparationEpoch", amount=1},
+                {owner=ST, key="generation", amount=1},
+                {owner=ST, key="semanticGeneration", amount=1},
+                {owner=ST, key="servingGeneration", amount=1},
+            }
     end
-    EvidencePublishCandidate()
+    local countersOk, countersWhy = Generation.Preflight(publishPlan)
+    if not countersOk then return AdmissionFail(handle, countersWhy) end
+
+    local itemCount = handle.mode == "mutation"
+        and math.max(1, #handle.items) or 1
+    local future = {
+        generation=ST.generation + itemCount,
+        preparationEpoch=ST.preparationEpoch + 1,
+        committedMutationRevision=ST.committedMutationRevision
+            + (handle.mode == "mutation" and itemCount or 0),
+    }
     if handle.mode == "mutation" then
-        ST.sessionTombstones = handle.sessionTombstones
-        ST.sessionBarriers = handle.sessionBarriers
         for _, item in ipairs(handle.items) do
             item.previous = handle.originalRoot.rows[item.slot.key]
-            Candidate.BumpRevisions(handle.verdicts[item.slot.key],
-                item.previous, item.slot.id)
         end
-    else
-        Generation.Advance(ST, "generation")
-        Generation.Advance(ST, "semanticGeneration")
     end
-    handle.token = CaptureToken(db, handle.finalBundle, handle.sourceWitness)
-    -- One pointer swap publishes the complete root by installing it inside a
-    -- replacement currentServingRoot. The domain root has no separately
-    -- consumable public pointer.
-    -- MASTER-RC-001: under the startup coordinator's seal this generation is
-    -- constructed and retained PRIVATELY. No public pointer is installed until
-    -- Catalog.PublishSealedServingV1, which only the coordinator calls, in
-    -- STORE_SERVING_PUBLICATION_PENDING after legacy disposition (1517-1519).
-    local sealedServing = NewServingRoot({
-        generation=ST.generation, token=handle.token, rows=handle.verdicts,
+    handle.token = CaptureToken(db, handle.finalBundle,
+        handle.sourceWitness, future, handle.mode == "mutation")
+    local catalogRoot = {
+        generation=future.generation, token=handle.token, rows=handle.verdicts,
         slots=handle.slots, slotVector=handle.slotVector, slotCount=handle.slotCount,
         index=handle.index, counts=handle.counts, overlayKeys=handle.overlayKeys,
         tombstoneKeys=handle.tombstoneKeys, barrierKeys=handle.barrierKeys,
         catalogVersion=handle.catalogVersion,
         schemaVersion=handle.metaVersion or STORAGE_SCHEMA_VERSION,
         migrated=handle.needsMigration, redundantRemoved=#handle.prune,
-    }, ST.durableBundleGeneration)
-    if ST.bootstrapSeal then
-        ST.sealedServing = sealedServing
-    else
-        local swapped, swapWhy = AuthorityServingRootWriterV1("final-swap", sealedServing)
-        if not swapped then return AdmissionFail(handle, swapWhy) end
+    }
+    local durableGeneration = tonumber(handle.finalBundle.transactionGeneration)
+        or ST.durableBundleGeneration
+    local sealedServing = NewServingRoot(catalogRoot, durableGeneration)
+    -- The bootstrap seal withholds only the startup ADMISSION root until the
+    -- coordinator's serving-publication state. A mutation always replaces an
+    -- already published root and must keep its durable bundle and serving
+    -- root adjacent: sealing it would commit the bundle while the public root
+    -- still bound the previous bundle identity, which is exact source drift.
+    local sealed = ST.bootstrapSeal == true and handle.mode ~= "mutation"
+    if not sealed then
+        sealedServing.generation = ST.servingGeneration + 1
+    end
+
+    -- Protected section: all allocation, copying, witness work, counter work,
+    -- and callback work is complete. The durable and serving assignments are
+    -- adjacent. Nothing between them can inspect or publish a partial graph.
+    local ok = pcall(function()
+        if handle.bundleWrite and not CommitDurableBundle(db, handle.finalBundle) then
+            error("AUTHORITY_BUNDLE_VERIFICATION_FAILED", 0)
+        end
+        if sealed then
+            ST.sealedServing = sealedServing
+        else
+            local swapped, swapWhy = AuthorityServingRootWriterV1(
+                "final-swap", sealedServing)
+            if not swapped then error(swapWhy or "SERVING_SWAP_FAILED", 0) end
+        end
+    end)
+    if not ok then
+        ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
+        return AdmissionFail(handle, "PROTECTED_COMMIT_FAILED")
+    end
+    Generation.ApplyPlan(publishPlan, sealed)
+    ST.durableBundle = handle.finalBundle
+    ST.durableBundleGeneration = durableGeneration
+    if handle.mode == "mutation" then
+        ST.sessionTombstones = handle.sessionTombstones
+        ST.sessionBarriers = handle.sessionBarriers
+    end
+    if handle.bundleWrite then
+        ST.debugStats.bundleWrites = ST.debugStats.bundleWrites + 1
+    end
+    if not sealed then
+        ST.debugStats.servingSwaps = ST.debugStats.servingSwaps + 1
+    end
+
+    -- Evidence publication only releases the already durable candidate. It is
+    -- deliberately outside the adjacent publication pair. A faulty release
+    -- cannot turn the complete transaction into a reported failure.
+    local evidenceReleased = pcall(EvidencePublishCandidate)
+    if not evidenceReleased then EvidenceCancelCandidate() end
+    if handle.mode == "mutation" then
+        local clock = ST.exactRevisionClock - #handle.items
+        for index, item in ipairs(handle.items) do
+            local verdict = handle.verdicts[item.slot.key]
+            local before = item.previous and item.previous.snapshot
+                and item.previous.exactFingerprint or nil
+            local after = verdict and verdict.snapshot
+                and verdict.exactFingerprint or nil
+            local revision = clock + index
+            if before then ST.exactRevisions[before] = revision end
+            if after then ST.exactRevisions[after] = revision end
+        end
+        ST.debugStats.relatedIndexUpdates = ST.debugStats.relatedIndexUpdates
+            + #handle.items
+        ST.debugStats.commits = ST.debugStats.commits + itemCount
+    end
+    if sealed then
+        -- PublishSealedServingV1 assigns the serving generation when the startup
+        -- coordinator reaches the final all-domain publication state.
+        sealedServing.generation = 0
     end
     ST.rootState, ST.rootReason = "ROOT_ADMITTED", nil
     ST.activeCursors = {}
@@ -3323,7 +3513,7 @@ local function PublishRoot(handle)
         ST.debugStats.authorIndexRebuilds = ST.debugStats.authorIndexRebuilds + 1
     end
     if handle.mode == "mutation" and handle.claim then
-        local released, releaseWhy = Candidate.ReleaseClaim(handle.claim)
+        local released, releaseWhy = Candidate.ReleaseClaim(handle.claim, true)
         if not released then return AdmissionFail(handle, releaseWhy) end
     end
     if handle.completion == "put" then
@@ -3340,6 +3530,17 @@ local function PumpAdmission(handle)
     handle.pumps = handle.pumps + 1
     ST.debugStats.rootPumps = ST.debugStats.rootPumps + 1
     local result
+    if handle.phase == "maintenance-prepare" then
+        local prepared, prepareWhy = Candidate.PumpMaintenancePreparation(
+            handle, work)
+        if prepared == "failed" then
+            result = AdmissionFail(handle, prepareWhy)
+        elseif prepared == "pending" then
+            result = "pending"
+        else
+            result = "ok"
+        end
+    end
     if handle.phase == "put-prepare" then
         local prepared, prepareWhy = Candidate.PumpPutPreparation(handle, work)
         if prepared == "failed" then
@@ -3353,7 +3554,52 @@ local function PumpAdmission(handle)
             result = "ok"
         end
     end
-    if handle.phase == "mutation-bundle" then
+    if handle.phase == "mutation-bundle" and result ~= "pending"
+        and not handle.sourceVerified then
+        -- MASTER-RC-017 / MASTER-W2-011. A mutation rebuilds its root from
+        -- the durable bundle's raw maps, so before it copies one raw row it
+        -- proves the exact nested source graph still matches the witness the
+        -- admitted root is bound to. Identity drift is caught by the token;
+        -- a key written behind the published root is not, and without this
+        -- bounded walk that raw write would be admitted as source by the
+        -- next mutation instead of invalidating the root it drifted from.
+        if not handle.sourceVerifyHandle then
+            local token = handle.token
+            local source = type(token.bundleIdentity) == "table"
+                and token.bundleIdentity or token.databaseIdentity
+            handle.sourceVerifyHandle = Witness.BeginVerify(
+                token.sourceWitness, source)
+        end
+        local remaining = {edges=SLICE.edges - work.budget.edges,
+            nodes=SLICE.nodes - work.budget.nodes,
+            bytes=SLICE.bytesInspected - work.budget.bytesInspected}
+        local verified = remaining.edges > 0 and remaining.nodes > 0
+            and remaining.bytes > 0
+            and Witness.Pump(handle.sourceVerifyHandle, remaining)
+            or {state="pending", edges=0, nodes=0, bytes=0}
+        if (verified.edges or 0) > 0 then
+            Charge(work, "edges", verified.edges)
+        end
+        if (verified.nodes or 0) > 0 then
+            Charge(work, "nodes", verified.nodes)
+        end
+        if (verified.bytes or 0) > 0 then
+            Charge(work, "bytesInspected", verified.bytes)
+        end
+        if verified.state == "failed" then
+            result = AdmissionFail(handle,
+                verified.reason == "SOURCE_WITNESS_MISSING"
+                    and verified.reason or "SOURCE_DRIFT")
+        elseif verified.state == "complete" then
+            -- The bundle copy continues inside this same slice so the pump
+            -- that closes the walk still makes frontier progress.
+            handle.sourceVerified, handle.sourceVerifyHandle = true, nil
+            result = "ok"
+        else
+            result = "pending"
+        end
+    end
+    if handle.phase == "mutation-bundle" and result ~= "pending" then
         local complete, why = Candidate.PumpBundle(handle.bundleBuilder, work)
         if complete == false then result = AdmissionFail(handle, why)
         elseif not complete then result = "pending"
@@ -3386,6 +3632,10 @@ local function PumpAdmission(handle)
             local item = handle.items[handle.sessionWriteItem]
             local write = item.writes[handle.sessionWriteIndex]
             if not write then
+                local desired = item.verdict and item.verdict.state
+                if desired == "READMITTED" then
+                    handle.mutationStates[item.slot.key] = desired
+                end
                 handle.sessionWriteItem = handle.sessionWriteItem + 1
                 handle.sessionWriteIndex = 1
             else
@@ -3663,6 +3913,7 @@ local function FinishAdmission(result)
     end
     if handle.mode == "mutation" then
         if handle.failure == "SOURCE_DRIFT"
+            or handle.failure == "SOURCE_WITNESS_MISSING"
             or handle.failure == "PROTECTED_COMMIT_FAILED"
             or handle.failure == "ROOT_PUBLICATION_FAILED" then
             Invalidate(handle.failure)
@@ -4012,6 +4263,12 @@ end
 -- Complete detached collections are returned only within the one-call
 -- limits; otherwise the caller must use the matching cursor family.
 local function BoundedCollection(root, filter, project)
+    -- A sparse match set does not make a maximum root safe to scan in one
+    -- public call. Refuse from fixed root metadata before inspecting its first
+    -- slot; the caller can retain the matching cursor instead.
+    if root.slotCount > BUDGET.oneCallRows then
+        return nil, "CURSOR_REQUIRED"
+    end
     local out, rows, bytes, nodes = {}, 0, 0, 0
     for _, slot in ipairs(root.slotVector) do
         local verdict = root.rows[slot.key]
@@ -4295,6 +4552,7 @@ function Candidate.BeginAdmissionFinalization(handle)
     end
     local countersOk, countersWhy = Generation.Preflight(publishPlan)
     if not countersOk then return false, countersWhy end
+    handle.publishPlan = publishPlan
     handle.meta, handle.metaVersion = meta, metaVersion
     handle.catalogVersion, handle.needsMigration = catalogVersion, needsMigration
     handle.counts = {bundled=handle.mapCounts.bundled or 0,
@@ -4498,10 +4756,12 @@ local function IssueClaim(kind, typedKey, id, extra)
     return claim
 end
 
-local function ReleaseClaim(claim)
+local function ReleaseClaim(claim, counterAlreadyAdvanced)
     if ST.claimRegistry[claim] then
-        local advanced, advanceWhy = AdvanceReservation()
-        if not advanced then return false, advanceWhy end
+        if not counterAlreadyAdvanced then
+            local advanced, advanceWhy = AdvanceReservation()
+            if not advanced then return false, advanceWhy end
+        end
         ST.claimRegistry[claim] = nil
         if ST.activeClaim == claim then ST.activeClaim = nil end
         return true
@@ -4815,7 +5075,7 @@ local function DetachedVerdict(verdict)
 end
 
 local function CommitBatch(root, items, reason, deferred, notifyScope,
-                           existingHandle)
+                           existingHandle, bundleOverrides, counterPlan)
     local drift = TokenDrifted(root.token)
     if drift then
         EvidenceCancelCandidate()
@@ -4833,6 +5093,14 @@ local function CommitBatch(root, items, reason, deferred, notifyScope,
         return false, "AUTHORITY_BUNDLE_ABSENT"
     end
 
+    for field, value in pairs(bundleOverrides or {}) do
+        if not BUNDLE_MUTATION_OVERRIDES[field]
+            or type(value) ~= "table" or getmetatable(value) ~= nil then
+            EvidenceCancelCandidate()
+            return false, "ROOT_MAP_MALFORMED"
+        end
+    end
+
     -- Off-state validation. A target map that exists but is not a table would
     -- fail mid-publication, so the candidate is refused before any durable write.
     for _, item in ipairs(items) do
@@ -4847,158 +5115,35 @@ local function CommitBatch(root, items, reason, deferred, notifyScope,
 
     -- Every required increment, including every per-item revision, is refused
     -- before any one of them is performed.
-    local countersOk, countersWhy = Generation.Preflight(
-        Generation.MutationPlan(items))
+    local publishPlan = counterPlan or Generation.MutationPlan(items)
+    local countersOk, countersWhy = Generation.Preflight(publishPlan)
     if not countersOk then
         EvidenceCancelCandidate()
         return false, countersWhy
     end
-
-    -- Row count alone does not bound rich catalog rows.
-    -- Use the already captured exact source totals as well; this decision never
-    -- scans the root. Larger sources use the persistent mutation scheduler.
-    local sourceSize = root.token.sourceWitness
-    if existingHandle or root.slotCount > BUDGET.oneCallRows or not sourceSize
-        or sourceSize.byteCount > BUDGET.oneCallBytes
-        or sourceSize.edgeCount > BUDGET.oneCallNodes
-        or sourceSize.nodeCount > BUDGET.oneCallNodes then
-        local handle, handleWhy = Candidate.NewMutation(root, items, reason,
-            deferred, notifyScope, existingHandle)
-        if not handle then
-            EvidenceCancelCandidate()
-            return false, handleWhy
-        end
-        ST.candidate = handle
-        if existingHandle then
-            return handle, "ROOT_MUTATION_PENDING"
-        end
-        local outcome = Catalog.PumpRootAdmission()
-        if type(outcome) == "table" and outcome.state == "committed" then
-            return true
-        end
-        if type(outcome) == "table" and outcome.state == "failed" then
-            return false, outcome.reason
-        end
-        return outcome, "ROOT_MUTATION_PENDING"
-    end
-
-    -- Off-state construction of the complete detached bundle payload. Each
-    -- changed catalog map is copied once and the candidate's writes are applied
-    -- to the copy, so no live nested bundle field is ever mutated.
-    local payload = {}
-    for _, item in ipairs(items) do
-        for _, write in ipairs(item.writes) do
-            if BUNDLE_CATALOG_MAPS[write.map] then
-                if payload[write.map] == nil then
-                    payload[write.map] = ShallowSnapshot(rawget(current, write.map))
-                end
-                payload[write.map][write.id] = write.value
-            end
-        end
-    end
-    local stagedEvidence = EvidenceCandidateStore()
-    if stagedEvidence ~= nil then payload.loadoutEvidence = stagedEvidence end
-    local bundle = BuildDurableBundleCandidate(db, current,
-        ST.durableBundleGeneration + 1, payload)
-
-    -- Off-state construction of the complete replacement serving root.
-    local replacement = CloneServingCatalogRoot(root)
-    local applyOk = pcall(function()
-        for _, item in ipairs(items) do
-            local slot, verdict = item.slot, item.verdict
-            local key = slot.key
-            local previous = replacement.rows[key]
-            if previous then
-                IndexRemove(replacement.index, replacement.rows, key)
-            end
-            if verdict then
-                replacement.rows[key] = verdict
-                if replacement.slots[key] then
-                    replacement.slots[key] = DetachedSlot(slot)
-                else
-                    InsertSlot(replacement, DetachedSlot(slot))
-                end
-                IndexAdd(replacement.index, replacement.rows, verdict, nil)
-            else
-                replacement.rows[key] = nil
-                RemoveSlot(replacement, key)
-            end
-            ApplyCounts(replacement, previous, verdict)
-            RefreshVectors(replacement, key)
-            item.previous = previous
-        end
-    end)
-    if not applyOk then
+    Generation.PrepareReceiptRecords(items)
+    local handle, handleWhy = Candidate.NewMutation(root, items, reason,
+        deferred, notifyScope, existingHandle, bundleOverrides, publishPlan)
+    if not handle then
         EvidenceCancelCandidate()
-        ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
-        return false, "CANDIDATE_CONSTRUCTION_FAILED"
+        return false, handleWhy
     end
-
-    -- Build the two session registries and the complete source token before
-    -- the protected pointer replacement. The commit section below performs no
-    -- attacker-sized scan, copy, sort, or witness capture.
-    local sessionTombstones = setmetatable({}, {__mode="k"})
-    local sessionBarriers = setmetatable({}, {__mode="k"})
-    for key, value in pairs(ST.sessionTombstones) do sessionTombstones[key] = value end
-    for key, value in pairs(ST.sessionBarriers) do sessionBarriers[key] = value end
-    for _, item in ipairs(items) do
-        for _, write in ipairs(item.writes) do
-            if write.session == "sessionTombstones" then
-                sessionTombstones[write.value] = true
-            elseif write.session == "sessionBarriers" then
-                sessionBarriers[write.value] = true
-            end
-        end
+    ST.candidate = handle
+    if existingHandle then return handle, "ROOT_MUTATION_PENDING" end
+    local outcome = Catalog.PumpRootAdmission()
+    if type(outcome) == "table" and outcome.state == "committed" then
+        return true
     end
-    Generation.Advance(ST, "preparationEpoch")
-    local replacementToken = CaptureToken(db, bundle)
-    -- Protected section: allocation-free and callback-free. The single durable
-    -- bundle rawset and its identity verification are the only authority
-    -- payload write in the whole transaction. No legacy payload location is
-    -- written: line 394 gives the exact PR #68 locations no Package B writer,
-    -- and RAW-01 (line 4849) requires one complete `authorityBundle` pointer to
-    -- be the sole durable payload write.
-    local ok = pcall(function()
-        if not CommitDurableBundle(db, bundle) then
-            error("AUTHORITY_BUNDLE_VERIFICATION_FAILED", 0)
-        end
-        ST.sessionTombstones = sessionTombstones
-        ST.sessionBarriers = sessionBarriers
-        replacement.token = replacementToken
-    end)
-    if not ok then
-        EvidenceCancelCandidate()
-        ST.debugStats.protectedFailures = ST.debugStats.protectedFailures + 1
-        -- A protected commit failure leaves one complete selected durable bundle
-        -- and publishes the preallocated invalid sentinel. It never performs slot
-        -- restoration and never republishes the prior token.
-        Invalidate("PROTECTED_COMMIT_FAILED")
-        return false, "PROTECTED_COMMIT_FAILED"
+    if type(outcome) == "table" and outcome.state == "failed" then
+        return false, outcome.reason
     end
-    -- The detached evidence candidate is now durable inside the published
-    -- bundle, so the live compatibility mirror binds to that same graph.
-    EvidencePublishCandidate()
-
-    for _, item in ipairs(items) do
-        BumpRevisions(item.verdict, item.previous, item.slot.id)
-    end
-    replacement.generation = ST.generation
-    -- One serving swap for the whole candidate.
-    AuthorityServingRootWriterV1("final-swap",
-        NewServingRoot(replacement, ST.durableBundleGeneration))
-    ST.activeCursors = {}
-    ReleaseSupersededCursors()
-    -- Notification is strictly after publication and can never unpublish it.
-    -- A callback failure must not report that the transaction did not commit.
-    if not deferred then
-        pcall(NotifyBuild, reason, notifyScope == "all" and nil
-            or (items[1] and items[1].slot.id), notifyScope)
-    end
-    return true
+    return outcome, "ROOT_MUTATION_PENDING"
 end
 
-local function CommitSlot(root, slot, verdict, rawWrites, reason, deferred)
-    return CommitBatch(root, {{slot=slot, verdict=verdict, writes=rawWrites}},
+local function CommitSlot(root, slot, verdict, rawWrites, reason, deferred,
+                          receiptRecords)
+    return CommitBatch(root, {{slot=slot, verdict=verdict, writes=rawWrites,
+        receiptRecords=receiptRecords}},
         reason, deferred)
 end
 
@@ -5419,8 +5564,6 @@ end
 
 local function TombstoneRecord(slot, existing, tombstone)
     local snapshot = existing.snapshot
-    local receipt, why = Generation.Advance(ST, "receiptRevision")
-    if not receipt then return nil, why end
     return {
         schemaVersion=TOMBSTONE_SCHEMA_VERSION,
         typedId={luaType=slot.kind, exactValue=slot.id},
@@ -5433,7 +5576,7 @@ local function TombstoneRecord(slot, existing, tombstone)
             ownerKey=existing.verifiedOwner or snapshot.ownerKey,
             realm=snapshot.realm, ownerVerified=existing.verifiedOwner ~= nil,
         },
-        receiptRevision=receipt,
+        receiptRevision=nil,
         receiptAtServerTime=TrustedServerTime() or 0,
         remoteStampEvidence=tonumber(tombstone.stamp) or 0,
         -- MASTER-RC-016: the replaced row's unknown evidence travels with the
@@ -5496,7 +5639,7 @@ function Catalog.SetTombstone(id, tombstone, options)
         local ok, commitWhy = CommitSlot(root, slot, verdict, {
             {map="syncTombstones", id=slot.id, value=record, session="sessionTombstones"},
             {map="communityBuilds", id=slot.id, value=nil},
-        }, "build tombstoned", false)
+        }, "build tombstoned", false, {record})
         if type(ok) == "table" and ok.state == "pending" then
             return nil, commitWhy, ok
         end
@@ -5592,12 +5735,15 @@ end
 
 function Catalog.BeginCatalogMaintenance(request)
     request = type(request) == "table" and request or {}
+    if ST.activeMaintenance ~= nil then return nil, "MAINTENANCE_ACTIVE" end
     local root, why = MutationGate()
     if not root then return nil, why end
     if request.database ~= ST.db then return nil, "DETACHED_DATABASE" end
+    if ST.activeMaintenance ~= nil then return nil, "MAINTENANCE_ACTIVE" end
+    EvidenceBeginCandidate()
     local handle = {operation=request.operation or "retention",
         generation=ST.generation, revision=ST.committedMutationRevision,
-        ops={}, seen={}, state="open"}
+        ops={}, seen={}, receiptCount=0, state="open"}
     ST.maintenanceRegistry[handle] = true
     ST.activeMaintenance = handle
     return handle
@@ -5607,15 +5753,13 @@ local function MaintenanceOpen(handle)
     if type(handle) ~= "table" or not ST.maintenanceRegistry[handle] then
         return nil, "INVALID_MAINTENANCE_HANDLE"
     end
-    local root, why = MutationGate()
+    local root, why = MutationGate(handle)
     if not root then return nil, why end
     if handle.state ~= "open" then return nil, "INVALID_MAINTENANCE_HANDLE" end
     return root
 end
 
 local function BarrierRecord(slot, existing)
-    local receipt, why = Generation.Advance(ST, "receiptRevision")
-    if not receipt then return nil, why end
     return {
         schemaVersion=BARRIER_SCHEMA_VERSION,
         typedId={luaType=slot.kind, exactValue=slot.id},
@@ -5623,7 +5767,7 @@ local function BarrierRecord(slot, existing)
         evictedSourceIdentity=existing.source or "overlay",
         evictedProvenanceIdentity=existing.verifiedOwner
             or (existing.snapshot and existing.snapshot.claimedOwnerKey) or "",
-        receiptRevision=receipt,
+        receiptRevision=nil,
         receiptAtServerTime=TrustedServerTime() or 0,
     }
 end
@@ -5646,6 +5790,7 @@ function Catalog.MaintenanceEvictOverlay(handle, id)
     handle.seen[slot.key] = true
     handle.ops[#handle.ops + 1] = {kind="evict", slot=slot, existing=existing,
         barrier=barrier}
+    handle.receiptCount = handle.receiptCount + 1
     return true
 end
 
@@ -5705,12 +5850,15 @@ function Catalog.MaintenanceExpireBarrier(handle, id)
     return true
 end
 
-function Catalog.MaintenanceReplaceRow(handle, id, record)
+function Catalog.MaintenanceReplaceRow(handle, id, record, options)
     local root, why = MaintenanceOpen(handle)
     if not root then return false, why end
     local slot, existing, slotWhy = SlotFor(root, id)
     if not slot then return false, slotWhy end
-    if not (existing and existing.snapshot and existing.source == "overlay") then
+    options = type(options) == "table" and options or {}
+    local inserting = existing == nil and options.allowInsert == true
+    if not inserting
+        and not (existing and existing.snapshot and existing.source == "overlay") then
         return false, existing and existing.state == "READ_ONLY_FUTURE_SCHEMA"
             and "FUTURE_SCHEMA_RESERVATION" or "OVERLAY_ABSENT"
     end
@@ -5722,7 +5870,8 @@ function Catalog.MaintenanceReplaceRow(handle, id, record)
         handle.failed = verdict.reason
         return false, verdict.reason
     end
-    if existing.verifiedOwner and verdict.verifiedOwner ~= existing.verifiedOwner then
+    if existing and existing.verifiedOwner
+        and verdict.verifiedOwner ~= existing.verifiedOwner then
         handle.failed = "PROVENANCE_COLLISION"
         return false, "PROVENANCE_COLLISION"
     end
@@ -5731,9 +5880,10 @@ function Catalog.MaintenanceReplaceRow(handle, id, record)
         handle.failed = destinationWhy
         return false, destinationWhy
     end
-    verdict.state = "READMITTED"
-    verdict.bundledRaw, verdict.overlayRaw = existing.bundledRaw, destination
-    verdict.barrier = existing.barrier
+    verdict.state = inserting and "ADMITTED" or "READMITTED"
+    verdict.bundledRaw = existing and existing.bundledRaw or BundledRawFor(slot)
+    verdict.overlayRaw = destination
+    verdict.barrier = existing and existing.barrier or nil
     handle.seen[slot.key] = true
     handle.ops[#handle.ops + 1] = {kind="replace", slot=slot, existing=existing,
         verdict=verdict, destination=destination}
@@ -5748,12 +5898,20 @@ function Catalog.MaintenanceOverlayNext(handle, cursor)
     elseif handle.overlayLastId ~= cursor then
         return nil, nil, true, "INVALID_CURSOR"
     end
-    local key = root.overlayKeys[handle.overlayNextIndex]
-    handle.overlayNextIndex = handle.overlayNextIndex + 1
-    local verdict = key and root.rows[key] or nil
+    local verdict = handle.copyVerdict
+    if not verdict then
+        local key = root.overlayKeys[handle.overlayNextIndex]
+        local admitted = key and root.rows[key] or nil
+        if admitted then
+            verdict = {id=admitted.id, snapshot=admitted.overlayRaw}
+        end
+    end
     if not verdict then return nil, nil, true end
-    handle.overlayLastId = verdict.id
-    return verdict.id, DeepCopy(verdict.overlayRaw), false
+    local row, copiedVerdict, complete = Cursor.CopyStep(handle, verdict)
+    if not complete then return nil, nil, false, "COPY_PENDING" end
+    handle.overlayNextIndex = handle.overlayNextIndex + 1
+    handle.overlayLastId = copiedVerdict.id
+    return copiedVerdict.id, row, false
 end
 
 function Catalog.CancelMaintenance(handle)
@@ -5761,79 +5919,142 @@ function Catalog.CancelMaintenance(handle)
         handle.state = "cancelled"
         ST.maintenanceRegistry[handle] = nil
         if ST.activeMaintenance == handle then ST.activeMaintenance = nil end
+        EvidenceCancelCandidate()
         return true
     end
     return false
 end
 
-function Catalog.CommitMaintenance(handle)
+function Candidate.NewMaintenancePreparation(root, maintenance, overrides)
+    local ticket = {state="pending", committed=false, pumps=0}
+    ST.mutationTickets[ticket] = true
+    return {
+        mode="mutation", phase="maintenance-prepare",
+        counters=NewCounters(), pumps=0, failure=nil,
+        token=root.token, originalRoot=root, ticket=ticket,
+        reason=nil, deferred=true, notifyScope="all",
+        maintenance=maintenance, maintenanceIndex=1, items={},
+        bundleOverrides=overrides,
+        completion="maintenance",
+        maintenanceOperation=maintenance.operation,
+        applied=#maintenance.ops,
+    }
+end
+
+function Candidate.PumpMaintenancePreparation(handle, work)
+    local maintenance = handle.maintenance
+    local op = maintenance.ops[handle.maintenanceIndex]
+    if not op then
+        local outcome, why = CommitBatch(handle.originalRoot, handle.items,
+            nil, true, "all", handle, handle.bundleOverrides)
+        if type(outcome) ~= "table" then return "failed", why end
+        return "ready"
+    end
+    local slot, existing = op.slot, op.existing
+    local item = {slot=slot, writes={}}
+    if op.kind == "evict" then
+        local replacement = ReadmitLowerSource(slot)
+        if not replacement then
+            replacement = NewVerdict(slot, "UNADMITTED", "no source")
+        end
+        replacement.barrier = {state="BARRIER_CURRENT_DENY", raw=op.barrier,
+            receiptAtServerTime=op.barrier.receiptAtServerTime,
+            revision=op.barrier.receiptRevision}
+        slot.overlay, slot.barrier = nil, op.barrier
+        item.verdict = replacement
+        item.writes[1] = {map="communityBuilds", id=slot.id, value=nil}
+        item.writes[2] = {map="communityRetentionEvictions", id=slot.id,
+            value=op.barrier, session="sessionBarriers"}
+        item.receiptRecords = {op.barrier}
+    elseif op.kind == "retire" then
+        item.verdict = RetiredReplacement(slot, existing)
+        item.writes[1] = {map="syncTombstones", id=slot.id, value=nil}
+    elseif op.kind == "expire" then
+        local replacement
+        if existing.snapshot or existing.tombstone
+            or existing.state == "READ_ONLY_FUTURE_SCHEMA"
+            or existing.state == "INVALIDATED" then
+            replacement = DetachedVerdict(existing)
+            replacement.barrier = nil
+        end
+        slot.barrier = nil
+        item.verdict = replacement
+        item.writes[1] = {map="communityRetentionEvictions",
+            id=slot.id, value=nil}
+    elseif op.kind == "replace" then
+        local compacted, compactWhy = CompactDestination(op.destination, work)
+        if not compacted then
+            if compactWhy == "EVIDENCE_CANDIDATE_PENDING" then
+                return "pending"
+            end
+            return "failed", compactWhy
+        end
+        slot.overlay = op.destination
+        item.verdict = op.verdict
+        item.writes[1] = {map="communityBuilds", id=slot.id,
+            value=op.destination}
+    else
+        return "failed", "CANDIDATE_FAILED"
+    end
+    handle.items[#handle.items + 1] = item
+    handle.maintenanceIndex = handle.maintenanceIndex + 1
+    Charge(work, "rows", 1)
+    Charge(work, "nodes", 1)
+    -- One operation is one retained maintenance frontier step. Yield even when
+    -- the row was small so one public call cannot drain the complete list.
+    return "pending"
+end
+
+function Catalog.CommitMaintenance(handle, bundleOverrides)
     local root, why = MaintenanceOpen(handle)
     if not root then return false, why end
     handle.state = "committing"
     ST.maintenanceRegistry[handle] = nil
     if ST.activeMaintenance == handle then ST.activeMaintenance = nil end
-    if handle.failed then return false, "CANDIDATE_FAILED" end
+    if handle.failed then
+        EvidenceCancelCandidate()
+        return false, "CANDIDATE_FAILED"
+    end
     if handle.generation ~= ST.generation
         or handle.revision ~= ST.committedMutationRevision then
+        EvidenceCancelCandidate()
         return false, "SOURCE_DRIFT"
     end
-    if #handle.ops == 0 then return true, {applied=0} end
-    -- Prepare every replacement verdict off-state before any raw write.
-    local prepared = {}
-    for _, op in ipairs(handle.ops) do
-        local slot, existing = op.slot, op.existing
-        local item = {op=op, writes={}}
-        if op.kind == "evict" then
-            local replacement = ReadmitLowerSource(slot)
-            if not replacement then
-                replacement = NewVerdict(slot, "UNADMITTED", "no source")
-            end
-            replacement.barrier = {state="BARRIER_CURRENT_DENY", raw=op.barrier,
-                receiptAtServerTime=op.barrier.receiptAtServerTime,
-                revision=op.barrier.receiptRevision}
-            slot.overlay, slot.barrier = nil, op.barrier
-            item.verdict = replacement
-            item.writes[1] = {map="communityBuilds", id=slot.id, value=nil}
-            item.writes[2] = {map="communityRetentionEvictions", id=slot.id,
-                value=op.barrier, session="sessionBarriers"}
-        elseif op.kind == "retire" then
-            item.verdict = RetiredReplacement(slot, existing)
-            item.writes[1] = {map="syncTombstones", id=slot.id, value=nil}
-        elseif op.kind == "expire" then
-            local replacement
-            if existing.snapshot or existing.tombstone
-                or existing.state == "READ_ONLY_FUTURE_SCHEMA"
-                or existing.state == "INVALIDATED" then
-                replacement = DetachedVerdict(existing)
-                replacement.barrier = nil
-            end
-            slot.barrier = nil
-            item.verdict = replacement
-            item.writes[1] = {map="communityRetentionEvictions", id=slot.id, value=nil}
-        elseif op.kind == "replace" then
-            CompactDestination(op.destination)
-            slot.overlay = op.destination
-            item.verdict = op.verdict
-            item.writes[1] = {map="communityBuilds", id=slot.id, value=op.destination}
-        end
-        prepared[#prepared + 1] = item
+    local count = math.max(1, #handle.ops)
+    local headPlan = {
+        {owner=ST, key="durableBundleGeneration", amount=1},
+        {owner=ST, key="preparationEpoch", amount=1},
+        {owner=ST, key="servingGeneration", amount=1},
+        {owner=ST, key="generation", amount=count},
+        {owner=ST, key="committedMutationRevision", amount=count},
+        {owner=ST, key="semanticGeneration", amount=count},
+        {owner=ST, key="exactRevisionClock", amount=count},
+    }
+    if handle.receiptCount > 0 then
+        headPlan[#headPlan + 1] = {owner=ST, key="receiptRevision",
+            amount=handle.receiptCount}
     end
-    local batch = {}
-    for index, item in ipairs(prepared) do
-        batch[index] = {slot=item.op.slot, verdict=item.verdict, writes=item.writes}
+    local headOk, headWhy = Generation.Preflight(headPlan)
+    if not headOk then
+        EvidenceCancelCandidate()
+        return false, headWhy
     end
-    local ok, commitWhy = CommitBatch(root, batch, nil, true)
-    if type(ok) == "table" and ok.state == "pending" then
-        ST.candidate.completion = "maintenance"
-        ST.candidate.maintenanceOperation = handle.operation
-        ST.candidate.applied = #batch
-        return nil, commitWhy, ok
+    if #handle.ops == 0 and next(bundleOverrides or {}) == nil
+        and not Generation.EvidenceCandidateChanged() then
+        EvidenceCancelCandidate()
+        return true, {applied=0}
     end
-    if not ok then return false, commitWhy end
-    ST.debugStats.maintenanceCommits = ST.debugStats.maintenanceCommits + 1
-    pcall(NotifyBuild, handle.operation == "compaction" and "exact evidence compaction"
-        or "catalog maintenance", nil, "all")
-    return true, {applied=#batch}
+    local candidate = Candidate.NewMaintenancePreparation(
+        root, handle, bundleOverrides)
+    ST.candidate = candidate
+    local outcome = Catalog.PumpRootAdmission()
+    if candidate.ticket.state == "committed" then
+        return true, {applied=#handle.ops}
+    end
+    if candidate.ticket.state == "failed" then
+        return false, candidate.ticket.reason
+    end
+    return nil, "ROOT_MUTATION_PENDING", candidate.ticket
 end
 
 function Catalog.RemoveTombstonesBatch(ids)
@@ -5861,7 +6082,8 @@ end
 -- One namespace spends one file-level local for the six bounded cursor
 -- families. Copy state stays private and is discarded on completion,
 -- supersession, staleness, or publication.
-local Cursor = {}
+-- Cursor was forward-declared with Candidate so maintenance can reuse the same
+-- retained defensive-copy frontier.
 
 function Cursor.ChargeCopy(nodes, bytes, pending)
     local stats = ST.debugStats
@@ -6231,14 +6453,14 @@ function Catalog.RelatedCandidates(author, title, fingerprint)
     local rows = {}
     local cursor, err = Catalog.BeginRelatedCursor(author, title, fingerprint)
     if not cursor then return rows, err end
-    while true do
-        local record, done, nextErr = Catalog.RelatedCursorNext(cursor)
+    for _ = 1, BUDGET.oneCallRows do
+        local record, done, nextErr, pending = Catalog.RelatedCursorNext(cursor)
         if nextErr then return {}, nextErr end
+        if pending == "COPY_PENDING" then return nil, "CURSOR_REQUIRED" end
         if record then rows[#rows + 1] = record end
-        if #rows > BUDGET.oneCallRows then return nil, "CURSOR_REQUIRED" end
-        if done then break end
+        if done then return rows end
     end
-    return rows
+    return nil, "CURSOR_REQUIRED"
 end
 
 ------------------------------------------------------------------------

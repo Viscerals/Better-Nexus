@@ -317,6 +317,10 @@ local function NewBuildSummary(filters, catalog)
     }
 end
 
+-- One bounded read of the DPS owner's published eligibility snapshot. The
+-- shipped DPS owner supplies the resumable eligibility cursor, so the
+-- persistent projection job reaches this only for injected/older facades, as
+-- does the on-demand ExplainBuild fallback.
 local function CommunityEligibility()
     local stats = counters.builds
     local dps = Nexus and Nexus.DpsCapture
@@ -332,128 +336,10 @@ local function CommunityEligibility()
     return result
 end
 
-local function BuildProjection(filters)
-    local catalog = Nexus and Nexus.BuildCatalog
-    local summary = NewBuildSummary(filters, catalog)
-    -- UnitClass is briefly unavailable during some login transitions. Publish
-    -- an empty/loading projection and let the class-bearing cache key recover;
-    -- never interpret that state as an all-class request.
-    if filters.classFilter == "" then return {}, summary end
-
-    counters.builds.catalogWalks = counters.builds.catalogWalks + 1
-    local all
-    if catalog and type(catalog.BeginSummaryCursor) == "function"
-        and type(catalog.SummaryCursorNext) == "function" then
-        -- Lightweight summaries are walked through the generation-bound
-        -- summary cursor; a stale cursor yields an empty projection rather
-        -- than a partial root-owned table.
-        all = {}
-        local token = catalog.BeginSummaryCursor()
-        if token then
-            for _ = 1, 4096 do
-                local summary, done, err = catalog.SummaryCursorNext(token)
-                if err then all = {}; break end
-                if type(summary) == "table" then all[summary.id] = summary end
-                if done then break end
-            end
-        end
-    else
-        local reader = catalog and (catalog.Summaries or catalog.All)
-        if type(reader) ~= "function" then
-            error("BuildCatalog projection reader unavailable")
-        end
-        all = reader()
-    end
-    if type(all) ~= "table" then error("BuildCatalog projection reader returned invalid data") end
-    local eligibility = CommunityEligibility()
-    local out = {}
-    local presentation = Identity.NewPublicPresentation("author")
-    for _, build in pairs(all) do
-        if type(build) == "table" and IsLoaded(build) then
-            local indexed = Identity.IndexPublicRecord(presentation, build)
-            build = indexed and Identity.PresentPublicRecord(
-                presentation, build) or nil
-        end
-        if type(build) == "table" and IsLoaded(build) then
-            local savedKind = Identity.SavedMirrorKind(build)
-            summary.total = summary.total + 1
-            summary.ready = summary.ready + 1
-            local own = IsOwnBuild(build, filters)
-            if own then summary.mine = summary.mine + 1 end
-            if savedKind == "saved" then
-                summary.savedLoadouts = summary.savedLoadouts + 1
-            elseif savedKind == "ordinary" and own then
-                summary.uploaded = summary.uploaded + 1
-            end
-            local scopeMatch = filters.scope == "mine"
-                and own
-                or filters.scope ~= "mine" and savedKind == "ordinary"
-            local searchMatch = filters.search == ""
-                or tostring(build.title or ""):lower():find(filters.search, 1, true)
-                or tostring(build.author or ""):lower():find(filters.search, 1, true)
-                or tostring(build.description or ""):lower():find(filters.search, 1, true)
-            local relation
-            if scopeMatch and searchMatch and savedKind == "saved" then
-                build, relation = PrepareSavedBuild(build, filters)
-            end
-            local classMatch = not filters.currentClassOnly
-                or tostring(build.class or ""):upper() == filters.classFilter
-            local matched = classMatch and scopeMatch and searchMatch
-            local dpsSummary = matched
-                and BuildDpsSummary(build, eligibility, relation) or nil
-            local dummy = type(dpsSummary) == "table"
-                and (tonumber(dpsSummary.dummy) or 0) or 0
-            local lk = type(dpsSummary) == "table"
-                and (tonumber(dpsSummary.lk) or 0) or 0
-            local dpsCount = (dummy > 0 and 1 or 0) + (lk > 0 and 1 or 0)
-            local eligible = dummy > 0 and lk > 0 and dpsCount == 2
-            if matched then
-                summary.filterMatchedCount = summary.filterMatchedCount + 1
-                if eligible then summary.qualifying = summary.qualifying + 1 end
-            end
-            if matched and (eligible or not filters.qualifiedOnly) then
-                -- BuildCatalog readers return fresh public snapshots. This
-                -- projection owns the row and may attach derived DPS fields
-                -- without another full-table copy.
-                local copy = build
-                copy._nexusDps = {
-                    dummy=dummy,lk=lk,best=math.max(dummy,lk),
-                    average=dpsCount > 0 and (dummy+lk)/dpsCount or 0,
-                    count=dpsCount,
-                }
-                copy._nexusQualified = eligible
-                copy._nexusQualification = eligible and "qualified"
-                    or dummy <= 0 and lk <= 0 and "missing both"
-                    or dummy <= 0 and "missing Dummy" or "missing Lich King"
-                copy._nexusBestDps = copy._nexusDps.best
-                out[#out + 1] = copy
-            end
-        elseif type(build) == "table" then
-            summary.pending = summary.pending + 1
-        end
-    end
-    counters.builds.sorts = counters.builds.sorts + 1
-    table.sort(out, function(left, right)
-        if filters.sortMode == "recent" then
-            local lt = left.lastModified or left.postedAt or 0
-            local rt = right.lastModified or right.postedAt or 0
-            if lt ~= rt then return lt > rt end
-        elseif filters.sortMode == "dps" then
-            local ld = left._nexusDps and left._nexusDps.best or 0
-            local rd = right._nexusDps and right._nexusDps.best or 0
-            if ld ~= rd then return ld > rd end
-        end
-        local ln, rn = tostring(left.title or ""):lower(),
-            tostring(right.title or ""):lower()
-        if ln ~= rn then return ln < rn end
-        return Identity.CompareTypedIds(left.id, right.id) < 0
-    end)
-    summary.filtered = #out
-    summary.qualifyingCount = summary.qualifying
-    summary.resultCount = #out
-    summary.availableCount = summary.total
-    return out, summary
-end
+-- MASTER-W2-006: the synchronous whole-collection projection builder was
+-- retired. Projections.Builds serves only the atomically published cache
+-- and otherwise retains one persistent job through RequestBuilds/PumpBuilds,
+-- so no public read drains the catalog summary cursor in one call.
 
 local function EvidenceIdentityKey(row)
     if type(row) ~= "table" then return "invalid" end
@@ -702,28 +588,78 @@ local function InsertOrdered(rows, row, before, limit, countComparison)
     return true
 end
 
+-- The job consumes BuildCatalog rows through the generation-bound summary
+-- cursor. An older injected/test catalog facade without that cursor is read
+-- once through its bounded Summaries/All reader and then consumed row by row
+-- under the same per-pump source bound; the packaged owner always provides the
+-- cursor, and its one-call readers refuse a maximum root with CURSOR_REQUIRED.
+local function BeginCatalogRows(job, catalog)
+    if type(catalog.BeginSummaryCursor) == "function"
+        and type(catalog.SummaryCursorNext) == "function" then
+        job.catalogCursor = catalog.BeginSummaryCursor()
+        if type(job.catalogCursor) ~= "table" then
+            return false, "catalog cursor unavailable"
+        end
+        return true
+    end
+    local reader = catalog.Summaries or catalog.All
+    if type(reader) ~= "function" then
+        return false, "resumable catalog reader unavailable"
+    end
+    counters.builds.catalogWalks = counters.builds.catalogWalks + 1
+    local ok, rows, why = pcall(reader)
+    if not ok then return false, tostring(rows) end
+    if type(rows) ~= "table" then
+        return false, why or "BuildCatalog projection reader returned invalid data"
+    end
+    job.facadeRows, job.facadeKey = rows, nil
+    return true
+end
+
 local function NewBuildJob(filters, key)
     local dps = Nexus and Nexus.DpsCapture
     local catalog = Nexus and Nexus.BuildCatalog
-    if not (dps and type(dps.BeginCommunityEligibilityCursor) == "function"
-        and type(dps.CommunityEligibilityCursorNext) == "function"
-        and type(dps.CommunityEligibilityCursorResult) == "function"
-        and catalog and type(catalog.BeginSummaryCursor) == "function"
-        and type(catalog.SummaryCursorNext) == "function") then
-        return nil, "resumable Community readers unavailable"
+    if type(catalog) ~= "table" then
+        return nil, "resumable catalog reader unavailable"
     end
-    local cursor = dps.BeginCommunityEligibilityCursor()
-    if type(cursor) ~= "table" then return nil, "DPS eligibility cursor unavailable" end
     local summary = NewBuildSummary(filters, catalog)
-    -- The resumable cursor supplies exact baseline/overlay provenance without
-    -- adding a second catalog walk. Reset the O(1) snapshot counts so the
-    -- published projection proves what this cursor actually represented.
-    summary.bundledCount, summary.overlayCount, summary.availableCount = 0, 0, 0
-    return {
-        key=key,filters=filters,state="eligibility",eligibilityCursor=cursor,
+    local job = {
+        key=key,filters=filters,state="catalog",eligibility={},
         rows={},summary=summary,
         presentation=Identity.NewPublicPresentation("author"),
     }
+    if dps and type(dps.BeginCommunityEligibilityCursor) == "function"
+        and type(dps.CommunityEligibilityCursorNext) == "function"
+        and type(dps.CommunityEligibilityCursorResult) == "function" then
+        local cursor = dps.BeginCommunityEligibilityCursor()
+        if type(cursor) ~= "table" then
+            return nil, "DPS eligibility cursor unavailable"
+        end
+        job.state, job.eligibilityCursor = "eligibility", cursor
+        -- The resumable readers supply exact baseline/overlay provenance
+        -- without adding a second catalog walk. Reset the O(1) snapshot counts
+        -- so the published projection proves what the cursors represented.
+        job.countProvenance = true
+        summary.bundledCount, summary.overlayCount, summary.availableCount =
+            0, 0, 0
+    else
+        -- An injected/older DPS facade without the resumable eligibility
+        -- cursor supplies its published eligibility snapshot through one
+        -- bounded read, and the summary keeps the catalog's O(1) status
+        -- counts, exactly as the retired synchronous builder did.
+        local ok, eligibility = pcall(CommunityEligibility)
+        if not ok then
+            counters.builds.failures = counters.builds.failures + 1
+            return nil, tostring(eligibility)
+        end
+        job.eligibility = eligibility
+        local began, why = BeginCatalogRows(job, catalog)
+        if not began then
+            counters.builds.failures = counters.builds.failures + 1
+            return nil, why
+        end
+    end
+    return job
 end
 
 local function NewLeaderboardJob(filters, key)
@@ -756,6 +692,11 @@ local function Publish(kind, job, summary)
     if kind == "builds" then
         caches[kind].allRows = job.rows
         caches[kind].rows = nil
+        -- A retained job publishes outside any reader call. The publication is
+        -- current for a consumer only once a reader has served it; until then
+        -- the consumer's own last-good copy is stale and its dirty probe must
+        -- say so, or a list cache keyed by filters alone keeps stale rows.
+        caches[kind].consumed = false
     else
         caches[kind].rows = job.rows
     end
@@ -785,21 +726,32 @@ local function PumpBuildJob(job, unit)
                 if type(job.eligibility) ~= "table" then
                     return nil, "DPS eligibility cursor completed without data"
                 end
-                job.catalogCursor = catalog.BeginSummaryCursor()
+                local began, why = BeginCatalogRows(job, catalog)
+                if not began then return nil, why end
                 job.state = "catalog"
                 break
             end
         end
     elseif job.state == "catalog" then
         while sourceRows < MAX_SOURCE_PER_PUMP do
-            local build, done, err, fromBaseline, fromOverlay =
-                catalog.SummaryCursorNext(job.catalogCursor)
+            local build, done, err, fromBaseline, fromOverlay
+            if job.facadeRows then
+                local rowKey, row = next(job.facadeRows, job.facadeKey)
+                job.facadeKey = rowKey
+                build, done = row, rowKey == nil
+            else
+                build, done, err, fromBaseline, fromOverlay =
+                    catalog.SummaryCursorNext(job.catalogCursor)
+            end
             sourceRows = sourceRows + 1
             if err then return nil, err end
             if done then
                 job.summary.filtered = #job.rows
                 job.summary.qualifyingCount = job.summary.qualifying
                 job.summary.resultCount = #job.rows
+                if not job.countProvenance then
+                    job.summary.availableCount = job.summary.total
+                end
                 if #job.rows <= 1 then
                     unit.sourceRows, unit.comparisons = sourceRows, comparisons
                     return Publish("builds", job, job.summary)
@@ -808,10 +760,10 @@ local function PumpBuildJob(job, unit)
                 job.sortSource, job.sortTarget, job.merge = job.rows, {}, nil
                 break
             end
-            if fromBaseline then
+            if job.countProvenance and fromBaseline then
                 job.summary.bundledCount = job.summary.bundledCount + 1
             end
-            if fromOverlay then
+            if job.countProvenance and fromOverlay then
                 job.summary.overlayCount = job.summary.overlayCount + 1
             end
             if type(build) == "table" and IsLoaded(build) then
@@ -1427,29 +1379,13 @@ function Projections.Builds(filters)
     if cache.key == initialKey and type(cache.allRows) == "table" then
         stats.hits = stats.hits + 1
         stats.defensiveCopies = stats.defensiveCopies + 1
+        cache.consumed = true
         local pageRows, summary = BuildPage(
             cache.allRows, cache.summary, normalized)
         return DeepCopy(pageRows), DeepCopy(summary)
     end
-    for _ = 1, 2 do
-        local beforeKey = BuildKey(normalized)
-        stats.rebuilds = stats.rebuilds + 1
-        local ok, rows, summary = pcall(BuildProjection, normalized)
-        local afterKey = BuildKey(normalized)
-        if not ok or type(rows) ~= "table" then
-            stats.failures = stats.failures + 1
-            return nil, nil, tostring(rows or "projection failed")
-        end
-        if beforeKey == afterKey then
-            cache.key, cache.allRows, cache.rows = afterKey, rows, nil
-            cache.summary = summary
-            stats.defensiveCopies = stats.defensiveCopies + 1
-            local pageRows, pageSummary = BuildPage(rows, summary, normalized)
-            return DeepCopy(pageRows), DeepCopy(pageSummary)
-        end
-    end
-    stats.failures = stats.failures + 1
-    return nil, nil, "represented data changed during projection"
+    local _, _, why = Projections.RequestBuilds(normalized)
+    return nil, nil, why or "pending"
 end
 
 function Projections.RequestBuilds(filters)
@@ -1459,12 +1395,13 @@ function Projections.RequestBuilds(filters)
         -- Async UI projections are immutable after atomic publication. Return
         -- only the requested 20-row window; changing pages neither reacquires
         -- the catalog nor changes the represented-data cache key.
+        caches.builds.consumed = true
         return BuildPage(caches.builds.allRows,
             caches.builds.summary, normalized)
     end
     if normalized.classFilter == "" then
         CancelJob("builds")
-        caches.builds = {key=key,allRows={},summary=
+        caches.builds = {key=key,allRows={},consumed=true,summary=
             NewBuildSummary(normalized, Nexus and Nexus.BuildCatalog)}
         workStats.publications = workStats.publications + 1
         return BuildPage(caches.builds.allRows,
@@ -1473,7 +1410,7 @@ function Projections.RequestBuilds(filters)
     if not jobs.builds or jobs.builds.key ~= key then
         CancelJob("builds")
         local job, err = NewBuildJob(normalized, key)
-        if not job then return Projections.Builds(filters) end
+        if not job then return nil, nil, err end
         jobs.builds = job
     end
     return nil, nil, "pending"
@@ -1490,6 +1427,7 @@ function Projections.BuildsCurrent(filters)
     local normalized = NormalizeBuildFilters(filters)
     return type(caches.builds.allRows) == "table"
         and caches.builds.key == BuildKey(normalized)
+        and caches.builds.consumed ~= false
 end
 
 -- Explain one selected catalog row on demand. This deliberately keeps no

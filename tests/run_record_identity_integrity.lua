@@ -1,5 +1,6 @@
 -- Record class and per-character ownership regression coverage.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
@@ -23,12 +24,21 @@ DPS.Init(A,nil); C.Init(A,Nexus.Model)
 
 local mageEchoes={{spellId=200100,stacks=1},{spellId=200101,stacks=1}}
 local fp=DPS.GetEchoKey(mageEchoes)
-local id,b=C.EnsureDpsBuildForEchoes(mageEchoes,"dummy",{
+local mageRecord={
   player="Mageowner",class="MAGE",ownerKey="mageowner@ebonhold",realm="ebonhold",
   ownerVerified=true,
   dps=24000000,duration=65,ts=now,fingerprint=fp,echoes=mageEchoes,
-})
-assert(id and b and b.class=="MAGE", "local Mage record must create a Mage build")
+}
+local id,b,ensureWhy=C.EnsureDpsBuildForEchoes(mageEchoes,"dummy",mageRecord)
+if id==nil and ensureWhy=="ROOT_MUTATION_PENDING" then
+  -- MASTER-W2-004: the first exact-loadout page is one retained catalog
+  -- mutation. Settle it through the public scheduler seam and resolve the same
+  -- page through the same public entry point; the pending acknowledgement is
+  -- never treated as the created build.
+  S.PumpCatalogToIdle("local Mage record page admission")
+  id,b=C.EnsureDpsBuildForEchoes(mageEchoes,"dummy",mageRecord)
+end
+assert(id and b and b.class=="MAGE", "local Mage record must create a Mage build: "..tostring(ensureWhy))
 assert(type(b.fingerprintHash)=="string" and b.fingerprintHash~=""
   and b.fingerprintHash==DPS.GetEchoHash(mageEchoes)
   and b.echoCount==2 and b.loadoutAvailable==true,
@@ -52,6 +62,7 @@ local remoteFp=DPS.GetEchoKey(remoteEchoes)
 assert(DPS.ReceiveRecord({v=7,f=remoteFp,e=remoteEchoes,c="dummy",d=25000000,u=65,t=now,
   p="Remotemage",k="MAGE",o="remotemage@ebonhold",r="ebonhold",l=80}),
   "valid remote Mage record should be accepted")
+S.PumpCatalogToIdle("remote Mage record page admission")
 local found
 for _,build in pairs(H.DurableBuilds()) do
   if build.author=="Remotemage" then found=build break end
@@ -114,6 +125,7 @@ assert(DPS.ReceiveRecord({v=7,f=promoteFp,h=DPS.GetEchoHash(promoteEchoes),
   p="Promote",k="MAGE",o="promote@ebonhold",r="ebonhold",l=80,
   b="promote-page"},"Promote-Ebonhold"),
   "EXPECTED RED: exact DPS owner could not repair malformed retained evidence")
+S.PumpCatalogToIdle("promoted record page admission")
 local promoted=NexusDB.dpsCapture.characterBest.dummy["promote@ebonhold"]
 assert(promoted and DPS.VerifiedOwnerKey(promoted)=="promote@ebonhold"
   and promoted.o==nil and promoted.p==nil and promoted.r==nil
@@ -135,6 +147,7 @@ assert(DPS.ReceiveRecord({v=7,f=winningFp,h=DPS.GetEchoHash(winningEchoes),e=win
   o="collisionmage@ebonhold",r="ebonhold",l=80,b="collision"},
   "Collisionmage-Ebonhold"),
   "valid colliding DPS record was rejected")
+S.PumpCatalogToIdle("colliding record safe-loadout admission")
 local collisionRow
 for _,row in ipairs(DPS.GetDpsBoard("dummy")) do
   if row.player=="Collisionmage" then collisionRow=row break end
@@ -153,12 +166,14 @@ end
 -- not recreate a Community relationship from fingerprint or opaque ID alone.
 local relationEchoes={{spellId=200108,stacks=1}}
 local relationFp=DPS.GetEchoKey(relationEchoes)
-assert(Nexus.BuildCatalog.Put({
-  id="realm-b-relation",title="Realm B Relation",author="Twin",
-  ownerKey="twin@realmb",ownerVerified=true,realm="realmb",class="MAGE",
-  fingerprint=relationFp,fingerprintHash=DPS.GetEchoHash(relationEchoes),
-  echoes=relationEchoes,lastModified=now+2,
-}))
+assert(S.CatalogMutation(function()
+  return Nexus.BuildCatalog.Put({
+    id="realm-b-relation",title="Realm B Relation",author="Twin",
+    ownerKey="twin@realmb",ownerVerified=true,realm="realmb",class="MAGE",
+    fingerprint=relationFp,fingerprintHash=DPS.GetEchoHash(relationEchoes),
+    echoes=relationEchoes,lastModified=now+2,
+  })
+end, "realm-b relation fixture admission"))
 NexusDB.dpsCapture.characterBest.dummy["twin@realma"]={
   player="Twin",ownerKey="twin@realma",ownerVerified=true,realm="realma",
   class="MAGE",dps=27000001,duration=65,ts=now+2,level=80,
@@ -183,13 +198,15 @@ assert(materialized.Legacyrelation and materialized.Legacyrelation.echoes
 
 local savedRelationEchoes={{spellId=200109,stacks=1}}
 local savedRelationFp=DPS.GetEchoKey(savedRelationEchoes)
-assert(Nexus.BuildCatalog.Put({
-  id="private-saved-relation",title="Private Saved",author="Shamanalt",
-  ownerKey="shamanalt@ebonhold",ownerVerified=true,realm="ebonhold",
-  importedSavedBuild=true,isMine=true,class="SHAMAN",
-  fingerprint=savedRelationFp,fingerprintHash=DPS.GetEchoHash(savedRelationEchoes),
-  echoes=savedRelationEchoes,lastModified=now+4,
-}))
+assert(S.CatalogMutation(function()
+  return Nexus.BuildCatalog.Put({
+    id="private-saved-relation",title="Private Saved",author="Shamanalt",
+    ownerKey="shamanalt@ebonhold",ownerVerified=true,realm="ebonhold",
+    importedSavedBuild=true,isMine=true,class="SHAMAN",
+    fingerprint=savedRelationFp,fingerprintHash=DPS.GetEchoHash(savedRelationEchoes),
+    echoes=savedRelationEchoes,lastModified=now+4,
+  })
+end, "private Saved relation fixture admission"))
 NexusDB.dpsCapture.characterBest.dummy["shamanalt@ebonhold"]={
   player="Shamanalt",ownerKey="shamanalt@ebonhold",ownerVerified=true,
   realm="ebonhold",class="SHAMAN",dps=27000003,duration=65,ts=now+4,

@@ -583,8 +583,58 @@ end
 local StoreData = {current=nil, revision=0}
 
 function StoreData.Build(db, token)
-    StoreData.revision = StoreData.revision + 1
-    local revision = StoreData.revision
+    local counters = Nexus and Nexus.MainInternals
+        and Nexus.MainInternals.CatalogAuthorityCounters
+    if not (counters and type(counters.Advance) == "function"
+        and type(counters.Preflight) == "function") then
+        return nil, "GENERATION_EXHAUSTED"
+    end
+    if token and token.bundleDeferred then
+        local bundle = type(db) == "table" and rawget(db, "authorityBundle")
+            or nil
+        local wrapper = PlainTable(bundle) and rawget(bundle, "storeData")
+            or nil
+        if not PlainTable(wrapper) or rawget(wrapper, "schemaVersion") ~= 1
+            or not PlainTable(rawget(wrapper, "settings"))
+            or not PlainTable(rawget(wrapper, "chars"))
+            or not PlainTable(rawget(wrapper, "accountCharacters"))
+            or not PlainTable(rawget(wrapper, "migrationMarker")) then
+            return nil, "STORE_INVALID"
+        end
+        local known = {schemaVersion=true, storeRevision=true,
+            settingsRevision=true, accountRevision=true, settingsVersion=true,
+            settings=true, chars=true, accountCharacters=true,
+            migrationMarker=true}
+        for key in pairs(wrapper) do
+            if not known[key] then return nil, "STORE_INVALID" end
+        end
+        local marker = rawget(wrapper, "migrationMarker")
+        if rawget(marker, "version") ~= 1
+            or type(rawget(marker, "completed")) ~= "boolean"
+            or not DECISION[rawget(marker, "decision")] then
+            return nil, "STORE_INVALID"
+        end
+        for key in pairs(marker) do
+            if key ~= "version" and key ~= "completed" and key ~= "decision" then
+                return nil, "STORE_INVALID"
+            end
+        end
+        local highest = StoreData.revision
+        for _, key in ipairs({"storeRevision", "settingsRevision",
+                "accountRevision"}) do
+            local probe = {value=rawget(wrapper, key)}
+            local exact, why = counters.Preflight({
+                {owner=probe, key="value", amount=1},
+            })
+            if not exact then return nil, why end
+            highest = math.max(highest, probe.value)
+        end
+        StoreData.revision = highest
+        StoreData.current = {db=db, value=wrapper}
+        return wrapper
+    end
+    local revision, why = counters.Advance(StoreData, "revision", 1)
+    if not revision then return nil, why end
     local wrapper = {
         schemaVersion = 1,
         storeRevision = revision,
@@ -842,7 +892,14 @@ local function BootstrapSlice(C)
         -- site is the guarded one in STORE_COMPACTION_PENDING. The wrapper
         -- references the map when it exists and a detached empty table when it
         -- does not, so building the candidate never writes to the database.
-        C.storeData = StoreData.Build(db, C.token)
+        local storeData, storeDataWhy = StoreData.Build(db, C.token)
+        if not storeData then
+            C.state = SS.INVALID
+            C.result = {state="failed",
+                reason=storeDataWhy or "GENERATION_EXHAUSTED"}
+            return
+        end
+        C.storeData = storeData
         -- Version stamping happens only after the row work completed, which
         -- preserves "stamp only after the idempotent migration succeeded".
         ApplyMigrations(db)

@@ -3,6 +3,7 @@
 -- failure must never prevent functional widgets (Lock In, Delete) from
 -- being created.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/DefaultProfile.lua")
 dofile("logic/Model.lua")
 dofile("logic/Strategy.lua")
@@ -34,7 +35,7 @@ CB.Init(Adapter, Model)
 local ok, err = pcall(CB.Show)
 assert(ok, "Show() threw despite SetBackdrop failing: " .. tostring(err))
 
-local ok2, id = CB.PostCurrentWishlist("Test", "desc", H.wishlist)
+local ok2, id = S.PostWishlist(CB.PostCurrentWishlist, "Test", "desc", H.wishlist)
 assert(ok2, "PostCurrentWishlist failed after the backdrop failure")
 local ok3 = pcall(CB.Select, id)
 assert(ok3, "Select() failed after the backdrop failure")

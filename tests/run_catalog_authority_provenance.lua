@@ -93,8 +93,15 @@ function()
     S.Bind(db)
     Check(Catalog().RootState().state == "ROOT_ADMITTED",
         "fixture did not admit a root")
-    local ok, why = Catalog().SetTombstone("prov03", {stamp=1},
+    -- The row-to-tombstone transaction is one retained catalog mutation
+    -- (MASTER-RC-006); its committed ticket is the authority evidence.
+    local ok, why, ticket = Catalog().SetTombstone("prov03", {stamp=1},
         {source="local"})
+    if ok == nil and why == "ROOT_MUTATION_PENDING" then
+        S.PumpCatalogToIdle("verified local delete")
+        ok = type(ticket) == "table" and ticket.committed == true
+        why = ticket and ticket.reason or why
+    end
     Check(ok == true,
         "a verified local owner lost delete authority: " .. tostring(why))
 end)

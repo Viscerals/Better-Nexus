@@ -1381,13 +1381,15 @@ function Controller.New(options)
                     local slot = job.keys[job.index]
                     if slot == nil then
                         local catalog = Catalog()
-                        job.cleanup = catalog and catalog.SavedMirrorIds
-                            and catalog.SavedMirrorIds(job.me) or {}
+                        local cursor = catalog
+                            and type(catalog.BeginSavedMirrorCursor) == "function"
+                            and catalog.BeginSavedMirrorCursor(job.me) or nil
+                        job.cleanup = {}
+                        job.cleanupCursor = cursor
+                        job.cleanupIndex = cursor and nil or 1
                         savedImportStats.cleanupEnumerations =
                             savedImportStats.cleanupEnumerations + 1
-                        savedImportStats.cleanupCandidates =
-                            savedImportStats.cleanupCandidates + #job.cleanup
-                        job.cleanupIndex, job.phase = 1, "cleanup"
+                        job.phase = "cleanup"
                     else
                         job.current = PrepareSavedSlot(job, slot)
                         job.index = job.index + 1
@@ -1413,9 +1415,33 @@ function Controller.New(options)
                         job.current = nil
                     end
                 end
+            elseif job.cleanupCursor then
+                local catalog = Catalog()
+                local page, why = catalog.SavedMirrorCursorNext(
+                    job.cleanupCursor)
+                work = work + 1
+                if not page then
+                    local restarted
+                    job, restarted = RestartSavedImport(job, "cursor")
+                    if restarted then
+                        savedImportStats.cursorRestarts =
+                            savedImportStats.cursorRestarts + 1
+                    else
+                        return unreported + job.changed - changedBefore, true
+                    end
+                elseif page.done then
+                    job.cleanupCursor = nil
+                    job.cleanupIndex = 1
+                elseif page.state ~= "COPY_PENDING" then
+                    job.cleanup[#job.cleanup + 1] = {
+                        id=page.id,record=page.record,
+                    }
+                    savedImportStats.cleanupCandidates =
+                        savedImportStats.cleanupCandidates + 1
+                end
             else
-                local id = job.cleanup[job.cleanupIndex]
-                if id == nil then
+                local cleanup = job.cleanup[job.cleanupIndex]
+                if cleanup == nil then
                     savedImportStats.completions = savedImportStats.completions + 1
                     savedRelatedCache = job.cacheUpdates
                     savedRelatedCacheRevision = BuildRevision()
@@ -1423,21 +1449,53 @@ function Controller.New(options)
                         or lastSavedLoadoutImport
                     savedImportJob = nil
                 else
-                    job.cleanupIndex = job.cleanupIndex + 1
                     savedImportStats.cleanupExamined =
                         savedImportStats.cleanupExamined + 1
-                    local build = LoadBuild(id)
+                    local id, build = cleanup.id, cleanup.record
                     if Identity.SavedMirrorKind(build) == "saved"
                         and Identity.LocalOwnsSavedMirror(build, job.ownerKey)
                         and not job.seen[id] then
-                        if RemoveOverlay(id) then
+                        local removed, removeWhy, ticket = RemoveOverlay(id,
+                            function(outcome)
+                                if job.pendingCatalog == outcome then
+                                    job.pendingCatalog = nil
+                                end
+                                if savedImportJob ~= job
+                                    or not job.pendingCleanup
+                                    or job.pendingCleanup.ticket ~= outcome then
+                                    return
+                                end
+                                job.pendingCleanup = nil
+                                job.cleanupIndex = job.cleanupIndex + 1
+                                if outcome.committed == true then
+                                    if selectedId == id then selectedId = nil end
+                                    job.changed = job.changed + 1
+                                    job.unreportedChanged =
+                                        (job.unreportedChanged or 0) + 1
+                                    job.buildRevision = BuildRevision()
+                                    savedImportStats.writes =
+                                        savedImportStats.writes + 1
+                                    savedImportStats.cleanupRemovals =
+                                        savedImportStats.cleanupRemovals + 1
+                                end
+                            end)
+                        if removed then
                             if selectedId == id then selectedId = nil end
                             job.changed = job.changed + 1
                             job.buildRevision = BuildRevision()
                             savedImportStats.writes = savedImportStats.writes + 1
                             savedImportStats.cleanupRemovals =
                                 savedImportStats.cleanupRemovals + 1
+                            job.cleanupIndex = job.cleanupIndex + 1
+                        elseif removeWhy == "ROOT_MUTATION_PENDING"
+                            and type(ticket) == "table" then
+                            job.pendingCleanup = {ticket=ticket,id=id}
+                            job.pendingCatalog = ticket
+                        else
+                            job.cleanupIndex = job.cleanupIndex + 1
                         end
+                    else
+                        job.cleanupIndex = job.cleanupIndex + 1
                     end
                     work = work + 1
                 end
@@ -2044,32 +2102,28 @@ function Controller.New(options)
         if not identityOk then return false, identityErr end
         PeerRecord("share_created", {id=id,class=record.class or "UNKNOWN",
             echoes=record.echoCount or #echoes,outcome="created"})
-        local saved, saveWhy = SaveBuild(record)
-        local localSaved = saved == true
-        local buildRevision = BuildRevision()
-        PeerRecord("share_local", {id=id,
-            outcome=localSaved and "saved" or "rejected",
-            reason=saveWhy,revision=buildRevision})
         local outcome = {
             id=id,class=record.class or "UNKNOWN",
             echoCount=record.echoCount or #echoes,
-            buildRevision=buildRevision,localSaved=localSaved,
+            buildRevision=BuildRevision(),localSaved=false,
             queueAdmitted=false,queueReason=nil,retryPending=false,
             sent=false,sendCompleted=false,peerStored=nil,
             confirmation="unavailable",
         }
-        if not localSaved then
-            outcome.queueReason = "local save failed"
-            lastShareOutcome = outcome
-            return false, saveWhy or "local save failed", outcome
-        end
-        local admitted, queueWhy, syncStatus = BroadcastIfPossible(record, true)
-        if syncStatus then
-            -- Keep Sync's fixed operation owner immutable outside Sync. The
-            -- Community projection retains only a defensive scalar snapshot
-            -- and refreshes later transitions through GetShareStatus.
-            outcome = {}
-            for key, value in pairs(syncStatus) do
+        local function CompleteLocalSave(committed, why)
+            outcome.buildRevision = BuildRevision()
+            outcome.localSaved = committed == true
+            PeerRecord("share_local", {id=id,
+                outcome=committed and "saved" or "rejected",
+                reason=why,revision=outcome.buildRevision})
+            if not committed then
+                outcome.queueReason = why or "local save failed"
+                lastShareOutcome = outcome
+                return false
+            end
+            local admitted, queueWhy, syncStatus = BroadcastIfPossible(record, true)
+            for key, value in pairs(type(syncStatus) == "table"
+                and syncStatus or {}) do
                 local kind = type(value)
                 if kind == "string" or kind == "number"
                     or kind == "boolean" then outcome[key] = value end
@@ -2077,26 +2131,51 @@ function Controller.New(options)
             outcome.id = id
             outcome.class = record.class or "UNKNOWN"
             outcome.echoCount = record.echoCount or #echoes
-            outcome.buildRevision = buildRevision
+            outcome.buildRevision = BuildRevision()
             outcome.localSaved = true
+            outcome.queueAdmitted = admitted == true
+            outcome.queueReason = queueWhy
+                or (outcome.queueAdmitted and "queued" or "queue rejected")
+            outcome.retryPending = outcome.retryPending == true
+            outcome.sent = outcome.sent == true
+            outcome.sendCompleted = outcome.sendCompleted == true
+            outcome.peerStored = nil
+            outcome.confirmation = "unavailable"
+            lastShareOutcome = outcome
+            PeerRecord("share_outcome", {id=id,
+                outcome=outcome.queueAdmitted and "queued"
+                    or outcome.retryPending and "retry pending" or "not queued",
+                reason=outcome.queueReason,revision=outcome.buildRevision})
+            local D = Nexus.DpsCapture
+            if D and D.BroadcastBestForBuild then
+                pcall(D.BroadcastBestForBuild, id)
+            end
+            return true
         end
-        outcome.queueAdmitted = admitted == true
-        outcome.queueReason = queueWhy
-            or (outcome.queueAdmitted and "queued" or "queue rejected")
-        outcome.retryPending = outcome.retryPending == true
-        outcome.sent = outcome.sent == true
-        outcome.sendCompleted = outcome.sendCompleted == true
-        outcome.peerStored = nil
-        outcome.confirmation = "unavailable"
-        lastShareOutcome = outcome
-        PeerRecord("share_outcome", {id=id,
-            outcome=outcome.queueAdmitted and "queued"
-                or outcome.retryPending and "retry pending" or "not queued",
-            reason=outcome.queueReason,revision=buildRevision})
-        local D = Nexus.DpsCapture
-        if D and D.BroadcastBestForBuild then
-            pcall(D.BroadcastBestForBuild, id)
+
+        local saved, saveWhy = SaveBuild(record, function(ticket)
+            CompleteLocalSave(ticket.committed == true,
+                ticket.committed == true and ticket.storedAs or ticket.reason)
+        end)
+        if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" then
+            -- The local save is one retained catalog mutation. The post is
+            -- accepted exactly once here: the same retained outcome table
+            -- reports localSaved=false and queueReason=ROOT_MUTATION_PENDING
+            -- until its terminal ticket runs CompleteLocalSave, which then
+            -- queues the one broadcast. Reporting the retained save as a
+            -- failure would leave the Share popup open and invite a duplicate
+            -- post of the same draft.
+            outcome.queueReason = saveWhy
+            lastShareOutcome = outcome
+            PeerRecord("share_local", {id=id,outcome="pending",
+                reason=saveWhy,revision=outcome.buildRevision})
+            return true, id, outcome
         end
+        if not saved then
+            CompleteLocalSave(false, saveWhy or "local save failed")
+            return false, saveWhy or "local save failed", outcome
+        end
+        CompleteLocalSave(true, saveWhy)
         return true, id, outcome
     end
 
@@ -2475,41 +2554,51 @@ function Controller.New(options)
                 pcall(D.BroadcastBestForBuild, publishedId)
             end
         end
-        local function SaveSource()
-            local sourceSaved, sourceSaveWhy = SaveBuild(source,
-                function(outcome)
-                    if outcome.committed == true then
-                        Finish(true, publishedId)
-                    else
-                        Finish(false, outcome.reason
-                            or "saved-loadout storage refused")
-                    end
-                end)
-            if sourceSaved then
-                Finish(true, publishedId)
-                return true, publishedId
-            end
-            if sourceSaveWhy == "ROOT_MUTATION_PENDING" then
-                pendingPublications[id] = operation
-                return nil, sourceSaveWhy
-            end
-            Finish(false, sourceSaveWhy or "saved-loadout storage refused")
+        local catalog = Catalog()
+        if not (catalog and type(catalog.BeginCatalogMaintenance) == "function"
+            and type(catalog.MaintenanceReplaceRow) == "function"
+            and type(catalog.CommitMaintenance) == "function") then
+            Finish(false, "build catalog unavailable")
             return false, operation.value
         end
-        local recordSaved, recordSaveWhy = SaveBuild(record,
-            function(outcome)
+        local handle, beginWhy = catalog.BeginCatalogMaintenance({
+            database=catalog.BoundDatabase and catalog.BoundDatabase() or NexusDB,
+            operation="publish-imported"})
+        if not handle then
+            Finish(false, beginWhy or "catalog maintenance unavailable")
+            return false, operation.value
+        end
+        local recordStaged, recordWhy = catalog.MaintenanceReplaceRow(
+            handle, publishedId, record, {allowInsert=true})
+        if not recordStaged then
+            catalog.CancelMaintenance(handle)
+            Finish(false, recordWhy or "build storage refused")
+            return false, operation.value
+        end
+        local sourceStaged, sourceWhy = catalog.MaintenanceReplaceRow(
+            handle, id, source)
+        if not sourceStaged then
+            catalog.CancelMaintenance(handle)
+            Finish(false, sourceWhy or "saved-loadout storage refused")
+            return false, operation.value
+        end
+        local committed, commitWhy, ticket = RetainCatalogMutation(
+            catalog, "publish-imported", function(outcome)
                 if outcome.committed == true then
-                    SaveSource()
+                    Finish(true, publishedId)
                 else
                     Finish(false, outcome.reason or "build storage refused")
                 end
-            end)
-        if recordSaved then return SaveSource() end
-        if recordSaveWhy == "ROOT_MUTATION_PENDING" then
-            pendingPublications[id] = operation
-            return nil, recordSaveWhy
+            end, catalog.CommitMaintenance(handle))
+        if committed then
+            Finish(true, publishedId)
+            return true, publishedId
         end
-        Finish(false, recordSaveWhy or "build storage refused")
+        if commitWhy == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
+            pendingPublications[id] = operation
+            return nil, commitWhy
+        end
+        Finish(false, commitWhy or "build storage refused")
         return false, operation.value
     end
 
@@ -2553,7 +2642,20 @@ function Controller.New(options)
             b.userDescription = nextDescription
         end
         b.lastModified = NextStamp(b.lastModified or b.postedAt)
-        local saved, saveWhy = SaveBuild(b)
+        local saved, saveWhy = SaveBuild(b, function(ticket)
+            -- A retained edit broadcasts only from its terminal committed
+            -- ticket; a failed ticket is reported by the retained-mutation
+            -- owner and broadcasts nothing.
+            if ticket.committed == true and savedKind == "ordinary" then
+                BroadcastIfPossible(b)
+            end
+        end)
+        if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" then
+            -- Accepted and retained: the edit is one retained catalog
+            -- mutation whose terminal ticket settles it; the reason lets a
+            -- caller distinguish the retained state from a completed save.
+            return true, saveWhy
+        end
         if not saved then return false, saveWhy or "build storage refused" end
         -- Editing a server Saved Build mirror is local-only. It reaches the
         -- community only through the explicit Upload Build action (or a DPS
@@ -2586,13 +2688,24 @@ function Controller.New(options)
         local identityOk, identityErr = RefreshBuildIdentity(candidate)
         if not identityOk then return false, identityErr end
         candidate.lastModified = NextStamp(b.lastModified or b.postedAt)
-        local saved, saveWhy = SaveBuild(candidate)
-        if not saved then return false, saveWhy or "build storage refused" end
-        BroadcastIfPossible(candidate)
-        local D = Nexus.DpsCapture
-        if D and D.BroadcastBestForBuild then
-            pcall(D.BroadcastBestForBuild, id)
+        local function Published()
+            BroadcastIfPossible(candidate)
+            local D = Nexus.DpsCapture
+            if D and D.BroadcastBestForBuild then
+                pcall(D.BroadcastBestForBuild, id)
+            end
         end
+        local saved, saveWhy = SaveBuild(candidate, function(ticket)
+            -- A retained replacement broadcasts only from its terminal
+            -- committed ticket.
+            if ticket.committed == true then Published() end
+        end)
+        if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" then
+            -- Accepted and retained; the reason marks the retained state.
+            return true, #echoes, saveWhy
+        end
+        if not saved then return false, saveWhy or "build storage refused" end
+        Published()
         return true, #echoes
     end
 
@@ -2650,10 +2763,26 @@ function Controller.New(options)
                 stamp=(time and time()) or 0,
                 author=tostring(b.author or ""),
                 localOnly=not owner or nil,
-            }, {source="local"})
+            }, {source="local"}, function(terminal)
+                -- The retained row-to-tombstone transaction settles the local
+                -- removal exactly once from its terminal committed ticket.
+                if terminal.committed == true then
+                    if selectedId == id then selectedId = nil end
+                    outcome.localRemoved = true
+                    outcome.storageReason = nil
+                else
+                    outcome.storageReason = tostring(terminal.reason
+                        or "local build removal refused")
+                    outcome.queueReason = outcome.queueReason
+                        or outcome.storageReason
+                end
+            end)
             if tombstoned == nil and tombstoneWhy == "ROOT_MUTATION_PENDING" then
+                -- Accepted and retained: the same outcome table reports
+                -- localRemoved=false with this storage reason until the
+                -- terminal ticket above settles it.
                 outcome.storageReason = tombstoneWhy
-                return false, outcome
+                return true, outcome
             end
             if tombstoned then tombstoneWhy = nil end
         end

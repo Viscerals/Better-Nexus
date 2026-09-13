@@ -113,12 +113,12 @@ local function NewHarness(overrides)
             state.claims[#state.claims + 1] = description
             return true
         end,
-        handleDelete=function(description)
+        handleDelete=overrides.handleDelete or function(description)
             state.deletes[#state.deletes + 1] = description
             state.mutations = state.mutations + 1
             return true
         end,
-        handleSummary=function(data, sender)
+        handleSummary=overrides.handleSummary or function(data, sender)
             if type(data) ~= "table" then return false, false end
             state.summaries[#state.summaries + 1] = {data, sender}
             state.mutations = state.mutations + 1
@@ -144,7 +144,7 @@ local function NewHarness(overrides)
             state.mutations = state.mutations + 1
             return true
         end,
-        commitBuild=function(payload, sender)
+        commitBuild=overrides.commitBuild or function(payload, sender)
             state.builds[#state.builds + 1] = {payload, sender}
             state.order[#state.order + 1] = "build:" .. payload.id
             state.mutations = state.mutations + 1
@@ -303,6 +303,62 @@ AssertEqual(hostile.Counts().total, 0, "prevalidation rejects before assembly")
 hostile.Reset()
 AssertEqual(hostile.Counts().total, 0, "reset clears only inbound session state")
 
+-- Wave 3 MASTER-W2-008. A real envelope that opens catalog work has one
+-- retained terminal route. Pending is neither malformed nor synchronously
+-- rejected, and outer inbound/peer/refresh bookkeeping runs once at settlement.
+local summaryFinish
+local pendingSummary, pss = NewHarness({
+    handleSummary=function(data, sender, context, finish)
+        summaryFinish = finish
+        return nil, false, "ROOT_MUTATION_PENDING"
+    end,
+})
+local pendingSummaryWire = Encode({id="pending-summary"})
+assert(not pendingSummary.HandleIncoming(
+    "WLI|Alice|" .. pendingSummaryWire, "Alice"))
+assert(type(summaryFinish) == "function" and pss.malformed == 0
+        and pss.inbound == 0 and #pss.accepted == 0 and pss.refreshes == 0,
+    "pending summary was rejected or acknowledged before terminal catalog work")
+summaryFinish(true, true)
+summaryFinish(true, true)
+assert(pss.inbound == 1 and #pss.accepted == 1 and pss.refreshes == 1
+        and pss.malformed == 0,
+    "pending summary did not run one terminal acceptance route")
+
+local deleteFinish
+local pendingDelete, pds = NewHarness({
+    handleDelete=function(description, finish)
+        deleteFinish = finish
+        return nil, "ROOT_MUTATION_PENDING"
+    end,
+})
+assert(not pendingDelete.HandleIncoming("WLD|Alice|pending-delete|1|Alice", "Alice"))
+assert(type(deleteFinish) == "function" and pds.inbound == 0
+        and #pds.accepted == 0 and pds.malformed == 0,
+    "pending delete acquired a synchronous terminal outcome")
+deleteFinish(true)
+deleteFinish(true)
+assert(pds.inbound == 1 and #pds.accepted == 1 and pds.malformed == 0,
+    "pending delete did not run one terminal acceptance route")
+
+local buildFinish
+local pendingBuild, pbs = NewHarness({
+    commitBuild=function(payload, sender, context, finish)
+        buildFinish = finish
+        return nil, "ROOT_MUTATION_PENDING"
+    end,
+})
+local pendingBuildPayload = Encode({id="pending-build",author="Alice",lastModified=1})
+assert(not pendingBuild.HandleIncoming(
+    "WLB|Alice|pending-build|1|1/1|" .. pendingBuildPayload, "Alice"))
+assert(type(buildFinish) == "function" and pbs.inbound == 0
+        and #pbs.accepted == 0 and pbs.malformed == 0,
+    "pending full build acquired a synchronous terminal outcome")
+buildFinish(true)
+buildFinish(true)
+assert(pbs.inbound == 1 and #pbs.accepted == 1 and pbs.malformed == 0,
+    "pending full build did not run one terminal acceptance route")
+
 local function Read(path)
     local file = assert(io.open(path, "rb"))
     local text = file:read("*a")
@@ -333,5 +389,102 @@ local inboundAt = assert(toc:find("core\\SyncInbound.lua", reconcilerAt, true))
 local syncAt = assert(toc:find("core\\Sync.lua", inboundAt, true))
 assert(reconcilerAt < inboundAt and inboundAt < syncAt,
     "Sync inbound load order drifted")
+
+-- The factory cases above pin terminal routing in isolation. These three real
+-- envelopes prove that the production handlers bind the same route to an
+-- actual catalog ticket and publish outer bookkeeping only after settlement.
+Nexus = nil
+local RealH = dofile("tests/harness.lua")
+dofile("core/Codec.lua")
+dofile("core/BuildHashCache.lua")
+dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua")
+dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua")
+dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua")
+dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
+
+time = function() return 50000 end
+GetTime = function() return 500 end
+UnitName = function() return "Local" end
+GetNormalizedRealmName = function() return "Ebonhold" end
+GetRealmName = GetNormalizedRealmName
+NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={}}
+Nexus.ViewRefresh = Nexus.ViewRefresh or {}
+local realRefreshes = 0
+Nexus.ViewRefresh.Request = function()
+    realRefreshes = realRefreshes + 1
+    return true
+end
+RealH.AdmitCatalogV1(NexusDB)
+Nexus.Sync.Init(Nexus.Codec, {})
+
+local function RealEncode(value)
+    return Nexus.Codec.Base64Encode(Nexus.Codec.JSONEncode(value))
+end
+
+local function SettleRealMutation(label, commitsBefore)
+    local catalog = Nexus.BuildCatalog
+    assert(catalog.RootState().candidate == true,
+        label .. " did not retain one catalog candidate")
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then break end
+        catalog.PumpRootAdmission()
+    end
+    assert(catalog.RootState().candidate == false
+            and catalog.DebugStats().commits == commitsBefore + 1,
+        label .. " did not publish exactly one catalog commit")
+end
+
+local summarySender = "Alice-Ebonhold"
+local summaryId = "real-pending-summary"
+local summaryStatsBefore = Nexus.Sync.Stats().received
+local summaryCommitsBefore = Nexus.BuildCatalog.DebugStats().commits
+local summaryWire = RealEncode({id=summaryId,t="Summary",a=summarySender,
+    o="alice@ebonhold",c="MAGE",m=11,h="a1",n=1})
+assert(Nexus.Sync.HandleIncoming(
+        "WLBI|" .. summarySender .. "|" .. summaryWire,
+        summarySender) == false
+        and Nexus.BuildCatalog.Get(summaryId) == nil
+        and not Nexus.Sync.IsKnownPeer(summarySender)
+        and realRefreshes == 0
+        and Nexus.Sync.Stats().received == summaryStatsBefore,
+    "real summary published terminal work before its catalog ticket")
+SettleRealMutation("real summary", summaryCommitsBefore)
+assert(Nexus.BuildCatalog.Get(summaryId) ~= nil
+        and Nexus.Sync.IsKnownPeer(summarySender)
+        and realRefreshes == 1
+        and Nexus.Sync.Stats().received == summaryStatsBefore + 1,
+    "real summary did not run one terminal acceptance route")
+
+local buildSender = "Bob-Ebonhold"
+local buildId = "real-pending-build"
+local buildStatsBefore = Nexus.Sync.Stats().received
+local buildCommitsBefore = Nexus.BuildCatalog.DebugStats().commits
+local buildWire = RealEncode({id=buildId,t="Build",a=buildSender,
+    o="bob@ebonhold",c="MAGE",m=21,e={{200101,3,1}}})
+assert(Nexus.Sync.HandleIncoming(table.concat({"WLRB",buildSender,
+        buildId,"21","1/1",buildWire}, "|"), buildSender) == false
+        and Nexus.BuildCatalog.Get(buildId) == nil
+        and not Nexus.Sync.IsKnownPeer(buildSender)
+        and Nexus.Sync.Stats().received == buildStatsBefore,
+    "real full build published terminal work before its catalog ticket")
+SettleRealMutation("real full build", buildCommitsBefore)
+assert(Nexus.BuildCatalog.Get(buildId) ~= nil
+        and Nexus.Sync.IsKnownPeer(buildSender)
+        and Nexus.Sync.Stats().received == buildStatsBefore + 1,
+    "real full build did not run one terminal acceptance route")
+
+local deleteSender = "Bob-Ebonhold"
+local deleteCommitsBefore = Nexus.BuildCatalog.DebugStats().commits
+local tombstonesBefore = Nexus.Sync.TombstoneCount()
+assert(Nexus.Sync.HandleIncoming(table.concat({"WLRD",deleteSender,
+        buildId,"22",deleteSender}, "|"), deleteSender) == false
+        and Nexus.BuildCatalog.Get(buildId) ~= nil
+        and Nexus.Sync.TombstoneCount() == tombstonesBefore,
+    "real delete published terminal work before its catalog ticket")
+SettleRealMutation("real delete", deleteCommitsBefore)
+assert(Nexus.BuildCatalog.Get(buildId) == nil
+        and Nexus.Sync.TombstoneCount() == tombstonesBefore + 1
+        and Nexus.Sync.IsKnownPeer(deleteSender),
+    "real delete did not run one terminal acceptance route")
 
 print("synchronous Sync inbound ordering, validation, and assembly -- OK")

@@ -1,4 +1,5 @@
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/DefaultProfile.lua")
 dofile("logic/Model.lua")
 dofile("logic/Strategy.lua")
@@ -34,11 +35,14 @@ local ok, err = CB.UpdateFromWishlist("mine")
 assert(not ok and tostring(err):find("leaderboard record"), "recorded loadout must be immutable")
 assert(H.DurableBuilds().mine.echoes[1].spellId == 200050, "locked Echo list changed")
 local meta = CB.EditBuild("mine", "Renamed", "new")
+S.PumpCatalogToIdle("owner metadata edit")
 assert(meta and H.DurableBuilds().mine.title == "Renamed", "owner metadata edit should remain available")
 -- An occupied bundle is authoritative, so the foreign row is admitted through
 -- the public write seam instead of a raw legacy write.
-Nexus.BuildCatalog.Put({id="remote",title="Remote",author="Other",isMine=false,
- echoes={}}, {source="remote", sender="Other-Ebonhold"})
+S.CatalogMutation(function()
+ return Nexus.BuildCatalog.Put({id="remote",title="Remote",author="Other",isMine=false,
+  echoes={}}, {source="remote", sender="Other-Ebonhold"})
+end, "foreign row admission")
 local remote = CB.EditBuild("remote", "Bad", "Bad")
 assert(not remote, "non-owner edit must be rejected")
 print("build edit lock OK")

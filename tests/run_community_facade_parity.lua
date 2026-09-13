@@ -1,6 +1,7 @@
 -- Final Community facade/popup cutover: one projection/controller/renderer,
 -- stable named popups, exact draft actions, and no duplicate presentation path.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
 
@@ -113,6 +114,9 @@ print = function(...)
 end
 share()
 print = originalPrint
+-- The accepted post is one retained catalog mutation; its single broadcast
+-- is queued from the terminal commit.
+S.PumpCatalogToIdle("shared post admission")
 assert(not post:IsShown() and #broadcasts == 1,
     "locally saved post did not close or emitted duplicate Sync writes")
 local shareText = tostring(shareMessages[#shareMessages] or "")
@@ -136,6 +140,9 @@ edit._editTitleBox:SetText("Shared Fire Updated")
 edit._editDescBox:SetText("Edited once")
 local save = assert(edit._saveBtn:GetScript("OnClick"))
 save()
+-- The accepted edit is one retained catalog mutation; its single broadcast
+-- is queued from the terminal commit.
+S.PumpCatalogToIdle("edited post admission")
 shared = assert(Nexus.BuildCatalog.Get(sharedId))
 assert(not edit:IsShown() and shared.title == "Shared Fire Updated"
     and shared.description == "Edited once" and #broadcasts == 2

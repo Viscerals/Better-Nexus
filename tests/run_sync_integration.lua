@@ -35,14 +35,37 @@ UnitName = function() return "Alice" end
 H.FireEvent("ADDON_LOADED", "Nexus")
 H.FireEvent("SPELLS_CHANGED")
 H.FireEvent("PLAYER_ENTERING_WORLD")
+H.RequireStarted()
 H.Advance(2)
 
 assert(Nexus.Sync.IsConnected(), "sync channel should be connected after PLAYER_ENTERING_WORLD")
 print("sync channel connects automatically on login -- OK")
 
 -- Post through the real UI-facing function
+for turns = 0, 200000 do
+    local root = Nexus.BuildCatalog.RootState()
+    if not root.candidate then break end
+    assert(turns < 200000,
+        "pre-post catalog work did not reach terminal state")
+    H.Advance(0.1, 0.1)
+end
 local CB = Nexus.CommunityBuilds
-local ok, id = CB.PostCurrentWishlist("My Shared Build", "Check this out", H.wishlist)
+local ok, id, postOutcome = CB.PostCurrentWishlist(
+    "My Shared Build", "Check this out", H.wishlist)
+if type(postOutcome) == "table" and postOutcome.localSaved ~= true then
+    -- The retained pending save is accepted once and reports its state on
+    -- the same outcome table until the terminal ticket completes it.
+    assert(ok == true and postOutcome.queueReason == "ROOT_MUTATION_PENDING"
+            and type(postOutcome.id) == "string" and id == postOutcome.id,
+        "posting returned neither terminal success nor one retained catalog write")
+    for turns = 0, 200000 do
+        if postOutcome.localSaved == true then break end
+        assert(turns < 200000,
+            "posted wishlist did not reach terminal catalog state")
+        H.Advance(0.1, 0.1)
+    end
+    ok = postOutcome.localSaved == true
+end
 assert(ok, "posting should succeed")
 H.Advance(3)  -- let the send queue pump
 assert(#H.sentChatMessages >= 1, "posting did not actually broadcast anything")
@@ -67,6 +90,12 @@ Nexus.Sync.RequestSync()
 for _, msg in ipairs(H.sentChatMessages) do
     H.FireEvent("CHAT_MSG_CHANNEL", msg.text, "Alice-Ebonhold", "Common",
         Nexus.Sync.ChannelName())
+end
+for turns = 0, 200000 do
+    if H.DurableBuilds()[id] then break end
+    assert(turns < 200000,
+        "inbound integration mutation did not reach terminal state")
+    H.Advance(0.1, 0.1)
 end
 assert(H.DurableBuilds()[id],
     "a message on the real sync channel should have been processed and stored")

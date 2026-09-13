@@ -1,6 +1,7 @@
 -- Basic Sync lifecycle: channel discovery/join, and a small single-chunk
 -- build broadcast/receive round trip end to end.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 
@@ -47,6 +48,9 @@ assert(Sync.IsReceiving(), "receive window should be open after RequestSync")
 for _, msg in ipairs(H.sentChatMessages) do
     Sync.HandleIncoming(msg.text, "Alice-Ebonhold")
 end
+-- MASTER-W2-008: the received build is one retained catalog mutation; settle
+-- it through the public scheduler seam before the durable assertions.
+S.PumpCatalogToIdle("received build admission")
 
 -- Legacy-to-bundle cutover (architecture 3b5de54f, state machine lines 394 and
 -- 4849): the durable authority payload is the bundle, and the exact PR #68

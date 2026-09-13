@@ -8,18 +8,19 @@
 
 - Stage: 50
 - Checkpoint: 50.3
-- Status: IN_REVIEW
-- Branch: `refactor/test19-catalog-authority-22-wave2`
-- Starting head: rejected Wave 1 candidate `22c1553a018af9543c9b596d49cf5a9e7d776ffd`
-- Worktree: `C:\T3\BN\catalog-authority-22-wave2`
+- Status: IN_PROGRESS
+- Branch: `bugfix/test19-catalog-authority-22-wave3`
+- Starting head: rejected Wave 2 candidate `66e175b6296606e39bbec45ac30a109e21ab0ea9`, tree `fd2041bf2b9a7f6da3bdbb2716303ee4f99fb305`
+- Worktree: `C:\T3\BN\catalog-authority-22-wave3`
 - Base: exact PR #68 head `6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f`
 
 ## Objective (current checkpoint)
 
-Complete the second and final aggregated repair wave for `MASTER-RC-002`,
-`MASTER-RC-006`, `MASTER-RC-007`, `MASTER-RC-012`, and `MASTER-RC-017` from the
-rejected Wave 1 MASTER result. Then freeze one coherent candidate for exact-head
-validation and fresh independent review.
+Complete the third and final bounded repair wave for `MASTER-W2-001` through
+`MASTER-W2-011`, mapped only to `MASTER-RC-002`, `MASTER-RC-006`,
+`MASTER-RC-007`, and `MASTER-RC-017` from the rejected Wave 2 MASTER result.
+Then freeze one coherent candidate for exact-head validation and one fresh
+independent acceptance campaign.
 
 ## Deliverables (current checkpoint)
 
@@ -36,6 +37,13 @@ validation and fresh independent review.
 - Detached copy-on-write mutation targets with exact rollback identities.
 - Exact bounded nested-graph drift detection.
 - Centralized overflow-safe durable and session counter increments.
+- Adjacent durable-bundle and serving-root publication with no callback,
+  allocation, or yield between the two assignments.
+- Detached retention and compaction candidates that publish no nested durable
+  byte early.
+- One imported-publication mutation, one inbound mutation owner, and one
+  terminal result.
+- EvidenceCoordinator identity plus append/removal revision binding.
 
 ## Acceptance (current checkpoint)
 
@@ -57,12 +65,38 @@ validation and fresh independent review.
 - [x] Fail-capable expected-red regressions cover all five Wave 2 roots.
 - [x] All five coupled repairs and affected original-root invariants pass.
 - [x] One coherent Wave 2 freeze commit records its exact identity and paths.
-- [ ] Wave 2 exact-head Fast and Full pass on the frozen candidate.
-- [ ] Fresh independent Wave 2 MASTER accepts the frozen candidate.
+- [x] Wave 2 exact-head Fast and Full passed on frozen commit
+  `66e175b6296606e39bbec45ac30a109e21ab0ea9`.
+- [x] Fresh independent Wave 2 MASTER completed and rejected the frozen candidate
+  with eleven confirmed P1 blockers.
+- [x] Direct Wave 3 authority, exact scope, route, and pre-edit counters are bound
+  by one immutable packet and external receipt before any tracked Wave 3 edit.
+- [x] Fail-capable expected-red probes reproduce every Wave 2 finding on exact
+  rejected bytes before the corresponding production repair.
+- [x] All eleven Wave 3 repairs and their focused, subsystem, integrated, path,
+  policy, and compatibility controls pass.
+- [x] One coherent Wave 3 freeze commit records exact identity and paths
+  (this commit; its parent is
+  `66e175b6296606e39bbec45ac30a109e21ab0ea9`, and its exact commit and tree hashes are bound by
+  the external exact-head receipts under `C:\T3\BN\receipts\wave3`).
+- [ ] Wave 3 exact-head Fast and Full pass on the frozen candidate.
+- [ ] Fresh independent Wave 3 MASTER accepts the frozen candidate.
 
 ## Evidence
 
 - path: .vibe/EVIDENCE.md
+- Canonical Wave 3 execution packet:
+  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-3.json`, SHA-256
+  `760864fe79c3ca2962e8d7ff8610443e5a1f1e992113ec1734ecb86666b9d984`,
+  24,388 bytes.
+- Wave 3 pre-edit authorization and counter receipt:
+  `C:\T3\BN\receipts\wave3\CODEX_WAVE3_PREEDIT_AUTHORIZATION_2026-09-12.md`,
+  SHA-256 `0a62bee967aeabfabe9ea31ed38072bf6e1fbd1c570d572a09c7df9111c9e1e0`,
+  5,755 bytes.
+- Direct Wave 3 authorization attachment SHA-256:
+  `1f86ed284803d4b5e61c9fd102dac4be5d07b40df112396b541b085d024d64ad`.
+- Rejected Wave 2 MASTER result SHA-256:
+  `e7af6424053f68bd25b66ff36bfdbb6fd5a537c8b33b933f67017a2c78223e72`.
 - Amendment 2 and successor-writer authority were recorded before this reconciliation:
   `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-2-amendment-2.json`,
   SHA-256 `0e3cc02a266cc650d3a907750e34b71e2ac50f0a962e48f080035f3f528ff567`;
@@ -231,6 +265,30 @@ validation and fresh independent review.
   staged, untracked, protected, or outside paths. Its ordinal LF path-list
   SHA-256 is
   `fe67a7868304a03bb23114ba784d5d95412489d48de78dc73beadf97dea396ee`.
+- Wave 2 froze at commit `66e175b6296606e39bbec45ac30a109e21ab0ea9`,
+  tree `fd2041bf2b9a7f6da3bdbb2716303ee4f99fb305`. Exact-head Fast passed
+  230/230, Full passed 18 checks with one explicit manual SavedVariables skip,
+  and the current Lua inventory passed 243/243. Fresh independent MASTER then
+  rejected the candidate with `MASTER-W2-001` through `MASTER-W2-011`.
+- Direct user authority created one bounded Wave 3 from those exact rejected
+  bytes. The canonical packet enumerates 34 exact paths: 13 production owners
+  and consumers, 13 tests, and 8 support or workflow records. All 34 pre-edit
+  hashes match. No protected path is permitted.
+- Current turn metadata at ordinal 31524 verifies `gpt-5.6-sol` / `max` for the
+  same sole writer. Older medium and Astra/high routing evidence remains
+  unchanged.
+- The Codex writer handed the dirty Wave 3 bytes to the T3 Claude Fable
+  writer through the verified safe-handoff receipt (SHA-256
+  `61aa933eaf1b86decfa876866738b72f3ee64fd4299a0f0f2082fbece4a647e5`). The
+  same sole writer then diagnosed MIX-07 (slow, not hung; focused case
+  passed), repaired the startup seal, lifecycle gating, evidence rebinding,
+  controller pending contract, projection currency, DPS superseded-page and
+  completion binding, and mutation source-witness verification regressions,
+  and created prospective immutable Amendments 2, 3, 4, and 5 before editing
+  the 49 further existing offline tests they bind. Zero production paths
+  were added.
+- Pre-freeze proof on the dirty bytes: The complete current Lua inventory on the exact freeze-candidate bytes (started 2026-09-13 05:52:43, finished 08:20:22 local, untracked log SHA-256 `ddd714a6fddf473a26b6ebfac7b800e7abadb90b13d04601770dba8928c63fb5`, 64,381 bytes): `Lua suite: 243/243 passed` with the single explicit manual `tests/run_legacy_backup_smoke.lua` skip (244 discovered, 243 runnable). Inside that inventory the complete default `tests/run_sync_semantic_envelope.lua` reported `23 passed, 0 red` (also 23/0 standalone before the mutation-verification repair) and the complete default `tests/run_sync_mixed_client_matrix.lua` reported `14 passed, 0 red` Fast on the final dirty bytes (started 2026-09-13 03:21:32 local, 7,313.486 s): 163 passed, 0 failed, 0 unavailable, 1 nonblocking no-BaseRef skip (`git-diff-check-range`), including the shared artifact path policy, the PR58 expected-red oracle, and the 58-test mapped plan with the complete semantic envelope.
+- Path reconciliation before freeze: The pre-freeze inventory is exactly 105 tracked modified paths, zero staged, zero untracked, zero protected, and zero outside the parent packet plus Amendments 1-5 (34 parent paths, of which 30 changed; 27 + 2 + 42 + 1 + 3 amendment tests changed; `tests/run_builds_resilience.lua` of Amendment 3 passed unedited). Ordinal LF path-list SHA-256 `79a8c22d52d39b9eb6ca0185bc91b54e568c283bc181c86f6e3dbf50787d63d1`.
 
 ## Workflow state
 
@@ -305,6 +363,24 @@ validation and fresh independent review.
   - Notes: All nine targets matched `HEAD` through packet and receipt creation. This adds zero production paths and no new root, semantic, repair wave, counter change, evidence correction, or relaxed gate.
   - Resolution: Standing automation authority created exact prospective Amendment 9 before any target edit. Strict Vibe validation and actual implementation dispatch preceded implementation. All nine focused fixtures and the complete current suite now pass.
 
+- [x] ISSUE-W3-AUTHORITY-AND-SCOPE: One bounded final repair wave and exact path map
+  - Impact: BLOCKER
+  - Status: RESOLVED
+  - Owner: human
+  - Unblock Condition: Direct user authorization for exactly one Wave 3, followed by a canonical immutable packet and external pre-edit receipt before any tracked Wave 3 edit.
+  - Evidence Needed: Packet SHA-256 `760864fe79c3ca2962e8d7ff8610443e5a1f1e992113ec1734ecb86666b9d984`; receipt SHA-256 `0a62bee967aeabfabe9ea31ed38072bf6e1fbd1c570d572a09c7df9111c9e1e0`; 34/34 pre-edit hashes.
+  - Notes: This raises the repair-wave maximum from two to three for this bounded wave only. At this tracked reconciliation the counter becomes 3/3/0. Evidence-only corrections remain 1/1/0. No fourth wave, protected path, new architecture semantic, delivery, package, installation, or native test is authorized.
+  - Resolution: Direct authority, exact route, exact rejected candidate, all eleven findings, the ATOM-13 exception, exact paths, validation, acceptance, counters, and terminal boundaries are bound prospectively.
+
+- [x] ISSUE-W3-DISPATCH-AUTO-REVIEW: Actual Vibe implementation dispatch
+  - Impact: BLOCKER
+  - Status: RESOLVED
+  - Owner: human
+  - Unblock Condition: After disclosure of the automatic-review rejection, the user explicitly authorizes installed VibeRun `next` on the exact Wave 3 worktree to write its ignored runtime cursor and run the already bounded Wave 3 implementation loop.
+  - Evidence Needed: Direct attachment SHA-256 `9fb425396620360bbccaa1bb84587621dd714ddc618128fb4dfc4f1c9e0746ab`; immutable action-authorization receipt SHA-256 `15cbfaa5539ee4a65945542c8a776a95e70098815b0eb8f8d24fed8dc0e6f3e7`.
+  - Notes: The previous rejection and receipt remain unchanged. The retry consumes no repair wave or counter transition. Expected ignored writes are `.vibe/LOOP_RESULT.json` and `.vibe/workflow_runtime.json`; both were absent before dispatch.
+  - Resolution: The direct decision explicitly supersedes the earlier user-level two-wave maximum for this one bounded Wave 3 action, requires one normal approval submission, and prohibits bypass or repeated retry.
+
 ## Active issues
 
 - None.
@@ -315,15 +391,11 @@ validation and fresh independent review.
 
 ## Deferred work
 
-- Local packaging and recoverable installation are authorized only after
-  exact-head validation and valid independent MASTER acceptance. Stop and notify
-  the user before live WoW testing.
-- Scoped task-branch, pull request, relevant CI, and accepted tester/prerelease
-  GitHub writes are authorized by the separate 2026-09-11 receipt. Verify the
-  exact repository, remote, branch, workflow, and publication target first.
-  Merge, protected/default-branch push, force-push, history deletion, unrelated
-  PR #59 work, production deployment, paid-service mutation, live SavedVariables
-  access, game restart/reload, and legacy-campaign mutation remain unauthorized.
+- Packaging, publication, installation, native WoW testing, and live
+  SavedVariables access require a new decision after valid Wave 3 acceptance.
+- Merge, protected/default-branch push, force-push, history deletion, unrelated
+  PR #59 work, production deployment, paid-service mutation, game
+  restart/reload, and legacy-campaign mutation remain unauthorized.
 - PR #59 / issue #40 typed digest, PR #60 reconstruction, ChatThrottleLib audit,
   SyncTransport migration, WP8, and native Test 19 remain out of scope.
 
@@ -341,18 +413,23 @@ validation and fresh independent review.
   row. Exact replay is a no-op and a delete over a never-admitted row refuses.
 - Retention and compaction run inside one maintenance transaction bound to the
   exact database, and only the commit publishes a replacement root.
+- Wave 3 is the third and final repair wave. Its first tracked reconciliation
+  consumes the one added allowance: 3 used, maximum 3, remaining 0.
 
 ## Last completed loop
 
-- The final implementation loop passes the 46 modified focused tests, all
-  243 current Lua programs, and pre-freeze Fast 230/230. Exact path accounting
-  is 62/62 with zero protected or outside path. Flawed Amendments 6 and 7 remain
-  preserved and unconsumed. The candidate is ready for exact-head review.
+- Wave 3 continuation reached a coherent candidate: every current Lua test
+  and the pre-freeze Fast gate pass on the dirty bytes, every dirty path is
+  inside the parent packet plus Amendments 1-5, and this freeze commit is the
+  one coherent Wave 3 candidate. Exact-head Fast and one exact-head Full run
+  next on the frozen commit; their results and the commit hash are bound by
+  external receipts only.
 
 ## Recommended next action
 
-- Strictly validate this `IN_REVIEW` state, create the single coherent Wave 2
-  freeze commit, and record its commit, tree, parent, and exact 62-path inventory
-  in `C:/T3/BN/receipts/wave2/CODEX_WAVE2_FREEZE_2026-09-12.md`. Then run Fast
-  and one Full gate on that exact clean commit before fresh isolated SPEC,
-  STANDARDS, ADVERSARIAL, and separate MASTER review.
+- Run exact-head Fast and one exact-head Full on this frozen commit with no
+  tracked edit. If both pass, hand the exact evidence to fresh direct Codex
+  Sol/max SPEC, STANDARDS, and ADVERSARIAL review and a separate MASTER. If
+  a required gate fails, report `HANDOFF_REQUIRED - WAVE 3 COMPLETE, NO
+  FURTHER REPAIR AUTHORIZED` and stop. No packaging, publication,
+  installation, native WoW test, or live SavedVariables access is authorized.

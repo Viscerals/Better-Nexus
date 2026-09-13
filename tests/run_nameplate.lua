@@ -2,6 +2,7 @@
 -- Tests the AugmentUnitTooltip logic directly since GameTooltip
 -- HookScript can't fire in the test harness.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
@@ -90,10 +91,15 @@ assert(#lines==0, "unknown player should add nothing")
 print("Unknown player produces no output -- OK")
 
 -- 6. Community author with no DPS gets author badge
-assert(Nexus.BuildCatalog.Put({
-    id="b1",title="Fire Mage",author="AuthorGuy",class="MAGE",
-    echoes=echoes,postedAt=50000,lastModified=50000,isMine=false
-}))
+-- The received DPS records above created their exact-loadout pages through
+-- retained catalog work; settle it before the next fixture write.
+S.PumpCatalogToIdle("tooltip fixture record pages")
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put({
+        id="b1",title="Fire Mage",author="AuthorGuy",class="MAGE",
+        echoes=echoes,postedAt=50000,lastModified=50000,isMine=false
+    })
+end, "author badge fixture admission"))
 local catalogAllCalls = 0
 local realCatalogAll = Nexus.BuildCatalog.All
 Nexus.BuildCatalog.All = function(...)

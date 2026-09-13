@@ -16,6 +16,7 @@
 -- accumulated on a weaker pull -- and the preserved legacy input is now
 -- additionally asserted to keep its table identity and to take no write.
 local H=dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
@@ -55,6 +56,9 @@ local function setLoadout(ids)
 end
 local function pull(value)
  dps=value; DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
+ -- MASTER-W2-004: the automatic page and the superseded-page removal are
+ -- retained catalog mutations; settle them before counting durable rows.
+ S.PumpCatalogToIdle("character best catalog work")
 end
 setLoadout({200100,200102}); pull(24000000)
 local count=durableCount()

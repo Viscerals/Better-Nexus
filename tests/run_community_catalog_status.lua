@@ -1,6 +1,7 @@
 -- Stage 35.8: the immutable baseline, overlay, active filters, and displayed
 -- window must remain separate fixed facts through the real Community owners.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 local function SettleCatalog()
     local catalog = Nexus.BuildCatalog
@@ -97,6 +98,16 @@ C.Show()
 
 local frame = assert(H.frames.NexusCommunityBuildsFrame,
     "Community frame did not initialize")
+-- MASTER-W2-006: the Community list is a retained projection job pumped one
+-- bounded slice per real frame; drive the real frame until the represented
+-- projection is current and no job is pending before each status read.
+local function SettleProjection(label)
+    S.PumpCommunityFrame(H.frames.NexusCommunityBuildsFrame, function()
+        local snapshot = C.DiagnosticSnapshot()
+        return snapshot.projectionCurrent and not snapshot.projectionPending
+    end, label or "Community projection")
+end
+SettleProjection("Community list")
 local blank = C.DiagnosticSnapshot()
 assert(blank.bundledCount == 504 and blank.overlayCount == 0
     and blank.availableCount == 346 and blank.filterMatchedCount == 346
@@ -150,6 +161,7 @@ Nexus.BuildCatalog.Status = realStatus
 
 -- Qualification narrows the result without pretending the baseline vanished.
 frame._qualifiedBtn:GetScript("OnClick")()
+SettleProjection("qualified toggle")
 local qualified = C.DiagnosticSnapshot()
 assert(qualified.availableCount == 346 and qualified.filterMatchedCount == 346
     and qualified.qualifyingCount == 0 and qualified.resultCount == 0
@@ -162,6 +174,7 @@ frame._qualifiedBtn:GetScript("OnClick")()
 local search = assert(frame._searchBox)
 search:SetText("warrior")
 search:GetScript("OnTextChanged")(search)
+SettleProjection("search narrowing")
 local narrowed = C.DiagnosticSnapshot()
 assert(narrowed.searchActive and narrowed.filterMatchedCount > 20
     and narrowed.filterMatchedCount < 346
@@ -186,6 +199,7 @@ local clear = assert(frame._clearSearchBtn,
 assert(clear:IsShown() and clear:GetText() == "Clear Search",
     "Clear Search action was not visibly bound while search was active")
 clear:GetScript("OnClick")()
+SettleProjection("search clear")
 assert(NexusDB.buildFilters.search == "" and search:GetText() == ""
     and NexusDB.buildFilters.page == 2,
     "Clear Search did not clear through the filter owner and preserve page")
@@ -209,6 +223,7 @@ assert(PutTerminal({
 }))
 C.MarkDataDirty()
 C.Refresh()
+SettleProjection("overlay mutation")
 local overlaid = C.DiagnosticSnapshot()
 assert(overlaid.bundledCount == 504 and overlaid.overlayCount == 1
     and overlaid.availableCount == 347 and overlaid.resultCount == 347
@@ -269,6 +284,7 @@ C.Hide()
 dofile("ui/CommunityBuilds.lua")
 C = Nexus.CommunityBuilds
 C.Init(nil,nil); C.Show()
+SettleProjection("reload")
 local reloaded = C.DiagnosticSnapshot()
 assert(reloaded.bundledCount == 504 and reloaded.overlayCount == 1
     and reloaded.availableCount == 347 and reloaded.publishedPage == 2

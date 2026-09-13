@@ -1,9 +1,22 @@
 -- Optimized mesh: state hashes skip current peers and responder claims suppress duplicates.
 local H=dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
+-- MASTER-W2-006: the compatibility hash owner loads between the catalog and
+-- Sync (Nexus.toc order); Sync answers only from its retained cursor work.
+dofile("core/BuildHashCache.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 local Sync,DPS=Nexus.Sync,Nexus.DpsCapture
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
-local function Pump(steps) for _=1,steps do clock=clock+0.2; Sync.OnUpdate(0.2) end end
+local function Pump(steps)
+  for _=1,steps do
+    clock=clock+0.2
+    -- One catalog slice and one cache slice per turn before Sync consumes
+    -- them, exactly as MainLifecycle gates its frame.
+    Nexus.BuildCatalog.PumpRootAdmission()
+    Nexus.BuildHashCache.Pump()
+    Sync.OnUpdate(0.2)
+  end
+end
 local playerName="RelayB"; UnitName=function() return playerName end; UnitLevel=function() return 80 end
 local echoes={{spellId=200001,stacks=2},{spellId=200002,stacks=1}}
 local build={id="manual-build",title="Real Build",description="Real description",
@@ -19,11 +32,13 @@ H.AdmitCatalogV1(NexusDB)
 Sync.Init(Nexus.Codec,{})
 H.AdmitCatalogV1(NexusDB)
 DPS.Init({},Sync)
+S.CompatibilityHashes(Sync)
 -- Let the login-time automatic sync fire and drain, then clear it before targeted claims.
 Pump(100)
 H.sentChatMessages={}
 local fp=DPS.GetEchoKey(echoes)
 assert(DPS.ReceiveRecord({v=4,f=fp,e=echoes,c="dummy",d=24000000,u=65,t=50000,p="Winner",k="MAGE",l=80,b=build.id}))
+S.PumpCatalogToIdle("winner record catalog work")
 local function buildHash(builds)
   local buckets={}; for i=1,8 do buckets[i]={} end
   local function bucket(id) local h=5381; for i=1,#id do h=((h*33)+id:byte(i))%2147483648 end; return (h%8)+1 end

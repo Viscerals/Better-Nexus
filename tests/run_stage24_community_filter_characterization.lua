@@ -2,6 +2,7 @@
 -- contract remains the default, but explicit opt-outs and 20-row pages must
 -- reveal the complete synchronized catalog without changing storage.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 UnitName = function() return "FixtureOwner" end
 GetNormalizedRealmName = function() return "FixtureRealm" end
@@ -71,7 +72,7 @@ local function Contains(rows, prefix)
 end
 
 -- Default compatibility stays green: current MAGE, qualified, first 20.
-local defaults, defaultSummary = P.Builds({
+local defaults, defaultSummary = S.ProjectBuilds(P, {
     scope="all",sortMode="title",currentClassOnly=true,
     qualifiedOnly=true,page=1,pageSize=20,
 })
@@ -85,11 +86,11 @@ end
 
 -- Class opt-out must expose qualified Warrior and Unknown rows.
 P.Reset()
-local _, allClassSummary = P.Builds({
+local _, allClassSummary = S.ProjectBuilds(P, {
     scope="all",sortMode="title",currentClassOnly=false,
     qualifiedOnly=true,page=1,pageSize=20,
 })
-local allClassesPage2 = P.Builds({
+local allClassesPage2 = S.ProjectBuilds(P, {
     scope="all",sortMode="title",currentClassOnly=false,
     qualifiedOnly=true,page=2,pageSize=20,
 })
@@ -101,13 +102,13 @@ Expect("all_classes_filter_is_honored",
 
 -- Qualification opt-out must expose synchronized one-sided and no-DPS rows.
 P.Reset()
-local allShared, allSharedSummary = P.Builds({
+local allShared, allSharedSummary = S.ProjectBuilds(P, {
     scope="all",sortMode="title",currentClassOnly=false,
     qualifiedOnly=false,page=1,pageSize=20,
 })
 local beforePage = P.Stats().builds
 local beforePageKey = P.CacheKeys().builds
-local allSharedPage2 = P.Builds({
+local allSharedPage2 = S.ProjectBuilds(P, {
     scope="all",sortMode="title",currentClassOnly=false,
     qualifiedOnly=false,page=2,pageSize=20,
 })
@@ -126,7 +127,7 @@ Expect("page_change_reuses_cached_projection",
     "page change reacquired, resorted, or changed the represented query")
 
 -- Page two must reuse the represented query but return rows 21-35.
-local secondPage, secondSummary = P.Builds({
+local secondPage, secondSummary = S.ProjectBuilds(P, {
     scope="all",sortMode="title",currentClassOnly=false,
     qualifiedOnly=false,page=2,pageSize=20,
 })
@@ -164,7 +165,7 @@ end
 
 -- Existing scope/search/sort semantics remain independently green.
 P.Reset()
-local mine = P.Builds({scope="mine",sortMode="title",search="qualified-1"})
+local mine = S.ProjectBuilds(P, {scope="mine",sortMode="title",search="qualified-1"})
 assert(#mine > 0 and #mine <= 2,
     "existing mine/search/sort behavior changed during characterization")
 for _, row in ipairs(mine) do

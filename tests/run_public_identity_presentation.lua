@@ -2,6 +2,7 @@
 -- ambiguous duplicates without erasing them, and uses the same labels for
 -- Leaderboard and Community projections.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 Nexus = {}
 dofile("core/Revisions.lua")
@@ -116,6 +117,11 @@ local function Deliver(sender, transferId, record)
         assert(#packet <= 255, "identity fixture exceeded wire limit")
         result = Sync.HandleIncoming(packet,sender) or result
     end
+    -- MASTER-W2-004: the record's exact-loadout page is one retained catalog
+    -- mutation; settle it before the identity assertions read the row.
+    if Nexus.BuildCatalog and Nexus.BuildCatalog.RootState().candidate then
+        S.PumpCatalogToIdle("identity fixture page admission")
+    end
     return result
 end
 
@@ -202,8 +208,12 @@ local missing = WireRecord("MissingBridge", 810009, 22500000, 22, "dummy",
 assert(Deliver("MissingBridge", "missing-short", missing),
     "historical missing-metadata fixture was not retained")
 local missingRow = NexusDB.dpsCapture.characterBest.dummy.missingbridge
+-- A historical short row predates every derived field, including the
+-- self-verifying evidence keys the current receive path binds; strip those
+-- too so the row models the pre-metadata shape exactly.
 missingRow.duration,missingRow.loadoutHash,missingRow.buildId,
     missingRow.lockedEchoes = nil,nil,nil,nil
+missingRow.lockedEvidenceKey = nil
 missing.b = "new-build-id"
 assert(Deliver("MissingBridge-RealmC", "missing-exact", missing),
     "exact historical bridge was not accepted")
@@ -330,7 +340,9 @@ for _, rows in ipairs({projectedDummy,projectedLk,combined}) do
     end
 end
 
-local community, summary = P.Builds({currentClassOnly=false,
+-- A cold Builds read is one retained projection job; settle it through the
+-- public projection seam before the published counts are read.
+local community, summary = S.ProjectBuilds(P, {currentClassOnly=false,
     qualifiedOnly=false,scope="all",sortMode="title",page=1})
 assert(#community == 5 and summary.filteredTotal == 5
         and summary.displayedCount == 5 and summary.total == 5

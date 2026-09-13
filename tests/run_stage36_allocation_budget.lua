@@ -307,6 +307,15 @@ local function AwaitCatalogMutation(ok, why, ticket)
     return ok, why, ticket
 end
 
+-- Compaction bookkeeping is one durable payload: the protected bundle owns it
+-- once the root is admitted, the raw table only before. Read and mutate it
+-- through the same selection the owner uses.
+local function CompactionMeta(db)
+    local bundle = rawget(db, "authorityBundle")
+    if type(bundle) == "table" then return rawget(bundle, "dataCompaction") end
+    return rawget(db, "dataCompaction")
+end
+
 local function PumpCatalogSlice()
     if Catalog.RootState().candidate then Catalog.PumpRootAdmission() end
 end
@@ -402,7 +411,11 @@ Control(compacted.pending == false and compacted.maxPumpWork <= 32
         and compacted.dpsRecordsAfter == 40
         and compacted.restarts >= 1,
     "incremental compaction counters or revision restart were not exact")
-Control(NexusDB.dataCompaction.version == 1
+-- MASTER-W2-002: compaction metadata is a nested field of the published
+-- authority bundle; the exact PR #68 location is preserved input only.
+local durableCompaction = rawget(NexusDB, "authorityBundle")
+    and NexusDB.authorityBundle.dataCompaction or NexusDB.dataCompaction
+Control(type(durableCompaction) == "table" and durableCompaction.version == 1
         and Scheduler.Pending("data-compaction") == nil,
     "completed compaction retained pending scheduler ownership")
 -- Legacy-to-bundle cutover: the exact PR #68 tombstone map keeps its identity as
@@ -420,10 +433,17 @@ for index = 1, 160 do
             and hydrated and hydrated.echoes[1].spellId == 910000 + index,
         "build compaction lost exact evidence, ownership, or unknown fields")
 end
+-- MASTER-W2-002: compaction builds detached replacements and publishes them
+-- inside the complete bundle; the seeded source rows are never mutated in
+-- place, so the compacted rows are read from the published payload.
+local publishedDps = rawget(NexusDB, "authorityBundle")
+    and NexusDB.authorityBundle.dpsCapture or NexusDB.dpsCapture
+local publishedRows = publishedDps and publishedDps.characterBest
+    and publishedDps.characterBest.dummy or {}
 for index = 1, 40 do
-    local raw = dpsRows["player-" .. index]
-    local resolved = Nexus.LoadoutEvidence.ResolveDpsEchoes(raw)
-    Control(raw.echoes == nil and raw.ownerVerified == true
+    local raw = publishedRows["player-" .. index]
+    local resolved = raw and Nexus.LoadoutEvidence.ResolveDpsEchoes(raw)
+    Control(raw and raw.echoes == nil and raw.ownerVerified == true
             and raw.futureRow.keep == "dps-" .. index
             and resolved and resolved[1].spellId == 920000 + index,
         "DPS compaction lost exact evidence, provenance, or unknown fields")
@@ -535,6 +555,15 @@ do
     end
     local rebound = Compaction.Stats()
     local hydrated = Catalog.Get("owner-new-48")
+    -- MASTER-W2-002: compaction builds detached replacements and publishes
+    -- them inside the complete bundle; the seeded replacement DPS row is never
+    -- mutated in place, so the compacted row is read from the published
+    -- payload while the seeded owner tables keep their identities.
+    local publishedReplacementDps = H.DurablePayload("dpsCapture", ownerDb)
+    local publishedReplacementRow = publishedReplacementDps
+        and publishedReplacementDps.characterBest
+        and publishedReplacementDps.characterBest.dummy
+        and publishedReplacementDps.characterBest.dummy.replacement
     Desired(rebound.restarts >= 1 and rebound.overlayRecordsAfter == 48
             and rebound.dpsRecordsAfter == 1,
         "canonical owner replacement was not rebound and restarted")
@@ -545,8 +574,10 @@ do
             and H.DurableBuilds(ownerDb)["owner-new-48"].futureRow.keep
                 == "replacement-48"
             and hydrated and hydrated.echoes[1].spellId == 940048
-            and replacementDpsRow.echoes == nil
-            and Nexus.LoadoutEvidence.ResolveDpsEchoes(replacementDpsRow)[1].spellId
+            and publishedReplacementRow
+            and publishedReplacementRow.echoes == nil
+            and publishedReplacementRow.futureRow.keep == "replacement-dps"
+            and Nexus.LoadoutEvidence.ResolveDpsEchoes(publishedReplacementRow)[1].spellId
                 == 950001,
         "rebound owners lost exact evidence, identity, or unknown fields")
 end
@@ -606,14 +637,20 @@ do
     -- explicitly instead of a completed version stamp. This is a stronger
     -- oracle, not a relaxed one: before the repair the raw write was invisible
     -- and the root kept serving as if its source were still proven.
-    Desired(inserted and providerDb.dataCompaction.version == nil
+    -- The compaction bookkeeping now lives in the protected bundle payload;
+    -- a never-completed transaction leaves no version stamp in either
+    -- location.
+    local providerCompaction = CompactionMeta(providerDb)
+    Desired(inserted
+            and (providerCompaction == nil or providerCompaction.version == nil)
             and providerRaw and type(providerRaw.echoes) == "table"
             and providerRaw.evidenceKey == nil
             and Catalog.Get("provider-row") == nil
             and Catalog.RootState().state == "ROOT_INVALIDATED",
         string.format(
             "post-provider raw write was not caught as current-source drift: inserted=%s version=%s row=%s echoes=%s evidenceKey=%s public=%s root=%s reason=%s",
-            tostring(inserted), tostring(providerDb.dataCompaction.version),
+            tostring(inserted),
+            tostring(providerCompaction and providerCompaction.version),
             tostring(providerRaw ~= nil),
             tostring(providerRaw and type(providerRaw.echoes)),
             tostring(providerRaw and providerRaw.evidenceKey),
@@ -646,13 +683,35 @@ do
     NexusDB = providerDb
     Nexus.BundledBuilds = {schemaVersion=1,
         catalogVersion="provider-generation",sourceVersion="test",builds={}}
-    H.BootstrapStore()
-    Desired(replaced and not providerDb.dataCompaction.version
-            and string.find(tostring(providerDb.dataCompaction.lastError or ""),
+    -- MASTER-W2-002/W2-005: a failed detached transaction publishes no
+    -- durable byte, so its failure reason is no longer a durable lastError
+    -- stamp; it is the terminal result of the pump that stopped. Observe that
+    -- result through the public pump seam the bootstrap route drives.
+    local selfReplaceReason
+    do
+        local realPump = Compaction.Pump
+        Compaction.Pump = function(...)
+            local result, changed = realPump(...)
+            if type(result) == "table" and result.blocked then
+                selfReplaceReason = result.reason
+            end
+            return result, changed
+        end
+        H.BootstrapStore()
+        Compaction.Pump = realPump
+    end
+    Desired(replaced and not (CompactionMeta(providerDb) or {}).version
+            and string.find(tostring(selfReplaceReason or ""),
                 "providers changed",1,true),
         "changing provider registry was stamped from a stale health pass")
     Nexus.LoadoutEvidence.RegisterReferenceProvider(
         "stage36.self-replace",nil)
+    -- A changed evidence-provider registry or metadata owner is current-source
+    -- drift for the admitted root (MASTER-W2-011): readmit the complete root
+    -- before the retained maintenance transaction can resume.
+    if Catalog.RootState().state ~= "ROOT_ADMITTED" then
+        H.RebindCatalog(providerDb)
+    end
     Compaction.Init(providerDb)
     local providerGuard = 0
     while Compaction.Stats().pending do
@@ -662,7 +721,7 @@ do
         Control(providerGuard < 1000,
             "provider-generation recovery did not converge")
     end
-    Control(providerDb.dataCompaction.version == 1,
+    Control(CompactionMeta(providerDb).version == 1,
         "stable provider registry did not resume to completion")
 end
 
@@ -682,9 +741,9 @@ do
     local futureSnapshot, futureMeta
     Nexus.LoadoutEvidence.RegisterReferenceProvider(
         "stage36.provider-future",function()
-            providerDb.dataCompaction.schemaVersion = 99
-            providerDb.dataCompaction.future = {keep="provider-owned"}
-            futureMeta = providerDb.dataCompaction
+            CompactionMeta(providerDb).schemaVersion = 99
+            CompactionMeta(providerDb).future = {keep="provider-owned"}
+            futureMeta = CompactionMeta(providerDb)
             futureSnapshot = Copy(providerDb)
             error("provider promoted compaction metadata")
         end)
@@ -702,10 +761,10 @@ do
     end
     Nexus.LoadoutEvidence.RegisterReferenceProvider(
         "stage36.provider-future",nil)
-    Desired(futureSnapshot and providerDb.dataCompaction == futureMeta
-            and providerDb.dataCompaction.schemaVersion == 99
-            and providerDb.dataCompaction.future.keep == "provider-owned"
-            and providerDb.dataCompaction.lastError == nil
+    Desired(futureSnapshot and CompactionMeta(providerDb) == futureMeta
+            and CompactionMeta(providerDb).schemaVersion == 99
+            and CompactionMeta(providerDb).future.keep == "provider-owned"
+            and CompactionMeta(providerDb).lastError == nil
             and Equal(providerDb,futureSnapshot),
         "provider failure mutated future compaction metadata")
 end
@@ -750,22 +809,36 @@ do
         "stage36.provider-late-failure",function()
             error("late provider failure")
         end)
-    local lateGuard = 0
+    local lateGuard, lateResult = 0, nil
     while Compaction.Stats().pending do
         PumpCatalogSlice()
-        Compaction.Pump()
+        lateResult = Compaction.Pump()
         lateGuard = lateGuard + 1
         Control(lateGuard < 1000,
             "late provider mutation did not reach a terminal result")
     end
-    Desired(not providerDb.dataCompaction.version
-            and string.find(tostring(providerDb.dataCompaction.lastError or ""),
-                "provider failed",1,true),
+    -- The failed detached transaction stamps no durable lastError; its
+    -- terminal pump result names the boundary that stopped completion. A
+    -- provider registered after the health pass either fails inside the
+    -- re-run completion gate or, because the provider registry is bound into
+    -- the admitted root's token (MASTER-W2-011), stops the transaction as
+    -- current-source drift before any stamp. Both keep the version unstamped.
+    local lateReason = tostring(lateResult and lateResult.reason or "")
+    Desired(not (CompactionMeta(providerDb) or {}).version
+            and lateResult and lateResult.blocked == true
+            and (string.find(lateReason, "provider failed", 1, true)
+                or lateReason == "SOURCE_DRIFT"),
         "provider registered after health was omitted from the completion gate")
     Nexus.LoadoutEvidence.RegisterReferenceProvider(
         "stage36.provider-stable",nil)
     Nexus.LoadoutEvidence.RegisterReferenceProvider(
         "stage36.provider-late-failure",nil)
+    -- A changed evidence-provider registry or metadata owner is current-source
+    -- drift for the admitted root (MASTER-W2-011): readmit the complete root
+    -- before the retained maintenance transaction can resume.
+    if Catalog.RootState().state ~= "ROOT_ADMITTED" then
+        H.RebindCatalog(providerDb)
+    end
     Compaction.Init(providerDb)
     local recoveryGuard = 0
     while Compaction.Stats().pending do
@@ -775,7 +848,7 @@ do
         Control(recoveryGuard < 1000,
             "late provider recovery did not converge")
     end
-    Control(providerDb.dataCompaction.version == 1,
+    Control(CompactionMeta(providerDb).version == 1,
         "stable provider generation did not resume to completion")
 end
 
@@ -805,14 +878,20 @@ do
     H.BootstrapStore()
     Control(Compaction.Stats().pending == true,
         "future metadata fixture completed before its bounded yield")
-    schemaDb.dataCompaction.schemaVersion = 99
-    schemaDb.dataCompaction.futureOwner = {keep=true}
+    CompactionMeta(schemaDb).schemaVersion = 99
+    CompactionMeta(schemaDb).futureOwner = {keep=true}
     local metaAtBoundary = Copy(schemaDb)
     local stoppedMeta = Compaction.Pump()
-    Desired(stoppedMeta.blocked and not schemaDb.dataCompaction.version
+    Desired(stoppedMeta.blocked and not CompactionMeta(schemaDb).version
             and Equal(metaAtBoundary,schemaDb),
         "mid-flight future compaction owner was mutated or stamped complete")
-    schemaDb.dataCompaction.schemaVersion = 1
+    CompactionMeta(schemaDb).schemaVersion = 1
+    -- A changed evidence-provider registry or metadata owner is current-source
+    -- drift for the admitted root (MASTER-W2-011): readmit the complete root
+    -- before the retained maintenance transaction can resume.
+    if Catalog.RootState().state ~= "ROOT_ADMITTED" then
+        H.RebindCatalog(schemaDb)
+    end
     Compaction.Init(schemaDb)
     local metaGuard = 0
     while Compaction.Stats().pending do
@@ -821,7 +900,7 @@ do
         metaGuard = metaGuard + 1
         Control(metaGuard < 1000,"restored compaction owner did not resume")
     end
-    Control(schemaDb.dataCompaction.version == 1,
+    Control(CompactionMeta(schemaDb).version == 1,
         "restored compaction owner did not complete")
 
     local evidenceDb = {settingsVersion=2,settings={},chars={},
@@ -852,7 +931,7 @@ do
     durableEvidence.futureOwner = {keep=true}
     local evidenceAtBoundary = Copy(evidenceDb)
     local stoppedEvidence = Compaction.Pump()
-    Desired(stoppedEvidence.blocked and not evidenceDb.dataCompaction.version
+    Desired(stoppedEvidence.blocked and not CompactionMeta(evidenceDb).version
             and Equal(evidenceAtBoundary,evidenceDb),
         "mid-flight future evidence owner was mutated or stamped complete")
 end
@@ -874,11 +953,25 @@ do
         sourceVersion="test",builds={}}
     H.BootstrapStore()
     local realNext, maxNextCalls, deepGuard = next,0,0
+    -- The budget under test is the compaction owner's own traversal. Since
+    -- MASTER-W2-005 its commit drives the catalog's bounded maintenance
+    -- publication inside the same pump, and that owner meters its own slices;
+    -- count only the next() calls whose nearest Lua frame is this owner.
+    local function CompactionOwnerFrame()
+        for level = 3, 6 do
+            local info = debug.getinfo(level, "S")
+            if not info then return false end
+            if info.what ~= "C" then
+                return tostring(info.source):find("DataCompaction", 1, true) ~= nil
+            end
+        end
+        return false
+    end
     while Compaction.Stats().pending do
         PumpCatalogSlice()
         local calls = 0
         next = function(...)
-            calls = calls + 1
+            if CompactionOwnerFrame() then calls = calls + 1 end
             return realNext(...)
         end
         local ok, state = pcall(Compaction.Pump)
@@ -892,10 +985,10 @@ do
     end
     next = realNext
     Desired(maxNextCalls <= 32
-            and deepDb.dataCompaction.version == 1,
+            and CompactionMeta(deepDb).version == 1,
         string.format(
             "deep DFS traversal exceeded its declared per-pump work budget: nextCalls=%d version=%s root=%s phase=%s",
-            maxNextCalls, tostring(deepDb.dataCompaction.version),
+            maxNextCalls, tostring(CompactionMeta(deepDb).version),
             tostring(Catalog.RootState().state),
             tostring(Compaction.Stats().phase)))
 end

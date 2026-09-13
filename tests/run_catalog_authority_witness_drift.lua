@@ -353,4 +353,21 @@ Case("WIT-12", "root-fatal witness limits expose only invalidated authority", fu
         "root-fatal refusal rewrote the rejected row")
 end)
 
+-- Wave 3 MASTER-W2-011. The exact evidence coordinator is part of every
+-- admitted root token. Rebinding the facade cannot inherit an earlier root's
+-- authority even when every function body is copied unchanged.
+Case("WIT-13", "replacing the evidence coordinator invalidates the public root", function()
+    AdmitWith({witEvidenceOwner=S.LocalBuild("witEvidenceOwner", 2)})
+    local original = Nexus.LoadoutEvidence
+    local replacement = {}
+    for key, value in pairs(original) do replacement[key] = value end
+    Nexus.LoadoutEvidence = replacement
+    local row = Catalog().Get("witEvidenceOwner")
+    local after = Catalog().RootState()
+    Nexus.LoadoutEvidence = original
+    Check(row == nil and after.state == "ROOT_INVALIDATED"
+            and after.reason == "SOURCE_DRIFT",
+        "a replacement EvidenceCoordinator inherited the admitted root")
+end)
+
 S.Finish("catalog authority serving witness drift")

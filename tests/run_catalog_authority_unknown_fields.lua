@@ -19,6 +19,10 @@ dofile("data/DefaultProfile.lua")
 dofile("core/Codec.lua")
 local S = dofile("tests/catalog_authority_support.lua")
 local Case, Check = S.Case, S.Check
+local function AwaitMutation(ok, why, ticket)
+    return S.AwaitCatalogMutation(ok, why, ticket,
+        "unknown-field fixture mutation")
+end
 
 local now = 2000000000
 time = function() return now end
@@ -50,7 +54,8 @@ Case("UNK-01",
     "top-level unknown evidence survives a row-to-tombstone replacement",
 function()
     local db = BindRowWithUnknown("unk01")
-    Check(Catalog().SetTombstone("unk01", {stamp=5}, {source="local"}),
+    Check(AwaitMutation(Catalog().SetTombstone(
+        "unk01", {stamp=5}, {source="local"})),
         "the fixture delete was refused")
     local record = H.DurableTombstones(db)["unk01"]
     Check(type(record) == "table", "no durable tombstone was written")
@@ -66,7 +71,8 @@ Case("UNK-02",
     "tuple-scoped unknown evidence survives and stays at tuple scope",
 function()
     local db = BindRowWithUnknown("unk02")
-    Check(Catalog().SetTombstone("unk02", {stamp=5}, {source="local"}),
+    Check(AwaitMutation(Catalog().SetTombstone(
+        "unk02", {stamp=5}, {source="local"})),
         "the fixture delete was refused")
     local record = H.DurableTombstones(db)["unk02"]
     Check(type(record) == "table" and type(record.unknownEvidence) == "table",
@@ -92,13 +98,14 @@ Case("UNK-03",
     "readmission restores carried unknown evidence at its original scope",
 function()
     local db = BindRowWithUnknown("unk03")
-    Check(Catalog().SetTombstone("unk03", {stamp=5}, {source="local"}),
+    Check(AwaitMutation(Catalog().SetTombstone(
+        "unk03", {stamp=5}, {source="local"})),
         "the fixture delete was refused")
     local claim, why = Catalog().BeginTombstoneReadmissionClaim("unk03")
     Check(claim ~= nil, "readmission claim was refused: " .. tostring(why))
     local replacement = S.LocalBuild("unk03", 2)
-    local ok, putWhy = Catalog().PutWithClaim(claim, replacement,
-        {source="local"})
+    local ok, putWhy = AwaitMutation(Catalog().PutWithClaim(
+        claim, replacement, {source="local"}))
     Check(ok, "readmission was refused: " .. tostring(putWhy))
     local durable = H.DurableBuilds(db)["unk03"]
     Check(type(durable) == "table", "readmission wrote no durable row")
@@ -116,7 +123,8 @@ Case("UNK-04",
     "GUARD: the tombstone keeps its exact fixed known shape",
 function()
     local db = BindRowWithUnknown("unk04")
-    Check(Catalog().SetTombstone("unk04", {stamp=9}, {source="local"}),
+    Check(AwaitMutation(Catalog().SetTombstone(
+        "unk04", {stamp=9}, {source="local"})),
         "the fixture delete was refused")
     local record = H.DurableTombstones(db)["unk04"]
     Check(type(record) == "table", "no durable tombstone was written")
@@ -137,7 +145,8 @@ Case("UNK-05",
 function()
     local db = S.Database({unk05=S.LocalBuild("unk05", 2)})
     S.Bind(db)
-    Check(Catalog().SetTombstone("unk05", {stamp=3}, {source="local"}),
+    Check(AwaitMutation(Catalog().SetTombstone(
+        "unk05", {stamp=3}, {source="local"})),
         "the fixture delete was refused")
     local record = H.DurableTombstones(db)["unk05"]
     Check(type(record) == "table", "no durable tombstone was written")

@@ -371,12 +371,38 @@ function Lifecycle.New(options)
         local catalog = Nexus and Nexus.BuildCatalog
         if type(catalog) ~= "table"
             or type(catalog.PumpRootAdmission) ~= "function" then
-            return
+            return true
         end
-        local ok, err = pcall(catalog.PumpRootAdmission)
-        if not ok then RecordError("BuildCatalog.PumpRootAdmission", err) end
+        local ok, result = pcall(catalog.PumpRootAdmission)
+        if not ok then
+            RecordError("BuildCatalog.PumpRootAdmission", result)
+            return false
+        end
+        local root = type(catalog.RootState) == "function"
+            and catalog.RootState() or nil
+        if type(root) == "table" then
+            return root.state == "ROOT_ADMITTED" and root.candidate ~= true
+        end
+        return not (type(result) == "table" and result.state == "pending")
     end
     -- AUTHORITY-COORDINATOR-DRIVE END
+
+    -- Compatibility hashes can require a retained summary/tombstone walk and
+    -- an incremental bucket sort. Advance exactly one cache-owned slice after
+    -- catalog admission and before Sync consumes those hashes.
+    local function PumpBuildHashCacheSlice()
+        local cache = Nexus and Nexus.BuildHashCache
+        if type(cache) ~= "table"
+            or type(cache.Pump) ~= "function" then
+            return true
+        end
+        local ok, ready = pcall(cache.Pump)
+        if not ok then
+            RecordError("BuildHashCache.Pump", ready)
+            return false
+        end
+        return ready == true
+    end
 
     function CompleteWorldEntry(event)
         local Adapter = dependencies.Adapter
@@ -545,10 +571,16 @@ function Lifecycle.New(options)
         PumpAuthorityRebind()
         -- One post-ready Store mutation slice per turn, before consumer reads.
         PumpStoreMutationSlice()
-        PumpCatalogRootAdmissionSlice()
+        -- MASTER-W2-006/W2-008: Sync is the only frame owner that consumes
+        -- catalog and compatibility-hash state, so it alone waits for the
+        -- pending catalog slice and the one cache slice. DPS capture and
+        -- automation keep their per-frame turn; their own catalog writes are
+        -- retained pending tickets and never block the frame.
+        local catalogReady = PumpCatalogRootAdmissionSlice()
+        local buildHashesReady = catalogReady and PumpBuildHashCacheSlice()
         local Adapter = dependencies.Adapter
         if not Adapter.Ready() then return end
-        if Nexus.Sync then
+        if Nexus.Sync and catalogReady and buildHashesReady then
             RunIsolatedOwner("Sync.OnUpdate", Nexus.Sync.OnUpdate, elapsed)
         end
         if Nexus.DpsCapture then

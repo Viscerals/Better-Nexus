@@ -8,6 +8,7 @@ Nexus.LoadoutEvidence.Init({})
 dofile("core/CandidateEvidence.lua")
 dofile("core/ViewProjections.lua")
 dofile("core/CommunityProjection.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 UnitName = function() return "ProjectionMage" end
 UnitClass = function() return "Mage", "MAGE" end
@@ -105,7 +106,7 @@ Nexus.DpsCapture = {
 local P, R = Nexus.ViewProjections, Nexus.Revisions
 local filters = {scope="all",classFilter="MAGE",sortMode="recent"}
 P.Reset()
-local oldRows, oldSummary = P.Builds(filters)
+local oldRows, oldSummary = S.ProjectBuilds(P, filters)
 assert(type(oldRows) == "table" and #oldRows == 20,
     "established large Community list fixture changed")
 P.Reset(); catalogWalks, eligibilityReads = 0, 0
@@ -116,7 +117,7 @@ local failLoad, failDetailDps = false, false
 local factory = assert(Nexus.CommunityInternals
     and Nexus.CommunityInternals.Projection)
 local projection = factory.New({
-    builds=function(value) return P.Builds(value) end,
+    builds=function(value) return S.ProjectBuilds(P, value) end,
     buildsCurrent=function(value) return P.BuildsCurrent(value) end,
     loadBuild=function(id)
         loadCalls = loadCalls + 1
@@ -163,7 +164,7 @@ local projection = factory.New({
     end,
 })
 
-local rows, summary = projection.List(filters)
+local rows, summary = S.ProjectList(projection, P, filters)
 assert(Equal(rows, oldRows),
     "new Community list changed established filtered/sorted rows")
 assert(Equal(summary, oldSummary),
@@ -172,7 +173,7 @@ assert(catalogWalks == 1 and eligibilityReads == 1,
     string.format("new Community list work changed: walks=%d eligibility=%d",
         catalogWalks, eligibilityReads))
 local viewAfterFirst = P.Stats().builds
-local sameRows, sameSummary = projection.List(filters)
+local sameRows, sameSummary = S.ProjectList(projection, P, filters)
 local viewAfterHit = P.Stats().builds
 assert(sameRows == rows and sameSummary == summary
     and catalogWalks == 1 and eligibilityReads == 1
@@ -183,25 +184,25 @@ assert(projection.ListCurrent(filters),
     "warm Community projection did not report current")
 
 local legacyFilter = {scope="all",sortMode="class"}
-assert(type(projection.List(legacyFilter)) == "table"
+assert(type(S.ProjectList(projection, P, legacyFilter)) == "table"
     and legacyFilter.sortMode == "class",
     "pure filter normalization mutated caller/SavedVariables state")
 local beforeRevision = projection.Stats().list
 R.Advance(R.DPS_CHANGED, {scope="fixture"})
 assert(not projection.ListCurrent(legacyFilter),
     "DPS revision left Community projection current")
-assert(type(projection.List(legacyFilter)) == "table")
+assert(type(S.ProjectList(projection, P, legacyFilter)) == "table")
 local afterRevision = projection.Stats().list
 assert(afterRevision.rebuilds == beforeRevision.rebuilds + 1,
     "one relevant revision did not rebuild exactly once")
 
 R.Advance(R.BUILD_LIBRARY_CHANGED, {scope="failure"})
 failList = true
-local failedRows, _, listErr = projection.List(legacyFilter)
+local failedRows, _, listErr = S.ProjectList(projection, P, legacyFilter)
 assert(failedRows == nil and tostring(listErr):find("forced list failure",1,true),
     "failed list construction published partial data")
 failList = false
-assert(type(projection.List(legacyFilter)) == "table",
+assert(type(S.ProjectList(projection, P, legacyFilter)) == "table",
     "Community list did not recover after dependency failure")
 
 local selected = "community-0200"

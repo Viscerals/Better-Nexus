@@ -130,6 +130,7 @@ local channelIndex
 local seenRemoteIds  = {}   -- id -> lastModified we already hold
 local tombstones     = {}   -- id -> stamp; never resurrect
 local hotBuilds      = {}   -- id -> { build, t }; recently posted, include in answers
+local registeredHotBuildEvidenceOwner
 local pendingDeletes = {}   -- local tombstone ids awaiting direct notification
 local pendingDeleteTicker = 0
 local pendingShare          -- one immutable, session-only Share summary
@@ -157,7 +158,7 @@ local Now, MyName, CurrentTransportSender, IsLocalTransportSender
 local RelayEligible
 local recentBuildBroadcast = {}
 local BUILD_BROADCAST_DEDUPE = 2
-local Responder = {}
+local Responder = {state={hotBuildGeneration=0}, Work={}}
 local catalogMutationIdentity
 local PendingDeleteCount
 
@@ -170,6 +171,49 @@ local function CatalogGet(id)
     if not (catalog and catalog.Get) then return nil end
     return catalog.Get(id)
 end
+
+local function HotBuildEvidenceReferences()
+    local references = {}
+    for _, hot in pairs(hotBuilds) do
+        local build = hot and hot.build
+        if type(build) == "table"
+            and type(build.evidenceKey) == "string" then
+            references[#references + 1] = build.evidenceKey
+        end
+    end
+    return references
+end
+
+function Responder.Work.RememberHotBuild(id, hot)
+    hotBuilds[id] = hot
+    Responder.state.hotBuildGeneration =
+        (Responder.state.hotBuildGeneration or 0) + 1
+end
+
+function Responder.Work.ForgetHotBuild(id)
+    if hotBuilds[id] == nil then return false end
+    hotBuilds[id] = nil
+    Responder.state.hotBuildGeneration =
+        (Responder.state.hotBuildGeneration or 0) + 1
+    return true
+end
+
+local function EnsureHotBuildEvidenceProvider()
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    if evidence == registeredHotBuildEvidenceOwner then return true end
+    if not (evidence
+        and type(evidence.RegisterReferenceProvider) == "function") then
+        return false
+    end
+    local registered = evidence.RegisterReferenceProvider(
+        "sync.hot-builds", HotBuildEvidenceReferences)
+    if registered then registeredHotBuildEvidenceOwner = evidence end
+    return registered == true
+end
+
+-- Register stable Sync evidence ownership before catalog admission. A later
+-- owner replacement still requires an explicit rebind through Sync.Init.
+EnsureHotBuildEvidenceProvider()
 
 -- Every catalog write names its exact source so the central admission owner
 -- derives provenance itself; Sync never clears a tombstone before a write.
@@ -227,18 +271,11 @@ end
 -- bucket hash uses, plus the session-only `localOwned` verdict.
 local function TombstoneMap()
     local catalog = Catalog()
-    local out = {}
-    if not (catalog and type(catalog.TombstoneNext) == "function") then return out end
-    local cursor
-    for _ = 1, 2048 do
-        local id, view, done = catalog.TombstoneNext(cursor)
-        if done or id == nil then break end
-        out[id] = {stamp=view.stamp, author=view.author, ownerKey=view.ownerKey,
-            ownerVerified=view.ownerVerified == true or nil,
-            localOwned=view.localOwned == true}
-        cursor = id
+    if not (catalog and type(catalog.TombstoneSnapshot) == "function") then
+        return {}
     end
-    return out
+    local snapshot = catalog.TombstoneSnapshot()
+    return type(snapshot) == "table" and snapshot or nil
 end
 
 -- Protocol 7 gains no typed envelope. Only an exact 1..96-byte, UTF-8,
@@ -576,13 +613,19 @@ function Operation.RetainRecent(status)
 end
 
 function Operation.New(kind, id, version, previous, registerActive)
-    Operation.sequence = Operation.sequence + 1
+    local counters = Nexus and Nexus.MainInternals
+        and Nexus.MainInternals.CatalogAuthorityCounters
+    if not (counters and type(counters.Advance) == "function") then
+        return nil, "GENERATION_EXHAUSTED"
+    end
+    local sequence, why = counters.Advance(Operation, "sequence", 1)
+    if not sequence then return nil, why end
     local attempt = previous and tostring(previous.id) == tostring(id)
         and (tonumber(previous.attempt) or 0) + 1 or 1
     local status = {
         kind=tostring(kind),id=tostring(id),version=tostring(version or "0"),
         operationKey=Operation.Key(kind, id, version),
-        generation=Operation.sequence,attempt=attempt,
+        generation=sequence,attempt=attempt,
         outcome="not-queued",terminal=false,reason="none",accepted=false,
         queueAdmitted=false,queueReason=nil,retryPending=false,
         retryAttempts=0,sent=false,sendCompleted=false,
@@ -798,16 +841,13 @@ local CurrentBuildHash = Compatibility.CurrentBuildHash
 local CurrentDpsHash = Compatibility.CurrentDpsHash
 
 local function BucketContainsTombstone(bucket)
-    local catalog = Catalog()
-    if not (catalog and type(catalog.TombstoneNext) == "function") then return false end
-    local cursor
-    for _ = 1, 2048 do
-        local id, _, done = catalog.TombstoneNext(cursor)
-        if done or id == nil then break end
-        if BuildBucket(id) == bucket then return true end
-        cursor = id
+    local cache = Nexus and Nexus.BuildHashCache
+    if cache and type(cache.BucketHasTombstone) == "function" then
+        local present = cache.BucketHasTombstone(bucket)
+        if present ~= nil then return present == true end
     end
-    return false
+    -- An unavailable complete view cannot prove that a bucket is claim-safe.
+    return true
 end
 
 -- Read-only compatibility surface used by diagnostics and deterministic tests.
@@ -1312,8 +1352,10 @@ local function BroadcastSummary(build, options)
             local id = tostring(build and build.id or ""):sub(1,
                 MAX_BUILD_ID_BYTES)
             local previous = Operation.shareById[id]
-            status = Operation.New("share", id,
+            local statusWhy
+            status, statusWhy = Operation.New("share", id,
                 Operation.ShareVersion(build), previous, false)
+            if not status then return false, statusWhy end
             Operation.latestShare = status
             Operation.Transition(status, "rejected", why)
             -- A rejected pre-admission attempt is observable through its
@@ -1338,7 +1380,9 @@ local function BroadcastSummary(build, options)
         -- A new explicit confirmation supersedes only an older summary that
         -- never entered Transport. Already admitted FIFO work is untouched.
         FinishPendingShare("superseded by newer Share Build", false, true)
-        status = Operation.NewShare(build)
+        local statusWhy
+        status, statusWhy = Operation.NewShare(build)
+        if not status then return false, statusWhy end
         Operation.latestShare = status
     end
     local msg = prepared.messages[1]
@@ -1406,8 +1450,9 @@ end
 
 function Operation.NewDelete(id, tomb, registerActive)
     local version = tostring(TombStamp(tomb)) .. ":" .. TombAuthor(tomb)
-    local status = Operation.New("delete", id, version,
+    local status, why = Operation.New("delete", id, version,
         Operation.deleteById[tostring(id)], registerActive)
+    if not status then return nil, why end
     status.owner = TombAuthor(tomb)
     return status
 end
@@ -1478,7 +1523,7 @@ function Sync.RequestDataViewRefresh()
     end
 end
 
-local function StoreSummary(data, transportSender, context)
+local function StoreSummary(data, transportSender, context, onComplete)
     local validated, validationReason = Protocol.ValidateNetworkSummary(data)
     if not validated then
         Responder.NoteContextOutcome(context, "rejected",
@@ -1667,10 +1712,16 @@ local function StoreSummary(data, transportSender, context)
     local stored, storedAs, ticket = CatalogPut(record, {source="remote",
         sender=transportSender})
     if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then
-        if not BindCatalogCompletion(ticket, Complete) then
+        if not BindCatalogCompletion(ticket, function(ok, why)
+            if type(onComplete) == "function" then
+                onComplete(Complete(ok, why))
+            else
+                Complete(ok, why)
+            end
+        end) then
             return Complete(false, "INVALID_MUTATION_TICKET")
         end
-        return false, false, storedAs
+        return nil, false, storedAs
     end
     return Complete(stored, storedAs)
 end
@@ -1839,7 +1890,8 @@ function Responder.AdmitBuild(prepared, responseMode, responseContext)
         tostring(prepared.title), tonumber(prepared.echoCount) or 0,
         tonumber(prepared.b64Bytes) or 0)
     if not responseMode then
-        hotBuilds[prepared.id] = { build=prepared.build, t=Now() }
+        Responder.Work.RememberHotBuild(
+            prepared.id, { build=prepared.build, t=Now() })
         if prepared.buildKey ~= "" then
             recentBuildBroadcast[prepared.buildKey] = Now()
         end
@@ -1882,42 +1934,121 @@ function Sync.BroadcastBuild(build)
     return Responder.AdmitBuild(prepared, false)
 end
 
-function Sync.BroadcastMine()
-    local now = Now()
-    -- Expire hot builds
-    for id, h in pairs(hotBuilds) do
-        if now - h.t > HOT_WINDOW then hotBuilds[id] = nil end
+function Responder.Work.BroadcastCatalogRecord(build, sent)
+    if type(build) ~= "table" then return 0 end
+    sent[build.id] = true
+    if build.legacyRecovered == true and build.ownerVerified ~= true then
+        return 0
     end
-    local sent = {}   -- track by id to avoid double-sending
-    local n = 0
-    -- True mesh: redistribute every valid build held locally through the
-    -- generation-bound record cursor; no complete collection is copied.
-    local catalog = Catalog()
-    local cursor = catalog and type(catalog.BeginRecordCursor) == "function"
-        and catalog.BeginRecordCursor() or nil
-    while cursor do
-        local page, err = catalog.RecordCursorNext(cursor)
-        if err or not page or page.done then break end
-        local b = page.record
-        if type(b) == "table" then
-            if not (b.legacyRecovered == true and b.ownerVerified ~= true)
-                and BroadcastSummary(b) then n=n+1 end
-            sent[b.id] = true
-        end
+    return BroadcastSummary(build) and 1 or 0
+end
+
+function Responder.Work.HotBuildCountWithin(limit)
+    local count = 0
+    for _ in pairs(hotBuilds) do
+        count = count + 1
+        if count > limit then return nil end
     end
-    -- Also include hot builds not already sent (covers: posted while no
-    -- peer was listening, then peer syncs within HOT_WINDOW)
-    for id, h in pairs(hotBuilds) do
-        if not sent[id] then
+    return count
+end
+
+function Responder.Work.BroadcastSmallRoot(records, now)
+    local sent, expired, count = {}, {}, 0
+    for _, build in pairs(records) do
+        count = count + Responder.Work.BroadcastCatalogRecord(build, sent)
+    end
+    for id, hot in pairs(hotBuilds) do
+        if now - hot.t > HOT_WINDOW then
+            expired[#expired + 1] = id
+        elseif not sent[id] then
             local current = CatalogGet(id)
             if current and RelayEligible(current) then
-                if BroadcastSummary(current) then n=n+1 end
+                if BroadcastSummary(current) then count = count + 1 end
             else
-                hotBuilds[id] = nil
+                expired[#expired + 1] = id
             end
         end
     end
-    return n
+    for _, id in ipairs(expired) do Responder.Work.ForgetHotBuild(id) end
+    return count
+end
+
+function Responder.Work.PumpBroadcastMine()
+    local job = Responder.state.broadcastMineJob
+    if not job then return true end
+    if job.phase == "records" then
+        local page, err = job.catalog.RecordCursorNext(job.cursor)
+        if err or type(page) ~= "table" then
+            Responder.state.broadcastMineJob = nil
+            return false, err or "catalog cursor unavailable"
+        end
+        if page.done then
+            job.phase, job.hotCursor = "hot", nil
+            job.hotGeneration = Responder.state.hotBuildGeneration or 0
+            return false, "pending"
+        end
+        if type(page.record) == "table" then
+            job.count = job.count
+                + Responder.Work.BroadcastCatalogRecord(page.record, job.sent)
+        end
+        return false, "pending"
+    end
+
+    -- The traversal key remains present until the next key is obtained. Any
+    -- external hot-set mutation changes the generation before `next` runs.
+    if job.hotGeneration ~= (Responder.state.hotBuildGeneration or 0) then
+        Responder.state.broadcastMineJob = nil
+        return false, "hot build set changed"
+    end
+    local id, hot = next(hotBuilds, job.hotCursor)
+    if job.removeHot then
+        Responder.Work.ForgetHotBuild(job.removeHot)
+        job.hotGeneration = Responder.state.hotBuildGeneration or 0
+        job.removeHot = nil
+    end
+    if id == nil then
+        local count = job.count
+        Responder.state.broadcastMineJob = nil
+        return true, count
+    end
+    job.hotCursor = id
+    if job.now - hot.t > HOT_WINDOW then
+        job.removeHot = id
+    elseif not job.sent[id] then
+        local current = CatalogGet(id)
+        if current and RelayEligible(current) then
+            if BroadcastSummary(current) then job.count = job.count + 1 end
+        else
+            job.removeHot = id
+        end
+    end
+    return false, "pending"
+end
+
+function Sync.BroadcastMine()
+    local now = Now()
+    local catalog = Catalog()
+    if not catalog then return 0 end
+    if Responder.state.broadcastMineJob then return nil, "pending" end
+
+    -- Preserve immediate behavior only when both collections fit the public
+    -- one-call frontier. A sparse maximum root refuses before traversal.
+    local records, why = type(catalog.All) == "function" and catalog.All()
+    if type(records) == "table"
+        and Responder.Work.HotBuildCountWithin(8) ~= nil then
+        return Responder.Work.BroadcastSmallRoot(records, now)
+    end
+    if records == nil and why ~= "CURSOR_REQUIRED" then return 0, why end
+    if type(catalog.BeginRecordCursor) ~= "function"
+        or type(catalog.RecordCursorNext) ~= "function" then
+        return 0, "catalog cursor unavailable"
+    end
+    local cursor, cursorWhy = catalog.BeginRecordCursor()
+    if not cursor then return 0, cursorWhy or "catalog cursor unavailable" end
+    Responder.state.broadcastMineJob = {catalog=catalog, cursor=cursor,
+        sent={}, count=0,
+        phase="records", now=now}
+    return nil, "pending"
 end
 
 -- Response candidates are the mutable overlay/tombstone delta only. Immutable
@@ -2539,7 +2670,8 @@ function Sync.BroadcastDelete(build)
     local function Complete(tombStored, tombStoreWhy)
         if not tombStored then
             stats.storageRejected = (stats.storageRejected or 0) + 1
-            local refused = Operation.NewDelete(id, tomb)
+            local refused, operationWhy = Operation.NewDelete(id, tomb)
+            if not refused then return false, operationWhy end
             Operation.latestDelete = refused
             Operation.Transition(refused, "rejected",
                 tombStoreWhy or "tombstone storage refused")
@@ -2547,7 +2679,7 @@ function Sync.BroadcastDelete(build)
                 Operation.Copy(refused)
         end
         tomb = CatalogTombstoneView(id) or tomb
-        hotBuilds[id] = nil
+        Responder.Work.ForgetHotBuild(id)
         RequestRetention("local delete stored")
         -- MASTER-RC-019. Architecture line 4856 and the mixed-client tombstone
         -- rows: "Refuse before encoder invocation with
@@ -2566,7 +2698,8 @@ function Sync.BroadcastDelete(build)
         -- above and is RETAINED: only the wire is refused. This returns before
         -- DeleteWireMessage is constructed and before Transport.Enqueue, and the
         -- status registers no active delete claim.
-        local status = Operation.NewDelete(id, tomb, false)
+        local status, operationWhy = Operation.NewDelete(id, tomb, false)
+        if not status then return false, operationWhy end
         Operation.latestDelete = status
         Operation.Transition(status, "rejected", "REMOTE_TOMBSTONE_ORDER_UNPROVEN")
         ClearPendingDelete(id, tomb)
@@ -2677,7 +2810,8 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
     return Complete(stored, storedAs)
 end
 
-local function CommitReceivedBuild(payload, transportSender, context)
+local function CommitReceivedBuild(payload, transportSender, context,
+        onComplete)
     local directOwner = Identity.TransportOwns(
         payload.ownerKey, transportSender)
     local existing, existingSource = CatalogGet(payload.id)
@@ -2833,9 +2967,13 @@ local function CommitReceivedBuild(payload, transportSender, context)
     end
     local stored, storedWhy = StoreReceivedBuild(
         payload, directOwner, transportSender, matchedReplacement,
-        replacementFingerprint, Complete)
+        replacementFingerprint, function(completed, completedWhy)
+            local accepted = Complete(completed, completedWhy)
+            if type(onComplete) == "function" then onComplete(accepted) end
+            return accepted
+        end)
     if stored == nil and storedWhy == "ROOT_MUTATION_PENDING" then
-        return false, storedWhy
+        return nil, storedWhy
     end
     return Complete(stored, storedWhy)
 end
@@ -2904,7 +3042,8 @@ local function ProcessPendingResponses(elapsed)
     return Reconciler.Process(elapsed)
 end
 
-local function HandleDelete(sender, buildId, stamp, originAuthor, context)
+local function HandleDelete(sender, buildId, stamp, originAuthor, context,
+        onComplete)
     local existing, existingSource = CatalogGet(buildId)
     -- originAuthor is an optional 5th field; treat empty string same as nil
     local author = tostring((originAuthor and originAuthor ~= "")
@@ -2986,7 +3125,7 @@ local function HandleDelete(sender, buildId, stamp, originAuthor, context)
             return false
         end
         seenRemoteIds[buildId] = nil
-        hotBuilds[buildId] = nil
+        Responder.Work.ForgetHotBuild(buildId)
         Session.ClearRequestedLoadout(buildId)
         LogEvent("RX","DELETED '%s' from origin %s (relay %s)",
             tostring(existing.title), author, tostring(sender))
@@ -2998,8 +3137,11 @@ local function HandleDelete(sender, buildId, stamp, originAuthor, context)
     local tombStored, why, ticket = CatalogSetTombstone(buildId, tomb,
         {source="remote", sender=sender})
     if tombStored == nil and why == "ROOT_MUTATION_PENDING" then
-        if not BindCatalogCompletion(ticket, Complete) then return Complete(false) end
-        return false, why
+        if not BindCatalogCompletion(ticket, function(ok)
+            local accepted = Complete(ok)
+            if type(onComplete) == "function" then onComplete(accepted) end
+        end) then return Complete(false) end
+        return nil, why
     end
     return Complete(tombStored)
 end
@@ -3116,9 +3258,10 @@ Inbound = InboundFactory.New({
             description.requestId, description.kind, description.bucket,
             description.hash)
     end,
-    handleDelete=function(description)
+    handleDelete=function(description, onComplete)
         return HandleDelete(description.sender, description.buildId,
-            description.stamp, description.originAuthor, description.context)
+            description.stamp, description.originAuthor, description.context,
+            onComplete)
     end,
     handleSummary=StoreSummary,
     requestDataViewRefresh=function()
@@ -3362,6 +3505,7 @@ function Sync.OnUpdate(elapsed)
     Inbound.CleanExpired()
     ProcessPendingResponses(elapsed)
     Session.PumpRecovery(elapsed)
+    Responder.Work.PumpBroadcastMine()
     if not Sync._pendingDeleteScheduled then
         PumpPendingDeletes(elapsed)
         PumpPendingShare(elapsed)
@@ -3415,21 +3559,11 @@ function Sync.Init(codec, adapter)
     Compatibility.Reset()
     Reconciler.Reset()
     preparedDpsProofs = setmetatable({}, {__mode="k"})
-    hotBuilds    = {}  -- clear on init
-    local evidence = Nexus and Nexus.LoadoutEvidence
-    if evidence and type(evidence.RegisterReferenceProvider) == "function" then
-        evidence.RegisterReferenceProvider("sync.hot-builds", function()
-            local references = {}
-            for _, hot in pairs(hotBuilds) do
-                local build = hot and hot.build
-                if type(build) == "table"
-                    and type(build.evidenceKey) == "string" then
-                    references[#references + 1] = build.evidenceKey
-                end
-            end
-            return references
-        end)
-    end
+    hotBuilds = {}  -- clear on init
+    Responder.state.hotBuildGeneration =
+        (Responder.state.hotBuildGeneration or 0) + 1
+    Responder.state.broadcastMineJob = nil
+    EnsureHotBuildEvidenceProvider()
     pendingDeletes = {}
     pendingDeleteTicker = 0
     pendingShare = nil

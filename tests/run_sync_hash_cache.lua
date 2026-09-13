@@ -1,4 +1,5 @@
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Revisions.lua")
 dofile("core/BuildCatalog.lua")
 dofile("core/BuildHashCache.lua")
@@ -34,7 +35,7 @@ DPS.Init({}, {})
 Sync.Init(Nexus.Codec, {})
 
 local function AssertCanonical()
-    local current, dps = Sync.GetCompatibilityHashes()
+    local current, dps = S.CompatibilityHashes(Sync)
     local legacy = Sync.GetLegacyBuildHash()
     local canonicalCurrent, canonicalLegacy = Sync.GetCanonicalBuildHashes()
     assert(current == canonicalCurrent and legacy == canonicalLegacy,
@@ -74,12 +75,14 @@ assert(dpsHits.collectionWalks == dpsWarm.collectionWalks
 -- One overlay mutation updates one entry and rebuilds only its bucket in each
 -- compatibility view. No full collection snapshot is requested.
 local buildBefore = Sync.HashCacheStats()
-assert(Catalog.Put({
-    id="peer-a",title="Peer",author="Peer",class="MAGE",
-    ownerKey="peer@ebonhold",realm="ebonhold",ownerVerified=true,
-    postedAt=2,lastModified=2,fingerprint="200200x1",fingerprintHash="222",
-    echoes={{spellId=200200,quality=3,stacks=1}},
-}))
+assert(S.CatalogMutation(function()
+    return Catalog.Put({
+        id="peer-a",title="Peer",author="Peer",class="MAGE",
+        ownerKey="peer@ebonhold",realm="ebonhold",ownerVerified=true,
+        postedAt=2,lastModified=2,fingerprint="200200x1",fingerprintHash="222",
+        echoes={{spellId=200200,quality=3,stacks=1}},
+    })
+end, "hash-cache overlay mutation"))
 AssertCanonical()
 local buildAfter = Sync.HashCacheStats()
 assert(buildAfter.targetedInvalidations == buildBefore.targetedInvalidations + 1
@@ -90,8 +93,10 @@ assert(buildAfter.targetedInvalidations == buildBefore.targetedInvalidations + 1
     "one build mutation did not stay inside one deterministic bucket")
 
 local tombBefore = Sync.HashCacheStats()
-assert(Catalog.SetTombstone("peer-a", {stamp=3,author="Peer"},
-    {source="remote", sender="Peer-Ebonhold"}))
+assert(S.CatalogMutation(function()
+    return Catalog.SetTombstone("peer-a", {stamp=3,author="Peer"},
+        {source="remote", sender="Peer-Ebonhold"})
+end, "hash-cache tombstone mutation"))
 AssertCanonical()
 local tombAfter = Sync.HashCacheStats()
 assert(tombAfter.targetedInvalidations == tombBefore.targetedInvalidations + 1
@@ -99,8 +104,10 @@ assert(tombAfter.targetedInvalidations == tombBefore.targetedInvalidations + 1
     and tombAfter.deltaBucketRebuilds == tombBefore.deltaBucketRebuilds + 1
     and tombAfter.legacyBucketRebuilds == tombBefore.legacyBucketRebuilds + 1,
     "one tombstone mutation did not stay inside one deterministic bucket")
-assert(Catalog.SetTombstone("peer-a", {stamp=3,author="Peer"},
-    {source="remote", sender="Peer-Ebonhold"}))
+assert(S.CatalogMutation(function()
+    return Catalog.SetTombstone("peer-a", {stamp=3,author="Peer"},
+        {source="remote", sender="Peer-Ebonhold"})
+end, "hash-cache duplicate tombstone"))
 local duplicateTomb = Sync.HashCacheStats()
 assert(duplicateTomb.targetedInvalidations == tombAfter.targetedInvalidations,
     "duplicate tombstone invalidated the build hash cache")
@@ -187,7 +194,8 @@ assert(Nexus.BuildHashCache.Delta() == nil
     and Nexus.BuildHashCache.Stats().initialized == false,
     "failed cache warm published initialized state")
 Catalog.BeginSummaryCursor = realDelta
-assert(Sync.GetCompatibilityHashes() == expectedCurrent
+local recoveredCurrent = S.CompatibilityHashes(Sync)
+assert(recoveredCurrent == expectedCurrent
     and Sync.GetLegacyBuildHash() == expectedLegacy
     and Nexus.BuildHashCache.Stats().fullRebuilds == 1,
     "cache reload did not recover canonical compatibility hashes")

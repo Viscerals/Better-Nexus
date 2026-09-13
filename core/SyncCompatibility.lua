@@ -111,55 +111,43 @@ function Compatibility.New(options)
         return table.concat(encoded)
     end
 
-    -- Complete collections are read only through generation-bound cursors;
-    -- a stale or refused cursor yields an empty bounded map, never a partial
-    -- root-owned table.
-    local function CursorMap(beginName, nextName)
+    -- A synchronous compatibility fallback may consume only a collection that
+    -- fits the catalog's strict one-call bound. Larger roots stay pending in
+    -- BuildHashCache; this layer never drains their retained cursors.
+    local function BoundedMap(name)
         local catalog = getCatalog()
-        local out = {}
-        if not (catalog and type(catalog[beginName]) == "function") then
-            return out
-        end
-        local token = catalog[beginName]()
-        if not token then return out end
-        for _ = 1, 4096 do
-            local page, err = catalog[nextName](token)
-            -- MASTER-RC-018: a cursor error is NOT a clean done. Breaking on
-            -- both returned the accumulated prefix as if the collection were
-            -- complete, so a mid-walk fault silently produced a short result.
-            -- An error now yields the fixed empty result; only page.done ends a
-            -- complete walk.
-            if err then return {} end
-            if type(page) ~= "table" or page.done then break end
-            if page.id ~= nil and page.record ~= nil then
-                out[page.id] = page.record
-            end
-        end
-        return out
+        if not (catalog and type(catalog[name]) == "function") then return nil end
+        local rows = catalog[name]()
+        return type(rows) == "table" and rows or nil
     end
 
     local function CatalogDelta()
-        return CursorMap("BeginDeltaCursor", "DeltaCursorNext")
+        return BoundedMap("DeltaSnapshot")
     end
 
     local function CatalogAll()
-        return CursorMap("BeginRecordCursor", "RecordCursorNext")
+        return BoundedMap("All")
     end
 
     function C.DeltaBuildHash()
         local cache = getBuildHashCache()
-        return cache and cache.Delta and cache.Delta()
-            or C.LibraryHash(CatalogDelta())
+        local cached = cache and cache.Delta and cache.Delta() or nil
+        if cached then return cached end
+        local rows = CatalogDelta()
+        return rows and C.LibraryHash(rows) or nil
     end
 
     function C.LegacyBuildHash()
         local cache = getBuildHashCache()
-        return cache and cache.Legacy and cache.Legacy()
-            or C.LibraryHash(CatalogAll())
+        local cached = cache and cache.Legacy and cache.Legacy() or nil
+        if cached then return cached end
+        local rows = CatalogAll()
+        return rows and C.LibraryHash(rows) or nil
     end
 
     function C.CurrentBuildHash()
-        return C.DeltaBuildHash() .. "," .. C.CatalogToken()
+        local hash = C.DeltaBuildHash()
+        return hash and (hash .. "," .. C.CatalogToken()) or nil
     end
 
     function C.CurrentDpsHash()
@@ -180,9 +168,13 @@ function Compatibility.New(options)
                 canonicalTombstones = snapshot
             end
         end
-        return C.LibraryHash(CatalogDelta(), canonicalTombstones)
+        local delta, all = CatalogDelta(), CatalogAll()
+        if not delta or not all or type(canonicalTombstones) ~= "table" then
+            return nil, nil
+        end
+        return C.LibraryHash(delta, canonicalTombstones)
                 .. "," .. C.CatalogToken(),
-            C.LibraryHash(CatalogAll(), canonicalTombstones)
+            C.LibraryHash(all, canonicalTombstones)
     end
 
     function C.HashCacheStats()
@@ -303,8 +295,9 @@ function Compatibility.New(options)
     end
 
     function C.SnapshotCurrent(snapshot)
-        return type(snapshot) == "table"
-            and snapshot.key == CandidateKey(C.DeltaBuildHash())
+        local hash = C.DeltaBuildHash()
+        return hash ~= nil and type(snapshot) == "table"
+            and snapshot.key == CandidateKey(hash)
     end
 
     function C.AdvanceCandidateSnapshot(snapshot)

@@ -202,9 +202,17 @@ function()
     -- fixes the public Store inventory at nine. This case went red on the
     -- addition, exactly as designed, and the contract and the wave's disclosed
     -- residual were updated together rather than the count being quietly bumped.
+    -- Inventory raised 8 -> 9 by MASTER-W2-010's shared counter guard:
+    -- BuildCatalog registers CatalogAuthorityCounters on this seam so Store,
+    -- DPS, Sync, and evidence counters resolve one deny-only exhaustion latch
+    -- at each increment. It is on the seam and NOT on a public facade because
+    -- RAW-01 fixes every public owner inventory. This case went red on the
+    -- addition, exactly as designed, and the count is raised by that one
+    -- named entry together with the wave's evidence.
     local EXPECTED = {
-        "AuthorityBootstrap", "AutomationRuntime", "Commands", "Diagnostics",
-        "DpsAuthority", "Lifecycle", "StoreAuthorityOwner", "ViewModel",
+        "AuthorityBootstrap", "AutomationRuntime", "CatalogAuthorityCounters",
+        "Commands", "Diagnostics", "DpsAuthority", "Lifecycle",
+        "StoreAuthorityOwner", "ViewModel",
     }
     -- SOURCE-BACKED, deliberately. Reading the live table would only inventory
     -- whatever this one fixture happens to load, so a new factory registered by

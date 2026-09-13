@@ -355,7 +355,10 @@ local pendingController = factory.New({
 pendingController.BindAdapter(Adapter)
 local pendingOk, pendingWhy = pendingController.EditBuild(
     pendingRecord.id, "Pending edit", "detached", nil)
-assert(pendingOk == false and pendingWhy == "ROOT_MUTATION_PENDING"
+-- A retained pending edit is accepted exactly once and reports the retained
+-- state; nothing is acknowledged as committed (no refresh) until the exact
+-- bound ticket completes.
+assert(pendingOk == true and pendingWhy == "ROOT_MUTATION_PENDING"
         and type(pendingCallback) == "function" and pendingRefreshes == 0,
     "controller acknowledged or dropped a pending catalog mutation")
 pendingTicket.state, pendingTicket.committed = "committed", true

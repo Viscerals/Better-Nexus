@@ -108,6 +108,24 @@ while Nexus.DataCompaction.Stats().pending do
         "saved-import setup compaction did not converge")
 end
 
+-- Wave 3 MASTER-W2-007 expected red. More than one legacy one-call page of
+-- locally owned Saved mirrors must be traversed by a retained cursor. Each
+-- removal must remain owned by the import job until its exact catalog ticket
+-- reaches terminal state.
+local staleSavedIds = {}
+for index = 1, 12 do
+    local id = string.format("stale-saved-%02d", index)
+    staleSavedIds[#staleSavedIds + 1] = id
+    assert(PutTerminal({
+        id=id,title="Stale Saved " .. tostring(index),
+        author="AttributionMage",ownerKey="attributionmage@ebonhold",
+        ownerVerified=true,realm="ebonhold",class="MAGE",isMine=true,
+        importedSavedBuild=true,serverSlot=100 + index,
+        postedAt=7000 + index,lastModified=7000 + index,
+        echoes=BuildEchoes(700 + index, 6, false),
+    }))
+end
+
 local slots = {activeSlot=1,bySlot={}}
 for slot = 1, 4 do
     local echoes = {}
@@ -252,7 +270,7 @@ assert(not cold.pending and cold.pendingPhase == nil
     and cold.candidateAdvances >= cold.candidates
     and cold.finalizations == 4
     and cold.catalogPuts == 4 and cold.catalogPutCalls == 4
-    and cold.catalogPutChanges == 4 and cold.writes == 4
+    and cold.catalogPutChanges == 4 and cold.writes == 16
     and cold.compactionCalls == 4
     -- Catalog admission stores one canonical evidence record, so each
     -- saved-import row now round-trips through the shared pool instead of
@@ -261,9 +279,9 @@ assert(not cold.pending and cold.pendingPhase == nil
     and cold.referenceCalls == 0 and cold.referenceStores == 0
     and cold.relatedIndexUpdates == 4
     and cold.cleanupEnumerations == 1
-    and cold.cleanupCandidates == 4
-    and cold.cleanupExamined == 4
-    and cold.cleanupRemovals == 0
+    and cold.cleanupCandidates == 16
+    and cold.cleanupExamined == 16
+    and cold.cleanupRemovals == 12
     and cold.completions == 1,
     string.format("saved-import attribution mismatch: jobs=%s starts=%s source=%s/%s/%s cursor=%s pumps=%s max=%s/%s prep=%s discovery=%s/%s advances=%s candidates=%s final=%s puts=%s/%s/%s writes=%s compaction=%s/%s references=%s/%s index=%s cleanup=%s/%s/%s/%s complete=%s pending=%s",
         tostring(cold.jobs),tostring(cold.jobStarts),
@@ -284,6 +302,10 @@ assert(not cold.pending and cold.pendingPhase == nil
         tostring(cold.cleanupCandidates),tostring(cold.cleanupExamined),
         tostring(cold.cleanupRemovals),tostring(cold.completions),
         tostring(cold.pending)))
+for _, id in ipairs(staleSavedIds) do
+    assert(Nexus.BuildCatalog.Get(id) == nil,
+        "saved-import cleanup completed before terminal removal of " .. id)
+end
 assert(fullReads == 0 and virtual.dataRefreshes >= 1
     and virtual.dataBinds >= 1 and virtual.results <= 20
     and savedTiming.count >= cold.pumps,
@@ -317,7 +339,18 @@ assert(Delta(warm, beforeWarm, "jobs") == 1
 -- call from a newly stored canonical entry. Reusing identical evidence must
 -- add a second call without claiming a second store.
 local fallbackBefore = Nexus.BuildCatalog.DebugStats()
-NexusDB.dataCompaction = nil
+local disableHandle = assert(Nexus.BuildCatalog.BeginCatalogMaintenance({
+    database=NexusDB,operation="disable-compaction-fixture",
+}))
+local disabled, disableWhy, disableTicket =
+    Nexus.BuildCatalog.CommitMaintenance(disableHandle, {dataCompaction={}})
+if disabled == nil and disableWhy == "ROOT_MUTATION_PENDING" then
+    SettleCatalog()
+    assert(disableTicket.committed == true,
+        disableTicket.reason or "compaction disable did not commit")
+else
+    assert(disabled == true, disableWhy or "compaction disable was refused")
+end
 local fallbackEchoes = {{spellId=999991,quality=3,stacks=1}}
 assert(PutTerminal({
     id="fallback-reference-a",title="Fallback Reference A",author="Peer",
@@ -332,7 +365,10 @@ assert(PutTerminal({
 local fallbackAfter = Nexus.BuildCatalog.DebugStats()
 assert((fallbackAfter.referenceCalls - fallbackBefore.referenceCalls) == 2
     and (fallbackAfter.referenceStores - fallbackBefore.referenceStores) == 1,
-    "fallback reference reuse was counted as a second canonical store")
+    string.format(
+        "fallback reference reuse mismatch: calls=%s stores=%s",
+        tostring(fallbackAfter.referenceCalls - fallbackBefore.referenceCalls),
+        tostring(fallbackAfter.referenceStores - fallbackBefore.referenceStores)))
 
 print(string.format(
     "saved-import attribution: builds=568 dps=595 echoes=37348 jobs=%d starts=%d pumps=%d work=%d maxWork=%d restarts=%d source=%d(build=%d slots=%d) candidates=%d maxCandidates=%d finalizations=%d puts=%d writes=%d compaction=%d/%d references=%d/%d cleanup=%d/%d/%d completions=%d syncDeferrals=%d viewRefreshes=%d warmWrites=0 fullReads=0 -- OK",

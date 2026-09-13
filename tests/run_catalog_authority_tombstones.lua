@@ -10,17 +10,7 @@ local Case, Check = S.Case, S.Check
 -- Fixture assertions inspect terminal catalog transactions. This uses the real
 -- admission scheduler and never turns a pending acknowledgement into success.
 local function AwaitMutation(ok, why, ticket)
-    if ok == nil and why == "ROOT_MUTATION_PENDING" then
-        assert(type(ticket) == "table", "pending mutation returned no ticket")
-        local catalog = Nexus.BuildCatalog
-        for _ = 1, catalog.Budget().maximumPumps do
-            if ticket.state ~= "pending" then break end
-            catalog.PumpRootAdmission()
-        end
-        assert(ticket.state ~= "pending", "fixture mutation did not settle")
-        return ticket.committed, ticket.storedAs or ticket.reason, ticket
-    end
-    return ok, why, ticket
+    return S.AwaitCatalogMutation(ok, why, ticket, "tombstone fixture mutation")
 end
 
 
@@ -477,7 +467,8 @@ Case("TMB-08", "replay, refresh, local claim, and remote resurrection", function
     Check(okStale == false and whyStale == "STALE_CLAIM", "stale claim accepted: "
         .. tostring(whyStale))
     claim = assert(catalog.BeginTombstoneReadmissionClaim("tmb08"))
-    Check(catalog.PutWithClaim(claim, S.LocalBuild("tmb08", 2), {source="local"}),
+    Check(AwaitMutation(catalog.PutWithClaim(claim,
+        S.LocalBuild("tmb08", 2), {source="local"})),
         "trusted local claim could not readmit")
     Check(S.State("tmb08").state == "READMITTED"
         and catalog.TombstoneState("tmb08").state == "NONE"
@@ -506,7 +497,8 @@ Case("TMB-09", "only current-session tombstones retire by trusted age", function
         Check(handle, "maintenance handle unavailable")
         local ok, why = catalog.MaintenanceRetireTombstone(handle, id)
         if ok then
-            local committed, commitWhy = catalog.CommitMaintenance(handle)
+            local committed, commitWhy = AwaitMutation(
+                catalog.CommitMaintenance(handle))
             return committed, commitWhy
         end
         catalog.CancelMaintenance(handle)
@@ -543,7 +535,7 @@ local function Evict(db, id)
     Check(handle, "maintenance handle unavailable")
     local ok, why = catalog.MaintenanceEvictOverlay(handle, id)
     if not ok then catalog.CancelMaintenance(handle); return ok, why end
-    return catalog.CommitMaintenance(handle)
+    return AwaitMutation(catalog.CommitMaintenance(handle))
 end
 
 local function Expire(db, id)
@@ -552,7 +544,7 @@ local function Expire(db, id)
     Check(handle, "maintenance handle unavailable")
     local ok, why = catalog.MaintenanceExpireBarrier(handle, id)
     if not ok then catalog.CancelMaintenance(handle); return ok, why end
-    return catalog.CommitMaintenance(handle)
+    return AwaitMutation(catalog.CommitMaintenance(handle))
 end
 
 Case("EVC-01", "exact typed keys: numeric 1 and string \"1\" are distinct", function()
@@ -712,7 +704,8 @@ Case("ALC-01", "advisory vacancy never authorizes a write", function()
     Check(ok == false and why == "STALE_CLAIM", "stale claim authorized a write: "
         .. tostring(why))
     claim = assert(catalog.BeginAllocationClaim("alc01"))
-    Check(catalog.PutWithClaim(claim, S.Build("alc01", 1, 0)), "fresh claim refused")
+    Check(AwaitMutation(catalog.PutWithClaim(claim, S.Build("alc01", 1, 0))),
+        "fresh claim refused")
     -- create/remove/create ABA: a stale occupancy result cannot reuse the slot
     local stale = select(3, catalog.AllocationOccupancy("alc01"))
     Check(AwaitMutation(catalog.RemoveOverlay("alc01")))
@@ -738,7 +731,8 @@ Case("ALC-02", "copied, fabricated, mutated, wrong-ID, and reused claims refuse"
         "mutated claim field selected another ID")
     Check(select(2, catalog.PutWithClaim(claim, S.Build("alc02-wrong", 1, 0)))
         == "TYPED_ID_MISMATCH", "wrong-ID claim accepted")
-    Check(catalog.PutWithClaim(claim, S.Build("alc02", 1, 0)), "exact claim refused")
+    Check(AwaitMutation(catalog.PutWithClaim(claim, S.Build("alc02", 1, 0))),
+        "exact claim refused")
     Check(select(2, catalog.PutWithClaim(claim, S.Build("alc02", 1, 0))) == "INVALID_CLAIM",
         "claim consumed twice")
     local second = assert(catalog.BeginAllocationClaim("alc02b"))

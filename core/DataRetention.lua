@@ -56,6 +56,27 @@ local function Copy(source)
     return out
 end
 
+local function DeepCopy(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local out = {}
+    seen[value] = out
+    for key, child in pairs(value) do
+        out[DeepCopy(key, seen)] = DeepCopy(child, seen)
+    end
+    return out
+end
+
+-- After bundle occupancy, the legacy PR #68 locations are preserved input and
+-- never become a fallback or a write target.
+local function DurablePayload(database, field)
+    local bundle = type(database) == "table"
+        and rawget(database, "authorityBundle") or nil
+    if type(bundle) == "table" then return rawget(bundle, field) end
+    return type(database) == "table" and rawget(database, field) or nil
+end
+
 local function ResolveLimits(database)
     local limits = Copy(DEFAULT_LIMITS)
     local settings = type(database) == "table" and database.settings or nil
@@ -433,19 +454,49 @@ local function CatalogFor(database)
     return catalog
 end
 
-local function OverlaySummaries(catalog)
-    local rows = {}
-    local token = catalog.BeginSummaryCursor()
-    if not token then return rows end
-    for _ = 1, 4096 do
-        local summary, done, err = catalog.SummaryCursorNext(token)
-        if err then break end
-        if type(summary) == "table" and summary.source == "overlay" then
-            rows[summary.id] = summary
+local pendingOverlayScans = setmetatable({}, {__mode="k"})
+
+-- Small roots retain the established one-call behavior. Larger roots keep one
+-- generation-bound cursor and advance one bounded catalog slice per enforce
+-- call. A stale cursor discards the whole unpublished collection.
+local function OverlaySummaries(catalog, database)
+    local job = pendingOverlayScans[database]
+    if not job then
+        local all, why = catalog.Summaries()
+        if type(all) == "table" then
+            local rows = {}
+            for id, summary in pairs(all) do
+                if type(summary) == "table"
+                    and summary.source == "overlay" then
+                    rows[id] = summary
+                end
+            end
+            return rows, true
         end
-        if done then break end
+        if why ~= "CURSOR_REQUIRED" then return nil, nil, why end
+        local token, cursorWhy = catalog.BeginSummaryCursor()
+        if not token then return nil, nil, cursorWhy or "CURSOR_UNAVAILABLE" end
+        job = {catalog=catalog, token=token, rows={}, slices=0}
+        pendingOverlayScans[database] = job
+    elseif job.catalog ~= catalog then
+        pendingOverlayScans[database] = nil
+        return nil, nil, "CATALOG_OWNER_CHANGED"
     end
-    return rows
+
+    local summary, done, err = catalog.SummaryCursorNext(job.token)
+    job.slices = job.slices + 1
+    if err then
+        pendingOverlayScans[database] = nil
+        return nil, nil, err
+    end
+    if type(summary) == "table" and summary.source == "overlay" then
+        job.rows[summary.id] = summary
+    end
+    if done then
+        pendingOverlayScans[database] = nil
+        return job.rows, true
+    end
+    return nil, false, nil, job.slices
 end
 
 -- One retention transaction evicts every marked overlay row and installs
@@ -475,13 +526,13 @@ local function EvictOverlayIds(catalog, database, ids, transaction)
     return staged, staged
 end
 
-local function PruneOverlay(database, referenced, limits, transaction)
+local function PruneOverlay(database, referenced, limits, transaction, overlay)
     local catalog = CatalogFor(database)
     if not catalog then
         return {before=0, after=0, removed=0, orphaned=0, perClass=0,
             perAuthor=0, global=0, referencedKept=0, markersAdded=0}
     end
-    local overlay = OverlaySummaries(catalog)
+    overlay = type(overlay) == "table" and overlay or {}
     local marked, orphaned = {}, 0
     local remoteBefore = 0
     for id, build in pairs(overlay) do
@@ -581,13 +632,13 @@ local function ExpireReservations(database, stepName, expireName, transaction)
 end
 
 local function PruneEvictionMarkers(database, transaction)
-    local before = Count(database.communityRetentionEvictions)
+    local before = Count(DurablePayload(database,
+        "communityRetentionEvictions"))
     -- Retention suppression is exact-ID authority. Older schema versions
     -- compacted removed markers into a global timestamp floor, which allowed
     -- build B's history to reject an unrelated older build A. Forget the
     -- obsolete floor; once an exact marker is deliberately removed, that one
     -- build may re-enter and converge normally.
-    database.communityBuildRetentionFloor = nil
     local removed = ExpireReservations(database, "BarrierNext",
         "MaintenanceExpireBarrier", transaction)
     return {
@@ -597,27 +648,16 @@ local function PruneEvictionMarkers(database, transaction)
 end
 
 local function PruneTombstones(database, transaction)
-    local exactBefore = Count(database.syncTombstones)
+    local exactBefore = Count(DurablePayload(database, "syncTombstones"))
     -- As with eviction markers, a deleted build's exact tombstone cannot act
     -- as a namespace-wide watermark. Immutable baseline masks remain exact and
     -- are never candidates here.
-    database.syncTombstoneFloor = nil
     local removed = ExpireReservations(database, "TombstoneNext",
         "MaintenanceRetireTombstone", transaction)
     return {
         before=exactBefore, after=math.max(0, exactBefore - removed),
         removed=removed, floor=0,
     }
-end
-
-local function CollectEvidence(database)
-    local evidence = Nexus and Nexus.LoadoutEvidence
-    if not (evidence and type(evidence.CollectGarbage) == "function") then
-        return 0, false
-    end
-    local ok, summary = pcall(evidence.CollectGarbage, database, false)
-    return ok and type(summary) == "table" and tonumber(summary.removed) or 0,
-        ok and type(summary) == "table" and summary.blocked == true or false
 end
 
 local function BumpDpsAndViews(reason)
@@ -633,31 +673,36 @@ end
 
 local pendingEnforcements = setmetatable({}, {__mode="k"})
 
-local function FinishEnforcement(database, catalog, transaction, summary, now, changed)
+local function PrepareMetadata(source, summary, now, changed)
+    local meta = DeepCopy(type(source) == "table" and source or {})
+    meta.schemaVersion = SCHEMA_VERSION
+    if changed or type(meta.last) ~= "table" then
+        local terminal = DeepCopy(summary)
+        terminal.pending = false
+        meta.lastRun = now
+        meta.last = terminal
+    end
+    if summary.contentUnlimited then
+        meta.nextMaintenanceAt = now > 0 and now + 300 or 0
+    end
+    return meta
+end
+
+local function FinishEnforcement(database, catalog, transaction, summary,
+                                 changed, overrides)
     local function Finish()
-        local collect = (summary.characterBestRemoved or 0)
-            + (summary.personalRemoved or 0) + (summary.buildBestRemoved or 0)
-            + (summary.overlayRemoved or 0) + (summary.tombstonesRemoved or 0) > 0
-        if collect then
-            summary.evidenceRemoved, summary.evidenceGcBlocked = CollectEvidence(database)
-        end
-        if (summary.characterBestRemoved or 0) + (summary.personalRemoved or 0)
+        if changed and (summary.characterBestRemoved or 0)
+            + (summary.personalRemoved or 0)
             + (summary.buildBestRemoved or 0) > 0 then
             BumpDpsAndViews(summary.reason)
         end
-        summary.pending = false
-        if changed or (summary.evidenceRemoved or 0) > 0
-            or type(database.dataRetention.last) ~= "table" then
-            database.dataRetention.lastRun = now
-            database.dataRetention.last = Copy(summary)
-        end
-        if summary.contentUnlimited then
-            database.dataRetention.nextMaintenanceAt = now > 0 and now + 300 or 0
-        end
-        return summary
+        local result = Copy(summary)
+        result.pending = false
+        return result
     end
     if not transaction then return Finish() end
-    local committed, why, ticket = catalog.CommitMaintenance(transaction)
+    local committed, why, ticket = catalog.CommitMaintenance(
+        transaction, overrides)
     if committed == true then return Finish() end
     if committed ~= nil or why ~= "ROOT_MUTATION_PENDING"
         or type(ticket) ~= "table" then
@@ -698,8 +743,7 @@ function Retention.Enforce(database, reason)
         if not result.pending then pendingEnforcements[database] = nil end
         return result
     end
-    local priorMeta = type(database.dataRetention) == "table"
-        and database.dataRetention or nil
+    local priorMeta = DurablePayload(database, "dataRetention")
     local storedVersion = priorMeta and tonumber(priorMeta.schemaVersion) or nil
     if storedVersion and storedVersion > SCHEMA_VERSION then
         return { readOnly=true, schemaVersion=storedVersion, reason="future retention schema" }
@@ -707,37 +751,41 @@ function Retention.Enforce(database, reason)
     local catalog = Nexus and Nexus.BuildCatalog
     local catalogSchema = catalog and type(catalog.SchemaVersion) == "function"
         and tonumber(catalog.SchemaVersion()) or 1
-    if type(database.buildCatalog) == "table"
-        and tonumber(database.buildCatalog.schemaVersion)
-        and tonumber(database.buildCatalog.schemaVersion) > catalogSchema then
+    local catalogMeta = DurablePayload(database, "buildCatalog")
+    if type(catalogMeta) == "table"
+        and tonumber(catalogMeta.schemaVersion)
+        and tonumber(catalogMeta.schemaVersion) > catalogSchema then
         return { readOnly=true, schemaVersion=storedVersion,
             reason="future build catalog schema" }
     end
     local evidence = Nexus and Nexus.LoadoutEvidence
     local evidenceSchema = evidence and type(evidence.SchemaVersion) == "function"
         and tonumber(evidence.SchemaVersion()) or 1
-    if type(database.loadoutEvidence) == "table"
-        and tonumber(database.loadoutEvidence.schemaVersion)
-        and tonumber(database.loadoutEvidence.schemaVersion) > evidenceSchema then
+    local evidenceStore = DurablePayload(database, "loadoutEvidence")
+    if type(evidenceStore) == "table"
+        and tonumber(evidenceStore.schemaVersion)
+        and tonumber(evidenceStore.schemaVersion) > evidenceSchema then
         return { readOnly=true, schemaVersion=storedVersion,
             reason="future evidence schema" }
     end
-    if type(database.dataCompaction) == "table"
-        and tonumber(database.dataCompaction.schemaVersion)
-        and tonumber(database.dataCompaction.schemaVersion) > 1 then
+    local compactionMeta = DurablePayload(database, "dataCompaction")
+    if type(compactionMeta) == "table"
+        and tonumber(compactionMeta.schemaVersion)
+        and tonumber(compactionMeta.schemaVersion) > 1 then
         return { readOnly=true, schemaVersion=storedVersion,
             reason="future compaction schema" }
     end
-    database.dataRetention = priorMeta or {}
-    database.dataRetention.schemaVersion = SCHEMA_VERSION
-
     local limits = ResolveLimits(database)
-    local dps = type(database.dpsCapture) == "table" and database.dpsCapture or nil
     if not limits.enabled then
+        pendingOverlayScans[database] = nil
+        local dpsSource = DurablePayload(database, "dpsCapture")
+        local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
+        local overlaySource = DurablePayload(database, "communityBuilds")
+        overlaySource = type(overlaySource) == "table" and overlaySource or {}
         local now = EpochNow()
-        local prior = database.dataRetention.last
+        local prior = priorMeta and priorMeta.last
         local nextMaintenanceAt = tonumber(
-            database.dataRetention.nextMaintenanceAt) or 0
+            priorMeta and priorMeta.nextMaintenanceAt) or 0
         if type(prior) == "table" and prior.contentUnlimited == true
             and now > 0 and nextMaintenanceAt > now then
             local summary = Copy(prior)
@@ -751,9 +799,11 @@ function Retention.Enforce(database, reason)
         local lkCount = Count(type(character) == "table" and character.lk or nil)
         local personalCount = Count(type(dps) == "table" and dps.personalBest or nil)
         local buildBestCount = Count(type(dps) == "table" and dps.buildBest or nil)
-        local overlayCount = Count(database.communityBuilds)
-        local evictionCount = Count(database.communityRetentionEvictions)
-        local tombstoneCount = Count(database.syncTombstones)
+        local overlayCount = Count(overlaySource)
+        local evictionCount = Count(DurablePayload(database,
+            "communityRetentionEvictions"))
+        local tombstoneCount = Count(DurablePayload(database,
+            "syncTombstones"))
         local owner = CatalogFor(database)
         local transaction = owner and owner.BeginCatalogMaintenance({database=database,
             operation="retention"})
@@ -785,27 +835,56 @@ function Retention.Enforce(database, reason)
             evidenceRemoved=evidenceRemoved,evidenceGcBlocked=evidenceBlocked,
             fastPath=evictions.removed == 0 and tombstones.removed == 0,
         }
-        local prior = database.dataRetention.last
+        local prior = priorMeta and priorMeta.last
         local modeChanged = type(prior) ~= "table"
             or prior.contentUnlimited ~= true
-        return FinishEnforcement(database, owner, transaction, summary, now,
-            modeChanged or evictions.removed > 0 or tombstones.removed > 0)
+        local changed = modeChanged or evictions.removed > 0
+            or tombstones.removed > 0
+        local nextMaintenanceAt = now > 0 and now + 300 or 0
+        local metadataChanged = changed or type(priorMeta) ~= "table"
+            or rawget(priorMeta, "nextMaintenanceAt") ~= nextMaintenanceAt
+        local overrides = transaction and metadataChanged and {
+            dataRetention=PrepareMetadata(priorMeta, summary, now, changed),
+        } or nil
+        return FinishEnforcement(database, owner, transaction, summary,
+            changed, overrides)
     end
     local owner = CatalogFor(database)
+    local overlayRows = {}
+    if owner then
+        local complete, scanWhy, slices
+        overlayRows, complete, scanWhy, slices =
+            OverlaySummaries(owner, database)
+        if complete == false then
+            return {pending=true, workDomain="retention-overlay-scan",
+                scanSlices=slices or 0, overlayRemoved=0,
+                perAuthorRemoved=0, tombstonesRemoved=0,
+                evictionMarkersRemoved=0, evictionMarkersAdded=0}
+        end
+        if complete ~= true then
+            return {pending=false, blocked=true,
+                reason=scanWhy or "CATALOG_SCAN_FAILED"}
+        end
+    end
+    local dpsSource = DurablePayload(database, "dpsCapture")
+    local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
+    local overlaySource = DurablePayload(database, "communityBuilds")
+    overlaySource = type(overlaySource) == "table" and overlaySource or {}
     local transaction = owner and owner.BeginCatalogMaintenance({database=database,
         operation="retention"})
     if owner and not transaction then
         return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
     end
     local selected, fingerprints, selectedBuildIds, categoryCounts =
-        SelectCharacterBest(dps, limits, database.communityBuilds)
+        SelectCharacterBest(dps, limits, overlaySource)
     local characterRemoved = TrimCharacterBest(dps, selected)
     local personalRemoved = dps and TrimFingerprintMap(
         dps.personalBest, limits.personalFingerprints, fingerprints) or 0
     local buildBestRemoved = dps and TrimFingerprintMap(
         dps.buildBest, limits.buildBestFingerprints, fingerprints) or 0
     local referenced = CollectBuildReferences(dps, selectedBuildIds)
-    local overlay = PruneOverlay(database, referenced, limits, transaction)
+    local overlay = PruneOverlay(
+        database, referenced, limits, transaction, overlayRows)
     local now = EpochNow()
     local evictions = PruneEvictionMarkers(database, transaction)
     local tombstones = PruneTombstones(database, transaction)
@@ -845,11 +924,31 @@ function Retention.Enforce(database, reason)
     local changed = dpsRemoved > 0 or overlay.removed > 0
         or evictions.removed > 0 or tombstones.removed > 0
         or evidenceRemoved > 0
-    return FinishEnforcement(database, owner, transaction, summary, now, changed)
+    local metadataChanged = changed or type(priorMeta) ~= "table"
+        or type(priorMeta.last) ~= "table"
+    local overrides = transaction and metadataChanged and {
+        dataRetention=PrepareMetadata(priorMeta, summary, now, changed),
+        dpsCapture=dps or {},
+    } or nil
+    return FinishEnforcement(database, owner, transaction, summary,
+        changed, overrides)
 end
 
 function Retention.Init(database)
     return Retention.Enforce(database, "startup")
+end
+
+local ScheduleRetention
+ScheduleRetention = function(scheduler, reason, delay)
+    return scheduler.After("data-retention.enforce", delay, function()
+        -- Resolve the exact bound authority at run time; never the raw global.
+        local result = Retention.Enforce(nil, reason)
+        if type(result) == "table" and result.pending == true then
+            -- A new scheduler generation runs this continuation on a later
+            -- turn, so one callback cannot drain a retained catalog cursor.
+            ScheduleRetention(scheduler, reason, 0)
+        end
+    end)
 end
 
 function Retention.Request(reason)
@@ -862,10 +961,7 @@ function Retention.Request(reason)
         and scheduler.Pending("data-retention.enforce") then
         return true
     end
-    return scheduler.After("data-retention.enforce", 3, function()
-        -- Resolve the exact bound authority at run time; never the raw global.
-        Retention.Enforce(nil, reason or "scheduled")
-    end)
+    return ScheduleRetention(scheduler, reason or "scheduled", 3)
 end
 
 -- Every non-none replay barrier vetoes every inbound row for its exact typed
@@ -893,19 +989,12 @@ function Retention.ReleaseSupersededAutoBuild(buildId, database)
     if type(build) ~= "table" or build.autoDps ~= true or IsLocalBuild(build) then
         return false
     end
-    if CollectBuildReferences(database.dpsCapture)[buildId] then return false end
-    local removed, _, ticket = EvictOverlayIds(catalog, database, { buildId })
-    if ticket then
-        catalog.BindMutationCompletion(ticket, function(outcome)
-            if outcome.committed == true and outcome.database == database
-                and rawget(database, "authorityBundle") == outcome.bundle
-                and CatalogFor(database) == catalog then
-                CollectEvidence(database)
-            end
-        end)
-        return nil, "ROOT_MUTATION_PENDING", ticket
+    if CollectBuildReferences(DurablePayload(database, "dpsCapture"))[buildId] then
+        return false
     end
-    if removed > 0 then CollectEvidence(database); return true end
+    local removed, _, ticket = EvictOverlayIds(catalog, database, { buildId })
+    if ticket then return nil, "ROOT_MUTATION_PENDING", ticket end
+    if removed > 0 then return true end
     return false
 end
 
@@ -915,7 +1004,7 @@ end
 
 function Retention.Stats(database)
     database = AuthorityDatabase(database)
-    local meta = type(database) == "table" and database.dataRetention or nil
+    local meta = DurablePayload(database, "dataRetention")
     return type(meta) == "table" and Copy(meta.last) or nil
 end
 

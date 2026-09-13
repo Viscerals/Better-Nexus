@@ -1,6 +1,7 @@
 -- Interleaved multi-build chunk reassembly, inflight timeout cleanup,
 -- and RebroadcastMine only sending your own builds.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local Codec, Sync = Nexus.Codec, Nexus.Sync
@@ -10,7 +11,31 @@ UnitName = function() return "Alice" end
 GetNormalizedRealmName = function() return "Ebonhold" end
 local fakeTime = 100
 GetTime = function() return fakeTime end
-local function Pump(steps) for _ = 1, steps do fakeTime = fakeTime + 0.2; Sync.OnUpdate(0.2) end end
+local function Pump(steps)
+    for _ = 1, steps do
+        fakeTime = fakeTime + 0.2
+        local catalog = Nexus.BuildCatalog
+        local root = catalog and catalog.RootState and catalog.RootState()
+        if root and root.candidate then catalog.PumpRootAdmission() end
+        root = catalog and catalog.RootState and catalog.RootState()
+        if not root or (root.state == "ROOT_ADMITTED"
+            and root.candidate ~= true) then Sync.OnUpdate(0.2) end
+    end
+end
+local function SettleCatalog(label)
+    for turns = 0, 200000 do
+        local root = Nexus.BuildCatalog.RootState()
+        if not root.candidate then return turns end
+        assert(turns < 200000, label .. " did not reach terminal catalog state")
+        Pump(1)
+    end
+end
+local function Deliver(message, label)
+    local accepted = Sync.HandleIncoming(message.text, "Alice-Ebonhold")
+    SettleCatalog(label)
+    return accepted
+end
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, nil)
 
 -- 1. Two different builds, both multi-chunk, with their chunks
@@ -43,8 +68,8 @@ Sync.RequestSync()
 -- interleave: A1, B1, A2, B2, A3, B3, ...
 local maxLen = math.max(#msgsA, #msgsB)
 for i = 1, maxLen do
-    if msgsA[i] then Sync.HandleIncoming(msgsA[i].text, "Alice-Ebonhold") end
-    if msgsB[i] then Sync.HandleIncoming(msgsB[i].text, "Alice-Ebonhold") end
+    if msgsA[i] then Deliver(msgsA[i], "interleaved build A") end
+    if msgsB[i] then Deliver(msgsB[i], "interleaved build B") end
 end
 
 -- Legacy-to-bundle cutover (state machine lines 394, 4849): received builds are
@@ -69,13 +94,14 @@ local buildB2 = { id = "B2", title = "Build B2", description = string.rep("bravo
     class = "MAGE", echoes = { { spellId = 2, quality = 2, stacks = 1 } },
     postedAt = 1000 }
 NexusDB = {}
+H.RebindCatalog(NexusDB, Nexus.BundledBuilds)
 H.sentChatMessages = {}
 Sync.BroadcastBuild(buildA2)
 Pump(30)
 fakeTime = fakeTime + 10
 Sync.RequestSync()
 -- deliver only the FIRST chunk, never the rest
-Sync.HandleIncoming(H.sentChatMessages[1].text, "Alice-Ebonhold")
+Deliver(H.sentChatMessages[1], "partial build A2")
 assert(H.DurableBuilds()["A2"] == nil,
     "build should not be considered complete with only 1 of several chunks")
 -- advance fake time past the inflight timeout, then trigger cleanup via
@@ -85,7 +111,9 @@ H.sentChatMessages = {}
 Sync.BroadcastBuild(buildB2)
 Pump(30)
 Sync.RequestSync()
-for _, msg in ipairs(H.sentChatMessages) do Sync.HandleIncoming(msg.text, "Alice-Ebonhold") end
+for _, msg in ipairs(H.sentChatMessages) do
+    Deliver(msg, "replacement build B2")
+end
 -- buildB2 should complete fine; buildA2's stale partial transfer should
 -- have been silently dropped rather than accumulating forever
 assert(H.DurableBuilds()["B2"], "buildB2 should complete normally after the timeout window")

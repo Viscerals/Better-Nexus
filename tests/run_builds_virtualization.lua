@@ -1,5 +1,6 @@
 -- Community Builds fixed-height virtualization at live-library scale.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 local function SettleCatalog()
     local catalog = Nexus.BuildCatalog
@@ -89,6 +90,10 @@ for _, build in pairs(H.CatalogSummaries()) do
     }
 end
 C.Show()
+-- MASTER-W2-006: the Community list is a retained projection job pumped one
+-- bounded slice per real frame; drive the frame until it publishes.
+S.PumpCommunityFrame(H.frames.NexusCommunityBuildsFrame,
+    function() return C.VirtualStats().results > 0 end, "Community list")
 local initial = C.VirtualStats()
 assert(initial.results == 20 and initial.active <= 5
     and initial.created == initial.active and initial.first == 1,
@@ -138,7 +143,14 @@ local original = Nexus.BuildCatalog.Get("virtual-0001")
 local broken = {}
 for key, value in pairs(original) do broken[key] = value end
 broken.title = original.title.." changed"
+local bindsBeforeChange = C.VirtualStats().dataBinds
 assert(PutTerminal(broken))
+-- The represented-data change makes the list a retained projection job; let
+-- the real frame publish and bind it before the hostile row binding below,
+-- so the failing Refresh binds the changed rows rather than reporting pending.
+S.PumpCommunityFrame(NexusCommunityBuildsFrame,
+    function() return C.VirtualStats().dataBinds > bindsBeforeChange end,
+    "changed Community projection")
 local catalogGet = Nexus.BuildCatalog.Get
 Nexus.BuildCatalog.Get = function(id)
     local row, source = catalogGet(id)
@@ -164,12 +176,16 @@ assert(recovered.active <= 4 and recovered.created == beforeFailure,
 
 NexusDB.buildFilters.search = "Build 0005"
 C.Refresh()
+S.PumpCommunityFrame(NexusCommunityBuildsFrame,
+    function() return C.VirtualStats().results == 1 end, "search shrink")
 local shrunk = C.VirtualStats()
 assert(shrunk.results == 1 and shrunk.active == 1
     and shrunk.offset == 0 and shrunk.first == 1 and shrunk.last == 1,
     "filter shrink did not clamp scroll or remove stale cards")
 NexusDB.buildFilters.search = "no-such-build"
 C.Refresh()
+S.PumpCommunityFrame(NexusCommunityBuildsFrame,
+    function() return C.VirtualStats().results == 0 end, "empty search")
 local empty = C.VirtualStats()
 assert(empty.results == 0 and empty.active == 0 and empty.offset == 0,
     "empty virtualized build result retained stale cards")

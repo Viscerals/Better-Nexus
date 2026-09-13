@@ -2,6 +2,7 @@
 -- send, retain packets while disconnected, and reject newest packets when a
 -- bounded queue is full without overwriting older queued traffic.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 
@@ -23,6 +24,17 @@ local function Pump(steps)
         clock = clock + 0.2
         Sync.OnUpdate(0.2)
     end
+end
+
+local function AwaitDeleteTerminal(id, first, why)
+    if why == "ROOT_MUTATION_PENDING" then
+        S.PumpCatalogToIdle("transport delete " .. tostring(id))
+        local status = Sync.GetDeleteStatus(id)
+        assert(type(status) == "table" and status.terminal == true,
+            "pending delete did not publish one terminal refusal")
+        return false, status.reason, status
+    end
+    return first, why, Sync.GetDeleteStatus(id)
 end
 
 -- The cached slot began as 1. Before the queued packet is sent, the sync
@@ -110,12 +122,14 @@ Sync.Init(Nexus.Codec, {})
 -- Legacy-to-bundle cutover (state machine lines 394, 4849): an occupied bundle
 -- is authoritative, so this row is admitted through the public write seam
 -- instead of a raw write into the exact PR #68 location.
-assert(Nexus.BuildCatalog.Put({
-    id="claim-build", title="Claim Build", author="Alice", class="MAGE",
-    ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
-    lastModified=10, postedAt=10,
-    echoes={{spellId=200100, quality=3, stacks=1}},
-}, {source="local"}), "claim-build fixture was not admitted")
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put({
+        id="claim-build", title="Claim Build", author="Alice", class="MAGE",
+        ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
+        lastModified=10, postedAt=10,
+        echoes={{spellId=200100, quality=3, stacks=1}},
+    }, {source="local"})
+end, "transport claim-build admission"), "claim-build fixture was not admitted")
 limits = Sync.WorkState()
 for i = 1, limits.maxOutboundQueue do
     assert(Sync.BroadcastDps("claim-fill-" .. i, "Alice", 3000 + i,
@@ -297,12 +311,15 @@ for i = 1, limits.maxOutboundQueue do
 end
 -- A delete requires an admitted row: publish it through the catalog owner
 -- first, then delete the admitted record.
-assert(Nexus.BuildCatalog.Put({
-    id="delete-backpressure", title="Delete Backpressure", author="Alice",
-    ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
-    lastModified=30, postedAt=30,
-    echoes={{spellId=200301, quality=3, stacks=1}},
-}, {source="local"}), "delete backpressure fixture was not admitted")
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put({
+        id="delete-backpressure", title="Delete Backpressure", author="Alice",
+        ownerKey="alice@ebonhold",ownerVerified=true,realm="ebonhold",isMine=true,
+        lastModified=30, postedAt=30,
+        echoes={{spellId=200301, quality=3, stacks=1}},
+    }, {source="local"})
+end, "transport delete-backpressure admission"),
+    "delete backpressure fixture was not admitted")
 -- MASTER-RC-019 SUPERSEDED EXPECTATION, architecture justification recorded.
 -- Architecture line 4856 and the mixed-client tombstone rows make a local
 -- row-to-tombstone operation an UNCONDITIONAL zero-wire refusal that happens
@@ -317,6 +334,8 @@ assert(Nexus.BuildCatalog.Put({
 -- assertions below are unchanged.
 local immediateDelete, deleteWhy = Sync.BroadcastDelete(
     Nexus.BuildCatalog.Get("delete-backpressure"))
+immediateDelete, deleteWhy = AwaitDeleteTerminal(
+    "delete-backpressure", immediateDelete, deleteWhy)
 assert(immediateDelete == false
     and deleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
     "a saturated outbound queue changed the local delete refusal: "
@@ -379,13 +398,16 @@ while Sync.WorkState().sending < limits.maxOutboundQueue do
         .. tostring(fillWhy) .. " depth=" .. tostring(Sync.WorkState().sending))
 end
 local expiredBefore = Sync.Stats().operationExpired or 0
-assert(Nexus.BuildCatalog.Put({
-    id="delete-continuous-saturation", title="Delete Continuous Saturation",
-    author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,
-    realm="ebonhold",isMine=true,
-    lastModified=31, postedAt=31,
-    echoes={{spellId=200302, quality=3, stacks=1}},
-}, {source="local"}), "saturation delete fixture was not admitted")
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put({
+        id="delete-continuous-saturation", title="Delete Continuous Saturation",
+        author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,
+        realm="ebonhold",isMine=true,
+        lastModified=31, postedAt=31,
+        echoes={{spellId=200302, quality=3, stacks=1}},
+    }, {source="local"})
+end, "transport saturated-delete admission"),
+    "saturation delete fixture was not admitted")
 -- MASTER-RC-019. The old assertion required a continuously saturated delete to
 -- enter bounded RETRY OWNERSHIP -- again the removed transmission lifecycle.
 -- REWRITTEN (b): the refusal is asserted to be independent of transport
@@ -396,6 +418,8 @@ assert(Nexus.BuildCatalog.Put({
 -- machinery is unchanged.
 local expiryOk, expiryWhy = Sync.BroadcastDelete(
     Nexus.BuildCatalog.Get("delete-continuous-saturation"))
+expiryOk, expiryWhy = AwaitDeleteTerminal(
+    "delete-continuous-saturation", expiryOk, expiryWhy)
 assert(expiryOk == false and expiryWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
     "transport saturation changed the local delete refusal: "
         .. tostring(expiryWhy))

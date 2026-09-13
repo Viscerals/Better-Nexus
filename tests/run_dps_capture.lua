@@ -1,6 +1,7 @@
 -- DPS capture: always-on, two categories (dummy / LK), target detection,
 -- personal best tracking, leaderboard sorting, peer submission.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
@@ -70,8 +71,14 @@ DPS.OnCombatStart()
 clock = clock + 20; DPS.OnUpdate(10); DPS.OnUpdate(10)
 stubDps = 75000
 clock = clock + 15; DPS.OnCombatEnd()
+S.PumpCatalogToIdle("dummy session exact-build admission")
 local lb = DPS.GetLeaderboard(buildId,"dummy")
-assert(#lb == 1 and lb[1].dps == 75000, "dummy session not recorded: "..(#lb > 0 and lb[1].dps or "empty"))
+local currentDummy = DPS.GetCurrentPersonalBest("dummy")
+assert(#lb == 1 and lb[1].dps == 75000,
+    "dummy session not recorded: " .. (#lb > 0 and lb[1].dps or "empty")
+        .. " currentBuildId=" .. tostring(currentDummy and currentDummy.buildId)
+        .. " candidate="
+        .. tostring(Nexus.BuildCatalog.RootState().candidate))
 assert(#DPS.GetLeaderboard(buildId,"lk") == 0, "LK leaderboard should be empty after dummy session")
 print("dummy session recorded correctly, LK leaderboard untouched -- OK")
 
@@ -81,6 +88,7 @@ stubDps = 90000
 DPS.OnCombatStart()
 clock = clock + 40; DPS.OnUpdate(10); DPS.OnUpdate(10); DPS.OnUpdate(10)
 DPS.OnCombatEnd()
+S.PumpCatalogToIdle("LK session exact-build admission")
 local lkLb = DPS.GetLeaderboard(buildId,"lk")
 assert(#lkLb == 1 and lkLb[1].dps == 90000, "LK session not recorded")
 assert(#DPS.GetLeaderboard(buildId,"dummy") == 1, "dummy leaderboard should be unchanged")
@@ -90,6 +98,7 @@ print("LK session recorded in its own category -- OK")
 UnitGUID = function(unit) return unit == "target" and DUMMY_GUID or nil end
 stubDps = 60000  -- lower
 DPS.OnCombatStart(); clock = clock + 40; DPS.OnUpdate(10); DPS.OnUpdate(10); DPS.OnCombatEnd()
+S.PumpCatalogToIdle("lower dummy session catalog work")
 assert(DPS.GetLeaderboard(buildId,"dummy")[1].dps == 75000, "lower DPS must not replace best")
 
 stubDps = 100000  -- higher
@@ -110,6 +119,7 @@ print = function(...)
     printed[#printed + 1] = table.concat(values, "\t")
 end
 DPS.OnCombatStart(); clock = clock + 40; DPS.OnUpdate(10); DPS.OnUpdate(10); DPS.OnCombatEnd()
+S.PumpCatalogToIdle("higher dummy session exact-build admission")
 print = savedPrint
 Nexus.CommunityBuilds = savedCommunity
 local safeBuildTitle = rawBuildTitle:gsub("|", "||")
@@ -154,7 +164,6 @@ print("single-record leaderboard rejects lower data -- OK")
 
 -- Catalog class repair must retain a pending write and publish its metadata
 -- revision only after that exact write commits.
-local S = dofile("tests/catalog_authority_support.lua")
 local classRows = {}
 for index = 1, 9 do
     local id = string.format("pending-class-%02d", index)

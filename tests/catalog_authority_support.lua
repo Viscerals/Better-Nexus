@@ -174,8 +174,10 @@ function S.Bind(db, bundle)
     Nexus.LoadoutEvidence.Init(db)
     local catalog = Nexus.BuildCatalog
     local selected = bundle or S.Bundle()
-    local budget = catalog.Budget()
-    local limit = tonumber(budget.maximumPumps) or 0
+    -- A historical catalog (the PR58 expected-red oracle binds one) has no
+    -- pump budget and admits in its single synchronous Init call.
+    local budget = type(catalog.Budget) == "function" and catalog.Budget() or {}
+    local limit = tonumber(budget.maximumPumps) or 1
     local result = catalog.Init(db, selected)
     local pumps = 1
     while type(result) == "table" and result.state == "pending"
@@ -247,6 +249,158 @@ function S.PumpUntilTerminal(limit)
         S.Check(pumps < (limit or 200000), "root admission did not converge")
     end
     return result, pumps
+end
+
+-- Ordinary catalog writes may spend several scheduler turns constructing and
+-- publishing one detached candidate. Drive exactly one owner slice per loop,
+-- retain the exact ticket, and fail visibly if the bounded fixture does not
+-- reach its own terminal receipt. A pending result is never treated as success.
+function S.AwaitCatalogMutation(first, reason, ticket, label, limit)
+    if first == true then return true, reason, ticket, 0 end
+    if first == false then return false, reason, ticket, 0 end
+    if type(first) == "table" and first.state == "pending" then
+        ticket = first
+    end
+    S.Check(reason == "ROOT_MUTATION_PENDING" and type(ticket) == "table"
+            and ticket.state == "pending",
+        (label or "catalog mutation") .. " returned neither terminal nor pending")
+    local catalog = Nexus and Nexus.BuildCatalog
+    S.Check(type(catalog) == "table"
+            and type(catalog.PumpRootAdmission) == "function",
+        (label or "catalog mutation") .. " has no catalog owner pump")
+    local bound = limit or 200000
+    for pumps = 1, bound do
+        catalog.PumpRootAdmission()
+        if ticket.state ~= "pending" then
+            return ticket.committed == true,
+                ticket.committed == true and ticket.storedAs or ticket.reason,
+                ticket, pumps
+        end
+    end
+    error((label or "catalog mutation")
+        .. " did not reach a terminal ticket within " .. tostring(bound)
+        .. " owner slices", 2)
+end
+
+function S.CatalogMutation(callback, label, limit)
+    local first, reason, ticket = callback()
+    return S.AwaitCatalogMutation(first, reason, ticket, label, limit)
+end
+
+function S.PumpCatalogToIdle(label, limit)
+    local catalog = Nexus and Nexus.BuildCatalog
+    S.Check(type(catalog) == "table"
+            and type(catalog.PumpRootAdmission) == "function",
+        (label or "catalog work") .. " has no catalog owner pump")
+    local bound, last = limit or 200000, nil
+    for pumps = 0, bound do
+        local root = catalog.RootState()
+        if not root.candidate then return last, pumps end
+        S.Check(pumps < bound,
+            (label or "catalog work") .. " did not become idle")
+        last = catalog.PumpRootAdmission()
+    end
+end
+
+-- Direct Sync fixtures have no MainLifecycle scheduler. Stand in for its one
+-- BuildHashCache slice per turn until the exact compatibility view is ready.
+-- This helper never drains more than one cache slice in one simulated turn.
+function S.CompatibilityHashes(sync, limit)
+    local cache = Nexus and Nexus.BuildHashCache
+    local bound = limit or 200000
+    for pumps = 0, bound do
+        local buildHash, dpsHash = sync.GetCompatibilityHashes()
+        if type(buildHash) == "string" and type(dpsHash) == "string" then
+            return buildHash, dpsHash, pumps
+        end
+        local stats = type(cache) == "table" and type(cache.Stats) == "function"
+            and cache.Stats() or {}
+        S.Check(pumps < bound,
+            "compatibility hash work did not converge: initialized="
+                .. tostring(stats.initialized) .. " pending="
+                .. tostring(stats.pending) .. " warmPumps="
+                .. tostring(stats.warmPumps) .. " warmRestarts="
+                .. tostring(stats.warmRestarts) .. " revision="
+                .. tostring(stats.revision))
+        S.Check(type(cache) == "table" and type(cache.Pump) == "function",
+            "compatibility hash work has no cache owner pump")
+        cache.Pump()
+    end
+end
+
+-- Community facade posts save through one retained catalog mutation and
+-- report `false, "ROOT_MUTATION_PENDING", outcome` until it commits. Drive that
+-- exact retained outcome to its terminal local save through the public catalog
+-- scheduler seam. A pending acknowledgement is never treated as a saved post,
+-- and a terminal refusal is returned as the refusal it is.
+function S.PostWishlist(post, title, description, wishlist, class, label)
+    local ok, id, outcome = post(title, description, wishlist, class)
+    local retained = type(outcome) == "table" and outcome.localSaved ~= true
+        and outcome.queueReason == "ROOT_MUTATION_PENDING"
+        and (ok == true or id == "ROOT_MUTATION_PENDING")
+    if not retained then return ok, id, outcome end
+    S.PumpCatalogToIdle(label or "shared build admission")
+    if outcome.localSaved == true then return true, outcome.id, outcome end
+    return false, outcome.queueReason or "local save failed", outcome
+end
+
+-- Inbound Sync traffic that stores a row returns false until its retained
+-- catalog mutation commits. Deliver one wire text, settle the catalog through
+-- the public scheduler seam, and report whether the delivery was accepted
+-- immediately and whether catalog work was pending. Callers assert the durable
+-- terminal state themselves; pending is neither acceptance nor refusal.
+function S.DeliverInbound(sync, text, sender, label)
+    local accepted = sync.HandleIncoming(text, sender)
+    local catalog = Nexus and Nexus.BuildCatalog
+    local pending = type(catalog) == "table"
+        and type(catalog.RootState) == "function"
+        and catalog.RootState().candidate == true
+    if pending then S.PumpCatalogToIdle(label or "inbound catalog mutation") end
+    return accepted, pending
+end
+
+-- Cold Community projection reads are retained pending jobs (MASTER-W2-006).
+-- Drive the exact retained job through the public pump with a finite guard and
+-- serve the published cache through the same entry point. A job failure is
+-- returned as the failure it is; pending is never treated as a result.
+function S.ProjectBuilds(projections, filters)
+    local rows, summary, why = projections.Builds(filters)
+    if rows then return rows, summary end
+    for _ = 1, 100000 do
+        local _, pumpError = projections.PumpBuilds()
+        if pumpError then return nil, nil, pumpError end
+        rows, summary, why = projections.Builds(filters)
+        if rows then return rows, summary end
+        if why ~= "pending" then return nil, nil, why end
+    end
+    error("build projection did not terminate: " .. tostring(why))
+end
+
+function S.ProjectList(projection, projections, filters)
+    local rows, summary, why = projection.List(filters)
+    if rows then return rows, summary end
+    for _ = 1, 100000 do
+        local _, pumpError = projections.PumpBuilds()
+        if pumpError then return nil, nil, pumpError end
+        rows, summary, why = projection.List(filters)
+        if rows then return rows, summary end
+        if why ~= "pending" then return nil, nil, why end
+    end
+    error("Community list projection did not terminate: " .. tostring(why))
+end
+
+-- The Community browser pumps its retained projection job one bounded slice
+-- per real frame. Drive the frame's own OnUpdate until the predicate holds.
+function S.PumpCommunityFrame(frame, predicate, label, limit)
+    local onUpdate = frame and frame.GetScript and frame:GetScript("OnUpdate")
+    S.Check(type(onUpdate) == "function",
+        (label or "Community frame") .. " has no OnUpdate script")
+    local bound = limit or 100000
+    for turns = 0, bound do
+        if predicate() then return turns end
+        S.Check(turns < bound, (label or "Community frame") .. " did not publish")
+        onUpdate(frame, 0.05)
+    end
 end
 
 return S

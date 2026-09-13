@@ -2,6 +2,7 @@
 -- edits must actually PROPAGATE to a peer (not get silently dropped by
 -- the peer's dedup rule).
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua")
@@ -34,6 +35,9 @@ Sync.Init(Codec, Adapter)
 local function Drain(turns)
     for i = 1, tonumber(turns) or 60 do
         clock = clock + 0.2
+        -- One catalog slice per turn before Sync, as MainLifecycle does; a
+        -- retained edit or delete broadcasts only from its terminal commit.
+        Nexus.BuildCatalog.PumpRootAdmission()
         Sync.OnUpdate(0.2)
     end
     local m = H.sentChatMessages
@@ -43,7 +47,7 @@ end
 H.sentChatMessages = {}
 
 -- 1. POST auto-shares
-local ok, id = CB.PostCurrentWishlist("Original Title", "Original description", H.wishlist)
+local ok, id = S.PostWishlist(CB.PostCurrentWishlist, "Original Title", "Original description", H.wishlist)
 assert(ok, "post should succeed")
 local postMsgs = Drain()
 assert(#postMsgs > 0, "posting did not auto-share the build")
@@ -80,12 +84,18 @@ print("updating from your current wishlist auto-shares immediately -- OK")
 -- timestamp, edits 2+ would silently vanish. Replay all three onto a
 -- fresh "peer" and confirm the FINAL state wins.
 NexusDB = {}
+-- Replacing the SavedVariables owner is current-source drift: readmit the
+-- complete root from cursor zero before the peer receives into it.
+H.RebindCatalog(NexusDB)
 Sync.Init(Codec, Adapter)   -- fresh peer state
 clock = clock + 10
 Sync.RequestSync()
 for _, m in ipairs(postMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") end
+S.PumpCatalogToIdle("peer post admission")
 for _, m in ipairs(editMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") end
+S.PumpCatalogToIdle("peer edit admission")
 for _, m in ipairs(updMsgs) do Sync.HandleIncoming(m.text, "Alice-Ebonhold") end
+S.PumpCatalogToIdle("peer update admission")
 
 -- Legacy-to-bundle cutover: the peer's durable copy is the bundle payload.
 local peerCopy = H.DurableBuilds()[id]
@@ -104,12 +114,14 @@ print("every successive edit propagates to peers, in place, with no duplicates -
 -- 5. Editing/updating someone ELSE'S build must be refused
 -- An occupied bundle is authoritative, so the foreign build is admitted through
 -- the public write seam rather than a raw legacy write plus readmission.
-assert(Nexus.BuildCatalog.Put({ id = "theirs", title = "Theirs",
-    description = "d", author = "Bob", class = "ROGUE",
-    echoes = { { spellId = 1, quality = 0, stacks = 1 } },
-    postedAt = 1, lastModified = 1, ownerKey = "bob@ebonhold",
-    ownerVerified = true, isMine = false },
-    {source="remote", sender="Bob-Ebonhold"}),
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put({ id = "theirs", title = "Theirs",
+        description = "d", author = "Bob", class = "ROGUE",
+        echoes = { { spellId = 1, quality = 0, stacks = 1 } },
+        postedAt = 1, lastModified = 1, ownerKey = "bob@ebonhold",
+        ownerVerified = true, isMine = false },
+        {source="remote", sender="Bob-Ebonhold"})
+end, "foreign build admission"),
     "fixture could not admit another player's build")
 local okE, errE = CB.EditBuild("theirs", "Hijacked", "nope")
 assert(not okE, "editing someone else's build must be refused")

@@ -4,6 +4,7 @@
 -- response-only authorized-relay path remain green controls.
 
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 local HarnessNexus = Nexus
 
 local clock = 1000
@@ -32,6 +33,7 @@ local function Boot(name, db)
     Nexus.CommunityBuilds = nil
     dofile("core/Revisions.lua")
     dofile("core/Codec.lua")
+    dofile("core/BuildHashCache.lua")
     dofile("core/SyncProtocol.lua")
     dofile("core/SyncTransport.lua")
     dofile("core/SyncCompatibility.lua")
@@ -66,6 +68,7 @@ local function BootPeer(name, db)
     })
     dofile("core/Revisions.lua")
     dofile("core/Codec.lua")
+    dofile("core/BuildHashCache.lua")
     dofile("core/SyncProtocol.lua")
     dofile("core/SyncTransport.lua")
     dofile("core/SyncCompatibility.lua")
@@ -147,7 +150,7 @@ local compact = {
 }
 assert(DPS.ReceiveRecord(compact, provisionalOwner .. "-Ebonhold"),
     "direct-owner seed was rejected")
-local _, provisionalDpsHash = Sync.GetCompatibilityHashes()
+local _, provisionalDpsHash = S.CompatibilityHashes(Sync)
 local dpsBucket = assert(NonzeroBucket(provisionalDpsHash),
     "seed row did not occupy a DPS bucket")
 
@@ -174,7 +177,7 @@ compact = {
 }
 assert(DPS.ReceiveRecord(compact, owner .. "-Ebonhold"),
     "ranked direct-owner seed was rejected")
-local seedBuildHash, seedDpsHash = Sync.GetCompatibilityHashes()
+local seedBuildHash, seedDpsHash = S.CompatibilityHashes(Sync)
 dpsBucket = assert(NonzeroBucket(seedDpsHash),
     "ranked seed row did not occupy a DPS bucket")
 local seedDb = DeepCopy(NexusDB)
@@ -248,7 +251,7 @@ local function ConcurrentCohort(names, db, expectedBuildHash,
     for _, name in ipairs(names) do
         local peer = BootPeer(name, DeepCopy(db))
         Activate(peer)
-        local buildHash, dpsHash = peer.sync.GetCompatibilityHashes()
+        local buildHash, dpsHash = S.CompatibilityHashes(peer.sync)
         assert(buildHash == expectedBuildHash and dpsHash == expectedDpsHash,
             "concurrent responder hashes drifted")
         local request = table.concat({
@@ -464,7 +467,7 @@ local function RunCohort(names)
     }
     for _, name in ipairs(names) do
         local peerSync = Boot(name, DeepCopy(seedDb))
-        local buildHash, dpsHash = peerSync.GetCompatibilityHashes()
+        local buildHash, dpsHash = S.CompatibilityHashes(peerSync)
         assert(buildHash == seedBuildHash and dpsHash == seedDpsHash,
             "equivalent responder hashes drifted")
         local request = table.concat({
@@ -635,12 +638,17 @@ assert(type(durableRecord) == "table",
     "prepared-response fixture could not locate its durable owner row")
 local Catalog = Nexus.BuildCatalog
 local function PutRelatedBuild(id)
-    assert(Catalog.Put({
-        id=id,title=id,author=owner,ownerKey=verboseRecord.ownerKey,
-        ownerVerified=true,realm=verboseRecord.realm,isMine=false,
-        class="MAGE",postedAt=49000,lastModified=49000,
-        echoes=DeepCopy(echoes),fingerprint=fingerprint,
-    }), "prepared-response relation fixture could not store " .. id)
+    local stored, why = S.CatalogMutation(function()
+        return Catalog.Put({
+            id=id,title=id,author=owner,ownerKey=verboseRecord.ownerKey,
+            ownerVerified=true,realm=verboseRecord.realm,isMine=false,
+            class="MAGE",postedAt=49000,lastModified=49000,
+            echoes=DeepCopy(echoes),fingerprint=fingerprint,
+        })
+    end, "prepared-response relation " .. id)
+    assert(stored,
+        "prepared-response relation fixture could not store " .. id
+            .. ": " .. tostring(why))
 end
 local relationA = "fanout-prepared-relation-a"
 local relationB = "fanout-prepared-relation-b"
@@ -699,8 +707,12 @@ assert(removedDeferred == false
     and removedPrepared.payload.b == relationA,
     "removal control did not reach prepared-response deferral")
 durableRecord.ownerVerified = false
-assert(Catalog.RemoveOverlay(relationA),
-    "removal control could not remove the prepared relation")
+local removedRelation, removedRelationWhy = S.CatalogMutation(function()
+    return Catalog.RemoveOverlay(relationA)
+end, "prepared-response relation removal")
+assert(removedRelation,
+    "removal control could not remove the prepared relation: "
+        .. tostring(removedRelationWhy))
 local removedRetried, removedRetryWhy = Sync.BroadcastDpsRecord(
     removedRecord, removedPrepared, true, preparedContext,
     {chunks=64,bytes=16384,seconds=75,transfers=8})
@@ -838,7 +850,7 @@ local function SeedRecordSet(localName, records)
         assert(seedDps.ReceiveRecord(item.record, sender),
             "multi-record seed was rejected")
     end
-    local buildHash, dpsHash = seedSync.GetCompatibilityHashes()
+    local buildHash, dpsHash = S.CompatibilityHashes(seedSync)
     return DeepCopy(NexusDB), buildHash, dpsHash
 end
 

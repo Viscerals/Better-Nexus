@@ -1,6 +1,7 @@
 -- Saved Build relationship metadata must be selected by verified canonical
 -- owner authority before exact-fingerprint, title, or subset similarity.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 local function SettleCatalog()
     local catalog = Nexus.BuildCatalog
@@ -558,7 +559,7 @@ end
 
 local function ProjectMine(search, qualifiedOnly, currentClassOnly)
     Nexus.ViewProjections.Reset()
-    local rows, summary, err = Nexus.ViewProjections.Builds({
+    local rows, summary, err = S.ProjectBuilds(Nexus.ViewProjections, {
         scope="mine",search=search,currentClassOnly=currentClassOnly == true,
         qualifiedOnly=qualifiedOnly,sortMode="title",
     })
@@ -583,7 +584,7 @@ end
 
 local function ProjectPublic(search, qualifiedOnly)
     Nexus.ViewProjections.Reset()
-    local rows, summary, err = Nexus.ViewProjections.Builds({
+    local rows, summary, err = S.ProjectBuilds(Nexus.ViewProjections, {
         scope="all",search=search,currentClassOnly=false,
         qualifiedOnly=qualifiedOnly,sortMode="title",
     })

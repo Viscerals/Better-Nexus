@@ -2,6 +2,7 @@
 -- additive opt-outs expose complete synchronized storage without replacing
 -- unrelated persisted settings.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Relay.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
@@ -168,7 +169,12 @@ assert(CB.VirtualStats().dataBinds == recovered.dataBinds,
 NexusDB = {communityBuilds={}, syncTombstones={}, buildFilters=NexusDB.buildFilters}
 H.RebindCatalog()
 Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED, {scope="empty"})
-assert(pcall(CB.Refresh) and CB.VirtualStats().results == 0,
+-- The invalidated list is a retained projection job; the browser keeps its
+-- last-good rows until the empty projection publishes on a later frame.
+assert(pcall(CB.Refresh), "empty current-class library refresh failed")
+S.PumpCommunityFrame(frame,
+    function() return CB.VirtualStats().results == 0 end, "empty library")
+assert(CB.VirtualStats().results == 0,
     "empty current-class library was not handled")
 
 print("Community additive class/qualification filters and recovery -- OK")

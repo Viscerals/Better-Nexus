@@ -1,6 +1,7 @@
 -- Login sync opens one bounded receive window automatically. Outside that
 -- window, unsolicited build traffic is ignored; manual Sync Now reopens it.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local Codec, Sync = Nexus.Codec, Nexus.Sync
@@ -32,6 +33,9 @@ local msgs=EncodeBob("bob-1","Bob's Build",100)
 -- Login-time sync fires within the bounded 8-16 second startup delay above.
 assert(Sync.IsReceiving(),"automatic login sync should open the receive window")
 for _,m in ipairs(msgs) do Sync.HandleIncoming(m.text,"Bob-Ebonhold") end
+-- MASTER-W2-008: the received build is one retained catalog mutation; settle
+-- it through the public scheduler seam before the durable assertions.
+S.PumpCatalogToIdle("received build admission")
 -- Legacy-to-bundle cutover (architecture 3b5de54f, state machine lines 394,
 -- 4849): received builds are durable in the authority bundle only; the exact
 -- PR #68 location is preserved read-only input that receiving never writes.
@@ -46,6 +50,7 @@ clock=clock+70
 assert(not Sync.IsReceiving(),"automatic receive window should expire")
 local msgs2=EncodeBob("bob-2","Bob's Second",200)
 for _,m in ipairs(msgs2) do Sync.HandleIncoming(m.text,"Bob-Ebonhold") end
+S.PumpCatalogToIdle("direct-author build admission")
 assert(H.DurableBuilds()["bob-2"],"direct-author data was dropped outside a sync window")
 print("direct-author updates remain accepted after the status window -- OK")
 

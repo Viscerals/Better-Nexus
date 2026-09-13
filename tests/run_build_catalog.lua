@@ -1,6 +1,11 @@
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/BundledBuilds.lua")
 dofile("core/BuildCatalog.lua")
+local function AwaitMutation(ok, why, ticket)
+    return S.AwaitCatalogMutation(ok, why, ticket,
+        "build-catalog fixture mutation")
+end
 
 local baseline = {
     schemaVersion = 1,
@@ -63,19 +68,19 @@ delta.base.title = "mutated delta copy"
 assert(Nexus.BuildCatalog.Get("base").title == "Overlay",
     "DeltaSnapshot exposed mutable overlay storage")
 
-assert(Nexus.BuildCatalog.Put({id="delta-unverified",title="Unverified",
+assert(AwaitMutation(Nexus.BuildCatalog.Put({id="delta-unverified",title="Unverified",
     author="Peer",ownerKey="peer@realma",realm="realma",
-    postedAt=12,lastModified=12,echoes={{spellId=6,stacks=1}}}))
-assert(Nexus.BuildCatalog.Put({id="delta-saved",title="Private Saved",
+    postedAt=12,lastModified=12,echoes={{spellId=6,stacks=1}}})))
+assert(AwaitMutation(Nexus.BuildCatalog.Put({id="delta-saved",title="Private Saved",
     author="Me",ownerKey="me@realma",realm="realma",ownerVerified=true,
     importedSavedBuild=true,isMine=true,serverSlot=1,
-    postedAt=13,lastModified=13,echoes={{spellId=7,stacks=1}}}))
+    postedAt=13,lastModified=13,echoes={{spellId=7,stacks=1}}})))
 local authorityDelta = Nexus.BuildCatalog.DeltaSnapshot()
 assert(authorityDelta["delta-unverified"] == nil
         and authorityDelta["delta-saved"] == nil,
     "EXPECTED RED: unverified or private Saved rows entered Sync delta state")
-assert(Nexus.BuildCatalog.RemoveOverlay("delta-unverified")
-        and Nexus.BuildCatalog.RemoveOverlay("delta-saved"),
+assert(AwaitMutation(Nexus.BuildCatalog.RemoveOverlay("delta-unverified"))
+        and AwaitMutation(Nexus.BuildCatalog.RemoveOverlay("delta-saved")),
     "authority delta fixtures were not removed cleanly")
 
 -- A tombstone reservation denies every write for its typed ID; nothing can
@@ -99,7 +104,7 @@ assert(Nexus.BuildCatalog.Get("newer").title == "Bundled newer",
 local incoming = { id="copy", title="Copied", postedAt=40, lastModified=40,
     author="Boganic", ownerKey="boganic@ebonhold", realm="ebonhold",
     ownerVerified=true, isMine=true, echoes={{spellId=5,stacks=1}} }
-assert(Nexus.BuildCatalog.Put(incoming, {source="local"}))
+assert(AwaitMutation(Nexus.BuildCatalog.Put(incoming, {source="local"})))
 incoming.title = "changed after Put"
 assert(Nexus.BuildCatalog.Get("copy").title == "Copied",
     "Put retained the caller's mutable table")
@@ -109,7 +114,8 @@ local baselineEquivalent = {
     lastModified=20, echoes={{spellId=2,quality=0,stacks=1}},
     echoCount=1, loadoutAvailable=true,
 }
-local putOk, putTarget = Nexus.BuildCatalog.Put(baselineEquivalent)
+local putOk, putTarget = AwaitMutation(
+    Nexus.BuildCatalog.Put(baselineEquivalent))
 -- Legacy-to-bundle cutover (state machine lines 394, 4849): "persisted in the
 -- overlay" now means the durable authority bundle. The exact PR #68 location is
 -- read-only preserved bootstrap input and keeps its seeded row untouched.
@@ -120,11 +126,11 @@ assert(database.communityBuilds.newer ~= nil
     and database.communityBuilds.newer.title == "Stale overlay",
     "the preserved legacy bootstrap input was rewritten")
 
-assert(Nexus.BuildCatalog.SetTombstone("copy", {stamp=41,author="Boganic"},
-    {source="local"}))
+assert(AwaitMutation(Nexus.BuildCatalog.SetTombstone(
+    "copy", {stamp=41,author="Boganic"}, {source="local"})))
 assert(Nexus.BuildCatalog.Get("copy") == nil,
     "SetTombstone did not hide and remove the overlay row")
-assert(Nexus.BuildCatalog.ClearTombstone("copy"))
+assert(AwaitMutation(Nexus.BuildCatalog.ClearTombstone("copy")))
 assert(Nexus.BuildCatalog.Get("copy") == nil,
     "clearing a tombstone unexpectedly restored a removed overlay")
 
@@ -255,7 +261,10 @@ assert(summaries.malformed and summaries.malformed.title
         and Nexus.Identity.PublicRecordKey(summaries.malformed, "author")
             ~= Nexus.Identity.PublicRecordKey(summaries.malformedTwin, "author"),
     "summary cursor did not restore the durable map key as a missing id")
-local syncSummaries = Nexus.BuildCatalog.Summaries()
+local refusedSummaries, summariesWhy = Nexus.BuildCatalog.Summaries()
+assert(refusedSummaries == nil and summariesWhy == "CURSOR_REQUIRED",
+    "maximum-root synchronous summaries did not require the retained cursor")
+local syncSummaries = summaries
 local exactMalformed = Nexus.BuildCatalog.Get("malformed")
 local exactSummary = Nexus.BuildCatalog.GetSummary("malformedTwin")
 assert(syncSummaries.malformed.id == "malformed"

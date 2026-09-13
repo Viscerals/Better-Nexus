@@ -1,6 +1,7 @@
 -- Regression: build posted on A AFTER B's receive window closed must be
 -- received when B syncs again (the "Fire Mage not received" live bug).
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local Codec, Sync = Nexus.Codec, Nexus.Sync
 local clock = 1000; GetTime = function() return clock end
@@ -11,6 +12,15 @@ GetNormalizedRealmName = function() return "Ebonhold" end
 local function deliver(chunks)
     for _,m in ipairs(chunks) do
         Sync.HandleIncoming(m.text, "explore-Ebonhold")
+        for turns=0,200000 do
+            local root=Nexus.BuildCatalog.RootState()
+            if not root.candidate then break end
+            assert(turns<200000,
+                "inbound catalog mutation did not reach terminal state")
+            clock=clock+0.2
+            Nexus.BuildCatalog.PumpRootAdmission()
+            Sync.OnUpdate(0.2)
+        end
     end
 end
 local function drain()
@@ -84,11 +94,15 @@ Sync.RequestSync()
 -- Simulate A answering: BroadcastMine includes hot mageB
 -- A holds the rogue. After the cutover the durable store is the bundle, so the
 -- fixture seeds through the public admission seam rather than a raw legacy write.
-assert(Nexus.BuildCatalog.Put(rogueB), "fixture could not admit A's rogue build")
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put(rogueB)
+end, "late-post rogue admission"), "fixture could not admit A's rogue build")
 H.sentChatMessages={}
 local n = Sync.BroadcastMine()
 local answer2 = drain()
-assert(Nexus.BuildCatalog.RemoveOverlay("r1"), "fixture could not restore B's view")
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.RemoveOverlay("r1")
+end, "late-post rogue removal"), "fixture could not restore B's view")
 assert(n >= 2, "BroadcastMine should include hot mage: got "..n)
 print("BroadcastMine answers 2nd sync with "..n.." builds ("..#answer2.." chunks) -- OK")
 

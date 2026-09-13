@@ -101,10 +101,34 @@ local function Full(id, stamp, echoes, overrides)
     return payload
 end
 
+-- MASTER-W2-008: an accepted inbound row is one retained catalog mutation
+-- that reports false until its terminal ticket commits. Settle the exact
+-- candidate and report its terminal receipt; a refused delivery leaves none.
+local function SettleTerminal()
+    local catalog = Nexus.BuildCatalog
+    local last
+    for _ = 1, catalog.Budget().maximumPumps do
+        if not catalog.RootState().candidate then break end
+        last = catalog.PumpRootAdmission()
+    end
+    assert(not catalog.RootState().candidate, "fixture catalog did not settle")
+    return type(last) == "table" and last.committed == true
+end
+local function DeliverWire(text, sender)
+    local accepted = Sync.HandleIncoming(text, sender)
+    if not accepted and Nexus.BuildCatalog.RootState().candidate then
+        return SettleTerminal()
+    end
+    return accepted
+end
 local function DeliverSummary(sender, payload)
     local transportSender = sender .. "-Ebonhold"
-    return Sync.HandleIncoming("WLBI|" .. transportSender .. "|"
+    local accepted = Sync.HandleIncoming("WLBI|" .. transportSender .. "|"
         .. Encode(payload), transportSender)
+    if not accepted and Nexus.BuildCatalog.RootState().candidate then
+        return SettleTerminal()
+    end
+    return accepted
 end
 
 local function DeliverBuild(sender, payload, onlyFirst)
@@ -120,6 +144,9 @@ local function DeliverBuild(sender, payload, onlyFirst)
         assert(#wire <= 255, "fixture exceeded wire limit")
         result = Sync.HandleIncoming(wire, transportSender) or result
         if onlyFirst then break end
+    end
+    if not result and Nexus.BuildCatalog.RootState().candidate then
+        return SettleTerminal()
     end
     return result
 end
@@ -299,7 +326,7 @@ AssertPublic("new-hidden", 40, echoesB,
 Reset()
 assert(PutTerminal(CompleteRecord("deleted", 10, echoesA)))
 assert(DeliverSummary("Owner", Summary("deleted", 20, echoesB)))
-assert(Sync.HandleIncoming(
+assert(DeliverWire(
     "WLRD|Owner-Ebonhold|deleted|25|Owner", "Owner-Ebonhold"))
 assert(Catalog.Get("deleted") == nil and Pending("deleted") == nil,
     "authorized tombstone did not defeat pending replacement")

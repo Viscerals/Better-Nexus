@@ -2,6 +2,7 @@
 -- independently authorize ordinary completeness, navigation, Copy/EBH1,
 -- qualification, build manufacture, storage, or Sync publication.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 local function SettleCatalog()
     local catalog = Nexus.BuildCatalog
@@ -202,7 +203,7 @@ Nexus.DpsCapture = {
     GetEchoHash=EchoKey,
 }
 Nexus.ViewProjections.Reset()
-local communityRows, communitySummary = Nexus.ViewProjections.Builds({
+local communityRows, communitySummary = S.ProjectBuilds(Nexus.ViewProjections, {
     scope="all",classFilter="MAGE",currentClassOnly=false,
     qualifiedOnly=false,search="",sortMode="recent",page=1,
 })

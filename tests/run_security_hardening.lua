@@ -1,5 +1,6 @@
 -- Hostile Sync/DPS input and CommunityBuild integrity regressions.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("core/DpsCapture.lua")
@@ -16,6 +17,15 @@ local function ResetSync()
     NexusDB = { communityBuilds={}, syncTombstones={},
         dpsCapture=NexusDB.dpsCapture }
     Sync.Init(Codec, {})
+end
+
+-- MASTER-W2-008: inbound rows are retained catalog mutations. Every delivery
+-- below settles that retained work before the durable assertion that follows;
+-- a rejected packet leaves no candidate and settles nothing.
+local function Deliver(text, sender)
+    local accepted = Sync.HandleIncoming(text, sender)
+    S.PumpCatalogToIdle("inbound catalog mutation")
+    return accepted
 end
 
 local function BuildPacket(sender, build, stamp)
@@ -113,12 +123,12 @@ local alice = {
 -- Legacy-to-bundle cutover (architecture 3b5de54f state machine lines 394 and
 -- 4849): the durable authority payload is `authorityBundle`; the exact PR #68
 -- locations are read-only preserved input that receiving never writes.
-Sync.HandleIncoming(BuildPacket("Mallory", alice, 10), "Mallory")
+Deliver(BuildPacket("Mallory", alice, 10), "Mallory")
 local relayed = H.DurableBuilds()[alice.id]
 assert(relayed and relayed.ownerVerified == false and relayed.ownerKey == nil
     and relayed.claimedOwnerKey == "alice@ebonhold"
     and not relayed.isMine, "relay gained build-owner authority")
-Sync.HandleIncoming(BuildPacket("Alice", alice, 10), "Alice-Ebonhold")
+Deliver(BuildPacket("Alice", alice, 10), "Alice-Ebonhold")
 local verified = H.DurableBuilds()[alice.id]
 assert(verified and verified.ownerVerified == true
     and verified.ownerKey == "alice@ebonhold",
@@ -128,22 +138,22 @@ local forged = {
     class="MAGE", description="forged", lastModified=99,
     echoes={{spellId=200101, quality=3, stacks=1}},
 }
-Sync.HandleIncoming(BuildPacket("Mallory", forged, 99), "Mallory")
+Deliver(BuildPacket("Mallory", forged, 99), "Mallory")
 assert(H.DurableBuilds()[alice.id].title == "Alice Build",
     "relayed overwrite changed owner-controlled state")
-Sync.HandleIncoming("WLRD|Mallory|alice-build|100|Alice", "Mallory")
+Deliver("WLRD|Mallory|alice-build|100|Alice", "Mallory")
 assert(H.DurableBuilds()[alice.id], "spoofed tombstone deleted a build")
-Sync.HandleIncoming("WLRD|Mallory|unknown|100|Mallory", "Mallory")
+Deliver("WLRD|Mallory|unknown|100|Mallory", "Mallory")
 assert(H.DurableTombstones().unknown == nil,
     "unknown tombstone gained persistent authority")
-Sync.HandleIncoming("WLRD|Alice|alice-build|101|Alice", "Alice-Ebonhold")
+Deliver("WLRD|Alice|alice-build|101|Alice", "Alice-Ebonhold")
 -- The owner delete publishes a deny-only reservation and preserves the raw row.
 assert(Nexus.BuildCatalog.Get(alice.id) == nil
     and H.DurableBuilds()[alice.id] ~= nil,
     "actual owner could not delete the build")
 
 -- Sender spoofing is rejected before any protocol handler sees the packet.
-Sync.HandleIncoming(BuildPacket("Alice", alice, 110), "Mallory")
+Deliver(BuildPacket("Alice", alice, 110), "Mallory")
 -- The reserved slot still serves nothing and its raw evidence is unchanged.
 assert(Nexus.BuildCatalog.Get(alice.id) == nil
     and H.DurableBuilds()[alice.id].title == "Alice Build",
@@ -235,7 +245,13 @@ assert(not ok and mine.title == "Original"
 local oldFingerprint, oldHash = durableBefore.fingerprint, durableBefore.fingerprintHash
 local oldEchoCount = durableBefore.echoCount
 local bundleBefore = rawget(NexusDB, "authorityBundle")
+-- Earlier owner writes are retained catalog mutations; settle them so the
+-- replacement is admitted against the published root, not refused as pending.
+S.PumpCatalogToIdle("pre-replacement catalog work")
 local replaced, count = Builds.UpdateFromWishlist("mine")
+-- The replacement is one retained catalog mutation; settle it before the
+-- bundle and row assertions.
+S.PumpCatalogToIdle("Echo replacement admission")
 local published = H.DurableBuilds().mine
 local publicRow = Nexus.BuildCatalog.Get("mine")
 

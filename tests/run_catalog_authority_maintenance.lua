@@ -10,17 +10,7 @@ local Case, Check = S.Case, S.Check
 -- Fixture assertions inspect terminal catalog transactions. This uses the real
 -- admission scheduler and never turns a pending acknowledgement into success.
 local function AwaitMutation(ok, why, ticket)
-    if ok == nil and why == "ROOT_MUTATION_PENDING" then
-        assert(type(ticket) == "table", "pending mutation returned no ticket")
-        local catalog = Nexus.BuildCatalog
-        for _ = 1, catalog.Budget().maximumPumps do
-            if ticket.state ~= "pending" then break end
-            catalog.PumpRootAdmission()
-        end
-        assert(ticket.state ~= "pending", "fixture mutation did not settle")
-        return ticket.committed, ticket.storedAs or ticket.reason, ticket
-    end
-    return ok, why, ticket
+    return S.AwaitCatalogMutation(ok, why, ticket, "maintenance fixture mutation")
 end
 
 
@@ -81,7 +71,7 @@ Case("RET-02", "hidden overlay survives eviction and compaction exactly", functi
     catalog = Catalog()
     handle = assert(catalog.BeginCatalogMaintenance({database=db, operation="retention"}))
     Check(catalog.MaintenanceEvictOverlay(handle, "other"))
-    Check(catalog.CommitMaintenance(handle))
+    Check(AwaitMutation(catalog.CommitMaintenance(handle)))
     Check(S.Durable(db).other == nil and S.Durable(db).ret02 == hidden
         and S.Encode(hidden) == hiddenBytes,
         "successful maintenance touched the hidden overlay")
@@ -167,7 +157,8 @@ Case("RET-05", "known and unknown fields survive replacement and rollback", func
     destination.link = nil
     destination.evidenceKey = "v1|100000:3:1:0|100001:3:1:0|100002:3:1:0"
     Check(Catalog().MaintenanceReplaceRow(retry, "ret05", destination))
-    Check(Catalog().CommitMaintenance(retry), "replacement retry refused")
+    Check(AwaitMutation(Catalog().CommitMaintenance(retry)),
+        "replacement retry refused")
     S.Bind(db)
     Check(Catalog().Get("ret05").link == nil
         and S.Durable(db).ret05.futureA.nested == true,
@@ -211,7 +202,8 @@ Case("RET-06", "1,000 records with one hostile row stay within slices", function
         Check(pumps < 5000, "compaction did not converge")
     end
     local final = Nexus.DataCompaction.Stats(db)
-    Check(final.maxPumpWork <= 32 and db.dataCompaction.version == 1,
+    local durableCompaction = S.Durable(db, "dataCompaction")
+    Check(final.maxPumpWork <= 32 and durableCompaction.version == 1,
         "compaction exceeded its work budget or did not complete")
     Check(S.Durable(db)["ret06-hostile"] == hostile, "compaction rewrote the hostile row")
 end)
@@ -224,7 +216,8 @@ Case("RET-07", "drift during shadow work cancels the candidate", function()
     Check(catalog.MaintenanceEvictOverlay(handle, "ret07"))
     Check(AwaitMutation(catalog.Put(S.Build("ret07-new", 1, 0))), "concurrent mutation refused")
     local ok, why = catalog.CommitMaintenance(handle)
-    Check(ok == false and why == "SOURCE_DRIFT" and S.Durable(db).ret07 ~= nil,
+    Check(ok == false and why == "INVALID_MAINTENANCE_HANDLE"
+            and S.Durable(db).ret07 ~= nil,
         "drifted candidate committed: " .. tostring(why))
     handle = assert(catalog.BeginCatalogMaintenance({database=db, operation="retention"}))
     S.Reload()

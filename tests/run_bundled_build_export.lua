@@ -89,7 +89,10 @@ end
 assert(summary.bundled == count and summary.overlay == 0
     and Nexus.BuildCatalog.Count() == admissible,
     "clean database did not expose only the generated baseline")
-assert(next(Nexus.BuildCatalog.OverlaySnapshot()) == nil,
+-- MASTER-W2-006: the generated baseline is a maximum root, so the one-call
+-- overlay collection refuses with CURSOR_REQUIRED; the O(1) published status
+-- carries the same overlay count.
+assert(Nexus.BuildCatalog.Status().overlayCount == 0,
     "clean database gained an overlay while loading the baseline")
 
 print(string.format(

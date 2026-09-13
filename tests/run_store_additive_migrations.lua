@@ -141,9 +141,48 @@ UnitName = originalUnitName
 
 local converted = pending[17]
 local afterFirst = Copy(NexusDB)
+local statsBeforeRepeat = Nexus.BuildCatalog.DebugStats()
 H.BootstrapStore()
+local statsAfterRepeat = Nexus.BuildCatalog.DebugStats()
+local repeatChanges = {}
+for key, value in pairs(afterFirst) do
+    if not Equal(value, NexusDB[key]) then
+        repeatChanges[#repeatChanges + 1] = tostring(key)
+    end
+end
+for key in pairs(NexusDB) do
+    if afterFirst[key] == nil then repeatChanges[#repeatChanges + 1] = tostring(key) end
+end
+table.sort(repeatChanges)
+local repeatBundleChanges = {}
+for key, value in pairs(afterFirst.authorityBundle or {}) do
+    if not Equal(value, NexusDB.authorityBundle and NexusDB.authorityBundle[key]) then
+        repeatBundleChanges[#repeatBundleChanges + 1] = tostring(key)
+    end
+end
+table.sort(repeatBundleChanges)
 assert(Equal(NexusDB, afterFirst),
-    "repeat initialization changed a completed current-version save")
+    "repeat initialization changed a completed current-version save; bundle="
+        .. tostring(afterFirst.authorityBundle) .. "/"
+        .. tostring(NexusDB.authorityBundle)
+        .. " generation="
+        .. tostring(afterFirst.authorityBundle
+            and afterFirst.authorityBundle.transactionGeneration) .. "/"
+        .. tostring(NexusDB.authorityBundle
+            and NexusDB.authorityBundle.transactionGeneration)
+        .. " storeRevision="
+        .. tostring(afterFirst.authorityBundle
+            and afterFirst.authorityBundle.storeData
+            and afterFirst.authorityBundle.storeData.storeRevision) .. "/"
+        .. tostring(NexusDB.authorityBundle
+            and NexusDB.authorityBundle.storeData
+            and NexusDB.authorityBundle.storeData.storeRevision)
+        .. " roots=" .. table.concat(repeatChanges, ",")
+        .. " bundleFields=" .. table.concat(repeatBundleChanges, ",")
+        .. " commits=" .. tostring(statsBeforeRepeat.commits) .. "/"
+        .. tostring(statsAfterRepeat.commits)
+        .. " maintenance=" .. tostring(statsBeforeRepeat.maintenanceCommits)
+        .. "/" .. tostring(statsAfterRepeat.maintenanceCommits))
 assert(pending[17] == converted,
     "completed pending-toggle migration ran more than once")
 

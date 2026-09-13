@@ -77,6 +77,7 @@ local GOLDEN_WLRB =
 
 local results, failures, passed = {}, {}, 0
 local currentFailures
+local caseFilter = os.getenv("BN_MIX_CASE")
 
 local function Check(condition, message)
     if not condition then
@@ -85,6 +86,7 @@ local function Check(condition, message)
 end
 
 local function Case(id, name, body)
+    if caseFilter and caseFilter ~= "" and caseFilter ~= id then return end
     currentFailures = {}
     local ok, err = pcall(body)
     if not ok then currentFailures[#currentFailures + 1] = tostring(err) end
@@ -106,11 +108,16 @@ local function TempRoot()
     return (temp:gsub("\\", "/")) .. "/bn-mix-client-matrix"
 end
 
+local fileCache = {}
 local function ReadFile(path)
+    if fileCache[path] ~= nil then
+        return fileCache[path] ~= false and fileCache[path] or nil
+    end
     local handle = io.open(path, "rb")
-    if not handle then return nil end
+    if not handle then fileCache[path] = false; return nil end
     local text = handle:read("*a")
     handle:close()
+    fileCache[path] = text
     return text
 end
 
@@ -119,12 +126,19 @@ local function Materialize()
     local windows = dir:gsub("/", "\\")
     os.execute('rmdir /s /q "' .. windows .. '" 2>nul')
     os.execute('mkdir "' .. windows .. '" 2>nul')
-    os.execute('git archive ' .. REQUIRED_BASE_COMMIT
+    local cwdPath = dir .. "/.mix-cwd"
+    os.execute('cd > "' .. cwdPath .. '"')
+    local safeRoot = ReadFile(cwdPath)
+    safeRoot = safeRoot and safeRoot:gsub("%s+$", ""):gsub("\\", "/")
+    assert(type(safeRoot) == "string" and safeRoot ~= "",
+        "could not resolve the active fixture checkout")
+    local safeGit = 'git -c safe.directory="' .. safeRoot .. '"'
+    os.execute(safeGit .. ' archive ' .. REQUIRED_BASE_COMMIT
         .. ' | tar -x -C "' .. dir .. '"')
     -- `git rev-parse <sha>^{tree}` cannot be used here: `^` is the cmd.exe
     -- escape character and is eaten before git sees it.
     local hashPath = dir .. "/.mix-tree"
-    os.execute('git log -1 --format=%T ' .. REQUIRED_BASE_COMMIT
+    os.execute(safeGit .. ' log -1 --format=%T ' .. REQUIRED_BASE_COMMIT
         .. ' > "' .. hashPath .. '"')
     local tree = ReadFile(hashPath)
     tree = tree and (tree:gsub("%s+$", "")) or nil
@@ -192,7 +206,9 @@ end
 local function SettleCatalog(nexus)
     local catalog = nexus.BuildCatalog
     if type(catalog.RootState) ~= "function" then return end
-    for _ = 1, catalog.Budget().maximumPumps do
+    local budget = type(catalog.Budget) == "function" and catalog.Budget() or {}
+    local limit = math.min(tonumber(budget.maximumPumps) or 200000, 200000)
+    for _ = 1, limit do
         if not catalog.RootState().candidate then return end
         catalog.PumpRootAdmission()
     end
@@ -200,10 +216,57 @@ local function SettleCatalog(nexus)
 end
 
 local function PumpSide(nexus)
-    if type(nexus.BuildCatalog.PumpRootAdmission) == "function" then
-        nexus.BuildCatalog.PumpRootAdmission()
+    local catalog = nexus.BuildCatalog
+    if type(catalog.PumpRootAdmission) == "function" then
+        catalog.PumpRootAdmission()
+    end
+    if type(catalog.RootState) == "function" then
+        local root = catalog.RootState()
+        if root.state ~= "ROOT_ADMITTED" or root.candidate == true then
+            return false, "catalog"
+        end
+    end
+    local cache = nexus.BuildHashCache
+    if type(cache) == "table" and type(cache.Pump) == "function"
+        and cache.Pump() ~= true then
+        return false, "hash-cache"
     end
     nexus.Sync.OnUpdate(0.2)
+    return true
+end
+
+local function BuildWireComplete(messages)
+    local count, total = 0, nil
+    for _, message in ipairs(messages) do
+        local text = message.text or ""
+        if text:find("^WLRB") then
+            count = count + 1
+            local _, encodedTotal = text:match("||(%d+)/(%d+)||")
+            total = tonumber(encodedTotal) or total
+        end
+    end
+    return total ~= nil and count >= total, count, total
+end
+
+local function PumpUntilBuildWire(nexus, harness, label)
+    for turns = 0, 200000 do
+        local complete = BuildWireComplete(harness.sentChatMessages)
+        if complete then return turns end
+        assert(turns < 200000,
+            tostring(label) .. " did not emit a complete build payload")
+        PumpSide(nexus)
+    end
+end
+
+local function PumpUntilCode(nexus, harness, code, label)
+    for turns = 0, 200000 do
+        for _, message in ipairs(harness.sentChatMessages) do
+            if (message.text or ""):find("^" .. code) then return turns end
+        end
+        assert(turns < 200000,
+            tostring(label) .. " did not emit " .. tostring(code))
+        PumpSide(nexus)
+    end
 end
 
 local function PutSide(nexus, record, options)
@@ -246,8 +309,10 @@ local function CaptureBuildWire(root, id)
     local record = FixtureBuild(id)
     PutSide(nexus, record)
     harness.sentChatMessages = {}
-    pcall(nexus.Sync.BroadcastBuild, record)
-    for _ = 1, 40 do PumpSide(nexus) end
+    local called, accepted = pcall(nexus.Sync.BroadcastBuild, record)
+    if called and accepted then
+        PumpUntilBuildWire(nexus, harness, "captured build")
+    end
     SettleCatalog(nexus)
     for _, message in ipairs(harness.sentChatMessages) do
         local text = message.text or ""
@@ -262,7 +327,6 @@ local function DeliverTo(root, wire, sender)
     local env, harness, nexus = Side(root)
     local before = nexus.Codec.JSONEncode(env.NexusDB)
     local ok, accepted = pcall(nexus.Sync.HandleIncoming, wire, sender or "Boganic")
-    for _ = 1, 20 do PumpSide(nexus) end
     SettleCatalog(nexus)
     local after = nexus.Codec.JSONEncode(env.NexusDB)
     return {
@@ -431,8 +495,10 @@ local function CaptureDeleteWire(root, id)
     PutSide(nexus, record)
     harness.sentChatMessages = {}
     local ok, queued, why = pcall(nexus.Sync.BroadcastDelete, record)
-    for _ = 1, 40 do PumpSide(nexus) end
     SettleCatalog(nexus)
+    if ok and queued == true then
+        PumpUntilCode(nexus, harness, "WLRD", "captured delete")
+    end
     -- The immediate return is pending. Assert the unchanged refusal oracle
     -- against the real terminal operation record after catalog completion.
     if ok and why == "ROOT_MUTATION_PENDING" then
@@ -589,8 +655,10 @@ local function CaptureAllWire(root, record)
     local env, harness, nexus = Side(root)
     PutSide(nexus, record, {source="local"})
     harness.sentChatMessages = {}
-    pcall(nexus.Sync.BroadcastBuild, record)
-    for _ = 1, 40 do PumpSide(nexus) end
+    local called, accepted = pcall(nexus.Sync.BroadcastBuild, record)
+    if called and accepted then
+        PumpUntilBuildWire(nexus, harness, "captured operation")
+    end
     SettleCatalog(nexus)
     local texts = {}
     for _, message in ipairs(harness.sentChatMessages) do
@@ -880,8 +948,10 @@ local function ClsSend(sideRoot, record)
     local _, harness, nexus = Side(sideRoot)
     PutSide(nexus, record, {source="local"})
     harness.sentChatMessages = {}
-    pcall(nexus.Sync.BroadcastBuild, record)
-    for _ = 1, 90 do PumpSide(nexus) end
+    local called, accepted = pcall(nexus.Sync.BroadcastBuild, record)
+    if called and accepted then
+        PumpUntilBuildWire(nexus, harness, "semantic envelope")
+    end
     SettleCatalog(nexus)
     local texts = {}
     for _, message in ipairs(harness.sentChatMessages) do
@@ -898,7 +968,6 @@ local function ClsReceive(sideRoot, chunks)
     for _, chunk in ipairs(chunks) do
         pcall(nexus.Sync.HandleIncoming, chunk, "Boganic")
     end
-    for _ = 1, 60 do PumpSide(nexus) end
     SettleCatalog(nexus)
     local after = nexus.Codec.JSONEncode(env.NexusDB)
     return {
@@ -914,7 +983,6 @@ local function ClsReceive(sideRoot, chunks)
             for _, chunk in ipairs(more) do
                 pcall(nexus.Sync.HandleIncoming, chunk, "Boganic")
             end
-            for _ = 1, 60 do PumpSide(nexus) end
             SettleCatalog(nexus)
             return nexus.Codec.JSONEncode(env.NexusDB)
         end,

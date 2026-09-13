@@ -227,24 +227,14 @@ local function CatalogGet(id)
     return catalog.Get(id)
 end
 
--- Complete collections are read through the generation-bound record
--- cursor; the DPS owner never receives a root-owned catalog table.
+-- Compatibility-only whole collection reads use the catalog's strict
+-- one-call bound. The packaged owner uses indexed lookups and never drains a
+-- retained catalog cursor inside one DPS call.
 local function CatalogAll()
     local catalog = Catalog()
-    local out = {}
-    if not (catalog and type(catalog.BeginRecordCursor) == "function") then
-        return out
-    end
-    local token = catalog.BeginRecordCursor()
-    if not token then return out end
-    for _ = 1, 4096 do
-        local page, err = catalog.RecordCursorNext(token)
-        if err or type(page) ~= "table" or page.done then break end
-        if page.id ~= nil and page.record ~= nil then
-            out[page.id] = page.record
-        end
-    end
-    return out
+    if not (catalog and type(catalog.All) == "function") then return {} end
+    local all = catalog.All()
+    return type(all) == "table" and all or {}
 end
 
 local function CatalogPut(build)
@@ -294,11 +284,17 @@ end
 -- module-private preparation epoch advances exactly ONCE, before the
 -- replacement, never per field.
 function DpsAuthorityOwner.ReplaceRoots(db, personal, build, character)
-    DpsAuthorityOwner.epoch = DpsAuthorityOwner.epoch + 1
+    local counters = Nexus and Nexus.MainInternals
+        and Nexus.MainInternals.CatalogAuthorityCounters
+    if not (counters and type(counters.Advance) == "function") then
+        return nil, "GENERATION_EXHAUSTED"
+    end
+    local epoch, why = counters.Advance(DpsAuthorityOwner, "epoch", 1)
+    if not epoch then return nil, why end
     db.personalBest = personal
     db.buildBest = build
     db.characterBest = character
-    return DpsAuthorityOwner.epoch
+    return epoch
 end
 -- DPS-AUTHORITY-WRITER-INVENTORY END
 
@@ -389,7 +385,6 @@ local function RepairCurrentCharacterClass()
     local localOwner = OwnerKey(me, realm)
     if not localOwner then return false end
     local changed = false
-    local builds = CatalogAll()
     local character = CharacterBestStore()
     local personal = PersonalBestStore()
 
@@ -407,7 +402,7 @@ local function RepairCurrentCharacterClass()
                     end
                 end
 
-                local build = row.buildId and builds[row.buildId]
+                local build = row.buildId and CatalogGet(row.buildId)
                 if build and build.autoDps then
                     if Identity.VerifiedOwnerKey(build) == localOwner then
                         local buildChanged = false
@@ -682,19 +677,53 @@ local function LockedKey(echoes)
 end
 
 ReferenceEvidence = function(row)
-    local compaction = Nexus and Nexus.DataCompaction
-    if compaction and type(compaction.Enabled) == "function"
-        and compaction.Enabled(NexusDB)
-        and type(compaction.CompactDpsRow) == "function" then
-        local ok, changed = pcall(compaction.CompactDpsRow, row)
-        if ok then return changed == true end
-    end
+    if type(row) ~= "table" then return false end
     local evidence = Nexus and Nexus.LoadoutEvidence
-    if evidence and type(evidence.ReferenceDpsRow) == "function" then
-        local ok, changed = pcall(evidence.ReferenceDpsRow, row)
-        return ok and changed == true
+    if not (evidence and type(evidence.Fingerprint) == "function") then
+        return false
     end
-    return false
+    local compaction = Nexus and Nexus.DataCompaction
+    local compact = compaction and type(compaction.Enabled) == "function"
+        and compaction.Enabled(NexusDB)
+    local candidateOpen = type(evidence.CandidateOpen) == "function"
+        and evidence.CandidateOpen() == true
+    -- New evidence bytes belong to the catalog's detached candidate. Writing
+    -- the durable pool before that candidate starts changes the evidence-owner
+    -- revision and correctly invalidates the serving witness. Outside a
+    -- candidate, bind only the self-verifying key and retain inline bytes. If
+    -- the exact pool entry is already durable, compacting to it is read-only.
+    local changed = false
+    local function BindField(inlineField, referenceField, options)
+        local inline = row[inlineField]
+        if type(inline) ~= "table" or next(inline) == nil then return end
+        local ok, exact = pcall(evidence.Fingerprint, inline, options)
+        if not ok or type(exact) ~= "string" or exact == "" then return end
+        if row[referenceField] ~= exact then
+            row[referenceField] = exact
+            changed = true
+        end
+        if compact and not candidateOpen and type(evidence.Resolve) == "function" then
+            local resolvedOk, resolved, resolvedExact = pcall(
+                evidence.Resolve, exact, nil, options)
+            if resolvedOk and type(resolved) == "table"
+                and resolvedExact == exact then
+                row[inlineField] = nil
+                changed = true
+            end
+        end
+    end
+    BindField("echoes", "evidenceKey")
+    BindField("lockedEchoes", "lockedEvidenceKey", {forceLocked=true})
+    if not candidateOpen then return changed end
+    if compact and type(compaction.CompactDpsRow) == "function" then
+        local ok, compacted = pcall(compaction.CompactDpsRow, row)
+        if ok then return compacted == true or changed end
+    end
+    if type(evidence.ReferenceDpsRow) == "function" then
+        local ok, referenced = pcall(evidence.ReferenceDpsRow, row)
+        return ok and referenced == true or changed
+    end
+    return changed
 end
 
 StoredEchoes = function(row, locked)
@@ -807,10 +836,11 @@ local function MigrateLocalLockedBaseline()
         -- MASTER-RC-001: one protected replacement of the complete detached
         -- field set through the owner, which advances the preparation epoch
         -- exactly once. This was three direct writes.
-        DpsAuthorityOwner.ReplaceRoots(db,
+        local replaced = DpsAuthorityOwner.ReplaceRoots(db,
             DeepCopy(source.personalBest or {}),
             DeepCopy(source.buildBest or {}),
             DeepCopy(source.characterBest or { dummy={}, lk={} }))
+        if not replaced then return end
         db.lockedMigrationSource = nil
         local changed = not DeepEqual(beforeState.personalBest, PersonalBestStore())
             or not DeepEqual(beforeState.buildBest, BuildBestStore())
@@ -2960,30 +2990,17 @@ local function CommitSession(category)
         local becameCharacterBest = BetterRow(personalRow, previousCharacterBest)
         if becameCharacterBest then
             local C = Nexus.CommunityBuilds
-            if C and C.EnsureDpsBuildForEchoes then
-                local function CompleteBuild(ensuredId, ensuredBuild)
-                    if not ensuredId then return end
-                    buildId, build = ensuredId, ensuredBuild or build
-                    personalRow.buildId = ensuredId
-                    BumpDps("personal record build linked", {
-                        scope="record",category=category,player=player,
-                        ownerKey=personalRow.ownerKey,realm=personalRow.realm,
-                        characterKey=pk,
-                    })
-                end
-                local ok, ensuredId, ensuredBuild = pcall(
-                    C.EnsureDpsBuildForEchoes, snap, category, personalRow,
-                    CompleteBuild)
-                if ok and ensuredId then buildId, build = ensuredId, ensuredBuild or build end
-                personalRow.buildId = buildId
-            end
-            characterBucket[pk] = personalRow
-
             -- If the previous winning page was an automatically generated
             -- local record page and no leaderboard row references it anymore,
             -- remove it from the mesh instead of accumulating dead experiments.
-            local oldBuildId = previousCharacterBest and previousCharacterBest.buildId
-            if oldBuildId and oldBuildId ~= buildId and C and C.DeleteBuild then
+            -- The removal runs only once the replacement page is terminal: a
+            -- retained page creation and this removal are two catalog
+            -- mutations, and the second must not race the first's candidate.
+            local function RemoveSupersededPage(currentId)
+                local oldBuildId = previousCharacterBest
+                    and previousCharacterBest.buildId
+                if not (oldBuildId and oldBuildId ~= currentId and C
+                    and C.DeleteBuild) then return end
                 local stillUsed = false
                 for _, encounter in ipairs({ "dummy", "lk" }) do
                     for _, publicRow in pairs(CharacterBestStore()[encounter] or {}) do
@@ -2995,6 +3012,42 @@ local function CommitSession(category)
                 if not stillUsed and oldBuild and oldBuild.autoDps and oldBuild.isMine then
                     pcall(C.DeleteBuild, oldBuildId)
                 end
+            end
+            if C and C.EnsureDpsBuildForEchoes then
+                local function CompleteBuild(ensuredId, ensuredBuild)
+                    if not ensuredId then return end
+                    buildId, build = ensuredId, ensuredBuild or build
+                    personalRow.buildId = ensuredId
+                    BumpDps("personal record build linked", {
+                        scope="record",category=category,player=player,
+                        ownerKey=personalRow.ownerKey,realm=personalRow.realm,
+                        characterKey=pk,
+                    })
+                    RemoveSupersededPage(ensuredId)
+                end
+                -- The stable Community facade accepts the legacy three-argument
+                -- call. Carry the terminal callback on the record as well, so
+                -- the controller can retain it across an asynchronous catalog
+                -- commit without widening that public facade.
+                personalRow._catalogBuildCompletion = CompleteBuild
+                local ok, ensuredId, ensuredBuild, ensureWhy = pcall(
+                    C.EnsureDpsBuildForEchoes, snap, category, personalRow,
+                    CompleteBuild)
+                personalRow._catalogBuildCompletion = nil
+                ReferenceEvidence(personalRow)
+                if ok and ensuredId then buildId, build = ensuredId, ensuredBuild or build end
+                personalRow.buildId = buildId
+                characterBucket[pk] = personalRow
+                if not (ok and ensuredId == nil
+                    and ensureWhy == "ROOT_MUTATION_PENDING") then
+                    -- Terminal already (existing page, synchronous page, or
+                    -- no page): the superseded page can go now. A retained
+                    -- creation removes it from its terminal callback instead.
+                    RemoveSupersededPage(buildId)
+                end
+            else
+                characterBucket[pk] = personalRow
+                RemoveSupersededPage(buildId)
             end
         end
         BumpDps("personal best committed", becameCharacterBest and {
@@ -3395,10 +3448,14 @@ local function ReceiveRecord(record, transportSender, relayed)
             })
             RequestDataViewRefresh()
         end
+        -- The public facade forwards only (echoes, category, record); the
+        -- controller reads the completion from the record itself, so it must
+        -- stay bound across the safe retry, whose page is also one retained
+        -- mutation that links the row only at its terminal commit.
         row._catalogBuildCompletion = CompleteBuild
         local ok, ensuredId, _, ensureWhy = pcall(
             C.EnsureDpsBuildForEchoes, echoes, category, row, CompleteBuild)
-        row._catalogBuildCompletion = nil
+        ReferenceEvidence(row)
         if ok and ensuredId then
             row.buildId = ensuredId
         elseif ensureWhy ~= "ROOT_MUTATION_PENDING" and row.buildId then
@@ -3411,6 +3468,7 @@ local function ReceiveRecord(record, transportSender, relayed)
                 CompleteBuild)
             if safeOk and safeId then row.buildId = safeId end
         end
+        row._catalogBuildCompletion = nil
     end
     row._promotedFromUnverified = nil
     local previousCharacterKey = existing and existingKey ~= characterKey

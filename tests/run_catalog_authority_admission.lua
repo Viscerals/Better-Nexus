@@ -10,17 +10,7 @@ local Case, Check = S.Case, S.Check
 -- Fixture assertions inspect terminal catalog transactions. This uses the real
 -- admission scheduler and never turns a pending acknowledgement into success.
 local function AwaitMutation(ok, why, ticket)
-    if ok == nil and why == "ROOT_MUTATION_PENDING" then
-        assert(type(ticket) == "table", "pending mutation returned no ticket")
-        local catalog = Nexus.BuildCatalog
-        for _ = 1, catalog.Budget().maximumPumps do
-            if ticket.state ~= "pending" then break end
-            catalog.PumpRootAdmission()
-        end
-        assert(ticket.state ~= "pending", "fixture mutation did not settle")
-        return ticket.committed, ticket.storedAs or ticket.reason, ticket
-    end
-    return ok, why, ticket
+    return S.AwaitCatalogMutation(ok, why, ticket, "admission fixture mutation")
 end
 
 
@@ -442,7 +432,7 @@ Case("UNK-01", "unknown scalar survives update, restart, and maintenance", funct
     local copy = Nexus.BuildCatalog.Get("unk01")
     copy.description = "compacted"
     Check(Nexus.BuildCatalog.MaintenanceReplaceRow(handle, "unk01", copy))
-    Check(Nexus.BuildCatalog.CommitMaintenance(handle))
+    Check(AwaitMutation(Nexus.BuildCatalog.CommitMaintenance(handle)))
     Check(S.Durable(db).unk01.futureScalar == "keep me"
         and S.Durable(db).unk01.description == "compacted",
         "maintenance replacement erased the unknown scalar")

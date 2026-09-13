@@ -4,6 +4,7 @@
 -- while a pure bounded classifier distinguishes safe recovery from every
 -- fail-closed state without mutating SavedVariables or constructing UI.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 UnitName = function() return "FixtureOwner" end
 GetNormalizedRealmName = function() return "FixtureRealm" end
@@ -177,7 +178,9 @@ end
 -- not qualified by its reused ID, disabling Qualified Only exposes it, and
 -- an exact current fingerprint remains qualified without any repair.
 local P = Nexus.ViewProjections
-local collisionQualified, collisionQualifiedSummary = P.Builds({
+-- MASTER-W2-006: a cold Builds read is one retained projection job; settle
+-- each read through the public projection seam before its rows are counted.
+local collisionQualified, collisionQualifiedSummary = S.ProjectBuilds(P, {
     scope="all",currentClassOnly=true,qualifiedOnly=true,
     search="Collision",sortMode="title",page=1,
 })
@@ -185,7 +188,7 @@ assert(#collisionQualified == 0
         and collisionQualifiedSummary.filteredTotal == 0,
     "build-ID collision fabricated exact qualification")
 P.Reset()
-local collisionLibrary, collisionLibrarySummary = P.Builds({
+local collisionLibrary, collisionLibrarySummary = S.ProjectBuilds(P, {
     scope="all",currentClassOnly=true,qualifiedOnly=false,
     search="Collision",sortMode="title",page=1,
 })
@@ -195,7 +198,7 @@ assert(#collisionLibrary == 1
         and collisionLibrary[1]._nexusQualified == false,
     "Qualified Only opt-out did not expose the stored collision fixture")
 P.Reset()
-local exactRows = P.Builds({
+local exactRows = S.ProjectBuilds(P, {
     scope="all",currentClassOnly=true,qualifiedOnly=true,
     search="Exact",sortMode="dps",page=1,
 })
@@ -207,20 +210,20 @@ assert(#exactRows == 1 and exactRows[1].id == "exact-current"
 -- Existing current-class, scope, search, sort, and real 20-row paging remain
 -- independently usable before the new classifier exists.
 P.Reset()
-local allClasses = P.Builds({scope="all",currentClassOnly=false,
+local allClasses = S.ProjectBuilds(P, {scope="all",currentClassOnly=false,
     qualifiedOnly=true,search="Warrior",sortMode="recent",page=1})
 assert(#allClasses == 1 and allClasses[1].id == "warrior-current",
     "current-class opt-out lost a valid exact Warrior build")
 P.Reset()
-local mine = P.Builds({scope="mine",currentClassOnly=true,
+local mine = S.ProjectBuilds(P, {scope="mine",currentClassOnly=true,
     qualifiedOnly=true,search="Fixture",sortMode="title",page=1})
 assert(#mine == 1 and mine[1].id == "exact-current",
     "My Builds/search/sort control lost the exact local build")
 P.Reset()
-local pageOne, pageOneSummary = P.Builds({scope="all",
+local pageOne, pageOneSummary = S.ProjectBuilds(P, {scope="all",
     currentClassOnly=true,qualifiedOnly=false,search="",sortMode="title",page=1})
 local workBeforePage = P.Stats().builds
-local pageTwo, pageTwoSummary = P.Builds({scope="all",
+local pageTwo, pageTwoSummary = S.ProjectBuilds(P, {scope="all",
     currentClassOnly=true,qualifiedOnly=false,search="",sortMode="title",page=2})
 local workAfterPage = P.Stats().builds
 assert(#pageOne == 20 and #pageTwo == 3

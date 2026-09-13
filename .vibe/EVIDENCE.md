@@ -1094,3 +1094,506 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   receipt will record commit, tree, parent, and the exact 62 paths immediately
   after commit. Exact-head Fast, one Full, and fresh independent acceptance
   remain open; no delivery has started.
+
+## Stage 50.3 - Wave 3 prospective authorization and first tracked reconciliation - 2026-09-12
+
+- Direct user authority is preserved byte-exact at
+  `<user-home>\.codex\attachments\dcb7e239-a51b-45fd-b2fe-285f85dd32dd\pasted-text.txt`,
+  SHA-256 `1f86ed284803d4b5e61c9fd102dac4be5d07b40df112396b541b085d024d64ad`,
+  23,815 bytes. Sections 1 through 14 were read completely. They authorize one
+  third and final bounded repair wave for `MASTER-W2-001` through
+  `MASTER-W2-011`, the ATOM-13 correction, the exact packet paths, local
+  implementation and validation, one frozen candidate, one fresh independent
+  acceptance campaign, and separate MASTER aggregation.
+- Canonical prospective packet
+  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-3.json` is valid JSON,
+  SHA-256 `760864fe79c3ca2962e8d7ff8610443e5a1f1e992113ec1734ecb86666b9d984`,
+  24,388 bytes. It enumerates 34 exact existing tracked paths: 13 production,
+  13 offline tests, and 8 support or workflow records. All 34 pre-edit hashes
+  match. It authorizes zero protected path.
+- Immutable pre-edit receipt
+  `C:\T3\BN\receipts\wave3\CODEX_WAVE3_PREEDIT_AUTHORIZATION_2026-09-12.md`
+  is SHA-256
+  `0a62bee967aeabfabe9ea31ed38072bf6e1fbd1c570d572a09c7df9111c9e1e0`,
+  5,755 bytes. The packet and receipt existed and their destination hashes
+  matched before this first tracked Wave 3 reconciliation.
+- The Wave 3 worktree was clean at start on branch
+  `bugfix/test19-catalog-authority-22-wave3`. Its rejected Wave 2 start is
+  commit `66e175b6296606e39bbec45ac30a109e21ab0ea9`, tree
+  `fd2041bf2b9a7f6da3bdbb2716303ee4f99fb305`, parent
+  `22c1553a018af9543c9b596d49cf5a9e7d776ffd`.
+- Current task `01a0895c-84ed-72e3-96b8-27573a831e91`, turn-context ordinal
+  31524, verifies `gpt-5.6-sol` with reasoning `max`. Older medium and
+  Astra/high records remain unchanged.
+- Rejected Wave 2 MASTER result
+  `C:\T3\BN\review-results\catalog-authority-wave2-66e175b\master\result.json`
+  is SHA-256
+  `e7af6424053f68bd25b66ff36bfdbb6fd5a537c8b33b933f67017a2c78223e72`,
+  55,222 bytes. Its completion receipt is SHA-256
+  `ac7db486b69c861f5a9d3fde6b19f77fa63a6b7cb7fad35933bc7b057fe4b626`,
+  5,648 bytes. The full supervisor release disposition at task
+  `01a07ae8-93de-7243-8ba6-abce5576c3c2`, response timestamp
+  `2026-09-12T08:14:42.256Z`, ordinal 12888, is UTF-8 SHA-256
+  `13119e3cb4ced5735ef686c8940662480c0c4b3af301c08c994bff5999395d87`.
+- The exact implementation defects are `MASTER-W2-001` through
+  `MASTER-W2-011`. They map only to `MASTER-RC-002`, `MASTER-RC-006`,
+  `MASTER-RC-007`, and `MASTER-RC-017`. No new architecture semantic, product
+  owner, protected path, evidence correction, fourth wave, package, delivery,
+  installation, native WoW run, or live SavedVariables access is authorized.
+- Historical repair counters were 2 used / maximum 2 / remaining 0. Direct
+  authority raised only the maximum before tracked work, producing
+  2 used / maximum 3 / remaining 1. This first tracked Wave 3 reconciliation
+  consumes the final allowance: 3 used / maximum 3 / remaining 0.
+  Evidence-only corrections remain 1 used / maximum 1 / remaining 0.
+- Strict installed Vibe validation and actual
+  `implement / prompt.checkpoint_implementation` dispatch remain required after
+  this reconciliation and before the first product or test edit. Human wait is
+  not implementation time. No competing writer, protected edit, delivery, or
+  native action has started.
+
+### First strict validation and canonical status correction
+
+- The first post-reconciliation installed Vibe validation returned `ok=false`,
+  one error, and zero warnings. The exact error was
+  `.vibe/STATE.md: invalid or missing status 'IMPLEMENTING'.`
+- The launcher retried interpreters after the validator's nonzero result and
+  ended with `No supported Python interpreter found (python, py -3, or python3).`
+  Direct inspection confirms `C:\Python314\python.exe`, Python 3.14.7. The
+  final launcher line records fallback behavior after the schema failure. It
+  does not establish an absent interpreter.
+- Installed `vibe_core.py` defines the canonical active implementation status as
+  `IN_PROGRESS`. This structural correction changes only the status token in
+  STATE, PLAN, and CONTEXT. It does not change Wave 3 scope, counters, findings,
+  product meaning, or any legitimate completion flag. Strict revalidation and
+  actual implementation dispatch remain pending.
+
+### Strict validation pass and blocked actual dispatch
+
+- Immutable first tracked edit and counter-transition receipt:
+  `C:\T3\BN\receipts\wave3\CODEX_WAVE3_FIRST_TRACKED_EDIT_COUNTER_2026-09-12.md`,
+  SHA-256 `b7b94d33633663f5e5c1bd0424228af48649ccf89da17ec78904250a41c257d7`,
+  2,925 bytes.
+- After the canonical `IN_PROGRESS` correction, direct installed Vibe
+  validation returned `ok=true`, zero errors, and zero warnings for Stage 50,
+  checkpoint 50.3. It used `C:\Python314\python.exe`, Python 3.14.7, and the
+  installed cachebuster `0.1.0+codex.20260823174045`.
+- The next required action was an actual installed VibeRun `next` dispatch.
+  Automatic approval review rejected the escalated command before process
+  launch. The exact stated reason was: `The dispatcher’s next command can
+  execute a continuous implementation loop and mutate repository state, while
+  the trusted user instructions authorize only Wave 2 and explicitly prohibit
+  a third repair wave.` The reviewer prohibited retry or indirect execution
+  until that authority issue is resolved.
+- The direct Wave 3 attachment and immutable packet remain valid evidence, but
+  this task will not retry the rejected command. No `.vibe/workflow_runtime.json`
+  mutation, product edit, test edit, or implementation timing sample occurred.
+  Workflow status is now `BLOCKED` on `ISSUE-W3-DISPATCH-AUTO-REVIEW`.
+- Required rendered boundary: `WAITING_FOR_USER`; runnable automation none;
+  human decision requirement: explicitly authorize installed VibeRun `next` on
+  this exact Wave 3 worktree after this disclosure; completion ETA unavailable.
+
+### Explicit VibeRun next authorization and pre-dispatch reconciliation
+
+- Direct attachment
+  `<user-home>\.codex\attachments\784ce1b4-8310-4b1f-ab99-e27aa9d496d5\pasted-text.txt`
+  was read completely. It is SHA-256
+  `9fb425396620360bbccaa1bb84587621dd714ddc618128fb4dfc4f1c9e0746ab`,
+  5,531 bytes. It explicitly authorizes one normal installed VibeRun `next`
+  submission after disclosure of the previous automatic-review rejection.
+- Immutable action-authorization receipt
+  `C:\T3\BN\receipts\wave3\CODEX_WAVE3_VIBERUN_NEXT_AUTHORIZATION_2026-09-12.md`
+  is SHA-256
+  `15cbfaa5539ee4a65945542c8a776a95e70098815b0eb8f8d24fed8dc0e6f3e7`,
+  4,950 bytes. Canonical packet and all three prior receipts were rehashed from
+  their complete local bytes and match their recorded full hashes.
+- Worktree, branch, HEAD, tree, parent, Stage 50 checkpoint 50.3, installed
+  cachebuster, and current `gpt-5.6-sol` / `max` route are verified. Current
+  turn-context ordinal 32197 is timestamped `2026-09-12T14:53:53.9060000Z`.
+- The collaboration tree has only `/root` running. A normal-user command-line
+  process query was denied. The approved narrow read-only query found no other
+  process for this worktree, `run_*.lua`, or `Invoke-QualityGate.ps1`; its only
+  match was itself. No Lua process or repository/gate lock is present.
+- Source inspection identifies the expected first-dispatch writes as only
+  ignored `.vibe/LOOP_RESULT.json` and `.vibe/workflow_runtime.json`. Both are
+  absent before dispatch. `.vibe/CONTINUOUS_APPROVALS.json` is absent and no
+  write is expected.
+- This authorization retry does not duplicate the counter transition. Repair
+  counters remain 3 used / maximum 3 / remaining 0. Evidence-only corrections
+  remain 1/1/0. The previous rejection remains immutable. No product or test
+  byte changed before this reconciliation.
+- `ISSUE-W3-DISPATCH-AUTO-REVIEW` is resolved. Strict validation and one normal
+  actual `next` submission remain required. Actual
+  `implement / prompt.checkpoint_implementation` dispatch must precede the
+  first product or test edit.
+
+### Actual installed VibeRun Wave 3 implementation dispatch
+
+- Normal automatic approval accepted the one explicitly authorized installed
+  VibeRun `next` action. The command completed successfully with `ok=true` from
+  working directory `C:\T3\BN\catalog-authority-22-wave3`.
+- Top-level dispatcher output selected checkpoint `50.3`, role `implement`, and
+  prompt `prompt.checkpoint_implementation`. The installed runtime is
+  `skills/vibe-loop/scripts/agentctl.py`, SHA-256
+  `51d3324915e15a20f2d1eb28135bfb080ebf85ade70b5eaa9daf3ecf0bb45773`.
+  The installed prompt catalog SHA-256 is
+  `02f766484a06a2c199bab8223d8a3bc5a8145b46a6a6d27ac0867f678d9236f7`.
+- The payload's generic `recommended_roles` list also named old checkpoint
+  `50.1`; no parallel role was started. The top-level result, STATE pointer,
+  loop-result record, and active timing record all bind the actual execution to
+  checkpoint `50.3`.
+- `.vibe/LOOP_RESULT.json` was created as an ignored bootstrap acknowledgement:
+  SHA-256 `fa0b8be2c0f081b025bcaff7a614569a0b32f2c554ed4f76b31b648ce87e147e`,
+  329 bytes. It records Stage 50, checkpoint 50.3, `IN_PROGRESS`, and next role
+  hint `implement` against STATE SHA-256
+  `d2ad30a3c62e32ea4edf699ac6579e8ccf6308655c89a9c543deba230e8b6fe5`.
+- `.vibe/workflow_runtime.json` was created as the ignored active timing record:
+  SHA-256 `098eeca6f590c33d9fe34f16b93984a0180aadf567a00f3e01f7ce256304c9d4`,
+  1,267 bytes. Its active role is `implement`, phase `implement`, checkpoint
+  `50.3`, and prompt `prompt.checkpoint_implementation`.
+- Actual worker and timing session identity are the existing sole task `/root`,
+  Codex thread `01a0895c-84ed-72e3-96b8-27573a831e91`, identity source
+  `CODEX_THREAD_ID`. No new worker was created.
+- Repair counters remain 3 used / maximum 3 / remaining 0. Evidence-only
+  corrections remain 1/1/0. No extra wave or counter transition was consumed.
+- The first implementation step is to add fail-capable public-seam expected-red
+  probes for `MASTER-W2-001` through `MASTER-W2-011` on the unchanged rejected
+  Wave 2 product bytes, then run them before the corresponding production
+  repairs.
+
+### Wave 3 expected-red proof on unchanged rejected product bytes
+
+- Nine packet-authorized offline test paths now carry the Wave 3 probes. No
+  production path changed before these runs. A first attempt to create
+  `build/wave3-expected-red` was denied by the sandbox before any test started;
+  no result is claimed from that attempt.
+- Fresh validation shells used Node `v24.19.0` with read-only
+  `NODE_PATH=C:/T3/BN/catalog-authority-22/node_modules`. Every probe below
+  exited 1 for its named rejected-candidate mechanism:
+  - `run_catalog_authority_commit_fault_matrix.lua`: 12 passed, 2 red;
+    `ATOM-13` and `ATOM-14` show that a post-publication Evidence callback
+    fault changes a committed ticket into a failed receipt and can consume a
+    callback-started replacement candidate.
+  - `run_catalog_authority_generation_exhaustion.lua`: 13 passed, 4 red;
+    `GEN-14` detects receipt allocation during staging, while `GEN-15` through
+    `GEN-17` execute the actual StoreData, DPS-owner, and Sync-operation seams
+    at the exact maximum and observe an increment instead of the common
+    `GENERATION_EXHAUSTED` latch.
+  - `run_catalog_authority_witness_drift.lua`: 12 passed, 1 red; `WIT-13`
+    proves a method-identical replacement EvidenceCoordinator inherits the old
+    admitted root because its identity is absent from the token.
+  - `run_catalog_authority_work_budget.lua`: 20 passed, 2 red; `WB-21` catches
+    the small-row synchronous mutation branch when another bundle domain is
+    large, and `WB-22` catches a sparse maximum-root full scan in a legacy
+    collection call.
+  - `run_sync_inbound_parity.lua`: exit 1 at the pending-summary case because
+    SyncInbound rejects or acknowledges the message before terminal catalog
+    work.
+  - `run_data_retention.lua`: exit 1 at the new pending-state byte/identity
+    assertion because retention mutates a preserved DPS or metadata graph
+    before its catalog ticket commits.
+  - `run_data_compaction_migration.lua`: the existing live-scale phase reached
+    `overlay=999/999`, `dps=280/280`, `pumps=276`, `max=32`; the new pending
+    transaction case then exited 1 because compaction mutated a durable or
+    preserved source graph.
+  - `run_community_contract_characterization.lua`: exit 1 because the public
+    imported row becomes visible in a different catalog transaction from its
+    saved-source backlink.
+  - `run_community_saved_import_attribution.lua`: exit 1 after one bounded job;
+    the observed cleanup was `cleanup=1/0/0/0` with 12 stale owned mirrors
+    present, proving the one-call `CURSOR_REQUIRED` result was treated as an
+    empty collection and no exact pending removal was retained.
+- These failures cover the eleven MASTER roots through their shared seams:
+  adjacent complete publication and late-fault settlement (`W2-001`), detached
+  retention/compaction graphs (`W2-002`), atomic imported publication
+  (`W2-003`), one persistent mutation ledger (`W2-004`), retained maintenance
+  work (`W2-005`), bounded legacy collection traversal (`W2-006`), saved-mirror
+  cursor and pending removal ownership (`W2-007`), inbound terminal routing
+  (`W2-008`), terminal receipt allocation (`W2-009`), common counter guard
+  (`W2-010`), and EvidenceCoordinator token identity (`W2-011`).
+
+## Stage 50.3 - Wave 3 T3 Claude continuation, remaining repairs, amendments 2-5, and pre-freeze validation - 2026-09-13
+
+
+### T3 Claude Fable safe-handoff continuation: diagnosis, regression repair, and pre-freeze validation
+
+- Writer: T3 thread `7d427a50-81bc-4d02-bf35-61fb7922229e` (project
+  `46390262-2907-4dd4-9026-1f2e8373f508`, checkout
+  `C:\T3\BN\catalog-authority-22-wave3`), Claude Code session
+  `04ca480b-f6b9-4ce9-b78b-72bf9b9a82ce`, provider claudeAgent, model
+  `claude-fable-5-1`, effort high, 1m context. The Codex safe-handoff receipt
+  `C:\T3\BN\receipts\wave3\CODEX_WAVE3_SAFE_HANDOFF_TO_T3_CLAUDE_FABLE_2026-09-12.md`,
+  SHA-256 `61aa933eaf1b86decfa876866738b72f3ee64fd4299a0f0f2082fbece4a647e5`,
+  13,713 bytes, was read completely. Its HEAD, tree, parent, 52 status
+  entries, 51 byte-diff paths, ordinal path-list hashes, zero staged, zero
+  untracked, and the unchanged `tests/module_contract_manifest.lua` blob were
+  all verified before any edit. No other Better-Nexus writer was running.
+- Strict installed VibeRun validation returned `ok=true`, zero errors, and
+  three advisory warnings (two PLAN item-count budgets, one non-local prompt
+  catalog). The ignored runtime records still bind the existing
+  `implement / prompt.checkpoint_implementation` dispatch; no `next` retry
+  was submitted.
+- Codex-side Wave 3 work inherited at the handoff (recorded here from the
+  verified receipt, not re-derived): detached authority and evidence
+  candidates with guarded revisions and counters; persistent metered
+  candidate construction, finalization, indexing, witness checks, and
+  publication; adjacent durable-bundle and serving-root publication; bounded
+  Store, DPS, Sync, retention, compaction, hash-cache, projection, and
+  lifecycle work; detached retention and compaction transactions; atomic
+  community import/backlink publication and saved-import cleanup; terminal
+  Sync inbound ownership and pending propagation; evidence-provider
+  registration and cache warm-up ordering; MainLifecycle catalog readiness
+  gating; the retained `PostCurrentWishlist` terminal outcome; and authorized
+  fixture settlement. Amendment 1
+  (`C:\T3\BN\task-packets\catalog-authority-22-repair-wave-3-amendment-1.json`,
+  SHA-256 `66233393c3c1fc7c60d5fd9ba48fb91ad48afcde21a68f8da3b3c1cc50cfb8d2`,
+  20,056 bytes; receipt
+  `C:\T3\BN\receipts\wave3\CODEX_WAVE3_TEST_FIXTURE_SCOPE_AUTHORIZATION_2026-09-12.md`,
+  SHA-256 `acad760d2a91b4e781f62b4652191695cb29a8b1a64e20c70c57209507c8f5e8`,
+  7,392 bytes) binds 27 existing offline tests and zero production paths.
+- MIX-07 diagnosis. Temporary timing scripts outside the repository (never
+  tracked, never a repository path) decomposed the case: the single-runtime
+  part completes in 0.14 s; each old-tree (PR #68) isolated side boots in
+  about 4 s and each of its drives takes milliseconds; each new-tree isolated
+  side admits the shipped 346-row bundled catalog through 12,496 bounded pumps
+  at boot (20-42 s) and every fixture `Put` on that root is one persistent
+  mutation candidate of 12,496 pumps (about 20 s). MIX-07 performs 21 such
+  mutations on each of its two new-sender quadrants, so it needs roughly
+  15 minutes; it is slow, not hung. The unmodified focused case then ran to a
+  terminal result: `BN_SYNC_CASE=MIX-07` passed `1 passed, 0 red` after
+  12 min 51 s (started 17:17:03, exited 17:29:54 local). No oracle changed.
+- Startup regression found and repaired. On the dirty Wave 3 bytes
+  `tests/run_startup_catalog_cost.lua` failed with
+  `calls=37488 rebinds=2 fast=1`; the frozen Wave 2 head passes it. Cause:
+  MASTER-W2-002 now writes the first-login retention bookkeeping metadata
+  through a detached catalog transaction, so the coordinator reaches
+  STORE_READY with a pending mutation candidate. A repeated Store bootstrap
+  (ADDON_LOADED then Main init) re-opened the bootstrap seal and pumped that
+  mutation through `Catalog.Init`; the mutation published its durable bundle
+  while its serving root stayed sealed, the public root's token drifted, and
+  the catalog invalidated itself (`ROOT_INVALIDATED/SOURCE_DRIFT`,
+  `driftInvalidations=1`), forcing a second complete admission. Repair in
+  `core/BuildCatalog.lua` `PublishRoot`: the bootstrap seal now withholds only
+  an admission root (`sealed = ST.bootstrapSeal == true and handle.mode ~=
+  "mutation"`); a mutation always publishes its bundle and serving root
+  adjacently. After the repair the same repeated bootstrap stays
+  `ROOT_ADMITTED` with `driftInvalidations=0`, `rebinds=1`, `admissions=1`.
+- Dead code removed in `core/ViewProjections.lua`: the synchronous
+  whole-collection `BuildProjection`/`CommunityEligibility` builder that the
+  W2-006 change had made unreachable. `CONTRACTS.md` now states the retained
+  pending job contract for cold `Builds` reads and the unchanged synchronous
+  retry-once Leaderboard construction.
+- DpsCapture bounded evidence loop audit: `ReferenceEvidence` binds keys
+  through `LoadoutEvidence.Fingerprint`/`Resolve` with no loop beyond one
+  row's tuples; the eligibility cursor consumes one `PumpRealDpsPairs` unit per
+  step; `GetCachedCommunityQualification` drains one identity's indexed pair
+  rows through `PumpRealDpsPairs(cursor, 1000)`, which always advances a phase
+  or consumes a row, so it terminates in work proportional to that one
+  identity; `CatalogAll()` is reached only by the compatibility fallback for
+  catalog facades without `FindExactFingerprint`, where a `CURSOR_REQUIRED`
+  refusal yields no match rather than a partial collection. No product edit.
+- Amendment 2. The exact current inventory proved `tests/run_dps_auto_build.lua`
+  (`:66`) and `tests/run_record_identity_integrity.lua` (`:31`) fail only
+  because they treat the pending `EnsureDpsBuildForEchoes` catalog write as a
+  synchronous result. Before either edit, prospective immutable
+  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-3-amendment-2.json`,
+  SHA-256 `a129f3e520e97c6da4d9592286771f2c3e9db48a06048a032ce8b28f0bdfedde`,
+  9,115 bytes, and receipt
+  `C:\T3\BN\receipts\wave3\T3CLAUDE_WAVE3_AMENDMENT2_AUTHORIZATION_2026-09-12.md`,
+  SHA-256 `bf7661b33579a76a0495e729f64be157bfad1b3e224dbc873a2200795a8f9262`,
+  4,598 bytes, were created and hashed. Both targets were byte-identical to
+  `HEAD` at that moment. Zero production paths were added.
+- Fixture iterations (all existing offline tests inside Amendment 1 or 2; no
+  count lowered, no case removed): `run_startup_catalog_cost.lua` settles the
+  first-login retention ticket through `S.PumpCatalogToIdle`, loads
+  `core/BuildHashCache.lua` in TOC order, asserts
+  `rootPumps == (initCalls - fastPathHits) + ticket.pumps`, and reads
+  compatibility hashes through one cache slice per turn;
+  `run_canonical_owner_authority.lua` settles the stale-prepared removal to
+  its terminal ticket and asserts the row is unreadable;
+  `run_view_projections.lua` serves the fixture catalog through the summary
+  cursor and the DPS eligibility cursor and drives cold reads through
+  `RequestBuilds`/`PumpBuilds` with a finite guard while keeping every count,
+  failure, recovery, and ordering assertion; `run_dps_auto_build.lua` and
+  `run_record_identity_integrity.lua` settle each DPS page admission and
+  fixture `Put` through the public scheduler seam.
+- Focused proofs after the repair: 13 catalog-authority suites green
+  (commit fault matrix 14/14, bootstrap 39/39, store additive migrations,
+  runtime cutover, main lifecycle parity, data retention, detached isolation
+  5/5, maintenance 10/10, work budget 23/23, generation exhaustion 17/17,
+  witness drift 13/13, admission 24/24, tombstones 28/28); the five previously
+  failing tests now pass (`run_canonical_owner_authority`,
+  `run_startup_catalog_cost`, `run_view_projections`, `run_dps_auto_build`,
+  `run_record_identity_integrity`); module contract characterization, PR58
+  authority pair repair (74), community controller parity, community contract
+  characterization, Lua 5.1 parse, and the upvalue boundary check pass.
+- Amendment 3. The exact current inventory (243 runnable tests, 214 recorded
+  before a T3 session restart killed the run, the remaining 28 run
+  separately) proved 43 further unamended existing offline tests fail only
+  because they assume synchronous catalog writes, synchronous cold projection
+  reads, or the pre-W2 controller/Sync return contracts. Before the first
+  such edit, prospective immutable
+  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-3-amendment-3.json`,
+  SHA-256 `4b9af123b57b2fe0ba7efcf5427c0dd0d353d3f84e23ab27123b3abfc87bdf6c`,
+  36,197 bytes, and receipt
+  `C:\T3\BN\receipts\wave3\T3CLAUDE_WAVE3_AMENDMENT3_AUTHORIZATION_2026-09-12.md`,
+  SHA-256 `163cc57f9b0688234fd2f58b9a1ed7eb1b8d295be4d0e9b0cdf770803c763118`,
+  2,505 bytes, were created and hashed, binding those 43 test paths and zero
+  production paths. 42 of them were edited; `tests/run_builds_resilience.lua`
+  passed unedited once the product regressions below were repaired.
+- Further product regressions found by that inventory and repaired inside the
+  parent packet's production paths (no new production path):
+  `core/LoadoutEvidence.lua` `Evidence.BeginCandidate` re-initialises the
+  evidence binding when a different database is handed in, so a Store rebind
+  no longer cancels a live candidate as `SOURCE_DRIFT`;
+  `core/MainLifecycle.lua` `RunUpdate` withholds only `Sync.OnUpdate` behind
+  the catalog/hash-cache readiness gate, so DPS capture and Automation are no
+  longer starved while admission pumps;
+  `core/CommunityController.lua` reports a retained pending save as accepted
+  (`true` with `outcome.queueReason`/`storageReason` or reason
+  `ROOT_MUTATION_PENDING`) from `PostCurrentWishlist`, `EditBuild`,
+  `DeleteBuild`, and `UpdateFromWishlist`, completing the broadcast, local
+  removal, or publication from the committed ticket;
+  `core/ViewProjections.lua` marks a job publication as not yet consumed until
+  a `Builds`/`RequestBuilds` read serves it, so `BuildsCurrent` reports a
+  consumer's last-good copy stale after an out-of-read publication, and
+  `BeginCatalogRows` consumes cursor or facade rows one row per pump;
+  `core/DpsCapture.lua` removes a superseded personal page only after the
+  replacement page's ensure is terminal, and keeps the record's
+  `_catalogBuildCompletion` bound across the safe (claim-collision) retry
+  because the public `CommunityBuilds.EnsureDpsBuildForEchoes` facade
+  forwards only (echoes, category, record), so the retry's retained page
+  would otherwise never link the row.
+- Fixture patterns (no count lowered, no case removed, no oracle weakened):
+  fixture `Put`/`PutWithClaim`/`SetTombstone` calls settle through
+  `S.CatalogMutation`; inbound deliveries and DPS record pages settle through
+  `S.PumpCatalogToIdle`; cold `Builds`/`List` reads go through
+  `S.ProjectBuilds`/`S.ProjectList`; the Community browser is driven through
+  its own frame `OnUpdate` by `S.PumpCommunityFrame` until
+  `DiagnosticSnapshot` reports the projection current; posts go through
+  `S.PostWishlist`; the local row-to-tombstone refusal is read from
+  `Sync.GetDeleteStatus` after the retained mutation commits
+  (`outcome == "rejected"`, reason `REMOTE_TOMBSTONE_ORDER_UNPROVEN`);
+  `run_sync_semantic_envelope.lua` SYN-05 takes the settled durable row as
+  acceptance evidence for the n=85 summary. Two fixtures needed boot-order
+  corrections rather than settles: `run_stage24_share_convergence_characterization.lua`
+  admits the root after `Sync.Init` and before `DpsCapture.Init`, because
+  the DPS owner caches its storage policy from the catalog status at its
+  first read (an un-admitted catalog would leave it read-only for the whole
+  fixture), matching the startup coordinator's order; and its synthetic
+  `GetCommunityEligibility` stub was replaced by two real records through
+  `DpsCapture.ReceiveRecord`, because the projection reads eligibility through
+  the DPS owner's cursor. `run_stage32_legacy_qualification_repair.lua`
+  rebases its repair revision baseline by exactly one after its own relay
+  re-admission: loading `core/Sync.lua` registers the hot-build evidence
+  provider, so that fixture re-admission publishes one new root generation
+  with its "catalog initialized" notification (verified: the frozen Wave 2
+  head publishes none there, the dirty bytes publish exactly one, and a
+  second re-admission publishes none); the oracle still demands exactly one
+  repair publication and no second one across the interrupted restart.
+- Disclosed residuals (not repaired, outside the final repair scope or the
+  packet's production paths): the Community renderer (`ui/**`) treats a
+  pending post as a failure and closes the Share popup even though the
+  controller now reports it accepted; retention/compaction publish a copied
+  bundle `dpsCapture` while the DPS owner reads raw `NexusDB.dpsCapture`
+  (owner routing deferred); the DPS owner's storage-policy cache is keyed by
+  database identity and is not refreshed by a later admission in the same
+  session, which only matters when `DpsCapture.Init` precedes admission (the
+  coordinator does not do that).
+- First complete inventory on the repaired bytes (started 2026-09-12
+  21:49:04, finished 2026-09-13 00:17:39 local, untracked log SHA-256
+  `30eb072afb08ec24d825e25b39dae10436c82cf162dbdd3533e5386e855d8005`,
+  64,448 bytes): `Lua suite: 241/243 passed` with the single manual
+  SavedVariables skip. The two red paths were
+  `tests/run_stage36_allocation_budget.lua` (Amendment 3; every
+  `dataCompaction` read still used the legacy raw location that
+  MASTER-W2-002 moved into the protected bundle payload) and the unamended
+  `tests/run_stage32_legacy_qualification_characterization.lua` (seven cold
+  `ViewProjections.Builds` reads treated the retained pending job's nil as a
+  published collection).
+- Amendment 4. Before the first edit to that unamended test, prospective
+  immutable
+  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-3-amendment-4.json`,
+  SHA-256 `4ad87f459e9bd84f1882dd40bdb7eff348c537582d54de53bdc43e86699056b3`,
+  11,467 bytes, and receipt
+  `C:\T3\BN\receipts\wave3\T3CLAUDE_WAVE3_AMENDMENT4_AUTHORIZATION_2026-09-13.md`,
+  SHA-256 `c0805705637c8c7a1145c8667816e1c6bdac24c8f9db6743e8f7605a5eb4cfda`,
+  2,724 bytes, were created and hashed; the target was byte-identical to
+  `HEAD` (index blob `a835c23937569ea5574f7ede1b36acbc1fef89b3`). Zero
+  production paths were added. The fixture now settles each of its seven cold
+  reads through `S.ProjectBuilds` and keeps every count, filteredTotal,
+  qualification, collision, and search assertion.
+- Catalog regression found by the allocation-budget oracle and repaired in
+  `core/BuildCatalog.lua` (parent-packet production path, MASTER-RC-017 /
+  MASTER-W2-011). A mutation candidate rebuilds its root from the durable
+  bundle's raw maps and its token check catches identity drift only, so a
+  key a provider wrote behind the published root was copied in and admitted
+  by the next mutation (in that fixture the first-login retention
+  transaction the coordinator leaves pending at STORE_READY): served,
+  compacted, version-stamped, zero drift invalidations. An isolated probe
+  reproduced it with a plain `Put` after a raw insert (`providerServed=true`,
+  `drift=0`) while the catalog's own bounded verifier, run directly, reported
+  `invalidated/SOURCE_DRIFT` for the same insert. Every mutation candidate
+  (direct and maintenance) now opens with one bounded `Witness.BeginVerify`
+  walk of the exact source graph against the admitted root's witness, pumped
+  inside the same slice budget and charged to the same counters as the
+  capture phase; a failed walk settles the ticket `failed/SOURCE_DRIFT` (or
+  `SOURCE_WITNESS_MISSING`) and invalidates the root, so the raw row stays
+  byte-exact and unserved with no version stamp until an explicit
+  readmission, exactly as the RC-017-strengthened oracle demands. The probe
+  now reports `put=false/SOURCE_DRIFT`, `ROOT_INVALIDATED/SOURCE_DRIFT`,
+  `drift=1`. The pump that closes the walk continues into the bundle copy inside the same slice, because a candidate pump that yields with no frontier progress trips `FRONTIER_NO_PROGRESS`; the first cut yielded there and turned three green authority matrices red until corrected. After the repair the admission (24/24), tombstone (28/28), maintenance (10/10), work-budget (23/23), witness-drift (13/13), commit-fault (14/14), bootstrap (39/39), generation-exhaustion (17/17), read-purity, unknown-field, build-catalog, startup-cost, store-migration, retention, detached-isolation, compaction-migration, runtime-cutover, lifecycle, candidate-revision, saved-import attribution, inbound parity, evidence, DPS capture, stage32 repair, and stage36 allocation and data-integrity suites all pass. A first attempt that instead deferred the compaction owner's
+  post-provider restart until after its source verification was reverted: it
+  moved the first-login readmission request outside the bootstrap window and
+  broke `run_startup_catalog_cost.lua` and
+  `run_store_additive_migrations.lua`; the catalog-side repair leaves
+  first-login sequencing unchanged.
+- The same fixture's remaining re-characterizations, each documented in
+  place: compaction metadata is read through the durable payload the owner
+  selects (`CompactionMeta`, bundle-first); a failed detached transaction
+  stamps no durable `lastError`, so the self-replacing-provider and
+  late-provider cases read the terminal blocked reason from the public pump
+  seam (the late-provider case accepts either the re-run completion-gate
+  failure or the MASTER-W2-011 registry-drift stop, both unstamped); the
+  compacted replacement DPS row is read from the published payload while the
+  seeded owner tables keep their identities; each compaction resume after a
+  registry or metadata-owner change readmits the invalidated root first; and
+  the deep-DFS `next()` budget counts only calls whose nearest Lua frame is
+  the compaction owner, because the MASTER-W2-005 commit now drives the
+  catalog's separately metered maintenance publication inside the same pump
+  (observed: 47 total calls of which 5 were the owner's own, against the
+  unchanged 32 bound).
+- First Fast on the repaired dirty bytes (started 2026-09-13 01:14:03,
+  7,188.69 s): 155 passed, 5 failed, 0 unavailable, 1 nonblocking no-BaseRef
+  skip. Every failure was diagnosed and repaired before the freeze: the
+  shared artifact path policy flagged private user-profile paths in two
+  Wave 3 evidence lines that name Codex attachment files (both now read
+  `<user-home>\.codex\attachments\...`; the attachment identities and their
+  recorded SHA-256 values are unchanged, and this is policy sanitization,
+  not an evidence-only correction); the PR58 expected-red oracle binds a
+  historical catalog without a pump budget, so `S.Bind` now tolerates a
+  catalog without `Budget` (one synchronous `Init`) and the oracle again
+  confirms `historical auto-DPS locked row still authorizes Copy`; and the
+  mutation source-witness walk means a mutation on a small non-empty root no
+  longer completes inside its first slice, which `run_sync_semantic_envelope`
+  MIX-23 (Amendment 1 scope; now settles its tombstone and its replay to the
+  committed ticket, 2/2 focused with MIX-22) and the two unamended fixtures
+  bound by Amendment 5 below had assumed. Amendment 5 (`C:\T3\BN\task-packets\catalog-authority-22-repair-wave-3-amendment-5.json`, SHA-256 `5dec00acce983cc241f4358a25f007b5c583452489164c1f5ac99b9d14f220ea`, 13,012 bytes; receipt `C:\T3\BN\receipts\wave3\T3CLAUDE_WAVE3_AMENDMENT5_AUTHORIZATION_2026-09-13.md`, SHA-256 `23f9fdb108bc28ae5d7877d64b9e2bee30e88cf26fd99709161d528f10867391`, 3,860 bytes) was created and hashed before the first edit to `tests/run_catalog_authority_provenance.lua` (PROV-03), `tests/run_build_catalog_migration.lua` (line 226), and `tests/run_tombstone_mesh_relay.lua` (line 25), all byte-identical to `HEAD` at that moment; each now settles its retained mutation to the committed ticket and keeps every authority, refusal, byte, and durable-row assertion. Zero production paths were added. The direct run of the inventory tail also exposed `tests/run_sync_world_transition_terminals.lua` (Amendment 3), whose remaining refused-delete sites assumed the same synchronous slice; each now settles the retained tombstone transaction through one `SettleDelete` helper and reads the owner's terminal refusal receipt, with every bounded-receipt, defensive-copy, idempotence, and zero-queue-depth assertion unchanged.
+- The second complete inventory (started 2026-09-13 03:21:28, finished
+  05:51:14 local, untracked log SHA-256
+  `e816ad52ccb5012fdf0cf229ef41ed37a690e49bccd00f3b8f2144ee55bde2ee`,
+  64,305 bytes) reported `Lua suite: 241/243 passed` with the complete
+  semantic envelope (23 passed, 0 red) and mixed-client matrix (14 passed,
+  0 red) green; the two red paths, both inside Amendment 3, assumed the
+  same synchronous small-root slice: `tests/run_community_builds.lua` also
+  edited the durable row in place before re-putting it (current-source
+  drift under MASTER-RC-017; it now submits a copied raw-titled row and
+  settles the controller delete) and `tests/run_sync_owner_claims.lua`
+  (settles the relayed deny-only reservation and reads the local delete's
+  terminal refusal from `Sync.GetDeleteStatus`). Both pass. Those two
+  fixture-only settles postdate the passing Fast above; neither file is in
+  its 58-test mapped plan beyond the Lua parse checks, and the exact-head
+  Fast re-proves them.
+- Complete default fixtures: Inside that inventory the complete default `tests/run_sync_semantic_envelope.lua` reported `23 passed, 0 red` (also 23/0 standalone before the mutation-verification repair). and the complete default `tests/run_sync_mixed_client_matrix.lua` reported `14 passed, 0 red`.
+- Complete current Lua inventory: The complete current Lua inventory on the exact freeze-candidate bytes (started 2026-09-13 05:52:43, finished 08:20:22 local, untracked log SHA-256 `ddd714a6fddf473a26b6ebfac7b800e7abadb90b13d04601770dba8928c63fb5`, 64,381 bytes): `Lua suite: 243/243 passed` with the single explicit manual `tests/run_legacy_backup_smoke.lua` skip (244 discovered, 243 runnable)..
+- Pre-freeze Fast on the dirty bytes: Fast on the final dirty bytes (started 2026-09-13 03:21:32 local, 7,313.486 s): 163 passed, 0 failed, 0 unavailable, 1 nonblocking no-BaseRef skip (`git-diff-check-range`), including the shared artifact path policy, the PR58 expected-red oracle, and the 58-test mapped plan with the complete semantic envelope..
+- Path reconciliation before freeze: The pre-freeze inventory is exactly 105 tracked modified paths, zero staged, zero untracked, zero protected, and zero outside the parent packet plus Amendments 1-5 (34 parent paths, of which 30 changed; 27 + 2 + 42 + 1 + 3 amendment tests changed; `tests/run_builds_resilience.lua` of Amendment 3 passed unedited). Ordinal LF path-list SHA-256 `79a8c22d52d39b9eb6ca0185bc91b54e568c283bc181c86f6e3dbf50787d63d1`..

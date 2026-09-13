@@ -17,6 +17,7 @@
 -- preserved legacy input is now additionally checked to keep its table
 -- identity and to take no write.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
 
@@ -89,6 +90,9 @@ Community.ShowPostBuild()
 post._postTitleBox:SetText("Exact UTF-8 owner")
 postDescription:SetText(safeDescription)
 assert(post._postGoBtn:GetScript("OnClick"))()
+-- The accepted post is one retained catalog mutation; settle it before the
+-- durable byte assertions.
+S.PumpCatalogToIdle("shared post admission")
 local shared
 for _, build in pairs(H.DurableBuilds()) do shared = build break end
 local legacyRows = 0

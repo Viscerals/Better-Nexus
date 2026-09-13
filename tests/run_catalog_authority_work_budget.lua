@@ -610,4 +610,91 @@ Case("WB-20", "rich incoming rows cannot drain preparation synchronously", funct
         "small rich mutation escaped the public work bound: " .. maximum)
 end)
 
+-- Wave 3 MASTER-W2-004. A small catalog can still carry a large independent
+-- bundle domain. Row count cannot select a synchronous mutation path.
+Case("WB-21", "small roots with a large independent bundle domain retain one slice ledger", function()
+    S.Reload()
+    local db = S.Database({smallDomain=S.LocalBuild("smallDomain", 1)})
+    db.dataRetention = {}
+    for index = 1, 10000 do
+        db.dataRetention[string.format("domain-%05d", index)] = index
+    end
+    Check(S.Bind(db).state == "ROOT_ADMITTED", "large domain fixture did not admit")
+    local maximum = 0
+    local steps, ok, why, ticket = CountedCall(function()
+        return Nexus.BuildCatalog.Put(S.LocalBuild("smallDomain", 2),
+            {source="local"})
+    end)
+    maximum = math.max(maximum, steps)
+    Check(ok == nil and why == "ROOT_MUTATION_PENDING" and type(ticket) == "table",
+        "small row count bypassed persistent construction for a large bundle domain")
+    for _ = 1, Nexus.BuildCatalog.Budget().maximumPumps do
+        if ticket.state ~= "pending" then break end
+        steps = CountedCall(function() return Nexus.BuildCatalog.PumpRootAdmission() end)
+        maximum = math.max(maximum, steps)
+    end
+    Check(ticket.state == "committed" and Nexus.BuildCatalog.Get("smallDomain") ~= nil,
+        "large-domain mutation did not publish its complete candidate")
+    Check(maximum <= PUBLIC_STEP_MAXIMUM,
+        "large independent bundle domain escaped the slice ledger: " .. maximum)
+end)
+
+-- Wave 3 MASTER-W2-006. Legacy collection wrappers must stop on traversal,
+-- even when a maximum root has fewer than eight matching rows.
+Case("WB-22", "sparse legacy collections stop before scanning a maximum root", function()
+    S.Reload()
+    local rows = {zzSparse=S.LocalBuild("zzSparse", 1)}
+    for index = 1, 2047 do
+        local id = string.format("aa-future-%04d", index)
+        rows[id] = {id=id, schemaVersion=99}
+    end
+    Check(S.Bind(S.Database(rows)).state == "ROOT_ADMITTED",
+        "sparse maximum-root fixture did not admit")
+    local steps, result, why = CountedCall(function()
+        return Nexus.BuildCatalog.All()
+    end)
+    Check(result == nil and why == "CURSOR_REQUIRED",
+        "sparse legacy collection drained the complete root instead of requiring a cursor")
+    Check(steps <= 256,
+        "sparse legacy collection inspected proportional root work: " .. steps)
+end)
+
+Case("WB-23", "concentrated hash buckets retain collection, sort, and byte frontiers", function()
+    S.Reload()
+    dofile("core/BuildHashCache.lua")
+    local cache = Nexus.BuildHashCache
+    local rows, candidate, admitted = {}, 1, 0
+    while admitted < 64 do
+        local id = string.format("hash-concentrated-%05d", candidate)
+        candidate = candidate + 1
+        if cache.Bucket(id) == 1 then
+            admitted = admitted + 1
+            rows[id] = S.LocalBuild(id, 1, {
+                lastModified=admitted,
+                fingerprintHash=string.format("fp-%04d", admitted),
+            })
+        end
+    end
+    Check(S.Bind(S.Database(rows)).state == "ROOT_ADMITTED",
+        "concentrated hash fixture did not admit")
+    Check(cache.Legacy() == nil,
+        "concentrated hash bucket completed inside one compatibility call")
+
+    local maximum, pumps, ready = 0, 0, false
+    while not ready and pumps < 10000 do
+        local steps
+        steps, ready = CountedCall(function() return cache.Pump() end)
+        maximum = math.max(maximum, steps)
+        pumps = pumps + 1
+    end
+    local digest, stats = cache.Legacy(), cache.Stats()
+    Check(ready == true and type(digest) == "string" and digest ~= "",
+        "concentrated hash bucket did not publish a complete digest")
+    Check(pumps > 1 and stats.hashPumps > 1
+            and stats.maxHashWorkPerPump <= 64,
+        "concentrated hash work did not retain its incremental frontier")
+    Check(maximum <= PUBLIC_STEP_MAXIMUM,
+        "one hash-cache pump escaped the public work bound: " .. maximum)
+end)
+
 S.Finish("catalog authority work budget")

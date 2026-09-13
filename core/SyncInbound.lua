@@ -307,8 +307,26 @@ function Inbound.New(options)
         end
         observe("receiver_validation", {id=buildId,peer=transportSender,
             outcome="accepted"})
-        local committed = commitBuild(payload, transportSender, context)
-        return committed
+        local settled, terminal = false, false
+        local function Finish(committed)
+            if settled then return terminal end
+            settled = true
+            if committed then
+                noteInbound({kind="build_commit",sender=transportSender,
+                    buildId=buildId,
+                    requester=context and context.requester or nil,
+                    requestId=context and context.requestId or nil})
+                terminal = acceptPeer(transportSender)
+            end
+            return terminal
+        end
+        local committed, why = commitBuild(payload, transportSender,
+            context, Finish)
+        if settled then return terminal end
+        if committed == nil and why == "ROOT_MUTATION_PENDING" then
+            return false
+        end
+        return Finish(committed)
     end
 
     local function HandleDpsTransfer(parts)
@@ -465,15 +483,8 @@ function Inbound.New(options)
         if not entry then
             if TransferBlocked("build", key) then return false end
             if total == 1 then
-                if HandleCompleteBuild(buildId, lastMod, data,
-                        protocolSender, context) then
-                    noteInbound({kind="build_commit",sender=protocolSender,
-                        buildId=buildId,
-                        requester=context and context.requester or nil,
-                        requestId=context and context.requestId or nil})
-                    return acceptPeer(protocolSender)
-                end
-                return false
+                return HandleCompleteBuild(buildId, lastMod, data,
+                    protocolSender, context)
             end
             I.CleanExpired()
             if not CanStartTransfer(protocolSender) then
@@ -532,15 +543,8 @@ function Inbound.New(options)
             tostring(buildId), entry.received, entry.total, #full)
         observe("build_transfer_complete", {id=buildId,peer=protocolSender,
             chunks=entry.total,bytes=#full,outcome="complete"})
-        if HandleCompleteBuild(buildId, lastMod, full, protocolSender,
-                context) then
-            noteInbound({kind="build_commit",sender=protocolSender,
-                buildId=buildId,
-                requester=context and context.requester or nil,
-                requestId=context and context.requestId or nil})
-            return acceptPeer(protocolSender)
-        end
-        return false
+        return HandleCompleteBuild(buildId, lastMod, full, protocolSender,
+            context)
     end
 
     function I.HandleIncoming(text, sender)
@@ -653,15 +657,27 @@ function Inbound.New(options)
                     and not validPeerName(parts[5])) then
                 return RejectWithContext(context, "invalid delete", "schema")
             end
-            if handleDelete({sender=protocolSender, buildId=parts[3],
-                stamp=parts[4], originAuthor=parts[5],context=context}) then
-                noteInbound({kind="delete",sender=protocolSender,
-                    buildId=parts[3],
-                    requester=context and context.requester or nil,
-                    requestId=context and context.requestId or nil})
-                return acceptPeer(protocolSender)
+            local settled, terminal = false, false
+            local function FinishDelete(accepted)
+                if settled then return terminal end
+                settled = true
+                if accepted then
+                    noteInbound({kind="delete",sender=protocolSender,
+                        buildId=parts[3],
+                        requester=context and context.requester or nil,
+                        requestId=context and context.requestId or nil})
+                    terminal = acceptPeer(protocolSender)
+                end
+                return terminal
             end
-            return false
+            local accepted, why = handleDelete({sender=protocolSender,
+                buildId=parts[3],stamp=parts[4],originAuthor=parts[5],
+                context=context}, FinishDelete)
+            if settled then return terminal end
+            if accepted == nil and why == "ROOT_MUTATION_PENDING" then
+                return false
+            end
+            return FinishDelete(accepted)
         end
 
         if code == codes.index then
@@ -678,17 +694,29 @@ function Inbound.New(options)
             end
             local raw = base64Decode(parts[3])
             local data = raw and jsonDecode(raw)
-            local accepted, changed, rejection =
-                handleSummary(data, protocolSender, context)
-            if not accepted then
-                if rejection == "storage" then return false end
-                return rejectIncoming("rejected build summary")
+            local settled, terminal = false, false
+            local function FinishSummary(accepted, changed, rejection)
+                if settled then return terminal end
+                settled = true
+                if not accepted then
+                    if rejection == "storage" then return false end
+                    terminal = rejectIncoming("rejected build summary")
+                    return terminal
+                end
+                noteInbound({kind="summary",sender=protocolSender,
+                    requester=context and context.requester or nil,
+                    requestId=context and context.requestId or nil})
+                if changed then requestDataViewRefresh() end
+                terminal = acceptPeer(protocolSender)
+                return terminal
             end
-            noteInbound({kind="summary",sender=protocolSender,
-                requester=context and context.requester or nil,
-                requestId=context and context.requestId or nil})
-            if changed then requestDataViewRefresh() end
-            return acceptPeer(protocolSender)
+            local accepted, changed, rejection =
+                handleSummary(data, protocolSender, context, FinishSummary)
+            if settled then return terminal end
+            if accepted == nil and rejection == "ROOT_MUTATION_PENDING" then
+                return false
+            end
+            return FinishSummary(accepted, changed, rejection)
         end
 
         if code == codes.loadoutRequest then

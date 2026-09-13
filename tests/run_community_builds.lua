@@ -3,6 +3,7 @@
 -- owned/missing status, and locking one in via the real confirmed
 -- UploadWishlist path.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/DefaultProfile.lua")
 dofile("logic/Model.lua")
 dofile("logic/Strategy.lua")
@@ -27,7 +28,7 @@ CB.Init(Adapter, Model)
 
 -- 1. Posting with no wishlist active must fail cleanly (edge case)
 H.wishlist = nil
-local ok0, err0 = CB.PostCurrentWishlist("Test", "desc")
+local ok0, err0 = S.PostWishlist(CB.PostCurrentWishlist, "Test", "desc")
 assert(not ok0 and err0, "posting with no active wishlist should fail cleanly")
 print("posting with no active wishlist fails cleanly -- OK")
 
@@ -37,7 +38,7 @@ H.wishlist = { name = "MyBuild", class = "MAGE", echoes = {
     { spellId = 200104, quality = 2, stacks = 3 },
 } }
 local rawBuildTitle = "|cffff0000Fire|r"
-local ok1, id1 = CB.PostCurrentWishlist("Fire Mage AoE", "Great for farming, easy to play.", H.wishlist)
+local ok1, id1 = S.PostWishlist(CB.PostCurrentWishlist, "Fire Mage AoE", "Great for farming, easy to play.", H.wishlist)
 assert(ok1, "PostCurrentWishlist should have succeeded")
 local stored = H.DurableBuilds()[id1]
 assert(stored, "posted build not found in the store")
@@ -48,8 +49,15 @@ assert(stored.isMine == true, "own posted build should be tagged isMine")
 print("PostCurrentWishlist correctly snapshots the active wishlist -- OK")
 -- Incoming wire records admit literal pipes even though locally authored titles
 -- remain plain. Model that remote/storage boundary before the lock-in popup.
-stored.title = rawBuildTitle
-assert(Nexus.BuildCatalog.Put(stored), "raw title update was not readmitted")
+-- The durable row is bound to the admitted root's witness (MASTER-RC-017):
+-- editing it in place would be current-source drift, so the raw-titled
+-- replacement is submitted as its own row through the public write seam.
+local rawTitled = {}
+for key, value in pairs(stored) do rawTitled[key] = value end
+rawTitled.title = rawBuildTitle
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put(rawTitled)
+end, "raw title readmission"), "raw title update was not readmitted")
 
 -- 3. Show the window, select the build, verify detail rendering
 CB.Show()
@@ -81,6 +89,13 @@ dofile("ui/CommunityBuilds.lua")
 local CB2 = Nexus.CommunityBuilds
 CB2.Init(Adapter, Model)
 CB2.Show()
+-- MASTER-W2-006: the Community list is a retained projection job pumped one
+-- bounded slice per real frame; drive the frame until it publishes.
+S.PumpCommunityFrame(_G.NexusCommunityBuildsFrame, function()
+    local snapshot = CB2.DiagnosticSnapshot()
+    return snapshot.projectionCurrent == true
+        and snapshot.projectionPending == false
+end, "Community list")
 CB2.Select(id1)
 
 local foundMissingCount = false
@@ -114,5 +129,8 @@ print("Lock In goes through confirmation then calls the real, confirmed upload p
 
 -- 6. Delete removes it from the store and the list
 CB2.DeleteBuild(id1)
+-- The accepted delete is one retained catalog mutation; the durable row
+-- leaves the store at its terminal commit.
+S.PumpCatalogToIdle("delete removal")
 assert(H.DurableBuilds()[id1] == nil, "DeleteBuild did not remove the entry")
 print("DeleteBuild correctly removes a posted build -- OK")

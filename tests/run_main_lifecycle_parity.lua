@@ -135,12 +135,23 @@ Nexus.DpsCapture = {
     OnCombatStart=function() Note("DpsCapture.OnCombatStart") end,
     OnCombatEnd=function() Note("DpsCapture.OnCombatEnd") end,
 }
-local rootAdmissionPumps = 0
+local rootAdmissionPumps, catalogPending = 0, true
 Nexus.BuildCatalog = {
     PumpRootAdmission=function()
         rootAdmissionPumps = rootAdmissionPumps + 1
         Note("BuildCatalog.PumpRootAdmission")
-        return {state="pending"}
+        return {state=catalogPending and "pending" or "committed"}
+    end,
+    RootState=function()
+        return {state="ROOT_ADMITTED",candidate=catalogPending}
+    end,
+}
+local hashCachePumps, hashCacheReady = 0, true
+Nexus.BuildHashCache = {
+    Pump=function()
+        hashCachePumps = hashCachePumps + 1
+        Note("BuildHashCache.Pump")
+        return hashCacheReady
     end,
 }
 
@@ -253,18 +264,38 @@ assert(bindCount==repeatBinds and table.concat(trace,",",initTraceEnd+1)==table.
     "Sync.OnWorldEntry",
 }, ","), "repeated world event duplicated lifecycle initialization")
 
+local pendingUpdateStart = #trace
+lifecycle.OnUpdate(0.2)
+-- Pending catalog work withholds exactly the catalog-dependent owner (Sync)
+-- and the cache slice that feeds it; DPS capture and automation are not
+-- catalog dependents and keep their frame.
+assert(table.concat(trace,",",pendingUpdateStart+1)==table.concat({
+    "BuildCatalog.PumpRootAdmission","Adapter.Ready",
+    "DpsCapture.OnUpdate:0.2","Automation.OnUpdate:0.2",
+}, ",") and rootAdmissionPumps==1 and hashCachePumps==0,
+    "pending catalog work released Sync or blocked an independent frame owner")
+catalogPending = false
 local updateStart = #trace
 lifecycle.OnUpdate(0.2)
 assert(table.concat(trace,",",updateStart+1)==table.concat({
-    "BuildCatalog.PumpRootAdmission","Adapter.Ready",
+    "BuildCatalog.PumpRootAdmission","BuildHashCache.Pump","Adapter.Ready",
     "Sync.OnUpdate:0.2","DpsCapture.OnUpdate:0.2",
     "Automation.OnUpdate:0.2",
-}, ",") and rootAdmissionPumps==1,
+}, ",") and rootAdmissionPumps==2 and hashCachePumps==1,
     "per-frame root-admission or owner order changed")
+hashCacheReady = false
+local cachePendingStart = #trace
+lifecycle.OnUpdate(0.2)
+assert(table.concat(trace,",",cachePendingStart+1)==table.concat({
+    "BuildCatalog.PumpRootAdmission","BuildHashCache.Pump","Adapter.Ready",
+    "DpsCapture.OnUpdate:0.2","Automation.OnUpdate:0.2",
+}, ",") and rootAdmissionPumps==3 and hashCachePumps==2,
+    "pending compatibility hashes reached Sync or blocked unrelated owners")
+hashCacheReady = true
 local lagStart = #trace
 lifecycle.OnUpdate(2)
-assert(Nexus.lastLagElapsed==2 and #trace==lagStart+5
-    and rootAdmissionPumps==2,
+assert(Nexus.lastLagElapsed==2 and #trace==lagStart+6
+    and rootAdmissionPumps==4 and hashCachePumps==3,
     "lifecycle lost bounded lag observation or changed update continuation")
 
 local eventStart = #trace

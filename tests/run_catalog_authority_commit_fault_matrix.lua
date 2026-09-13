@@ -64,6 +64,18 @@ time = function() return now end
 UnitClass = function() return "Mage", "MAGE" end
 
 local function Catalog() return Nexus.BuildCatalog end
+local function AwaitMutation(ok, why, ticket)
+    if ok ~= nil then return ok, why end
+    if why ~= "ROOT_MUTATION_PENDING" or type(ticket) ~= "table" then
+        return false, why
+    end
+    for _ = 1, Catalog().Budget().maximumPumps do
+        if ticket.state ~= "pending" then break end
+        Catalog().PumpRootAdmission()
+    end
+    return ticket.state == "committed" and ticket.committed == true,
+        ticket.reason
+end
 local function CatalogState()
     for index = 1, 64 do
         local name, value = debug.getupvalue(Catalog().RootState, index)
@@ -86,8 +98,10 @@ local function TwoOperationCandidate()
     })
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.SetTombstone("atomKeep", LocalTomb(), {source="local"}),
-        "tombstone fixture refused")
+    local tombstoned, tombstoneWhy = AwaitMutation(catalog.SetTombstone(
+        "atomKeep", LocalTomb(), {source="local"}))
+    Check(tombstoned,
+        "tombstone fixture refused: " .. tostring(tombstoneWhy))
     now = now + 180 * DAY + 1
     local handle = catalog.BeginCatalogMaintenance({database=db,
         operation="retention"})
@@ -199,7 +213,9 @@ function()
     local servedBytes = S.Encode(servedBefore)
 
     local replacement = S.LocalBuild("atomRow", 4, {title="Replacement"})
-    Check(catalog.Put(replacement, {source="local"}), "replacement refused")
+    local replaced, replaceWhy = AwaitMutation(
+        catalog.Put(replacement, {source="local"}))
+    Check(replaced, "replacement refused: " .. tostring(replaceWhy))
 
     Check(S.Encode(servedBefore) == servedBytes,
         "a previously served snapshot was mutated by a later publication")
@@ -218,7 +234,8 @@ function()
     })
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.SetTombstone("evKeep", LocalTomb(), {source="local"}),
+    Check(AwaitMutation(catalog.SetTombstone(
+        "evKeep", LocalTomb(), {source="local"})),
         "tombstone fixture refused")
     now = now + 180 * DAY + 1
     local handle = catalog.BeginCatalogMaintenance({database=db,
@@ -352,7 +369,8 @@ function()
     })
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.SetTombstone("atomOne", LocalTomb(), {source="local"}),
+    Check(AwaitMutation(catalog.SetTombstone(
+        "atomOne", LocalTomb(), {source="local"})),
         "tombstone fixture refused")
     now = now + 180 * DAY + 1
     local handle = catalog.BeginCatalogMaintenance({database=db,
@@ -368,7 +386,7 @@ function()
     local supersededBytes = S.Encode(bundleBefore)
     local legacyBytes = S.Encode(rawget(db, "communityBuilds"))
 
-    Check(catalog.CommitMaintenance(handle) ~= false,
+    Check(AwaitMutation(catalog.CommitMaintenance(handle)),
         "the two-operation maintenance transaction was refused")
 
     local bundleAfter = rawget(db, "authorityBundle")
@@ -397,13 +415,15 @@ function()
     })
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.SetTombstone("atomRetire", LocalTomb(), {source="local"}),
+    Check(AwaitMutation(catalog.SetTombstone(
+        "atomRetire", LocalTomb(), {source="local"})),
         "retirement tombstone fixture refused")
     local evict = catalog.BeginCatalogMaintenance({database=db,
         operation="retention"})
     Check(evict and catalog.MaintenanceEvictOverlay(evict, "atomBarrier"),
         "barrier fixture would not stage")
-    Check(catalog.CommitMaintenance(evict), "barrier fixture would not commit")
+    Check(AwaitMutation(catalog.CommitMaintenance(evict)),
+        "barrier fixture would not commit")
 
     now = now + 180 * DAY + 1
     local handle = catalog.BeginCatalogMaintenance({database=db,
@@ -609,7 +629,7 @@ Case("ATOM-12", "notification rebind cannot replace the completed mutation ticke
         "replacement admission did not complete independently")
 end)
 
-Case("ATOM-13", "evidence publication faults settle once before and after release", function()
+Case("ATOM-13", "post-publication evidence faults preserve one complete published transaction", function()
     for _, afterRelease in ipairs({false,true}) do
         S.Reload()
         local rows={}
@@ -634,21 +654,23 @@ Case("ATOM-13", "evidence publication faults settle once before and after releas
         Nexus.LoadoutEvidence.PublishCandidate=original
         Check(injected,"publication hook was not reached")
         Check(pumpOk,"publication error escaped: "..tostring(pumpError))
-        Check(ticket.state=="failed" and ticket.committed==false and callbacks==1,
-            "publication fault did not settle its owner once")
-        Check(catalog.RootState().state=="ROOT_INVALIDATED" and catalog.Get("evidenceFault1")==nil,
-            "publication fault left serving authority live")
+        Check(ticket.state=="committed" and ticket.committed==true and callbacks==1,
+            "post-publication evidence fault did not retain one committed terminal receipt")
+        Check(catalog.RootState().state=="ROOT_ADMITTED"
+                and catalog.Get("evidenceFault1").lastModified==10
+                and catalog.Get("evidenceFault9")~=nil,
+            "post-publication evidence fault exposed an incomplete or invalid serving root")
         Check(S.Encode(before)==bytes,"publication fault changed the retained old bundle")
         local selected=rawget(db,"authorityBundle")
         Check(selected~=before and selected.transactionGeneration==before.transactionGeneration+1
                 and selected.communityBuilds.evidenceFault1 and selected.communityBuilds.evidenceFault9,
             "publication fault left an incomplete new bundle")
-        Check(not Nexus.LoadoutEvidence.CandidateOpen(),"failed publication retained evidence candidate")
-        catalog.PumpRootAdmission(); Check(callbacks==1,"publication failure callback repeated")
+        Check(not Nexus.LoadoutEvidence.CandidateOpen(),"post-publication fault retained evidence candidate")
+        catalog.PumpRootAdmission(); Check(callbacks==1,"committed publication callback repeated")
     end
 end)
 
-Case("ATOM-14", "failure callback rebind cannot consume the replacement candidate", function()
+Case("ATOM-14", "post-publication callback rebind cannot consume the replacement candidate", function()
     S.Reload()
     local rows={}
     for index=1,9 do local id="failedRebind"..index; rows[id]=S.LocalBuild(id,1) end
@@ -671,7 +693,8 @@ Case("ATOM-14", "failure callback rebind cannot consume the replacement candidat
     end)
     Nexus.LoadoutEvidence.PublishCandidate=original
     Check(injected and pumpOk,"failure escaped or never injected: "..tostring(pumpError))
-    Check(ticket.state=="failed" and callbacks==1,"failed owner receipt was not stable")
+    Check(ticket.state=="committed" and ticket.committed==true and callbacks==1,
+        "published owner receipt was not stable")
     local result
     for _=1,catalog.Budget().maximumPumps do
         result=catalog.PumpRootAdmission()
@@ -679,7 +702,7 @@ Case("ATOM-14", "failure callback rebind cannot consume the replacement candidat
     end
     Check(result.state=="ROOT_ADMITTED" and catalog.Get("nextRoot")~=nil,
         "failed owner consumed its callback's replacement candidate")
-    Check(callbacks==1 and ticket.state=="failed","replacement replayed old failure completion")
+    Check(callbacks==1 and ticket.state=="committed","replacement replayed old completion")
 end)
 
 S.Finish("catalog authority commit fault matrix")

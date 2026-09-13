@@ -2,6 +2,7 @@
 -- the matching capability-marked request. Legacy requestless traffic remains
 -- valid ambient storage input and cannot keep a current request alive.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua")
 dofile("core/SyncTransport.lua")
@@ -176,10 +177,33 @@ end
 
 local function SendSingle(id, stamp, context, sender)
     sender = sender or "Bob"
-    return Sync.HandleIncoming(BuildWire(sender, id, stamp, 1, 1,
+    local accepted = Sync.HandleIncoming(BuildWire(sender, id, stamp, 1, 1,
         EncodeBuild(id, sender, stamp), context), ActualSender(sender))
+    -- MASTER-W2-008: an accepted build is one retained catalog mutation that
+    -- reports false until its terminal commit. Settle it and report the exact
+    -- durable outcome; a rejected packet leaves no candidate.
+    if not accepted and Nexus.BuildCatalog.RootState().candidate then
+        S.PumpCatalogToIdle("inbound build admission")
+        local row = Catalog.Get(id)
+        return type(row) == "table" and row.id == id
+    end
+    return accepted
 end
 
+-- MASTER-W2-008: an accepted summary is one retained catalog mutation that
+-- reports false until its terminal commit. Deliver, settle, and report the
+-- exact durable outcome; a rejected packet leaves no candidate.
+local DeliverSummaryWire
+-- An accepted delete is one retained row-to-tombstone transaction; settle it
+-- and report the exact durable outcome (the row is gone).
+local function DeliverDelete(text, transport, id)
+    local accepted = Sync.HandleIncoming(text, transport)
+    if not accepted and Nexus.BuildCatalog.RootState().candidate then
+        S.PumpCatalogToIdle("inbound delete admission")
+        return Catalog.Get(id) == nil
+    end
+    return accepted
+end
 local function SummaryWire(sender, id, stamp, context)
     local payload = {
         id=id,t="Summary " .. id,a=sender,o=OwnerKey(sender),
@@ -192,6 +216,15 @@ local function SummaryWire(sender, id, stamp, context)
         wire = wire .. "|" .. context.requester .. "|" .. context.requestId
     end
     return wire
+end
+DeliverSummaryWire = function(sender, id, stamp, context, transport)
+    local accepted = Sync.HandleIncoming(
+        SummaryWire(sender, id, stamp, context), transport)
+    if not accepted and Nexus.BuildCatalog.RootState().candidate then
+        S.PumpCatalogToIdle("inbound summary admission")
+        return Catalog.GetSummary(id) ~= nil
+    end
+    return accepted
 end
 
 local function CompactDps(player, dps, stamp, context)
@@ -245,7 +278,8 @@ local function PutBuild(id, author, stamp, complete)
         loadoutAvailable=echoes ~= nil,
         fingerprintHash=echoes and nil or "36b3",
     }
-    local stored = Catalog.Put(record)
+    local stored = S.CatalogMutation(function() return Catalog.Put(record) end,
+        "fixture build admission")
     return stored ~= false and record or nil
 end
 
@@ -500,9 +534,9 @@ Check(oldAccepted and laterAccepted and Stored("expired-old-build")
 do
 local summaryId, summarySent = BeginManual()
 clock = summarySent + 55
-local summaryAccepted = Sync.HandleIncoming(SummaryWire("Bob",
+local summaryAccepted = DeliverSummaryWire("Bob",
     "context-summary", 601, {requester=LOCAL_TRANSPORT,
-        requestId=summaryId}), "Bob-Ebonhold")
+        requestId=summaryId}, "Bob-Ebonhold")
 local summaryOutcome = RequestOutcome()
 clock = summarySent + 61
 Check(summaryAccepted and Stored("context-summary")
@@ -513,8 +547,8 @@ Check(summaryAccepted and Stored("context-summary")
 
 local legacySummaryId, legacySummarySent = BeginManual()
 clock = legacySummarySent + 55
-Control(Sync.HandleIncoming(SummaryWire("Bob",
-    "legacy-summary", 602, nil), "Bob-Ebonhold") == true,
+Control(DeliverSummaryWire("Bob",
+    "legacy-summary", 602, nil, "Bob-Ebonhold") == true,
     "legacy three-field WLBI remains accepted")
 local legacySummaryOutcome = RequestOutcome()
 clock = legacySummarySent + 61
@@ -551,9 +585,9 @@ local deleteId, deleteSent = BeginManual()
 Control(PutBuild("context-delete", "Bob", 610, true) ~= nil,
     "contextual delete fixture stored its remote build")
 clock = deleteSent + 55
-local deleteAccepted = Sync.HandleIncoming(table.concat({
+local deleteAccepted = DeliverDelete(table.concat({
     "WLRD","Bob","context-delete","611","Bob",LOCAL_TRANSPORT,deleteId,
-}, "|"), "Bob-Ebonhold")
+}, "|"), "Bob-Ebonhold", "context-delete")
 local deleteOutcome = RequestOutcome()
 clock = deleteSent + 61
 Check(deleteAccepted and not Stored("context-delete")
@@ -566,8 +600,8 @@ local legacyDeleteId, legacyDeleteSent = BeginManual()
 Control(PutBuild("legacy-delete", "Bob", 620, true) ~= nil,
     "legacy delete fixture stored its remote build")
 clock = legacyDeleteSent + 55
-Control(Sync.HandleIncoming(
-    "WLRD|Bob|legacy-delete|621|Bob", "Bob-Ebonhold") == true,
+Control(DeliverDelete(
+    "WLRD|Bob|legacy-delete|621|Bob", "Bob-Ebonhold", "legacy-delete") == true,
     "legacy five-field WLRD remains accepted")
 local legacyDeleteOutcome = RequestOutcome()
 clock = legacyDeleteSent + 61
@@ -922,6 +956,16 @@ local deleteBuild = assert(PutBuild("unrelated-delete", "Alice", 852, false))
 -- and the requestRelated/outbound assertions below are unchanged.
 local unrelatedDeleteOk, unrelatedDeleteWhy =
     Sync.BroadcastDelete(Catalog.Get("unrelated-delete") or deleteBuild)
+if unrelatedDeleteWhy == "ROOT_MUTATION_PENDING" then
+    -- The local row-to-tombstone transaction is one retained catalog
+    -- mutation; the zero-wire refusal is registered at its terminal commit,
+    -- so settle it and read the same terminal delete status the owner keeps.
+    S.PumpCatalogToIdle("unrelated local tombstone")
+    local terminal = Sync.GetDeleteStatus("unrelated-delete")
+    unrelatedDeleteOk = false
+    unrelatedDeleteWhy = terminal and terminal.outcome == "rejected"
+        and terminal.reason or unrelatedDeleteWhy
+end
 Control(unrelatedDeleteOk == false
     and unrelatedDeleteWhy == "REMOTE_TOMBSTONE_ORDER_UNPROVEN",
     "unrelated delete refused zero-wire")
@@ -1113,6 +1157,13 @@ Sync.HandleIncoming(BuildWire("Bob", "overlap-build", 901, 1, 2,
 local overlapBuildAccepted = Sync.HandleIncoming(BuildWire("Bob",
     "overlap-build", 901, 2, 2, overlapChunks[2], newBuildContext),
     "Bob-Ebonhold")
+-- MASTER-W2-008: the completed transfer is one retained catalog mutation
+-- that reports false until its terminal commit; settle it and take the
+-- exact durable outcome as acceptance.
+if not overlapBuildAccepted and Nexus.BuildCatalog.RootState().candidate then
+    S.PumpCatalogToIdle("overlapping build admission")
+    overlapBuildAccepted = Stored("overlap-build")
+end
 local overlapBuildOutcome = RequestOutcome()
 Check(overlapBuildAccepted and Stored("overlap-build")
         and overlapBuildOutcome.new == 1

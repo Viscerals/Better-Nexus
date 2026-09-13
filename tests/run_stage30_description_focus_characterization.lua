@@ -135,11 +135,14 @@ end
 local function PostTerminal(...)
     AwaitCatalog()
     local ok, value, outcome = Community.PostCurrentWishlist(...)
-    if not ok and value == "ROOT_MUTATION_PENDING" then
-        assert(type(outcome) == "table" and type(outcome.id) == "string",
+    -- The accepted post is one retained catalog mutation that reports its
+    -- retained state on the same outcome table until the terminal commit.
+    if ok and type(outcome) == "table" and outcome.localSaved ~= true
+        and outcome.queueReason == "ROOT_MUTATION_PENDING" then
+        assert(type(outcome.id) == "string",
             "pending post returned no stable publication identity")
         AwaitCatalog()
-        assert(Catalog.Get(outcome.id),
+        assert(outcome.localSaved == true and Catalog.Get(outcome.id),
             "pending post did not reach terminal catalog publication")
         return true, outcome.id, outcome
     end
@@ -149,7 +152,9 @@ end
 local function EditTerminal(...)
     AwaitCatalog()
     local ok, why = Community.EditBuild(...)
-    if not ok and why == "ROOT_MUTATION_PENDING" then
+    if why == "ROOT_MUTATION_PENDING" then
+        -- The accepted edit is one retained catalog mutation; settle it
+        -- before the durable description is read back.
         AwaitCatalog()
         return true
     end

@@ -2,8 +2,14 @@
 -- shipped bundled catalog. Focused suites normally use an empty bundle, which
 -- cannot expose full-library defensive-copy pressure.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/BundledBuilds.lua")
 dofile("data/DefaultProfile.lua")
+-- The shipped login sequence loads the compatibility hash owner between the
+-- catalog and Store (Nexus.toc order). MASTER-W2-006 refuses any one-call
+-- collection read on the shipped maximum root, so the compatibility view is
+-- served only through this cache owner's retained cursor work.
+dofile("core/BuildHashCache.lua")
 dofile("core/Store.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
@@ -23,6 +29,29 @@ assert(type(Catalog.DebugStats) == "function",
 -- and DPS subsystem initializers all bind the same database and immutable
 -- release bundle during one login.
 H.BootstrapStore()
+-- MASTER-W2-002: the first login writes the retention bookkeeping metadata
+-- through one detached catalog transaction instead of a raw legacy write. The
+-- coordinator releases dependents at STORE_READY while that transaction is
+-- still a pending catalog candidate, exactly as MainLifecycle then pumps it
+-- one slice per frame. Settle it here through the same public scheduler seam,
+-- retain its exact ticket, and account for its slices explicitly below. It is
+-- the only root work at login that Init does not drive.
+local startupRetention = Nexus.DataRetention.Enforce(NexusDB, "startup")
+assert(type(startupRetention) == "table" and startupRetention.pending == true
+    and type(startupRetention.mutationTicket) == "table",
+    "the first-login retention transaction was not a retained pending ticket")
+local startupTicket = startupRetention.mutationTicket
+local _, startupTransactionPumps = S.PumpCatalogToIdle(
+    "first-login retention transaction")
+assert(startupTicket.state == "committed" and startupTicket.committed == true
+    and startupTicket.pumps == startupTransactionPumps + 1,
+    string.format("first-login retention transaction did not commit exactly: state=%s committed=%s pumps=%s settled=%s",
+        tostring(startupTicket.state), tostring(startupTicket.committed),
+        tostring(startupTicket.pumps), tostring(startupTransactionPumps)))
+local settledRetention = Nexus.DataRetention.Enforce(NexusDB, "startup")
+assert(type(settledRetention) == "table" and settledRetention.pending == false
+    and not settledRetention.blocked,
+    "settled first-login retention transaction did not publish its terminal summary")
 H.BootstrapStore()
 Nexus.CommunityBuilds.Init({}, {})
 -- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
@@ -98,13 +127,18 @@ Nexus.DpsCapture.Init({}, Nexus.Sync)
 
 local login = Catalog.DebugStats()
 local maximumPumps = Catalog.Budget().maximumPumps
+-- Every root pump at login is either one Init-driven admission slice or one
+-- slice of the exact first-login retention transaction settled above. Nothing
+-- else may rebuild or copy the catalog.
 assert(login.rootAdmissions == 1 and login.rebinds == 1
     and login.rootPumps > 0 and login.rootPumps <= maximumPumps
     and login.fastPathHits == 4
-    and login.initCalls == login.rootPumps + login.fastPathHits
+    and login.rootPumps == (login.initCalls - login.fastPathHits)
+        + startupTicket.pumps
     and login.revisionSnapshots == 0,
-    string.format("login rebuilt/copied catalog: calls=%s rebinds=%s fast=%s snapshots=%s",
-        tostring(login.initCalls), tostring(login.rebinds),
+    string.format("login rebuilt/copied catalog: calls=%s pumps=%s retention=%s rebinds=%s fast=%s snapshots=%s",
+        tostring(login.initCalls), tostring(login.rootPumps),
+        tostring(startupTicket.pumps), tostring(login.rebinds),
         tostring(login.fastPathHits), tostring(login.revisionSnapshots)))
 assert(Catalog.Count() == AdmissibleBundledCount()
     and Catalog.Status().bundledCount == Nexus.BundledBuilds.generation.included,
@@ -150,7 +184,10 @@ local realAll = Catalog.All
 Catalog.All = function()
     error("full catalog copy reached startup hash/projection path")
 end
-local buildHash, dpsHash = Nexus.Sync.GetCompatibilityHashes()
+-- MASTER-W2-006: the compatibility view warms one BuildHashCache slice per
+-- scheduler turn; the fixture stands in for that lifecycle turn without
+-- draining more than one slice per call.
+local buildHash, dpsHash = S.CompatibilityHashes(Nexus.Sync)
 assert(type(buildHash) == "string" and buildHash ~= ""
     and type(dpsHash) == "string",
     "startup compatibility hashes did not build from lightweight summaries")

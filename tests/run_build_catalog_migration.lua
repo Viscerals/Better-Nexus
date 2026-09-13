@@ -1,4 +1,5 @@
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/DefaultProfile.lua")
 dofile("data/BundledBuilds.lua")
 dofile("core/BuildCatalog.lua")
@@ -223,7 +224,11 @@ assert(not ok and reason == "ROOT_READ_ONLY_FUTURE_SCHEMA"
 local writableDb = {communityBuilds={},syncTombstones={}}
 NexusDB = writableDb
 H.AdmitCatalogV1(writableDb, futureBundle)
-assert(Nexus.BuildCatalog.Put({id="writable",title="Writable"})
+-- The write is one retained catalog mutation (MASTER-RC-006); settle it to
+-- its committed ticket before the durable row is read.
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put({id="writable",title="Writable"})
+end, "writable rebind put")
     and H.DurableBuilds(writableDb).writable,
     "read-only guard survived rebinding to a supported schema")
 assert(next(writableDb.communityBuilds) == nil,

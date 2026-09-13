@@ -24,6 +24,10 @@ local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/DataRetention.lua")
 dofile("core/ViewProjections.lua")
 local Case, Check = S.Case, S.Check
+local function AwaitMutation(ok, why, ticket)
+    return S.AwaitCatalogMutation(ok, why, ticket,
+        "typed-id fixture mutation")
+end
 
 local now = 2000000000
 time = function() return now end
@@ -127,8 +131,10 @@ function()
     local db = S.Database()
     S.Bind(db)
     local catalog = Nexus.BuildCatalog
-    Check(catalog.Put(S.LocalBuild(7, 2, {id=7})), "numeric id was refused")
-    Check(catalog.Put(S.LocalBuild("7", 2, {id="7"})), "string id was refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild(7, 2, {id=7}))),
+        "numeric id was refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild("7", 2, {id="7"}))),
+        "string id was refused")
     local numeric, text = catalog.Get(7), catalog.Get("7")
     Check(type(numeric) == "table" and type(text) == "table",
         "one of the two typed ids was lost")
@@ -144,8 +150,10 @@ function()
     local db = S.Database()
     S.Bind(db)
     local catalog = Nexus.BuildCatalog
-    Check(catalog.Put(S.LocalBuild(1, 2, {id=1})), "numeric id was refused")
-    Check(catalog.Put(S.LocalBuild("1", 2, {id="1"})), "string id was refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild(1, 2, {id=1}))),
+        "numeric id was refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild("1", 2, {id="1"}))),
+        "string id was refused")
     local numericState = catalog.AuthorityState(1)
     local stringState = catalog.AuthorityState("1")
     Check(type(numericState.fingerprint) == "string"
@@ -156,12 +164,14 @@ function()
     Check(type(initial) == "number" and initial == 1,
         "number-first order did not select numeric 1 initially")
 
-    Check(catalog.RemoveOverlay(1), "numeric winner removal was refused")
+    Check(AwaitMutation(catalog.RemoveOverlay(1)),
+        "numeric winner removal was refused")
     local afterRemoval = catalog.FindExactFingerprintId(fingerprint)
     Check(type(afterRemoval) == "string" and afterRemoval == "1",
         "string id did not become winner after numeric removal")
 
-    Check(catalog.Put(S.LocalBuild(1, 2, {id=1})), "numeric reinsertion was refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild(1, 2, {id=1}))),
+        "numeric reinsertion was refused")
     local afterReinsert = catalog.FindExactFingerprintId(fingerprint)
     Check(type(afterReinsert) == "number" and afterReinsert == 1,
         "numeric 1 did not regain the winner after reinsertion")

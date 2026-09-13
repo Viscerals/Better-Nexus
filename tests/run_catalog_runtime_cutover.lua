@@ -29,6 +29,7 @@
 -- CUT-01 and CUT-07 were GUARD on that tree (bootstrap admission and restart
 -- idempotence already held) and are kept as regressions.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("ui/CommunityBuilds.lua")
 
 UnitName = function(unit) return unit == "player" and "Boganic" or nil end
@@ -81,6 +82,27 @@ NexusDB = {
 
 local Catalog = Nexus.BuildCatalog
 local Builds = Nexus.CommunityBuilds
+local function AwaitMutation(ok, why, ticket)
+    return S.AwaitCatalogMutation(ok, why, ticket,
+        "runtime-cutover catalog mutation")
+end
+local function AwaitControllerMutation(ok, why)
+    -- A retained pending controller write is accepted once and reports the
+    -- retained state through its reason or its outcome table; settle it to the
+    -- exact terminal ticket before any durable assertion.
+    local pending = why == "ROOT_MUTATION_PENDING"
+        or type(why) == "table"
+            and (why.storageReason == "ROOT_MUTATION_PENDING"
+                or why.queueReason == "ROOT_MUTATION_PENDING")
+    if pending then
+        local terminal = S.PumpCatalogToIdle(
+            "runtime-cutover controller mutation")
+        return type(terminal) == "table" and terminal.committed == true,
+            type(terminal) == "table" and terminal.reason or why,
+            terminal
+    end
+    return ok, why
+end
 
 -- The exact legacy input graph, captured before bootstrap. Every identity and
 -- every scalar below must survive the whole cutover untouched: after the bundle
@@ -172,6 +194,7 @@ end
 -- bootstrap, so every row it rewrites must land in a replacement bundle and
 -- nowhere else.
 Builds.Init({}, {})
+S.PumpCatalogToIdle("startup identity repair")
 do
     local all = H.CatalogAll()
     local count = 0
@@ -210,7 +233,8 @@ end
 local immutableTitle = bundled.builds.collision.title
 do
     local before = Bundle()
-    local ok = Builds.EditBuild("collision", "Edited personal overlay", "Changed")
+    local ok = AwaitControllerMutation(
+        Builds.EditBuild("collision", "Edited personal overlay", "Changed"))
     local after = Bundle()
     local why = LegacyPreserved()
     Check("CUT-03 edit publishes through the bundle and never the legacy overlay",
@@ -232,7 +256,7 @@ end
 ------------------------------------------------------------------------
 do
     local before = Bundle()
-    local ok = Builds.DeleteBuild("collision")
+    local ok = AwaitControllerMutation(Builds.DeleteBuild("collision"))
     local after = Bundle()
     local why = LegacyPreserved()
     Check("CUT-04 delete publishes overlay removal and tombstone in the bundle",
@@ -257,7 +281,7 @@ local created = {id="created",title="Created locally",author="Boganic",
     isMine=true,postedAt=30,lastModified=30,
     echoes={{spellId=200103,stacks=1}}}
 do
-    local ok = Catalog.Put(created)
+    local ok = AwaitMutation(Catalog.Put(created))
     local after = Bundle()
     created.title = "caller mutation"
     local why = LegacyPreserved()
@@ -338,7 +362,7 @@ do
         author="Boganic",ownerKey="boganic@ebonhold",realm="ebonhold",
         ownerVerified=true,isMine=true,postedAt=40,lastModified=40,
         echoes={{spellId=200107,quality=3,stacks=2}}}
-    local ok = Catalog.Put(evidenceBuild)
+    local ok = AwaitMutation(Catalog.Put(evidenceBuild))
     local after = Bundle()
     local why = LegacyPreserved()
     local bundleEvidence = after and after.loadoutEvidence or nil

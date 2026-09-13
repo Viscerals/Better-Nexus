@@ -14,6 +14,7 @@ local PUMP_KEY = "data-compaction"
 local PUMP_INTERVAL = 0.05
 local MAX_WORK_PER_PUMP = 32
 local active
+local garbageJobs = setmetatable({}, {__mode="k"})
 
 local function DeepCopy(value, seen)
     if type(value) ~= "table" then return value end
@@ -57,6 +58,35 @@ local function Evidence()
     return Nexus and Nexus.LoadoutEvidence
 end
 
+-- After authority-bundle occupancy, every legacy field is preserved input.
+-- The complete bundle is the only selected durable payload.
+local function DurablePayload(database, field)
+    if type(database) ~= "table" then return nil end
+    local bundle = rawget(database, "authorityBundle")
+    if type(bundle) == "table" then return rawget(bundle, field) end
+    return rawget(database, field)
+end
+
+local function AuthorityDatabase(database)
+    if type(database) == "table" then return database end
+    local catalog = Nexus and Nexus.BuildCatalog
+    if catalog and type(catalog.BoundDatabase) == "function" then
+        local bound = catalog.BoundDatabase()
+        if type(bound) == "table" then return bound end
+    end
+    return type(NexusDB) == "table" and NexusDB or nil
+end
+
+local function CatalogFor(database)
+    local catalog = Nexus and Nexus.BuildCatalog
+    if not (catalog and type(catalog.BoundDatabase) == "function"
+        and catalog.BoundDatabase() == database
+        and type(catalog.BeginCatalogMaintenance) == "function") then
+        return nil
+    end
+    return catalog
+end
+
 -- The selected durable evidence payload after the accepted legacy-to-bundle
 -- cutover. State machine line 394 keeps the exact PR #68 `loadoutEvidence`
 -- location "Preserved legacy input when the bundle is absent. Never used as
@@ -67,29 +97,19 @@ end
 -- owner performs it. A detached database that is not the evidence owner's bound
 -- one falls through to its own bundle, never to this module's global state.
 local function DurableEvidenceStore(database)
-    if type(database) ~= "table" then return nil end
-    local owner = Evidence()
-    if owner and type(owner.DurableStore) == "function" then
-        local store = owner.DurableStore(database)
-        if type(store) == "table" then return store end
-    end
-    local bundle = rawget(database, "authorityBundle")
-    if type(bundle) == "table" then return rawget(bundle, "loadoutEvidence") end
-    return rawget(database, "loadoutEvidence")
+    return DurablePayload(database, "loadoutEvidence")
 end
 
-local function Meta(database)
-    database.dataCompaction = type(database.dataCompaction) == "table"
-        and database.dataCompaction or {}
-    local meta = database.dataCompaction
+local function DetachedMeta(database)
+    local source = DurablePayload(database, "dataCompaction")
+    local meta = DeepCopy(type(source) == "table" and source or {})
     if meta.schemaVersion == nil then meta.schemaVersion = SCHEMA_VERSION end
     return meta
 end
 
 function Compaction.Enabled(database)
-    database = type(database) == "table" and database
-        or type(NexusDB) == "table" and NexusDB or nil
-    local meta = database and database.dataCompaction
+    database = AuthorityDatabase(database)
+    local meta = DurablePayload(database, "dataCompaction")
     return type(meta) == "table"
         and tonumber(meta.schemaVersion) == SCHEMA_VERSION
         and (tonumber(meta.version) or 0) >= MIGRATION_VERSION
@@ -148,8 +168,11 @@ local function CompactField(row, inlineField, referenceField, options,
         and row.fingerprint ~= "" and row.fingerprint:sub(1, 1) ~= "@"
         and semanticFingerprint ~= nil
         and tostring(row.fingerprint) ~= semanticFingerprint
-    local reference = evidence.Intern(inline, claimed, options)
+    local reference, internWhy = evidence.Intern(inline, claimed, options)
     if not reference then
+        if internWhy == "EVIDENCE_CANDIDATE_PENDING" then
+            return false, false, internWhy
+        end
         Add(stats, "retainedConflicts")
         Add(stats, "afterInlineEchoRows", #inline)
         return false, false
@@ -195,13 +218,15 @@ end
 function Compaction.CompactDpsRow(row, force, stats)
     if type(row) ~= "table" then return false, 0 end
     local changed, compacted = false, 0
-    local fieldChanged, fieldCompacted = CompactField(
+    local fieldChanged, fieldCompacted, fieldWhy = CompactField(
         row, "echoes", "evidenceKey", nil, "dps", force == true, stats)
+    if fieldWhy then return false, 0, fieldWhy end
     changed = fieldChanged or changed
     if fieldCompacted then compacted = compacted + 1 end
-    fieldChanged, fieldCompacted = CompactField(
+    fieldChanged, fieldCompacted, fieldWhy = CompactField(
         row, "lockedEchoes", "lockedEvidenceKey", {forceLocked=true},
         "dps", force == true, stats)
+    if fieldWhy then return changed, compacted, fieldWhy end
     changed = fieldChanged or changed
     if fieldCompacted then compacted = compacted + 1 end
     return changed, compacted
@@ -256,7 +281,7 @@ local function Revision(event)
 end
 
 local function FutureCatalogReason(database)
-    local owner = rawget(database,"buildCatalog")
+    local owner = DurablePayload(database, "buildCatalog")
     if type(owner) ~= "table" then return nil end
     local catalog = Nexus and Nexus.BuildCatalog
     local schema = catalog and type(catalog.SchemaVersion) == "function"
@@ -273,7 +298,7 @@ local function NewState(database, meta)
     if not (evidence and type(evidence.SchemaVersion) == "function") then
         error("loadout evidence pool unavailable")
     end
-    local emptyOverlay, emptyDps, emptyEntries = {}, {}, {}
+    local emptyOverlay, emptyDps, emptyEntries, emptyMeta = {}, {}, {}, {}
     local rawEvidenceStore = DurableEvidenceStore(database)
     local evidenceStore = type(rawEvidenceStore) == "table"
         and rawEvidenceStore or nil
@@ -281,20 +306,26 @@ local function NewState(database, meta)
         and tonumber(evidenceStore.schemaVersion) > evidence.SchemaVersion() then
         error("future evidence schema is read-only")
     end
-    local overlay = type(database.communityBuilds) == "table"
-        and database.communityBuilds or emptyOverlay
-    local dps = type(database.dpsCapture) == "table"
-        and database.dpsCapture or emptyDps
+    local selectedOverlay = DurablePayload(database, "communityBuilds")
+    local overlay = type(selectedOverlay) == "table"
+        and selectedOverlay or emptyOverlay
+    local selectedDps = DurablePayload(database, "dpsCapture")
+    local sourceDps = type(selectedDps) == "table" and selectedDps or emptyDps
+    local selectedMeta = DurablePayload(database, "dataCompaction")
+    local sourceMeta = type(selectedMeta) == "table" and selectedMeta or emptyMeta
     local entries = evidenceStore and type(evidenceStore.entries) == "table"
         and evidenceStore.entries or emptyEntries
     local state = {
         database=database,meta=meta,phase="pool-before",cursor=nil,
-        overlay=overlay,dps=dps,entries=entries,dpsStack=nil,dpsSeen=nil,
+        overlay=overlay,dps=DeepCopy(sourceDps),entries=entries,
+        sourceDps=sourceDps,sourceMeta=sourceMeta,
+        dpsStack=nil,dpsSeen=nil,
         evidenceStore=evidenceStore,maintenance=nil,pendingCommit=nil,
+        pendingOverlay=nil,pendingDpsRow=nil,candidateEntries=nil,
         sourceVerificationPending=false,
-        catalogOwner=type(database.buildCatalog) == "table"
-            and database.buildCatalog or nil,
+        catalogOwner=DurablePayload(database, "buildCatalog"),
         emptyOverlay=emptyOverlay,emptyDps=emptyDps,emptyEntries=emptyEntries,
+        emptyMeta=emptyMeta,
         buildChanged=false,dpsChanged=false,providersChecked=false,
         providerGeneration=nil,done=false,
     }
@@ -327,10 +358,12 @@ end
 -- normalized or annotated by this older migration.
 local function RefreshOwners(state)
     local database = state.database
-    local meta = rawget(database,"dataCompaction")
-    if type(meta) ~= "table" then
+    local selectedMeta = DurablePayload(database, "dataCompaction")
+    if selectedMeta ~= nil and type(selectedMeta) ~= "table" then
         return "blocked","compaction metadata is incompatible",false
     end
+    local meta = type(selectedMeta) == "table" and selectedMeta
+        or state.emptyMeta
     if tonumber(meta.schemaVersion)
         and tonumber(meta.schemaVersion) > SCHEMA_VERSION then
         return "blocked","future compaction schema is read-only",false
@@ -339,7 +372,7 @@ local function RefreshOwners(state)
         return "complete",meta,false
     end
 
-    local catalogOwner = rawget(database,"buildCatalog")
+    local catalogOwner = DurablePayload(database, "buildCatalog")
     local catalogReason = FutureCatalogReason(database)
     if catalogReason then return "blocked",catalogReason,false end
 
@@ -354,23 +387,25 @@ local function RefreshOwners(state)
         return "blocked","future evidence schema is read-only",false
     end
 
-    local overlay = type(rawget(database,"communityBuilds")) == "table"
-        and database.communityBuilds or state.emptyOverlay
-    local dps = type(rawget(database,"dpsCapture")) == "table"
-        and database.dpsCapture or state.emptyDps
+    local selectedOverlay = DurablePayload(database, "communityBuilds")
+    local overlay = type(selectedOverlay) == "table" and selectedOverlay
+        or state.emptyOverlay
+    local selectedDps = DurablePayload(database, "dpsCapture")
+    local dps = type(selectedDps) == "table" and selectedDps
+        or state.emptyDps
     local entries = type(evidenceStore) == "table"
         and type(evidenceStore.entries) == "table"
         and evidenceStore.entries or state.emptyEntries
-    local changed = meta ~= state.meta or catalogOwner ~= state.catalogOwner
+    local changed = meta ~= state.sourceMeta or catalogOwner ~= state.catalogOwner
         or evidenceStore ~= state.evidenceStore or overlay ~= state.overlay
-        or dps ~= state.dps or entries ~= state.entries
+        or dps ~= state.sourceDps or entries ~= state.entries
     -- Only a replaced catalog backing table is current-source drift for the
     -- catalog root; evidence or DPS owner changes are not.
     state.catalogOwnerChanged = overlay ~= state.overlay
         or catalogOwner ~= state.catalogOwner
-    state.meta,state.catalogOwner,state.evidenceStore =
+    state.sourceMeta,state.catalogOwner,state.evidenceStore =
         meta,catalogOwner,evidenceStore
-    state.overlay,state.dps,state.entries = overlay,dps,entries
+    state.overlay,state.sourceDps,state.entries = overlay,dps,entries
     return "ok",nil,changed
 end
 
@@ -389,9 +424,8 @@ local function CancelOverlayCandidate(state)
 end
 
 local function OverlayCatalog(state)
-    local catalog = Nexus and Nexus.BuildCatalog
-    if not (catalog and type(catalog.BoundDatabase) == "function"
-        and catalog.BoundDatabase() == state.database
+    local catalog = CatalogFor(state.database)
+    if not (catalog
         and type(catalog.MaintenanceOverlayNext) == "function") then
         return nil
     end
@@ -428,12 +462,20 @@ local function RestartForExternalChange(state, ownersChanged)
     state.buildRevision,state.dpsRevision = buildRevision,dpsRevision
     if not ownersChanged and state.phase == "pool-before" then return false end
     CancelOverlayCandidate(state)
+    state.meta = DeepCopy(type(state.sourceMeta) == "table"
+        and state.sourceMeta or {})
+    if state.meta.schemaVersion == nil then
+        state.meta.schemaVersion = SCHEMA_VERSION
+    end
+    state.dps = DeepCopy(type(state.sourceDps) == "table"
+        and state.sourceDps or {})
+    state.candidateEntries,state.pendingOverlay,state.pendingDpsRow = nil,nil,nil
+    state.buildChanged,state.dpsChanged = false,false
     if ownersChanged and state.catalogOwnerChanged then
         state.catalogOwnerChanged = false
         ReadmitCatalog()
     end
-    state.phase,state.cursor,state.done =
-        ownersChanged and "pool-before" or "overlay",nil,false
+    state.phase,state.cursor,state.done = "pool-before",nil,false
     state.dpsStack,state.dpsSeen = nil,nil
     state.stats.overlayRecordsBefore,state.stats.overlayRecordsAfter = 0,0
     state.stats.dpsRecordsBefore,state.stats.dpsRecordsAfter = 0,0
@@ -461,6 +503,15 @@ local function SafeNext(source, cursor)
 end
 
 local function DpsStep(state)
+    if state.pendingDpsRow then
+        local changed, _, why = Compaction.CompactDpsRow(
+            state.pendingDpsRow, true, state.stats)
+        if why == "EVIDENCE_CANDIDATE_PENDING" then return true, true end
+        state.dpsChanged = changed or state.dpsChanged
+        state.stats.dpsRecordsAfter = state.stats.dpsRecordsAfter + 1
+        state.pendingDpsRow = nil
+        return true
+    end
     local frame = state.dpsStack[#state.dpsStack]
     if not frame then
         state.phase,state.cursor = "pool-after",nil
@@ -485,13 +536,28 @@ local function DpsStep(state)
         if tonumber(child.dps) ~= nil then
             state.stats.dpsRecordsBefore =
                 state.stats.dpsRecordsBefore + 1
-            local changed = Compaction.CompactDpsRow(
-                child, true, state.stats)
-            state.dpsChanged = changed or state.dpsChanged
-            state.stats.dpsRecordsAfter =
-                state.stats.dpsRecordsAfter + 1
+            state.pendingDpsRow = child
+            return DpsStep(state)
         end
     end
+    return true
+end
+
+local function CompactOverlayRow(state, catalog, id, row)
+    local changed, _, why = Compaction.CompactBuildRow(
+        row, true, state.stats)
+    if why then return false, why end
+    if changed then
+        local staged = catalog.MaintenanceReplaceRow(
+            state.maintenance, id, row)
+        if staged then
+            state.buildChanged = true
+        else
+            Add(state.stats, "retainedUnavailable")
+        end
+    end
+    state.stats.overlayRecordsAfter =
+        state.stats.overlayRecordsAfter + 1
     return true
 end
 
@@ -504,14 +570,55 @@ local function Step(state)
                 state.stats.poolEntriesBefore + 1
             return true
         end
+        state.phase,state.cursor = "candidate",nil
+        state.stats.phase = state.phase
+        return true
+    elseif state.phase == "candidate" then
+        local catalog = OverlayCatalog(state)
+        if state.maintenance and state.maintenance.state ~= "open" then
+            state.maintenance = nil
+        end
+        if catalog and not state.maintenance then
+            local handle, why = catalog.BeginCatalogMaintenance({
+                database=state.database, operation="compaction"})
+            if not handle then
+                if why == "ROOT_MUTATION_PENDING"
+                    or why == "ROOT_ADMISSION_PENDING"
+                    or why == "MAINTENANCE_ACTIVE" then
+                    state.stats.phase = "catalog-wait"
+                    return true, true
+                end
+                error(why or "catalog authority unavailable")
+            end
+            state.maintenance = handle
+        end
+        if not (catalog and state.maintenance) then
+            error("catalog authority unavailable")
+        end
+        local evidence = Evidence()
+        local store, why
+        if evidence and type(evidence.CandidateStore) == "function" then
+            store, why = evidence.CandidateStore()
+        end
+        if not store then
+            if why == "EVIDENCE_CANDIDATE_PENDING" then
+                state.stats.phase = "evidence-copy"
+                return true, true
+            end
+            error(why or "loadout evidence candidate unavailable")
+        end
+        state.candidateEntries = type(store.entries) == "table"
+            and store.entries or state.emptyEntries
         state.phase,state.cursor = "overlay",nil
         state.stats.phase = state.phase
         return true
     elseif state.phase == "overlay" then
         local catalog = OverlayCatalog(state)
-        if catalog and not state.maintenance then
-            state.maintenance = catalog.BeginCatalogMaintenance({
-                database=state.database, operation="compaction"})
+        if state.maintenance and state.maintenance.state ~= "open" then
+            state.maintenance = nil
+            state.phase = "candidate"
+            state.stats.phase = "catalog-wait"
+            return true, true
         end
         if not (catalog and state.maintenance) then
             -- Overlay rows can be compacted only through the catalog
@@ -521,25 +628,36 @@ local function Step(state)
             error("catalog authority unavailable")
         end
         if catalog and state.maintenance then
-            local id, row, done = catalog.MaintenanceOverlayNext(
+            if state.pendingOverlay then
+                local pending = state.pendingOverlay
+                local complete, why = CompactOverlayRow(
+                    state, catalog, pending.id, pending.row)
+                if not complete then
+                    if why == "EVIDENCE_CANDIDATE_PENDING" then
+                        return true, true
+                    end
+                    error(why)
+                end
+                state.pendingOverlay = nil
+                return true
+            end
+            local id, row, done, why = catalog.MaintenanceOverlayNext(
                 state.maintenance, state.cursor)
+            if why == "COPY_PENDING" then return true, true end
+            if why then error(why) end
             if not done and id ~= nil then
                 state.cursor = id
                 state.stats.overlayRecordsBefore =
                     state.stats.overlayRecordsBefore + 1
-                local changed = Compaction.CompactBuildRow(
-                    row, true, state.stats)
-                if changed then
-                    local staged = catalog.MaintenanceReplaceRow(
-                        state.maintenance, id, row)
-                    if staged then
-                        state.buildChanged = true
-                    else
-                        Add(state.stats, "retainedUnavailable")
+                local complete, compactWhy = CompactOverlayRow(
+                    state, catalog, id, row)
+                if not complete then
+                    if compactWhy == "EVIDENCE_CANDIDATE_PENDING" then
+                        state.pendingOverlay = {id=id,row=row}
+                        return true, true
                     end
+                    error(compactWhy)
                 end
-                state.stats.overlayRecordsAfter =
-                    state.stats.overlayRecordsAfter + 1
                 return true
             end
         end
@@ -550,7 +668,8 @@ local function Step(state)
     elseif state.phase == "dps" then
         return DpsStep(state)
     elseif state.phase == "pool-after" then
-        local key = SafeNext(state.entries,state.cursor)
+        local entries = state.candidateEntries or state.entries
+        local key = SafeNext(entries,state.cursor)
         state.cursor = key
         if key ~= nil then
             state.stats.poolEntriesAfter =
@@ -565,20 +684,27 @@ local function Step(state)
     return false
 end
 
-local function Finish(state)
+local function PreparePublication(state)
     local stats = state.stats
     stats.gcRetained = stats.poolEntriesAfter
     stats.recordCountsUnchanged =
         stats.overlayRecordsBefore == stats.overlayRecordsAfter
         and stats.dpsRecordsBefore == stats.dpsRecordsAfter
-    stats.pending,stats.phase = false,"done"
     if state.meta.schemaVersion == nil then
         state.meta.schemaVersion = SCHEMA_VERSION
     end
     state.meta.version = MIGRATION_VERSION
-    state.meta.last = DeepCopy(stats)
+    local terminal = DeepCopy(stats)
+    terminal.pending,terminal.phase = false,"done"
+    state.meta.last = terminal
     state.meta.lastError = nil
     state.meta.inProgress = nil
+    return {dpsCapture=state.dps,dataCompaction=state.meta}
+end
+
+local function Finish(state)
+    local stats = state.stats
+    stats.pending,stats.phase = false,"done"
     active = nil
     CancelPump()
     -- Completion ownership is settled before synchronous revision subscribers
@@ -632,7 +758,9 @@ end
 
 local function RunWork(state, work)
     while work < MAX_WORK_PER_PUMP and not state.done do
-        if Step(state) then work = work + 1 end
+        local worked, mustYield = Step(state)
+        if worked then work = work + 1 end
+        if mustYield then break end
     end
     return work
 end
@@ -773,7 +901,9 @@ function Compaction.Pump()
         state.maintenance = nil
         if handle then
             local catalog = Nexus and Nexus.BuildCatalog
-            local committed, commitWhy, ticket = catalog.CommitMaintenance(handle)
+            local overrides = PreparePublication(state)
+            local committed, commitWhy, ticket = catalog.CommitMaintenance(
+                handle, overrides)
             if committed == nil and commitWhy == "ROOT_MUTATION_PENDING"
                 and type(ticket) == "table" then
                 state.pendingCommit = ticket
@@ -798,12 +928,12 @@ function Compaction.Pump()
 end
 
 function Compaction.Init(database)
-    database = type(database) == "table" and database or {}
+    database = AuthorityDatabase(database) or {}
     local catalogReason = FutureCatalogReason(database)
     if catalogReason then
         return {blocked=true,reason=catalogReason},false
     end
-    local rawMeta = rawget(database,"dataCompaction")
+    local rawMeta = DurablePayload(database, "dataCompaction")
     if rawMeta ~= nil and type(rawMeta) ~= "table" then
         return {blocked=true,reason="compaction metadata is incompatible"},false
     end
@@ -818,7 +948,7 @@ function Compaction.Init(database)
         and tonumber(evidenceStore.schemaVersion) > evidence.SchemaVersion() then
         return {blocked=true,reason="future evidence schema is read-only"},false
     end
-    local meta = Meta(database)
+    local meta = DetachedMeta(database)
     if (tonumber(meta.version) or 0) >= MIGRATION_VERSION then
         return DeepCopy(meta.last or {migrationVersion=MIGRATION_VERSION}), false
     end
@@ -830,11 +960,10 @@ function Compaction.Init(database)
     if not active then
         local ok, state = pcall(NewState,database,meta)
         if not ok then
-            meta.lastError = tostring(state):sub(1,500)
-            return {blocked=true,reason=meta.lastError},false
+            return {blocked=true,reason=tostring(state):sub(1,500)},false
         end
         active = state
-        meta.inProgress = {version=MIGRATION_VERSION}
+        state.meta.inProgress = {version=MIGRATION_VERSION}
         SchedulePump()
     end
     return Compaction.Pump()
@@ -845,17 +974,96 @@ function Compaction.CollectGarbage(database, dryRun)
     if not (evidence and evidence.CollectGarbage) then
         return {blocked=true, reason="loadout evidence pool unavailable"}
     end
-    return evidence.CollectGarbage(database, dryRun == true)
+    database = AuthorityDatabase(database)
+    if type(database) ~= "table" then
+        return {blocked=true, reason="database required"}
+    end
+    if dryRun == true then return evidence.CollectGarbage(database, true) end
+    if active and active.database == database then
+        return {blocked=true, reason="compaction already active"}
+    end
+    local catalog = CatalogFor(database)
+    if not catalog then
+        return {blocked=true, reason="catalog authority unavailable"}
+    end
+
+    local job = garbageJobs[database]
+    if job and job.ticket then
+        local ticket = job.ticket
+        if ticket.state == "pending" then
+            return {pending=true, phase="commit-pending",
+                mutationTicket=ticket, removed=0}
+        end
+        garbageJobs[database] = nil
+        if ticket.state ~= "committed" or ticket.committed ~= true
+            or ticket.database ~= database
+            or rawget(database, "authorityBundle") ~= ticket.bundle then
+            return {blocked=true, pending=false,
+                reason=ticket.reason or "SOURCE_DRIFT", removed=0}
+        end
+        local result = DeepCopy(job.summary)
+        result.pending = false
+        return result
+    end
+
+    if not job then
+        local handle, why = catalog.BeginCatalogMaintenance({
+            database=database, operation="evidence-gc"})
+        if not handle then
+            return {blocked=true, reason=why or "catalog maintenance unavailable",
+                removed=0}
+        end
+        job = {handle=handle,catalog=catalog}
+        garbageJobs[database] = job
+    elseif job.handle.state ~= "open" then
+        garbageJobs[database] = nil
+        return {blocked=true, reason="SOURCE_DRIFT", removed=0}
+    end
+
+    local store, storeWhy = evidence.CandidateStore()
+    if not store then
+        if storeWhy == "EVIDENCE_CANDIDATE_PENDING" then
+            return {pending=true, phase="evidence-copy", removed=0}
+        end
+        catalog.CancelMaintenance(job.handle)
+        garbageJobs[database] = nil
+        return {blocked=true,
+            reason=storeWhy or "loadout evidence candidate unavailable",
+            removed=0}
+    end
+    local summary = evidence.CollectGarbage(database, false)
+    if type(summary) ~= "table" or summary.blocked then
+        catalog.CancelMaintenance(job.handle)
+        garbageJobs[database] = nil
+        return type(summary) == "table" and summary
+            or {blocked=true, reason="evidence garbage collection failed",
+                removed=0}
+    end
+    job.summary = DeepCopy(summary)
+    local committed, why, ticket = catalog.CommitMaintenance(job.handle)
+    job.handle = nil
+    if committed == true then
+        garbageJobs[database] = nil
+        summary.pending = false
+        return summary
+    end
+    if committed == nil and why == "ROOT_MUTATION_PENDING"
+        and type(ticket) == "table" then
+        job.ticket = ticket
+        return {pending=true, phase="commit-pending",
+            mutationTicket=ticket, removed=0}
+    end
+    garbageJobs[database] = nil
+    return {blocked=true, reason=why or "CANDIDATE_FAILED", removed=0}
 end
 
 function Compaction.Stats(database)
-    database = type(database) == "table" and database
-        or type(NexusDB) == "table" and NexusDB or {}
+    database = AuthorityDatabase(database) or {}
     if active and active.database == database then
         return DeepCopy(active.stats)
     end
-    local meta = type(database.dataCompaction) == "table"
-        and database.dataCompaction or {}
+    local selected = DurablePayload(database, "dataCompaction")
+    local meta = type(selected) == "table" and selected or {}
     if type(meta.last) == "table" then return DeepCopy(meta.last) end
     return meta.inProgress and {migrationVersion=MIGRATION_VERSION,
         pending=true,phase="restart"} or {}

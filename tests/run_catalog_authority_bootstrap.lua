@@ -42,6 +42,10 @@ dofile("core/Store.lua")
 dofile("core/Revisions.lua")
 dofile("core/DpsCapture.lua")
 local Case, Check = S.Case, S.Check
+local function AwaitMutation(ok, why, ticket)
+    return S.AwaitCatalogMutation(ok, why, ticket,
+        "bootstrap fixture mutation", 200000)
+end
 
 local now = 2000000000
 time = function() return now end
@@ -102,7 +106,8 @@ function()
     local generationBefore = rawget(before, "transactionGeneration")
     local beforeBytes = S.Encode(before)
 
-    Check(catalog.Put(S.LocalBuild("krnB", 3)), "commit fixture refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild("krnB", 3))),
+        "commit fixture refused")
 
     local after = Bundle(db)
     Check(after ~= before,
@@ -162,7 +167,8 @@ function()
         "the serving root does not bind the exact selected bundle generation")
     local servingBefore = root.servingGeneration
 
-    Check(catalog.Put(S.LocalBuild("krnB", 3)), "commit fixture refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild("krnB", 3))),
+        "commit fixture refused")
 
     local after = S.Root()
     Check(after.servingGeneration == servingBefore + 1,
@@ -185,7 +191,8 @@ function()
     local db = S.Database({krnA=S.LocalBuild("krnA", 2)})
     S.Bind(db)
     local catalog = Catalog()
-    Check(catalog.Put(S.LocalBuild("krnB", 3)), "commit fixture refused")
+    Check(AwaitMutation(catalog.Put(S.LocalBuild("krnB", 3))),
+        "commit fixture refused")
     local generationBefore = rawget(Bundle(db), "transactionGeneration")
     Check(generationBefore >= 2,
         "fixture did not produce a replaced bundle before the reload")
@@ -221,7 +228,7 @@ function()
     Check(handle, "maintenance handle unavailable")
     Check(catalog.MaintenanceEvictOverlay(handle, "krnA"),
         "overlay would not stage for eviction")
-    local ok = catalog.CommitMaintenance(handle)
+    local ok = AwaitMutation(catalog.CommitMaintenance(handle))
     Check(ok, "maintenance commit refused")
 
     Check(S.Encode(retained) == retainedBytes,
@@ -1383,16 +1390,9 @@ Case("SMT-W2-03", "Store binds the exact terminal retention bundle", function()
             postedAt=10, lastModified=10, echoes={{spellId=410099, stacks=1}}}
         local coordinator = ReadyCoordinator(db, 20000)
         local catalog = Nexus.BuildCatalog
-        local ok, why, ticket = catalog.SetTombstone(SMT_ROW,
+        local ok, why, ticket = AwaitMutation(catalog.SetTombstone(SMT_ROW,
             {stamp=now, author="Boganic", ownerKey="boganic@ebonhold", ownerVerified=true},
-            {source="local"})
-        if ok == nil and why == "ROOT_MUTATION_PENDING" then
-            for _ = 1, 20000 do
-                if ticket.state ~= "pending" then break end
-                catalog.PumpRootAdmission()
-            end
-            ok = ticket.committed
-        end
+            {source="local"}))
         Check(ok == true, "pending retention fixture could not create its tombstone")
         local originalNow = now
         S.pendingRestores[#S.pendingRestores + 1] = function() now = originalNow end
@@ -1461,6 +1461,8 @@ end)
 Case("SMT-03",
     "a post-publication notification fault commits and replays notification only",
 function()
+    S.pendingRestores[#S.pendingRestores + 1] = function() S.Reload() end
+    S.Reload()
     -- This case needs a LOCALLY OWNED row, because only a local owner may set
     -- the current-session tombstone Retention later retires
     -- (SetTombstone refuses a foreign row with LOCAL_OWNER_REQUIRED, measured).
@@ -1472,6 +1474,16 @@ function()
         realm="ebonhold", ownerVerified=true, isMine=true,
         postedAt=10, lastModified=10, echoes={{spellId=410099, stacks=1}}}
     local coordinator = ReadyCoordinator(db)
+    local startupRetention
+    for turns = 1, 200000 do
+        startupRetention = Nexus.DataRetention.Enforce(db, "startup")
+        if type(startupRetention) == "table"
+            and startupRetention.pending ~= true then break end
+        Nexus.BuildCatalog.PumpRootAdmission()
+    end
+    Check(type(startupRetention) == "table"
+        and startupRetention.pending == false and not startupRetention.blocked,
+        "the startup retention cursor did not settle before the notification fixture")
     local begin, pump = StoreMutationEntries(coordinator)
     Check(begin ~= nil and pump ~= nil,
         "the coordinator exposes no private post-ready mutation entries, so "
@@ -1485,9 +1497,9 @@ function()
     local DAY = 24 * 60 * 60
     local restoreNow = now
     S.pendingRestores[#S.pendingRestores + 1] = function() now = restoreNow end
-    local tombstoned, tombWhy = catalog.SetTombstone(SMT_ROW,
+    local tombstoned, tombWhy = AwaitMutation(catalog.SetTombstone(SMT_ROW,
         {stamp=now, author="Boganic", ownerKey="boganic@ebonhold",
-            ownerVerified=true}, {source="local"})
+            ownerVerified=true}, {source="local"}))
     Check(tombstoned,
         "the fixture could not create the tombstone this case retires: "
             .. tostring(tombWhy))
@@ -1513,8 +1525,9 @@ function()
     Check(type(entered) == "table" and entered.state == "pending",
         "the Retention route did not open a candidate")
     local settled, turns = nil, 0
-    while turns < H.BOOTSTRAP_TURN_BOUND do
+    while turns < 200000 do
         turns = turns + 1
+        catalog.PumpRootAdmission()
         settled = pump(coordinator)
         if type(settled) == "table" and settled.state ~= "pending" then break end
     end
@@ -1523,7 +1536,10 @@ function()
     -- below is about nothing.
     Check(#attempts >= 1,
         "the Retention route published nothing and notified nothing, so this "
-            .. "case cannot observe a post-publication notification fault")
+            .. "case cannot observe a post-publication notification fault; settled="
+            .. tostring(type(settled) == "table" and settled.state) .. "/"
+            .. tostring(type(settled) == "table" and settled.result)
+            .. " tombstone=" .. tostring(catalog.TombstoneState(SMT_ROW).state))
     Check(type(settled) == "table" and settled.state == "ready"
         and settled.result == "MUTATION_COMMITTED",
         "a post-publication notification fault did not leave the mutation "

@@ -1,4 +1,5 @@
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 -- The bus starts deterministically, dispatches in subscription order, and
 -- isolates a failing callback. Subscribers added mid-dispatch start next time.
@@ -49,7 +50,8 @@ Catalog.Init(NexusDB, bundle)
 Catalog.Get("base"); Catalog.All(); Catalog.Count()
 assert(R.Get(R.BUILD_LIBRARY_CHANGED) == 1,
     "catalog reads or same-content initialization advanced the revision")
-assert(Catalog.Put(baseline))
+assert(S.CatalogMutation(function() return Catalog.Put(baseline) end,
+    "baseline-equivalent put"))
 assert(R.Get(R.BUILD_LIBRARY_CHANGED) == 1,
     "baseline-equivalent put advanced the build revision")
 
@@ -68,26 +70,32 @@ local changed = {
     ownerKey="boganic@ebonhold",realm="ebonhold",ownerVerified=true,isMine=true,
     postedAt=1,lastModified=2,echoes={{spellId=1,quality=3,stacks=1}},
 }
-assert(Catalog.Put(changed, {source="local"}))
+assert(S.CatalogMutation(function()
+    return Catalog.Put(changed, {source="local"})
+end, "changed put"))
 assert(Catalog.Get("base").title == "Changed"
     and R.Get(R.BUILD_LIBRARY_CHANGED) == 2
     and table.concat(callbacks, ",") == "bad,good-2",
     "subscriber failure broke or reordered the originating build mutation")
-assert(Catalog.Put(changed, {source="local"}) and R.Get(R.BUILD_LIBRARY_CHANGED) == 2,
+assert(S.CatalogMutation(function()
+    return Catalog.Put(changed, {source="local"})
+end, "duplicate put") and R.Get(R.BUILD_LIBRARY_CHANGED) == 2,
     "duplicate build put advanced the revision")
-assert(Catalog.SetTombstone("base", {stamp=3,author="Boganic"}, {source="local"})
-    and R.Get(R.BUILD_LIBRARY_CHANGED) == 3,
+assert(S.CatalogMutation(function()
+    return Catalog.SetTombstone("base", {stamp=3,author="Boganic"}, {source="local"})
+end, "visible tombstone") and R.Get(R.BUILD_LIBRARY_CHANGED) == 3,
     "visible tombstone did not advance once")
 -- A changed replay never refreshes a published tombstone; an exact replay is
 -- an idempotent no-op. Neither publishes a revision.
 assert(not Catalog.SetTombstone("base", {stamp=4,author="Boganic"}, {source="local"})
     and R.Get(R.BUILD_LIBRARY_CHANGED) == 3,
     "changed tombstone metadata refreshed the reservation")
-assert(Catalog.SetTombstone("base", {stamp=3,author="Boganic"}, {source="local"})
-    and R.Get(R.BUILD_LIBRARY_CHANGED) == 3,
+assert(S.CatalogMutation(function()
+    return Catalog.SetTombstone("base", {stamp=3,author="Boganic"}, {source="local"})
+end, "duplicate tombstone") and R.Get(R.BUILD_LIBRARY_CHANGED) == 3,
     "duplicate tombstone metadata advanced the build revision")
-assert(Catalog.ClearTombstone("base")
-    and R.Get(R.BUILD_LIBRARY_CHANGED) == 4,
+assert(S.CatalogMutation(function() return Catalog.ClearTombstone("base") end,
+    "clear tombstone") and R.Get(R.BUILD_LIBRARY_CHANGED) == 4,
     "clearing a baseline tombstone did not restore one visible revision")
 assert(not Catalog.RemoveOverlay("missing")
     and R.Get(R.BUILD_LIBRARY_CHANGED) == 4,

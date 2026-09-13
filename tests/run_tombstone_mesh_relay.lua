@@ -1,5 +1,6 @@
 -- Unsigned relays cannot delete or redistribute another author's build.
 local H=dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local Sync=Nexus.Sync
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
@@ -19,6 +20,9 @@ Sync.Init(Nexus.Codec,{})
 Sync.HandleIncoming("WLRD|PeerA||x||20||Origin","PeerA")
 assert(NexusDB.communityBuilds.x,"relayed author deletion gained owner authority")
 Sync.HandleIncoming("WLRD|Origin||x||20||Origin","Origin-Ebonhold")
+-- MASTER-W2-008: the owner delete's deny-only reservation is one retained
+-- catalog mutation; settle it before the public surfaces are read.
+S.PumpCatalogToIdle("owner delete reservation")
 -- Protocol 7 carries no operation-order proof, so an owner delete installs a
 -- deny-only reservation: the row leaves every public surface while its
 -- admitted raw evidence is preserved.

@@ -2,6 +2,7 @@
 -- reused build ID or granting authority. The fixture exceeds 200 recoveries
 -- so implementation limits cannot silently become storage caps.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 UnitName = function() return "LocalFixture" end
 GetNormalizedRealmName = function() return "FixtureRealm" end
@@ -318,7 +319,7 @@ local framesBefore = Count(H.frames)
 local deltaBefore = Count(Catalog.DeltaSummaries())
 local buildRevisionBefore = R.Get(buildRevision)
 Nexus.ViewProjections.Reset()
-local _, collisionLibraryBeforeSummary = Nexus.ViewProjections.Builds({
+local _, collisionLibraryBeforeSummary = S.ProjectBuilds(Nexus.ViewProjections, {
     scope="all",currentClassOnly=false,qualifiedOnly=false,
     search="Current collision",sortMode="title",page=1,
 })
@@ -531,6 +532,16 @@ dofile("core/SyncDiagnostics.lua")
 dofile("core/SyncSession.lua")
 dofile("core/Sync.lua")
 H.AdmitCatalogV1(NexusDB)
+-- Loading Sync registers its hot-build evidence provider, so this fixture's
+-- own re-admission publishes exactly one new root generation with its
+-- "catalog initialized" BUILD_LIBRARY_CHANGED notification. That is fixture
+-- work, not repair publication: rebase the repair baseline by exactly that
+-- admission so the restart oracle below still demands one repair publication
+-- and no second one.
+assert(R.Get(buildRevision) == buildRevisionBefore + 2,
+    string.format("fixture relay re-admission did not publish exactly one root generation revision=%d expected=%d",
+        R.Get(buildRevision), buildRevisionBefore + 2))
+buildRevisionBefore = buildRevisionBefore + 1
 Nexus.Sync.Init(Nexus.Codec,{})
 H.sentChatMessages = {}
 local recoveredForRelay = Catalog.Get(firstRecoveredId)
@@ -543,11 +554,11 @@ assert(summaryOk == false and summaryWhy == "relay unauthorized"
     "an exact-ID or direct outgoing path relayed unverified recovered content")
 
 Nexus.ViewProjections.Reset()
-local pageOne, pageOneSummary = Nexus.ViewProjections.Builds({
+local pageOne, pageOneSummary = S.ProjectBuilds(Nexus.ViewProjections, {
     scope="all",currentClassOnly=true,qualifiedOnly=true,
     search="Historical Record Loadout",sortMode="title",page=1,
 })
-local pageTwelve, pageTwelveSummary = Nexus.ViewProjections.Builds({
+local pageTwelve, pageTwelveSummary = S.ProjectBuilds(Nexus.ViewProjections, {
     scope="all",currentClassOnly=true,qualifiedOnly=true,
     search="Historical Record Loadout",sortMode="title",page=12,
 })
@@ -556,22 +567,22 @@ assert(#pageOne == 1 and #pageTwelve == 1
     string.format("unverified recovered identities qualified without canonical owner authority: page1=%d page12=%d total=%s",
         #pageOne,#pageTwelve,tostring(pageOneSummary.filteredTotal)))
 Nexus.ViewProjections.Reset()
-local allClasses, allClassSummary = Nexus.ViewProjections.Builds({
+local allClasses, allClassSummary = S.ProjectBuilds(Nexus.ViewProjections, {
     scope="all",currentClassOnly=false,qualifiedOnly=true,
     search="Historical Record Loadout",sortMode="dps",page=12,
 })
 Nexus.ViewProjections.Reset()
-local mine, mineSummary = Nexus.ViewProjections.Builds({
+local mine, mineSummary = S.ProjectBuilds(Nexus.ViewProjections, {
     scope="mine",currentClassOnly=false,qualifiedOnly=true,
     search="Historical Record Loadout",sortMode="recent",page=1,
 })
 Nexus.ViewProjections.Reset()
-local unqualifiedCollisions, collisionSummary = Nexus.ViewProjections.Builds({
+local unqualifiedCollisions, collisionSummary = S.ProjectBuilds(Nexus.ViewProjections, {
     scope="all",currentClassOnly=false,qualifiedOnly=false,
     search="Current collision",sortMode="title",page=1,
 })
 Nexus.ViewProjections.Reset()
-local qualifiedCollisions, qualifiedCollisionSummary = Nexus.ViewProjections.Builds({
+local qualifiedCollisions, qualifiedCollisionSummary = S.ProjectBuilds(Nexus.ViewProjections, {
     scope="all",currentClassOnly=false,qualifiedOnly=true,
     search="Current collision",sortMode="title",page=1,
 })

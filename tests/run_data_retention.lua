@@ -1,4 +1,5 @@
 local H = dofile("tests/harness.lua")
+dofile("core/Codec.lua")
 
 local function AwaitMutation(ok, why, ticket)
     if ok ~= nil then return ok, why end
@@ -206,12 +207,61 @@ assert(limits.topPerCategory == 120 and limits.minPerClassPerCategory == 10
     and limits.remotePerAuthor == 8,
     "configured retention limits were not resolved")
 assert(limits.enabled == true, "explicit ranked retention mode was not enabled")
-local retentionBefore = NexusDB.dataRetention and NexusDB.dataRetention.last
+-- Wave 3 MASTER-W2-002 expected red. Retention must construct every DPS,
+-- evidence, floor, and metadata replacement off-state. A pending catalog
+-- transaction grants no authority to mutate either the admitted bundle graph
+-- or the preserved legacy input graph.
+local retentionBundleBefore = assert(rawget(NexusDB, "authorityBundle"),
+    "retention fixture has no durable authority bundle")
+local retentionBundleBytesBefore = Nexus.Codec.JSONEncode(retentionBundleBefore)
+local retentionDpsBefore = assert(H.DurablePayload("dpsCapture"),
+    "retention fixture has no durable DPS payload")
+local retentionDpsBytesBefore = Nexus.Codec.JSONEncode(retentionDpsBefore)
+local legacyDpsBefore = NexusDB.dpsCapture
+local legacyDpsBytesBefore = Nexus.Codec.JSONEncode(legacyDpsBefore)
+local rawRetentionBefore = rawget(NexusDB, "dataRetention")
 local summary = assert(Nexus.DataRetention.Enforce(NexusDB, "focused test"))
 assert(summary.pending == true and summary.overlayRemoved == 0
         and summary.perAuthorRemoved == 0
-        and NexusDB.dataRetention.last == retentionBefore,
-    "retention reported planned removal or stamped completion before catalog commit")
+        and rawget(NexusDB, "dataRetention") == rawRetentionBefore,
+    "retention reported planned removal or stamped completion before terminal work")
+assert(rawget(NexusDB, "authorityBundle") == retentionBundleBefore
+        and Nexus.Codec.JSONEncode(retentionBundleBefore)
+            == retentionBundleBytesBefore
+        and H.DurablePayload("dpsCapture") == retentionDpsBefore
+        and Nexus.Codec.JSONEncode(retentionDpsBefore)
+            == retentionDpsBytesBefore
+        and NexusDB.dpsCapture == legacyDpsBefore
+        and Nexus.Codec.JSONEncode(legacyDpsBefore) == legacyDpsBytesBefore
+        and rawget(NexusDB, "dataRetention") == rawRetentionBefore,
+    "pending retention mutated a durable or preserved source graph")
+local retentionScanPumps = 0
+while summary.pending == true and summary.mutationTicket == nil do
+    assert(summary.workDomain == "retention-overlay-scan",
+        "retention did not disclose its retained collection frontier")
+    retentionScanPumps = retentionScanPumps + 1
+    assert(retentionScanPumps < 20000,
+        "retention overlay scan did not terminate")
+    summary = assert(Nexus.DataRetention.Enforce(NexusDB, "focused test"))
+end
+local scanStats = Nexus.BuildCatalog.DebugStats()
+local scanBudget = Nexus.BuildCatalog.Budget()
+assert(retentionScanPumps > 0
+        and scanStats.maxCursorRowsPerCall <= scanBudget.totals.oneCallRows
+        and scanStats.maxCursorCopyNodesPerCall <= scanBudget.slices.nodes
+        and scanStats.maxCursorCopyBytesPerCall
+            <= scanBudget.slices.bytesInspected,
+    "retention drained or exceeded its bounded catalog cursor")
+assert(rawget(NexusDB, "authorityBundle") == retentionBundleBefore
+        and Nexus.Codec.JSONEncode(retentionBundleBefore)
+            == retentionBundleBytesBefore
+        and H.DurablePayload("dpsCapture") == retentionDpsBefore
+        and Nexus.Codec.JSONEncode(retentionDpsBefore)
+            == retentionDpsBytesBefore
+        and NexusDB.dpsCapture == legacyDpsBefore
+        and Nexus.Codec.JSONEncode(legacyDpsBefore) == legacyDpsBytesBefore
+        and rawget(NexusDB, "dataRetention") == rawRetentionBefore,
+    "retention scan mutated a durable or preserved source graph")
 local retainedTicket = summary.mutationTicket
 assert(type(retainedTicket) == "table" and retainedTicket.state == "pending",
     "retention dropped its pending transaction ticket")
@@ -225,6 +275,11 @@ while summary.pending == true do
 end
 assert(retainedTicket.committed == true and summary.blocked ~= true,
     "retention did not observe a committed transaction")
+assert(Nexus.Codec.JSONEncode(retentionBundleBefore)
+        == retentionBundleBytesBefore
+        and NexusDB.dpsCapture == legacyDpsBefore
+        and Nexus.Codec.JSONEncode(legacyDpsBefore) == legacyDpsBytesBefore,
+    "terminal retention changed an already published or preserved source graph")
 
 local remoteCount, floodCount, localCount = 0, 0, 0
 local classCounts = {}
@@ -268,12 +323,17 @@ assert(type(evictedMarker) == "table" and evictedMarker.schemaVersion == 1
     "exact eviction barrier suppressed an unrelated build or lost its own ID")
 
 local characterCount = 0
-for _ in pairs(dummy) do characterCount = characterCount + 1 end
+local durableDps = assert(H.DurablePayload("dpsCapture"),
+    "retention did not publish its detached DPS replacement")
+local durableDummy = assert(durableDps.characterBest
+        and durableDps.characterBest.dummy,
+    "retention lost the durable Dummy leaderboard")
+for _ in pairs(durableDummy) do characterCount = characterCount + 1 end
 assert(characterCount >= limits.topPerCategory
     and summary.selectedAverage >= limits.topAverage,
     "ranked category selection did not keep overall/Average leaders")
 local perClass = {}
-for _, row in pairs(dummy) do
+for _, row in pairs(durableDummy) do
     local build = overlay[row.buildId]
     local class = tostring(build and build.class or "UNKNOWN")
     perClass[class] = (perClass[class] or 0) + 1
@@ -283,8 +343,8 @@ for _, class in ipairs(classes) do
         tostring(class) .. " lost its per-category minimum")
 end
 local personalCount, buildBestCount = 0, 0
-for _ in pairs(NexusDB.dpsCapture.personalBest) do personalCount = personalCount + 1 end
-for _ in pairs(NexusDB.dpsCapture.buildBest) do buildBestCount = buildBestCount + 1 end
+for _ in pairs(durableDps.personalBest) do personalCount = personalCount + 1 end
+for _ in pairs(durableDps.buildBest) do buildBestCount = buildBestCount + 1 end
 assert(personalCount <= limits.personalFingerprints
     and buildBestCount <= limits.buildBestFingerprints,
     "fingerprint history exceeded its cap")
@@ -499,7 +559,7 @@ local function TypedReferenceFixture(referenceId)
     NexusDB = database
     H.AdmitCatalogV1(database, {schemaVersion=1,
         catalogVersion="typed",sourceVersion="test",builds={}})
-    Nexus.DataRetention.Enforce(database, "typed ID reference")
+    Enforce(database, "typed ID reference")
     return database
 end
 -- Legacy-to-bundle cutover: retention publishes through the catalog owner, so
@@ -590,8 +650,10 @@ assert(unlimitedSummary.contentUnlimited == true
         and UnlimitedCount(unlimited.dpsCapture.characterBest.lk) == 1100
         and UnlimitedCount(unlimited.dpsCapture.personalBest) == 1100
         and UnlimitedCount(unlimited.dpsCapture.buildBest) == 1100
-        and unlimited.communityBuildRetentionFloor == nil
-        and unlimited.syncTombstoneFloor == nil
+        -- An unbound fixture has no authority writer. Retention may calculate
+        -- a summary but must preserve every raw legacy byte.
+        and unlimited.communityBuildRetentionFloor == now
+        and unlimited.syncTombstoneFloor == now
         -- MASTER-RC-008: `unlimited` is a fixture table, not the bound
         -- authority, so its raw communityRetentionEvictions marker is a claim
         -- and grants no veto (architecture line 188; RAW-01 forbids treating a

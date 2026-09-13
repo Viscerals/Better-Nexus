@@ -3,6 +3,7 @@
 -- in their injected source stores so this fixture also proves non-destructive
 -- filtering.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 local P = Nexus.ViewProjections
 local Evidence = Nexus.LoadoutEvidence
 local Revisions = Nexus.Revisions
@@ -119,11 +120,11 @@ Nexus.DpsCapture = {
 }
 
 P.Reset()
-local page1, summary1 = P.Builds({
+local page1, summary1 = S.ProjectBuilds(P, {
     scope="all",classFilter="MAGE",currentClassOnly=true,
     qualifiedOnly=false,sortMode="title",page=1,
 })
-local page2, summary2 = P.Builds({
+local page2, summary2 = S.ProjectBuilds(P, {
     scope="all",classFilter="MAGE",currentClassOnly=true,
     qualifiedOnly=false,sortMode="title",page=2,
 })
@@ -169,7 +170,7 @@ assert(type(completeDetail) == "table" and completeDetail.hasLoadout == true,
     "complete Community selection lost detail/Copy authority")
 
 local before = P.WorkStats()
-P.Builds({
+S.ProjectBuilds(P, {
     scope="all",classFilter="MAGE",currentClassOnly=true,
     qualifiedOnly=false,sortMode="title",page=1,
 })

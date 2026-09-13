@@ -1,5 +1,6 @@
 -- Public boards: one highest winning loadout per character, ranked separately by encounter.
 local H=dofile("tests/harness.lua")
+local S=dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
@@ -20,10 +21,13 @@ local b={{spellId=200010,stacks=1},{spellId=200011,stacks=3}}
 local fa,fb=DPS.GetEchoKey(a),DPS.GetEchoKey(b)
 assert(DPS.ReceiveRecord({v=4,f=fa,e=a,c="dummy",d=24000000,u=65,t=100,p="Alpha",k="MAGE",l=80,
     o="alpha@realma",r="realma"}, "Alpha-RealmA"),"dummy A rejected")
+S.PumpCatalogToIdle("dummy A exact-build admission")
 assert(DPS.ReceiveRecord({v=4,f=fb,e=b,c="dummy",d=28000000,u=65,t=101,p="Bravo",k="MAGE",l=80,
     o="bravo@realmb",r="realmb"}, "Bravo-RealmB"),"dummy B rejected")
+S.PumpCatalogToIdle("dummy B exact-build admission")
 assert(DPS.ReceiveRecord({v=4,f=fa,e=a,c="lk",d=19000000,u=240,t=102,p="Alpha",k="MAGE",l=80,
     o="alpha@realma",r="realma"}, "Alpha-RealmA"),"LK A rejected")
+S.PumpCatalogToIdle("LK A exact-build admission")
 assert(not DPS.ReceiveRecord({v=4,f=fb,e=b,c="dummy",d=23000000,u=65,t=103,p="Alpha",k="MAGE",l=80,
     o="alpha@realma",r="realma"}, "Alpha-RealmA"),"lower second loadout for the same character accepted")
 local dummy=DPS.GetDpsBoard("dummy")
@@ -31,7 +35,10 @@ assert(#dummy==2,"dummy board should contain one row per character")
 assert(dummy[1].player=="Bravo" and dummy[1].dps==28000000,"dummy board not DPS-ranked")
 assert(dummy[1].build and dummy[1].buildId and #dummy[1].echoes==2
     and dummy[1].ownerVerified==true and dummy[1].ownerKey=="bravo@realmb",
-    "verified board row lacks its copyable exact build")
+    "verified board row lacks its copyable exact build: build="
+        .. tostring(dummy[1].build) .. " buildId="
+        .. tostring(dummy[1].buildId) .. " candidate="
+        .. tostring(Nexus.BuildCatalog.RootState().candidate))
 local collisionId=dummy[1].buildId
 local collisionBuild=H.DurableBuilds()[collisionId]
 collisionBuild.fingerprint="different-current-content"

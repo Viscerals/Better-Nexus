@@ -191,6 +191,37 @@ local function DeleteBuild(id)
     return build
 end
 
+-- A local delete is one retained row-to-tombstone transaction that reports
+-- false/pending until it commits; settle it and read the same terminal
+-- delete status the owner publishes.
+local function SettleDelete(id, ok, why, status)
+    if why == "ROOT_MUTATION_PENDING" then
+        for _ = 1, Catalog.Budget().maximumPumps do
+            if not Catalog.RootState().candidate then break end
+            Catalog.PumpRootAdmission()
+        end
+        Check(not Catalog.RootState().candidate,
+            id .. " tombstone transaction did not settle")
+        status = DeleteStatus(id)
+        return false, status and status.reason or why, status
+    end
+    return ok, why, status
+end
+
+local function BroadcastDeleteTerminal(id)
+    local ok, why, status = Sync.BroadcastDelete(DeleteBuild(id))
+    if why == "ROOT_MUTATION_PENDING" then
+        for _ = 1, Catalog.Budget().maximumPumps do
+            if not Catalog.RootState().candidate then break end
+            Catalog.PumpRootAdmission()
+        end
+        Check(not Catalog.RootState().candidate,
+            id .. " tombstone transaction did not settle")
+        return false, why, DeleteStatus(id)
+    end
+    return ok, why, status
+end
+
 -- First initialization remains destructive and constant-shape, while an
 -- ordinary repeated world entry preserves the active manual request and does
 -- not reinstall the keyed maintenance task.
@@ -589,6 +620,18 @@ Check(finalPendingOk == false and finalPendingWhy == "sync queue full"
 FreshDb()
 local deleteBuild = DeleteBuild("zone-delete")
 local deleteOk, deleteWhy, deleteStatus = Sync.BroadcastDelete(deleteBuild)
+-- The local row-to-tombstone transaction is one retained catalog mutation;
+-- settle it and read the same terminal refusal receipt the owner keeps.
+if deleteWhy == "ROOT_MUTATION_PENDING" then
+    for _ = 1, Catalog.Budget().maximumPumps do
+        if not Catalog.RootState().candidate then break end
+        Catalog.PumpRootAdmission()
+    end
+    Check(not Catalog.RootState().candidate,
+        "zone-delete tombstone transaction did not settle")
+    deleteStatus = DeleteStatus("zone-delete")
+    deleteOk, deleteWhy = false, deleteStatus and deleteStatus.reason
+end
 local deleteGeneration = deleteStatus and deleteStatus.generation
 if deleteStatus then
     deleteStatus.outcome = "caller-mutated"
@@ -625,10 +668,11 @@ Check(DeleteStatus("zone-delete").outcome == "rejected",
 -- duplicates, explicit reset, successful attempts, and local retry exhaustion.
 FreshDb()
 local resetDeleteBuild = DeleteBuild("reset-delete")
-local resetDeleteOk, _, resetDelete = Sync.BroadcastDelete(resetDeleteBuild)
+local resetDeleteOk, _, resetDelete = SettleDelete("reset-delete",
+    Sync.BroadcastDelete(resetDeleteBuild))
 local resetDeleteDepth = Sync.WorkState().sending
 local duplicateDeleteOk, duplicateDeleteWhy, duplicateDelete =
-    Sync.BroadcastDelete(resetDeleteBuild)
+    SettleDelete("reset-delete", Sync.BroadcastDelete(resetDeleteBuild))
 -- Idempotence survives and is stronger: a repeated local delete is refused
 -- identically and still adds no outbound depth. It cannot be "already queued"
 -- because it was never queued.
@@ -655,8 +699,8 @@ Check(resetDeleteVisible and resetDeleteVisible.outcome == "rejected"
     "a refused delete was reset as though it held active ownership")
 
 FreshDb()
-local sentDeleteOk, _, sentDelete = Sync.BroadcastDelete(
-    DeleteBuild("sent-delete"))
+local sentDeleteOk, _, sentDelete = SettleDelete("sent-delete",
+    Sync.BroadcastDelete(DeleteBuild("sent-delete")))
 Pump(1.2, 1)
 local sentDeleteVisible = DeleteStatus("sent-delete")
 -- The attribution window belongs to traffic that reaches transport. A refused
@@ -676,8 +720,19 @@ Check(sentDeleteVisible and sentDeleteVisible.outcome == "rejected"
 
 FreshDb()
 SendChatMessage = function() error("stage36 delete send failure") end
-local failedDeleteOk, _, failedDelete = Sync.BroadcastDelete(
+local failedDeleteOk, failedDeleteWhy, failedDelete = Sync.BroadcastDelete(
     DeleteBuild("dropped-delete"))
+-- The local row-to-tombstone transaction is one retained catalog mutation;
+-- settle it and read the same terminal delete status the owner publishes.
+if failedDeleteWhy == "ROOT_MUTATION_PENDING" then
+    for _ = 1, Catalog.Budget().maximumPumps do
+        if not Catalog.RootState().candidate then break end
+        Catalog.PumpRootAdmission()
+    end
+    Check(not Catalog.RootState().candidate,
+        "dropped-delete tombstone transaction did not settle")
+    failedDeleteOk, failedDelete = false, DeleteStatus("dropped-delete")
+end
 Pump(2.2, 1); Pump(2.2, 1); Pump(2.2, 1)
 SendChatMessage = realSendChatMessage
 local failedDeleteVisible = DeleteStatus("dropped-delete")
@@ -702,10 +757,8 @@ JoinChannelByName = function() end
 H.joinedChannels = {}
 local multiShareA = AdmitShare("multi-share-a")
 local multiShareB = AdmitShare("multi-share-b")
-local multiDeleteAOk, _, multiDeleteA = Sync.BroadcastDelete(
-    DeleteBuild("multi-delete-a"))
-local multiDeleteBOk, _, multiDeleteB = Sync.BroadcastDelete(
-    DeleteBuild("multi-delete-b"))
+local multiDeleteAOk, _, multiDeleteA = BroadcastDeleteTerminal("multi-delete-a")
+local multiDeleteBOk, _, multiDeleteB = BroadcastDeleteTerminal("multi-delete-b")
 -- SPLIT: the Share half of this block is kept verbatim; only the delete half
 -- is rewritten.
 Check(ScalarOnly(multiShareA) and ScalarOnly(multiShareB),

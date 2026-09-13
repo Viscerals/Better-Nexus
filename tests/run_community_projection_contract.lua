@@ -6,6 +6,7 @@ dofile("core/Identity.lua")
 dofile("core/CandidateEvidence.lua")
 dofile("core/ViewProjections.lua")
 dofile("core/CommunityProjection.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 UnitName = function() return "ContractMage" end
 GetNormalizedRealmName = function() return "Ebonhold" end
@@ -183,7 +184,7 @@ local P, R = Nexus.ViewProjections, Nexus.Revisions
 local factory = assert(Nexus.CommunityInternals
     and Nexus.CommunityInternals.Projection)
 local projection = factory.New({
-    builds=function(filters) return P.Builds(filters) end,
+    builds=function(filters) return S.ProjectBuilds(P, filters) end,
     buildsCurrent=function(filters) return P.BuildsCurrent(filters) end,
     loadBuild=function(id) return Nexus.BuildCatalog.Get(id) end,
     revisionSnapshot=function()
@@ -200,7 +201,7 @@ local function AssertEligibleRows(rows, label)
     end
 end
 
-local dpsRows, dpsSummary = projection.List({
+local dpsRows, dpsSummary = S.ProjectList(projection, P, {
     scope="all",classFilter="WARRIOR",sortMode="dps",
 })
 AssertEligibleRows(dpsRows, "DPS sort")
@@ -210,23 +211,23 @@ assert(dpsRows[1].id == "contract-0040"
 assert(dpsSummary.filtered == 20 and dpsSummary.qualifying == 40,
     "projection summary lost returned/qualifying count semantics")
 
-local recentRows = assert(projection.List({scope="all",sortMode="recent"}))
+local recentRows = assert(S.ProjectList(projection, P, {scope="all",sortMode="recent"}))
 AssertEligibleRows(recentRows, "Recent sort")
 assert(recentRows[1].id == "contract-0001"
     and recentRows[20].id == "contract-0020",
     "Recent sort did not use newest timestamp before the limit")
 
-local titleRows = assert(projection.List({scope="all",sortMode="title"}))
+local titleRows = assert(S.ProjectList(projection, P, {scope="all",sortMode="title"}))
 AssertEligibleRows(titleRows, "Title sort")
 assert(titleRows[1].id == "contract-0040"
     and titleRows[20].id == "contract-0021",
     "Title sort inherited recency or limited before title ordering")
 
-local mineRows = assert(projection.List({scope="mine",sortMode="dps"}))
+local mineRows = assert(S.ProjectList(projection, P, {scope="mine",sortMode="dps"}))
 assert(#mineRows == 20 and mineRows[1].id == "contract-0025"
     and mineRows[20].id == "contract-0006",
     "My Builds scope was not applied before DPS sorting/limit")
-local searchRows = assert(projection.List({
+local searchRows = assert(S.ProjectList(projection, P, {
     scope="all",search="needle",sortMode="recent",
 }))
 assert(#searchRows == 20 and searchRows[1].id == "contract-0002"
@@ -234,7 +235,7 @@ assert(#searchRows == 20 and searchRows[1].id == "contract-0002"
     "search was not applied before Recent sorting/limit")
 
 local statsBeforeHit = P.Stats().builds
-local sameRows = assert(projection.List({
+local sameRows = assert(S.ProjectList(projection, P, {
     scope="all",search="needle",sortMode="recent",
 }))
 local statsAfterHit = P.Stats().builds
@@ -248,13 +249,13 @@ assert(sameRows == searchRows
 currentClass = nil
 assert(not projection.ListCurrent({scope="all",sortMode="title"}),
     "missing current class left the old projection current")
-local unavailable, unavailableSummary = projection.List({scope="all",sortMode="title"})
+local unavailable, unavailableSummary = S.ProjectList(projection, P, {scope="all",sortMode="title"})
 assert(#unavailable == 0 and unavailableSummary.filtered == 0,
     "missing current class did not fail closed")
 currentClass = "MAGE"
 assert(not projection.ListCurrent({scope="all",sortMode="title"}),
     "class recovery did not invalidate the fail-closed projection")
-AssertEligibleRows(assert(projection.List({scope="all",sortMode="title"})),
+AssertEligibleRows(assert(S.ProjectList(projection, P, {scope="all",sortMode="title"})),
     "recovered class")
 
 assert(allCalls == 0 and exactCalls == 0,

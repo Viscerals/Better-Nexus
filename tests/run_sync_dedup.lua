@@ -1,6 +1,7 @@
 -- Verifies the core correctness requirement: no duplicates, correct
 -- update-vs-stale handling, and safe rejection of malformed data.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 local Codec, Sync = Nexus.Codec, Nexus.Sync
@@ -14,8 +15,18 @@ GetTime = function() return fakeClock end
 Sync.Init(Codec, nil)
 
 local function BroadcastAndCollect(build)
+    -- A replaced SavedVariables owner is current-source drift: readmit the
+    -- complete root from cursor zero before the sender writes into it.
+    if type(Catalog.BoundDatabase) == "function"
+        and Catalog.BoundDatabase() ~= NexusDB then
+        H.RebindCatalog(NexusDB)
+    end
+    -- Received builds are retained catalog mutations; settle them before the
+    -- sender writes so the fixture never races its own pending work.
+    S.PumpCatalogToIdle("sender fixture catalog work")
     local previous = Catalog.Get(build.id)
-    assert(Catalog.Put(build), "sender build could not enter the catalog")
+    assert(S.CatalogMutation(function() return Catalog.Put(build) end,
+        "sender build admission"), "sender build could not enter the catalog")
     local selected = Catalog.Get(build.id)
     H.sentChatMessages = {}
     local queued, why = Sync.BroadcastBuild(selected)
@@ -28,9 +39,11 @@ local function BroadcastAndCollect(build)
     end
     assert(emitted, "selected sender build emitted no WLRB payload")
     if previous then
-        assert(Catalog.Put(previous), "receiver snapshot could not be restored")
+        assert(S.CatalogMutation(function() return Catalog.Put(previous) end,
+            "receiver snapshot restore"), "receiver snapshot could not be restored")
     else
-        assert(Catalog.RemoveOverlay(build.id),
+        assert(S.CatalogMutation(function() return Catalog.RemoveOverlay(build.id) end,
+            "temporary sender build removal"),
             "temporary sender build could not be removed")
     end
     return messages
@@ -43,6 +56,7 @@ local function DeliverAll(msgs)
     fakeClock = (fakeClock or 100) + 10   -- clear the request cooldown
     Sync.RequestSync()
     for _, msg in ipairs(msgs) do Sync.HandleIncoming(msg.text, "Alice-Ebonhold") end
+    S.PumpCatalogToIdle("received build catalog work")
 end
 
 -- 1. Sending the exact same build twice must NOT create a duplicate or

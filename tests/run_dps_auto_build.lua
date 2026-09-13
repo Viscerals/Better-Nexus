@@ -17,6 +17,7 @@
 -- legacy input is now additionally asserted to keep its table identity and to
 -- take no write.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 dofile("data/DefaultProfile.lua"); dofile("logic/Model.lua"); dofile("logic/Strategy.lua")
 dofile("logic/Ratchet.lua"); dofile("logic/Policy.lua"); dofile("core/Store.lua")
@@ -61,6 +62,10 @@ H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter,sync)
 
 DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
+-- MASTER-W2-004: the automatic page is one retained catalog mutation that
+-- completes through the record's terminal callback. Settle it through the
+-- public scheduler seam before any durable, served, or broadcast assertion.
+S.PumpCatalogToIdle("automatic build admission")
 local count, buildId, build=0
 for id,b in pairs(H.DurableBuilds()) do count=count+1; buildId=id; build=b end
 assert(count==1 and build and build.autoDps, "a new exact loadout should create one automatic shareable build")
@@ -94,18 +99,22 @@ assert(#sent==1 and sent[1].fingerprint==DPS.GetEchoKey(build.echoes), "the exac
 
 -- Lower pull: no new build, no public update, no additional broadcast.
 stubDps=20000000; DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
+S.PumpCatalogToIdle("lower pull catalog work")
 local n=0; for _ in pairs(H.DurableBuilds()) do n=n+1 end
 assert(n==1 and DPS.GetLeaderboard(buildId,"dummy")[1].dps==24000000 and #sent==1, "lower pull must change nothing")
 legacyUntouched("lower pull")
 
 -- Higher pull: same build, replacement record.
 stubDps=26000000; DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
+S.PumpCatalogToIdle("higher pull catalog work")
 assert(DPS.GetLeaderboard(buildId,"dummy")[1].dps==26000000 and #sent==2, "higher pull should replace and rebroadcast the same build record")
 
 -- Higher remote record replaces; lower stale data is rejected.
 local echoes=build.echoes
 assert(DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=27000000,u=65,t=60000,p="Othermage",k="MAGE",l=80,b=buildId}), "higher remote record should be accepted")
+S.PumpCatalogToIdle("higher remote record catalog work")
 assert(DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=25000000,u=65,t=60001,p="Oldmage",k="MAGE",l=80,b=buildId}), "a different character should keep its own best entry")
+S.PumpCatalogToIdle("second character record catalog work")
 assert(not DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=24000000,u=65,t=60002,p="Oldmage",k="MAGE",l=80,b=buildId}), "a lower record for the same character should be rejected")
 assert(DPS.GetLeaderboard(buildId,"dummy")[1].player=="Othermage", "highest exact-loadout holder should remain authoritative")
 
@@ -123,16 +132,19 @@ H.granted={
 H.FireEvent("SPELLS_CHANGED"); H.Advance(2)
 local collisionFp=DPS.GetEchoKey(collisionEchoes)
 local foreignId="foreign-exact-owner"
-assert(Nexus.BuildCatalog.Put({
-    id=foreignId,title="Foreign Exact",author="Othermage",
-    ownerKey="othermage@ebonhold",ownerVerified=true,realm="ebonhold",
-    class="MAGE",echoes=collisionEchoes,fingerprint=collisionFp,
-    fingerprintHash=DPS.GetEchoHash(collisionEchoes),echoCount=1,
-    loadoutAvailable=true,lastModified=70000,
-}), "foreign exact-fingerprint fixture was not stored")
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put({
+        id=foreignId,title="Foreign Exact",author="Othermage",
+        ownerKey="othermage@ebonhold",ownerVerified=true,realm="ebonhold",
+        class="MAGE",echoes=collisionEchoes,fingerprint=collisionFp,
+        fingerprintHash=DPS.GetEchoHash(collisionEchoes),echoCount=1,
+        loadoutAvailable=true,lastModified=70000,
+    })
+end, "foreign exact-fingerprint fixture admission"), "foreign exact-fingerprint fixture was not stored")
 local foreignBefore=Nexus.BuildCatalog.Get(foreignId)
 stubDps=30000000
 DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
+S.PumpCatalogToIdle("collision capture page admission")
 local localCollision=NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"]
 local foreignAfter=Nexus.BuildCatalog.Get(foreignId)
 assert(localCollision and localCollision.fingerprint==collisionFp
@@ -157,15 +169,18 @@ H.granted={A={{spellId=200112,stack=1,maxStack=1,quality=3}},B={}}
 H.FireEvent("SPELLS_CHANGED"); H.Advance(2)
 local savedFp=DPS.GetEchoKey(savedEchoes)
 local savedId="private-saved-recordmage"
-assert(Nexus.BuildCatalog.Put({
-    id=savedId,title="Private Saved Recordmage",author="Recordmage",
-    ownerKey="recordmage@ebonhold",ownerVerified=true,realm="ebonhold",
-    importedSavedBuild=true,isMine=true,class="MAGE",echoes=savedEchoes,
-    fingerprint=savedFp,fingerprintHash=DPS.GetEchoHash(savedEchoes),
-    echoCount=1,loadoutAvailable=true,lastModified=71000,
-}), "private Saved collision fixture was not stored")
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put({
+        id=savedId,title="Private Saved Recordmage",author="Recordmage",
+        ownerKey="recordmage@ebonhold",ownerVerified=true,realm="ebonhold",
+        importedSavedBuild=true,isMine=true,class="MAGE",echoes=savedEchoes,
+        fingerprint=savedFp,fingerprintHash=DPS.GetEchoHash(savedEchoes),
+        echoCount=1,loadoutAvailable=true,lastModified=71000,
+    })
+end, "private Saved collision fixture admission"), "private Saved collision fixture was not stored")
 stubDps=32000000
 DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
+S.PumpCatalogToIdle("Saved collision capture page admission")
 local savedCollision=NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"]
 local savedMirror=Nexus.BuildCatalog.Get(savedId)
 assert(savedCollision and savedCollision.fingerprint==savedFp

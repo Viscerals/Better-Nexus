@@ -2,6 +2,7 @@
 -- validation, future-schema storage refusal, EBH1 import, and relay
 -- provenance must agree at their real owners and fail closed.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua")
 dofile("core/SyncTransport.lua")
@@ -1405,7 +1406,10 @@ local savedFilters = {
     scope="mine",sortMode="title",currentClassOnly=false,
     qualifiedOnly=false,
 }
-local savedRows, savedProjection = Nexus.ViewProjections.Builds(savedFilters)
+-- A cold Builds read is one retained projection job; settle it through the
+-- public projection seam before the published rows are read.
+local savedRows, savedProjection = S.ProjectBuilds(
+    Nexus.ViewProjections, savedFilters)
 local projectedSaved = {}
 for _, row in ipairs(savedRows or {}) do projectedSaved[row.id] = row end
 local lockedSaved = Catalog.Get(lockedSavedId)

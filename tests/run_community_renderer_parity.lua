@@ -1,6 +1,7 @@
 -- Renderer extraction parity: stable facade/frame identity, bounded pooled rows,
 -- and one-way presentation boundaries at a 1,000-build fixture.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
 
@@ -67,6 +68,10 @@ Nexus.BuildCatalog.Get = function(...)
     return originalGet(...)
 end
 C.Show()
+-- MASTER-W2-006: the Community list is a retained projection job pumped one
+-- bounded slice per real frame; drive the frame until it publishes.
+S.PumpCommunityFrame(H.frames.NexusCommunityBuildsFrame,
+    function() return C.VirtualStats().results > 0 end, "Community list")
 
 assert(H.frames.NexusCommunityBuildsFrame
     and H.frames.NexusCommunityBuildsFrame:IsShown(),

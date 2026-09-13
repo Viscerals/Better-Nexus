@@ -37,6 +37,10 @@ dofile("data/DefaultProfile.lua")
 dofile("core/Codec.lua")
 local S = dofile("tests/catalog_authority_support.lua")
 local Case, Check = S.Case, S.Check
+local function AwaitMutation(ok, why, ticket)
+    return S.AwaitCatalogMutation(ok, why, ticket,
+        "read-purity fixture mutation")
+end
 
 local now = 2000000000
 time = function() return now end
@@ -229,7 +233,7 @@ end)
 -- cannot be a blanket refusal of every continuation.
 local function DriftRoot()
     -- A commit replaces the published root and advances its generation.
-    Check(Catalog().Put(S.LocalBuild("rdpDrift", 2)),
+    Check(AwaitMutation(Catalog().Put(S.LocalBuild("rdpDrift", 2))),
         "the drift commit was refused")
 end
 
@@ -274,9 +278,11 @@ function()
     S.Bind(S.Database({
         rdpH=S.LocalBuild("rdpH", 2), rdpI=S.LocalBuild("rdpI", 2),
     }))
-    local ok1, why1 = Catalog().SetTombstone("rdpH", {stamp=1}, {source="local"})
+    local ok1, why1 = AwaitMutation(
+        Catalog().SetTombstone("rdpH", {stamp=1}, {source="local"}))
     Check(ok1, "the tombstone fixture was refused: " .. tostring(why1))
-    local ok2, why2 = Catalog().SetTombstone("rdpI", {stamp=1}, {source="local"})
+    local ok2, why2 = AwaitMutation(
+        Catalog().SetTombstone("rdpI", {stamp=1}, {source="local"}))
     Check(ok2, "the second tombstone fixture was refused: " .. tostring(why2))
     local first = Catalog().TombstoneNext(nil)
     Check(first ~= nil, "the tombstone walk produced no first row")

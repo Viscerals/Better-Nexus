@@ -1,5 +1,6 @@
 -- Mesh audit: Sync Now responses include every held build and only its highest DPS record.
 local H=dofile("tests/harness.lua")
+local S=dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua"); dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua"); dofile("core/DpsCapture.lua")
 local Sync, DPS=Nexus.Sync, Nexus.DpsCapture
 local clock=1000; GetTime=function() return clock end; time=function() return 50000 end
@@ -30,6 +31,7 @@ local ownerRecord = {v=3,f=fp,e=echoes,c="dummy",d=31000000,u=65,
     o="champion@ebonhold",r="ebonhold"}
 assert(DPS.ReceiveRecord(ownerRecord,"Champion"),
     "seed record failed")
+S.PumpCatalogToIdle("relay seed exact-build admission")
 
 H.sentChatMessages={}
 clock=clock+100
@@ -48,6 +50,7 @@ assert(not sawDps,"relay redistributed a verified DPS record without origin evid
 currentName="Champion"
 assert(DPS.ReceiveRecord(ownerRecord,"Champion-Ebonhold"),
     "exact owner could not promote retained realm-less evidence")
+S.PumpCatalogToIdle("owner promotion exact-build admission")
 H.sentChatMessages={}
 assert(DPS.BroadcastAllBuildBests("0")>0,"record owner did not queue its DPS evidence")
 for i=1,1000 do Sync.OnUpdate(0.2) end
@@ -65,6 +68,7 @@ DPS.Init({},Sync)
 for _,text in ipairs(dpsMessages) do
     Sync.HandleIncoming(text,"Champion-Ebonhold")
 end
+S.PumpCatalogToIdle("received DPS exact-build admission")
 local lb=DPS.GetLeaderboard(build.id,"dummy")
 assert(#lb==1 and lb[1].dps==31000000 and lb[1].player=="Champion","DPS chunks did not reconstruct the highest record")
 assert(not DPS.ReceiveRecord({v=3,f=fp,e=echoes,c="dummy",d=30000000,u=65,

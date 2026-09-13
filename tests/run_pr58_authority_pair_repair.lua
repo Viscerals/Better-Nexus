@@ -3,6 +3,7 @@
 -- and resumable summaries agree, strongest single DPS ranks real pairs, and
 -- compatible-pair construction has bounded total work.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 local failures, checks = {}, 0
 local function Desired(ok, label)
@@ -206,7 +207,7 @@ dofile("core/DpsCapture.lua")
 -- root (core/BuildCatalog.lua Gate). A fixture that swaps the raw global must
 -- drive one explicit admission itself, exactly as the authority coordinator
 -- does at bootstrap.
-Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+S.Bind(NexusDB, Nexus.BundledBuilds)
 local synchronous = assert(Nexus.DpsCapture.GetCommunityEligibility()["983001x1"])
 local cachedQualification = assert(
     Nexus.DpsCapture.GetCachedCommunityQualification(
@@ -262,7 +263,7 @@ dofile("core/Revisions.lua")
 dofile("core/DpsCapture.lua")
 -- MASTER-RC-009: a simulated reload must drive one explicit admission;
 -- a read no longer binds the swapped raw global.
-Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+S.Bind(NexusDB, Nexus.BundledBuilds)
 local DPS = Nexus.DpsCapture
 local eligibilityCursor = DPS.BeginCommunityEligibilityCursor()
 local cursorSteps = 0
@@ -299,7 +300,7 @@ dofile("core/Revisions.lua")
 dofile("core/DpsCapture.lua")
 -- MASTER-RC-009: a simulated reload must drive one explicit admission;
 -- a read no longer binds the swapped raw global.
-Nexus.BuildCatalog.Init(NexusDB, Nexus.BundledBuilds)
+S.Bind(NexusDB, Nexus.BundledBuilds)
 local syncRebuilt = assert(
     Nexus.DpsCapture.GetCommunityEligibility()["983001x1"])
 Desired(Signature(syncRebuilt) == Signature(synchronous),
@@ -315,24 +316,50 @@ Desired(rebuiltPaired and rebuiltPaired.dummy == 700
     "reload lost complete build's exact pair")
 
 local realBuildCatalog = Nexus.BuildCatalog
-Nexus.BuildCatalog = {Summaries=function() return {
-    contaminated={
+local projectionBuilds = {
+    {
         id="contaminated",title="Contaminated Candidate",author="Target",
         ownerKey="target@ebonhold",ownerVerified=true,realm="ebonhold",
         class="MAGE",fingerprint="983001x1",ordinaryComplete=true,
         postedAt=1,lastModified=1,
     },
-    clean={
+    {
         id="clean",title="Clean Candidate",author="Clean",
         ownerKey="clean@ebonhold",ownerVerified=true,realm="ebonhold",
         class="MAGE",fingerprint="983002x1",ordinaryComplete=true,
         postedAt=1,lastModified=1,
     },
-} end}
+}
+Nexus.BuildCatalog = {
+    BeginSummaryCursor=function()
+        return {index=1}
+    end,
+    SummaryCursorNext=function(cursor)
+        local build = projectionBuilds[cursor.index]
+        if not build then return nil, true end
+        cursor.index = cursor.index + 1
+        return Clone(build), false, nil, false, true
+    end,
+    Status=function()
+        return {overlayCount=#projectionBuilds,availableCount=#projectionBuilds}
+    end,
+}
 Nexus.ViewProjections.Reset()
-local communityRows = assert(Nexus.ViewProjections.Builds({
+local projectionFilters = {
     scope="all",currentClassOnly=false,sortMode="dps",
-}))
+}
+local communityRows, _, projectionReason =
+    Nexus.ViewProjections.RequestBuilds(projectionFilters)
+local projectionPumps = 0
+while not communityRows do
+    local _, err = Nexus.ViewProjections.PumpBuilds()
+    assert(not err, tostring(err))
+    projectionPumps = projectionPumps + 1
+    assert(projectionPumps < 1000,
+        "Community projection did not terminate: " .. tostring(projectionReason))
+    communityRows, _, projectionReason =
+        Nexus.ViewProjections.RequestBuilds(projectionFilters)
+end
 Desired(#communityRows == 2 and communityRows[1].id == "clean"
         and communityRows[1]._nexusBestDps == 1200
         and communityRows[2].id == "contaminated"
@@ -413,10 +440,13 @@ local historicalRow = {
 local historicalBefore = Signature(historicalRow)
 NexusDB = {communityBuilds={},syncTombstones={},dpsCapture={}}
 local Catalog = assert(Nexus.BuildCatalog)
-Catalog.Init(NexusDB, Nexus.BundledBuilds)
+S.Bind(NexusDB, Nexus.BundledBuilds)
 local autoDpsPage = Clone(historicalBuild)
 autoDpsPage.lockedEchoes = nil
-assert(Catalog.Put(autoDpsPage))
+local storedAutoDps, autoDpsWhy = S.CatalogMutation(function()
+    return Catalog.Put(autoDpsPage)
+end, "PR58 auto-DPS page admission")
+assert(storedAutoDps, tostring(autoDpsWhy))
 Nexus.DpsCapture = {GetDpsBoard=function(category)
     return category == "dummy" and {historicalRow} or {}
 end}
@@ -470,7 +500,10 @@ currentBuild.autoDps = nil
 currentBuild.lockedEchoes = Clone(currentLocked)
 currentBuild.lockedAuthorityProven = true
 currentBuild.lastModified = 2
-assert(Catalog.Put(currentBuild))
+local storedCurrent, currentWhy = S.CatalogMutation(function()
+    return Catalog.Put(currentBuild)
+end, "PR58 current locked authority admission")
+assert(storedCurrent, tostring(currentWhy))
 Leaderboard.Show("dummy")
 Leaderboard.RefreshData()
 assert(Leaderboard.SelectKey(selectedKey), "current-authority row was not selectable")
@@ -484,7 +517,10 @@ Desired(opened and #opened.lockedEchoes == 1
 currentBuild.lockedEchoes = {}
 currentBuild.lockedAuthorityProven = true
 currentBuild.lastModified = 3
-assert(Catalog.Put(currentBuild))
+local storedEmpty, emptyWhy = S.CatalogMutation(function()
+    return Catalog.Put(currentBuild)
+end, "PR58 verified-empty authority admission")
+assert(storedEmpty, tostring(emptyWhy))
 Leaderboard.Show("dummy")
 Leaderboard.RefreshData()
 assert(Leaderboard.SelectKey(selectedKey), "verified-empty row was not selectable")

@@ -2,6 +2,7 @@
 -- records a DISTINCT reason for every failure mode -- so a broken sync can
 -- be diagnosed from the log alone instead of by guesswork.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua")
@@ -54,7 +55,7 @@ print("channel join is logged -- OK")
 
 -- SEND side: posting must log the broadcast and the actual wire sends
 local CB = Nexus.CommunityBuilds
-local ok, id = CB.PostCurrentWishlist("Logged Build", "desc", H.wishlist)
+local ok, id = S.PostWishlist(CB.PostCurrentWishlist, "Logged Build", "desc", H.wishlist)
 assert(ok, "post should succeed")
 H.Advance(3)
 assert(LogHas("queuing") or LogHas("broadcasting"), "broadcast was not logged")
@@ -74,6 +75,7 @@ for _, m in ipairs(msgs) do
     H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice-Ebonhold", "Common",
         "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
 end
+S.PumpCatalogToIdle("owner-authored update admission")
 assert(H.DurableBuilds()[id],
     "a valid owner-authored update was dropped outside a sync window")
 assert(LogHas("STORED"), "outside-window owner update was not logged")
@@ -93,6 +95,7 @@ for _, m in ipairs(msgs) do
     H.FireEvent("CHAT_MSG_CHANNEL", m.text, "Alice-Ebonhold", "Common",
         "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
 end
+S.PumpCatalogToIdle("received build admission")
 assert(LogHas("STORED"), "a successful store was not logged")
 print("successful receive+store is logged -- OK")
 

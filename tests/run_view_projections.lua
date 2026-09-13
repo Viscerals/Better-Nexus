@@ -38,6 +38,32 @@ Nexus.BuildCatalog = {Summaries=function()
     catalogWalks = catalogWalks + 1
     return DeepCopy(builds)
 end}
+-- MASTER-W2-006: the Builds surface no longer walks the complete collection
+-- synchronously; the persistent projection job consumes the generation-bound
+-- summary cursor instead. The fixture catalog serves the same rows through
+-- that cursor, and the cursor still reads through Summaries so the walk count
+-- and the forced failure/recovery injections below keep their exact meaning.
+function Nexus.BuildCatalog.BeginSummaryCursor()
+    return {rows=nil, order=nil, index=0}
+end
+function Nexus.BuildCatalog.SummaryCursorNext(cursor)
+    if cursor.rows == nil then
+        local ok, rows = pcall(Nexus.BuildCatalog.Summaries)
+        if not ok then return nil, false, tostring(rows) end
+        cursor.rows, cursor.order = rows, {}
+        for id in pairs(rows) do cursor.order[#cursor.order + 1] = id end
+        table.sort(cursor.order, function(left, right)
+            if tostring(left) == tostring(right) then
+                return type(left) < type(right)
+            end
+            return tostring(left) < tostring(right)
+        end)
+    end
+    cursor.index = cursor.index + 1
+    local id = cursor.order[cursor.index]
+    if id == nil then return nil, true end
+    return cursor.rows[id], false, nil, false, true
+end
 
 local boards = {dummy={},lk={}}
 for index = 1, 100 do
@@ -89,9 +115,41 @@ end
 function Nexus.DpsCapture.DpsBoardCursorResult(cursor)
     return cursor.rows
 end
+-- The projection job acquires bulk eligibility through the resumable DPS
+-- cursor; the fixture cursor reads through GetCommunityEligibility so the
+-- read count and the transient-failure injection below keep their meaning.
+function Nexus.DpsCapture.BeginCommunityEligibilityCursor()
+    return {result=nil}
+end
+function Nexus.DpsCapture.CommunityEligibilityCursorNext(cursor)
+    local ok, result = pcall(Nexus.DpsCapture.GetCommunityEligibility)
+    if not ok then return true, tostring(result) end
+    cursor.result = result
+    return true
+end
+function Nexus.DpsCapture.CommunityEligibilityCursorResult(cursor)
+    return cursor.result
+end
+
+-- A cold Builds read is a retained pending job. Drive it through the public
+-- pump with a finite guard and serve the published cache through the same
+-- Builds entry point; a job failure returns nil exactly as the old
+-- synchronous failure did, and pending is never treated as a result.
+local function Builds(filters)
+    local rows, summary, why = P.Builds(filters)
+    if rows then return rows, summary end
+    for _ = 1, 100000 do
+        local _, pumpError = P.PumpBuilds()
+        if pumpError then return nil, nil, pumpError end
+        rows, summary, why = P.Builds(filters)
+        if rows then return rows, summary end
+        if why ~= "pending" then return nil, nil, why end
+    end
+    error("build projection did not terminate: " .. tostring(why))
+end
 
 P.Reset()
-local first, firstSummary = P.Builds({scope="all",classFilter="MAGE",sortMode="recent"})
+local first, firstSummary = Builds({scope="all",classFilter="MAGE",sortMode="recent"})
 assert(#first == 20 and first[1].lastModified == 1000
     and firstSummary.total == 1000 and firstSummary.pending == 0
     and firstSummary.qualifying == 493 and firstSummary.filtered == 20,
@@ -99,7 +157,7 @@ assert(#first == 20 and first[1].lastModified == 1000
 local afterFirst = P.Stats()
 assert(afterFirst.builds.defensiveCopies == 1,
     "build projection rebuild copied the full result more than once")
-local second, secondSummary = P.Builds({scope="all",classFilter="MAGE",sortMode="recent"})
+local second, secondSummary = Builds({scope="all",classFilter="MAGE",sortMode="recent"})
 local afterSecond = P.Stats()
 assert(#second == #first and secondSummary.filtered == #first
     and catalogWalks == 1
@@ -110,10 +168,10 @@ assert(#second == #first and secondSummary.filtered == #first
     and afterSecond.builds.hits == afterFirst.builds.hits + 1,
     "unchanged build projection walked or sorted after warm-up")
 second[1].title = "mutated"
-assert(P.Builds({scope="all",classFilter="MAGE",sortMode="recent"})[1].title ~= "mutated",
+assert(Builds({scope="all",classFilter="MAGE",sortMode="recent"})[1].title ~= "mutated",
     "caller mutated cached build projection")
 
-local mine, mineSummary = P.Builds({scope="mine",search="needle",sortMode="title"})
+local mine, mineSummary = Builds({scope="mine",search="needle",sortMode="title"})
 assert(mineSummary.savedLoadouts == 15 and mineSummary.uploaded == 99
     and #mine > 0,
     "owner/scope/search projection summary changed")
@@ -121,7 +179,7 @@ local beforeStatus = P.Stats().builds.rebuilds
 Revisions.Advance(Revisions.SYNC_CHANGED, {scope="status"})
 assert(P.BuildsCurrent({scope="mine",search="needle",sortMode="title"}),
     "status-only revision made the current build projection look dirty")
-P.Builds({scope="mine",search="needle",sortMode="title"})
+Builds({scope="mine",search="needle",sortMode="title"})
 assert(P.Stats().builds.rebuilds == beforeStatus,
     "status-only revision invalidated build projection")
 local beforeDirtyProbe = P.Stats().builds
@@ -132,7 +190,7 @@ assert(not P.BuildsCurrent({scope="mine",search="needle",sortMode="title"})
     and P.Stats().builds.sorts == beforeDirtyProbe.sorts
     and P.Stats().builds.defensiveCopies == beforeDirtyProbe.defensiveCopies,
     "dirty probe performed projection work")
-P.Builds({scope="mine",search="needle",sortMode="title"})
+Builds({scope="mine",search="needle",sortMode="title"})
 assert(P.Stats().builds.rebuilds == beforeStatus + 1,
     "DPS revision did not invalidate DPS-sorted build metadata")
 
@@ -143,7 +201,7 @@ local savedFilters = {scope="mine",search="build 0991",sortMode="dps",
     currentClassOnly=false,qualifiedOnly=true}
 eligibility["500010x1"] = {dummy=0,lk=0,best=0,average=0,count=0}
 Revisions.Advance(Revisions.DPS_CHANGED, {scope="saved-relation"})
-assert(#P.Builds(savedFilters) == 0,
+assert(#Builds(savedFilters) == 0,
     "raw Saved fingerprint remained qualified without a relation resolver")
 local relationCalls = 0
 local function ResolveSaved(build)
@@ -160,7 +218,7 @@ local function ResolveSaved(build)
 end
 assert(P.BindSavedRelationResolver(ResolveSaved),
     "Saved relation resolver did not invalidate the build projection")
-local resolvedSaved = P.Builds(savedFilters)
+local resolvedSaved = Builds(savedFilters)
 assert(#resolvedSaved == 1 and resolvedSaved[1].id == "projection-0010"
     and resolvedSaved[1]._nexusDps.dummy == 200
     and resolvedSaved[1]._nexusDps.lk == 400
@@ -169,11 +227,11 @@ assert(#resolvedSaved == 1 and resolvedSaved[1].id == "projection-0010"
 assert((P.WorkStats().joins or 0) >= 1,
     "Saved relation join was omitted from bounded work telemetry")
 local warmRelationCalls = relationCalls
-assert(#P.Builds(savedFilters) == 1 and relationCalls == warmRelationCalls,
+assert(#Builds(savedFilters) == 1 and relationCalls == warmRelationCalls,
     "warm Saved projection repeated relation resolution")
 assert(P.BindSavedRelationResolver(function() return nil end)
     and not P.BuildsCurrent(savedFilters)
-    and #P.Builds(savedFilters) == 0,
+    and #Builds(savedFilters) == 0,
     "rebinding the Saved relation policy did not fail closed")
 P.BindSavedRelationResolver(nil)
 eligibility["500010x1"] = {
@@ -267,20 +325,20 @@ boards.lk = restoredLk
 local healthySummaries = Nexus.BuildCatalog.Summaries
 Nexus.BuildCatalog.Summaries = function() error("forced catalog failure") end
 Revisions.Advance(Revisions.BUILD_LIBRARY_CHANGED, {scope="all"})
-local failed = P.Builds({scope="all",sortMode="dps"})
+local failed = Builds({scope="all",sortMode="dps"})
 assert(failed == nil and P.Stats().builds.failures >= 1,
     "failed projection published partial build cache")
 Nexus.BuildCatalog.Summaries = healthySummaries
-local recovered = P.Builds({scope="all",sortMode="dps"})
+local recovered = Builds({scope="all",sortMode="dps"})
 assert(#recovered == 20, "projection did not recover after failed construction")
 
 local healthyEligibility = Nexus.DpsCapture.GetCommunityEligibility
 Nexus.DpsCapture.GetCommunityEligibility = function() error("transient DPS failure") end
 Revisions.Advance(Revisions.DPS_CHANGED, {scope="all"})
-assert(P.Builds({scope="all",sortMode="dps"}) == nil,
+assert(Builds({scope="all",sortMode="dps"}) == nil,
     "transient DPS exception published a partial build projection")
 Nexus.DpsCapture.GetCommunityEligibility = healthyEligibility
-assert(#P.Builds({scope="all",sortMode="dps"}) == 20,
+assert(#Builds({scope="all",sortMode="dps"}) == 20,
     "build projection did not recover from a transient DPS exception")
 
 local healthyBoard = Nexus.DpsCapture.GetDpsBoard
@@ -310,7 +368,7 @@ eligibility = {
 }
 Nexus.BuildCatalog.Summaries = function() return DeepCopy(idCollisionBuilds) end
 Revisions.Advance(Revisions.BUILD_LIBRARY_CHANGED, {scope="all"})
-local orderedCollision = P.Builds({scope="all",sortMode="title"})
+local orderedCollision = Builds({scope="all",sortMode="title"})
 assert(#orderedCollision == 2 and type(orderedCollision[1].id) == "number"
     and type(orderedCollision[2].id) == "string",
     "numeric/string build IDs retained nondeterministic final ordering")

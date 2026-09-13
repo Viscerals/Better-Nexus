@@ -36,6 +36,19 @@ dofile("core/Codec.lua")
 local S = dofile("tests/catalog_authority_support.lua")
 local Case, Check = S.Case, S.Check
 
+local function AwaitMutation(catalog, ok, why, ticket)
+    if ok ~= nil then return ok, why end
+    if why ~= "ROOT_MUTATION_PENDING" or type(ticket) ~= "table" then
+        return false, why
+    end
+    for _ = 1, catalog.Budget().maximumPumps do
+        if ticket.state ~= "pending" then break end
+        catalog.PumpRootAdmission()
+    end
+    return ticket.state == "committed" and ticket.committed == true,
+        ticket.reason
+end
+
 local now = 2000000000
 time = function() return now end
 UnitClass = function() return "Mage", "MAGE" end
@@ -121,7 +134,8 @@ function()
         "MAX-1 must remain a legal current generation, got " .. tostring(S.Root().state))
 
     -- One more complete durable-bundle replacement reaches exactly MAX.
-    Check(catalog.Put(S.LocalBuild("genB", 3)), "the MAX-1 -> MAX commit was refused")
+    Check(AwaitMutation(catalog, catalog.Put(S.LocalBuild("genB", 3))),
+        "the MAX-1 -> MAX commit was refused")
     Check(rawget(Bundle(db), "transactionGeneration") == MAX,
         "the MAX-1 -> MAX commit did not land on the exact maximum, got "
             .. tostring(rawget(Bundle(db), "transactionGeneration")))
@@ -147,7 +161,8 @@ Case("GEN-04",
     "the latched state has precedence over every authority-bearing API",
 function()
     local db, catalog = BoundAt(MAX - 1)
-    Check(catalog.Put(S.LocalBuild("genB", 3)), "the MAX-1 -> MAX commit was refused")
+    Check(AwaitMutation(catalog, catalog.Put(S.LocalBuild("genB", 3))),
+        "the MAX-1 -> MAX commit was refused")
     Check(catalog.Put(S.LocalBuild("genC", 4)) == false,
         "an increment past the maximum succeeded")
 
@@ -197,7 +212,8 @@ Case("GEN-05",
 function()
     local db, catalog = BoundAt(MAX - 1)
     local restorePoint = S.DeepCopy(Bundle(db))
-    Check(catalog.Put(S.LocalBuild("genB", 3)), "the MAX-1 -> MAX commit was refused")
+    Check(AwaitMutation(catalog, catalog.Put(S.LocalBuild("genB", 3))),
+        "the MAX-1 -> MAX commit was refused")
     Check(catalog.Put(S.LocalBuild("genC", 4)) == false,
         "an increment past the maximum succeeded")
     Check(S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
@@ -352,6 +368,130 @@ Case("GEN-13", "exhaustion settles a retained pending mutation once", function()
         "exhaustion abandoned the pending ticket or changed the durable bundle")
     catalog.PumpRootAdmission()
     Check(callbacks == 1, "exhaustion repeated the terminal callback")
+end)
+
+-- Wave 3 MASTER-W2-009. Receipt revisions belong to the complete transaction
+-- plan. Staging, cancellation, drift, and refusal allocate no receipt prefix.
+Case("GEN-14", "maintenance receipt ranges allocate only at terminal publication", function()
+    local db, catalog, state = Fresh({
+        genReceiptA=S.LocalBuild("genReceiptA", 2),
+        genReceiptB=S.LocalBuild("genReceiptB", 3),
+    })
+    local bundle, bytes = Bundle(db), S.Encode(Bundle(db))
+    state.receiptRevision = MAX - 1
+    local handle = assert(catalog.BeginCatalogMaintenance({database=db,
+        operation="retention"}))
+    Check(catalog.MaintenanceEvictOverlay(handle, "genReceiptA"),
+        "first receipt operation would not stage")
+    Check(catalog.MaintenanceEvictOverlay(handle, "genReceiptB"),
+        "second receipt operation consumed a receipt before complete preflight")
+    Check(state.receiptRevision == MAX - 1,
+        "receipt authority advanced while the transaction was only staged")
+    local ok, why = catalog.CommitMaintenance(handle)
+    Check(ok == false and why == "GENERATION_EXHAUSTED",
+        "complete MAX-1 receipt range was not refused before allocation")
+    Check(state.receiptRevision == MAX - 1 and Bundle(db) == bundle
+            and S.Encode(Bundle(db)) == bytes,
+        "refused receipt range changed its counter, bundle identity, or bytes")
+
+    db, catalog, state = Fresh({
+        genCancelA=S.LocalBuild("genCancelA", 2),
+        genCancelB=S.LocalBuild("genCancelB", 3),
+    })
+    state.receiptRevision = 17
+    handle = assert(catalog.BeginCatalogMaintenance({database=db,
+        operation="retention"}))
+    Check(catalog.MaintenanceEvictOverlay(handle, "genCancelA"),
+        "cancel receipt operation would not stage")
+    Check(state.receiptRevision == 17 and catalog.CancelMaintenance(handle),
+        "staging allocated a receipt before cancellation")
+    Check(state.receiptRevision == 17,
+        "cancellation consumed unpublished receipt authority")
+
+    handle = assert(catalog.BeginCatalogMaintenance({database=db,
+        operation="retention"}))
+    Check(catalog.MaintenanceEvictOverlay(handle, "genCancelA")
+            and catalog.MaintenanceEvictOverlay(handle, "genCancelB"),
+        "successful receipt range would not stage")
+    local committed, commitWhy, ticket = catalog.CommitMaintenance(handle)
+    Check(committed == nil and commitWhy == "ROOT_MUTATION_PENDING"
+            and type(ticket) == "table",
+        "successful receipt range did not retain one pending transaction")
+    Check(state.receiptRevision == 17,
+        "pending transaction allocated receipts before publication")
+    for _ = 1, catalog.Budget().maximumPumps do
+        if ticket.state ~= "pending" then break end
+        catalog.PumpRootAdmission()
+    end
+    Check(ticket.state == "committed" and state.receiptRevision == 19,
+        "terminal two-item publication did not allocate its exact receipt range")
+end)
+
+local function PrivateUpvalue(callback, expected)
+    for index = 1, 64 do
+        local name, value = debug.getupvalue(callback, index)
+        if name == expected then return value end
+        if name == nil then break end
+    end
+    error("unable to locate module-private " .. tostring(expected), 2)
+end
+
+-- Wave 3 MASTER-W2-010. These resettable module-private counters must use the
+-- same fail-closed exhaustion guard as the catalog owner. The tests place each
+-- exact counter at MAX, then call its real construction/replacement seam.
+Case("GEN-15", "StoreData revision refuses before construction at MAX", function()
+    Fresh()
+    dofile("core/Store.lua")
+    local bootstrap = assert(Nexus.MainInternals.AuthorityBootstrap)
+    local storeData = PrivateUpvalue(bootstrap.__storeData, "StoreData")
+    storeData.revision = MAX
+    local current = storeData.current
+    local value, why = storeData.Build({settings={},chars={},accountCharacters={}},
+        {decision="current"})
+    Check(value == nil and why == "GENERATION_EXHAUSTED",
+        "StoreData construction advanced an exhausted revision")
+    Check(storeData.revision == MAX and storeData.current == current
+            and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "StoreData exhaustion changed state or failed to latch")
+end)
+
+Case("GEN-16", "DPS preparation epoch refuses before root replacement at MAX", function()
+    Fresh()
+    dofile("core/DpsCapture.lua")
+    local owner = assert(Nexus.MainInternals.DpsAuthority)
+    local db = {personalBest={old=true},buildBest={old=true},
+        characterBest={dummy={},lk={}}}
+    local personal, build, character = db.personalBest, db.buildBest,
+        db.characterBest
+    owner.epoch = MAX
+    local value, why = owner.ReplaceRoots(db, {new=true}, {new=true},
+        {dummy={},lk={}})
+    Check(value == nil and why == "GENERATION_EXHAUSTED",
+        "DPS root replacement advanced an exhausted epoch")
+    Check(owner.epoch == MAX and db.personalBest == personal
+            and db.buildBest == build and db.characterBest == character
+            and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "DPS exhaustion changed roots or failed to latch")
+end)
+
+Case("GEN-17", "Sync operation sequence refuses before receipt creation at MAX", function()
+    Fresh()
+    dofile("core/SyncProtocol.lua")
+    dofile("core/SyncTransport.lua")
+    dofile("core/SyncCompatibility.lua")
+    dofile("core/SyncReconciler.lua")
+    dofile("core/SyncInbound.lua")
+    dofile("core/SyncDiagnostics.lua")
+    dofile("core/SyncSession.lua")
+    dofile("core/Sync.lua")
+    local operation = PrivateUpvalue(Nexus.Sync.GetShareStatus, "Operation")
+    operation.sequence = MAX
+    local value, why = operation.New("share", "gen-sync", "1", nil, true)
+    Check(value == nil and why == "GENERATION_EXHAUSTED",
+        "Sync operation construction advanced an exhausted sequence")
+    Check(operation.sequence == MAX and next(operation.active) == nil
+            and S.Root().state == "AUTHORITY_GENERATION_EXHAUSTED",
+        "Sync exhaustion registered an operation or failed to latch")
 end)
 
 S.Finish("catalog authority generation exhaustion")

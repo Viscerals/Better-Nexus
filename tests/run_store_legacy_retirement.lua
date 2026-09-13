@@ -164,8 +164,19 @@ assert(Failed(Bootstrap(), "STORE_INVALID", 1) and NexusDB == metatableCurrent,
 -- any marker or legacy location is inspected. The malformed namespace below
 -- would be row 5 if it were read at all, and the nonempty legacy would be
 -- row 8's FOREIGN_BLOCK; neither is consulted.
+-- MASTER-W2-010: an occupied bundle carries its own complete StoreDataV1
+-- wrapper, which the guarded store counters read back exactly instead of
+-- rebuilding. A bundle without that wrapper is foreign and fails closed.
+local function OccupiedBundle()
+    return {schemaVersion=1, communityBuilds={}, storeData={
+        schemaVersion=1, storeRevision=1, settingsRevision=1,
+        accountRevision=1, settingsVersion=1, settings={}, chars={},
+        accountCharacters={},
+        migrationMarker={version=1, completed=true, decision="keptCurrent"},
+    }}
+end
 local bundledCurrent = BasicRoot("bundle-current")
-bundledCurrent.authorityBundle = {schemaVersion=1, communityBuilds={}}
+bundledCurrent.authorityBundle = OccupiedBundle()
 bundledCurrent.nexusStoreMigrations = {futureOwner={keep=true}}
 local bundleNamespace = bundledCurrent.nexusStoreMigrations
 NexusDB, WishlistRealizerDB = bundledCurrent, nil
@@ -274,7 +285,7 @@ assert(row8.state == "ready" and row8.decision == "keptCurrent"
 
 -- Row 9: current absent/empty and a nonempty plain legacy carrying a bundle.
 local bundledLegacy = BasicRoot("bundle-legacy")
-bundledLegacy.authorityBundle = {schemaVersion=1, communityBuilds={}}
+bundledLegacy.authorityBundle = OccupiedBundle()
 NexusDB, WishlistRealizerDB = nil, bundledLegacy
 local row9 = Bootstrap()
 assert(row9.state == "ready" and row9.decision == "adoptedLegacy"

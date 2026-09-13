@@ -2,224 +2,185 @@
 
 ## Authority
 
-- Work only in `C:\T3\BN\catalog-authority-22-wave2` on
-  `refactor/test19-catalog-authority-22-wave2`.
-- Wave 2 starts from rejected Wave 1 commit
-  `22c1553a018af9543c9b596d49cf5a9e7d776ffd`, tree
-  `b0225f21853ba04023fc42bdd7a018da23cfd87c`.
-- Exact PR #68 base is `6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f`.
+- Work only in `C:\T3\BN\catalog-authority-22-wave3` on
+  `bugfix/test19-catalog-authority-22-wave3`.
+- The exact rejected Wave 2 start is commit
+  `66e175b6296606e39bbec45ac30a109e21ab0ea9`, tree
+  `fd2041bf2b9a7f6da3bdbb2716303ee4f99fb305`, parent
+  `22c1553a018af9543c9b596d49cf5a9e7d776ffd`.
+- Preserve frozen `C:\T3\BN\catalog-authority-22-wave2`,
+  `C:\T3\BN\catalog-authority-22-wave1`, and
+  `C:\T3\BN\catalog-authority-22`.
+- Exact PR #68 product base is
+  `6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f`.
 - Accepted architecture is
-  `3b5de54f56f1c27678e53b1dd7e1de742de820af`; it is design authority only.
-- Governing packet is
-  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-2.json`, SHA-256
-  `bed73f70161a5ca5f6ca14511dc2a4883eb09003a4915542dfdc32f94a9b1878`.
-- Prospective successor packet Amendment 1 is
-  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-2-amendment-1.json`,
-  SHA-256 `be779cd2470c2db319282d84feb2ad42008475fdc9dc8526fbbb6bd9c0310ed1`.
-  It adds exactly seven existing production owner/scheduler paths and seven
-  matching existing offline tests. It maps them only to the five authorized
-  MASTER roots.
-- Prospective Amendment 2 adds only `core/Store.lua` and
-  `tests/run_catalog_authority_bootstrap.lua`, mapped to RC-006, RC-002, and RC-007.
-  Packet SHA-256: `0e3cc02a266cc650d3a907750e34b71e2ac50f0a962e48f080035f3f528ff567`.
-  Its authorization receipt SHA-256 is
-  `21407b2299d9e34ffa112d57aeefb213b372cddcbb8ac4aaf2e1a4b2dc17a2a1`.
-- Amendment 9 changes the PR #68 locked-payload old-side outcome to documented
-  characterization while preserving continued exact new-side emission.
-- The user authorized the second and final repair wave for exactly
-  `MASTER-RC-002`, `MASTER-RC-006`, `MASTER-RC-007`, `MASTER-RC-012`, and
-  `MASTER-RC-017`. Live SavedVariables access, game restart/reload, and
-  legacy-campaign mutation remain unauthorized.
-  Separate direct authority permits a clean local tester package, installation,
-  and safe native WoW testing only after exact-head validation and valid
-  independent acceptance. Receipt SHA-256:
-  `3510642c806ea6755d2cad923bd6311a023c035fecb1ee4ab8a9c60b26e6d981`.
-- Prospective Amendment 4 adds exactly `core/LoadoutEvidence.lua` for
-  RC-006/002 and the fifteen existing offline tests in its pathPermissions map
-  for RC-006 only. Packet SHA-256:
-  `9870cd7356b5d99ade5a93ee7b625c3ebebbe70c03a9fc4fd22bd582a17dea8b`.
-  Authorization receipt SHA-256:
-  `a0e820e967c7121f2856092fd8e4528e7f43095a2acbefa9744fff972961c505`.
-- Prospective Amendment 5 adds exactly three existing offline tests for
-  `MASTER-RC-006`. Packet SHA-256:
-  `97e9748b9b96573f4e15f729657c362253d237a4690450ff0cb9e6a33a27b2d9`.
-  Authorization receipt SHA-256:
-  `e794c7b8e2c99a0050c99c47e1af966d871cbada93e6f7aeef5492a4f1e0be68`.
-  Both were created before any target test edit.
-- Prospective Amendment 8 adds exactly
-  `tests/run_candidate_revision_scope.lua`, mapped only to `MASTER-RC-006`.
-  Packet SHA-256:
-  `da1d269326a7f66bb4536ec75acb38b78a2d8e47104081162e93fee9965082ee`.
-  Authorization receipt SHA-256:
-  `3d14ef7b5116025d09f17c4b0c7edd731acc7ecbfd08b7213e429610d313547a`.
-  The target retained its bound pre-edit hash through both artifacts. Flawed
-  Amendment 6 and incomplete Amendment 7 remain immutable and unconsumed.
-- Prospective Wave 2 Amendment 9 adds exactly nine existing offline fixtures,
-  all mapped only to `MASTER-RC-006`, and no production path. Packet SHA-256:
-  `1777dba0a396770c3f45051cf9188d96668794fd4c991e74120f4a25245c56d8`.
-  Authorization receipt SHA-256:
-  `c232df236846039e9245143d4074801ea422c6997616a8eb117ab236a5f92720`.
-  All nine targets matched `HEAD` through both artifacts.
-- Standing automation authority through accepted package and recoverable local
-  installation is recorded by receipt SHA-256
-  `7bb84443ac2b912fd2a5d32d11b0612f3919a92d83d19e16ca57cc3e334c5b11`.
-  Stop and notify the user before live WoW testing.
-- Later direct user authority permits scoped GitHub and CI writes for this task.
-  Receipt SHA-256:
-  `e5f5df8c45abeac2cf58d92e8361e9be4ed3e10d272ae154f04f1c50794a8ab9`.
-  Merge, protected/default-branch push, force-push, and unrelated work remain
-  outside that authority.
+  `3b5de54f56f1c27678e53b1dd7e1de742de820af`. It is design authority only.
+- Amendment 9 documentation realization is
+  `fd9a5674386a432feb5bd8aba542b79d0e82bffd`, tree
+  `d92a8130b5b9bc5868aa9d2a9341186c0aba963c`.
+- Canonical Wave 3 packet:
+  `C:\T3\BN\task-packets\catalog-authority-22-repair-wave-3.json`,
+  SHA-256
+  `760864fe79c3ca2962e8d7ff8610443e5a1f1e992113ec1734ecb86666b9d984`,
+  24,388 bytes.
+- Pre-edit receipt:
+  `C:\T3\BN\receipts\wave3\CODEX_WAVE3_PREEDIT_AUTHORIZATION_2026-09-12.md`,
+  SHA-256
+  `0a62bee967aeabfabe9ea31ed38072bf6e1fbd1c570d572a09c7df9111c9e1e0`,
+  5,755 bytes.- VibeRun next action authorization receipt:
+  `C:\T3\BN\receipts\wave3\CODEX_WAVE3_VIBERUN_NEXT_AUTHORIZATION_2026-09-12.md`,
+  SHA-256
+  `15cbfaa5539ee4a65945542c8a776a95e70098815b0eb8f8d24fed8dc0e6f3e7`,
+  4,950 bytes.
+- Direct authority attachment SHA-256:
+  `1f86ed284803d4b5e61c9fd102dac4be5d07b40df112396b541b085d024d64ad`.
+- Rejected Wave 2 MASTER result SHA-256:
+  `e7af6424053f68bd25b66ff36bfdbb6fd5a537c8b33b933f67017a2c78223e72`.
+- Wave 2 MASTER completion receipt SHA-256:
+  `ac7db486b69c861f5a9d3fde6b19f77fa63a6b7cb7fad35933bc7b057fe4b626`.
+- Preserve the valid Wave 2 parent plus Amendments 1, 2, 3, 4, 5, 8, and 9.
+  Amendments 6 and 7 remain immutable and unconsumed.
+- Current writer task `01a0895c-84ed-72e3-96b8-27573a831e91` is the sole
+  product writer. Current turn-context ordinal 31524 verifies
+  `gpt-5.6-sol` / `max`. Older medium and Astra/high records remain unchanged.
+- VibeRun is the sole dispatcher. Do not create another workflow owner.
 
 ## Current State
 
-- Stage 50 checkpoint 50.3 remains incomplete. The seven-test scope issue is now
-  resolved by direct user approval and prospective immutable Amendment 3. Packet:
-  C:/T3/BN/task-packets/catalog-authority-22-repair-wave-2-amendment-3.json,
-  SHA-256 0080c1f1847d653c24680d66c8695de7aa149b91827a0b51bff8654e33ebfc09.
-- Authorization receipt: C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT3_AUTHORIZATION_2026-09-10.md,
-  SHA-256 e8e8d19e494006b73470d999ae1a37497d2ef9a2a355eeacbb12a146c246bb74.
-  All seven tests matched their bound hashes before edits. Terminal-work waits
-  are now implemented; all 530 original assertions remain.
-- The approved local archive preserves 99 files from build/verify and
-  build/wave2-successor-final-checks. Every destination and original hash matched.
-  Archive: C:/T3/BN/receipts/wave2/CODEX_SUCCESSOR_FAST_DIAGNOSTIC_2026-09-10.
-  MANIFEST.json SHA-256 5cab452dd9d3f35c127bafea58dcd3a03e3de55adcbcee7d4a672236560418dc.
-  Originals remain intact. No logs were published to GitHub; no raw Claude output.
-- ISSUE-W2-REASONING-SETTING is now resolved. Same writer thread
-  01a0895c-84ed-72e3-96b8-27573a831e91 has verified openai/gpt-6-astra/high in
-  current turn 01a08c89-34fa-70e3-8000-852b5efb3909 at 2026-09-10T18:16:38.806Z.
-  Separate receipt: C:/T3/BN/receipts/wave2/CODEX_WAVE2_HIGH_REASONING_VERIFIED_2026-09-10.json,
-  SHA-256 240aacdc2115a9e50ccac12eae911140f2d0af875d43d7d8e3b04a497ea22a07.
-  Prior medium-turn metadata and immutable A3 remain unchanged. No product/test
-  edit precedes strict validation and actual implementation dispatch.
-- Preserve repair waves used=2/max=2/remaining=0 and evidence corrections
-  used=1/max=1/remaining=0. Preserve every legitimate historical acceptance flag.
-- HEAD remains `22c1553a018af9543c9b596d49cf5a9e7d776ffd` at the
-  pre-freeze implementation boundary. The inventory is exactly 62 tracked
-  modified paths with zero staged or untracked paths. It equals the valid
-  parent plus Amendments 1, 2, 3, 4, 5, 8, and 9 path union. The ordinal LF
-  path-list SHA-256 is
-  `fe67a7868304a03bb23114ba784d5d95412489d48de78dc73beadf97dea396ee`.
-- All 46 modified focused tests pass. The complete current Lua inventory passes
-  `243/243` with the single explicit manual SavedVariables runner skipped. Its
-  log SHA-256 is
-  `12edc2500a6444e50618fac24107f08cbf24a66c893ca92cf6dc6304336fde2d`.
-- Pre-freeze Fast passes `230/230` in `4851.799s`, with zero failed,
-  unavailable, or skipped checks. Its summary SHA-256 is
-  `2a453b5d5d15e8d532de21e1b57799f3d140e55826cc9fb703c7c174a1839d5d`.
-  The refined scan found zero failure markers across all non-parse logs.
-- The source-stable inventory passed admission 24/24, maintenance 10/10,
-  cursor 6/6, read purity 8/8, tombstones 28/28, navigation, mixed-client 14/14,
-  and Sync semantic-envelope 23/23. All 530 original A3 assertions remain.
-  ADM-08 retains its original oracle. postExpiry=3 and both Store directions pass.
-- ISSUE-W2-EVIDENCE-FIXTURE-SCOPE is resolved by direct approval and
-  prospective Amendment 4. Its final boundary is
-  C:/T3/BN/receipts/wave2/CODEX_WAVE2_POST_A3_SCOPE_BOUNDARY_2026-09-10.json,
-  SHA-256 f5b3759dc06f4712f4f78a335072dc52652c068c0a5d226706d449ecec08115d.
-  All sixteen pre-edit hashes and byte counts matched. The boundary supersedes
-  the earlier partial fifteen-path request without changing that receipt.
-- ISSUE-W2-AMENDMENT5-FIXTURE-SCOPE is resolved by direct user approval and
-  prospective immutable Amendment 5. Current dirty
-  Fast completed in 5047.359 seconds with 105 passed, 4 failed, 1 nonblocking
-  no-BaseRef skip, and 0 unavailable. The artifact-path failure is corrected;
-  a direct policy probe passes all 49 paths. The other three failures are stale
-  synchronous fixture assumptions in unchanged tests. Their exact scope request
-  is `C:/T3/BN/receipts/wave2/CODEX_WAVE2_AMENDMENT5_SCOPE_REQUEST_2026-09-11.md`,
-  SHA-256 ad5271c5ea4c8756c9f5f90449a58be8549d4494e5c665bae4a7ffff9c5f91b5.
-  Direct authority is bound by the Amendment 5 packet and authorization receipt
-  listed above. The three target tests remained unchanged through their creation.
-- ISSUE-W2-AMENDMENT8-FIXTURE-SCOPE is resolved prospectively. The one unchanged
-  target still expects four `Catalog.Put` calls to complete synchronously. Valid
-  Amendment 8 authorizes a bounded exact-ticket terminal fixture helper without
-  changing production semantics or assertions. Its reconciliation is a
-  prospective pre-edit packet replacement, not an evidence-only correction.
-- Amendment 8 implementation is complete and its focused and affected invariant
-  proofs pass. ISSUE-W2-AMENDMENT9-FIXTURE-SCOPE is resolved prospectively for
-  the nine unchanged tests exposed by the later complete inventory. Amendment 9
-  adds no production path and maps every target only to `MASTER-RC-006`.
-- The failed Fast evidence is preserved byte-exact under
-  `C:/T3/BN/receipts/wave2/CODEX_WAVE2_DIRTY_FAST_2026-09-11`.
-  MANIFEST.json SHA-256:
-  05f3232736dec93bd9330d170762ebfc3201ff2c3c81377499756d2f92adcb96.
-- The same sole-writer task is now authorized on openai/gpt-5.6-sol/max by the
-  bounded provider-routing exception, SHA-256
-  d5d64daca37e436910f21d1edb33cbb8d80335281afc6acf8c909233e1aedd4e.
-  Current turn 01a091b6-0728-7c42-9980-65d64f01763d verifies that route at
-  2026-09-11T18:23:40.935Z.
-  Prior medium and Astra/high evidence remains unchanged.
-- Local copies of 22 completed current diagnostic logs are verified; originals
-  remain intact. Archive MANIFEST.json SHA-256
-  5cd622dd1adcd3751ccc37f3067404d28b405e9ad7e3b256ae04dbc75b3f752f in
-  C:/T3/BN/receipts/wave2/CODEX_WAVE2_A3_HIGH_DIAGNOSTICS_2026-09-10.
-- Historical 242/242 and earlier 243/243 suites remain old baselines. The
-  separate current 243/243 and Fast 230/230 proofs bind the final working bytes.
-  The installed dispatcher selected actual
-  `implement / prompt.checkpoint_implementation`, and the tracked workflow is
-  now `IN_REVIEW`. This tracked state forms the one-commit freeze boundary.
-  The exact commit identity will be recorded in the external Wave 2 freeze
-  receipt immediately after commit.
+- Stage 50 checkpoint 50.3 is `IN_PROGRESS`.
+- Direct user authority opens one third and final bounded repair wave for
+  `MASTER-W2-001` through `MASTER-W2-011`.
+- The findings map only to `MASTER-RC-002`, `MASTER-RC-006`,
+  `MASTER-RC-007`, and `MASTER-RC-017`.
+- Before the exception, repair counters were 2/2/0. Before this tracked
+  reconciliation they were 2/3/1. This first tracked Wave 3 edit makes them
+  3/3/0. Evidence-only corrections remain 1/1/0.
+- The packet enumerates 34 exact paths. All 34 matched their pre-edit hashes.
+  It permits zero protected paths.
+- Wave 2 exact-head Fast passed 230/230. Full passed 18 checks with one explicit
+  manual SavedVariables skip. Lua passed 243/243. These are historical controls.
+- Fresh independent Wave 2 MASTER rejected the candidate with eleven P1
+  implementation defects. Wave 3 repaired all eleven on the dirty bytes; the
+  T3 Claude Fable continuation then repaired the startup seal, lifecycle
+  gating, evidence rebinding, controller pending contract, projection
+  currency, DPS page/completion binding, and mutation source-witness
+  verification regressions the complete inventory exposed.
+- Canonical `IN_PROGRESS` strict validation passed with zero errors and zero
+  warnings. Direct attachment SHA-256
+  `9fb425396620360bbccaa1bb84587621dd714ddc618128fb4dfc4f1c9e0746ab`
+  explicitly resolves the disclosed automatic-review authority conflict for
+  one normal installed VibeRun `next` submission. Its immutable receipt SHA-256
+  is `15cbfaa5539ee4a65945542c8a776a95e70098815b0eb8f8d24fed8dc0e6f3e7`.
+- Actual `implement / prompt.checkpoint_implementation` dispatch occurred
+  before the first product or test edit and remains the bound runtime.
+- Prospective immutable Amendments 1-5 bind 27 + 2 + 43 + 1 + 3 existing
+  offline tests and zero production paths. The pre-freeze inventory is exactly 105 tracked modified paths, zero staged, zero untracked, zero protected, and zero outside the parent packet plus Amendments 1-5 (34 parent paths, of which 30 changed; 27 + 2 + 42 + 1 + 3 amendment tests changed; `tests/run_builds_resilience.lua` of Amendment 3 passed unedited). Ordinal LF path-list SHA-256 `79a8c22d52d39b9eb6ca0185bc91b54e568c283bc181c86f6e3dbf50787d63d1`.
+- Pre-freeze proof on the dirty bytes: The complete current Lua inventory on the exact freeze-candidate bytes (started 2026-09-13 05:52:43, finished 08:20:22 local, untracked log SHA-256 `ddd714a6fddf473a26b6ebfac7b800e7abadb90b13d04601770dba8928c63fb5`, 64,381 bytes): `Lua suite: 243/243 passed` with the single explicit manual `tests/run_legacy_backup_smoke.lua` skip (244 discovered, 243 runnable). Inside that inventory the complete default `tests/run_sync_semantic_envelope.lua` reported `23 passed, 0 red` (also 23/0 standalone before the mutation-verification repair) and the complete default `tests/run_sync_mixed_client_matrix.lua` reported `14 passed, 0 red` Fast on the final dirty bytes (started 2026-09-13 03:21:32 local, 7,313.486 s): 163 passed, 0 failed, 0 unavailable, 1 nonblocking no-BaseRef skip (`git-diff-check-range`), including the shared artifact path policy, the PR58 expected-red oracle, and the 58-test mapped plan with the complete semantic envelope.
+- The manual `tests/run_legacy_backup_smoke.lua` check remains skipped. No
+  real SavedVariables path or native game run is authorized.
 
-## Five-root Repair Contract
+## Wave 3 Repair Contract
 
-- `MASTER-RC-012`: use typed identity comparison for exact-candidate ties and
-  prove stable numeric/string winners after removal, reinsertion, and reload.
-- `MASTER-RC-006`: make finalization, witness, replacement maps, session
-  registries, and ordinary reads persistent and metered. Prove maximum-root
-  bounds and keep raw diagnostic verification scheduler-only.
-- `MASTER-RC-002`: detach every target slot, verdict, and barrier before mutation.
-  Prove failed commits preserve old rows, slots, barriers, indexes, counts,
-  vectors, and object identities.
-- `MASTER-RC-017`: detect nested in-place graph mutation under the same row
-  identity with bounded exact witness accounting.
-- `MASTER-RC-007`: centralize every durable and session increment, preflight
-  batches, and prove refusal at `MAX-1`, `MAX`, and multi-item boundaries.
+- `MASTER-W2-001`: preallocate the final serving root and sentinel. Publish
+  the durable bundle and serving root adjacently. Run callbacks and telemetry
+  only after successful publication.
+- `MASTER-W2-002`: build detached retention and compaction replacements for
+  every affected nested durable field. Publish them only in one complete
+  bundle/root transaction.
+- `MASTER-W2-003`: stage the imported public row and saved-source backlink in
+  one candidate with one ticket and one protected commit.
+- `MASTER-W2-004`: route every mutation through one persistent metered
+  candidate. Charge all proportional row, evidence, bundle, witness, index,
+  registry, unknown-field, comparison, and copy work.
+- `MASTER-W2-005`: retain maintenance operation, readmission, evidence,
+  batch-builder, overlay-copy, and finalization frontiers across pumps.
+- `MASTER-W2-006`: stop legacy collections at one call slice independent of
+  match density. Return `CURSOR_REQUIRED` with no partial output. Retain and
+  pump affected consumer cursors across scheduler turns.
+- `MASTER-W2-007`: use the saved-mirror cursor. Bind each pending removal
+  ticket to the exact import job and advance only after terminal settlement.
+- `MASTER-W2-008`: retain one exact inbound mutation ticket. Complete peer,
+  request-context, acceptance, or rejection bookkeeping exactly once from its
+  terminal result.
+- `MASTER-W2-009`: include every tombstone and barrier receipt allocation in
+  the complete counter plan. Apply planned increments only with terminal
+  publication.
+- `MASTER-W2-010`: guard Store, DPS, Sync, evidence, provider, and catalog
+  authority counters. Latch the same deny-only exhaustion state before any
+  refused increment. Bind resettable counters to fresh owner identities.
+- `MASTER-W2-011`: bind the exact EvidenceCoordinator identity and evidence
+  append/removal revisions in admission and mutation tokens. Recheck them at
+  every authority-bearing boundary.
+- The ATOM-13 exception corrects only its prohibited failed-operation/new-bundle
+  literal. Preserve fault injection, actual durable and serving state,
+  precommit old-bundle preservation, post-publication notification behavior,
+  and exactly-once terminal completion.
+
+## Exact Scope
+
+- Production:
+  `core/BuildCatalog.lua`, `core/LoadoutEvidence.lua`,
+  `core/DataRetention.lua`, `core/DataCompaction.lua`,
+  `core/CommunityController.lua`, `core/Sync.lua`,
+  `core/SyncInbound.lua`, `core/Store.lua`, `core/DpsCapture.lua`,
+  `core/BuildHashCache.lua`, `core/SyncCompatibility.lua`,
+  `core/ViewProjections.lua`, and `core/MainLifecycle.lua`.
+- Tests:
+  `tests/run_catalog_authority_commit_fault_matrix.lua`,
+  `tests/run_data_retention.lua`,
+  `tests/run_data_retention_detached_isolation.lua`,
+  `tests/run_data_compaction_migration.lua`,
+  `tests/run_community_contract_characterization.lua`,
+  `tests/run_catalog_authority_work_budget.lua`,
+  `tests/run_build_catalog_related_index.lua`,
+  `tests/run_community_saved_import_attribution.lua`,
+  `tests/run_community_controller_parity.lua`,
+  `tests/run_sync_inbound_parity.lua`,
+  `tests/run_sync_protocol_parity.lua`,
+  `tests/run_catalog_authority_generation_exhaustion.lua`, and
+  `tests/run_catalog_authority_witness_drift.lua`.
+- Support and material records:
+  `tests/catalog_authority_support.lua`,
+  `tests/module_contract_manifest.lua`, `tests/validation-map.json`,
+  `CONTRACTS.md`, `.vibe/STATE.md`, `.vibe/PLAN.md`,
+  `.vibe/CONTEXT.md`, and `.vibe/EVIDENCE.md`.
+- The packet contains the exact root and finding map. An additional existing
+  unprotected offline test needs an immutable successor before its first edit.
+  No additional production path may be self-authorized.
 
 ## Safety Boundaries
 
-- Never edit a protected path. The surviving protected set includes
-  `core/MainCommands.lua`, `core/SyncDiagnostics.lua`,
-  `core/SyncTransport.lua`, `data/**`, `docs/**`, `logic/**`, `package.json`,
-  `package-lock.json`, and `tools/**`.
-- Edit only paths mapped by the immutable Wave 2 packet and valid prospective
-  Amendments 1, 2, 3, 4, 5, 8, and 9. Amendments 6 and 7 grant no edit authority.
-  Any further production or test path requires a
-  necessary exact prospective immutable successor before its first edit under
-  the standing authority.
-- Preserve Lua 5.1, WoW 3.3.5a, protocol 7, exact 79/6/85 semantics, expected
-  counts, and all closed-root behavior.
-- Do not access live SavedVariables, restart/reload the game, merge, push a
-  protected/default branch, force-push, alter a stable release, mutate the
-  legacy campaign, or delete history. Scoped task-branch, task-PR, relevant CI,
-  and post-acceptance tester/prerelease GitHub writes are separately authorized
-  after exact target verification.
-- After exact-head validation and valid independent MASTER acceptance, current
-  authority permits a clean local tester package and installation with a
-  recoverable addon backup. Stop and notify the user before live WoW testing.
-  Scoped GitHub delivery also requires all existing acceptance conditions.
-- The bounded provider exception makes this existing gpt-5.6-sol/max task the
-  sole writer for Amendment 4 implementation, local validation, and final
-  candidate preparation. Claude restoration or handback is not a prerequisite.
+- Preserve Lua 5.1, WoW 3.3.5a, `Nexus.toc`, version, protocol 7, author,
+  SavedVariables, bundled data, historical artifacts, and all closed-root
+  behavior.
+- Preserve the 79 ordinary, 6 locked, and 85 total semantic envelope.
+- Preserve exact legacy old-peer emission. Old peers do not converge on the new
+  locked payload. New-to-new convergence remains required.
+- Never edit `core/MainCommands.lua`, `core/SyncDiagnostics.lua`,
+  `core/SyncTransport.lua`, `data/**`, `docs/**`, `logic/**`,
+  `package.json`, `package-lock.json`, `tools/**`, Test 18 artifacts, or
+  live SavedVariables.
+- Do not reset, clean, rebase, cherry-pick, discard changes, alter history,
+  merge, push, mutate a pull request, package, publish, install, run native WoW,
+  restart/reload the game, change billing, build an API backend, or mutate the
+  legacy campaign.
+- Do not read raw Claude worker output.
+- No fourth repair wave is authorized.
 
 ## Validation and Review Boundary
 
-- Record fail-capable expected red for all five roots before production repair.
-  Then run mapped focused and affected-invariant tests, Fast, exact path
-  accounting, residual reconciliation, and a current complete Lua inventory.
-- Create exactly one coherent Wave 2 freeze commit. Record commit, tree, parent,
-  and exact path inventory. Do not start a third repair wave.
-- Run exact-head Fast and Full on the frozen candidate. Read the exact N/N result
-  and scan for genuine failures.
-- This writer never performs acceptance review. Fresh isolated Codex sessions
-  perform SPEC, STANDARDS, and ADVERSARIAL review. A separate fresh Codex session
-  performs MASTER aggregation. The current bounded exception requires
-  `gpt-5.6-sol` with reasoning `max` for bookkeeping, implementation,
-  supervision, and final candidate preparation.
-- Sole successor writer: Codex thread `01a0895c-84ed-72e3-96b8-27573a831e91`.
-  The prior implementation turn verified `openai`/`gpt-6-astra`/`high`.
-  Current continuation turn `01a091b6-0728-7c42-9980-65d64f01763d` verifies
-  `openai`/`gpt-5.6-sol`/`max` under the explicit provider exception. The prior
-  medium and Astra/high records remain
-  preserved. Subscription billing and native T3 successor ID are unverified.
-  The exact handoff and prior identities are preserved in external Wave 2 receipts.
-  The installed dispatcher abandons the old interrupted triage timing sample on
-  session change and retains historical timing. No human wait is implementation.
+- Record fail-capable expected red on exact rejected bytes for all eleven
+  findings before the corresponding production repair.
+- Run focused green, affected subsystem suites, then complete integrated
+  validation on coherent bytes.
+- Reconcile exact paths and create one clean Wave 3 freeze commit.
+- Run exact-head Fast and exactly one Full. Preserve failures and the manual
+  SavedVariables skip honestly. Make no tracked edit after final Full starts.
+- If the frozen gate fails, preserve it and stop:
+  `HANDOFF_REQUIRED - WAVE 3 COMPLETE, NO FURTHER REPAIR AUTHORIZED`.
+- After successful gates, dispatch exactly one fresh isolated SPEC, STANDARDS,
+  and ADVERSARIAL campaign. Keep partial findings isolated. Dispatch a separate
+  fresh MASTER only after all three finish.
+- A blocking review finding ends this wave. It starts no further repair.
+- If MASTER accepts, stop:
+  `PACKAGE B WAVE 3 ACCEPTED - PACKAGING AND NATIVE VALIDATION AUTHORIZATION REQUIRED`.

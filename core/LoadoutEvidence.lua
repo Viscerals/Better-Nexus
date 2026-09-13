@@ -42,6 +42,10 @@ local detachedSource = nil
 local detachedSourceSet = false
 local referenceProviders = {}
 local referenceProviderGeneration = 0
+-- Fresh module-session identity plus exact append/removal revisions. A catalog
+-- root binds all three values; copying this facade cannot inherit its authority.
+local authority = {ownerIdentity=Evidence, appendRevision=0, removalRevision=0,
+    providerRevision=0}
 local runtime = {
     created=0, reused=0, resolved=0, inlineFallbacks=0,
     malformed=0, conflicts={},
@@ -90,6 +94,29 @@ local function Count(source)
     local n = 0
     for _ in pairs(source or {}) do n = n + 1 end
     return n
+end
+
+local function AuthorityCounters()
+    local internals = Nexus and Nexus.MainInternals
+    local counters = type(internals) == "table"
+        and internals.CatalogAuthorityCounters or nil
+    return type(counters) == "table" and counters or nil
+end
+
+local function PreflightAuthority(key, amount)
+    local counters = AuthorityCounters()
+    if not (counters and type(counters.Preflight) == "function") then
+        return false, "GENERATION_EXHAUSTED"
+    end
+    return counters.Preflight({{owner=authority, key=key, amount=amount}})
+end
+
+local function AdvanceAuthority(key, amount)
+    local counters = AuthorityCounters()
+    if not (counters and type(counters.Advance) == "function") then
+        return nil, "GENERATION_EXHAUSTED"
+    end
+    return counters.Advance(authority, key, amount)
 end
 
 local function RecordConflict(kind, claimed, actual)
@@ -273,8 +300,61 @@ function Evidence.CanonicalTupleOrder(left, right)
     return 0
 end
 
-function Evidence.BeginCandidate()
-    if not candidate then candidate = {store=nil, copy=nil} end
+function Evidence.BeginCandidate(database)
+    -- The catalog opens the candidate against its exact bound database. Bind
+    -- the pool to that same database first: otherwise the next Store() read
+    -- would rebind through the raw global, discard this open candidate, and
+    -- intern into the live pool outside the transaction, which advances the
+    -- append revision the admitted root has already bound and invalidates it.
+    if type(database) == "table" and database ~= boundDb then
+        Evidence.Init(database)
+    end
+    if not candidate then
+        candidate = {store=nil, copy=nil, appends=0, removals=0,
+            revisionsApplied=false}
+    end
+    return true
+end
+
+function Evidence.AuthorityTokenV1(includeCandidate)
+    local appends = includeCandidate and candidate
+        and (candidate.appends or 0) or 0
+    local removals = includeCandidate and candidate
+        and (candidate.removals or 0) or 0
+    return {ownerIdentity=authority.ownerIdentity,
+        appendRevision=authority.appendRevision + appends,
+        removalRevision=authority.removalRevision + removals,
+        providerRevision=authority.providerRevision}
+end
+
+function Evidence.CandidateRevisionPlanV1()
+    local plan = {}
+    if not candidate then return plan end
+    if (candidate.appends or 0) > 0 then
+        plan[#plan + 1] = {owner=authority, key="appendRevision",
+            amount=candidate.appends}
+    end
+    if (candidate.removals or 0) > 0 then
+        plan[#plan + 1] = {owner=authority, key="removalRevision",
+            amount=candidate.removals}
+    end
+    return plan
+end
+
+function Evidence.CommitCandidateRevisionsV1()
+    if not candidate or candidate.revisionsApplied then return true end
+    local counters = Nexus and Nexus.MainInternals
+        and Nexus.MainInternals.CatalogAuthorityCounters
+    local plan = Evidence.CandidateRevisionPlanV1()
+    if counters and type(counters.Preflight) == "function" then
+        local ok, why = counters.Preflight(plan)
+        if not ok then return false, why end
+    end
+    authority.appendRevision = authority.appendRevision
+        + (candidate.appends or 0)
+    authority.removalRevision = authority.removalRevision
+        + (candidate.removals or 0)
+    candidate.revisionsApplied = true
     return true
 end
 
@@ -461,7 +541,16 @@ function Evidence.Intern(source, claimedReference, options)
         runtime.reused = runtime.reused + 1
         return exact, DeepCopy(existingNormalized), false
     end
+    if candidate then
+        local ok, why = PreflightAuthority("appendRevision",
+            (candidate.appends or 0) + 1)
+        if not ok then return nil, why end
+    else
+        local revision, why = AdvanceAuthority("appendRevision", 1)
+        if not revision then return nil, why end
+    end
     entries[exact] = DeepCopy(normalized)
+    if candidate then candidate.appends = (candidate.appends or 0) + 1 end
     runtime.created = runtime.created + 1
     return exact, DeepCopy(normalized), true
 end
@@ -882,14 +971,16 @@ end
 
 function Evidence.RegisterReferenceProvider(name, provider)
     if type(name) ~= "string" or name == "" then return false end
+    if provider ~= nil and type(provider) ~= "function" then return false end
+    local generation, why = AdvanceAuthority("providerRevision", 1)
+    if not generation then return false, why end
     if provider == nil then
         referenceProviders[name] = nil
-        referenceProviderGeneration = referenceProviderGeneration + 1
+        referenceProviderGeneration = generation
         return true
     end
-    if type(provider) ~= "function" then return false end
     referenceProviders[name] = provider
-    referenceProviderGeneration = referenceProviderGeneration + 1
+    referenceProviderGeneration = generation
     return true
 end
 
@@ -942,7 +1033,7 @@ end
 -- Full scan first, deletion second. Providers protect transient retry owners
 -- such as Sync's hot-build window that are not represented in SavedVariables.
 function Evidence.ReferenceSnapshot(database)
-    local store = Store()
+    local store = Store(candidate ~= nil)
     local entries = type(store.entries) == "table" and store.entries or {}
     local references = {}
     ScanReferences(type(database) == "table" and database or boundDb,
@@ -960,7 +1051,7 @@ function Evidence.ReferenceSnapshot(database)
 end
 
 function Evidence.CollectGarbage(database, dryRun)
-    local store = Store()
+    local store = Store(candidate ~= nil)
     if boundReadOnly or tonumber(store.schemaVersion)
         and tonumber(store.schemaVersion) > SCHEMA_VERSION then
         return {
@@ -985,8 +1076,28 @@ function Evidence.CollectGarbage(database, dryRun)
         if not references[key] then unreachable[#unreachable + 1] = key end
     end
     table.sort(unreachable)
-    if dryRun ~= true then
+    if dryRun ~= true and #unreachable > 0 then
+        if candidate then
+            local ok, why = PreflightAuthority("removalRevision",
+                (candidate.removals or 0) + #unreachable)
+            if not ok then
+                return {blocked=true,reason=why,removed=0,
+                    retained=Count(entries),references=Count(references),
+                    providerFailures=providerFailures}
+            end
+        else
+            local revision, why = AdvanceAuthority("removalRevision",
+                #unreachable)
+            if not revision then
+                return {blocked=true,reason=why,removed=0,
+                    retained=Count(entries),references=Count(references),
+                    providerFailures=providerFailures}
+            end
+        end
         for _, key in ipairs(unreachable) do entries[key] = nil end
+        if candidate then
+            candidate.removals = (candidate.removals or 0) + #unreachable
+        end
     end
     return {
         blocked=false,

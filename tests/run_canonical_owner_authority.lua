@@ -1167,7 +1167,22 @@ assert(swapped and admittedPrepared == false
         and preparedWhy == "stale prepared build"
         and Sync.WorkState().sending == sendingBeforePrepared,
     "prepared ordinary bytes survived a same-ID private authority replacement")
-assert(Catalog.RemoveOverlay(stalePrepared.id),
-    "stale prepared-build control could not be removed")
+-- The removal is one retained catalog mutation; settle it to its exact
+-- terminal ticket instead of treating the pending acknowledgement as removal.
+local removedStale, removedStaleWhy, removedStaleTicket =
+    Catalog.RemoveOverlay(stalePrepared.id)
+if removedStale == nil and removedStaleWhy == "ROOT_MUTATION_PENDING" then
+    SettleCatalog()
+    assert(type(removedStaleTicket) == "table"
+            and removedStaleTicket.state ~= "pending",
+        "stale prepared-build removal did not reach a terminal ticket")
+    removedStale, removedStaleWhy = removedStaleTicket.committed,
+        removedStaleTicket.reason
+end
+assert(removedStale,
+    "stale prepared-build control could not be removed: "
+        .. tostring(removedStaleWhy))
+assert(Catalog.Get(stalePrepared.id) == nil,
+    "stale prepared-build control remained readable after removal")
 
 print("canonical transport owner authority -- OK")

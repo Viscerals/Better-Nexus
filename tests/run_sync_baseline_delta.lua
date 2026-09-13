@@ -1,6 +1,7 @@
 -- Same-release, legacy, and different-release peers exchange bounded overlay
 -- deltas. Immutable bundled rows remain available by exact loadout request.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 
@@ -84,7 +85,8 @@ local changed = {id="overlay-change",title="Overlay Change",author="Alice",
     class="MAGE",description="Changed",
     postedAt=30,lastModified=30,isMine=true,
     echoes={{spellId=200103,quality=3,stacks=1}}}
-assert(Catalog.Put(changed))
+assert(S.CatalogMutation(function() return Catalog.Put(changed) end,
+    "overlay change admission"))
 H.sentChatMessages = {}
 assert(Sync.HandleIncoming("WLRQ|Current|" .. emptyReleaseHash .. "|"
     .. dpsHash .. "|one-overlay", "Current"))
@@ -182,9 +184,11 @@ Sync.Init(Nexus.Codec,{})
 Pump(100)
 H.sentChatMessages = {}
 local beforeDeleteHash, beforeDeleteDps = Sync.GetCompatibilityHashes()
-assert(Catalog.SetTombstone("baseline-b", {
-    stamp=40,author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,
-}, {source="local"}))
+assert(S.CatalogMutation(function()
+    return Catalog.SetTombstone("baseline-b", {
+        stamp=40,author="Alice",ownerKey="alice@ebonhold",ownerVerified=true,
+    }, {source="local"})
+end, "baseline-b local tombstone"))
 assert(Sync.HandleIncoming("WLRQ|DeletePeer|" .. beforeDeleteHash .. "|"
     .. beforeDeleteDps .. "|one-delete", "DeletePeer"))
 Pump(100)

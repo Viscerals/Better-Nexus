@@ -137,7 +137,7 @@ for _, name in ipairs({
     assert(type(CB[name]) == "function", "Community facade lost " .. name)
 end
 
-local function AwaitCatalog()
+local function AwaitCatalog(observer)
     local candidates = 0
     while Catalog.RootState().candidate do
         candidates = candidates + 1
@@ -153,6 +153,7 @@ local function AwaitCatalog()
             if ticket.state ~= "pending" then break end
             local observed = Catalog.PumpRootAdmission()
             assert(observed == ticket, "fixture catalog work changed tickets")
+            if observer then observer() end
             local current = tonumber(ticket.pumps)
             assert(current and current > previous,
                 "fixture catalog work made no scheduler progress")
@@ -165,12 +166,24 @@ end
 
 local function PublishImportedTerminal(id)
     AwaitCatalog()
+    local expectedPublishedId = "published-" .. tostring(id)
+    local function AssertAtomicPublication()
+        local published = Catalog.Get(expectedPublishedId)
+        local source = Catalog.Get(id)
+        local linked = source
+            and source.publishedBuildId == expectedPublishedId
+            and source.recordBuildId == expectedPublishedId
+        assert((published ~= nil) == (linked and true or false),
+            "saved publication exposed its public row and source backlink "
+                .. "from different catalog transactions")
+    end
+    AssertAtomicPublication()
     local ok, value = CB.PublishImportedBuild(id)
     if ok == nil then
         assert(value == "ROOT_MUTATION_PENDING",
             "saved-loadout publication returned unknown pending result: "
                 .. tostring(value))
-        AwaitCatalog()
+        AwaitCatalog(AssertAtomicPublication)
         ok, value = CB.PublishImportedBuild(id)
     end
     assert(ok ~= nil and value ~= "ROOT_MUTATION_PENDING",
@@ -206,6 +219,17 @@ assert(CB.IsShown() and H.frames.NexusCommunityBuildsFrame
     "Community main frame name/show contract changed")
 assert(UISpecialFrames[1] == "NexusCommunityBuildsFrame",
     "Community escape-close frame registration changed")
+local projectionReady, projectionWhy = CB.Refresh()
+local projectionPumps = 0
+while projectionReady ~= true and projectionPumps < 20000 do
+    assert(projectionWhy == "pending",
+        projectionWhy or "Community projection failed")
+    Nexus.ViewProjections.PumpBuilds()
+    projectionReady, projectionWhy = CB.Refresh()
+    projectionPumps = projectionPumps + 1
+end
+assert(projectionReady == true and projectionPumps > 0,
+    "Community projection did not publish through retained pumps")
 
 -- The explicit terminal retry is a dedicated owned-build action. Passive
 -- reads never resend, the click preserves exact ID/version, and an immediate
@@ -228,14 +252,17 @@ local retryPoint, retryRelative, retryRelativePoint, retryX, retryY =
     retryButton:GetPoint()
 local lockPoint, lockRelative, lockRelativePoint, lockX, lockY =
     detail.lockBtn:GetPoint()
-assert(retryButton:IsShown() and not detail.lockBtn:IsShown()
-        and detail.editBtn:IsShown()
-        and retryCalls == retryCallsBefore
-        and retryButton:GetWidth() == detail.lockBtn:GetWidth()
+assert(retryButton:IsShown(),
+    "exact terminal owned Share did not show its dedicated Retry action")
+assert(not detail.lockBtn:IsShown() and detail.editBtn:IsShown(),
+    "Retry Share did not preserve the owned-build control state")
+assert(retryCalls == retryCallsBefore,
+    "rendering Retry Share triggered a resend")
+assert(retryButton:GetWidth() == detail.lockBtn:GetWidth()
         and retryPoint == lockPoint and retryRelative == lockRelative
         and retryRelativePoint == lockRelativePoint
         and retryX == lockX and retryY == lockY,
-    "exact terminal owned Share did not expose its dedicated Retry action")
+    "Retry Share did not occupy the established action slot")
 local retryClick = assert(retryButton:GetScript("OnClick"))
 retryClick(retryButton)
 assert(retryCalls == retryCallsBefore + 1

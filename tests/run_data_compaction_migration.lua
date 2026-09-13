@@ -199,7 +199,7 @@ print(string.format(
 -- the catalog authority contract; compaction never visits or rewrites it.
 assert(Catalog.AuthorityState("scale-1000").state == "INVALIDATED",
     "malformed overlay row was admitted as a compaction candidate")
-assert(NexusDB.dataCompaction.version == 1
+assert(H.DurablePayload("dataCompaction", NexusDB).version == 1
     and stats.overlayRecordsBefore == 999
     and stats.overlayRecordsAfter == 999
     and stats.dpsRecordsBefore == 280
@@ -231,7 +231,8 @@ assert(H.DurableBuilds()["scale-0001"].echoes == nil
     and Catalog.Get("scale-0001").title == "Scale 1 edited during migration"
     and DeepEqual(Catalog.Get("scale-0001").echoes, expectedBuild),
     "canonical build did not hydrate exactly after inline removal")
-local _, firstPersonal = next(NexusDB.dpsCapture.personalBest)
+local durableDps = assert(H.DurablePayload("dpsCapture", NexusDB))
+local _, firstPersonal = next(durableDps.personalBest)
 assert(firstPersonal.dummy.echoes == nil
     and DeepEqual(Evidence.ResolveDpsEchoes(firstPersonal.dummy), expectedDps),
     "canonical DPS row did not hydrate exactly after inline removal")
@@ -245,9 +246,48 @@ assert(H.DurableBuilds()["scale-0998"].echoes
 
 -- The migration stamp makes repeat Store.Init byte-for-byte stable.
 local beforeRepeat = DeepCopy(NexusDB)
-H.BootstrapStore()
+local repeatBootstrap = H.BootstrapStore()
+assert(type(repeatBootstrap) == "table" and repeatBootstrap.state == "ready",
+    "repeat Store.Init did not restore coordinator readiness")
 assert(DeepEqual(beforeRepeat, NexusDB),
     "repeat Store.Init changed an already compacted database")
+local admissionProbe = Catalog.PumpRootAdmission()
+for _ = 1, 100000 do
+    if type(admissionProbe) ~= "table"
+        or admissionProbe.state ~= "pending" then break end
+    admissionProbe = Catalog.PumpRootAdmission()
+end
+
+local function WithEvidenceCandidate(callback)
+    local handle, why = Catalog.BeginCatalogMaintenance({
+        database=NexusDB, operation="compaction-test"})
+    assert(handle, why or "evidence candidate unavailable")
+    for _ = 1, 100000 do
+        local store, storeWhy = Evidence.CandidateStore()
+        if store then break end
+        assert(storeWhy == "EVIDENCE_CANDIDATE_PENDING",
+            storeWhy or "evidence candidate copy failed")
+    end
+    local values = {callback()}
+    assert(AwaitCatalogMutation(Catalog.CommitMaintenance(handle)),
+        "evidence candidate did not publish")
+    return unpack(values)
+end
+
+local function AwaitGarbage(database)
+    local summary = Compaction.CollectGarbage(database)
+    for _ = 1, 100000 do
+        if type(summary) ~= "table" or summary.pending ~= true then break end
+        Catalog.PumpRootAdmission()
+        summary = Compaction.CollectGarbage(database)
+    end
+    assert(type(summary) == "table" and summary.pending ~= true,
+        "evidence garbage collection did not terminate")
+    return summary
+end
+assert(type(admissionProbe) ~= "table"
+        or admissionProbe.state ~= "pending",
+    "repeat Store.Init left catalog maintenance unterminated")
 
 -- New canonical writes compact immediately after the migration is enabled.
 local newEchoes = {{spellId=499001,quality=3,stacks=2}}
@@ -269,7 +309,9 @@ local newDps = {
     class="MAGE", level=80, fingerprint="499002x1",
     echoes={{spellId=499002,count=1}},
 }
-assert(Compaction.CompactDpsRow(newDps)
+assert(WithEvidenceCandidate(function()
+        return Compaction.CompactDpsRow(newDps)
+    end)
     and newDps.echoes == nil
     and Evidence.ResolveDpsEchoes(newDps)[1].spellId == 499002,
     "post-migration DPS writes retained duplicate inline evidence")
@@ -278,6 +320,7 @@ assert(Compaction.CompactDpsRow(newDps)
 -- failed provider, then removes only evidence proven unreachable.
 local durableReference = H.DurableBuilds()["scale-0001"].evidenceKey
 Sync.Init(Nexus.Codec, {})
+H.RebindAuthorityV1("Sync evidence provider registered")
 local retryEchoes = {{spellId=499900,quality=3,stacks=1}}
 assert(AwaitCatalogMutation(Catalog.Put({
     id="outgoing-retry", title="Retry", author="Compactor",
@@ -289,21 +332,25 @@ local retryReference = H.DurableBuilds()["outgoing-retry"].evidenceKey
 assert(Sync.BroadcastBuild(Catalog.Get("outgoing-retry"))
     and AwaitCatalogMutation(Catalog.RemoveOverlay("outgoing-retry")),
     "outgoing retry fixture did not enter Sync's retained hot-build path")
-local gcWithRetry = Compaction.CollectGarbage(NexusDB)
+local gcWithRetry = AwaitGarbage(NexusDB)
 assert(not gcWithRetry.blocked
     and Evidence.Snapshot()[durableReference]
     and Evidence.Snapshot()[retryReference],
     "GC removed durable or outgoing-retry evidence")
-local orphanReference = Evidence.Intern({{spellId=499901,stacks=1}})
+local orphanReference = WithEvidenceCandidate(function()
+    return Evidence.Intern({{spellId=499901,stacks=1}})
+end)
 Evidence.RegisterReferenceProvider("test.failure", function()
     error("forced provider failure")
 end)
-local blockedGc = Compaction.CollectGarbage(NexusDB)
+H.RebindAuthorityV1("failing evidence provider registered")
+local blockedGc = AwaitGarbage(NexusDB)
 assert(blockedGc.blocked and Evidence.Snapshot()[orphanReference],
     "GC deleted evidence after an incomplete reference scan")
 Evidence.RegisterReferenceProvider("test.failure", nil)
 Sync.Init(Nexus.Codec, {}) -- clears the hot-build retry owner and its queue
-local finalGc = Compaction.CollectGarbage(NexusDB)
+H.RebindAuthorityV1("evidence providers refreshed")
+local finalGc = AwaitGarbage(NexusDB)
 assert(not finalGc.blocked and finalGc.removed >= 2
     and Evidence.Snapshot()[durableReference]
     and not Evidence.Snapshot()[retryReference]
@@ -368,15 +415,18 @@ AwaitCatalogAdmission(Catalog.Init(interruptedDb, Nexus.BundledBuilds))
 Evidence.RegisterReferenceProvider("test.interrupt", function()
     error("forced migration interruption")
 end)
+H.RebindAuthorityV1("interrupting evidence provider registered")
 local interruptedResult = Compaction.Init(interruptedDb)
 -- A failed candidate publishes nothing: the raw overlay row keeps its exact
 -- inline evidence and the migration stamp is absent until a later complete
 -- transaction commits.
 assert(interruptedResult.blocked
-    and not interruptedDb.dataCompaction.version
+    and not (type(H.DurablePayload("dataCompaction", interruptedDb)) == "table"
+        and H.DurablePayload("dataCompaction", interruptedDb).version)
     and DeepEqual(H.DurableBuilds(interruptedDb).interrupt.echoes, interruptEchoes),
     "failed migration mutated raw storage before its transaction committed")
 Evidence.RegisterReferenceProvider("test.interrupt", nil)
+H.RebindAuthorityV1("interrupting evidence provider removed")
 local resumedResult, resumed = Compaction.Init(interruptedDb)
 local resumeGuard = 0
 while Compaction.Stats(interruptedDb).pending do
@@ -387,7 +437,7 @@ while Compaction.Stats(interruptedDb).pending do
         "interrupted migration did not finish its bounded verification pass")
 end
 assert(resumed and not resumedResult.blocked
-    and interruptedDb.dataCompaction.version == 1
+    and H.DurablePayload("dataCompaction", interruptedDb).version == 1
     and DeepEqual(Catalog.Get("interrupt").echoes, interruptEchoes),
     "interrupted migration did not resume to exact hydrated evidence")
 
@@ -403,7 +453,15 @@ assert(H.DurableBuilds(interruptedDb).interrupt == nil
     "pool-only redundant overlay survived a later baseline promotion")
 
 for _, tamper in ipairs({"database", "bundle"}) do
-    local pendingDb = {communityBuilds={}, dpsCapture={}}
+    local pendingDpsEchoes = BuildEchoes(90)
+    local pendingDpsRow = {
+        player="Compactor",dps=900090,ts=60002,
+        fingerprint=Fingerprint(pendingDpsEchoes),echoes=pendingDpsEchoes,
+    }
+    local pendingDb = {communityBuilds={}, dpsCapture={
+        personalBest={pending={dummy=pendingDpsRow}},buildBest={},
+        characterBest={dummy={},lk={}},
+    }}
     for index = 1, 9 do
         local id = "pending-compaction-" .. index
         local echoes = BuildEchoes(index)
@@ -416,6 +474,16 @@ for _, tamper in ipairs({"database", "bundle"}) do
     NexusDB = pendingDb
     Evidence.Init(pendingDb)
     AwaitCatalogAdmission(Catalog.Init(pendingDb, Nexus.BundledBuilds))
+    -- Wave 3 MASTER-W2-002 expected red. The migration must leave both the
+    -- admitted bundle and the preserved legacy input byte-exact until its one
+    -- catalog transaction reaches a terminal commit.
+    local bundleBefore = assert(rawget(pendingDb, "authorityBundle"))
+    local bundleBytesBefore = Nexus.Codec.JSONEncode(bundleBefore)
+    local durableDpsBefore = H.DurablePayload("dpsCapture", pendingDb)
+    local durableDpsBytesBefore = Nexus.Codec.JSONEncode(durableDpsBefore)
+    local legacyDpsBefore = pendingDb.dpsCapture
+    local legacyDpsBytesBefore = Nexus.Codec.JSONEncode(legacyDpsBefore)
+    local rawMetaBefore = rawget(pendingDb, "dataCompaction")
     local pendingResult = Compaction.Init(pendingDb)
     for _ = 1, 1000 do
         if pendingResult.mutationTicket then break end
@@ -423,19 +491,28 @@ for _, tamper in ipairs({"database", "bundle"}) do
     end
     local ticket = assert(pendingResult.mutationTicket,
         "compaction did not retain a pending commit")
-    assert(not pendingDb.dataCompaction.version,
+    assert(rawget(pendingDb, "authorityBundle") == bundleBefore
+            and Nexus.Codec.JSONEncode(bundleBefore) == bundleBytesBefore
+            and H.DurablePayload("dpsCapture", pendingDb) == durableDpsBefore
+            and Nexus.Codec.JSONEncode(durableDpsBefore) == durableDpsBytesBefore
+            and pendingDb.dpsCapture == legacyDpsBefore
+            and Nexus.Codec.JSONEncode(legacyDpsBefore) == legacyDpsBytesBefore
+            and rawget(pendingDb, "dataCompaction") == rawMetaBefore,
+        "pending compaction mutated a durable or preserved source graph")
+    assert(not (type(pendingDb.dataCompaction) == "table"
+            and pendingDb.dataCompaction.version),
         "compaction stamped completion before its catalog commit")
     for _ = 1, Catalog.Budget().maximumPumps do
         if ticket.state ~= "pending" then break end
         Catalog.PumpRootAdmission()
     end
     assert(ticket.state == "committed", "compaction catalog ticket did not commit")
-    local metaBefore = DeepCopy(pendingDb.dataCompaction)
+    local metaBefore = DeepCopy(rawget(pendingDb, "dataCompaction"))
     if tamper == "database" then NexusDB = {foreign=true}
     else pendingDb.authorityBundle = {foreign=true} end
     local refused, changed = Compaction.Pump()
     assert(refused.blocked and not changed
-            and DeepEqual(pendingDb.dataCompaction, metaBefore),
+            and DeepEqual(rawget(pendingDb, "dataCompaction"), metaBefore),
         "compaction completed against a replaced " .. tamper)
 end
 

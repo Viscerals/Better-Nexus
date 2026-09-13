@@ -3,6 +3,7 @@
 --   2. Updates needed to be clearly distinguishable from duplicates.
 --   3. Nothing may ever appear twice in the library.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 dofile("core/Codec.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua"); dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua"); dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua"); dofile("core/SyncSession.lua"); dofile("core/Sync.lua")
 dofile("data/DefaultProfile.lua")
@@ -51,6 +52,9 @@ local function Deliver(msgs, fromName)
             fromName .. "-Ebonhold", "Common",
             "5. " .. Sync.ChannelName(), nil, nil, nil, 5, Sync.ChannelName())
     end
+    -- MASTER-W2-008: an accepted inbound row is one retained catalog
+    -- mutation; its log line and durable row exist at the terminal commit.
+    S.PumpCatalogToIdle("delivered build admission")
 end
 local function Drain()
     H.Advance(4)
@@ -62,7 +66,7 @@ end
 
 -- Author (Solkr) posts a build
 H.sentChatMessages = {}
-local ok, id = CB.PostCurrentWishlist("Rogue Double Strike", "the good one", H.wishlist)
+local ok, id = S.PostWishlist(CB.PostCurrentWishlist, "Rogue Double Strike", "the good one", H.wishlist)
 assert(ok, "post failed")
 local postMsgs = Drain()
 
@@ -70,11 +74,13 @@ local postMsgs = Drain()
 -- catalog owner and receive it fresh. Raw SavedVariables are never edited
 -- around the catalog authority.
 local Catalog = Nexus.BuildCatalog
-assert(Catalog.RemoveOverlay(id), "local copy was not released")
+assert(S.CatalogMutation(function() return Catalog.RemoveOverlay(id) end,
+    "local copy release"), "local copy was not released")
 Sync.ClearLog()
 clock = clock + 10
 Sync.RequestSync()
 Deliver(postMsgs, "Solkr")
+S.PumpCatalogToIdle("received build admission")
 -- Legacy-to-bundle cutover (state machine lines 394, 4849): the durable copy
 -- lives in the authority bundle; the exact PR #68 location is preserved input.
 local lib = H.DurableBuilds()
@@ -92,12 +98,16 @@ UnitName = function() return "Solkr" end
 -- rebuild the author's copy so we can edit and re-share it
 local authorCopy = Catalog.Get(id)
 authorCopy.isMine = true
-assert(Catalog.Put(authorCopy, {source="local"}), "author copy was not restored")
+assert(S.CatalogMutation(function()
+    return Catalog.Put(authorCopy, {source="local"})
+end, "author copy restore"), "author copy was not restored")
 CB.EditBuild(id, "Rogue Double Strike v2", "now even better")
 local editMsgs = Drain()
 -- Restore the receiver's older copy before delivering the author's update.
-assert(Catalog.Put(receiverBeforeEdit, {source="remote", sender="Solkr-Ebonhold"}),
-    "receiver copy was not restored")
+assert(S.CatalogMutation(function()
+    return Catalog.Put(receiverBeforeEdit,
+        {source="remote", sender="Solkr-Ebonhold"})
+end, "receiver copy restore"), "receiver copy was not restored")
 
 Sync.ClearLog()
 clock = clock + 10
@@ -133,6 +143,8 @@ clock = clock + 10
 H.FireEvent("CHAT_MSG_CHANNEL", "WLRD||Solkr||" .. id .. "||99999",
     "Solkr-Ebonhold", "Common", "5. " .. Sync.ChannelName(),
     nil, nil, nil, 5, Sync.ChannelName())
+-- The remote delete's opaque reservation is one retained catalog mutation.
+S.PumpCatalogToIdle("remote delete reservation")
 -- Protocol 7 carries no operation-order proof, so the remote delete becomes
 -- an opaque deny-only reservation: the build leaves every public surface
 -- while its admitted raw row is preserved as evidence.
@@ -204,11 +216,13 @@ assert(Catalog.Get(id) == nil and H.DurableTombstones()[id] ~= nil,
     "a remote revision superseded a tombstone reservation: "
         .. tostring(provider("sync")))
 local claim = assert(Catalog.BeginTombstoneReadmissionClaim(id))
-assert(Catalog.PutWithClaim(claim, { id=id, title="Authorized return",
-    description="good", author="Solkr", ownerKey="solkr@ebonhold",
-    ownerVerified=true, isMine=true, class="ROGUE",
-    echoes={{spellId=200100,quality=3,stacks=1}},
-    postedAt=100001, lastModified=100001 }, {source="local"}),
+assert(S.CatalogMutation(function()
+    return Catalog.PutWithClaim(claim, { id=id, title="Authorized return",
+        description="good", author="Solkr", ownerKey="solkr@ebonhold",
+        ownerVerified=true, isMine=true, class="ROGUE",
+        echoes={{spellId=200100,quality=3,stacks=1}},
+        postedAt=100001, lastModified=100001 }, {source="local"})
+end, "claimed local readmission"),
     "the trusted local owner could not readmit their own build")
 assert(Catalog.Get(id) and Catalog.Get(id).title == "Authorized return"
     and H.DurableTombstones()[id] == nil,
