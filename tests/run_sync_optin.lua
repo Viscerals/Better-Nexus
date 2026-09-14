@@ -17,16 +17,19 @@ local function EncodeBob(id, title, stamp)
     local saved = H.sentChatMessages
     H.sentChatMessages = {}
     local prior = currentName; currentName = "Bob"
+    H.AdmitCatalogV1(NexusDB)
     Sync.BroadcastBuild({ id=id, title=title, description="d", author="Bob",
         ownerKey="bob@ebonhold", ownerVerified=true, isMine=true, class="ROGUE",
         echoes={{spellId=200100,quality=3,stacks=1}}, postedAt=stamp,lastModified=stamp })
     Pump(100)
     currentName = prior
+    H.AdmitCatalogV1(NexusDB)
     local msgs=H.sentChatMessages; H.sentChatMessages=saved
     return msgs
 end
 
 NexusDB = {}
+H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec,nil)
 -- Generate payload before the automatic receive window fires.
 local msgs=EncodeBob("bob-1","Bob's Build",100)

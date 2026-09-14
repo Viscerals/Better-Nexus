@@ -167,28 +167,45 @@ end
 -- Saved variables
 ------------------------------------------------------------------------
 
-local transientDb, transientDbOwner, dbPolicyOwner, dbPolicyReadOnly
+local transientDb, transientDbOwner, dbPolicyReadOnly
+local dbBinding = {}
+function dbBinding.Select(payload)
+    if dbBinding.database ~= NexusDB or dbBinding.payload ~= payload then
+        dbBinding.database, dbBinding.payload = NexusDB, payload
+        if dbBinding.invalidate then dbBinding.invalidate() end
+    end
+    return payload
+end
 local function DB()
     NexusDB = NexusDB or {}
-    if dbPolicyOwner ~= NexusDB then
-        local catalog = Nexus and Nexus.BuildCatalog
-        local status = catalog and type(catalog.Status) == "function"
-            and catalog.Status() or nil
-        dbPolicyOwner = NexusDB
-        dbPolicyReadOnly = type(status) == "table"
-            and status.readOnly == true
-    end
+    local bundle = rawget(NexusDB, "authorityBundle")
+    -- Serving readiness can change without replacing the database or bundle
+    -- (notably the startup seal). Do not retain its earlier read-only verdict.
+    local catalog = Nexus and Nexus.BuildCatalog
+    local status = catalog and type(catalog.Status) == "function"
+        and catalog.Status() or nil
+    dbPolicyReadOnly = type(status) == "table" and status.readOnly == true
     if dbPolicyReadOnly then
         if transientDbOwner ~= NexusDB then
             transientDbOwner, transientDb = NexusDB, {}
         end
-        return transientDb
+        return dbBinding.Select(transientDb)
+    end
+    if bundle ~= nil then
+        local payload = type(bundle) == "table" and rawget(bundle, "dpsCapture")
+        if type(payload) == "table" then return dbBinding.Select(payload) end
+        -- An occupied bundle never grants permission to revive legacy input.
+        dbPolicyReadOnly = true
+        if transientDbOwner ~= NexusDB then
+            transientDbOwner, transientDb = NexusDB, {}
+        end
+        return dbBinding.Select(transientDb)
     end
     if type(NexusDB.dpsCapture) == "table" then
-        return NexusDB.dpsCapture
+        return dbBinding.Select(NexusDB.dpsCapture)
     end
     NexusDB.dpsCapture = {}
-    return NexusDB.dpsCapture
+    return dbBinding.Select(NexusDB.dpsCapture)
 end
 
 local function StorageReadOnly()
@@ -1117,6 +1134,7 @@ local function NewIdentityCategory()
 end
 
 local function CurrentDpsRevision()
+    DB()
     local revisions = Nexus and Nexus.Revisions
     local revision = revisions and type(revisions.Get) == "function"
         and revisions.Get(revisions.DPS_CHANGED) or nil
@@ -1935,6 +1953,14 @@ local function InvalidateAllDpsHashes()
     end
 end
 
+-- Retained hash/index/response work belongs to the represented payload, even
+-- when a maintenance replacement leaves the scalar DPS revision unchanged.
+dbBinding.invalidate = function()
+    identityIndex.initialized = false
+    InvalidateAllDpsHashes()
+    responseGeneration = responseGeneration + 1
+end
+
 local function AdjustDpsHashClass(classification, delta)
     if not classification then return end
     dpsHashCache.stats.storedRows = math.max(0,
@@ -2014,6 +2040,7 @@ local function EnsureDpsHashSubscription()
 end
 
 local function CachedDpsSyncHash()
+    DB()
     EnsureDpsHashSubscription()
     local revisions = Nexus and Nexus.Revisions
     local currentRevision = revisions and revisions.Get
@@ -2205,6 +2232,7 @@ local function TerminalOutbound(reason, amount)
 end
 
 local function CurrentDpsRevision()
+    DB()
     local revisions = Nexus and Nexus.Revisions
     return revisions and type(revisions.Get) == "function"
         and revisions.Get(revisions.DPS_CHANGED) or nil

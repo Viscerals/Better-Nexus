@@ -1,5 +1,54 @@
 # EVIDENCE
 
+## Controlled tester stabilization (2026-09-14; pre-freeze)
+
+- User authority SHA-256: ed346c82de566936e84bf5027f320275340b294a148ee3c4510b8818bf405b43.
+  One local attempt starts at 7efbd2608b8f016bd405692e8669c5082a508d14 on
+  test/usable-beta-stabilization. Prospective paths and dispositions:
+  C:/T3/BN/receipts/TESTER_PROFILE_7efbd260.md. Historical FAIL and 3/3/0 remain.
+- Refreshed CI: LuaJIT WB-13/18/19/20/21/22 failed; pinned Gitleaks detected a
+  public commit fixture variable; Fast/Full cancelled at 20/30-minute limits.
+  Windows LuaJIT 2.1.1774896198 reproduced the six exact errors. CountedCall
+  discarded nil-bearing return values through undefined sparse-table length.
+  Explicit return arity now passes 24/24 including a new guard, without changing
+  thresholds or original assertions. Gitleaks 8.30.1 exits 0 after the exact
+  fixture variable rename; no suppression, scanner change or history rewrite.
+- DPS public regression reproduced a post-retention write missing the current
+  bundle. Canonical payload selection and graph-bound cache invalidation correct
+  that path. Synthetic reload exposed stale cached read-only readiness; DPS now
+  observes current readiness. Capture/reload, boards, auto-build, metadata claim
+  cache, mesh, concurrent fanout, retention, compaction, duration, work-budget and
+  bootstrap checks passed individually under Windows LuaJIT. These are focused
+  pre-freeze checks, not integrated acceptance or native proof.
+- Real Sync Now regression passes cold readiness, repeated-click coalescing,
+  queued-generation replacement, disconnect and reset through actual transport.
+- Real saved-build publication passes pending display, duplicate-click
+  coalescing, close/reopen and selection-switch identity, one truthful completion,
+  one summary broadcast, source-drift failure, and synchronous refusal through
+  the actual renderer and controller paths.
+- Persisted `preparationEpoch` is inert across the exercised ordinary
+  bootstrap/DPS/save/reload/later-maintenance paths. Its schema cleanup remains
+  DEFERRED_NOT_PASS. MASTER-W3-003 through 006 remain P1 and require native
+  performance evidence. MASTER-W3-001 and 008 remain explicit synthetic
+  hardening deferrals, not architecture acceptance or severity downgrades.
+- Integrated pre-freeze proof: Windows LuaJIT inventory 243/243, 0 failed, with
+  only manual `tests/run_legacy_backup_smoke.lua` excluded; Lua 5.1 parsing
+  317/317; integration 70/70; semantic envelope 23/23; mixed-client 14/14;
+  work-budget 24/24; repository-pinned Gitleaks 8.30.1 exit 0 with no leaks.
+- Pre-freeze Fast on the final dirty bytes passed 89/89 checks, 0 failed,
+  0 skipped, 0 unavailable, in 7,377.126 seconds. Preserved summary SHA-256:
+  `f4de98cb147e9475240aaf325c3b03c98ff8dbd45c33c729ed74d6e70990a6c3`.
+- Freeze scope: 37 tracked paths, 751 insertions, 220 deletions, zero unstaged,
+  zero untracked. Ordinal LF path-list SHA-256:
+  `cc2499ad06bef9c733e7a26662c8877e86b85b345c20ba0e15e1537c10c154fe`.
+  Production scope is exactly `core/CommunityController.lua`,
+  `core/DpsCapture.lua`, `core/Main.lua`, `core/Sync.lua`,
+  `core/SyncSession.lua`, and `ui/CommunityRenderer.lua`.
+- Model provenance: earlier product edits used actual gpt-6-astra/high. At the
+  safe checkpoint, the same task continued with an actual turn_context at
+  2026-09-14T10:25:49.966Z recording gpt-5.6-sol/max. No competing writer or
+  worktree was created.
+
 Record concise command/result receipts here. A skipped or unavailable command is not a pass.
 
 ## Stage 50.1 — Package A clean reconstruction and review

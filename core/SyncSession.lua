@@ -63,6 +63,7 @@ function Session.New(options)
     local lastRequestAt = -math.huge
     local lastRequestId = nil
     local pendingRequest = nil
+    local pendingHashRequest = nil
     local requestedLoadouts = {}
     local pendingReplacementCount = 0
     local recoveryQueue, recoveryHead, recoveryTail = {}, 1, 0
@@ -511,6 +512,13 @@ function Session.New(options)
         lastSyncNewCount = 0
         local buildHash = options.currentBuildHash()
         local dpsHash = options.currentDpsHash()
+        if type(buildHash) ~= "string" or buildHash == "" or buildHash == "nil"
+            or type(dpsHash) ~= "string" or dpsHash == "" or dpsHash == "nil" then
+            pendingHashRequest = pendingHashRequest or {bypassCooldown=bypassCooldown}
+            SetQueueOutcome("preparing")
+            return nil, "preparing sync data"
+        end
+        pendingHashRequest = nil
         local requestId = "c1-" .. tostring(math.floor(current * 1000)) .. "-"
             .. tostring(math.random(1000, 9999))
         ResetOutcome(requestId)
@@ -593,7 +601,7 @@ function Session.New(options)
 
     local function BeginConvergencePass(mode, bypassCooldown)
         local ok, why = RequestSyncOnce(bypassCooldown)
-        if not ok then return false, why end
+        if ok ~= true then return ok, why end
         autoConverge.mode = mode or autoConverge.mode
         autoConverge.pass = autoConverge.pass + 1
         autoConverge.started = now()
@@ -606,6 +614,43 @@ function Session.New(options)
         return true
     end
 
+    -- One session-owned intent waits for the existing hash owner. No timer or
+    -- callback survives reset. Validate queued bytes again before transport so
+    -- an intervening generation change cannot send an obsolete digest.
+    function M.PrepareTransport()
+        if not pendingHashRequest and not pendingRequest then return end
+        local connected = options.isRequestChannelPresent and options.isRequestChannelPresent()
+            or not options.isRequestChannelPresent and options.isConnected()
+        if not connected or now() >= Number(autoConverge.absoluteUntil) then
+            local old = pendingRequest
+            pendingHashRequest, pendingRequest = nil, nil
+            autoConverge.active = false
+            if old then cancelRequest(old.id, myName()) end
+            SetQueueOutcome("dropped")
+            SetTerminal(not connected and "disconnected" or "expired")
+            return
+        end
+        if pendingRequest then
+            local buildHash, dpsHash = options.currentBuildHash(), options.currentDpsHash()
+            if buildHash == pendingRequest.buildHash and dpsHash == pendingRequest.dpsHash then
+                return
+            end
+            local old = pendingRequest
+            pendingRequest = nil
+            cancelRequest(old.id, myName())
+            autoConverge.pass = math.max(0, autoConverge.pass - 1)
+            pendingHashRequest = {bypassCooldown=true}
+        end
+        local intent = pendingHashRequest
+        if not intent then return end
+        local ok, why = BeginConvergencePass(autoConverge.mode, intent.bypassCooldown)
+        if ok == false then
+            pendingHashRequest = nil
+            autoConverge.active = false
+            autoConverge.terminal = why
+        end
+    end
+
     function M.RequestSync()
         local current = now()
         if autoConverge.active
@@ -613,11 +658,13 @@ function Session.New(options)
             autoConverge.active = false
             autoConverge.terminal = "expired"
             pendingRequest = nil
+            pendingHashRequest = nil
             receiveWindowUntil, receiveAbsoluteUntil = 0, 0
         end
         local supersedingAutomatic = autoConverge.active
             and autoConverge.mode == "automatic"
         if autoConverge.active and not supersedingAutomatic then
+            if pendingHashRequest then return nil, "preparing sync data" end
             return true, "already syncing"
         end
         if supersedingAutomatic then
@@ -625,6 +672,7 @@ function Session.New(options)
                 or lastRequestId
             if staleRequestId then cancelRequest(staleRequestId, myName()) end
             pendingRequest = nil
+            pendingHashRequest = nil
             lastRequestId = nil
             receiveWindowUntil, receiveAbsoluteUntil = 0, 0
             autoConverge.superseded = Number(autoConverge.superseded) + 1
@@ -640,11 +688,11 @@ function Session.New(options)
         autoConverge.peerEquivalent = false
         autoConverge.absoluteUntil = current + maxConvergenceAge
         local ok, why = BeginConvergencePass("manual", supersedingAutomatic)
-        if not ok then
+        if ok == false then
             autoConverge.active = false
             return false, why
         end
-        return true
+        return ok, why
     end
 
     function M.UpdateAutoSync(elapsed)
@@ -663,7 +711,7 @@ function Session.New(options)
         autoConverge.peerEquivalent = false
         autoConverge.absoluteUntil = now() + maxConvergenceAge
         local ok, why = BeginConvergencePass("automatic", false)
-        if not ok then
+        if ok == false then
             autoSyncPending = true
             autoSyncElapsed = autoSyncDelay - 1
             log("SYNC", "automatic login convergence deferred: %s",
@@ -678,13 +726,14 @@ function Session.New(options)
             autoConverge.active = false
             autoConverge.terminal = "expired"
             pendingRequest = nil
+            pendingHashRequest = nil
             receiveWindowUntil, receiveAbsoluteUntil = 0, 0
             SetTerminal("expired")
             log("SYNC", "convergence expired after %d pass(es)",
                 autoConverge.pass)
             return
         end
-        if pendingRequest or M.IsReceiving() then return end
+        if pendingHashRequest or pendingRequest or M.IsReceiving() then return end
         if current - autoConverge.started < autoSyncMinPass then return end
         if current - autoConverge.lastInbound < autoSyncQuiet then return end
         local changed = tostring(options.currentBuildHash())
@@ -853,6 +902,7 @@ function Session.New(options)
         lastRequestAt = -math.huge
         lastRequestId = nil
         pendingRequest = nil
+        pendingHashRequest = nil
         lastSyncNewCount = 0
         requestedLoadouts = {}
         pendingReplacementCount = 0

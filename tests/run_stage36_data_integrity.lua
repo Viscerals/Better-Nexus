@@ -652,12 +652,20 @@ Desired("storage", futureDb.loadoutEvidence == nil
         and futureDb.syncTombstones == nil
         and Codec.JSONEncode(futureDb) == futureBytes,
     "Sync.Init created older-owned siblings in a future catalog root")
+-- A read-only future root has no publishable hash. Establish a real marked
+-- request on an admitted root, then rebind the future root before ingress.
+-- This preserves every storage/refusal assertion without sending a nil hash.
+NexusDB = S.Database({})
+H.AdmitCatalogV1(NexusDB)
+S.CompatibilityHashes(Sync)
 Control(Sync.RequestSync() == true, "future-schema manual request queued")
 Pump(1.2)
 local futureRequestId = LatestRequestId()
 Control(type(futureRequestId) == "string"
         and futureRequestId:sub(1,3) == "c1-",
     "future-schema fixture reached a marked active request")
+NexusDB = futureDb
+H.AdmitCatalogV1(NexusDB)
 
 local futureSummary = {
     id="future-summary",t="Future Summary",a="FuturePeer",
@@ -874,8 +882,18 @@ do
     Sync.Init(Codec, {})
     Control(Catalog.Status().readOnly == true and Sync.IsConnected(),
         "opaque future-DPS fixture reached connected read-only Sync")
+    NexusDB = S.Database({})
+    H.AdmitCatalogV1(NexusDB)
+    S.CompatibilityHashes(Sync)
     Control(Sync.RequestSync() == true,
         "opaque future-DPS fixture queued a bounded Sync request")
+    Pump(1.2)
+    NexusDB = opaqueDpsDb
+    H.AdmitCatalogV1(NexusDB)
+    Sync.Init(Codec, {})
+    local pendingFuture, pendingFutureWhy = Sync.RequestSync()
+    Control(pendingFuture == nil and pendingFutureWhy == "preparing sync data",
+        "opaque future-DPS request did not retain truthful hash preparation")
     Pump(1.2)
     Desired("storage", opaqueDpsDb.dpsCapture == opaqueDpsIdentity
             and opaqueDpsDb.loadoutEvidence == nil

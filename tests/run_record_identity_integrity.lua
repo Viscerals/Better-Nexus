@@ -112,7 +112,7 @@ end
 -- but the promotion must atomically remove every contradictory field.
 local promoteEchoes={{spellId=200106,stacks=1}}
 local promoteFp=DPS.GetEchoKey(promoteEchoes)
-NexusDB.dpsCapture.characterBest.dummy["promote@ebonhold"]={
+H.DurablePayload("dpsCapture").characterBest.dummy["promote@ebonhold"]={
   player="Promote",ownerKey="promote@ebonhold",ownerVerified=true,
   realm="ebonhold",o="other@ebonhold",p="Other",r="otherrealm",
   claimedOwnerKey="other@ebonhold",relaySender="Other-Realm",
@@ -126,7 +126,7 @@ assert(DPS.ReceiveRecord({v=7,f=promoteFp,h=DPS.GetEchoHash(promoteEchoes),
   b="promote-page"},"Promote-Ebonhold"),
   "EXPECTED RED: exact DPS owner could not repair malformed retained evidence")
 S.PumpCatalogToIdle("promoted record page admission")
-local promoted=NexusDB.dpsCapture.characterBest.dummy["promote@ebonhold"]
+local promoted=H.DurablePayload("dpsCapture").characterBest.dummy["promote@ebonhold"]
 assert(promoted and DPS.VerifiedOwnerKey(promoted)=="promote@ebonhold"
   and promoted.o==nil and promoted.p==nil and promoted.r==nil
   and promoted.claimedOwnerKey==nil and promoted.relaySender==nil,
@@ -174,12 +174,12 @@ assert(S.CatalogMutation(function()
     echoes=relationEchoes,lastModified=now+2,
   })
 end, "realm-b relation fixture admission"))
-NexusDB.dpsCapture.characterBest.dummy["twin@realma"]={
+H.DurablePayload("dpsCapture").characterBest.dummy["twin@realma"]={
   player="Twin",ownerKey="twin@realma",ownerVerified=true,realm="realma",
   class="MAGE",dps=27000001,duration=65,ts=now+2,level=80,
   fingerprint=relationFp,echoes=relationEchoes,buildId="realm-b-relation",
 }
-NexusDB.dpsCapture.characterBest.dummy["legacyrelation@realma"]={
+H.DurablePayload("dpsCapture").characterBest.dummy["legacyrelation@realma"]={
   player="Legacyrelation",ownerKey="legacyrelation@realma",ownerVerified=false,
   realm="realma",class="MAGE",dps=27000002,duration=65,ts=now+3,level=80,
   fingerprint=relationFp,echoes=relationEchoes,
@@ -207,7 +207,7 @@ assert(S.CatalogMutation(function()
     echoes=savedRelationEchoes,lastModified=now+4,
   })
 end, "private Saved relation fixture admission"))
-NexusDB.dpsCapture.characterBest.dummy["shamanalt@ebonhold"]={
+H.DurablePayload("dpsCapture").characterBest.dummy["shamanalt@ebonhold"]={
   player="Shamanalt",ownerKey="shamanalt@ebonhold",ownerVerified=true,
   realm="ebonhold",class="SHAMAN",dps=27000003,duration=65,ts=now+4,
   level=80,fingerprint=savedRelationFp,echoes=savedRelationEchoes,
@@ -225,7 +225,7 @@ assert(savedMaterialized and savedMaterialized.echoes
 -- players share the same short name and fingerprint.
 local twinEchoes={{spellId=200107,stacks=1}}
 local twinFp=DPS.GetEchoKey(twinEchoes)
-local twinRows=NexusDB.dpsCapture.characterBest.dummy
+local twinRows=H.DurablePayload("dpsCapture").characterBest.dummy
 twinRows["twin@realma"]={
   player="Twin",ownerKey="twin@realma",ownerVerified=true,realm="realma",
   class="MAGE",dps=27100000,duration=65,ts=now+2,level=80,

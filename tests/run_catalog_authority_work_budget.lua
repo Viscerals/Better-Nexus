@@ -307,11 +307,25 @@ local function CountedCall(call)
             return nextKey, nextValue
         end, state, key
     end
-    local results = {pcall(call)}
+    local function Pack(...) return {n=select("#", ...), ...} end
+    local results = Pack(pcall(call))
     pairs, ipairs, next = oldPairs, oldIpairs, oldNext
     if not results[1] then error(results[2], 2) end
-    return steps, unpack(results, 2)
+    return steps, unpack(results, 2, results.n)
 end
+
+Case("WB-24", "public-call meter preserves nil-bearing result arity", function()
+    local ticket = {}
+    local steps, ok, reason, returnedTicket = CountedCall(function()
+        return nil, "ROOT_MUTATION_PENDING", ticket
+    end)
+    Check(steps == 0 and ok == nil and reason == "ROOT_MUTATION_PENDING"
+        and returnedTicket == ticket,
+        "public-call meter dropped the pending reason or exact ticket")
+    local function Arity(...) return select("#", ...) end
+    Check(Arity(CountedCall(function() return true, nil, nil end)) == 4,
+        "public-call meter dropped trailing nil result slots")
+end)
 
 local function MaximumDatabase()
     local rows = {

@@ -109,6 +109,10 @@ H.IsolatedSideV1 = function(root, database, identity)
         assert(state.state == "ROOT_ADMITTED" and state.candidate ~= true,
             "isolated peer catalog did not reach ROOT_ADMITTED")
     end
+    local dps = side.nexus and side.nexus.DpsCapture
+    if dps and type(dps.Init) == "function" then
+        dps.Init({}, side.nexus.Sync)
+    end
     local cache = side.nexus and side.nexus.BuildHashCache
     if type(cache) == "table" and type(cache.Pump) == "function" then
         for pumps = 0, 200000 do
@@ -921,7 +925,7 @@ end)
 --   * Both sides must carry DISTINCT identities or the exchange is treated as a
 --     self-request and silently dropped (core/SyncReconciler.lua ScheduleLoadout).
 
-local KEY_COMMIT = "6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f"
+local RECOVERY_BASE_COMMIT = "6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f"
 
 local keySequence = 0
 local function KeyRecord(ordinaryStacks, owner)
@@ -1001,7 +1005,7 @@ Case("MIX-17",
 function()
     -- Non-durable control messages. Their terminal is the correlation and the
     -- wire count, so no durable assertion is invented for them.
-    local baseRoot = H.MaterializeBaseTreeV1(KEY_COMMIT)
+    local baseRoot = H.MaterializeBaseTreeV1(RECOVERY_BASE_COMMIT)
     local requester = H.IsolatedSideV1(".", nil, {playerName="Alpha"})
     local ambient = H.CaptureWireV1(requester, function() return true end, 80)
     local requests = H.WireOfCodeV1(ambient, "WLRQ")
@@ -1052,7 +1056,7 @@ function()
     -- A per-bucket mesh claim divides reconciliation work. It carries no
     -- payload, so its terminal is "no durable mutation, no channel movement",
     -- and no durable assertion is invented for it.
-    local baseRoot = H.MaterializeBaseTreeV1(KEY_COMMIT)
+    local baseRoot = H.MaterializeBaseTreeV1(RECOVERY_BASE_COMMIT)
     for _, spec in ipairs({{name="new", root="."},
                            {name="old", root=baseRoot}}) do
         local side = H.IsolatedSideV1(spec.root, nil,

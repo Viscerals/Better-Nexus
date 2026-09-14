@@ -910,7 +910,8 @@ end
 local function CommandSync()
     if Nexus.Sync then
         local ok, err = Nexus.Sync.RequestSync()
-        Print(ok and "asking other players for their builds -- results appear in /nexus builds"
+        Print(ok == nil and tostring(err or "preparing sync data")
+            or ok and "asking other players for their builds -- results appear in /nexus builds"
             or tostring(err))
     else
         Print("sync unavailable")

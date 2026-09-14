@@ -212,6 +212,7 @@ NexusDB = viewerDb
 Nexus.Sync, Nexus.DpsCapture, Nexus.Revisions = requestingSync,
     requestingDps, requestingRevisions
 Sync, DPS, R = requestingSync, requestingDps, requestingRevisions
+H.AdmitCatalogV1(NexusDB)
 local beforeRevision = R.Get(R.DPS_CHANGED)
 -- A paced changed bucket can legitimately outlive the initial 60-second UI
 -- window. Inbound activity for the exact active request must extend quiet-time

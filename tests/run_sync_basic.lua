@@ -39,6 +39,7 @@ print("BroadcastBuild sends a real chat message via the sync channel -- OK")
 -- This build spans more than one chunk, so feed ALL queued messages
 -- through in order, exactly as CHAT_MSG_CHANNEL would deliver each one.
 NexusDB = {}  -- fresh DB, as if this were Bob's client
+H.AdmitCatalogV1(NexusDB)
 -- Receiving is opt-in now: Bob must have requested a sync for incoming
 -- builds to be accepted at all.
 assert(Sync.RequestSync(), "RequestSync should succeed")

@@ -8,19 +8,20 @@
 
 - Stage: 50
 - Checkpoint: 50.3
-- Status: IN_PROGRESS
-- Branch: `bugfix/test19-catalog-authority-22-wave3`
-- Starting head: rejected Wave 2 candidate `66e175b6296606e39bbec45ac30a109e21ab0ea9`, tree `fd2041bf2b9a7f6da3bdbb2716303ee4f99fb305`
-- Worktree: `C:\T3\BN\catalog-authority-22-wave3`
+- Status: IN_REVIEW
+- Branch: `test/usable-beta-stabilization`
+- Starting head: frozen Wave 3 `7efbd2608b8f016bd405692e8669c5082a508d14`, tree `8ceb2eb9decf9b1cb87096e78e33d5a87f76d5b5`
+- Worktree: `C:\T3\BN\usable-beta-stabilization`
 - Base: exact PR #68 head `6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f`
 
 ## Objective (current checkpoint)
 
-Complete the third and final bounded repair wave for `MASTER-W2-001` through
-`MASTER-W2-011`, mapped only to `MASTER-RC-002`, `MASTER-RC-006`,
-`MASTER-RC-007`, and `MASTER-RC-017` from the rejected Wave 2 MASTER result.
-Then freeze one coherent candidate for exact-head validation and one fresh
-independent acceptance campaign.
+Complete one finite controlled tester-stabilization attempt from frozen Wave 3.
+Correct MASTER-W3-002, 007, and 010 through real consumers. Assess 009 and
+characterize 003-006. Defer 001/008 under the explicit tester contract unless a
+normal enabled trigger is demonstrated. Preserve the historical Wave 3 FAIL and
+3/3/0 counters. One freeze and one independent tester-profile campaign; no
+automatic post-review repair.
 
 ## Deliverables (current checkpoint)
 
@@ -46,6 +47,17 @@ independent acceptance campaign.
 - EvidenceCoordinator identity plus append/removal revision binding.
 
 ## Acceptance (current checkpoint)
+
+- [x] CI failures classified with exact runtime evidence; scanner false positive resolved narrowly.
+- [x] DPS post-maintenance reads/writes, caches, and synthetic reload use the current owner.
+- [x] Real manual Sync entry retains one cancellable generation-correct pending action.
+- [x] Real publication renderer owns one truthful terminal outcome.
+- [x] Sidecar assessment and ordinary/max work measurements are recorded.
+- [x] Integrated tests and any DEFERRED_NOT_PASS assertions are identified exactly.
+- [ ] One clean candidate frozen; exact-head gates preserved without later tracked edits.
+- [ ] One independent tester-profile campaign aggregated; no automatic repair afterward.
+
+## Historical frozen Wave 3 acceptance checklist
 
 - [x] A behavioral expected-red matrix is recorded on exact PR #68 before any
   product edit, using only public seams that already exist on that base.
@@ -83,6 +95,10 @@ independent acceptance campaign.
 - [ ] Fresh independent Wave 3 MASTER accepts the frozen candidate.
 
 ## Evidence
+
+- Current governing tester profile: `C:/T3/BN/receipts/TESTER_PROFILE_7efbd260.md`.
+- Direct tester authorization SHA-256: `ed346c82de566936e84bf5027f320275340b294a148ee3c4510b8818bf405b43`.
+- The following Wave 3 and earlier entries are preserved history, not current acceptance or delivery authority.
 
 - path: .vibe/EVIDENCE.md
 - Canonical Wave 3 execution packet:
@@ -427,9 +443,6 @@ independent acceptance campaign.
 
 ## Recommended next action
 
-- Run exact-head Fast and one exact-head Full on this frozen commit with no
-  tracked edit. If both pass, hand the exact evidence to fresh direct Codex
-  Sol/max SPEC, STANDARDS, and ADVERSARIAL review and a separate MASTER. If
-  a required gate fails, report `HANDOFF_REQUIRED - WAVE 3 COMPLETE, NO
-  FURTHER REPAIR AUTHORIZED` and stop. No packaging, publication,
-  installation, native WoW test, or live SavedVariables access is authorized.
+- Complete the authorized tester implementation under the current profile.
+- Do not continue unrelated checkpoints, push, modify PRs, package, install,
+  access live SavedVariables, or run native WoW. No post-review repair is authorized.

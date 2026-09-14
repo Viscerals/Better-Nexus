@@ -110,7 +110,7 @@ local function BoardRow(category, fingerprint, realm)
 end
 
 local function DurableRow(category, fingerprint, realm)
-    local capture = NexusDB.dpsCapture or {}
+    local capture = H.DurablePayload("dpsCapture") or {}
     local store = capture.characterBest and capture.characterBest[category] or {}
     for _, row in pairs(store or {}) do
         if row.fingerprint == fingerprint and row.realm == realm then
@@ -636,7 +636,7 @@ end
 local storedProvenance = {}
 for key, value in pairs(outboundBase) do storedProvenance[key] = value end
 storedProvenance.relaySender = "Relay-RealmB"
-NexusDB.dpsCapture.characterBest.dummy["twin@realma"] = storedProvenance
+H.DurablePayload("dpsCapture").characterBest.dummy["twin@realma"] = storedProvenance
 local bucket = assert(DPS.SyncBucket("dummy", "Twin"))
 assert(not DPS.LocalOwnsDpsBucket(bucket),
     "retained DPS provenance regained local bucket ownership")

@@ -847,10 +847,10 @@ local staleDirectAccepted = SendDpsRecord("StaleDirectDps", "direct-stale",
         requestId="c1-stale-direct",
         bucket=staleDirectBucket})
 local staleDirectOutcome = RequestOutcome()
-local staleDirectStored = NexusDB and NexusDB.dpsCapture
-    and NexusDB.dpsCapture.characterBest
-    and NexusDB.dpsCapture.characterBest.dummy
-    and NexusDB.dpsCapture.characterBest.dummy["staledirectdps@ebonhold"] ~= nil
+local staleDirectDps = H.DurablePayload("dpsCapture")
+local staleDirectStored = staleDirectDps and staleDirectDps.characterBest
+    and staleDirectDps.characterBest.dummy
+    and staleDirectDps.characterBest.dummy["staledirectdps@ebonhold"] ~= nil
 clock = staleDirectSent + 61
 Check(staleDirectAccepted and staleDirectStored
         and staleDirectOutcome.requestId == staleDirectId
@@ -869,10 +869,10 @@ local foreignDirectAccepted = SendDpsRecord("ForeignDirectDps",
     "direct-foreign", foreignDirectRecord, {requester="Mallory-Ebonhold",
         requestId=foreignDirectId,bucket=foreignDirectBucket})
 local foreignDirectOutcome = RequestOutcome()
-local foreignDirectStored = NexusDB and NexusDB.dpsCapture
-    and NexusDB.dpsCapture.characterBest
-    and NexusDB.dpsCapture.characterBest.dummy
-    and NexusDB.dpsCapture.characterBest.dummy["foreigndirectdps@ebonhold"] ~= nil
+local foreignDirectDps = H.DurablePayload("dpsCapture")
+local foreignDirectStored = foreignDirectDps and foreignDirectDps.characterBest
+    and foreignDirectDps.characterBest.dummy
+    and foreignDirectDps.characterBest.dummy["foreigndirectdps@ebonhold"] ~= nil
 clock = foreignDirectSent + 61
 Check(foreignDirectAccepted and foreignDirectStored
         and foreignDirectOutcome.requestId == foreignDirectId
@@ -909,10 +909,10 @@ local wrongBucketAccepted = SendDpsRecord("WrongBucketDps", "wrong-bucket",
 Check(wrongBucketAccepted == false,
     "direct contextual WLD2 with wrong bucket remained fail-closed")
 local wrongBucketOutcome = RequestOutcome()
-local wrongBucketStored = NexusDB and NexusDB.dpsCapture
-    and NexusDB.dpsCapture.characterBest
-    and NexusDB.dpsCapture.characterBest.dummy
-    and NexusDB.dpsCapture.characterBest.dummy.wrongbucketdps ~= nil
+local wrongBucketDps = H.DurablePayload("dpsCapture")
+local wrongBucketStored = wrongBucketDps and wrongBucketDps.characterBest
+    and wrongBucketDps.characterBest.dummy
+    and wrongBucketDps.characterBest.dummy.wrongbucketdps ~= nil
 clock = wrongBucketSent + 61
 Check(wrongBucketOutcome.updated == 0 and wrongBucketOutcome.new == 0
         and wrongBucketOutcome.duplicates == 0

@@ -162,6 +162,132 @@ assert(#lb3 == 1 and lb3[1].player == "Alice" and lb3[1].dps == 120000,
     "lower remote submissions must not replace the record")
 print("single-record leaderboard rejects lower data -- OK")
 
+-- Real maintenance replaces the durable graph. Later public DPS writes must
+-- reach that graph, not the superseded legacy alias or a warmed identity index.
+NexusDB = S.Database({[buildId]=S.LocalBuild(buildId, 1, {author="Remote",
+    ownerKey="remote@ebonhold",isMine=false,class="ROGUE"})}, nil, {settings={communityRetentionEnabled=true,
+    communityRetentionTopPerCategory=25,communityRetentionMinPerClassPerCategory=1},
+    dpsCapture={lockedMigrationVersion=1,
+    personalBest={},buildBest={},characterBest={dummy={},lk={}}}})
+for index = 1, 26 do
+    local player = "Maintenance" .. index
+    NexusDB.dpsCapture.characterBest.dummy[player:lower() .. "@ebonhold"] = {
+        player=player,ownerKey=player:lower() .. "@ebonhold",realm="ebonhold",
+        ownerVerified=true,class="ROGUE",buildId=buildId,fingerprint="100000x1",
+        echoes={{spellId=100000,quality=3,stacks=1}},lockedEchoes={},
+        dps=100+index,duration=30,category="dummy",ts=wall}
+end
+H.BootstrapStoreReady()
+DPS.Init(Adapter, nil)
+S.PumpCatalogToIdle("DPS maintenance fixture startup")
+local startupCompaction
+for _ = 1, 20000 do
+    startupCompaction = Nexus.DataCompaction.Pump()
+    if not startupCompaction.pending then break end
+    Nexus.BuildCatalog.PumpRootAdmission()
+end
+assert(not startupCompaction.pending and not startupCompaction.blocked,
+    "startup compaction failed to settle: " .. tostring(startupCompaction.reason))
+local beforeMaintenance = NexusDB.authorityBundle.dpsCapture
+DPS.GetSyncHash()
+DPS.GetLeaderboard(buildId, "dummy")
+local retainedBoard = DPS.BeginDpsBoardCursor("dummy")
+local retainedEligibility = DPS.BeginCommunityEligibilityCursor()
+local maintenance = Nexus.DataRetention.Enforce(NexusDB, "tester DPS adoption")
+for _ = 1, 20000 do
+    if not maintenance.pending then break end
+    Nexus.BuildCatalog.PumpRootAdmission()
+    maintenance = Nexus.DataRetention.Enforce(NexusDB, "tester DPS adoption")
+end
+assert(not maintenance.pending and not maintenance.blocked,
+    "public retention failed to settle: " .. tostring(maintenance.reason))
+local currentDps = NexusDB.authorityBundle.dpsCapture
+assert(currentDps ~= beforeMaintenance, "retention did not replace DPS graph")
+assert(maintenance.characterBestRemoved == 1,
+    "retention did not remove the supported lowest DPS row: "
+        .. tostring(maintenance.characterBestRemoved) .. "/"
+        .. tostring(maintenance.selectedDummy))
+assert(#DPS.GetDpsBoard("dummy") == 25,
+    "public board still includes the removed row")
+local staleDone, staleWhy = DPS.DpsBoardCursorNext(retainedBoard)
+assert(staleDone and staleWhy == "DPS changed",
+    "retained board cursor accepted the superseded graph")
+local eligibilityDone, eligibilityWhy = DPS.CommunityEligibilityCursorNext(retainedEligibility)
+assert(eligibilityDone and eligibilityWhy == "DPS changed",
+    "retained eligibility cursor accepted the superseded graph")
+assert(DPS.ReceiveSubmission(buildId, "Tester", 130000, 80, "dummy", wall, 30),
+    "post-maintenance public submission refused")
+local durableTester
+for _, row in pairs(currentDps.characterBest.dummy) do
+    if row.player == "Tester" then durableTester = row end
+end
+assert(durableTester and durableTester.dps == 130000,
+    "post-maintenance DPS write missed the authoritative bundle")
+assert(DPS.GetLeaderboard(buildId, "dummy")[1].player == "Tester",
+    "post-maintenance leaderboard retained the superseded graph")
+local republished = Nexus.BuildCatalog.Get(buildId)
+republished.title = "Maintenance publication"
+republished.lastModified = republished.lastModified + 1
+assert(S.AwaitCatalogMutation(Nexus.BuildCatalog.Put(republished)),
+    "post-maintenance catalog publication failed")
+assert(Nexus.BuildCatalog.Get(buildId).title == republished.title,
+    "post-maintenance catalog update was not applied")
+assert(NexusDB.authorityBundle.dpsCapture.characterBest.dummy["maintenance1@ebonhold"] == nil,
+    "later catalog publication revived a pruned legacy DPS row")
+assert(DPS.GetLeaderboard(buildId, "dummy")[1].player == "Tester",
+    "later catalog publication lost a new DPS result")
+
+-- Cancelled and refused maintenance must not replace any accepted DPS row.
+local preservedBundle = NexusDB.authorityBundle
+local cancelled = assert(Nexus.BuildCatalog.BeginCatalogMaintenance({database=NexusDB,
+    operation="tester cancellation"}))
+assert(Nexus.BuildCatalog.CancelMaintenance(cancelled), "maintenance cancellation refused")
+assert(Nexus.BuildCatalog.CommitMaintenance(cancelled) == false,
+    "cancelled maintenance committed")
+assert(NexusDB.authorityBundle == preservedBundle
+        and DPS.GetLeaderboard(buildId, "dummy")[1].player == "Tester",
+    "cancelled maintenance changed accepted DPS data")
+
+-- Synthetic serialization destroys session identities. Keep durable bytes,
+-- reload the real domain modules, and bootstrap through the Store coordinator.
+local savedEpoch = NexusDB.authorityBundle.dpsAuthority.preparationEpoch
+local savedBytes = Nexus.Codec.JSONEncode(NexusDB)
+NexusDB = assert(Nexus.Codec.JSONDecode(savedBytes))
+S.Reload()
+dofile("core/DpsCapture.lua")
+DPS = Nexus.DpsCapture
+H.BootstrapStoreReady()
+DPS.Init(Adapter, nil)
+assert(NexusDB.authorityBundle.dpsAuthority.preparationEpoch == savedEpoch,
+    "ordinary reload unexpectedly changed the persisted sidecar epoch")
+assert(DPS.GetLeaderboard(buildId, "dummy")[1].player == "Tester"
+        and #DPS.GetDpsBoard("dummy") == 26,
+    "synthetic reload lost the post-maintenance result or revived the removed row")
+assert(NexusDB.authorityBundle.dpsCapture.characterBest.dummy["maintenance1@ebonhold"] == nil,
+    "synthetic reload used preserved legacy DPS as fallback")
+print("DPS public retention and later submission share the durable graph -- OK")
+
+-- A restarted session must also complete later maintenance without adopting
+-- the serialized epoch as session authority or falling back to legacy rows.
+for _ = 1, 20000 do
+    startupCompaction = Nexus.DataCompaction.Pump()
+    if not startupCompaction.pending then break end
+    Nexus.BuildCatalog.PumpRootAdmission()
+end
+assert(not startupCompaction.pending and not startupCompaction.blocked,
+    "post-reload compaction did not settle")
+local reloadMaintenance = Nexus.DataRetention.Enforce(NexusDB, "tester reload assessment")
+for _ = 1, 20000 do
+    if not reloadMaintenance.pending then break end
+    Nexus.BuildCatalog.PumpRootAdmission()
+    reloadMaintenance = Nexus.DataRetention.Enforce(NexusDB, "tester reload assessment")
+end
+assert(not reloadMaintenance.pending and not reloadMaintenance.blocked
+        and #DPS.GetDpsBoard("dummy") == 25
+        and DPS.GetLeaderboard(buildId, "dummy")[1].player == "Tester",
+    "persisted sidecar metadata changed later maintenance or DPS results")
+print("synthetic sidecar reload and later maintenance -- OK")
+
 -- Catalog class repair must retain a pending write and publish its metadata
 -- revision only after that exact write commits.
 local classRows = {}
@@ -180,7 +306,7 @@ local classRow = {player="Solkr", ownerKey="solkr@ebonhold", realm="ebonhold",
     ownerVerified=true, class="MAGE", buildId="pending-class-01",
     fingerprint="100000x1", echoes={{spellId=100000,quality=3,stacks=1}},
     lockedEchoes={}, dps=100, duration=30, category="dummy", ts=wall}
-NexusDB.dpsCapture.characterBest.dummy["solkr@ebonhold"] = classRow
+S.Durable(NexusDB, "dpsCapture").characterBest.dummy["solkr@ebonhold"] = classRow
 UnitClass = function() return "Mage", "MAGE" end
 local revisions, revisionKey = Nexus.Revisions, Nexus.Revisions.DPS_CHANGED
 local revisionBefore = revisions.Get(revisionKey)

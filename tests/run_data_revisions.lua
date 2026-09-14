@@ -126,7 +126,7 @@ local DPS = Nexus.DpsCapture
 time = function() return 50000 end
 UnitName = function() return "Local" end
 GetNormalizedRealmName = function() return "Ebonhold" end
-NexusDB.dpsCapture = {}
+NexusDB.authorityBundle.dpsCapture = {}
 Nexus.CommunityBuilds = nil
 -- MASTER-RC-001 (architecture 1207-1211): Sync.Init and DpsCapture.Init no
 -- longer admit the catalog root as a side effect. The same admission is
@@ -212,7 +212,7 @@ local personalRow = {
     ownerKey="local@ebonhold",ownerVerified=true,
     fingerprint="200200x2",echoes={{spellId=200200,count=2}},protocolVersion=7,
 }
-NexusDB.dpsCapture = {
+NexusDB.authorityBundle.dpsCapture = {
     characterBest={dummy={["local"]=localRow},lk={}},
     personalBest={["200200x2"]={dummy=personalRow}},
     buildBest={},

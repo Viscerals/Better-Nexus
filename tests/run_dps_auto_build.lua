@@ -90,8 +90,8 @@ assert(build.evidenceKey and type(durableEvidence) == "table"
     "automatic page did not dual-write exact evidence")
 assert(rawget(NexusDB, "loadoutEvidence") == nil,
     "Package B wrote the legacy evidence payload location")
-assert(NexusDB.dpsCapture.personalBest[fp].dummy.evidenceKey
-    and NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"].evidenceKey,
+assert(S.Durable(NexusDB, "dpsCapture").personalBest[fp].dummy.evidenceKey
+    and S.Durable(NexusDB, "dpsCapture").characterBest.dummy["recordmage@ebonhold"].evidenceKey,
     "personal/public DPS rows did not dual-write exact evidence")
 local lb=DPS.GetLeaderboard(buildId,"dummy")
 assert(#lb==1 and lb[1].dps==24000000 and lb[1].player=="Recordmage", "captured personal best should become the public build record")
@@ -145,7 +145,7 @@ local foreignBefore=Nexus.BuildCatalog.Get(foreignId)
 stubDps=30000000
 DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
 S.PumpCatalogToIdle("collision capture page admission")
-local localCollision=NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"]
+local localCollision=S.Durable(NexusDB, "dpsCapture").characterBest.dummy["recordmage@ebonhold"]
 local foreignAfter=Nexus.BuildCatalog.Get(foreignId)
 assert(localCollision and localCollision.fingerprint==collisionFp
     and localCollision.buildId and localCollision.buildId~=foreignId
@@ -181,7 +181,7 @@ end, "private Saved collision fixture admission"), "private Saved collision fixt
 stubDps=32000000
 DPS.OnCombatStart(); clock=clock+35; DPS.OnUpdate(10); DPS.OnCombatEnd()
 S.PumpCatalogToIdle("Saved collision capture page admission")
-local savedCollision=NexusDB.dpsCapture.characterBest.dummy["recordmage@ebonhold"]
+local savedCollision=S.Durable(NexusDB, "dpsCapture").characterBest.dummy["recordmage@ebonhold"]
 local savedMirror=Nexus.BuildCatalog.Get(savedId)
 assert(savedCollision and savedCollision.fingerprint==savedFp
     and savedCollision.buildId and savedCollision.buildId~=savedId

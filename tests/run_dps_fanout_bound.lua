@@ -63,9 +63,14 @@ end
 local function BootPeer(name, db)
     actor = name
     NexusDB = db
-    Nexus = setmetatable({SyncInternals={},CommunityBuilds=false}, {
+    Nexus = setmetatable({SyncInternals={},CommunityBuilds=false,
+        MainInternals=setmetatable({}, {__index=HarnessNexus.MainInternals})}, {
         __index=HarnessNexus,
     })
+    -- These authorities are session-owned too. Sharing the last peer's catalog
+    -- made all earlier peers read-only when their own database was activated.
+    dofile("core/LoadoutEvidence.lua")
+    dofile("core/BuildCatalog.lua")
     dofile("core/Revisions.lua")
     dofile("core/Codec.lua")
     dofile("core/BuildHashCache.lua")
@@ -632,7 +637,7 @@ local costBypassed, costBypassWhy = Sync.BroadcastDpsRecord(
 assert(costBypassed == false and costBypassWhy == "response wire budget",
     "EXPECTED RED: prepared DPS cache bypassed its wire budget")
 
-local durableRows = NexusDB.dpsCapture.characterBest.dummy
+local durableRows = S.Durable(NexusDB, "dpsCapture").characterBest.dummy
 local durableRecord = durableRows[verboseRecord.ownerKey]
 assert(type(durableRecord) == "table",
     "prepared-response fixture could not locate its durable owner row")

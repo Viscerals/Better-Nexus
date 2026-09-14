@@ -112,7 +112,7 @@ assert(Signature(alt)==altBefore,
     "another local account character was treated as current-login history")
 assert(Signature(localUnknown)==localBefore,
     "exact current owner was treated as proof of unknown historical locks")
-assert(prevention.lockedMigrationVersion==1,
+assert(H.DurablePayload("dpsCapture").lockedMigrationVersion==1,
     "fail-closed prevention did not complete the one-time migration")
 assert(unrelatedBroadcasts==0,
     "preserved fingerprints fabricated unrelated Sync churn")
@@ -181,6 +181,7 @@ interrupted.personalBest[Key(provenFinal)]={dummy=partial}
 DPS = LoadDps({loadoutEvidence={schemaVersion=1,entries={}},
     dpsCapture=interrupted})
 H.AdmitCatalogV1(NexusDB)
+interrupted = H.DurablePayload("dpsCapture")
 DPS.Init(Adapter({[B]=5}),{})
 local resumed = interrupted.personalBest[Key(provenSource)]
     and interrupted.personalBest[Key(provenSource)].dummy

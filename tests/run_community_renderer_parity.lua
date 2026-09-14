@@ -160,3 +160,188 @@ assert(not controller:find("CreateFrame", 1, true),
 print(string.format(
     "community renderer: results=%d created=%d active<=%d stable frames/boundaries -- OK",
     first.results, ending.created, ending.peakActive))
+
+-- Shipped manual entry points must retain intent while the real hash owner is
+-- cold. Neither a slash command nor repeated Sync Now clicks may format nil.
+local manualRows = {}
+for index = 1, 9 do
+    local id = "manual-sync-" .. index
+    manualRows[id] = S.LocalBuild(id, 1)
+end
+NexusDB = S.Database(manualRows)
+dofile("core/Codec.lua")
+dofile("core/BuildHashCache.lua")
+for _, module in ipairs({"SyncProtocol", "SyncTransport", "SyncCompatibility",
+        "SyncReconciler", "SyncInbound", "SyncDiagnostics", "SyncSession", "Sync"}) do
+    dofile("core/" .. module .. ".lua")
+end
+local realSync = Nexus.Sync
+H.AdmitCatalogV1(NexusDB)
+realSync.Init(Nexus.Codec, {})
+local coldHash = realSync.GetCompatibilityHashes()
+assert(coldHash == nil, "manual readiness fixture did not start with a cold hash")
+local clickOk, clickWhy = pcall(syncClick)
+assert(clickOk, "real Sync Now formatted an unready hash: " .. tostring(clickWhy))
+assert(realSync.Stats().preparingRequest == true,
+    "cold manual Sync did not expose truthful preparation")
+syncClick()
+syncClick()
+assert(realSync.Stats().preparingRequest == true,
+    "repeated Sync Now clicks did not retain one preparing intent")
+H.sentChatMessages = {}
+for _ = 1, 20000 do
+    Nexus.BuildHashCache.Pump()
+    realSync.OnUpdate(0.2)
+    if realSync.Stats().queueOutcome == "sent" then break end
+end
+local manualRequests = 0
+for _, message in ipairs(H.sentChatMessages) do
+    local wire = message.text:gsub("||", "|")
+    if wire:find("^WLRQ|") then
+        manualRequests = manualRequests + 1
+        assert(not wire:find("|nil|", 1, true), "manual request sent a nil hash")
+    end
+end
+assert(manualRequests == 1, "pending manual Sync did not send exactly once")
+print("real Sync Now cold-hash readiness -- OK")
+
+-- A changed generation must replace queued request bytes, not send the old
+-- digest. The mutation is real and all request traffic uses real transport.
+realSync.Init(Nexus.Codec, {})
+S.CompatibilityHashes(realSync)
+assert(realSync.RequestSync() == true, "warm manual request was not queued")
+local changed = Nexus.BuildCatalog.Get("manual-sync-1")
+changed.lastModified = changed.lastModified + 1
+changed.title = "New manual Sync generation"
+assert(S.CatalogMutation(function() return Nexus.BuildCatalog.Put(changed) end,
+    "manual Sync generation replacement"))
+H.sentChatMessages = {}
+for _ = 1, 20000 do
+    Nexus.BuildHashCache.Pump()
+    realSync.OnUpdate(0.2)
+    if realSync.Stats().queueOutcome == "sent" then break end
+end
+local expectedHash = realSync.GetCompatibilityHashes()
+local replacementRequests = 0
+for _, message in ipairs(H.sentChatMessages) do
+    local wire = message.text:gsub("||", "|")
+    if wire:find("^WLRQ|") then
+        replacementRequests = replacementRequests + 1
+        assert(wire:match("^WLRQ|[^|]+|([^|]+)|") == expectedHash,
+            "manual Sync sent the superseded generation hash")
+    end
+end
+assert(replacementRequests == 1, "generation replacement duplicated manual request")
+
+for _, cancelKind in ipairs({"disconnect", "reset"}) do
+    dofile("core/BuildHashCache.lua")
+    realSync.Init(Nexus.Codec, {})
+    local queued, why = realSync.RequestSync()
+    assert(queued == nil and why == "preparing sync data", "cancellation fixture not pending")
+    H.sentChatMessages = {}
+    if cancelKind == "disconnect" then H.joinedChannels = {}
+    else realSync.Init(Nexus.Codec, {}) end
+    realSync.OnUpdate(0.2)
+    assert(not realSync.Stats().preparingRequest,
+        cancelKind .. " retained an unintended delayed Sync action")
+    assert(#H.sentChatMessages == 0, cancelKind .. " sent a cancelled request")
+end
+print("manual Sync generation, disconnect and reset -- OK")
+
+-- Real upload button: a saved mirror publishes as one retained transaction.
+local savedId = "renderer-saved-upload"
+assert(S.CatalogMutation(function()
+    return Nexus.BuildCatalog.Put(S.LocalBuild(savedId, 1, {
+        title="Saved UI Build",serverTitle="Saved UI Build",author="RendererMage",
+        ownerKey="renderermage@ebonhold",realm="ebonhold",ownerVerified=true,
+        isMine=true,importedSavedBuild=true,serverSlot=1,class="MAGE"}))
+end, "renderer saved upload fixture"))
+C.ShowBuild(savedId)
+local uploadFrame = H.frames.NexusCommunityBuildsFrame
+S.PumpCommunityFrame(uploadFrame, function()
+    return uploadFrame._detailPanel:IsShown()
+        and uploadFrame._detailPanel.lockBtn:GetText() == "Upload Build"
+end, "saved upload detail")
+local uploadButton = uploadFrame._detailPanel.lockBtn
+local uploadClick = uploadButton:GetScript("OnClick")
+local uploadNotices, uploadPrint = {}, print
+local uploadBroadcasts, originalBroadcast = 0, realSync.BroadcastBuildSummary
+realSync.BroadcastBuildSummary = function(...)
+    uploadBroadcasts = uploadBroadcasts + 1
+    return originalBroadcast(...)
+end
+print = function(text) uploadNotices[#uploadNotices + 1] = tostring(text) end
+uploadClick()
+print = uploadPrint
+assert(Nexus.BuildCatalog.RootState().candidate == true,
+    "real upload button did not enter pending publication")
+assert(#uploadNotices == 1 and not uploadNotices[1]:find("|cffff6060", 1, true)
+        and uploadButton:GetText() == "Uploading...",
+    "real upload button reported pending publication as a failure")
+uploadClick()
+C.Hide()
+C.ShowBuild(savedId)
+assert(uploadButton:GetText() == "Uploading...",
+    "reopening the same saved build lost its pending operation")
+C.Hide()
+C.ShowBuild("manual-sync-2")
+print = function(text) uploadNotices[#uploadNotices + 1] = tostring(text) end
+S.PumpCatalogToIdle("real upload button transaction")
+print = uploadPrint
+local uploadedId = Nexus.BuildCatalog.Get(savedId).publishedBuildId
+assert(uploadedId and Nexus.BuildCatalog.Get(uploadedId),
+    "pending upload did not publish the exact saved build")
+local terminalNotices = 0
+for _, text in ipairs(uploadNotices) do
+    if text:find("uploaded", 1, true) then
+        terminalNotices = terminalNotices + 1
+        assert(text:find("Saved UI Build", 1, true),
+            "completion was attributed to the newly selected build")
+    end
+end
+assert(terminalNotices == 1, "pending upload did not report exactly one completion")
+assert(uploadBroadcasts == 1, "pending upload did not broadcast exactly once")
+assert(C.GetSelectedBuildForPanel().id == "manual-sync-2", "upload completion changed current selection")
+print("real upload button retains exact transaction and completion -- OK")
+
+-- Cancel an actual pending publication by replacing its source identity.
+-- The callback must report one failure and must never broadcast that attempt.
+C.ShowBuild(savedId)
+S.PumpCommunityFrame(uploadFrame, function()
+    return uploadButton:GetText() ~= "Uploading..."
+end, "completed saved upload detail")
+uploadNotices = {}
+print = function(text) uploadNotices[#uploadNotices + 1] = tostring(text) end
+uploadClick()
+local failedSource = NexusDB.authorityBundle
+assert(Nexus.BuildCatalog.RootState().candidate,
+    "failure fixture did not begin a real publication")
+NexusDB.authorityBundle = H.CloneValue(failedSource)
+S.PumpCatalogToIdle("source-drift upload failure")
+print = uploadPrint
+local failedNotices = 0
+for _, text in ipairs(uploadNotices) do
+    if text:find("|cffff6060", 1, true) then failedNotices = failedNotices + 1 end
+end
+assert(failedNotices == 1 and uploadBroadcasts == 1,
+    "failed upload did not report once or broadcast an uncommitted build")
+assert(NexusDB.authorityBundle.communityBuilds[savedId].publishedBuildId == uploadedId,
+    "failed upload changed the prior publication identity")
+H.AdmitCatalogV1(NexusDB)
+
+-- The same actual button must still report an immediate ownership refusal.
+C.ShowBuild(savedId)
+S.PumpCommunityFrame(uploadFrame, function()
+    return uploadButton:GetText() ~= "Uploading..."
+end, "refused upload detail")
+local originalName = UnitName
+UnitName = function() return "NotTheOwner" end
+uploadNotices = {}
+print = function(text) uploadNotices[#uploadNotices + 1] = tostring(text) end
+uploadClick()
+print, UnitName = uploadPrint, originalName
+assert(#uploadNotices == 1 and uploadNotices[1]:find("|cffff6060", 1, true)
+        and uploadBroadcasts == 1 and not Nexus.BuildCatalog.RootState().candidate,
+    "synchronous upload refusal was not truthful and side-effect free")
+realSync.BroadcastBuildSummary = originalBroadcast
+print("real upload failure and synchronous refusal -- OK")

@@ -464,10 +464,10 @@ Desired("recovered", boardReads == 0 and identityReads > 0,
 -- The real narrow DPS owner must derive that recovered identity itself; a
 -- consumer fixture is not allowed to manufacture resolvedBuildId.
 local injectedDps = Nexus.DpsCapture
-local originalDpsDb = NexusDB.dpsCapture
+local originalDpsDb = H.DurablePayload("dpsCapture")
 local originalFingerprintHash = build.fingerprintHash
 build.fingerprintHash = "stage36-shared-hash"
-NexusDB.dpsCapture = {characterBest={dummy={fixture={
+NexusDB.authorityBundle.dpsCapture = {characterBest={dummy={fixture={
     player="Fixture",class="MAGE",category="dummy",dps=410000,
     duration=30,level=80,ts=100,protocolVersion=6,
     buildId="historical-stage36-id",fingerprint=build.fingerprint,
@@ -497,7 +497,7 @@ Desired("recovered", realRecoveredReason == nil
         and EchoKey(realRecovered) == EchoKey(dummyLocked),
     "real indexed DPS owner did not publish the exact recovered identity")
 Nexus.DpsCapture = injectedDps
-NexusDB.dpsCapture = originalDpsDb
+NexusDB.authorityBundle.dpsCapture = originalDpsDb
 build.fingerprintHash = originalFingerprintHash
 
 local largeBoard = {}

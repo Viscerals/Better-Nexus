@@ -112,7 +112,7 @@ function Controller.New(options)
                 pendingCatalogMutations[outcome] = nil
                 if outcome.committed == true then
                     refreshView()
-                else
+                elseif retained and retained.operation ~= "publish-imported" then
                     notify("Catalog " .. tostring(retained
                         and retained.operation or "mutation")
                         .. " failed: " .. tostring(outcome.reason or "unknown"))
@@ -2475,14 +2475,19 @@ function Controller.New(options)
         return nil, nil, "no safe publication identity is available"
     end
 
-    function M.PublishImportedBuild(id)
+    function M.PublishImportedBuild(id, onComplete)
         local prior = pendingPublications[id]
         if prior then
             if prior.state == "pending" then
-                return nil, "ROOT_MUTATION_PENDING"
+                if not prior.onComplete and type(onComplete) == "function" then
+                    prior.onComplete = onComplete
+                end
+                return nil, "ROOT_MUTATION_PENDING", prior.ticket
             end
             pendingPublications[id] = nil
-            return prior.ok, prior.value
+            -- Existing polling callers consume the terminal receipt. A renderer
+            -- that already received its callback starts a new explicit update.
+            if type(onComplete) ~= "function" then return prior.ok, prior.value end
         end
         local source = LoadBuild(id)
         if Identity.SavedMirrorKind(source) ~= "saved" then
@@ -2547,11 +2552,15 @@ function Controller.New(options)
             operation.finalized = true
             operation.state, operation.ok, operation.value = "complete", ok,
                 value
-            if not ok then return end
-            BroadcastIfPossible(record)
-            local D = Nexus.DpsCapture
-            if D and D.BroadcastBestForBuild then
-                pcall(D.BroadcastBestForBuild, publishedId)
+            if ok then
+                BroadcastIfPossible(record)
+                local D = Nexus.DpsCapture
+                if D and D.BroadcastBestForBuild then
+                    pcall(D.BroadcastBestForBuild, publishedId)
+                end
+            end
+            if operation.onComplete then
+                operation.onComplete(ok, value, operation.ticket)
             end
         end
         local catalog = Catalog()
@@ -2595,8 +2604,10 @@ function Controller.New(options)
             return true, publishedId
         end
         if commitWhy == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
+            operation.ticket = ticket
+            operation.onComplete = type(onComplete) == "function" and onComplete or nil
             pendingPublications[id] = operation
-            return nil, commitWhy
+            return nil, commitWhy, ticket
         end
         Finish(false, commitWhy or "build storage refused")
         return false, operation.value

@@ -101,13 +101,13 @@ end
 local rebound=Copy(NexusDB)
 for _,category in ipairs({"dummy","lk"}) do
  local replacement={}
- for characterKey,row in pairs(rebound.dpsCapture.characterBest[category] or {}) do
+ for characterKey,row in pairs(H.DurablePayload("dpsCapture", rebound).characterBest[category] or {}) do
   -- Authority/provenance is deliberately poisoned without changing any digest
   -- input or the scalar DPS revision.
   row.claimedOwnerKey="mallory@otherrealm"
   replacement[characterKey]=row
  end
- rebound.dpsCapture.characterBest[category]=replacement
+ H.DurablePayload("dpsCapture", rebound).characterBest[category]=replacement
 end
 local equivalentHash=DPS.GetSyncHash()
 local equivalentRevision=Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)

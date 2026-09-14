@@ -79,7 +79,7 @@ for _,message in ipairs(localizedMessages) do
     Sync.HandleIncoming(message.text,'Duká')
 end
 local receivedLocalized=false
-for _,row in pairs(NexusDB.dpsCapture.characterBest.dummy or {}) do
+for _,row in pairs(H.DurablePayload("dpsCapture").characterBest.dummy or {}) do
     if row.player=='Duká' then receivedLocalized=true end
 end
 assert(receivedLocalized,'localized DPS transfer was rejected during reassembly')

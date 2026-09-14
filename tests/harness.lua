@@ -1191,7 +1191,8 @@ end
 function H.CaptureWireV1(side, operation, pumps)
     assert(type(side) == "table" and side.nexus, "CaptureWireV1 needs a side")
     side.harness.sentChatMessages = {}
-    local results = {pcall(operation, side)}
+    local function Pack(...) return {n=select("#", ...), ...} end
+    local results = Pack(pcall(operation, side))
     for _ = 1, (pumps or 40) do
         pcall(side.nexus.Sync.OnUpdate, 0.2)
     end
@@ -1199,7 +1200,7 @@ function H.CaptureWireV1(side, operation, pumps)
     for _, message in ipairs(side.harness.sentChatMessages) do
         wire[#wire + 1] = message.text or ""
     end
-    return wire, table.unpack(results)
+    return wire, (table.unpack or unpack)(results, 1, results.n)
 end
 
 -- Only the messages carrying `code`, so a caller never attributes ambient

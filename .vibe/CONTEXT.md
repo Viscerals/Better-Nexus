@@ -1,6 +1,24 @@
 # CONTEXT
 
-## Authority
+## Current tester-stabilization authority
+
+Complete one finite controlled tester-stabilization attempt from frozen Wave 3.
+Correct MASTER-W3-002, 007, and 010 through real consumers. Assess 009 and
+characterize 003-006. Defer 001/008 under the explicit tester contract unless a
+normal enabled trigger is demonstrated. Preserve the historical Wave 3 FAIL and
+3/3/0 counters. One freeze and one independent tester-profile campaign; no
+automatic post-review repair.
+
+- Worktree: `C:/T3/BN/usable-beta-stabilization`.
+- Branch: `test/usable-beta-stabilization`; checkpoint remains 50.3.
+- Governing profile: `C:/T3/BN/receipts/TESTER_PROFILE_7efbd260.md`.
+- Included Echo, Wishlist, DPS, Sync, and Community; no feature exclusions.
+- No push, PR modification, package, installation, native test, or live data access.
+- Original architecture acceptance stays FAIL. The sections below are frozen
+  historical context. Their old writer, next-action, acceptance and path restrictions
+  are superseded only by the explicit tester authorization and its exact purposes.
+
+## Historical Wave 3 authority
 
 - Work only in `C:\T3\BN\catalog-authority-22-wave3` on
   `bugfix/test19-catalog-authority-22-wave3`.

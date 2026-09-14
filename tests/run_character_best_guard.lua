@@ -48,6 +48,7 @@ local function legacyUntouched(what)
   "Package B wrote a legacy payload location ("..what..")")
 end
 local sent={}
+H.AdmitCatalogV1(NexusDB)
 DPS.Init(Adapter,{BroadcastDpsRecord=function(r) sent[#sent+1]=r return true end,BroadcastBuild=function() return true end,BroadcastDelete=function() return true end})
 local function setLoadout(ids)
  H.wishlist={name="test",echoes={}}

@@ -244,8 +244,9 @@ function Renderer.New(options)
             id, title, description, link)
     end
 
-    local function PublishImportedBuild(id)
-        return ControllerInstance().PublishImportedBuild(id)
+    local pendingUploads = {}
+    local function PublishImportedBuild(id, onComplete)
+        return ControllerInstance().PublishImportedBuild(id, onComplete)
     end
 
     local function PumpPendingLockIn()
@@ -1214,15 +1215,32 @@ local function EnsureDetailPanel(parent)
             return
         end
         if IsSavedMirror(b) then
-            local ok, err = PublishImportedBuild(selected)
-            if ok then
-                local displayTitle = b.displayTitle or DisplayRemoteText(
-                    b.title or "Saved Build", 1024, false) or "Saved Build"
-                print("|cff4dff80Nexus:|r uploaded '" .. displayTitle
-                    .. "' to community builds.")
+            if pendingUploads[selected] then return end
+            local displayTitle = b.displayTitle or DisplayRemoteText(
+                b.title or "Saved Build", 1024, false) or "Saved Build"
+            local operation = {id=selected,done=false}
+            local function Finish(ok, value, ticket)
+                if operation.done then return end
+                if ticket and (pendingUploads[selected] ~= operation
+                    or operation.ticket ~= ticket) then return end
+                operation.done = true
+                if pendingUploads[selected] == operation then pendingUploads[selected] = nil end
+                if ok then
+                    print("|cff4dff80Nexus:|r uploaded '" .. displayTitle
+                        .. "' to community builds.")
+                else
+                    print("|cffff6060Nexus:|r " .. tostring(value))
+                end
                 M.Refresh()
+            end
+            local ok, value, ticket = PublishImportedBuild(selected, Finish)
+            if ok == nil and value == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
+                operation.ticket = ticket
+                pendingUploads[selected] = operation
+                p.lockBtn:SetText("Uploading...")
+                print("|cff7fd5ffNexus:|r uploading '" .. displayTitle .. "'...")
             else
-                print("|cffff6060Nexus:|r " .. tostring(err))
+                Finish(ok == true, value)
             end
             return
         end
@@ -1541,7 +1559,9 @@ local function RefreshDetailPanel(buildId)
         detailPanel.retryShareBtn._nexusRetryGeneration = nil
         detailPanel.retryShareBtn._nexusRetryConsumed = false
     end
-    if detail then
+    if pendingUploads[SelectedId()] then
+        detailPanel.lockBtn:SetText("Uploading...")
+    elseif detail then
         detailPanel.lockBtn:SetText(detail.actionText)
     elseif IsSavedMirror(build) then
         detailPanel.lockBtn:SetText(
@@ -2273,7 +2293,10 @@ local function EnsureFrame()
         CloseDropdowns()
         local ok, err, available = ControllerInstance().RequestSync()
         if not available then return end
-        if ok then print("|cff7fd5ffNexus:|r asking other players for their builds...")
+        if ok == nil then
+            syncBtn:SetText("Preparing...")
+            print("|cff7fd5ffNexus:|r " .. tostring(err or "preparing sync data"))
+        elseif ok then print("|cff7fd5ffNexus:|r asking other players for their builds...")
         else print("|cffff6060Nexus:|r "..tostring(err)) end
     end)
     syncBtn:SetScript("OnEnter",function(self)
@@ -2492,7 +2515,11 @@ RenderSyncStatus = function(receiveCount)
                 bundled,overlay,available,shown,results,version))
         end
     end
-    if syncBtn then syncBtn:SetText(receiving and "Listening..." or "Sync Now") end
+    local syncStats = type(sync.Stats) == "function" and sync.Stats() or {}
+    local preparing = syncStats.preparingRequest == true
+    if preparing then syncStatusText:SetText("|cff7fd5ffPreparing sync data...|r") end
+    if syncBtn then syncBtn:SetText(preparing and "Preparing..."
+        or receiving and "Listening..." or "Sync Now") end
 end
 
 function M.DiagnosticSnapshot()

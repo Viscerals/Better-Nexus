@@ -50,7 +50,7 @@ assert(dpsBucket,"DPS row did not occupy a reconciliation bucket")
 Sync.HandleIncoming("WLRQ|Requester|0|0|dps-owner","Requester")
 Sync.HandleIncoming("WLBC|RelayTwo|Requester|dps-owner|D|"..dpsBucket.."|"..dpsBucketHash,"RelayTwo")
 Sync.HandleIncoming("WLRC|RelayTwo|Requester|dps-owner|0|"..dpsHash,"RelayTwo")
-currentName="Owner"; Pump(100)
+currentName="Owner"; H.AdmitCatalogV1(NexusDB); Pump(100)
 local sawDps,sawDpsClaim=false,false
 for _,m in ipairs(H.sentChatMessages) do
   sawDps=sawDps or not not m.text:find("^WLD2|")

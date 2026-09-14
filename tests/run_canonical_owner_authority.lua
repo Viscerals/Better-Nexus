@@ -1,6 +1,7 @@
 -- Durable owner authority is derived from the actual realm-qualified
 -- transport sender. Display-name resemblance is never ownership proof.
 local H = dofile("tests/harness.lua")
+local S = dofile("tests/catalog_authority_support.lua")
 
 local Identity = Nexus.Identity
 
@@ -14,6 +15,7 @@ assert(Identity.TransportOwns("twin@realma", "Twin-RealmB") == false,
     "same-name cross-realm transport gained owner authority")
 
 dofile("core/Codec.lua")
+dofile("core/BuildHashCache.lua")
 dofile("core/SyncProtocol.lua"); dofile("core/SyncTransport.lua")
 dofile("core/SyncCompatibility.lua"); dofile("core/SyncReconciler.lua")
 dofile("core/SyncInbound.lua"); dofile("core/SyncDiagnostics.lua")
@@ -452,7 +454,7 @@ assert(#rows == 1 and exactDps and exactDps.ownerVerified == true
         and exactDps.ownerKey == "twin@realma",
     "cross-realm DPS input displaced the exact RealmA owner record")
 local mismatchDps
-for _, candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
+for _, candidate in pairs(H.DurablePayload("dpsCapture").characterBest.dummy) do
     if candidate.fingerprint == DPS.GetEchoKey({{spellId=200201,stacks=1}}) then
         mismatchDps = candidate
     end
@@ -479,7 +481,7 @@ rows = DPS.GetDpsBoard("dummy")
 byFingerprint = {}
 for _, row in ipairs(rows) do byFingerprint[row.fingerprint] = row end
 local shortDps
-for _, candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
+for _, candidate in pairs(H.DurablePayload("dpsCapture").characterBest.dummy) do
     if candidate.fingerprint == DPS.GetEchoKey({{spellId=200202,stacks=1}}) then
         shortDps = candidate
     end
@@ -505,7 +507,7 @@ assert(verifiedRealms["twin@realma"] and verifiedRealms["twin@realmb"]
         and #rows == 2,
     "reload collapsed or re-authorized realm-qualified DPS evidence")
 local retainedUnverified = 0
-for _, candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
+for _, candidate in pairs(H.DurablePayload("dpsCapture").characterBest.dummy) do
     if candidate.ownerVerified ~= true then
         retainedUnverified = retainedUnverified + 1
     end
@@ -781,7 +783,7 @@ H.RebindCatalog()
 H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 
-NexusDB.dpsCapture = {}
+NexusDB.authorityBundle.dpsCapture = {}
 H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 H.AdmitCatalogV1(NexusDB)
@@ -842,7 +844,7 @@ local ghost = {
     fingerprint=ghostFingerprint,loadoutHash=DPS.GetEchoHash(ghostEchoes),
     protocolVersion=7,
 }
-NexusDB.dpsCapture = {
+NexusDB.authorityBundle.dpsCapture = {
     characterBest={dummy={["ghost@realma"]=ghost},lk={}},
     personalBest={},buildBest={},
 }
@@ -862,7 +864,7 @@ local malformedDps = {
     fingerprint=DPS.GetEchoKey(malformedEchoes),
     loadoutHash=DPS.GetEchoHash(malformedEchoes),protocolVersion=7,
 }
-NexusDB.dpsCapture = {
+NexusDB.authorityBundle.dpsCapture = {
     characterBest={dummy={["bob@realma"]=malformedDps},lk={}},
     personalBest={},buildBest={},
 }
@@ -957,6 +959,7 @@ assert(Nexus.BuildCatalog.Get("twin-a") == nil
 H.AdmitCatalogV1(NexusDB)
 Sync.Init(Codec, {})
 H.sentChatMessages = {}
+S.CompatibilityHashes(Sync)
 assert(Sync.RequestSync(), "canonical claim fixture could not start a request")
 for _ = 1, 20 do Sync.OnUpdate(0.2) end
 local activeRequestId

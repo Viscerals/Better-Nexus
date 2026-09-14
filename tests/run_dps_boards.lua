@@ -56,7 +56,7 @@ assert(collisionRow and collisionRow.ownerVerified==true
     and collisionRow.lockedFingerprint=="0",
     "stale catalog relationship did not retain exact verified row evidence and fail closed")
 local rawBravo
-for _,candidate in pairs(NexusDB.dpsCapture.characterBest.dummy) do
+for _,candidate in pairs(S.Durable(NexusDB, "dpsCapture").characterBest.dummy) do
     if candidate.player=="Bravo" then rawBravo=candidate break end
 end
 assert(rawBravo,"raw Bravo board row unavailable")

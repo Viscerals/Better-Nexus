@@ -48,6 +48,9 @@ assert(not sawDps,"relay redistributed a verified DPS record without origin evid
 
 -- The actual record owner can still publish the exact evidence.
 currentName="Champion"
+-- Simulated character switch: the normal lifecycle re-proves owner authority
+-- before admitting traffic for the new character.
+H.AdmitCatalogV1(NexusDB)
 assert(DPS.ReceiveRecord(ownerRecord,"Champion-Ebonhold"),
     "exact owner could not promote retained realm-less evidence")
 S.PumpCatalogToIdle("owner promotion exact-build admission")

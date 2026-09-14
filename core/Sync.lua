@@ -932,7 +932,13 @@ end
 function Sync.ChannelName()  return SYNC_CHANNEL end
 function Sync.ChannelIndex() return channelIndex end
 function Sync.IsConnected()  return channelIndex ~= nil and channelIndex > 0 end
-function Sync.Stats()        return stats end
+function Sync.Stats()
+    -- The diagnostic queue enum describes transport, not hash preparation.
+    -- Expose the current session's separate readiness state without inventing
+    -- a queued request or expanding that transport enum.
+    stats.preparingRequest = Session.StatusSnapshot().queueOutcome == "preparing"
+    return stats
+end
 
 function Sync.OnWorldEntry()
     local connected = Sync.EnsureChannel()
@@ -3447,6 +3453,11 @@ Session = SessionFactory.New({
     pendingDeleteCount=PendingDeleteCount,
     rejectRecoveryOverflow=RejectRecoveryOverflow,
     isConnected=function() return Sync.IsConnected() end,
+    isRequestChannelPresent=function()
+        local index = FindSyncChannel()
+        if not index then channelIndex = nil end
+        return index ~= nil
+    end,
     ensureChannel=function() return Sync.EnsureChannel() end,
     sendWhisper=function(message, target)
         return SendChatMessage(message, "WHISPER", nil, target)
@@ -3510,6 +3521,7 @@ function Sync.OnUpdate(elapsed)
         PumpPendingDeletes(elapsed)
         PumpPendingShare(elapsed)
     end
+    Session.PrepareTransport()
     Transport.Pump(elapsed)
     if Sync.FlushStatusReply then Sync.FlushStatusReply() end
     Session.UpdateAutoSync(elapsed)

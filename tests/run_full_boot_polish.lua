@@ -67,3 +67,30 @@ assert(Nexus.WishlistOverlay.IsShown(), "overlay did not show")
 print("overlay reachable and functional -- OK")
 
 print("full boot + polish integration OK (checks=4)")
+
+-- Actual Main command dispatch, after normal startup, with a cold hash owner.
+local S = dofile("tests/catalog_authority_support.lua")
+dofile("core/Codec.lua")
+for _, module in ipairs({"SyncProtocol", "SyncTransport", "SyncCompatibility",
+        "SyncReconciler", "SyncInbound", "SyncDiagnostics", "SyncSession", "Sync"}) do
+    dofile("core/" .. module .. ".lua")
+end
+H.AdmitCatalogV1(NexusDB)
+for index = 1, 9 do
+    assert(S.CatalogMutation(function()
+        return Nexus.BuildCatalog.Put(S.LocalBuild("slash-sync-" .. index, 1))
+    end, "slash Sync cold fixture"))
+end
+dofile("core/BuildHashCache.lua")
+Nexus.Sync.Init(Nexus.Codec, Nexus.GameAdapter)
+local notices, oldMessage = {}, DEFAULT_CHAT_FRAME.AddMessage
+DEFAULT_CHAT_FRAME.AddMessage = function(_, text) notices[#notices + 1] = text end
+local commandOk, commandWhy = pcall(SlashCmdList.NEXUS, "sync")
+DEFAULT_CHAT_FRAME.AddMessage = oldMessage
+assert(commandOk, "real /nexus sync failed: " .. tostring(commandWhy))
+assert(Nexus.Sync.Stats().preparingRequest == true,
+    "real /nexus sync did not retain hash preparation")
+assert(#notices == 1 and notices[1]:find("preparing sync data", 1, true)
+        and not notices[1]:find("asking other players", 1, true),
+    "real /nexus sync claimed transmission before hash readiness")
+print("real Main /nexus sync reports pending hash readiness -- OK")

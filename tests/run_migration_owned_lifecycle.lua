@@ -43,22 +43,22 @@ local DPS=Nexus.DpsCapture
 -- or expected value in this fixture is changed.
 H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
-assert(not NexusDB.dpsCapture.lockedMigrationVersion
-    and NexusDB.dpsCapture.personalBest[oldKey],
+assert(not H.DurablePayload("dpsCapture").lockedMigrationVersion
+    and H.DurablePayload("dpsCapture").personalBest[oldKey],
     "migration ran before locked data was authoritative")
 
 lockedReady=true
 H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
-assert(NexusDB.dpsCapture.lockedMigrationVersion==1,
+assert(H.DurablePayload("dpsCapture").lockedMigrationVersion==1,
     "successful locked migration did not persist its version")
-assert(NexusDB.dpsCapture.personalBest[oldKey]
-    and NexusDB.dpsCapture.personalBest[oldKey].dummy.echoes[1].count==2,
+assert(H.DurablePayload("dpsCapture").personalBest[oldKey]
+    and H.DurablePayload("dpsCapture").personalBest[oldKey].dummy.echoes[1].count==2,
     "unproven locked baseline changed historical data")
-local once=Codec.JSONEncode(NexusDB.dpsCapture)
+local once=Codec.JSONEncode(H.DurablePayload("dpsCapture"))
 H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
-assert(Codec.JSONEncode(NexusDB.dpsCapture)==once,
+assert(Codec.JSONEncode(H.DurablePayload("dpsCapture"))==once,
     "repeated initialization changed completed migration data")
 
 -- Simulate a reload interrupt after one row was already modified. The saved
@@ -98,18 +98,18 @@ interrupted.lockedMigrationSource={
     buildBest=original.buildBest,
     characterBest=original.characterBest,
 }
-NexusDB.dpsCapture=interrupted
+NexusDB.authorityBundle.dpsCapture=interrupted
 lockedReady=false
 dofile("core/DpsCapture.lua")
 DPS=Nexus.DpsCapture
 H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
-local retried=NexusDB.dpsCapture.personalBest[oldKey]
+local retried=H.DurablePayload("dpsCapture").personalBest[oldKey]
 assert(retried and retried.dummy.echoes[1].spellId==200100
     and retried.dummy.echoes[1].count==2
-    and NexusDB.dpsCapture.lockedMigrationSource==nil,
+    and H.DurablePayload("dpsCapture").lockedMigrationSource==nil,
     "unsynced restart did not restore and retire its immutable source")
-assert(not NexusDB.dpsCapture.lockedMigrationVersion,
+assert(not H.DurablePayload("dpsCapture").lockedMigrationVersion,
     "unsynced source restoration prematurely completed the migration")
 assert(partialEvidenceTouches==0,
     "partial live rows produced evidence before immutable source restoration")
@@ -118,13 +118,13 @@ assert(revisionBumps>0,
 lockedReady=true
 H.AdmitCatalogV1(NexusDB)
 DPS.Init(adapter,{})
-assert(NexusDB.dpsCapture.lockedMigrationVersion==1,
+assert(H.DurablePayload("dpsCapture").lockedMigrationVersion==1,
     "authoritative retry did not complete restored migration")
-local retryOnce=Codec.JSONEncode(NexusDB.dpsCapture)
+local retryOnce=Codec.JSONEncode(H.DurablePayload("dpsCapture"))
 dofile("core/DpsCapture.lua")
 H.AdmitCatalogV1(NexusDB)
 Nexus.DpsCapture.Init(adapter,{})
-assert(Codec.JSONEncode(NexusDB.dpsCapture)==retryOnce,
+assert(Codec.JSONEncode(H.DurablePayload("dpsCapture"))==retryOnce,
     "reload after resumed migration changed data again")
 
 -- Run ownership: a successful prior generation must not authorize the next.
