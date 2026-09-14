@@ -16,44 +16,133 @@ local function Case(id, name, body)
     return BaseCase(id, name, body)
 end
 
--- The sandbox runs as a different Windows identity from the worktree owner.
--- Keep fixture Git reads local to this exact checkout and never alter global
--- Git configuration.
-local materializedTrees = {}
-local function ReadMaterialized(path)
-    local handle = io.open(path, "rb")
-    if not handle then return nil end
-    local value = handle:read("*a")
-    handle:close()
-    return value
+-- Shell setup is local to this test. Peers still receive fresh isolated state.
+local fixtureWindows = package.config:sub(1, 1) == "\\"
+local function FixtureQuote(value)
+    assert(type(value) == "string" and not value:find("[\r\n]"),
+        "compatibility prerequisite: invalid shell path")
+    if fixtureWindows then
+        assert(not value:find('["%%!%^]'),
+            "compatibility prerequisite: unsupported Windows shell path")
+        return '"' .. value .. '"'
+    end
+    return "'" .. value:gsub("'", "'\\''") .. "'"
 end
+
+local function FixtureCommand(command, purpose)
+    local ok, kind, code = os.execute(command)
+    assert(ok == 0 or (ok == true and kind == "exit" and code == 0),
+        "compatibility prerequisite: " .. purpose .. " failed ("
+            .. tostring(ok) .. ", " .. tostring(kind) .. ", " .. tostring(code) .. ")")
+end
+
+local function FixtureRead(path)
+    local handle = assert(io.open(path, "rb"),
+        "compatibility prerequisite: missing command output " .. path)
+    local text = handle:read("*a")
+    handle:close()
+    return (text:gsub("%s+$", ""))
+end
+
+local function MaterializeFixture(commit, expectedTree)
+    local temp = os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP")
+        or (not fixtureWindows and "/tmp")
+    assert(type(temp) == "string", "compatibility prerequisite: no temporary parent")
+    temp = temp:gsub("\\", "/"):gsub("/+$", "")
+    assert((fixtureWindows and temp:match("^%a:/"))
+        or (not fixtureWindows and temp:sub(1, 1) == "/"),
+        "compatibility prerequisite: temporary parent must be absolute")
+    -- tmpname may reserve a file (LuaJIT) or only a name (Fengari).
+    local marker = os.tmpname()
+    local token = marker:gsub("\\", "/"):match("([^/]+)$")
+    assert(token and token:match("^[%w._%-]+$"),
+        "compatibility prerequisite: invalid unique temporary name")
+    local reserved = io.open(marker, "rb")
+    if reserved then
+        reserved:close()
+        assert(os.remove(marker), "compatibility prerequisite: temporary marker cleanup failed")
+    end
+    -- The parent of the extracted source deliberately contains spaces.
+    local dir = temp .. "/bn compatibility " .. token
+    local source = dir .. "/source"
+    local owned = false
+    local function Cleanup()
+        if not owned then return end
+        -- Only the exact absolute directory successfully created below is owned.
+        assert(dir:sub(1, #temp + 1) == temp .. "/" and dir ~= temp,
+            "compatibility prerequisite: unsafe cleanup target")
+        if fixtureWindows then
+            local script = "$target = [IO.Path]::GetFullPath('"
+                .. dir:gsub("'", "''") .. "'); $parent = [IO.Path]::GetFullPath('"
+                .. temp:gsub("'", "''") .. "'); "
+                .. "if ([IO.Path]::GetDirectoryName($target) -cne $parent) "
+                .. "{ throw 'unsafe cleanup target' }; "
+                .. "Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop"
+            FixtureCommand("powershell.exe -NoProfile -NonInteractive -Command "
+                .. FixtureQuote(script), "owned temporary cleanup")
+        else
+            FixtureCommand("rm -rf -- " .. FixtureQuote(dir), "owned temporary cleanup")
+        end
+        owned = false
+    end
+    local ok, tree = pcall(function()
+        local mkdir = fixtureWindows and "mkdir " or "mkdir -- "
+        local function Directory(path)
+            return FixtureQuote(fixtureWindows and path:gsub("/", "\\") or path)
+        end
+        FixtureCommand(mkdir .. Directory(dir), "unique temporary directory creation")
+        owned = true
+        FixtureCommand(mkdir .. Directory(source), "source directory creation")
+        local output = dir .. "/identity.txt"
+        FixtureCommand((fixtureWindows and "cd" or "pwd -P") .. " > "
+            .. FixtureQuote(output), "active checkout resolution")
+        local safeRoot = FixtureRead(output):gsub("\\", "/")
+        assert(type(safeRoot) == "string" and safeRoot ~= "",
+            "could not resolve the active fixture checkout")
+        local git = "git -c " .. FixtureQuote("safe.directory=" .. safeRoot)
+            .. " -C " .. FixtureQuote(safeRoot)
+        FixtureCommand(git .. " log -1 --format=%H " .. commit .. " > "
+            .. FixtureQuote(output), "historical commit verification")
+        assert(FixtureRead(output) == commit,
+            "compatibility prerequisite: historical commit mismatch")
+        FixtureCommand(git .. " log -1 --format=%T " .. commit .. " > "
+            .. FixtureQuote(output), "historical tree verification")
+        local actualTree = FixtureRead(output)
+        assert(actualTree == expectedTree,
+            "compatibility prerequisite: historical tree mismatch: " .. actualTree)
+        local archive = dir .. "/base.tar"
+        FixtureCommand(git .. " archive --format=tar --output="
+            .. FixtureQuote(archive) .. " " .. commit, "historical archive")
+        FixtureCommand("tar -xf " .. FixtureQuote(archive) .. " -C "
+            .. FixtureQuote(source), "historical extraction")
+        assert(os.remove(archive), "compatibility prerequisite: archive cleanup failed")
+        print("compatibility prerequisite verified: " .. commit .. " tree " .. actualTree)
+        return actualTree
+    end)
+    if not ok then
+        local cleaned, cleanupError = pcall(Cleanup)
+        error("compatibility prerequisite: " .. tostring(tree)
+            .. (cleaned and "" or ("; " .. tostring(cleanupError))), 0)
+    end
+    return source, tree, Cleanup
+end
+
+local materializedTrees = {}
 function H.MaterializeBaseTreeV1(commit)
     assert(type(commit) == "string" and #commit >= 7,
         "MaterializeBaseTreeV1 requires an exact commit")
+    assert(commit == "6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f",
+        "compatibility prerequisite: unexpected historical commit")
     local cached = materializedTrees[commit]
     if cached then return cached.root, cached.tree end
-    local temp = (os.getenv("TEMP") or os.getenv("TMPDIR") or ".")
-    local dir = (temp:gsub("\\", "/")) .. "/bn-mix-" .. commit:sub(1, 12)
-    local windows = dir:gsub("/", "\\")
-    os.execute('rmdir /s /q "' .. windows .. '" 2>nul')
-    os.execute('mkdir "' .. windows .. '" 2>nul')
-    local cwdPath = dir .. "/.mix-cwd"
-    os.execute('cd > "' .. cwdPath .. '"')
-    local safeRoot = ReadMaterialized(cwdPath)
-    safeRoot = safeRoot and safeRoot:gsub("%s+$", ""):gsub("\\", "/")
-    assert(type(safeRoot) == "string" and safeRoot ~= "",
-        "could not resolve the active fixture checkout")
-    local safeGit = 'git -c safe.directory="' .. safeRoot .. '"'
-    os.execute(safeGit .. ' archive ' .. commit
-        .. ' | tar -x -C "' .. dir .. '"')
-    local hashPath = dir .. "/.mix-tree"
-    os.execute(safeGit .. ' log -1 --format=%T ' .. commit
-        .. ' > "' .. hashPath .. '"')
-    local tree = ReadMaterialized(hashPath)
-    tree = tree and tree:gsub("%s+$", "") or nil
-    materializedTrees[commit] = {root=dir, tree=tree}
+    local dir, tree, cleanup = MaterializeFixture(commit,
+        "0d293768d6c7a14d78a9b9ee9b3844d2b9bad3b6")
+    materializedTrees[commit] = {root=dir, tree=tree, cleanup=cleanup}
     return dir, tree
 end
+
+-- Fail on setup before any product assertion. Only immutable source is cached.
+H.MaterializeBaseTreeV1("6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f")
 
 local Codec, Sync = Nexus.Codec, Nexus.Sync
 local clock = 1000
@@ -363,8 +452,8 @@ local MIX_COMMIT = "6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f"
 local MIX_TREE = "0d293768d6c7a14d78a9b9ee9b3844d2b9bad3b6"
 local MIX_BASE
 
--- Rule 1. H.MaterializeBaseTreeV1 reports the tree hash and does not assert it,
--- so the verification is the caller's and cannot be skipped by accident.
+-- Rule 1. Setup verifies the prerequisite before cases run. Retain the caller's
+-- original tree assertion as an independent check of the returned identity.
 local function MixQuadrants()
     if not MIX_BASE then
         local root, tree = H.MaterializeBaseTreeV1(MIX_COMMIT)
@@ -1612,5 +1701,6 @@ function()
     Check(type(Sync.BroadcastDpsRecord) == "function",
         "Sync.BroadcastDpsRecord is not a public entry")
 end)
+for _, fixture in pairs(materializedTrees) do fixture.cleanup() end
 Check(#S.results > 0, "no selected Sync test case executed")
 S.Finish("sync semantic envelope and protocol-7 identity matrix")

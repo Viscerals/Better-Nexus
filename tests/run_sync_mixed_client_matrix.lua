@@ -103,9 +103,115 @@ end
 -- Fixture rule 1: materialize the exact PR #68 tree and verify it.
 ------------------------------------------------------------------------
 
-local function TempRoot()
-    local temp = (os.getenv("TEMP") or os.getenv("TMPDIR") or ".")
-    return (temp:gsub("\\", "/")) .. "/bn-mix-client-matrix"
+-- Shell setup is local to this test. Peers still receive fresh isolated state.
+local fixtureWindows = package.config:sub(1, 1) == "\\"
+local function FixtureQuote(value)
+    assert(type(value) == "string" and not value:find("[\r\n]"),
+        "compatibility prerequisite: invalid shell path")
+    if fixtureWindows then
+        assert(not value:find('["%%!%^]'),
+            "compatibility prerequisite: unsupported Windows shell path")
+        return '"' .. value .. '"'
+    end
+    return "'" .. value:gsub("'", "'\\''") .. "'"
+end
+
+local function FixtureCommand(command, purpose)
+    local ok, kind, code = os.execute(command)
+    assert(ok == 0 or (ok == true and kind == "exit" and code == 0),
+        "compatibility prerequisite: " .. purpose .. " failed ("
+            .. tostring(ok) .. ", " .. tostring(kind) .. ", " .. tostring(code) .. ")")
+end
+
+local function FixtureRead(path)
+    local handle = assert(io.open(path, "rb"),
+        "compatibility prerequisite: missing command output " .. path)
+    local text = handle:read("*a")
+    handle:close()
+    return (text:gsub("%s+$", ""))
+end
+
+local function MaterializeFixture(commit, expectedTree)
+    local temp = os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP")
+        or (not fixtureWindows and "/tmp")
+    assert(type(temp) == "string", "compatibility prerequisite: no temporary parent")
+    temp = temp:gsub("\\", "/"):gsub("/+$", "")
+    assert((fixtureWindows and temp:match("^%a:/"))
+        or (not fixtureWindows and temp:sub(1, 1) == "/"),
+        "compatibility prerequisite: temporary parent must be absolute")
+    -- tmpname may reserve a file (LuaJIT) or only a name (Fengari).
+    local marker = os.tmpname()
+    local token = marker:gsub("\\", "/"):match("([^/]+)$")
+    assert(token and token:match("^[%w._%-]+$"),
+        "compatibility prerequisite: invalid unique temporary name")
+    local reserved = io.open(marker, "rb")
+    if reserved then
+        reserved:close()
+        assert(os.remove(marker), "compatibility prerequisite: temporary marker cleanup failed")
+    end
+    -- The parent of the extracted source deliberately contains spaces.
+    local dir = temp .. "/bn compatibility " .. token
+    local source = dir .. "/source"
+    local owned = false
+    local function Cleanup()
+        if not owned then return end
+        -- Only the exact absolute directory successfully created below is owned.
+        assert(dir:sub(1, #temp + 1) == temp .. "/" and dir ~= temp,
+            "compatibility prerequisite: unsafe cleanup target")
+        if fixtureWindows then
+            local script = "$target = [IO.Path]::GetFullPath('"
+                .. dir:gsub("'", "''") .. "'); $parent = [IO.Path]::GetFullPath('"
+                .. temp:gsub("'", "''") .. "'); "
+                .. "if ([IO.Path]::GetDirectoryName($target) -cne $parent) "
+                .. "{ throw 'unsafe cleanup target' }; "
+                .. "Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop"
+            FixtureCommand("powershell.exe -NoProfile -NonInteractive -Command "
+                .. FixtureQuote(script), "owned temporary cleanup")
+        else
+            FixtureCommand("rm -rf -- " .. FixtureQuote(dir), "owned temporary cleanup")
+        end
+        owned = false
+    end
+    local ok, tree = pcall(function()
+        local mkdir = fixtureWindows and "mkdir " or "mkdir -- "
+        local function Directory(path)
+            return FixtureQuote(fixtureWindows and path:gsub("/", "\\") or path)
+        end
+        FixtureCommand(mkdir .. Directory(dir), "unique temporary directory creation")
+        owned = true
+        FixtureCommand(mkdir .. Directory(source), "source directory creation")
+        local output = dir .. "/identity.txt"
+        FixtureCommand((fixtureWindows and "cd" or "pwd -P") .. " > "
+            .. FixtureQuote(output), "active checkout resolution")
+        local safeRoot = FixtureRead(output):gsub("\\", "/")
+        assert(type(safeRoot) == "string" and safeRoot ~= "",
+            "could not resolve the active fixture checkout")
+        local git = "git -c " .. FixtureQuote("safe.directory=" .. safeRoot)
+            .. " -C " .. FixtureQuote(safeRoot)
+        FixtureCommand(git .. " log -1 --format=%H " .. commit .. " > "
+            .. FixtureQuote(output), "historical commit verification")
+        assert(FixtureRead(output) == commit,
+            "compatibility prerequisite: historical commit mismatch")
+        FixtureCommand(git .. " log -1 --format=%T " .. commit .. " > "
+            .. FixtureQuote(output), "historical tree verification")
+        local actualTree = FixtureRead(output)
+        assert(actualTree == expectedTree,
+            "compatibility prerequisite: historical tree mismatch: " .. actualTree)
+        local archive = dir .. "/base.tar"
+        FixtureCommand(git .. " archive --format=tar --output="
+            .. FixtureQuote(archive) .. " " .. commit, "historical archive")
+        FixtureCommand("tar -xf " .. FixtureQuote(archive) .. " -C "
+            .. FixtureQuote(source), "historical extraction")
+        assert(os.remove(archive), "compatibility prerequisite: archive cleanup failed")
+        print("compatibility prerequisite verified: " .. commit .. " tree " .. actualTree)
+        return actualTree
+    end)
+    if not ok then
+        local cleaned, cleanupError = pcall(Cleanup)
+        error("compatibility prerequisite: " .. tostring(tree)
+            .. (cleaned and "" or ("; " .. tostring(cleanupError))), 0)
+    end
+    return source, tree, Cleanup
 end
 
 local fileCache = {}
@@ -122,27 +228,7 @@ local function ReadFile(path)
 end
 
 local function Materialize()
-    local dir = TempRoot()
-    local windows = dir:gsub("/", "\\")
-    os.execute('rmdir /s /q "' .. windows .. '" 2>nul')
-    os.execute('mkdir "' .. windows .. '" 2>nul')
-    local cwdPath = dir .. "/.mix-cwd"
-    os.execute('cd > "' .. cwdPath .. '"')
-    local safeRoot = ReadFile(cwdPath)
-    safeRoot = safeRoot and safeRoot:gsub("%s+$", ""):gsub("\\", "/")
-    assert(type(safeRoot) == "string" and safeRoot ~= "",
-        "could not resolve the active fixture checkout")
-    local safeGit = 'git -c safe.directory="' .. safeRoot .. '"'
-    os.execute(safeGit .. ' archive ' .. REQUIRED_BASE_COMMIT
-        .. ' | tar -x -C "' .. dir .. '"')
-    -- `git rev-parse <sha>^{tree}` cannot be used here: `^` is the cmd.exe
-    -- escape character and is eaten before git sees it.
-    local hashPath = dir .. "/.mix-tree"
-    os.execute(safeGit .. ' log -1 --format=%T ' .. REQUIRED_BASE_COMMIT
-        .. ' > "' .. hashPath .. '"')
-    local tree = ReadFile(hashPath)
-    tree = tree and (tree:gsub("%s+$", "")) or nil
-    return dir, tree
+    return MaterializeFixture(REQUIRED_BASE_COMMIT, REQUIRED_BASE_TREE)
 end
 
 ------------------------------------------------------------------------
@@ -339,7 +425,7 @@ local function DeliverTo(root, wire, sender)
     }
 end
 
-local BASE, BASE_TREE = Materialize()
+local BASE, BASE_TREE, CleanupBase = Materialize()
 local NEW = "."
 
 ------------------------------------------------------------------------
@@ -1156,6 +1242,7 @@ function()
         "new sender's echo tuple " .. tostring(mismatch)
             .. " differs from the exact PR #68 encoder output")
 end)
+CleanupBase()
 print(string.format(
     "sync mixed-client matrix: %d passed, %d red", passed, #failures))
 if #failures > 0 then

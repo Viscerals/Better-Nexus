@@ -65,6 +65,7 @@ jobs:
         with:
           ref: ${{ needs.candidate.outputs.candidate_sha }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Verify exact candidate checkout
         shell: pwsh
@@ -75,10 +76,28 @@ jobs:
           if ($actual -cne $env:EXPECTED_CANDIDATE_SHA) { throw "Expected $env:EXPECTED_CANDIDATE_SHA, checked out $actual." }
           "Exact candidate HEAD: $actual" >> $env:GITHUB_STEP_SUMMARY
 
+      - name: Verify exact compatibility source
+        shell: bash
+        run: |
+          historical=6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f
+          expected_tree=0d293768d6c7a14d78a9b9ee9b3844d2b9bad3b6
+          test "$(git log -1 --format=%H "$historical")" = "$historical"
+          actual_tree=$(git log -1 --format=%T "$historical")
+          test "$actual_tree" = "$expected_tree"
+          echo "Compatibility source: $historical tree $actual_tree" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Install LuaJIT
         run: |
           sudo apt-get update
           sudo apt-get install --yes luajit
+
+      - name: Verify Linux compatibility fixtures
+        shell: bash
+        run: |
+          uname -sr
+          luajit -v
+          luajit tests/run_sync_mixed_client_matrix.lua
+          luajit tests/run_sync_semantic_envelope.lua
 
       - name: Run normal Lua regression programs
         shell: bash
