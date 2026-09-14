@@ -926,7 +926,17 @@ local function EnsureFrame()
     end
     classBtn:SetScript("OnClick",function(self) if classMenu:IsShown() then classMenu:Hide() else classMenu:ClearAllPoints(); classMenu:SetPoint("TOPLEFT",self,"BOTTOMLEFT",0,-2); classMenu:Show() end end)
 
-    syncBtn=MakeNavButton(frame,"Sync Now",90); syncBtn:SetPoint("TOPRIGHT",-18,-50); syncBtn:SetScript("OnClick",function() classMenu:Hide(); if Nexus.Sync then Nexus.Sync.RequestSync() end end)
+    syncBtn=MakeNavButton(frame,"Sync Now",90); syncBtn:SetPoint("TOPRIGHT",-18,-50)
+    syncBtn:SetScript("OnClick",function()
+        classMenu:Hide()
+        local S=Nexus.Sync
+        if not (S and type(S.RequestSync)=="function") then return end
+        local ok,reason=S.RequestSync()
+        if ok==nil then print("|cff7fd5ffNexus:|r "..tostring(reason or "preparing sync data"))
+        elseif ok then print("|cff7fd5ffNexus:|r "..tostring(reason or "asking other players for their builds..."))
+        else print("|cffff6060Nexus:|r "..tostring(reason or "sync unavailable")) end
+        M.RefreshStatus()
+    end)
     dummyBtn=MakeTab(frame,"Training Dummy",118); dummyBtn:SetPoint("TOPLEFT",18,-82); dummyBtn:SetScript("OnClick",function() category="dummy"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
     lkBtn=MakeTab(frame,"Lich King",100); lkBtn:SetPoint("LEFT",dummyBtn,"RIGHT",5,0); lkBtn:SetScript("OnClick",function() category="lk"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
     combinedBtn=MakeTab(frame,"Strongest Pair",112); combinedBtn:SetPoint("LEFT",lkBtn,"RIGHT",5,0); combinedBtn:SetScript("OnClick",function() category="combined"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
@@ -988,9 +998,19 @@ end
 function M.RefreshStatus()
     if not frame or not frame:IsShown() then return end
     local S=Nexus.Sync
+    syncBtn:SetText("Sync Now")
     if S and S.GetLeaderboardSyncStatus then
         local state,waitSeconds,pending,work=S.GetLeaderboardSyncStatus(); work=type(work)=="table" and work or {}; local receiving=tonumber(work.receiving) or 0
+        -- Preparation is a session outcome, not a transport queue state. Read it
+        -- with the live operation on every repaint, including reopen/selection.
+        -- A terminal session can retain its last outcome, so an idle operation
+        -- must not keep the temporary preparation label.
+        local stats=state=="syncing" and type(S.Stats)=="function" and S.Stats() or nil
+        local preparing=type(stats)=="table" and stats.preparingRequest==true
         if state=="throttled" then statusText:SetText("|cffffcc55Sync resumes in "..tostring(waitSeconds).."s|r")
+        elseif preparing then
+            syncBtn:SetText("Preparing...")
+            statusText:SetText("|cff7fd5ffPreparing sync data...|r")
         elseif state=="syncing" then statusText:SetText("|cff4dff80Syncing"..(receiving>0 and (" • "..receiving.." receiving") or "...").."|r")
         elseif state=="cleaning" then statusText:SetText("|cffffcc55Cleaning expired Sync work...|r")
         elseif state=="sending" then statusText:SetText("|cff4dff80Sending queued Nexus work...|r")
