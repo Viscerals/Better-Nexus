@@ -118,7 +118,9 @@ jobs:
     name: fast-quality
     needs: preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Local direct-parent Fast took 115m; the cumulative PR range selects more work.
+    # Internal 175m budget leaves diagnostic time within the authorized 180m ceiling.
+    timeout-minutes: 180
     steps:
       - name: Check out the exact reviewed tree
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -146,17 +148,36 @@ jobs:
         shell: pwsh
         env:
           BASE_REF: ${{ needs.preflight.outputs.base_ref }}
-        run: ./tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef $env:BASE_REF
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef $env:BASE_REF -BudgetSeconds 10500
       - name: Write compact Fast summary
         if: always()
         shell: pwsh
         run: if (Test-Path build/verify/summary.md) { Get-Content build/verify/summary.md >> $env:GITHUB_STEP_SUMMARY }
+      - name: Check bounded Fast diagnostic contents
+        id: diagnostics
+        if: failure() || cancelled()
+        shell: pwsh
+        run: |
+          . ./tools/ArtifactPathPolicy.ps1
+          $root = (Get-Location).Path
+          $files = @(Get-ChildItem -Path build/verify/logs/*.log,build/verify/progress.json,build/verify/summary.json,build/verify/summary.md -File -ErrorAction SilentlyContinue)
+          if (@($files | Where-Object { $_.Length -gt 1048576 -or $_.LinkType }).Count) { throw 'Diagnostic file exceeds existing content-check coverage or is a link; upload withheld.' }
+          $paths = @($files | ForEach-Object { [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/') })
+          $findings = @(Test-ArtifactPathSet -RepositoryRoot $root -Candidates $paths -ReadContent)
+          $unexpected = @($findings | Where-Object { $_ -notin @($paths | ForEach-Object { "path:$_" }) })
+          if ($unexpected.Count) { throw "Diagnostic content check refused: $($unexpected -join ', ')" }
+          "Diagnostic content checks passed for $($files.Count) enumerated files; retention 5 days."
+          $paths | ForEach-Object { "Diagnostic file: $_" }
       - name: Upload Fast failure logs
-        if: failure() || (github.event_name == 'workflow_dispatch' && inputs.upload_logs)
+        if: (failure() || cancelled()) && steps.diagnostics.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: fast-quality-logs
-          path: build/verify/logs
+          path: |
+            build/verify/logs/*.log
+            build/verify/progress.json
+            build/verify/summary.json
+            build/verify/summary.md
           retention-days: 5
           if-no-files-found: ignore
 
@@ -211,7 +232,8 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.full_required == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Recorded local Full: 145m. Allow measured work plus finite host overhead.
+    timeout-minutes: 180
     steps:
       - name: Check out the exact reviewed tree
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -239,17 +261,39 @@ jobs:
         shell: pwsh
         env:
           BASE_REF: ${{ needs.preflight.outputs.base_ref }}
-        run: ./tools/Invoke-QualityGate.ps1 -Mode Full -BaseRef $env:BASE_REF
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Full -BaseRef $env:BASE_REF -BudgetSeconds 10500
       - name: Write compact Full summary
         if: always()
         shell: pwsh
         run: if (Test-Path build/verify/summary.md) { Get-Content build/verify/summary.md >> $env:GITHUB_STEP_SUMMARY }
+      - name: Check bounded Full diagnostic contents
+        id: diagnostics
+        if: failure() || cancelled()
+        shell: pwsh
+        run: |
+          . ./tools/ArtifactPathPolicy.ps1
+          $root = (Get-Location).Path
+          $files = @(Get-ChildItem -Path build/verify/logs/*.log,build/verify/progress.json,build/verify/summary.json,build/verify/summary.md,build/lua-suite/manifest.json,build/lua-suite/*.log -File -ErrorAction SilentlyContinue)
+          if (@($files | Where-Object { $_.Length -gt 1048576 -or $_.LinkType }).Count) { throw 'Diagnostic file exceeds existing content-check coverage or is a link; upload withheld.' }
+          $paths = @($files | ForEach-Object { [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/') })
+          $findings = @(Test-ArtifactPathSet -RepositoryRoot $root -Candidates $paths -ReadContent)
+          $unexpected = @($findings | Where-Object { $_ -notin @($paths | ForEach-Object { "path:$_" }) })
+          if ($unexpected.Count) { throw "Diagnostic content check refused: $($unexpected -join ', ')" }
+          "Diagnostic content checks passed for $($files.Count) enumerated files; retention 5 days."
+          $paths | ForEach-Object { "Diagnostic file: $_" }
       - name: Upload Full failure logs
-        if: failure() || (github.event_name == 'workflow_dispatch' && inputs.upload_logs)
+        # Hard termination can prevent this step. Preserve available diagnostics only.
+        if: (failure() || cancelled()) && steps.diagnostics.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: full-quality-logs
-          path: build/verify/logs
+          path: |
+            build/verify/logs/*.log
+            build/verify/progress.json
+            build/verify/summary.json
+            build/verify/summary.md
+            build/lua-suite/manifest.json
+            build/lua-suite/*.log
           retention-days: 5
           if-no-files-found: ignore
 

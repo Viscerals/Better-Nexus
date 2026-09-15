@@ -59,7 +59,7 @@ assert(!/^\s+paths(?:-ignore)?:/m.test(workflow));
 for (const job of ["candidate", "release-policy", "lua-regression"]) {
     assert.match(release, new RegExp(`^  ${job}:`, "m"), `missing release job: ${job}`);
 }
-const releaseRunnerCount = release.match(/test "\$\{#tests\[@\]\}" -eq (\d+)/);
+const releaseRunnerCount = release.match(/Run-LuaSuite\.js --runtime luajit --expected-count (\d+) --timeout-seconds 600/);
 assert(releaseRunnerCount, "release Lua runner-count guard is missing");
 assert.strictEqual(
     Number(releaseRunnerCount[1]),
@@ -72,5 +72,58 @@ assert.strictEqual((release.match(/Verify exact candidate checkout/g) || []).len
 assert.strictEqual((release.match(/git rev-parse HEAD/g) || []).length, 2);
 assert.strictEqual((release.match(/persist-credentials: false/g) || []).length, 2);
 assert(!release.includes("pull_request_target"));
+assert.strictEqual((release.match(/Run-LuaSuite\.js --runtime luajit/g) || []).length, 1);
+assert(!/luajit tests\/run_/.test(release), "focused fixtures must not duplicate inventory work");
+assert.match(release, /historical=6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f/);
+assert.match(release, /expected_tree=0d293768d6c7a14d78a9b9ee9b3844d2b9bad3b6/);
+assert.match(release, /lua-regression:[\s\S]*timeout-minutes: 15/);
+for (const profile of ["Fast", "Full"]) {
+    assert.match(workflow, new RegExp(`Invoke-QualityGate\\.ps1 -Mode ${profile} -BaseRef \\$env:BASE_REF -BudgetSeconds 10500`));
+}
+assert(!/continue-on-error/.test(workflow + release));
+assert.strictEqual((workflow.match(/if: failure\(\) \|\| cancelled\(\)/g) || []).length, 2);
+assert.match(release, /Upload failed or interrupted Lua diagnostics\s+if: \(failure\(\) \|\| cancelled\(\)\) && steps\.diagnostics\.outcome == 'success'/);
+assert.strictEqual((workflow.match(/if: \(failure\(\) \|\| cancelled\(\)\) && steps\.diagnostics\.outcome == 'success'/g) || []).length, 2);
+for (const source of [workflow, release]) {
+    assert.match(source, /Test-ArtifactPathSet -RepositoryRoot \$root -Candidates \$paths -ReadContent/);
+    assert.match(source, /Length -gt 1048576 -or \$_.LinkType/);
+    assert.match(source, /if \(\$unexpected.Count\) \{ throw/);
+}
+for (const [name, body, files] of [
+    ["fast-quality-logs", workflow, ["build/verify/logs/*.log", "build/verify/progress.json", "build/verify/summary.json", "build/verify/summary.md"]],
+    ["full-quality-logs", workflow, ["build/verify/logs/*.log", "build/verify/progress.json", "build/verify/summary.json", "build/verify/summary.md", "build/lua-suite/manifest.json", "build/lua-suite/*.log"]],
+    ["luajit-inventory-diagnostics", release, ["build/lua-suite/manifest.json", "build/lua-suite/*.log"]],
+]) {
+    const paths = body.match(new RegExp(`name: ${name}\\s+path: \\|\\r?\\n([\\s\\S]*?)\\s+retention-days: 5`));
+    assert(paths, `missing bounded artifact ${name}`);
+    assert.deepStrictEqual(paths[1].trim().split(/\r?\n/).map((line) => line.trim()), files);
+}
+
+// Execute the real aggregation expression against absent/cancelled/failed jobs.
+// Only its synthetic step-summary file is writable; no workflow is dispatched.
+const { spawnSync } = require("child_process");
+const os = require("os");
+const aggregateBody = workflow.match(/Aggregate required results[\s\S]*?run: \|\r?\n([\s\S]*)$/)?.[1];
+assert(aggregateBody, "required aggregation script is missing");
+const aggregateScript = aggregateBody.replace(/^          /gm, "");
+const aggregateScratch = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-aggregate-"));
+try {
+    const baseEnvironment = { ...process.env, PREFLIGHT_RESULT: "success", FAST_RESULT: "success",
+        SECURITY_RESULT: "success", FULL_RESULT: "success", PACKAGE_RESULT: "success", FULL_REQUIRED: "true",
+        GITHUB_STEP_SUMMARY: path.join(aggregateScratch, "summary.md") };
+    const runAggregate = (values) => spawnSync(process.platform === "win32" ? "pwsh.exe" : "pwsh",
+        ["-NoProfile", "-Command", aggregateScript], {
+            encoding: "utf8", timeout: 10000, env: { ...baseEnvironment, ...values },
+        });
+    assert.strictEqual(runAggregate({}).status, 0);
+    for (const job of ["PREFLIGHT_RESULT", "FAST_RESULT", "SECURITY_RESULT", "FULL_RESULT", "PACKAGE_RESULT"]) {
+        for (const result of ["failure", "cancelled", "", "skipped"]) {
+            assert.notStrictEqual(runAggregate({ [job]: result }).status, 0, `${job}=${result} passed`);
+        }
+    }
+    assert.strictEqual(runAggregate({ FULL_REQUIRED: "false", FULL_RESULT: "skipped" }).status, 0);
+} finally {
+    fs.rmSync(aggregateScratch, { recursive: true, force: true });
+}
 
 console.log("quality workflow policy: triggers, permissions, pins, concurrency, jobs, skips, artifacts, release ownership -- OK");

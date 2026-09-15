@@ -10,6 +10,118 @@ const { normalize: normalizeSummary } = require("../tools/Write-ValidationSummar
 const root = path.resolve(__dirname, "..");
 const pwsh = process.platform === "win32" ? "pwsh.exe" : "pwsh";
 
+async function runnerTests() {
+    const { spawn } = require("child_process");
+    const os = require("os");
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-ci-runner-"));
+    try {
+        fs.mkdirSync(path.join(fixture, "tools"));
+        fs.mkdirSync(path.join(fixture, "tests"));
+        for (const name of ["Invoke-QualityGate.ps1", "Write-ValidationSummary.js", "Run-LuaSuite.js"]) {
+            fs.copyFileSync(path.join(root, "tools", name), path.join(fixture, "tools", name));
+        }
+        const gate = path.join(fixture, "tools", "Invoke-QualityGate.ps1");
+        const streaming = spawnSync(pwsh, ["-NoProfile", "-File", gate,
+            "-Mode", "Fast", "-SelfTestScenario", "Streaming"],
+        { encoding: "utf8", timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
+        assert.strictEqual(streaming.status, 0, `${streaming.stdout}\n${streaming.stderr}`);
+        const streamLog = fs.readFileSync(path.join(fixture, "build/verify/logs/self-stream.log"), "utf8");
+        assert(streamLog.includes("OUT-1999") && streamLog.includes("ERR-1999"), "both pipes must drain completely");
+        assert(!streamLog.includes("C:\\Users\\Private"), "streamed logs must redact user paths");
+
+        const timed = spawn(pwsh, ["-NoProfile", "-File", gate,
+            "-Mode", "Fast", "-SelfTestScenario", "Timeout"], { stdio: "ignore" });
+        let closed = false;
+        const completion = new Promise((resolve) => timed.on("close", (code) => { closed = true; resolve(code); }));
+        const timeoutLog = path.join(fixture, "build/verify/logs/self-timeout.log");
+        let observed = false;
+        const deadline = Date.now() + 12000;
+        while (!closed && Date.now() < deadline) {
+            if (fs.existsSync(timeoutLog) && fs.readFileSync(timeoutLog, "utf8").includes("PARTIAL-BEFORE-TIMEOUT")) {
+                const progress = JSON.parse(fs.readFileSync(path.join(fixture, "build/verify/progress.json"), "utf8"));
+                assert.strictEqual(progress.result, "incomplete");
+                assert.strictEqual(progress.active.id, "self-timeout");
+                observed = true;
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        if (!observed) timed.kill();
+        assert(observed, "partial evidence must exist while child is running");
+        assert.notStrictEqual(await completion, 0, "timeout cannot pass");
+        const timeoutSummary = JSON.parse(fs.readFileSync(path.join(fixture, "build/verify/summary.json"), "utf8"));
+        assert.strictEqual(timeoutSummary.result, "fail");
+        assert.match(timeoutSummary.checks[0].reason, /timeout/);
+
+        // Synthetic .lua names deliberately run under Node in this isolated copy.
+        // No production test runtime or behavioral assertion is substituted.
+        fs.writeFileSync(path.join(fixture, "tests/run_a.lua"), 'console.log("A");\n');
+        fs.writeFileSync(path.join(fixture, "tests/run_b.lua"), 'console.error("B"); process.exit(7);\n');
+        fs.writeFileSync(path.join(fixture, "tests/run_legacy_backup_smoke.lua"), 'throw Error("manual test must not run");\n');
+        const suite = spawnSync(process.execPath, [path.join(fixture, "tools/Run-LuaSuite.js"),
+            "--runtime", process.execPath, "--expected-count", "2", "--timeout-seconds", "2"],
+        { cwd: fixture, encoding: "utf8", timeout: 10000 });
+        assert.strictEqual(suite.status, 1, suite.stderr);
+        const inventory = JSON.parse(fs.readFileSync(path.join(fixture, "build/lua-suite/manifest.json"), "utf8"));
+        assert.deepStrictEqual(inventory.runnable, ["tests/run_a.lua", "tests/run_b.lua"]);
+        assert.strictEqual(inventory.manual[0].path, "tests/run_legacy_backup_smoke.lua");
+        assert.deepStrictEqual(inventory.results.map((row) => row.result), ["pass", "fail"]);
+        const { auditInventory } = require(path.join(fixture, "tools/Run-LuaSuite.js"));
+        assert.strictEqual(auditInventory(inventory).ok, false);
+        const good = { ...inventory, results: inventory.results.map((row) => ({ ...row, result: "pass", exit_code: 0 })) };
+        assert.strictEqual(auditInventory(good).ok, true);
+        for (const results of [good.results.slice(1), [...good.results, good.results[0]],
+            [...good.results, { path: "tests/unexpected.lua", result: "pass" }],
+            good.results.map((row) => ({ ...row, result: "running" }))]) {
+            assert.strictEqual(auditInventory({ ...good, results }).ok, false);
+        }
+        for (const result of ["cancelled", "incomplete", "timeout", undefined]) {
+            assert.strictEqual(normalizeSummary({ schema: 1, checks: [{
+                id: "required", result, log: "logs/required.log", blocking: true,
+            }] }).result, "fail");
+        }
+        fs.writeFileSync(path.join(fixture, "tests/run_a.lua"), 'process.stdout.write("PARTIAL-NO-NEWLINE"); setInterval(()=>{},1000);\n');
+        const suiteTimeout = spawnSync(process.execPath, [path.join(fixture, "tools/Run-LuaSuite.js"),
+            "--runtime", process.execPath, "--expected-count", "2", "--timeout-seconds", "1"],
+        { cwd: fixture, encoding: "utf8", timeout: 10000 });
+        assert.strictEqual(suiteTimeout.status, 1, suiteTimeout.stderr);
+        const incomplete = JSON.parse(fs.readFileSync(path.join(fixture, "build/lua-suite/manifest.json"), "utf8"));
+        assert.strictEqual(incomplete.result, "fail");
+        assert.strictEqual(incomplete.results[0].result, "timeout");
+        assert(incomplete.audit.errors.includes("missing: tests/run_b.lua"));
+        assert(fs.readFileSync(path.join(fixture, "build/lua-suite/run_a.lua.log"), "utf8").includes("PARTIAL-NO-NEWLINE"));
+        const wrongCount = spawnSync(process.execPath, [path.join(fixture, "tools/Run-LuaSuite.js"),
+            "--expected-count", "3"], { cwd: fixture, encoding: "utf8", timeout: 5000 });
+        assert.strictEqual(wrongCount.status, 1);
+        assert.match(wrongCount.stderr, /incomplete or duplicate discovered inventory/);
+        // Reuse the repository's unchanged private-content rules. This explicit
+        // artifact exception permits only the enumerated generated log path.
+        const diagnostic = "build/lua-suite/run_a.lua.log";
+        const policy = path.join(root, "tools/ArtifactPathPolicy.ps1").replace(/'/g, "''");
+        const checkContents = (contents) => {
+            fs.writeFileSync(path.join(fixture, diagnostic), contents);
+            const script = `. '${policy}'; $paths=@('${diagnostic}'); `
+                + `$findings=@(Test-ArtifactPathSet -RepositoryRoot '${fixture.replace(/'/g, "''")}' -Candidates $paths -ReadContent); `
+                + '$unexpected=@($findings | Where-Object { $_ -notin @($paths | ForEach-Object { "path:$_" }) }); '
+                + 'if($unexpected.Count){exit 1}';
+            return spawnSync(pwsh, ["-NoProfile", "-Command", script], { encoding: "utf8", timeout: 5000 });
+        };
+        assert.strictEqual(checkContents("TEST END example result=fail exit=7\n").status, 0);
+        for (const unsafe of ["C:\\Users\\Private\\example\n", "api_" + 'key="synthetic-not-a-real-key"\n',
+            "-----BEGIN " + "PRIVATE KEY-----\n"]) {
+            assert.notStrictEqual(checkContents(unsafe).status, 0, "existing diagnostic content policy accepted private content");
+        }
+        console.log("CI runner synthetic tests: dual streams, live partial evidence, timeout, inventory and fail-closed aggregate -- OK");
+    } finally {
+        fs.rmSync(fixture, { recursive: true, force: true });
+    }
+}
+
+if (process.argv.includes("--runner-only")) {
+    runnerTests().catch((error) => { console.error(error); process.exitCode = 1; });
+    return;
+}
+
 function runPowerShell(script, args = []) {
     return spawnSync(pwsh, ["-NoProfile", "-File", path.join(root, script), ...args], {
         cwd: root,
@@ -371,4 +483,9 @@ if (process.env.BETTER_NEXUS_QUALITY_GATE_ACTIVE !== "1") {
 }
 
 fs.rmSync(scratch, { recursive: true, force: true });
+const runnerProof = spawnSync(process.execPath, [__filename, "--runner-only"], {
+    cwd: root, encoding: "utf8", timeout: 30000,
+});
+assert.strictEqual(runnerProof.status, 0, `${runnerProof.stdout}\n${runnerProof.stderr}`);
+console.log(runnerProof.stdout.trim());
 console.log("quality gate self-tests: routing, modes, failures, unavailable tools, compact summaries, ordering, portability, exit status -- OK");

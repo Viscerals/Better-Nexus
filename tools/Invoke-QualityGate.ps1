@@ -10,8 +10,14 @@ param(
     [Parameter()]
     [string] $BaseRef,
 
+    [ValidateRange(1, 10500)]
+    [int] $BudgetSeconds = 10500,
+
+    [ValidateRange(1, 10500)]
+    [int] $CheckTimeoutSeconds = 5400,
+
     [Parameter(DontShow)]
-    [ValidateSet('None', 'MultipleFailures', 'UnavailableTool')]
+    [ValidateSet('None', 'MultipleFailures', 'UnavailableTool', 'Streaming', 'Timeout')]
     [string] $SelfTestScenario = 'None'
 )
 
@@ -38,6 +44,34 @@ if (-not (Test-Path -LiteralPath $pwsh)) { $pwsh = Join-Path $PSHOME 'pwsh' }
 $git = Get-Command git -ErrorAction SilentlyContinue
 $checks = New-Object 'System.Collections.Generic.List[object]'
 $gateWatch = [System.Diagnostics.Stopwatch]::StartNew()
+$script:activeCheck = $null
+$script:defaultCheckTimeout = $CheckTimeoutSeconds
+$head = 'unknown'
+if ($git) {
+    $headRows = & $git.Source -c "safe.directory=$safeRepositoryRoot" -C $repositoryRoot rev-parse HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $headRows) { $head = ([string] $headRows).Trim() }
+}
+
+function Protect-LogText([string] $Text) {
+    $Text = $Text.Replace($repositoryRoot, '<repo>').Replace($safeRepositoryRoot, '<repo>')
+    return $Text -replace '(?i)[A-Z]:[\\/]Users[\\/][^\\/\s]+', '<user-home>'
+}
+
+function Save-Progress {
+    param([string] $Result = 'incomplete')
+    [ordered]@{
+        mode = $Mode
+        head = $head
+        platform = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+        powershell = $PSVersionTable.PSVersion.ToString()
+        result = $Result
+        updated_at = [DateTime]::UtcNow.ToString('o')
+        elapsed_seconds = [Math]::Round($gateWatch.Elapsed.TotalSeconds, 3)
+        active = $script:activeCheck
+        checks = $checks.ToArray()
+    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $outputRoot 'progress.json') -Encoding utf8
+}
+Save-Progress
 
 function Convert-ArgumentText {
     [CmdletBinding()]
@@ -70,17 +104,24 @@ function Add-CheckResult {
         $logText = $logText.Replace($safeRepositoryRoot, '<repo>')
         $logText -replace '(?i)[A-Z]:[\\/]Users[\\/][^\\/\s]+', '<user-home>'
     })
-    $safeLogLines | Set-Content -LiteralPath $logPath -Encoding utf8
+    $safeLogLines | Add-Content -LiteralPath $logPath -Encoding utf8
     $checks.Add([ordered]@{
         id = $Id
         result = $Result
         count = $Count
         duration_seconds = [Math]::Round($DurationSeconds, 3)
         log = $relativeLog
-        command = $Command
+        command = Protect-LogText $Command
         blocking = $Blocking
-        reason = $Reason
+        reason = Protect-LogText $Reason
+        started_at = $(if ($script:activeCheck) { $script:activeCheck.started_at } else { $null })
+        completed_at = [DateTime]::UtcNow.ToString('o')
+        runtime = $(if ($script:activeCheck) { $script:activeCheck.runtime } else { 'in-process' })
+        exit_code = $(if ($script:activeCheck) { $script:activeCheck.exit_code } else { $null })
     })
+    $script:activeCheck = $null
+    Save-Progress
+    Write-Host "CHECK END $Id result=$Result seconds=$([Math]::Round($DurationSeconds, 3)) log=$relativeLog $(Protect-LogText $Reason)"
 }
 
 function Invoke-QualityCheck {
@@ -90,7 +131,8 @@ function Invoke-QualityCheck {
         [Parameter(Mandatory)][string] $FilePath,
         [Parameter()][string[]] $Arguments = @(),
         [Parameter()][bool] $Blocking = $true,
-        [Parameter()][int[]] $UnavailableExitCodes = @()
+        [Parameter()][int[]] $UnavailableExitCodes = @(),
+        [Parameter()][int] $TimeoutSeconds = $script:defaultCheckTimeout
     )
 
     $commandText = "$(Split-Path -Leaf $FilePath) $(Convert-ArgumentText $Arguments)".Trim()
@@ -102,6 +144,22 @@ function Invoke-QualityCheck {
     }
 
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    $relativeLog = "logs/$($Id -replace '[^A-Za-z0-9._-]', '-').log"
+    $logPath = Join-Path $outputRoot $relativeLog
+    $script:activeCheck = [ordered]@{
+        id = $Id; result = 'running'; started_at = [DateTime]::UtcNow.ToString('o')
+        command = Protect-LogText $commandText; runtime = Split-Path -Leaf $FilePath
+        log = $relativeLog; exit_code = $null; completed_at = $null
+    }
+    Save-Progress
+    Write-Host "CHECK START $Id at=$($script:activeCheck.started_at) command=$($script:activeCheck.command) log=$relativeLog"
+    $remaining = $BudgetSeconds - $gateWatch.Elapsed.TotalSeconds
+    if ($remaining -le 0) {
+        Add-CheckResult -Id $Id -Result fail -Command $commandText -Blocking $Blocking `
+            -Reason 'incomplete: profile execution budget exhausted before start'
+        return
+    }
+    $limit = [Math]::Min($TimeoutSeconds, $remaining)
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $FilePath
     $startInfo.WorkingDirectory = $repositoryRoot
@@ -112,25 +170,65 @@ function Invoke-QualityCheck {
     foreach ($argument in $Arguments) { [void] $startInfo.ArgumentList.Add($argument) }
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
+    $stdout = ''
+    $stderr = ''
+    $interruption = ''
+    $exitCode = 1
+    $started = $false
     try {
         [void] $process.Start()
-        $stdout = $process.StandardOutput.ReadToEnd()
-        $stderr = $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
+        $started = $true
+        # Both asynchronous reads stay pending together. Neither pipe waits for
+        # the other pipe to reach EOF. Complete lines are redacted before storage.
+        $streams = @(
+            @{ Reader = $process.StandardOutput; Buffer = [char[]]::new(4096); Pending = $null; Text = ''; Done = $false; Kind = 'stdout' },
+            @{ Reader = $process.StandardError; Buffer = [char[]]::new(4096); Pending = $null; Text = ''; Done = $false; Kind = 'stderr' }
+        )
+        foreach ($stream in $streams) { $stream.Pending = $stream.Reader.ReadAsync($stream.Buffer, 0, $stream.Buffer.Length) }
+        while (@($streams | Where-Object { -not $_.Done }).Count -gt 0 -or -not $process.HasExited) {
+            if ($interruption -and $watch.Elapsed.TotalSeconds -ge ($limit + 5)) { break }
+            if (-not $interruption -and $watch.Elapsed.TotalSeconds -ge $limit) {
+                $interruption = "timeout: incomplete after $limit seconds"
+                if (-not $process.HasExited) { $process.Kill($true) }
+            }
+            foreach ($stream in $streams) {
+                if ($stream.Done -or -not $stream.Pending.IsCompleted) { continue }
+                $length = $stream.Pending.GetAwaiter().GetResult()
+                if ($length -eq 0) { $stream.Done = $true }
+                else { $stream.Text += [string]::new($stream.Buffer, 0, $length) }
+                # Keep an unfinished line redacted as a whole, including paths
+                # split across read boundaries. Never stream an unsafe fragment.
+                [System.IO.File]::WriteAllText("$logPath.$($stream.Kind).partial.log", (Protect-LogText $stream.Text))
+                while ($stream.Text.Contains("`n") -or ($stream.Done -and $stream.Text.Length -gt 0)) {
+                    $boundary = $stream.Text.IndexOf("`n")
+                    if ($boundary -lt 0) { $boundary = $stream.Text.Length - 1 }
+                    $line = Protect-LogText $stream.Text.Substring(0, $boundary + 1)
+                    $stream.Text = $stream.Text.Substring($boundary + 1)
+                    [System.IO.File]::AppendAllText($logPath, $line)
+                    Write-Host -NoNewline $line
+                    # Only a bounded tail is needed for count and unavailable markers.
+                    if ($stream.Kind -eq 'stdout') { $stdout = ($stdout + $line); if ($stdout.Length -gt 65536) { $stdout = $stdout.Substring($stdout.Length - 65536) } }
+                    else { $stderr = ($stderr + $line); if ($stderr.Length -gt 65536) { $stderr = $stderr.Substring($stderr.Length - 65536) } }
+                }
+                if (-not $stream.Done) { $stream.Pending = $stream.Reader.ReadAsync($stream.Buffer, 0, $stream.Buffer.Length) }
+            }
+            Start-Sleep -Milliseconds 20
+        }
         $exitCode = $process.ExitCode
     }
     catch {
-        $stdout = ''
         $stderr = $_.Exception.Message
+        [System.IO.File]::AppendAllText($logPath, (Protect-LogText $stderr))
         $exitCode = 1
     }
     finally {
         $watch.Stop()
+        if ($started -and -not $process.HasExited) { $process.Kill($true) }
         $process.Dispose()
     }
-    $lines = @()
-    if ($stdout) { $lines += $stdout.TrimEnd() }
-    if ($stderr) { $lines += $stderr.TrimEnd() }
+    $lines = @("CHECK TERMINAL completed_at=$([DateTime]::UtcNow.ToString('o')) exit_code=$exitCode interruption=$interruption")
+    if ($interruption) { $exitCode = 124 }
+    $script:activeCheck.exit_code = $exitCode
     $unavailable = $exitCode -in $UnavailableExitCodes -and "$stdout`n$stderr" -match '(?m)^UNAVAILABLE:'
     $result = if ($exitCode -eq 0) { 'pass' } elseif ($unavailable) { 'unavailable' } else { 'fail' }
     $count = if ($exitCode -eq 0) { '1/1' } elseif ($unavailable) { '0/0' } else { '0/1' }
@@ -144,7 +242,7 @@ function Invoke-QualityCheck {
         $count = "$($Matches.passed)/$([int] $Matches.passed + [int] $Matches.failed)"
     }
     Add-CheckResult -Id $Id -Result $result -Command $commandText `
-        -Reason $(if ($exitCode -eq 0) { '' } elseif ($unavailable) { 'required tool is unavailable' } else { "command exited $exitCode" }) `
+        -Reason $(if ($interruption) { $interruption } elseif ($exitCode -eq 0) { '' } elseif ($unavailable) { 'required tool is unavailable' } else { "command exited $exitCode" }) `
         -Blocking $Blocking -DurationSeconds $watch.Elapsed.TotalSeconds `
         -Count $count -LogLines $lines
 }
@@ -229,7 +327,15 @@ function Add-GitDiffCheckSet {
 
 Push-Location $repositoryRoot
 try {
-    if ($SelfTestScenario -eq 'MultipleFailures') {
+    if ($SelfTestScenario -eq 'Streaming') {
+        Invoke-QualityCheck -Id 'self-stream' -FilePath $node.Source -Arguments @('-e',
+            'for(let i=0;i<2000;i++){console.log("OUT-"+i+" "+"x".repeat(256));console.error("ERR-"+i+" "+"y".repeat(256));} console.log("C:\\Users\\Private\\fixture");')
+    }
+    elseif ($SelfTestScenario -eq 'Timeout') {
+        Invoke-QualityCheck -Id 'self-timeout' -FilePath $node.Source -Arguments @('-e',
+            'console.log("PARTIAL-BEFORE-TIMEOUT"); setInterval(()=>{},1000);') -TimeoutSeconds 2
+    }
+    elseif ($SelfTestScenario -eq 'MultipleFailures') {
         Invoke-QualityCheck -Id 'self-pass' -FilePath $pwsh -Arguments @('-NoProfile', '-Command', 'exit 0')
         Invoke-QualityCheck -Id 'self-fail-a' -FilePath $pwsh -Arguments @('-NoProfile', '-Command', 'Write-Error first; exit 7')
         Invoke-QualityCheck -Id 'self-fail-b' -FilePath $pwsh -Arguments @('-NoProfile', '-Command', 'Write-Error second; exit 8')
@@ -273,7 +379,7 @@ try {
             Add-GitDiffCheckSet
         }
         elseif ($Mode -eq 'Full') {
-            Add-NodeCheck -Id 'lua-suite' -Arguments @('tools/Run-LuaSuite.js')
+            Invoke-QualityCheck -Id 'lua-suite' -FilePath $node.Source -Arguments @('tools/Run-LuaSuite.js') -TimeoutSeconds $BudgetSeconds
             Add-CheckResult -Id 'lua-suite-manual-legacy-backup' -Result skipped `
                 -Command 'manual: tests/run_legacy_backup_smoke.lua <authorized-backup>' `
                 -Reason 'requires an explicitly authorized SavedVariables backup path' `
@@ -346,5 +452,6 @@ if ($LASTEXITCODE -ne 0) { throw 'validation summary generation failed' }
 Remove-Item -LiteralPath $payloadPath -Force
 
 $summary = Get-Content -Raw -LiteralPath (Join-Path $outputRoot 'summary.json') | ConvertFrom-Json
+Save-Progress -Result $summary.result
 Write-Output "Quality gate $Mode`: $($summary.result); passed=$($summary.passed) failed=$($summary.failed) unavailable=$($summary.unavailable) skipped=$($summary.skipped)"
 if ($summary.result -ne 'pass') { exit 1 }
