@@ -63,6 +63,12 @@ depends_on: [50.2]
   Community continuation, popup correction and empty runtime seed together;
   package, independently review and verify native behavior. Keep historical
   gates distinct. Repair confirmed supported blockers under current authority.
+- Demo commands (accepted runtime policy; no multi-hour Fengari rerun):
+  - `node tools/Run-LuaSuite.js --runtime luajit --expected-count 245 --timeout-seconds 600`
+  - `node tests/run-quality-toolchain.js`
+  - `node tools/Test-PackageSource.js .`
+  - Native: verify exact installed build, startup timing, Wishlist save/reload
+    and the three ordinary manual Sync entry points on Valentinew.
 - Objective:
   - Complete one finite controlled tester-stabilization attempt from frozen Wave 3.
     Correct MASTER-W3-002, 007, and 010 through real consumers. Assess 009 and
