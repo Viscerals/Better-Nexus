@@ -161,8 +161,20 @@ assert(zone.initCalls == login.initCalls + 2
 -- Author membership may scan visible build identities once per library
 -- generation, but repeated tooltips must remain O(1) and never copy Echoes.
 local knownAuthor
-for _, build in pairs(Nexus.BundledBuilds.builds) do
-    if type(build.author) == "string" and build.author ~= "" then
+local bundledIds = {}
+for id in pairs(Nexus.BundledBuilds.builds) do
+    bundledIds[#bundledIds + 1] = id
+end
+table.sort(bundledIds)
+for _, id in ipairs(bundledIds) do
+    local build = Nexus.BundledBuilds.builds[id]
+    local verdict = Nexus.LoadoutEvidence.SemanticEnvelope(build.echoes)
+    -- Raw bundle iteration can select an author whose only rows are denied.
+    -- Pick a supported row by the independent envelope, not by IsAuthor's
+    -- result, so the membership assertion still detects a broken author index.
+    if verdict.valid
+        and verdict.ordinary <= Nexus.LoadoutEvidence.SemanticLimits().ordinary
+        and type(build.author) == "string" and build.author ~= "" then
         knownAuthor = build.author
         break
     end

@@ -1,5 +1,22 @@
 # EVIDENCE
 
+## Startup author fixture admission correction — 2026-09-16
+
+- Exact 377d623 inventory stopped at tests/run_startup_catalog_cost.lua:172:
+  181 passed, one failed, remaining tests not run. Preserve that failed receipt.
+- The fixture picked the first raw bundled author through unordered pairs,
+  including denied-only rows. The same diagnostic on original 55640b2 and
+  replacement 377d623 produced identical outcomes: 346 valid author rows,
+  158 invalid rows, and 128 rows with absent authors; all 128 were invalid.
+  This runner never loads MainLifecycle. No production author change is needed.
+- Its author fixture now selects a deterministic bundled ID with an independent
+  valid semantic envelope. It does not select by IsAuthor's result. Every
+  existing lookup, repeated-lookup, cost and content assertion remains intact.
+  Five fresh LuaJIT executions pass. This is related startup test setup, not
+  an expected-red exemption, weakened assertion, or additional product repair.
+- Final exact-candidate inventory and focused review remain required before
+  packaging. Native execution is awaiting operator login on Valentinew.
+
 ## Startup terminal-result retention follow-up — 2026-09-16
 
 - Independent recheck reproduced the original/rejected/successor event order:
