@@ -206,3 +206,62 @@ assert(table.concat(calls, ",") == "evidence,catalog,compaction"
     "Store retry did not complete against the preserved live root")
 
 print("Store order, identity, future fields, failure, and retry behavior -- OK")
+
+-- Native compatibility correction. These are real GameAdapter-produced keys,
+-- followed by exact scope and slice-resumption boundaries. No player data.
+do
+    local H = dofile("tests/harness.lua")
+    dofile("data/DefaultProfile.lua")
+    dofile("core/GameAdapter.lua")
+    local function Profile()
+        dofile("core/Store.lua")
+        NexusDB={settingsVersion=2,settings={},chars={synthetic={}},
+            nexusStoreMigrations={wishlistRealizerDB={version=1,completed=true,
+                decision="keptCurrent"}}}
+        WishlistRealizerDB=nil
+    end
+    for _,count in ipairs({20,79,85}) do
+        Profile()
+        local echoes={}
+        for i=1,count do
+            echoes[i]={spellId=100000+i,stacks=1,quality=1,locked=i>79}
+        end
+        local key=Nexus.GameAdapter.WishlistKey(echoes)
+        local targets={[1]={spellId=100001,stacks=1}}
+        NexusDB.chars.synthetic.lockDesignTargetsBySlot={[key]=targets}
+        assert(H.BootstrapStore().state=="ready","real Wishlist key refused")
+        assert(NexusDB.chars.synthetic.lockDesignTargetsBySlot[key]==targets,
+            "existing target identity changed")
+        print("Native key: echoes="..count.." bytes="..#key.." -- OK")
+    end
+    local function Boundary(label,setup,ready)
+        Profile(); setup(NexusDB)
+        local result=H.BootstrapStore()
+        assert((result.state=="ready")==ready,label)
+        if not ready then assert(result.detail=="SOURCE_KEY_WIDTH_EXCEEDED",label) end
+        print("Native key boundary: "..label.." -- OK")
+    end
+    Boundary("2048 accepted",function(db)
+        db.chars.synthetic.lockDesignTargetsBySlot={[string.rep("x",2048)]={}}
+    end,true)
+    Boundary("2049 refused",function(db)
+        db.chars.synthetic.lockDesignTargetsBySlot={[string.rep("x",2049)]={}}
+    end,false)
+    Boundary("other field bounded",function(db)
+        db.chars.synthetic.other={[string.rep("x",184)]={}}
+    end,false)
+    Boundary("settings field bounded",function(db)
+        db.settings.lockDesignTargetsBySlot={[string.rep("x",184)]={}}
+    end,false)
+    Boundary("descendant bounded",function(db)
+        db.chars.synthetic.lockDesignTargetsBySlot={short={[string.rep("x",184)]={}}}
+    end,false)
+    Boundary("non-table value bounded",function(db)
+        db.chars.synthetic.lockDesignTargetsBySlot={[string.rep("x",184)]=true}
+    end,false)
+    Boundary("wide-key continuation",function(db)
+        local map={}
+        for i=1,12 do map[string.rep(tostring(i%10),764)..tostring(i)]={} end
+        db.chars.synthetic.lockDesignTargetsBySlot=map
+    end,true)
+end

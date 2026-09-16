@@ -1,5 +1,45 @@
 # EVIDENCE
 
+## Native startup usability amendment — 2026-09-16
+
+- Direct user authorization: attachment e3ccaa1c-7f0f-48a9-a2f8-cdba46914e58.
+  Original 55640b2 source and exact test.19 ZIP remain unchanged. Historical
+  architecture FAIL and repair counters are unchanged; no old campaign resumed.
+- Dedicated branch refactor/native-startup-usability starts at
+  55640b2af055d93614862599ff02ea2f32bd06b0. Only core/Store.lua,
+  core/MainLifecycle.lua, two existing related tests, and this evidence change.
+- Store retains the tested immediate per-character lockDesignTargetsBySlot
+  table-value key exception, maximum 2048 bytes. Real producer fixtures yield
+  179/710/764 bytes for 20/79/85 Echoes. All seven scope/boundary/resumption
+  cases pass. Settings, unrelated fields, deeper keys, non-table values, and
+  all existing aggregate/per-slice caps retain their validation.
+- Lifecycle shares one 2 ms allowance across at most 32 existing startup
+  slices. The coordinator reports actual frontier progress. Missing, invalid,
+  or backwards timer values fall back to one slice. Waiting, no progress,
+  readiness, and failure end the batch. Reentrant updates do not pump.
+  Post-ready mutation, maintenance and Sync schedules are unchanged.
+- Session-only startupTiming scalar counters record slices, updates, time,
+  overshoots and fallback. No raw data, saved telemetry, samples, or production
+  testing callback is introduced. Existing Performance measures full updates.
+- Native clock check: debugprofilestop delta 334983.61729997 milliseconds,
+  GetTime delta 334.984 seconds. No shared profiling clock reset.
+- Red-capable lifecycle regression failed against original scheduling at the
+  32-progressing-slices assertion. Corrected fixture setup errors (nil clock
+  selection and missing required dependency bindings) are not product reds.
+- Focused LuaJIT tests pass. Real shipped-catalog differential: one character
+  12455 original updates versus 390 timed, exactly 12455 slices; 100 characters
+  12505 versus 391, exactly 12505 slices. Invalid profile: 2 versus 1 updates,
+  same refusal and zero releases. Final content, source identities, synthetic
+  recovery archive, unknown data and exactly-once initialization match.
+- 68 runtime Lua files / 3653 functions satisfy the 60-upvalue guard; maximum
+  remains 60 in unchanged ui/Panel.lua. Diff whitespace check passes.
+- Current consistent backup after observed character selection:
+  ebonhold/.codex-native-backups/timed-startup-20260916-060820, 631 files,
+  112484854 bytes. All original/copy hashes match; no reparse points.
+- Full exact-candidate checks, focused Astra/xhigh review, native before/after
+  measurements and replacement package remain pending at this freeze. Their
+  receipts continue in the existing external native-startup-20260916 location.
+
 ## Controlled tester stabilization (2026-09-14; pre-freeze)
 
 - User authority SHA-256: ed346c82de566936e84bf5027f320275340b294a148ee3c4510b8818bf405b43.

@@ -459,6 +459,10 @@ end
 local CharMigration = {
     ROWS=8, EDGES=64,
     KEY_WIDTH=183, DEPTH=6,
+    -- Local native startup correction: WishlistKey serializes the complete
+    -- wishlist. A normal 79-row key can be 710 bytes, not a catalog ID.
+    -- Only the immediate character lock-design map gets this bounded width.
+    WISHLIST_KEY_WIDTH=2048,
     CAPS = {
         rows=8, edges=64, nodes=64, graphBytes=2048,
         cursorEntries=64, comparisons=64, comparedBytes=2048,
@@ -510,14 +514,26 @@ function CharMigration.ChargeSlice(work)
         if key == nil then
             stack[#stack] = nil
         else
-            frame.key = key
-            work.edges = work.edges + 1
-            work.pumpEdges = work.pumpEdges + 1
             local keyText = tostring(key)
-            if #keyText > CharMigration.KEY_WIDTH then
+            local keyLimit = CharMigration.KEY_WIDTH
+            if work.settingsCharged and frame.depth == 2
+                and stack[1].key == "lockDesignTargetsBySlot"
+                and type(key) == "string" and type(value) == "table" then
+                keyLimit = CharMigration.WISHLIST_KEY_WIDTH
+            end
+            if #keyText > keyLimit then
                 work.failure = "SOURCE_KEY_WIDTH_EXCEEDED"
                 return "failed"
             end
+            -- Do not make the wider key exceed the existing byte slice.
+            -- Keep the cursor before this edge when it must wait for a pump.
+            if #keyText > CharMigration.KEY_WIDTH
+                and work.pumpBytes + #keyText > caps.graphBytes then
+                return "capped"
+            end
+            frame.key = key
+            work.edges = work.edges + 1
+            work.pumpEdges = work.pumpEdges + 1
             work.graphBytes = work.graphBytes + #keyText
             work.pumpBytes = work.pumpBytes + #keyText
             local kind = type(value)
@@ -1335,8 +1351,23 @@ function AuthorityBootstrap.New()
         if self.state == SS.READY or self.result.state == "failed" then
             return self.result
         end
+        -- Detached progress signal for startup scheduling. A pending phase may
+        -- advance without changing its name. Observe the existing frontier;
+        -- do not expose its tables or manufacture progress from call count.
+        local state, work = self.state, self.charWork
+        local edges, nodes, rows, bytes = work and work.edges,
+            work and work.nodes, work and work.rows, work and work.graphBytes
+        local pending, charged = work and work.pending, work and work.settingsCharged
+        local pumps = self.catalogSummary and self.catalogSummary.pumps
         BootstrapSlice(self)
-        return self:Settle()
+        local result = self:Settle()
+        local after = self.charWork
+        result.progressed = self.state ~= state or after ~= work
+            or (after ~= nil and (after.edges ~= edges or after.nodes ~= nodes
+                or after.rows ~= rows or after.graphBytes ~= bytes
+                or after.pending ~= pending or after.settingsCharged ~= charged))
+            or (self.catalogSummary ~= nil and self.catalogSummary.pumps ~= pumps)
+        return result
     end
     -- Store.Init's binding entry. Repeating it never restarts bootstrap.
     function C:BindAuthorityDatabase()

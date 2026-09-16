@@ -521,4 +521,180 @@ do
         .. "mutation slice per turn -- OK")
 end
 
+-- Native startup amendment: exercise the real lifecycle call site with a
+-- deterministic millisecond clock, not a production test callback.
+do
+    local previousClock = debugprofilestop
+    local function Scenario(config)
+        local clock, calls, releases, mutations = 0, 0, 0, 0
+        local result = {state="pending"}
+        local S = {Init=function() return result end,
+            Settings=function() return {autoPick=false} end}
+        local life
+        local C = {
+            IsReady=function() return result.state == "ready" end,
+            Result=function() return result end,
+            BindAuthorityDatabase=function() return result end,
+            PumpStoreMutationV1=function() mutations=mutations+1 end,
+            PumpAuthorityBootstrap=function()
+                calls=calls+1
+                if config.recursive then life.OnUpdate(0.01) end
+                clock=clock+(config.cost or 0)
+                result={state=calls == config.ready and "ready"
+                    or calls == config.failed and "failed" or "pending",
+                    progressed=config.progress ~= false}
+                return result
+            end,
+        }
+        local N = {VERSION="test",Store=S,DiagnosticLogs={Init=function() return true end},
+            MainInternals={AuthorityBootstrap={owner=S,
+            New=function() return C end}}}
+        local deps={}
+        for k,v in pairs(dependencies) do deps[k]=v end
+        deps.Store=S
+        deps.Adapter={Init=function() releases=releases+1 end,
+            Ready=function() return false end, OnEvent=function() end,
+            RivalDetected=function() return false end,RequestSlots=function() end,
+            SetSoloPicker=function() end}
+        debugprofilestop = function()
+            if config.badClock and calls > 0 then return config.badClock end
+            return clock
+        end
+        if config.noClock then debugprofilestop=nil end
+        life=factory.New({nexus=N,bindDependencies=function() return deps end,
+            ensureAutomation=function() return automation end,print=function() end,
+            recordError=function() end,recordStoreError=function() end,
+            errorText=tostring,requestRecompute=function() end,
+            refreshHud=function() return true end,database=function() return {} end,
+            now=function() return 100 end})
+        life.OnEvent("ADDON_LOADED","Nexus")
+        life.OnEvent("PLAYER_ENTERING_WORLD")
+        life.OnUpdate(0.01)
+        return life, function() return calls,releases,mutations end
+    end
+    local life, counts=Scenario({})
+    assert(counts()==32,"startup must advance 32 progressing cheap slices, not one per frame")
+    life.OnUpdate(0.01)
+    assert(counts()==64,"hard ceiling must restart only at the next update")
+    life,counts=Scenario({cost=0.75})
+    assert(counts()==3,"deadline must stop after the first overshooting slice")
+    life,counts=Scenario({cost=3})
+    assert(counts()==1,"one expensive slice must not get a second allowance")
+    life,counts=Scenario({progress=false})
+    assert(counts()==1,"no-progress pending must yield immediately")
+    life,counts=Scenario({noClock=true})
+    assert(counts()==1,"missing timer must retain one-slice fallback")
+    for _,bad in ipairs({-1,math.huge,"invalid"}) do
+        life,counts=Scenario({badClock=bad})
+        assert(counts()==1,"invalid timer must retain one-slice fallback")
+    end
+    life,counts=Scenario({ready=3})
+    local pumps,releases=counts()
+    assert(pumps==3 and releases==1 and life.IsInitialized(),
+        "real readiness must stop batching and release dependents once")
+    life.OnUpdate(0.01)
+    pumps,releases=counts()
+    assert(pumps==3 and releases==1,"ready lifecycle must not repump or reinitialize")
+    life,counts=Scenario({failed=2})
+    assert(counts()==2 and not life.IsInitialized(),"failure must stop and withhold dependents")
+    life.OnUpdate(0.01)
+    assert(counts()==2,"terminal failure must not restart batching")
+    life,counts=Scenario({recursive=true})
+    assert(counts()==32,"recursive update must not start a competing pump")
+    debugprofilestop=previousClock
+    print("Timed startup cap, deadline, overshoot, progress, fallback, terminal and recursion -- OK")
+end
+
 print("Main lifecycle readiness boundary, boot, identity, idempotence, events, updates, and ownership -- OK")
+
+-- Differential admission: real shipped catalog and real Store, using the real
+-- lifecycle with timer absent (original one-slice scheduling) versus timed.
+-- Only post-ready UI/network dependents are test doubles; admission is not.
+do
+    local savedClock=debugprofilestop
+    local function Encode(v)
+        if type(v)~="table" then return type(v)..":"..tostring(v) end
+        local keys={}; for k in pairs(v) do keys[#keys+1]=k end
+        table.sort(keys,function(a,b) return tostring(a)<tostring(b) end)
+        local out={"{"}
+        for _,k in ipairs(keys) do out[#out+1]=Encode(k).."="..Encode(v[k]) end
+        out[#out+1]="}"; return table.concat(out,"|")
+    end
+    local function Run(size,timed,invalid)
+        Nexus={}
+        dofile("tests/harness.lua")
+        dofile("data/DefaultProfile.lua")
+        dofile("data/BundledBuilds.lua")
+        dofile("core/Codec.lua")
+        dofile("core/Store.lua")
+        dofile("core/MainLifecycle.lua")
+        local chars={}
+        for i=1,size do
+            chars["synthetic"..i]={future={keep=i},lockDesignTargetsBySlot={
+                [string.rep("x",710)]={[1]={spellId=100001,stacks=1}}}}
+        end
+        if invalid then chars.synthetic1.other={[string.rep("x",184)]={}} end
+        local archive={schemaVersion=1,chars={synthetic={relayPairs={
+            [string.rep("r",764)]={keep="synthetic"}}}}}
+        NexusDB={settingsVersion=2,settings={},chars=chars,futureRoot={keep=true},
+            nexusNativeRecoveryRelayPairs764=archive}
+        WishlistRealizerDB=nil
+        local originalRoot=NexusDB
+        local releases,failures=0,{}
+        local N={VERSION="test",Store=Nexus.Store,MainInternals=Nexus.MainInternals,
+            DiagnosticLogs={Init=function() return true end}}
+        local deps={Store=Nexus.Store,Model={},Panel={Init=function() end},
+            Adapter={Init=function() releases=releases+1 end,
+                OnEvent=function() end,RivalDetected=function() return false end,
+                Ready=function() return false end,RequestSlots=function() end,
+                SetSoloPicker=function() end}}
+        local tick=0
+        debugprofilestop=nil
+        if timed then debugprofilestop=function() tick=tick+0.01;return tick end end
+        local L=Nexus.MainInternals.Lifecycle.New({nexus=N,
+            bindDependencies=function() return deps end,
+            ensureAutomation=function() return {Initialize=function() end} end,
+            print=function() end,recordError=function(_,e) error(e) end,
+            recordStoreError=function(e) failures[#failures+1]=e end,
+            errorText=tostring,requestRecompute=function() end,
+            refreshHud=function() return true end,database=function() return NexusDB end,
+            now=GetTime})
+        L.OnEvent("ADDON_LOADED","Nexus"); L.OnEvent("PLAYER_ENTERING_WORLD")
+        local updates=0
+        while not L.IsInitialized() and #failures==0 and updates<50000 do
+            updates=updates+1; L.OnUpdate(0.01)
+        end
+        assert(NexusDB==originalRoot and NexusDB.chars==chars,
+            "scheduling replaced preserved source identities")
+        assert(NexusDB.nexusNativeRecoveryRelayPairs764==archive
+            and archive.chars.synthetic.relayPairs[string.rep("r",764)].keep=="synthetic",
+            "recovery archive changed")
+        assert(NexusDB.futureRoot.keep and chars.synthetic1.future.keep==1,
+            "unknown data changed")
+        if invalid then
+            assert(not L.IsInitialized() and releases==0 and #failures==1,
+                "invalid profile must refuse without releasing dependents")
+        else
+            assert(L.IsInitialized() and releases==1 and #failures==0,
+                "valid profile failed actual readiness: "..table.concat(failures,",")
+                    .." updates="..updates.." releases="..releases)
+            assert(Nexus.BuildCatalog.RootState().state=="ROOT_ADMITTED",
+                "dependent released before actual catalog admission")
+        end
+        local slices=N.startupTiming.slices
+        L.OnUpdate(0.01)
+        assert(N.startupTiming.slices==slices and releases==(invalid and 0 or 1),
+            "terminal startup repeated work or initialization")
+        return Encode(NexusDB),table.concat(failures,","),updates,slices
+    end
+    for _,profile in ipairs({{1,false},{100,false},{1,true}}) do
+        local a,ar,au,as=Run(profile[1],false,profile[2])
+        local b,br,bu,bs=Run(profile[1],true,profile[2])
+        assert(a==b and ar==br and as==bs,
+            "timed schedule changed final content, refusal, or coordinator work")
+        assert(bu<au,"timed schedule did not reduce frame-bound startup turns")
+        print("Real catalog parity: chars="..profile[1].." invalid="..tostring(profile[2])
+            .." originalUpdates="..au.." timedUpdates="..bu.." slices="..as.." -- OK")
+    end
+    debugprofilestop=savedClock
+end

@@ -39,8 +39,16 @@ function Lifecycle.New(options)
     local bootstrapCoordinator = nil
     local bootstrapFailureRecorded = false
     -- World entry can legitimately arrive while authority is still pending,
-    -- because bootstrap advances one slice per scheduler turn (line 1204).
+    -- because bootstrap advances bounded work across scheduler turns.
     local worldEntryPending = false
+    local bootstrapPumping = false
+    local bootstrapTerminal = false
+    local STARTUP_MS, STARTUP_SLICES = 2, 32
+    -- Session-only scalar observations, like lastLagElapsed below. Never saved,
+    -- never used as readiness, and no samples or player content are retained.
+    local startupTiming = {updates=0, slices=0, maxBatchMs=0, overshoots=0,
+        maxOvershootMs=0, fallbackUpdates=0}
+    Nexus.startupTiming = startupTiming
     local CompleteWorldEntry
     local lagWarnedAt = -math.huge
     local LAG_THRESHOLD = 1.5
@@ -117,7 +125,7 @@ function Lifecycle.New(options)
         return coordinator
     end
 
-    -- Exactly one PumpAuthorityBootstrap slice, never a loop (line 1204).
+    -- Each call still advances exactly one existing bounded coordinator slice.
     local function PumpBootstrapSlice()
         local coordinator = bootstrapCoordinator
         if coordinator == nil then return nil end
@@ -129,6 +137,55 @@ function Lifecycle.New(options)
             end
             return nil
         end
+        return result
+    end
+
+    local function StartupClock()
+        if type(debugprofilestop) ~= "function" then return nil end
+        local ok, value = pcall(debugprofilestop)
+        if not ok or type(value) ~= "number" or value ~= value
+            or value < 0 or value == math.huge then return nil end
+        return value
+    end
+
+    -- Native startup amendment: one shared soft deadline across all phases,
+    -- plus an unconditional slice cap. Missing/broken clocks retain one slice.
+    local function PumpBootstrapBatch()
+        if bootstrapPumping or bootstrapTerminal then return nil end
+        bootstrapPumping = true
+        local started = StartupClock()
+        local previous = started
+        local result
+        startupTiming.updates = startupTiming.updates + 1
+        for slice = 1, STARTUP_SLICES do
+            result = PumpBootstrapSlice()
+            startupTiming.slices = startupTiming.slices + 1
+            local finished = StartupClock()
+            local timed = started ~= nil and finished ~= nil
+                and finished >= previous
+            local elapsed = timed and (finished - started) or nil
+            if timed then
+                previous = finished
+                startupTiming.maxBatchMs = math.max(startupTiming.maxBatchMs, elapsed)
+                if elapsed > STARTUP_MS then
+                    startupTiming.overshoots = startupTiming.overshoots + 1
+                    startupTiming.maxOvershootMs = math.max(
+                        startupTiming.maxOvershootMs, elapsed - STARTUP_MS)
+                end
+            else
+                startupTiming.fallbackUpdates = startupTiming.fallbackUpdates + 1
+            end
+            if type(result) == "table"
+                and (result.state == "ready" or result.state == "failed") then
+                bootstrapTerminal = true
+                break
+            end
+            if not timed or elapsed >= STARTUP_MS
+                or type(result) ~= "table" or result.progressed ~= true then
+                break
+            end
+        end
+        bootstrapPumping = false
         return result
     end
 
@@ -481,11 +538,14 @@ function Lifecycle.New(options)
                 RegisterStutterAlertProvider()
             end
         elseif event == "PLAYER_ENTERING_WORLD" then
-            -- Bootstrap advances one slice per scheduler turn (line 1204), so
+            -- Bootstrap advances bounded work per scheduler turn, so
             -- world entry can arrive while authority is still pending. The
             -- request is recorded and completed on the turn the coordinator
             -- reaches STORE_READY; it is never driven to readiness here.
             worldEntryPending = true
+            if startupTiming.worldEnteredAt == nil then
+                startupTiming.worldEnteredAt = GetTime()
+            end
             -- A still-pending bootstrap is the normal startup path, not a
             -- fault, so it is not reported as a Store error here. With no
             -- coordinator (a Store stub) behaviour is unchanged: Initialize
@@ -541,18 +601,24 @@ function Lifecycle.New(options)
             end
         end
         if not initialized then
-            -- The scheduler's bounded bootstrap-pump core: at most ONE
-            -- PumpAuthorityBootstrap slice per scheduler turn (lines 1203-1204).
+            -- Only startup uses the amended timed batch. Rebind, maintenance,
+            -- and post-ready mutation scheduling below remain one-slice paths.
             -- Dependents are released only when the coordinator itself reaches
             -- STORE_READY (line 1519), never because this call completed.
             if bootstrapCoordinator ~= nil then
-                local result = PumpBootstrapSlice()
+                if bootstrapPumping then return end
+                local result = PumpBootstrapBatch()
                 local failed = type(result) == "table"
                     and result.state == "failed"
                 if worldEntryPending
                     and (failed or BootstrapCoordinatorIsReady()) then
                     Initialize()
                     if initialized then
+                        startupTiming.readyAt = GetTime()
+                        if startupTiming.worldEnteredAt ~= nil then
+                            startupTiming.readySeconds = startupTiming.readyAt
+                                - startupTiming.worldEnteredAt
+                        end
                         worldEntryPending = false
                         CompleteWorldEntry("PLAYER_ENTERING_WORLD")
                     elseif failed then
