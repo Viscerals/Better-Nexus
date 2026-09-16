@@ -555,6 +555,9 @@ function Cache.Stats()
     for key, value in pairs(state.stats) do out[key] = value end
     out.available, out.initialized = true, state.initialized
     out.pending = state.initializing or state.warmJob ~= nil
+    out.phase = state.warmJob and state.warmJob.phase
+        or state.hashJob and state.hashJob.phase or state.initialized and "ready" or "cold"
+    out.preparedRows = state.warmJob and state.warmJob.buildRows or state.stats.buildRows
     out.revision = state.observedRevision
     out.buckets = BUCKETS
     out.dirtyBuckets = 0

@@ -2110,3 +2110,77 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   controlled-peer test,backup recovery or GitHub mutation. Counters unchanged.
   Full external receipt: native-startup-20260916/manual-preparation-current.md
   beneath the established visualization evidence directory.
+
+## Additional manual prerequisite correction - 2026-09-16
+
+- Direct attachment58929bbb SHA256c2eca70a06dc976d395f74a1c41e9a6ff3de441cded111b487c6368d978f2520.
+  Clean continuation c045734121a5fb4331a2641790b3cd89f3270e19;
+  sourcefc1e567/treefa358c7262d072db983f448eaeb5b040e8d8b3f5 and ZIP SHA verified.
+  Prior native FAIL/ZIP/backup/counters preserved. No native wait repeated.
+- Original100x79 probe on unchanged product:301.1sec,expired,incomplete,sent0,
+  samecandidate3011pumps. Synthetic scalar trace identifies retention mutation
+  owned by BuildCatalog,tokenbinding1/generation1. Same candidate progresses
+  through mutation-bundle526,rows535-2135,index2147,witness-capture2346,
+  witness-verify2869-3011. It is scheduled, not restarting or externally waiting.
+  Native4667 phase cannot be reconstructed from its old receipt alone.
+- Before product edits, necessary paths and purposes:
+  core/BuildCatalog.lua: bounded read-only scalar prerequisite snapshot and an
+  opaque non-authority identity for same-candidate matching; existing pump gains
+  additive real-work result. Eligible only same published root/database/owner/
+  generation mutation. Rebind/admission/foreign pending work stays unboosted.
+  core/MainLifecycle.lua: one batch includes required catalog and hash slices;
+  owner and candidate matching before every slice, unchanged ordinary fallback.
+  core/BuildHashCache.lua: scalar partial warmup phase/row/work observations only.
+  tests/run_main_lifecycle_parity.lua: preserve old expiry assertions under the
+  supported one-slice timer-unavailable mode, add same100x79 timed end-to-end
+  dispatch regression and unrelated/ownership/shared-budget controls.
+  Workflow STATE/CONTEXT/EVIDENCE only for authority and results.
+  No source validation/hash/transport/lifetime/startup semantic changes.
+- Player-report preservation addendum: all supplied files exist. Text diagnostic
+  header is test.20-09d9ff3 withPRIEST-state strings; DKvideo build/session remains
+  unmatched. Preserve five separate outstanding reports in CONTEXT: Priest
+  locked-design save/assignment, DKunsynced automation, cardFreeze decision,
+  full diagnostic export lag, tester-build startup. No report is resolved by
+  manualSync or old unrelated suites. Videos not yet inspected this continuation.
+  No new tracking system, blanket repair scope, fullWTF or repeatedexport request.
+- Focused implementation checkpoint: lifecycle suite PASS under LuaJIT21,exit0.
+  Same100x79 input reaches readiness11.5sec and first dispatch12.6sec using an
+  advancing simulated update clock. Original unchanged-product expiry remains
+  preserved; fallback retains the300second expiry guard. Not native acceptance.
+- Strengthened lifecycle32-slice assertion first exposed33slices at0.2sec:
+  ordinary maintenance creation consumed one slice before the manual batch.
+  Correction charges that existing slice/time to the same manual allowance;
+  no ordinary/background scheduler acceleration added. Current-generation
+  publication ends the batch; the next update may warm the new generation.
+  Initial assertion insertion hit a different fixture and failed with missingC;
+  moved to the intended real-prerequisite fixture before evaluating the cap.
+  Whole-update clock experiment failed the existing soft-deadline progress
+  assertion; final accounting charges prerequisite work without charging
+  unrelated owner/status work. All original focused assertions retained.
+- Outstanding report files rechecked with exact sizes and diagnostic header.
+  CONTEXT retains five explicit open statuses and evidence limitations; STATE
+  now directly requires carrying them forward. Videos not inspected this turn.
+  No full diagnostic/WTF request, unrelated repair, package/install/native test,
+  new review campaign or GitHub operation occurred at this checkpoint.
+- Continuation controls completed: real pending Catalog.Put, pure scalar status,
+  detached comparison identity, shared32 cap, soft deadline, missing timer,
+  retained cursor, no intent/reset/disconnect/expiry, mid-pump cancellation,
+  expiry/disconnect/replacement request, generation replacement, unrelated
+  admission and no-progress all PASS. Generation fault hook initially recursed
+  into its own Init; restored original public pump before invoking Init, then
+  PASS. No product behavior changed to satisfy that fixture correction.
+- Integrated-prerequisite-budget/inventory.json:245/245PASS,exit0; explicit
+  tests/run_legacy_backup_smoke.lua manual skip. Real command and both button
+  consumers included. Parse321/321,68TOC upvalue max60,quality toolchain,
+  metadata,workflow,synthetic analyzer,bundled exporter,security self-tests,
+  package72files/68Lua and release-policy PASS. No Fengari profiles rerun.
+- Existing artifact policy identified two absolute user-directory references
+  in CONTEXT, not raw player evidence. Replaced with private-root-relative
+  references; originals remain in local historical receipts. Artifact policy
+  now408paths/0violations. No scanner/policy change. Current-tree secret scan
+  found no leaks. History scan must include nonzero commits before publication.
+- Direct publication exception acknowledged: one review branch/draft on PR70
+  at next coherent commit; no other GitHub mutation or broader repair granted.
+  Read-only GitHub verified PR70 open/draft,head55640b2,expected branch; local
+  ancestry exit0. Installed/package remains test26; current correction is not
+  installed. All five player-report statuses remain open and separately listed.

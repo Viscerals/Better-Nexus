@@ -461,13 +461,13 @@ function Lifecycle.New(options)
     -- MainLifecycle only owns the scheduler dispatch.
     -- AUTHORITY-COORDINATOR-DRIVE BEGIN. The lifecycle scheduler advances the
     -- catalog-owned pending candidate once before dependent consumers run.
-    local function PumpCatalogRootAdmissionSlice()
+    local function PumpCatalogRootAdmissionSlice(expectedPreparation)
         local catalog = Nexus and Nexus.BuildCatalog
         if type(catalog) ~= "table"
             or type(catalog.PumpRootAdmission) ~= "function" then
             return true
         end
-        local ok, result = pcall(catalog.PumpRootAdmission)
+        local ok, result, progressed = pcall(catalog.PumpRootAdmission, expectedPreparation)
         if not ok then
             RecordError("BuildCatalog.PumpRootAdmission", result)
             return false
@@ -475,9 +475,9 @@ function Lifecycle.New(options)
         local root = type(catalog.RootState) == "function"
             and catalog.RootState() or nil
         if type(root) == "table" then
-            return root.state == "ROOT_ADMITTED" and root.candidate ~= true
+            return root.state == "ROOT_ADMITTED" and root.candidate ~= true, progressed == true
         end
-        return not (type(result) == "table" and result.state == "pending")
+        return not (type(result) == "table" and result.state == "pending"), progressed == true
     end
     -- AUTHORITY-COORDINATOR-DRIVE END
 
@@ -498,23 +498,56 @@ function Lifecycle.New(options)
         return ready == true, progressed == true
     end
 
-    -- Only the existing manual hash-preparation owner receives this allowance.
-    -- Catalog, rebind and maintenance are prerequisites, never accelerated here.
+    -- Only the retained manual operation receives one shared allowance. A
+    -- same-root catalog commit is a prerequisite; rebind/foreign work is not.
     -- This is one batch per lifecycle update, shared by all command/UI entries.
-    local function PumpManualHashBatch(owner)
+    local function PumpManualPreparationBatch(owner, preparationElapsed, preparationPumps)
         local started, previous = StartupClock(), nil
+        local ready, catalogReady = false, false
+        local catalog = Nexus.BuildCatalog
+        local describe = catalog and catalog.ManualPreparationStatus
+        if type(describe) ~= "function" then
+            catalogReady = PumpCatalogRootAdmissionSlice()
+            return catalogReady and PumpBuildHashCacheSlice(), catalogReady
+        end
+        local initial, prerequisite = describe()
+        -- Starting ordinary maintenance can already consume a catalog slice.
+        -- Count it in this update's shared allowance, not as a second budget.
+        local priorSlices = math.max(0, initial.totalPumps - preparationPumps)
+        if priorSlices > 0 then
+            started = started and preparationElapsed and started-preparationElapsed or nil
+        end
         previous = started
-        local ready = false
-        for slice=1,MANUAL_SLICES do
+        manualTiming.slices = manualTiming.slices + priorSlices
+        for slice=1,math.max(0,MANUAL_SLICES-priorSlices) do
             local ok, _, current = RunIsolatedOwner("Sync.UpdatePendingRequestStatus",
                 Nexus.Sync.UpdatePendingRequestStatus)
             if not ok or current ~= owner then break end
             local before = StartupClock()
             local timed = started ~= nil and before ~= nil and before >= previous
             if timed and before-started >= MANUAL_MS then break end
-            if not timed and slice > 1 then break end
+            if not timed and priorSlices+slice > 1 then break end
+            local status, currentPrerequisite = describe()
+            -- Even our own completed publication ends this generation's batch.
+            -- The next update may prepare hashes against the new generation.
+            if status.binding ~= initial.binding or status.generation ~= initial.generation then break end
+            if currentPrerequisite ~= nil and currentPrerequisite ~= prerequisite then break end
             local progressed
-            ready, progressed = PumpBuildHashCacheSlice()
+            local ordinaryOnly = not status.ready and not status.relevant
+            if status.ready then
+                catalogReady = true
+                ready, progressed = PumpBuildHashCacheSlice()
+            elseif status.relevant then
+                catalogReady, progressed = PumpCatalogRootAdmissionSlice(prerequisite)
+            elseif slice == 1 then
+                -- Preserve the ordinary allowance, but never accelerate a
+                -- different binding, rebind or unrelated pending operation.
+                catalogReady = PumpCatalogRootAdmissionSlice()
+            else break end
+            local observed = describe()
+            manualTiming.catalogPhase, manualTiming.catalogKind = observed.phase, observed.kind
+            manualTiming.catalogPumps, manualTiming.catalogWork = observed.pumps, observed.work
+            manualTiming.waitReason = observed.reason
             manualTiming.slices = manualTiming.slices + 1
             local finished = StartupClock()
             timed = timed and finished ~= nil and finished >= before
@@ -525,9 +558,9 @@ function Lifecycle.New(options)
                 end
                 previous = finished
             else manualTiming.fallbackUpdates = manualTiming.fallbackUpdates + 1 end
-            if ready or not progressed or not timed or finished-started >= MANUAL_MS then break end
+            if ready or ordinaryOnly or not progressed or not timed or finished-started >= MANUAL_MS then break end
         end
-        return ready
+        return ready, catalogReady
     end
 
     function CompleteWorldEntry(event)
@@ -733,6 +766,11 @@ function Lifecycle.New(options)
             end
             return
         end
+        local preparationPumps = 0
+        if Nexus.BuildCatalog and type(Nexus.BuildCatalog.ManualPreparationStatus)=="function" then
+            preparationPumps = Nexus.BuildCatalog.ManualPreparationStatus().totalPumps
+        end
+        local preparationStarted = StartupClock()
         -- One authority rebind slice per scheduler turn, before any consumer
         -- reads this frame, so a character-identity change is re-proved by the
         -- coordinator rather than by a read.
@@ -747,6 +785,10 @@ function Lifecycle.New(options)
                 RecordStoreError(ok and StoreResultReason(result) or result)
             end
         end
+        local preparationFinished = StartupClock()
+        local preparationElapsed = preparationStarted and preparationFinished
+            and preparationFinished >= preparationStarted
+            and preparationFinished-preparationStarted or nil
         -- MASTER-W2-006/W2-008: Sync is the only frame owner that consumes
         -- catalog and compatibility-hash state, so it alone waits for the
         -- pending catalog slice and the one cache slice. DPS capture and
@@ -766,11 +808,14 @@ function Lifecycle.New(options)
                 manualTiming.startedAt, manualTiming.readyAt, manualTiming.sentAt = GetTime(), nil, nil
             end
         end
-        local catalogReady = PumpCatalogRootAdmissionSlice()
-        local buildHashesReady
+        local catalogReady, buildHashesReady
+        if manualOwner then
+            buildHashesReady, catalogReady = PumpManualPreparationBatch(manualOwner, preparationElapsed, preparationPumps)
+        else
+            catalogReady = PumpCatalogRootAdmissionSlice()
+            if catalogReady then buildHashesReady = PumpBuildHashCacheSlice() end
+        end
         if catalogReady then
-            buildHashesReady = manualOwner and PumpManualHashBatch(manualOwner)
-                or not manualOwner and PumpBuildHashCacheSlice()
             if manualOwner and buildHashesReady and manualTiming.readyAt == nil then
                 manualTiming.readyAt = GetTime()
             end

@@ -840,6 +840,9 @@ do
         end
         assert(#errors==0,table.concat(errors,";"))
         if life.IsInitialized() and not requestedAt then
+            -- Keep the real expiry assertions under the supported one-slice
+            -- fallback. The timed same-input case below must instead send.
+            debugprofilestop=nil
             local ok,why=sync.RequestSync()
             assert(ok==nil and why=="preparing sync data")
             requestedAt=H.now
@@ -925,9 +928,97 @@ do
     print("Real lifecycle manual expiry during catalog preparation -- OK")
 end
 
+-- Same supported 100x79 input, real retention prerequisite, and real wire.
+-- Simulated time advances on EVERY lifecycle update, including preparation.
+do
+    Nexus={VERSION="manual-prerequisite-test"}
+    local H=dofile("tests/harness.lua")
+    local S=dofile("tests/catalog_authority_support.lua")
+    for _,path in ipairs({"data/DefaultProfile.lua","data/BundledBuilds.lua",
+        "core/Store.lua","core/DpsCapture.lua","ui/CommunityBuilds.lua",
+        "core/MainLifecycle.lua","core/BuildHashCache.lua","core/Codec.lua",
+        "core/SyncProtocol.lua","core/SyncTransport.lua","core/SyncCompatibility.lua",
+        "core/SyncReconciler.lua","core/SyncInbound.lua","core/SyncDiagnostics.lua",
+        "core/SyncSession.lua","core/Sync.lua"}) do dofile(path) end
+    local savedClock,savedTime=debugprofilestop,time
+    local clock=0
+    debugprofilestop=function() clock=clock+0.01;return clock end
+    time=function() return 2000000000+math.floor(H.now) end
+    local rows={}
+    for i=1,100 do
+        local row=S.LocalBuild("saved-"..i,79,{futureBuild={keep="row-"..i}})
+        row.fingerprint=Nexus.DpsCapture.GetEchoKey(row.echoes)
+        row.fingerprintHash=Nexus.DpsCapture.GetEchoHash(row.echoes)
+        row.echoCount,row.loadoutAvailable,row.needsFullBuild=79,true,false
+        rows[row.id]=row
+    end
+    NexusDB=S.Database(rows,nil,{settings={},chars={},dpsCapture={},
+        futureRoot={keep=true},dataCompaction={schemaVersion=1,version=1,
+            last={migrationVersion=1}}})
+    WishlistRealizerDB=nil
+    local C,cache,sync=Nexus.BuildCatalog,Nexus.BuildHashCache,Nexus.Sync
+    local adapter={Init=function() end,Ready=function() return true end,
+        RivalDetected=function() return false end,OnEvent=function() end,
+        RequestSlots=function() end,SetSoloPicker=function() end}
+    local life=Nexus.MainInternals.Lifecycle.New({nexus=Nexus,
+        bindDependencies=function() return {Store=Nexus.Store,Adapter=adapter,
+            Model={},Panel={Init=function() end}} end,
+        ensureAutomation=function() return {Initialize=function() end,OnUpdate=function() end} end,
+        print=function() end,recordError=function(s,e) error(s..":"..tostring(e)) end,
+        recordStoreError=error,errorText=tostring,requestRecompute=function() end,
+        refreshHud=function() return true end,database=function() return NexusDB end,now=GetTime})
+    life.OnEvent("ADDON_LOADED","Nexus");life.OnEvent("PLAYER_ENTERING_WORLD")
+    local requestedAt,observedCandidate,readyAt,sentAt
+    for _=1,5000 do
+        local rootBefore=C.DebugStats().rootPumps
+        local hashBefore=cache.Stats().warmPumps+cache.Stats().hashPumps
+        H.now=H.now+0.1;life.OnUpdate(0.1)
+        if requestedAt then
+            local batchUsed=C.DebugStats().rootPumps-rootBefore
+                +cache.Stats().warmPumps+cache.Stats().hashPumps-hashBefore
+            assert(batchUsed<=32,"lifecycle preparation exceeded the shared 32-slice cap: "
+                ..tostring(batchUsed).." at "..tostring(H.now-requestedAt))
+        end
+        Nexus.Scheduler.Tick(H.now)
+        if requestedAt then
+            local used=C.DebugStats().rootPumps-rootBefore
+                +cache.Stats().warmPumps+cache.Stats().hashPumps-hashBefore
+            -- A scheduler callback can create the retained maintenance ticket
+            -- with its ordinary first slice, outside the lifecycle allowance.
+            assert(used<=33,"catalog and hash phases multiplied the shared cap")
+            if C.RootState().candidate then observedCandidate=true end
+            if cache.Stats().initialized and not readyAt then readyAt=H.now end
+            if sync.Stats().queueOutcome=="sent" then sentAt=H.now;break end
+            if H.now-requestedAt>=301 then break end
+        elseif life.IsInitialized() then
+            assert(sync.RequestSync()==nil,"cold supported case must prepare")
+            requestedAt=H.now
+        end
+    end
+    assert(observedCandidate,"same-input reproduction did not exercise the catalog prerequisite")
+    assert(sentAt and readyAt and sentAt-requestedAt<300,
+        "100x79 manual Sync expired before real prerequisite and hashes completed")
+    local requests=0
+    for _,message in ipairs(H.sentChatMessages) do
+        if message.text:gsub("||","|"):find("^WLRQ|") then requests=requests+1 end
+    end
+    assert(requests==1 and sync.Stats().terminalReason=="none",
+        "real preparation must dispatch one current request before expiry")
+    assert(C.DebugStats().maintenanceCommits==1,"retention prerequisite did not commit")
+    assert(NexusDB.futureRoot.keep,"preparation changed unrelated saved data")
+    for id,row in pairs(rows) do
+        local actual=S.Durable(NexusDB,"communityBuilds")[id]
+        assert(actual.futureBuild.keep==row.futureBuild.keep and #actual.echoes==79,
+            "preparation changed the supported source records")
+    end
+    print(string.format("100x79 real prerequisite ready %.3fs / sent %.3fs -- OK",
+        readyAt-requestedAt,sentAt-requestedAt))
+    debugprofilestop,time=savedClock,savedTime
+end
+
 -- Manual-only allowance: real session, cache, catalog and lifecycle. The
--- earlier fixture above deliberately keeps unrelated maintenance pending;
--- its unchanged one-slice and expiry assertions remain mandatory.
+-- earlier fixture uses the one-slice timer fallback to retain real pending
+-- maintenance; its lifetime and expiry assertions remain mandatory.
 do
     Nexus={VERSION="manual-budget-test"}
     local H=dofile("tests/harness.lua")
@@ -1075,6 +1166,81 @@ do
         if sync.Stats().queueOutcome=="sent" then break end
     end
     assert(sync.Stats().queueOutcome=="sent","invalidated request never dispatched")
+    -- A real catalog mutation, not an injected ready/hash state. It stays
+    -- pending while the stop controls exercise the lifecycle's shared owner.
+    local C=Nexus.BuildCatalog
+    local put,why=C.Put(S.LocalBuild("manual-prerequisite-control",79),{source="local"})
+    assert(put==nil and why=="ROOT_MUTATION_PENDING","control needs a real pending mutation")
+    local description,identity=C.ManualPreparationStatus()
+    assert(description.relevant and identity and next(identity)==nil,
+        "prerequisite must expose only a detached empty comparison identity")
+    for _,v in pairs(description) do assert(type(v)~="table","status leaked authority") end
+    local pumps=C.DebugStats().rootPumps
+    description.phase="caller edit";identity.callerEdit=true
+    local again,same=C.ManualPreparationStatus()
+    assert(same==identity and again.phase~="caller edit" and C.DebugStats().rootPumps==pumps,
+        "status query mutated or advanced catalog authority")
+    identity.callerEdit=nil
+    for _,stop in ipairs({"active","background","reset","disconnect","expiry","fallback","deadline"}) do
+        cache=Cold()
+        if stop~="background" then assert(sync.RequestSync()==nil) end
+        if stop=="active" then
+            local _,requestOwner=sync.UpdatePendingRequestStatus()
+            for _=1,3 do assert(sync.RequestSync()==nil) end
+            local _,repeatedOwner=sync.UpdatePendingRequestStatus()
+            assert(requestOwner==repeatedOwner,"catalog wait replaced logical manual intent")
+        elseif stop=="reset" then sync.Init(Nexus.Codec,adapter)
+        elseif stop=="disconnect" then H.joinedChannels.wrbuildssync=nil
+        elseif stop=="expiry" then H.now=H.now+301
+        elseif stop=="fallback" then debugprofilestop=nil
+        elseif stop=="deadline" then clockStep=1.1 end
+        local prior=C.ManualPreparationStatus()
+        local hashCount=Count(cache)
+        H.now=H.now+0.1;life.OnUpdate(0.1)
+        local after,currentIdentity=C.ManualPreparationStatus()
+        local used=after.totalPumps-prior.totalPumps
+        assert(currentIdentity==identity and after.work>=prior.work,"lost pending continuation")
+        assert(Count(cache)==hashCount and #H.sentChatMessages==0,"catalog wait leaked hash work or traffic")
+        if stop=="active" then assert(used==32 and after.work>prior.work,"relevant work did not progress")
+        elseif stop=="deadline" then assert(used>0 and used<=2,"catalog soft deadline did not yield")
+        else assert(used<=1,stop.." accelerated catalog work") end
+        H.joinedChannels.wrbuildssync=7
+        debugprofilestop=function() clock=clock+clockStep;return clock end
+        clockStep=0.01
+    end
+    for _,stop in ipairs({"no-progress","cancel","mid-expiry","mid-disconnect","superseded","generation"}) do
+        cache=Cold();assert(sync.RequestSync()==nil)
+        local original,calls=C.PumpRootAdmission,0
+        C.PumpRootAdmission=function(expected)
+            calls=calls+1
+            if stop=="no-progress" then return {state="pending"},false end
+            local result,progress=original(expected)
+            if stop=="cancel" then sync.Init(Nexus.Codec,adapter)
+            elseif stop=="mid-expiry" then H.now=H.now+301
+            elseif stop=="mid-disconnect" then H.joinedChannels.wrbuildssync=nil
+            elseif stop=="superseded" then
+                sync.Init(Nexus.Codec,adapter);assert(sync.RequestSync()==nil)
+            elseif stop=="generation" then
+                C.PumpRootAdmission=original
+                C.CancelRootAdmission();C.Init(NexusDB,Nexus.BundledBuilds)
+            end
+            return result,progress
+        end
+        H.now=H.now+0.1;life.OnUpdate(0.1)
+        C.PumpRootAdmission=original
+        assert(calls==1,stop.." did not end the additional catalog batch")
+        assert(#H.sentChatMessages==0 and Count(cache)==0,stop.." allowed stale dispatch/hash work")
+        H.joinedChannels.wrbuildssync=7
+    end
+    -- The superseding admission is not the original same-root prerequisite.
+    cache=Cold();assert(sync.RequestSync()==nil)
+    local unrelated=C.ManualPreparationStatus()
+    assert(not unrelated.relevant and not unrelated.ready,"expected unrelated admission")
+    pumps=C.DebugStats().rootPumps
+    H.now=H.now+0.1;life.OnUpdate(0.1)
+    assert(C.DebugStats().rootPumps-pumps<=1,"unrelated admission received the manual allowance")
+    assert(Count(cache)==0 and #H.sentChatMessages==0,"unrelated work allowed stale dispatch")
+    print("Real catalog prerequisite scalar isolation, cancellation, drift, wait and background controls -- OK")
     local startupMax=Nexus.startupTiming.maxUpdateMs
     life.OnUpdate(0.1)
     assert(Nexus.startupTiming.maxUpdateMs==startupMax,

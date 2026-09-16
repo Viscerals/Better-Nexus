@@ -8,7 +8,7 @@
 
 - Stage: 50
 - Checkpoint: 50.3
-- Status: IN_PROGRESS
+- Status: IN_REVIEW
 - Branch: `refactor/native-startup-usability`
 - Starting head: native smoke candidate `09d9ff36a1be5d5abe91a627876d4bcd230a5df0`, tree `e2d3037b29a9d0cede76f3bbaa441e09dd3e9a9f`
 - Worktree: `.native-startup-usability-worktree` beneath the established Better-Nexus checkout
@@ -312,7 +312,7 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Workflow state
 
-- [x] RUN_STOPPED
+- [ ] RUN_STOPPED
 - [ ] RUN_CONTEXT_CAPTURE
 - [x] STAGE_DESIGNED
 - [x] MAINTENANCE_CYCLE_DONE
@@ -455,6 +455,21 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Recommended next action
 
+- CURRENT COHERENT CHECKPOINT: real prerequisite cancellation, expiry,
+  disconnect, supersession, generation, no-progress, fallback and unrelated
+  admission controls PASS. Integrated LuaJIT245/245 PASS with the existing
+  manual backup skip; parse321/321 and package/source policies PASS. Freeze
+  the three production files plus lifecycle regression and these records;
+  obtain the authorized fresh Astra/xhigh focused review before packaging.
+- PUBLICATION EXCEPTION: the latest direct instruction authorizes one new
+  review/native-tester-fixes branch and draft PR stacked on verified PR70,
+  plus later permitted fast-forward updates. Review-only, no acceptance or
+  distribution. All other scope and native stop rules remain unchanged.
+- PLAYER REPORTS: carry all five explicit statuses and source-matching limits
+  from CONTEXT's "Outstanding player reports" section through every handoff.
+  Manual-Sync prerequisite work stays first. No unrelated repair authority or
+  reporter-confirmed resolution is implied. All three supplied files exist.
+- CURRENT AUTHORIZATION: attachment58929bbb SHA256c2eca70a06dc976d395f74a1c41e9a6ff3de441cded111b487c6368d978f2520 authorizes one additional manual prerequisite correction from fc1e567. Diagnose offline first, permit only proven same-root prerequisites within one shared2ms/32 batch, then integrated tests, fresh focused review, exact package and one cold native test. Stop if expiry repeats. Historical counters unchanged; earlier terminal remains preserved evidence.
 - CURRENT TERMINAL: MANUAL SYNC STILL BLOCKED. Bounded manual-only correction
   fc1e567f1f7a74a371451f2acdf3e1ba87c0a593 has245/245LuaJIT and focused
   Standards/Spec PASS, but native cold request expired without dispatch.

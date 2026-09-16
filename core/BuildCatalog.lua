@@ -2369,6 +2369,7 @@ function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
         ST.mutationTickets[ticket] = true
     end
     handle.mode, handle.phase = "mutation", "mutation-bundle"
+    handle.preparationIdentity = handle.preparationIdentity or {}
     handle.counters = handle.counters or NewCounters()
     handle.pumps, handle.failure = handle.pumps or 0, nil
     handle.token, handle.originalRoot, handle.ticket = root.token, root, ticket
@@ -3963,18 +3964,66 @@ function Catalog.BeginRootAdmission(database, bundle)
     return {state="pending", pumps=0}
 end
 
-function Catalog.PumpRootAdmission()
+function Candidate.PreparationWork(handle)
+    local totals = handle and handle.counters and handle.counters.totals
+    local amount = 0
+    for _, key in ipairs(COUNTER_KEYS) do amount = amount + (totals and totals[key] or 0) end
+    return amount
+end
+
+-- Scalar, read-only dependency description. The separate empty identity has
+-- no authority fields; editing it cannot change a candidate. Neither this
+-- query nor identity comparison admits, invalidates or advances any root.
+function Catalog.ManualPreparationStatus()
+    local root, handle = ServingCatalogRoot(), ST.candidate
+    local token = handle and handle.token or root and root.token
+    local agrees = token ~= nil and token.databaseIdentity == ST.db
+        and (type(NexusDB) ~= "table" or NexusDB == ST.db)
+        and token.ownerIdentity == CurrentOwnerKey()
+        and token.bindingGeneration == ST.bindingGeneration
+        and TokenDrifted(token) == nil and not ST.rebindRequired and not ST.exhausted
+    local relevant = agrees and ST.rootState == "ROOT_ADMITTED" and root ~= nil
+        and handle ~= nil and handle.mode == "mutation"
+        and handle.originalRoot == root and token == root.token
+        and handle.preparationIdentity ~= nil
+    local witness = handle and (handle.witnessHandle or handle.sourceVerifyHandle)
+    return {ready=agrees and ST.rootState == "ROOT_ADMITTED" and handle == nil or false,
+        relevant=relevant or false, ownerAgrees=agrees or false,
+        reason=not agrees and "OWNER_OR_GENERATION_MISMATCH"
+            or handle and (relevant and "CATALOG_COMMIT_PENDING" or "UNRELATED_CATALOG_WORK")
+            or ST.rootState,
+        kind=handle and (handle.maintenanceOperation or handle.completion or handle.mode),
+        phase=handle and handle.phase, pumps=handle and handle.pumps or 0,
+        totalPumps=ST.debugStats.rootPumps,
+        work=Candidate.PreparationWork(handle), row=handle and handle.rowIndex or 0,
+        index=handle and handle.indexIndex or 0,
+        witnessRoot=witness and witness.rootIndex or 0,
+        witnessDepth=witness and #witness.frames or 0,
+        binding=ST.bindingGeneration, generation=ST.generation},
+        relevant and handle.preparationIdentity or nil
+end
+
+function Catalog.PumpRootAdmission(expectedPreparation)
     if ST.exhausted then
         return {state=ST.rootState, reason="GENERATION_EXHAUSTED", pumps=0}
     end
     local handle = ST.candidate
     if not handle then return {state=ST.rootState, reason=ST.rootReason, pumps=0} end
+    if expectedPreparation ~= nil then
+        local _, current = Catalog.ManualPreparationStatus()
+        if current ~= expectedPreparation then
+            return {state="pending", reason="PREPARATION_SUPERSEDED", pumps=handle.pumps}, false
+        end
+    end
     local drift = TokenDrifted(handle.token)
     if drift then
         handle.phase, handle.failure = "failed", drift
         return FinishAdmission("failed")
     end
-    return FinishAdmission(PumpAdmission(handle))
+    local before, phase = Candidate.PreparationWork(handle), handle.phase
+    local outcome = FinishAdmission(PumpAdmission(handle))
+    return outcome, outcome.state ~= "failed" and (Candidate.PreparationWork(handle) > before
+        or handle.phase ~= phase or outcome.state == "committed")
 end
 
 function Catalog.BindMutationCompletion(ticket, callback)
@@ -5210,6 +5259,7 @@ function Candidate.NewPutPreparation(root, record, options, claim, deferred, slo
                                      existing, readmitTombstone, carriedUnknown)
     return {
         mode="mutation", phase="put-prepare", counters=NewCounters(), pumps=1,
+        preparationIdentity={},
         failure=nil, token=root.token, originalRoot=root, ticket=nil,
         reason="build put", deferred=deferred, notifyScope=nil,
         put={
@@ -5929,7 +5979,7 @@ function Candidate.NewMaintenancePreparation(root, maintenance, overrides)
     local ticket = {state="pending", committed=false, pumps=0}
     ST.mutationTickets[ticket] = true
     return {
-        mode="mutation", phase="maintenance-prepare",
+        mode="mutation", phase="maintenance-prepare", preparationIdentity={},
         counters=NewCounters(), pumps=0, failure=nil,
         token=root.token, originalRoot=root, ticket=ticket,
         reason=nil, deferred=true, notifyScope="all",

@@ -1,6 +1,46 @@
 # CONTEXT
 
+## Outstanding player reports - carry through every handoff
+
+Manual-Sync prerequisite correction remains FIRST implementation task. These
+five reports are separate, not resolved by its changes or unrelated green tests.
+All three supplied files exist in the user's local Downloads directory:
+message (5).txt (332582bytes), Testing Wishlist issue.mp4 (160393888bytes),
+testing vid 2.mp4 (76544151bytes). Text header independently matches
+test.20-09d9ff3; PRIEST-state strings present. DK video build/session UNKNOWN.
+Videos are preserved, not yet inspected in this continuation. Do not conflate
+the text snapshot and DK video or ask for full WTF/full export by default.
+
+| Report | Explicit current status | Required next evidence |
+| --- | --- | --- |
+| Priest six designed locked Echoes disappear after save/reopen; invalid assignment; panel unavailable until reload | not reproduced, with the evidence limitation | Inspect Testing Wishlist issue.mp4; reproduce exact save/assignment input and identify build. Prior save-dialog tests do not resolve it. |
+| DK recommendation remains unsynced across >23minute observations; reload plus Echo UI helps | needs a specific missing build/input | Match testing vid 2.mp4 build/session; trace exact unsynced predicate, not Community/Leaderboard hashes by assumption. |
+| Wanted offered Echo not preserved by Freeze | needs a specific missing build/input | Reconstruct exact board, desired/owned copies, qualities, charges and real guarantee. Card Freeze is not locked Echoes or Auto-Lock. |
+| Full diagnostic export causes severe lag | not reproduced, with the evidence limitation | Separate collection, formatting and copy-window rendering; do not request another full export first. |
+| Slow startup on distributed tester build | needs a specific missing build/input | Text is test20; identify each affected distributed build and compare existing later startup fixes before duplicating work. |
+
+No reporter confirmation on an identified corrected build exists for these
+reports. Read-only triage may relate them to proven roots. This addendum is not
+blanket repair authority. Retain explicit statuses at next checkpoint/final.
+
 ## Current bounded manual preparation correction
+
+Additional prerequisite correction is entering focused review under attachment58929bbb.
+Single writer continues from c045734 with one coherent source/test freeze. Same-root
+retention is proven to progress too slowly under the ordinary allowance; the
+native test26 private phase is still UNKNOWN. Shared catalog/hash batch now
+counts maintenance's initial slice and ends on generation change. Focused real
+100x79 test: ready11.5sec/sent12.6sec, LuaJIT lifecycle suite PASS, exit0.
+These are simulated update-clock results, not native measurements. Prerequisite
+cancellation/unrelated-work controls and integrated245/245LuaJIT checks PASS.
+Manual backup test remains skipped. Obtain the authorized fresh focused review,
+then package and perform the single authorized cold native retest. No new
+package/install yet. Latest direct authority also permits one review-only draft
+on review/native-tester-fixes stacked on PR70 and later authorized fast-forwards.
+PR70 head55640b2 was refreshed and is an ancestor; recheck before publishing.
+The five player reports above remain open and must accompany that handoff.
+The terminal paragraph below describes the preserved test26 result, not a new
+authorization gate for this explicitly authorized correction.
 
 TERMINAL NATIVE FAIL: test.26-fc1e567 expired without readiness/dispatch.
 Source fc1e567f1f7a74a371451f2acdf3e1ba87c0a593,
@@ -15,7 +55,7 @@ hashwarm417,restarts0,buildRows0,hashPumps0. Private subphase UNKNOWN.
 Native navigation responsive,Errors empty. Stop-on-expiry reached. Warm control
 and replacement reload NOT RUN; no larger budget/lifetime or repair authorized.
 Exact source/ZIP/install and addon/fullWTF backup preserved. Full local receipt:
-C:/Users/Valentine/.codex/visualizations/2026/09/07/01a07ae8-93de-7243-8ba6-abce5576c3c2/native-startup-20260916/manual-preparation-current.md
+Established private visualization evidence root: native-startup-20260916/manual-preparation-current.md
 The earlier pending paragraphs below are historical.
 
 Direct attachment2d7b5643 SHA256
