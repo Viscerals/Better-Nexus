@@ -2,6 +2,14 @@
 
 ## Startup terminal-result retention follow-up — 2026-09-16
 
+- Independent recheck reproduced the original/rejected/successor event order:
+  successor retains exactly one refusal for all four cases, with no repumping.
+  A separate repeated differential exposed a slice-count-only mismatch
+  (12513/12516), while content/refusal remained equal. The comparison now pins
+  test-only scalar-key next/pairs order, preserving every original assertion.
+  Production traversal and all other native-order tests are unchanged. This
+  isolates scheduling from iteration order; it is not native performance proof.
+
 - User standing-completion follow-up authorizes correcting the independent
   early STORE_INVALID finding, focused recheck, native measurement and package.
 - Regression added before fix: real Store, invalid unrelated 184-byte key,

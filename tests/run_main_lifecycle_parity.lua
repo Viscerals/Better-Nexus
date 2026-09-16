@@ -618,6 +618,30 @@ print("Main lifecycle readiness boundary, boot, identity, idempotence, events, u
 -- Only post-ready UI/network dependents are test doubles; admission is not.
 do
     local savedClock=debugprofilestop
+    local rawNext,rawPairs=next,pairs
+    -- The differential must hold traversal order fixed as well as data. Lua
+    -- hash order can otherwise pack identical work into different slice counts.
+    -- This test-only legal scalar-key traversal changes no production source,
+    -- admission result, expected data, or work oracle. Identity-keyed internal
+    -- maps keep native traversal; persisted input maps use strings/numbers.
+    local function OrderedNext(t,previous)
+        local best
+        local function Before(a,b)
+            if type(a)~=type(b) then return type(a)<type(b) end
+            if type(a)=="boolean" then return a==false and b==true end
+            return a<b
+        end
+        for k in rawNext,t do
+            local kind=type(k)
+            if kind~="string" and kind~="number" and kind~="boolean" then
+                return rawNext(t,previous)
+            end
+            if (previous==nil or Before(previous,k)) and (best==nil or Before(k,best)) then
+                best=k
+            end
+        end
+        if best~=nil then return best,rawget(t,best) end
+    end
     local function Encode(v)
         if type(v)~="table" then return type(v)..":"..tostring(v) end
         local keys={}; for k in pairs(v) do keys[#keys+1]=k end
@@ -627,6 +651,8 @@ do
         out[#out+1]="}"; return table.concat(out,"|")
     end
     local function Run(size,timed,invalid,recovered)
+        next=OrderedNext
+        pairs=function(t) return OrderedNext,t,nil end
         Nexus={}
         dofile("tests/harness.lua")
         dofile("data/DefaultProfile.lua")
@@ -696,6 +722,7 @@ do
         L.OnUpdate(0.01)
         assert(N.startupTiming.slices==slices and releases==(invalid and 0 or 1),
             "terminal startup repeated work or initialization")
+        next,pairs=rawNext,rawPairs
         return Encode(NexusDB),table.concat(failures,","),updates,slices
     end
     for _,profile in ipairs({{0,false,false},{1,false,false},{100,false,false},
