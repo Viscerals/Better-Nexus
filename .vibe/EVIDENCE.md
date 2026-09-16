@@ -1969,3 +1969,37 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   ran the same release check successfully without changing machine policy.
 - PR58 four and catalog six expected-red confirmations PASS, exit0,
   product_bytes_unchanged=true. Existing gitleaks8.30.1 dir scan found no leaks.
+
+## Native test24 and sent-active expiry follow-up
+
+- Exact baecbbf/test.24 installed72/72 after verified631file addon/WTF backup.
+  Ready75.306sec,fullmax15.6659ms,Communitymax8.0829ms,total499.0812ms.
+  Restored Wishlist values unchanged. No automation/resources/publication.
+- /nexus sync at18:06:23.936Z: preparing at154sec,real sent1 by210sec.
+  This attempt did not reproduce the earlier12-20minute pre-send wait.
+  At317.905sec terminalnone/queuesent/UI Syncing: sent-active lifetime still
+  gated after later catalog work. Stop affected test; normal /quit,process
+  absence confirmed. Full receipts remain external test24-native.md.
+- Independent realLifecycle/Sync/cache/inbound probe sends the exact manual
+  WLRQ once then admits one real WLBI. RED onbaecbbf at301.1sec,
+  same candidate3001pumps,queue sent/terminalnone/UI syncing.
+- Tracked lifecycle regression completes real preparation and real transport,
+  then creates one real catalog.Put. First fixture allowed only1second for
+  transport and failed its setup;10second bounded wait reaches actual send.
+  Then genuineRED at absolute-expiry assertion. Private helper extraction
+  reuses unchanged UpdateAutoConvergence expiry; status-only entry handles
+  sent-active with no pending slots. GREEN on tracked and independent probes:
+  queue sent,terminalexpired,same progressing candidate,no resend.
+- Pending disconnect precedence/cancellation unchanged. No hashes, recovery,
+  transport, deadline or budget expansion. Focused Standards PASS; Spec recheck
+  and integrated245 inventory underway. Parse321/321 and upvalue boundary PASS.
+- Final focused Spec PASS: both preparing and sent real-path probes; no early
+  expiry, exactly-once terminal, closed windows, late response rejection,
+  reset/retry/disconnect and queued cancellation. All remaining algorithms and
+  budgets unchanged. Non-Lua toolchain/metadata/workflow/analyzer/exporter/
+  release policy/gitleaks recheck PASS. Native exact replacement still required.
+- Integrated sent-state candidate245/245LuaJIT PASS,exit0; sole manual skip
+  tests/run_legacy_backup_smoke.lua. Receipt:
+  native-startup-20260916/integrated-sync-sent-deadline/inventory.json.
+  Prior exact-base expected-red and unchanged policy results remain applicable;
+  no historical FAIL was rewritten and no FengariFull rerun occurred.

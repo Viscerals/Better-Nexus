@@ -403,18 +403,25 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Active issues
 
-- [ ] ISSUE-NATIVE-STALE-SAVE: Old Wishlist confirmation can change a new editor association
+- [x] ISSUE-NATIVE-STALE-SAVE: Old Wishlist confirmation can change a new editor association
   - Impact: MAJOR
-  - Status: IN_PROGRESS
+  - Status: RESOLVED
   - Owner: agent
-  - Unblock Condition: Focused regression and independent recheck PASS; native confirm/cancel/reopen on the coherent replacement remains pending.
-- [ ] ISSUE-NATIVE-STARTUP-SERIALIZATION: Required Community repairs wait behind automatic maintenance and one-slice catalog writes
+  - Unblock Condition: Focused regression and independent recheck PASS; native test23 confirm/cancel/reopen and reversible edit/reload/restoration PASS. Original restored values verified again on exact test24.
+- [x] ISSUE-NATIVE-STARTUP-SERIALIZATION: Required Community repairs wait behind automatic maintenance and one-slice catalog writes
   - Impact: MAJOR
-  - Status: IN_PROGRESS
+  - Status: RESOLVED
   - Owner: agent
-  - Unblock Condition: Offline no-predrain regression and independent recheck PASS; measure replacement native readiness and complete update before closing this issue.
+  - Unblock Condition: Offline no-predrain regression and independent recheck PASS; exact test23 and test24 native readiness and complete-update measurements PASS for the tested previously recovered profile.
   - Evidence Needed: Independent exact f34216a reproduction and corrected public UI/controller checks.
   - Notes: Confirmed independently on both review axes. Correct under current standing native authority; no unrelated repair wave.
+- [ ] ISSUE-NATIVE-SYNC-LIFETIME: Readiness gating suspends manual request expiry
+  - Impact: MAJOR
+  - Status: IN_PROGRESS
+  - Owner: agent
+  - Unblock Condition: Pending and sent-active real-path regressions PASS, integrated validation/review, and native outcome on one exact replacement.
+  - Evidence Needed: test24 native sent1 with terminal none beyond317seconds; independent sent-deadline RED and corrected GREEN.
+  - Notes: No scheduling budget expansion. Previous long preparation remains separate; manual-only batching requires resolving the explicit startup-only boundary.
 
 ## Blockers
 

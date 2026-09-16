@@ -1,5 +1,26 @@
 # CONTEXT
 
+## Latest native checkpoint - sent Sync expiry
+
+Frozen/installed test.24-baecbbf source baecbbf224179fa4ec1fd7e31fa7938549828018,
+tree41ed3a48c69be5eeb9eececfb637e329bae49b91. ZIP650638bytes,
+SHA256277909c53c600822e1f81564e6237aac084f7b08557946c5fe1d8525f7234074.
+Installed72/72 parity. Ready75.306sec/fullmax15.6659ms, Communitycomplete.
+Restored Wishlist41/79,EmberSparkx1,6locked,Notassigned verified unchanged.
+Manual request really sent once between154 and210seconds, but at317.905seconds
+still terminal=none/UI Syncing. Offline independent real-path reproduction
+confirmed sent-active convergence expiry was still behind the readiness gate.
+Current dirty follow-up shares its existing absolute-expiry branch with
+status-only maintenance. Real request send then catalog write RED->GREEN;
+queue remains sent,terminal expired,same candidate progresses,no extra sends.
+No scheduling/deadline/transport budget change. New integrated validation and
+package native check pending. WoW closed normally; no profile edits.
+The prior12-20minute preparation delay did not recur on this changed saved
+profile; it remains a performance limitation, not disproved by this run.
+Any manual-only timed budget extension awaits the specific asked decision.
+External native receipts test23-native.md/test24-native.md preserve details.
+Older checkpoints below are historical, not the current installation identity.
+
 ## Current native continuation - 2026-09-16
 
 Current frozen product/package: 435ebe1370860e857103d72b6c04a84abae73502,

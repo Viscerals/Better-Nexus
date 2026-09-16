@@ -614,10 +614,28 @@ function Session.New(options)
         return true
     end
 
+    local function ExpireActiveConvergence()
+        if not autoConverge.active
+            or now() < Number(autoConverge.absoluteUntil) then return false end
+        autoConverge.active = false
+        autoConverge.terminal = "expired"
+        pendingRequest = nil
+        pendingHashRequest = nil
+        receiveWindowUntil, receiveAbsoluteUntil = 0, 0
+        SetTerminal("expired")
+        log("SYNC", "convergence expired after %d pass(es)", autoConverge.pass)
+        return true
+    end
+
     -- Lifetime checks do not consume catalog/hash state or enqueue work. They
     -- must still run while the lifecycle withholds transport for preparation.
     function M.UpdatePendingRequestStatus()
-        if not pendingHashRequest and not pendingRequest then return false end
+        if not pendingHashRequest and not pendingRequest then
+            -- A sent request no longer owns either pending slot. Its absolute
+            -- deadline still applies if later catalog work gates full updates.
+            ExpireActiveConvergence()
+            return false
+        end
         local connected = options.isRequestChannelPresent and options.isRequestChannelPresent()
             or not options.isRequestChannelPresent and options.isConnected()
         if not connected or now() >= Number(autoConverge.absoluteUntil) then
@@ -728,18 +746,8 @@ function Session.New(options)
 
     function M.UpdateAutoConvergence()
         if not autoConverge.active then return end
+        if ExpireActiveConvergence() then return end
         local current = now()
-        if current >= Number(autoConverge.absoluteUntil) then
-            autoConverge.active = false
-            autoConverge.terminal = "expired"
-            pendingRequest = nil
-            pendingHashRequest = nil
-            receiveWindowUntil, receiveAbsoluteUntil = 0, 0
-            SetTerminal("expired")
-            log("SYNC", "convergence expired after %d pass(es)",
-                autoConverge.pass)
-            return
-        end
         if pendingHashRequest or pendingRequest or M.IsReceiving() then return end
         if current - autoConverge.started < autoSyncMinPass then return end
         if current - autoConverge.lastInbound < autoSyncQuiet then return end

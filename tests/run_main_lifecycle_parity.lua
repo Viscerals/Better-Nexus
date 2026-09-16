@@ -880,6 +880,47 @@ do
     assert(#H.sentChatMessages==0 and cache.Stats().hashPumps==hashPumps,
         "status-only continuation pumped hashes or transport")
     assert(NexusDB.futureRoot.keep,"deadline check changed unknown saved data")
+
+    -- Native follow-up: a request can send, then a legitimate catalog write
+    -- withholds full Sync updates again. Its sent lifetime must still expire.
+    H.joinedChannels.wrbuildssync=7
+    adapter.Ready=function() return true end
+    for _=1,100000 do
+        H.now=H.now+0.001;life.OnUpdate(0.001);Nexus.Scheduler.Tick(H.now)
+        if cache.Stats().initialized and not catalog.RootState().candidate then break end
+    end
+    assert(cache.Stats().initialized and not catalog.RootState().candidate,
+        "sent-deadline fixture must complete real preparation")
+    local sentBefore=sync.Stats().sent
+    local sentRequestAt=H.now
+    assert(sync.RequestSync()==true,"prepared request must be accepted")
+    for _=1,1000 do
+        H.now=H.now+0.01;life.OnUpdate(0.01);Nexus.Scheduler.Tick(H.now)
+        if sync.Stats().queueOutcome=="sent" then break end
+    end
+    assert(sync.Stats().queueOutcome=="sent" and sync.Stats().sent==sentBefore+1,
+        "fixture must reach real transport send before catalog invalidation: "
+            ..tostring(sync.Stats().queueOutcome).."/"..tostring(sync.Stats().sent)
+            .."/"..tostring(catalog.RootState().candidate))
+    local put,putWhy,putTicket=catalog.Put(S.LocalBuild("sent-deadline-new",79))
+    assert(put==nil and putWhy=="ROOT_MUTATION_PENDING" and putTicket.state=="pending",
+        "later supported write must retain a real pending catalog candidate")
+    local laterGeneration=catalog.RootState().generation
+    while H.now-sentRequestAt<301 do
+        local before=catalog.DebugStats().rootPumps
+        H.now=H.now+0.1;life.OnUpdate(0.1);Nexus.Scheduler.Tick(H.now)
+        assert(catalog.DebugStats().rootPumps-before<=1,
+            "sent expiry expanded the ordinary catalog budget")
+        if H.now-sentRequestAt<300 then
+            assert(sync.Stats().terminalReason=="none","sent request expired early")
+        end
+    end
+    assert(catalog.RootState().candidate and catalog.RootState().generation==laterGeneration,
+        "sent expiry fixture must still withhold full Sync behind the same candidate")
+    assert(sync.Stats().terminalReason=="expired" and sync.Stats().queueOutcome=="sent",
+        "sent request remained active past its absolute deadline while catalog was pending")
+    assert(sync.Stats().sent==sentBefore+1,"expiry must not resend a request")
+    assert(#errors==0,table.concat(errors,";"))
     debugprofilestop,time=savedClock,savedTime
     print("Real lifecycle manual expiry during catalog preparation -- OK")
 end
