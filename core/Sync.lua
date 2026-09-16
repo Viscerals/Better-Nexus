@@ -3529,6 +3529,12 @@ function Sync.OnUpdate(elapsed)
     Session.UpdateJoinRetry(elapsed)
 end
 
+-- Safe before catalog/hash readiness: only expire or disconnect a retained
+-- request. This never pumps recovery, hashes, or transport ahead of their gate.
+function Sync.UpdatePendingRequestStatus()
+    return Session.UpdatePendingRequestStatus()
+end
+
 ------------------------------------------------------------------------
 -- Peer status exchange (dev diagnostic, internal)
 -- Sends a compact base64 JSON token via WHISPER on request.

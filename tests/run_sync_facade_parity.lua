@@ -28,6 +28,9 @@ local expected = {
     "RawLog", "ReceiveTimeLeft", "RequestDataViewRefresh",
     "RequestFullLoadoutSync", "RequestLoadout", "RequestSync",
     "ResponseStats", "SendStatusTo", "Stats", "TombstoneCount", "WorkState",
+    -- Native continuation adds one status-only lifecycle entry. Keep the exact
+    -- surface assertion and every prior member; no permissive wildcard.
+    "UpdatePendingRequestStatus",
 }
 local actual = {}
 for name, value in pairs(Nexus.Sync) do

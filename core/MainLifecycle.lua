@@ -61,6 +61,7 @@ function Lifecycle.New(options)
         ["Sync.Init"]={active=false,message=nil},
         ["Sync.OnWorldEntry"]={active=false,message=nil},
         ["Sync.OnUpdate"]={active=false,message=nil},
+        ["Sync.UpdatePendingRequestStatus"]={active=false,message=nil},
         ["DpsCapture.Init"]={active=false,message=nil},
         ["DpsCapture.OnUpdate"]={active=false,message=nil},
         ["DpsCapture.OnCombatStart"]={active=false,message=nil},
@@ -714,6 +715,10 @@ function Lifecycle.New(options)
         -- pending catalog slice and the one cache slice. DPS capture and
         -- automation keep their per-frame turn; their own catalog writes are
         -- retained pending tickets and never block the frame.
+        if Nexus.Sync and type(Nexus.Sync.UpdatePendingRequestStatus)=="function" then
+            RunIsolatedOwner("Sync.UpdatePendingRequestStatus",
+                Nexus.Sync.UpdatePendingRequestStatus)
+        end
         local catalogReady = PumpCatalogRootAdmissionSlice()
         local buildHashesReady = catalogReady and PumpBuildHashCacheSlice()
         local Adapter = dependencies.Adapter

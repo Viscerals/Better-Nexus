@@ -1905,3 +1905,67 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   security/workflow policies, analyzer/exporter, package-source, release policy
   and gitleaks PASS. PR58 four and catalog six expected-red confirmations
   exit0 with product_bytes_unchanged=true. No further product edits before freeze.
+
+## Native test.23 measured continuation - 2026-09-16
+
+- Frozen product435ebe1370860e857103d72b6c04a84abae73502,
+  treeb512e47d1f9ae21057adeb92be9594395ebf09ad; test.23-435ebe1.
+  ZIP650421bytes,SHA256420466b84b8ebf0499fb7f49a64d8493235c20e76682add984de5417cfc17b9c.
+  Package72files/68Lua, supported label injection only; installed72/72parity.
+  No product/test changes after freeze. Current edits are evidence only.
+- Native initial ready75.044sec/fullupdate max24.3548ms; reload40.404sec/
+  max24.8336ms; reentry79.909sec/max16.7305ms. Community max9.4192/3.3097/
+  12.0774ms respectively. Existing previously recovered profile, not fresh
+  native or general historical-backup recovery. Prior normal repairs changed
+  data, so no controlled speed ratio or hard2ms guarantee is claimed.
+- Popup visible above editor; Escape cancellation, confirm, close/reopen
+  without stale modal PASS. Existing Wishlist EmberSparkx1->x2 saved and
+  persisted /reload; restoredx1/41total/6locked/Notassigned survived session
+  save and reentry. No character-owned Echo/resource or association change.
+- Community and Leaderboard render; /nexus log errors reports none. Ordinary
+  manual Sync from command and both buttons retains Preparing with no false
+  failure or observed duplicate send. First attempt remained Preparing about
+  20minutes; catalog advanced2puts+2maintenance then cleared, but client
+  returned to character selection before terminal observation. Not SyncPASS.
+- Independent real-path synthetic979x79 fixture reproduced four finite
+  candidates33276/33277/33279/33278slices then1992hash turns and send. This
+  early send attribution is corrected below; it was not the manual request. No
+  expired-deadline self-loop in1000extra turns. Counts are not native timings.
+  Current legacy worker recovered0; its work counter did not prove ownership.
+- Source/offline independent PASS remains separate from incomplete native
+  Sync acceptance. Further live evidence stays in external
+  native-startup-20260916/test23-native.md. Controlled-peer convergence,
+  new combat capture, publication and real backup recovery remain NOT RUN.
+
+## Manual Sync lifetime correction - 2026-09-16
+
+- Correction to preceding inference: synthetic wire output was WLLQ background
+  recovery. The original manual WLRQ was never sent; it expired only after
+  catalog/hash readiness, about2258 synthetic seconds. This is not native time.
+- Actual native second request remained Preparing beyond12minutes, sent0.
+  A later sample showed Not Responding then realm selection without a worker
+  logout. Cause UNKNOWN. Normal Alt+F4 closed WoW; process/window absence verified.
+- Real lifecycle deadline test is RED on435ebe1: at301.1sec pending=true,
+  terminal=none. Corrected source GREEN: pending=false,terminal=expired,sent0,
+  same progressing catalog candidate. No workload, deadline, or budget relaxed.
+- SyncSession owns status-only disconnect/expiry; Sync forwards it and lifecycle
+  isolates errors before readiness gates. Hashes, recovery and transport retain
+  their old gates. The exact public contract adds one method; old assertions
+  remain, module manifest218symbols and facade43callables are explicit.
+- Fresh focused independent Standards and Spec PASS. Real cancellation,
+  late-response, rebind, retry and no-transport-before-readiness checks PASS.
+- Integrated LuaJIT245/245 PASS, exit0; manual skip
+  tests/run_legacy_backup_smoke.lua. Receipt:
+  native-startup-20260916/integrated-sync-deadline-accepted/inventory.json.
+  Earlier inventory contract-surface mismatch preserved, then exact manifest
+  updated for the one intended addition. Parse321/321,68TOC files,
+  max60upvalues,60pass/61fail boundary,package-source PASS.
+- Long manual preparation is unresolved. Timely expiry does not establish
+  native Sync usability. Startup-only soft2ms/hard32 authority stays bounded;
+  no steady-state scheduling expansion or root-algorithm rewrite performed.
+- Final integrated checks: release policy, metadata, toolchain, security policy,
+  workflow policy, sanitized analyzer and bundled exporter PASS. Initial Windows
+  PowerShell5 invocation was execution-policy blocked; repository-standard pwsh
+  ran the same release check successfully without changing machine policy.
+- PR58 four and catalog six expected-red confirmations PASS, exit0,
+  product_bytes_unchanged=true. Existing gitleaks8.30.1 dir scan found no leaks.

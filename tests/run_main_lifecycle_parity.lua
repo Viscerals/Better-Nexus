@@ -782,3 +782,104 @@ do
     debugprofilestop=savedClock
     print("Real Store early/late world entry x timer/fallback: 4/4 -- OK")
 end
+
+-- A pending catalog must not suspend the manual request's existing deadline.
+-- Real Store, retention, catalog, hash cache, Sync and lifecycle; no ready stub.
+do
+    Nexus={}
+    local H=dofile("tests/harness.lua")
+    local S=dofile("tests/catalog_authority_support.lua")
+    for _,path in ipairs({"data/DefaultProfile.lua","data/BundledBuilds.lua",
+        "core/Store.lua","core/DpsCapture.lua","ui/CommunityBuilds.lua",
+        "core/MainLifecycle.lua","core/BuildHashCache.lua","core/Codec.lua",
+        "core/SyncProtocol.lua","core/SyncTransport.lua","core/SyncCompatibility.lua",
+        "core/SyncReconciler.lua","core/SyncInbound.lua","core/SyncDiagnostics.lua",
+        "core/SyncSession.lua","core/Sync.lua"}) do dofile(path) end
+    local savedClock,savedTime=debugprofilestop,time
+    Nexus.VERSION="synthetic-deadline-probe"
+    debugprofilestop=function() return os.clock()*1000 end
+    time=function() return 2000000000+math.floor(H.now) end
+    local rows={}
+    for i=1,100 do
+        local row=S.LocalBuild("saved-deadline-"..i,79,{futureBuild={keep=i}})
+        row.fingerprint=Nexus.DpsCapture.GetEchoKey(row.echoes)
+        row.fingerprintHash=Nexus.DpsCapture.GetEchoHash(row.echoes)
+        row.echoCount,row.loadoutAvailable,row.needsFullBuild=79,true,false
+        rows[row.id]=row
+    end
+    NexusDB=S.Database(rows,nil,{settings={},chars={},dpsCapture={},
+        futureRoot={keep=true},dataCompaction={schemaVersion=1,version=1,
+            last={migrationVersion=1}}})
+    WishlistRealizerDB=nil
+    local catalog,cache,sync=Nexus.BuildCatalog,Nexus.BuildHashCache,Nexus.Sync
+    local adapter={Init=function() end,Ready=function() return true end,
+        RivalDetected=function() return false end,OnEvent=function() end,
+        RequestSlots=function() end,SetSoloPicker=function() end}
+    local automation={Initialize=function() end,OnUpdate=function() end}
+    local errors={}
+    local life=Nexus.MainInternals.Lifecycle.New({nexus=Nexus,
+        bindDependencies=function() return {Store=Nexus.Store,Adapter=adapter,
+            Model={},Panel={Init=function() end}} end,
+        ensureAutomation=function() return automation end,print=function() end,
+        recordError=function(s,e) errors[#errors+1]=s..":"..tostring(e) end,
+        recordStoreError=function(e) errors[#errors+1]=tostring(e) end,
+        errorText=tostring,requestRecompute=function() end,
+        refreshHud=function() return true end,database=function() return NexusDB end,
+        now=GetTime})
+    life.OnEvent("ADDON_LOADED","Nexus")
+    life.OnEvent("PLAYER_ENTERING_WORLD")
+    local requestedAt,retainedGeneration,initialPumps
+    for turn=1,5000 do
+        H.now=H.now+0.1
+        local beforeRoot,beforePumps=catalog.RootState(),catalog.DebugStats().rootPumps
+        life.OnUpdate(0.1)
+        Nexus.Scheduler.Tick(H.now)
+        if life.IsInitialized() and beforeRoot.candidate then
+            assert(catalog.DebugStats().rootPumps-beforePumps<=1,
+                "deadline handling expanded the ordinary catalog budget")
+        end
+        assert(#errors==0,table.concat(errors,";"))
+        if life.IsInitialized() and not requestedAt then
+            local ok,why=sync.RequestSync()
+            assert(ok==nil and why=="preparing sync data")
+            requestedAt=H.now
+        end
+        local root=catalog.RootState()
+        if requestedAt and root.candidate and not retainedGeneration then
+            retainedGeneration=root.generation
+            initialPumps=catalog.DebugStats().rootPumps
+        end
+        if requestedAt and H.now-requestedAt>=299 and H.now-requestedAt<300 then
+            assert(sync.Stats().preparingRequest and sync.Stats().terminalReason=="none",
+                "manual request expired before the unchanged deadline")
+        end
+        if requestedAt and H.now-requestedAt>=301 then break end
+    end
+    local root,stats=catalog.RootState(),sync.Stats()
+    assert(root.candidate and root.generation==retainedGeneration,
+        "deadline fixture must retain its ordinary catalog candidate")
+    assert(catalog.DebugStats().rootPumps>initialPumps and not cache.Stats().initialized,
+        "normal catalog slices must progress while hashes remain unavailable")
+    assert(#H.sentChatMessages==0 and stats.sent==0,
+        "pending deadline check must not send traffic")
+    assert(stats.terminalReason=="expired" and not stats.preparingRequest,
+        "manual request still Preparing after its 300-second absolute deadline")
+    local hashPumps=cache.Stats().hashPumps
+    for _=1,10 do
+        H.now=H.now+0.1;life.OnUpdate(0.1);Nexus.Scheduler.Tick(H.now)
+        assert(sync.Stats().terminalReason=="expired" and not sync.Stats().preparingRequest,
+            "terminal outcome changed without a new request")
+    end
+    local ok,why=sync.RequestSync()
+    assert(ok==nil and why=="preparing sync data","explicit retry must retain fresh intent")
+    H.joinedChannels.wrbuildssync=nil
+    adapter.Ready=function() return false end
+    H.now=H.now+0.1;life.OnUpdate(0.1)
+    assert(sync.Stats().terminalReason=="disconnected" and not sync.Stats().preparingRequest,
+        "disconnect must clear pending status even while Adapter and catalog are unavailable")
+    assert(#H.sentChatMessages==0 and cache.Stats().hashPumps==hashPumps,
+        "status-only continuation pumped hashes or transport")
+    assert(NexusDB.futureRoot.keep,"deadline check changed unknown saved data")
+    debugprofilestop,time=savedClock,savedTime
+    print("Real lifecycle manual expiry during catalog preparation -- OK")
+end

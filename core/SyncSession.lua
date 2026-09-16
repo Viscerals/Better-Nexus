@@ -614,11 +614,10 @@ function Session.New(options)
         return true
     end
 
-    -- One session-owned intent waits for the existing hash owner. No timer or
-    -- callback survives reset. Validate queued bytes again before transport so
-    -- an intervening generation change cannot send an obsolete digest.
-    function M.PrepareTransport()
-        if not pendingHashRequest and not pendingRequest then return end
+    -- Lifetime checks do not consume catalog/hash state or enqueue work. They
+    -- must still run while the lifecycle withholds transport for preparation.
+    function M.UpdatePendingRequestStatus()
+        if not pendingHashRequest and not pendingRequest then return false end
         local connected = options.isRequestChannelPresent and options.isRequestChannelPresent()
             or not options.isRequestChannelPresent and options.isConnected()
         if not connected or now() >= Number(autoConverge.absoluteUntil) then
@@ -628,8 +627,16 @@ function Session.New(options)
             if old then cancelRequest(old.id, myName()) end
             SetQueueOutcome("dropped")
             SetTerminal(not connected and "disconnected" or "expired")
-            return
+            return false
         end
+        return true
+    end
+
+    -- One session-owned intent waits for the existing hash owner. No timer or
+    -- callback survives reset. Validate queued bytes again before transport so
+    -- an intervening generation change cannot send an obsolete digest.
+    function M.PrepareTransport()
+        if not M.UpdatePendingRequestStatus() then return end
         if pendingRequest then
             local buildHash, dpsHash = options.currentBuildHash(), options.currentDpsHash()
             if buildHash == pendingRequest.buildHash and dpsHash == pendingRequest.dpsHash then

@@ -262,6 +262,7 @@ Sync extraction parity is complete.
 | `Sync.GetLeaderboardSyncStatus` | UI status projection | Leaderboard/Main | TX/RX/DG -> - | idle defaults | S-D |
 | `Sync.TombstoneCount` | Deletion count projection | diagnostics/tests | CAT -> - | zero invalid store | S-C |
 | `Sync.OnUpdate` | One bounded transport/response unit | Main direct update | TX/RX/clock -> TX/RX/DG | isolate at Main | S-Q/S-M |
+| `Sync.UpdatePendingRequestStatus` | Check pending intent expiry/disconnect without catalog/hash/transport work | Main lifecycle before readiness gates | clock/channel -> terminal status and exact queued-request cancellation | isolate at Main | native deadline regression |
 | `Sync.OnWorldEntry` | Revalidate channel and re-arm join retry without resetting admitted work | Main lifecycle/tests | channel/session -> channel/session | false while disconnected; preserves request/queue/inflight state | S-Q/S-M |
 | `Sync.HandleStatusRequest` | Replace one pending developer status reply | Main dev-token whisper route | RX -> RX | noop empty sender | S-C |
 | `Sync.FlushStatusReply` | Build/send pending status reply directly | update/tests | RX/GA -> RX/TX | consume then best-effort whisper | S-C |

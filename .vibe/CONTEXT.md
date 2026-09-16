@@ -2,6 +2,39 @@
 
 ## Current native continuation - 2026-09-16
 
+Current frozen product/package: 435ebe1370860e857103d72b6c04a84abae73502,
+tree b512e47d1f9ae21057adeb92be9594395ebf09ad, test.23-435ebe1.
+Installed72/72 parity; exact ZIP SHA256
+420466b84b8ebf0499fb7f49a64d8493235c20e76682add984de5417cfc17b9c.
+Integrated245/245 LuaJIT and independent Standards/Spec source checks PASS.
+Native existing previously recovered profile: initial ready75.044sec,
+fullmax24.3548ms; reload40.404sec/fullmax24.8336ms;
+reentry79.909sec/fullmax16.7305ms. Community completes without the old
+approximately one-second callback. Data differs after normal prior repairs;
+this is not an identical-input speedup claim or hard2ms guarantee.
+Popup confirm/cancel/close-reopen PASS. Reversible Wishlist edit persists
+/reload; restored original41/79,EmberSparkx1,6locked,Notassigned persists
+session save/reentry. No resources, automation enablement or publication.
+Remaining native Sync preparation is NOT accepted: first ordinary attempt
+stayed Preparing roughly20minutes before an uncommanded return to character
+selection. Catalog did advance and clear. Independent unchanged-source
+979-row synthetic reproduction completed four serial catalog candidates,
+then hashes; the later wire sends were background WLLQ, NOT the original
+manual request. That request expired only after preparation completed.
+No infinite loop established. Second native request also remained Preparing
+past twelve minutes; client then returned to realm selection after a sampled
+Not Responding frame. Cause UNKNOWN. WoW closed normally with Alt+F4.
+Current dirty correction factors status-only expiry/disconnect out of Sync
+transport and calls it before the catalog/hash/Adapter readiness gates.
+The real lifecycle regression went RED on 435ebe1 and GREEN on the correction.
+Integrated LuaJIT 245/245 PASS, one manual backup skip; focused independent
+Standards/Spec PASS. Installed test.23 does not contain this correction yet.
+Long manual preparation remains a separate unresolved usability blocker.
+Do not broaden the startup-only timed budget to
+steady-state Sync/maintenance or rewrite root algorithms without resolving
+that explicit boundary. Exact live receipt: external visualization directory
+native-startup-20260916/test23-native.md. Prior results below remain history.
+
 Latest continuation authority SHA-256:
 7bb435e0d4af65b882a5aae3ad3e287a779dfd06dddcad6c87292546dadb9107.
 Community startup now retains its defensive-copy cursor across updates, then

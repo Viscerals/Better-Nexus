@@ -141,7 +141,9 @@ for _, module in ipairs(manifest.modules) do
     totalCallbacks = totalCallbacks + callbackCount
 end
 
-assert(totalSymbols == 217, "unexpected eleven-module public-surface total")
+-- Native deadline continuation adds one named status-only Sync entry to the
+-- previous 217 symbols. All per-module identities remain checked exactly.
+assert(totalSymbols == 218, "unexpected eleven-module public-surface total")
 assert(totalAssigned == 14, "unexpected assigned namespace-member total")
 assert(totalCallbacks == 165, "unexpected eleven-module callback-site total")
 
