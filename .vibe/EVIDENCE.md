@@ -2079,3 +2079,11 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   profiles rerun. No startup/background/transport/deadline assertions relaxed.
 - Scope used four production files and one existing test; prospectively listed
   run_sync_protocol_parity.lua/run_stage36_lifecycle_safety.lua needed no edits.
+- Focused review of frozen20f3b6a: Standards PASS; Spec found first-dispatch
+  measurement overwritten by a later legitimate convergence pass (1005.264 to
+  1068.264). Before correction: MainLifecycle.lua will retain the first sentAt
+  for the current owner; run_main_lifecycle_parity.lua will assert it through
+  an actual second convergence request. No transport or lifetime changes.
+- Regression RED exit1 at later convergence pass overwrote first dispatch time;
+  nil-only capture GREEN exit0 through the real second request. Earlier frozen
+  candidate is preserved. Same focused review will recheck this narrow delta.

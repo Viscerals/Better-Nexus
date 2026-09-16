@@ -779,7 +779,7 @@ function Lifecycle.New(options)
         if not Adapter.Ready() then return end
         if Nexus.Sync and catalogReady and buildHashesReady then
             RunIsolatedOwner("Sync.OnUpdate", Nexus.Sync.OnUpdate, elapsed)
-            if manualOwner and type(Nexus.Sync.Stats)=="function"
+            if manualOwner and manualTiming.sentAt==nil and type(Nexus.Sync.Stats)=="function"
                 and Nexus.Sync.Stats().queueOutcome=="sent" then manualTiming.sentAt=GetTime() end
         end
         if Nexus.DpsCapture then

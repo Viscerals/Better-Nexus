@@ -1020,6 +1020,16 @@ do
     assert(requests==1,"duplicate clicks duplicated logical request")
     local _,afterSend=sync.UpdatePendingRequestStatus()
     assert(afterSend==nil,"sent request retained accelerated preparation")
+    assert(Nexus.manualSyncTiming.sentAt==sentAt,"first dispatch time was not recorded")
+    H.now=H.now+61
+    for _=1,5 do H.now=H.now+1;life.OnUpdate(1) end
+    local laterRequests=0
+    for _,message in ipairs(H.sentChatMessages) do
+        if message.text:gsub("||","|"):find("^WLRQ|") then laterRequests=laterRequests+1 end
+    end
+    assert(laterRequests==2,"fixture must send a legitimate later convergence request")
+    assert(Nexus.manualSyncTiming.sentAt==sentAt,
+        "later convergence pass overwrote the first dispatch time")
     for _,stop in ipairs({"background","reset","disconnect","expiry"}) do
         cache=Cold()
         if stop~="background" then assert(sync.RequestSync()==nil) end
