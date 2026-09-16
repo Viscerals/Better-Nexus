@@ -35,9 +35,12 @@ assert(admittedBefore>0 and C.Count()==admittedBefore,
     "startup discarded admitted historical test rows")
 print("Community populated startup continuation: turns="..turns.." cursorCalls="..total.." PASS")
 
-local function Fresh(rows)
+local function Fresh(rows,compacted)
     Nexus.BundledBuilds=S.Bundle({})
     NexusDB=S.Database(rows,nil,{settings={},chars={},futureRoot={keep=true}})
+    if compacted then
+        NexusDB.dataCompaction={schemaVersion=1,version=1,last={migrationVersion=1}}
+    end
     H.BootstrapStoreReady()
     S.PumpCatalogToIdle("fixture bootstrap")
 end
@@ -95,6 +98,80 @@ assert(refused.state=="failed" and refused.reason=="COMMUNITY_SOURCE_CHANGED",
     "stale startup candidate survived source generation change")
 assert(C.Get("concurrent"),"generation refusal lost external write")
 print("Community fresh/existing, growth, unknown fields, pending, cancellation and rebind PASS")
+
+-- The real startup consumer must not reconstruct the complete catalog for
+-- each eligible identity-only row. This is a transaction-count oracle, not
+-- an invented native timing threshold.
+do
+    local rows={}
+    for i=1,20 do rows["repair-"..i]=S.LocalBuild("repair-"..i,79,{futureBuild={keep=i}}) end
+    Fresh(rows,true)
+    local stats,root=C.DebugStats(),C.RootState()
+    local result=Finish()
+    assert(result.state=="ready","identity batch did not finish: "..tostring(result.reason))
+    local after,current=C.DebugStats(),C.RootState()
+    assert(after.maintenanceCommits==stats.maintenanceCommits+1
+        and after.putChanges==stats.putChanges
+        and current.servingGeneration==root.servingGeneration+1,
+        "identity startup reconstructs the entire root separately for each repaired row")
+    for id,input in pairs(rows) do
+        local durable,public=S.Durable()[id],C.Get(id)
+        assert(durable.futureBuild.keep==input.futureBuild.keep
+            and public.echoCount==79 and public.needsFullBuild==false,
+            "identity batch lost unknown data or required repair")
+        for i,echo in ipairs(input.echoes) do
+            assert(public.echoes[i].spellId==echo.spellId
+                and public.echoes[i].stacks==echo.stacks
+                and public.echoes[i].quality==echo.quality,"identity batch changed Echoes")
+        end
+    end
+    local freshController=Nexus.CommunityInternals.Controller.New()
+    local bundle=Nexus.BundledBuilds
+    local repeated
+    for i=1,1000 do
+        repeated=freshController.Initialize({},bundle)
+        assert(not C.RootState().candidate,"repeat initialization opened a root replacement")
+        if repeated.state~="pending" then break end
+    end
+    local repeatedStats,repeatedRoot=C.DebugStats(),C.RootState()
+    assert(repeated.state=="ready"
+        and repeatedStats.maintenanceCommits==after.maintenanceCommits
+        and repeatedStats.putChanges==after.putChanges
+        and repeatedRoot.generation==current.generation
+        and repeatedRoot.servingGeneration==current.servingGeneration,
+        "fresh controller repeated completed identity writes")
+    print("Community identity repair uses one atomic root replacement for 20 rows PASS")
+
+    Fresh(rows,true)
+    local replace,cancel=C.MaintenanceReplaceRow,C.CancelMaintenance
+    local staged,cancelled=0,0
+    local beforeFailure=C.RootState()
+    C.MaintenanceReplaceRow=function(...)
+        staged=staged+1
+        if staged==2 then return false,"TEST_STAGING_REFUSAL" end
+        return replace(...)
+    end
+    C.CancelMaintenance=function(...)
+        local ok=cancel(...)
+        if ok then cancelled=cancelled+1 end
+        return ok
+    end
+    local failed=Finish()
+    C.MaintenanceReplaceRow,C.CancelMaintenance=replace,cancel
+    assert(failed.state=="failed" and failed.reason=="TEST_STAGING_REFUSAL"
+        and staged==2 and cancelled==1,"failed staging did not cancel its exact handle")
+    assert(C.RootState().generation==beforeFailure.generation
+        and C.RootState().servingGeneration==beforeFailure.servingGeneration,
+        "failed batch published partial changes")
+    local available,why=C.BeginCatalogMaintenance({database=NexusDB,operation="test-after-cancel"})
+    assert(available,"failed startup leaked an open handle: "..tostring(why))
+    assert(C.CancelMaintenance(available))
+    for id,input in pairs(rows) do
+        assert(S.Durable()[id].futureBuild.keep==input.futureBuild.keep,
+            "failed batch lost existing data")
+    end
+    print("Community staged batch refusal preserves root and releases its handle PASS")
+end
 
 -- Real lifecycle + real Store/catalog/Community. Readiness must include the
 -- retained work, its writes, and final dependent initialization exactly once.

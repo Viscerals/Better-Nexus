@@ -9,10 +9,17 @@ settles generation-bound cleanup and identity mutations before readiness.
 The integrated LuaJIT inventory passed 245/245; only the explicit manual
 backup smoke is skipped. The popup strata correction and empty seed are in
 the same candidate. The CI inventory guard now requires all 245 tests.
-Current installed package remains exact test.20-09d9ff3; replacement native
-timing, dialog interactions and whole-addon independent review remain pending.
-WoW was disconnected at login and is now closed for backup/install. Do not
-automate authentication. Continue packaging/review independently of login.
+Current installed package is exact test.22-143f37c, source
+143f37ce66c51d3d487f9ec3640c682ffccb152e. Native startup remained unready
+after 376.533 seconds: eight identity puts, 113356 root pumps, incomplete peak
+update 43.923900008202 ms. This is a failed usability result, not performance
+acceptance. WoW is now closed normally; prior committed repairs remain saved.
+Current source combines eligible identity-only overlays in one existing catalog
+maintenance transaction. Baseline/reservation rows retain their prior Put path.
+The focused transaction-count, data-parity, cancellation and repeat-controller
+tests pass. Independent whole-addon reviews on 143f37c and focused batch-delta
+reviews pass for source/offline behavior. Replacement native readiness and the
+corrected popup are still pending. Do not automate authentication.
 Confirmed supported-use blockers may be repaired under current authority;
 older post-review prohibitions below remain historical for this native task.
 

@@ -1873,3 +1873,35 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   PR58 four and catalog six expected-red confirmations both exit 0 and preserve
   product bytes. Metadata, security policy, analyzer/exporter, release-policy,
   source package and secret checks pass. No paid API or GitHub action.
+
+## Native test.22 failure and bounded identity transaction - 2026-09-16
+
+- Exact installed 143f37ce66c51d3d487f9ec3640c682ffccb152e / test.22-143f37c
+  remained unready at 376.533 seconds; command still said not initialized.
+  Community phase identities, putChanges8, rootPumps113356, incomplete peak
+  update43.923900008202ms. No native PASS or speedup is claimed. Normal quit;
+  no manual profile edit, resource spending, automation enablement or publication.
+- Reproduction found one complete-root reconstruction per identity row.
+  New 20-row transaction-count oracle failed on the prior implementation and
+  passes after eligible overlays use one existing maintenance transaction.
+  Staging stays row-bounded under the existing startup clock. Baseline,
+  barrier and tombstone cases keep Put semantics; existing maintenance owners
+  are not stolen. No scheduler, authority model or recovery framework added.
+- Original assertions remain. Added checks cover all Echo/unknown data,
+  one root swap, no repeated writes from a fresh controller, failed second-row
+  staging with no partial publication, and exact open-handle cancellation.
+- Fresh independent Standards and Spec whole-addon reviews passed on exact
+  143f37c, followed by independent focused batch-delta PASS from both reviewers.
+  Separate Spec probe exercised the real no-predrain lifecycle and fresh
+  controller. Synthetic frame counts are not native timing evidence.
+- Preserved empty runtime seed and byte-exact 504-row reference. Native
+  profile remains the previously recovered existing profile; fresh native,
+  general backup recovery, corrected popup and controlled-peer checks remain
+  unproven until exercised. All older candidates and failed receipts retained.
+- Integrated batch candidate: 245/245 LuaJIT PASS, exit0; sole manual skip
+  tests/run_legacy_backup_smoke.lua. Receipt:
+  native-startup-20260916/integrated-startup-atomic-identities/inventory.json.
+  Parse321/321; unchanged upvalue boundary60pass/61fail,68TOC files; metadata,
+  security/workflow policies, analyzer/exporter, package-source, release policy
+  and gitleaks PASS. PR58 four and catalog six expected-red confirmations
+  exit0 with product_bytes_unchanged=true. No further product edits before freeze.

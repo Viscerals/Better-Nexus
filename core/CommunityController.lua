@@ -2962,12 +2962,20 @@ function Controller.New(options)
         if not startupJob or startupJob.database ~= database
             or startupJob.catalog ~= catalog or startupJob.bundle ~= bundledBuilds then
             -- A previous callback may still settle, but cannot resume this job.
+            if startupJob and startupJob.maintenance then
+                startupJob.catalog.CancelMaintenance(startupJob.maintenance)
+            end
             startupJob = {database=database,catalog=catalog,bundle=bundledBuilds,
-                state="pending",phase="scan",removals={},repairs={},index=1}
+                state="pending",phase="scan",removals={},repairs={},index=1,
+                batchIdentities=true}
             catalog.Init(type(database)=="table" and database or {},bundledBuilds)
         end
         local job = startupJob
         local function Fail(why)
+            if job.maintenance then
+                catalog.CancelMaintenance(job.maintenance)
+                job.maintenance=nil
+            end
             job.state,job.reason="failed",why or "COMMUNITY_STARTUP_FAILED"
             job.cursor,job.removals,job.repairs=nil,nil,nil
             return Result(job)
@@ -3014,8 +3022,64 @@ function Controller.New(options)
                         job.removals[#job.removals+1]=page.id
                     elseif page.source=="overlay" then
                         local candidate=RepairedIdentity(build)
-                        if candidate then job.repairs[#job.repairs+1]=candidate end
+                        if candidate then
+                            job.repairs[#job.repairs+1]=candidate
+                            -- Put owns baseline-equivalence and reservation
+                            -- semantics. Keep that existing route if any row
+                            -- cannot use an identity-only overlay transaction.
+                            if not (catalog.BeginCatalogMaintenance
+                                and catalog.MaintenanceReplaceRow and catalog.CommitMaintenance
+                                and catalog.HasBaseline and catalog.BarrierState
+                                and catalog.TombstoneState)
+                                or catalog.HasBaseline(page.id)
+                                or catalog.BarrierState(page.id).state~="BARRIER_NONE"
+                                or catalog.TombstoneState(page.id).state~="NONE" then
+                                job.batchIdentities=false
+                            end
+                        end
                     end
+                end
+            elseif job.phase=="identities" and job.batchIdentities and #job.repairs>0 then
+                if not job.maintenance then
+                    local handle,why=catalog.BeginCatalogMaintenance({
+                        database=job.database,operation="community-startup-identities"})
+                    if not handle and why=="MAINTENANCE_ACTIVE" then
+                        -- Standalone Store callers may already have an open
+                        -- background owner. Preserve the prior Put route and
+                        -- its existing arbitration, never steal its handle.
+                        job.batchIdentities=false
+                        return Result(job)
+                    end
+                    if not handle then return Fail(why) end
+                    job.maintenance=handle
+                end
+                local item=job.repairs[job.index]
+                if item then
+                    -- One admitted row is staged per work unit, never the
+                    -- entire collection in a single callback. The catalog
+                    -- preserves durable unknown fields and verifies ownership.
+                    local ok,why=catalog.MaintenanceReplaceRow(job.maintenance,item.id,item)
+                    if not ok then return Fail(why) end
+                    job.index=job.index+1
+                else
+                    local function Complete(outcome)
+                        if startupJob~=job then return end
+                        job.pending=nil
+                        if not outcome.committed then Fail(outcome.reason);return end
+                        job.state,job.phase="ready","complete"
+                        job.removals,job.repairs=nil,nil
+                    end
+                    local handle=job.maintenance
+                    local ok,why,ticket=RetainCatalogMutation(catalog,
+                        "startup-identities",Complete,catalog.CommitMaintenance(handle))
+                    job.maintenance=nil
+                    if ok==nil and why=="ROOT_MUTATION_PENDING" then
+                        job.pending=ticket
+                        return Result(job)
+                    end
+                    if not ok then return Fail(why) end
+                    Complete({committed=true})
+                    return Result(job)
                 end
             else
                 local list=job.phase=="legacy" and job.removals or job.repairs
