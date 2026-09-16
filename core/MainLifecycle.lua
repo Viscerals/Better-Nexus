@@ -33,6 +33,8 @@ function Lifecycle.New(options)
     local initialized = false
     local preparedDatabase
     local communityFailure
+    local communityMutationTicket
+    local maintenanceFailureRecorded=false
     local syncInitialized = false
     local dpsInitialized = false
     local dependencies = nil
@@ -121,7 +123,9 @@ function Lifecycle.New(options)
             or factory.owner ~= Store then
             return nil
         end
-        local ok, coordinator = pcall(factory.New)
+        local community=Nexus.CommunityBuilds
+        local ok, coordinator = pcall(factory.New,{deferAutomaticMaintenance=
+            type(community)=="table" and type(community.Init)=="function"})
         if not ok or type(coordinator) ~= "table" then return nil end
         bootstrapCoordinator = coordinator
         return coordinator
@@ -152,13 +156,13 @@ function Lifecycle.New(options)
 
     -- Native startup amendment: one shared soft deadline across all phases,
     -- plus an unconditional slice cap. Missing/broken clocks retain one slice.
-    local function PumpBootstrapBatch()
+    local function PumpBootstrapBatch(updateStarted)
         if bootstrapPumping then return nil end
         -- Keep the terminal result for a world-entry request that arrives
         -- after the final pump. Stopping work must not discard its refusal.
         if bootstrapTerminal then return bootstrapTerminal end
         bootstrapPumping = true
-        local started = StartupClock()
+        local started = updateStarted or StartupClock()
         local previous = started
         local result
         startupTiming.updates = startupTiming.updates + 1
@@ -263,7 +267,7 @@ function Lifecycle.New(options)
         end
     end
 
-    local function Initialize()
+    local function Initialize(updateStarted)
         if initialized then return true end
         dependencies = BindDependencies()
         if not dependencies then return false end
@@ -341,7 +345,7 @@ function Lifecycle.New(options)
         if communityFailure then return false end
         if Nexus.CommunityBuilds and Nexus.CommunityBuilds.Init then
             local started=StartupClock()
-            local ok,result=pcall(Nexus.CommunityBuilds.Init,Adapter,Model)
+            local ok,result=pcall(Nexus.CommunityBuilds.Init,Adapter,Model,updateStarted)
             local finished=StartupClock()
             if started and finished and finished>=started then
                 startupTiming.communityMaxMs=math.max(
@@ -350,6 +354,7 @@ function Lifecycle.New(options)
                     + finished-started
             end
             startupTiming.communityPhase=type(result)=="table" and result.phase or nil
+            communityMutationTicket=type(result)=="table" and result.mutationTicket or nil
             if not ok or type(result)=="table" and result.state=="failed" then
                 communityFailure=not ok and result or result.reason
                     or "COMMUNITY_STARTUP_FAILED"
@@ -627,7 +632,7 @@ function Lifecycle.New(options)
         end
     end
 
-    local function RunUpdate(elapsed)
+    local function RunUpdate(elapsed,updateStarted)
         if elapsed and elapsed > LAG_THRESHOLD then
             local now = GetTime and GetTime() or 0
             if now - lagWarnedAt > LAG_WARN_COOLDOWN then
@@ -642,7 +647,7 @@ function Lifecycle.New(options)
             -- STORE_READY (line 1519), never because this call completed.
             if bootstrapCoordinator ~= nil or worldEntryPending then
                 if bootstrapPumping then return end
-                local result = bootstrapCoordinator and PumpBootstrapBatch()
+                local result = bootstrapCoordinator and PumpBootstrapBatch(updateStarted)
                 local failed = type(result) == "table"
                     and result.state == "failed"
                 if worldEntryPending
@@ -653,9 +658,25 @@ function Lifecycle.New(options)
                     if preparedDatabase then
                         PumpAuthorityRebind()
                         PumpStoreMutationSlice()
-                        PumpCatalogRootAdmissionSlice()
+                        -- Only the required Community startup ticket may use
+                        -- timed startup batching. Background maintenance and
+                        -- the post-ready path remain one slice per update.
+                        local started=updateStarted or StartupClock()
+                        local previous=started
+                        local ticket=communityMutationTicket
+                        for slice=1,(ticket and STARTUP_SLICES or 1) do
+                            -- A completion subscriber can start unrelated work.
+                            -- Never continue batching that replacement candidate.
+                            if ticket and ticket.state~="pending" then break end
+                            PumpCatalogRootAdmissionSlice()
+                            if ticket and ticket.state~="pending" then break end
+                            local finished=StartupClock()
+                            if not started or not finished or finished<previous
+                                or finished-started>=STARTUP_MS then break end
+                            previous=finished
+                        end
                     end
-                    Initialize()
+                    Initialize(updateStarted)
                     if initialized then
                         worldEntryPending = false
                         CompleteWorldEntry("PLAYER_ENTERING_WORLD")
@@ -680,6 +701,14 @@ function Lifecycle.New(options)
         PumpAuthorityRebind()
         -- One post-ready Store mutation slice per turn, before consumer reads.
         PumpStoreMutationSlice()
+        if bootstrapCoordinator and bootstrapCoordinator.StartAutomaticMaintenance then
+            local ok,result=pcall(bootstrapCoordinator.StartAutomaticMaintenance,bootstrapCoordinator)
+            if (not ok or type(result)=="table" and result.state=="failed")
+                and not maintenanceFailureRecorded then
+                maintenanceFailureRecorded=true
+                RecordStoreError(ok and StoreResultReason(result) or result)
+            end
+        end
         -- MASTER-W2-006/W2-008: Sync is the only frame owner that consumes
         -- catalog and compatibility-hash state, so it alone waits for the
         -- pending catalog slice and the one cache slice. DPS capture and
@@ -719,9 +748,9 @@ function Lifecycle.New(options)
         local performance = Nexus and Nexus.Performance
         if performance and type(performance.Measure) == "function" then
             return FinishStartupUpdate(started,
-                performance.Measure("lifecycle.update", RunUpdate, elapsed))
+                performance.Measure("lifecycle.update", RunUpdate, elapsed,started))
         end
-        return FinishStartupUpdate(started, RunUpdate(elapsed))
+        return FinishStartupUpdate(started, RunUpdate(elapsed,started))
     end
 
     local M = {}

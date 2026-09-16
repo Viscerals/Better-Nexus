@@ -2948,12 +2948,13 @@ function Controller.New(options)
         return ok, err
     end
 
-    function M.Initialize(adapter, bundledBuilds)
+    function M.Initialize(adapter, bundledBuilds,updateStarted)
         Adapter = adapter
         local catalog = Catalog()
         local database = NexusDB
         local function Result(job)
-            return {state=job.state,reason=job.reason,phase=job.phase}
+            return {state=job.state,reason=job.reason,phase=job.phase,
+                mutationTicket=job.pending}
         end
         if not (catalog and catalog.BeginRecordCursor and catalog.RootState) then
             return {state="failed",reason="COMMUNITY_CATALOG_UNAVAILABLE"}
@@ -2990,8 +2991,12 @@ function Controller.New(options)
             if ok and type(value)=="number" and value==value
                 and value>=0 and value<math.huge then return value end
         end
-        local started=Clock()
+        local started=updateStarted or Clock()
         for unit=1,32 do
+            local before=Clock()
+            if started and before and before>=started and before-started>=2 then
+                return Result(job)
+            end
             if job.phase=="scan" then
                 if not job.cursor then
                     local token,why=catalog.BeginRecordCursor()

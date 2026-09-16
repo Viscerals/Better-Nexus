@@ -227,8 +227,8 @@ end
 -- Community data is intentionally empty on first install.
 -- The admin can publish real builds from the Post Build flow.
 
-function M.Init(adapter, model)
-    local result=ControllerInstance().Initialize(adapter, Nexus.BundledBuilds)
+function M.Init(adapter, model, updateStarted)
+    local result=ControllerInstance().Initialize(adapter, Nexus.BundledBuilds,updateStarted)
     -- Bind before the first render so direct startup consumers such as Peer
     -- Debug and ExplainBuild use the same Saved relationship authority.
     BindSavedProjectionRelation()

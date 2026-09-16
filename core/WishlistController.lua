@@ -75,6 +75,7 @@ function Controller.New(options)
         replacingSpellId = nil,
         currentLockKey = 0,
         applyRetry = nil,
+        applyConfirmation = nil,
         candidateContext = nil,
         candidateSerial = 0,
         candidateApplyToken = nil,
@@ -713,7 +714,16 @@ function Controller.New(options)
         TouchPresentation()
     end
 
+    function M.CancelApply(data)
+        if data and data.confirmation ~= state.applyConfirmation then return false end
+        state.applyConfirmation = nil
+        state.applyRetry = nil
+        state.candidateApplyToken = nil
+        return true
+    end
+
     function M.ResetNewWishlistDraft()
+        M.CancelApply()
         state.editingContext = nil
         state.createTargetContext = nil
         state.awaitingWishlist = nil
@@ -783,6 +793,7 @@ function Controller.New(options)
     end
 
     function M.BeginWishlist(wishlist, loadoutSlot)
+        M.CancelApply()
         state.candidateContext = nil
         state.candidateApplyToken = nil
         state.applyRetry = nil
@@ -1070,6 +1081,8 @@ function Controller.New(options)
                 draftToken=guard and guard.draftToken,
                 applyToken=guard and guard.applyToken
                     or ApplyPayloadToken(slot,name,echoes),
+                editingContext=state.editingContext,
+                createTargetContext=state.createTargetContext,
             }
             return false, "spacing"
         end
@@ -1107,6 +1120,12 @@ function Controller.New(options)
             end
         end
         local data = {slot = slot, name = name, echoes = echoes}
+        local confirmation = {adapter=Adapter,editingContext=state.editingContext,
+            createTargetContext=state.createTargetContext,
+            draftToken=CurrentDraftToken(),
+            applyToken=ApplyPayloadToken(slot,name,echoes)}
+        state.applyConfirmation = confirmation
+        data.confirmation = confirmation
         if state.candidateContext then
             data.candidateSerial = state.candidateContext.serial
             data.sourceIdentity = state.candidateContext.sourceIdentity
@@ -1125,6 +1144,18 @@ function Controller.New(options)
         if type(slot) == "table" then
             data = slot
             slot, name, echoes = data.slot, data.name, data.echoes
+            local confirmation = data.confirmation
+            -- PrepareApply always binds UI confirmations. Preserve the existing
+            -- direct controller payload API for callers without a popup token.
+            if confirmation and (confirmation ~= state.applyConfirmation
+                or confirmation.adapter ~= Adapter
+                or confirmation.editingContext ~= state.editingContext
+                or confirmation.createTargetContext ~= state.createTargetContext
+                or confirmation.draftToken ~= CurrentDraftToken()
+                or confirmation.applyToken ~= ApplyPayloadToken(slot,name,echoes)) then
+                notify("|cffff6060Nexus:|r Save cancelled: the editor changed. Review and save again.")
+                return false, "stale_confirmation"
+            end
         end
         if state.candidateContext then
             local context = state.candidateContext
@@ -1143,12 +1174,18 @@ function Controller.New(options)
                 return false, "stale_candidate"
             end
         end
+        state.applyConfirmation = nil
         return TryApply(slot, name, echoes, data)
     end
 
     function M.PumpApplyRetry()
         local retry = state.applyRetry
         if not retry then return nil, "idle" end
+        if retry.editingContext ~= state.editingContext
+            or retry.createTargetContext ~= state.createTargetContext then
+            state.applyRetry = nil
+            return false, "stale_confirmation"
+        end
         retry.tries = retry.tries + 1
         if retry.tries > 12 then
             notify("|cffff6060Nexus:|r couldn't apply: " .. APPLY_FRIENDLY.spacing)

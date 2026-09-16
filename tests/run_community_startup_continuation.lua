@@ -146,3 +146,127 @@ assert(N.startupTiming.maxUpdateMs>=40 and N.startupTiming.communityMaxMs>0
 L.OnUpdate(0.01)
 assert(adapterInits==1 and panelInits==1 and entries==1,"ready initialization repeated")
 print("Real lifecycle Community readiness, exactly-once release and complete-update timing PASS")
+
+-- No fixture predrain: exercise actual startup, ordinary registration, and
+-- the real scheduler before automatic retention publishes its replacement.
+do
+    Nexus={VERSION="test"}
+    local H=dofile("tests/harness.lua")
+    local S=dofile("tests/catalog_authority_support.lua")
+    dofile("data/DefaultProfile.lua")
+    dofile("data/BundledBuilds.lua")
+    dofile("core/Store.lua")
+    dofile("core/DpsCapture.lua")
+    dofile("ui/CommunityBuilds.lua")
+    dofile("core/MainLifecycle.lua")
+    local rows={}
+    for i=1,100 do
+        local row=S.LocalBuild("retained-"..i,79,{futureBuild={keep=i}})
+        row.fingerprint=Nexus.DpsCapture.GetEchoKey(row.echoes)
+        row.fingerprintHash=Nexus.DpsCapture.GetEchoHash(row.echoes)
+        row.echoCount,row.loadoutAvailable,row.needsFullBuild=79,true,false
+        rows[row.id]=row
+    end
+    NexusDB=S.Database(rows,nil,{settings={},chars={},futureRoot={keep=true},
+        dataCompaction={schemaVersion=1,version=1,last={migrationVersion=1}}})
+    debugprofilestop=function() return 0 end
+    local coordinator,life,errors,ownerCalls=nil,nil,{},{}
+    local factory=Nexus.MainInternals.AuthorityBootstrap.New
+    Nexus.MainInternals.AuthorityBootstrap.New=function(...)
+        coordinator=factory(...);return coordinator
+    end
+    for _,name in ipairs({"DataCompaction","DataRetention"}) do
+        local original=Nexus[name].Init
+        Nexus[name].Init=function(database)
+            assert(life.IsInitialized() and Nexus.startupTiming.communityPhase=="complete",
+                "automatic maintenance ran before required Community startup")
+            assert(database==NexusDB and coordinator:IsReady()
+                and coordinator:Result().result=="MUTATION_COMMITTED",
+                "automatic maintenance overtook ordinary registration or rebound database")
+            ownerCalls[name]=(ownerCalls[name] or 0)+1
+            return original(database)
+        end
+    end
+    local A={Init=function() end,Ready=function() return false end,
+        RivalDetected=function() return false end,OnEvent=function() end,
+        RequestSlots=function() end,SetSoloPicker=function() end}
+    life=Nexus.MainInternals.Lifecycle.New({nexus=Nexus,
+        bindDependencies=function() return {Store=Nexus.Store,Adapter=A,Model={},
+            Panel={Init=function() end}} end,
+        ensureAutomation=function() return {Initialize=function() end} end,
+        print=function() end,errorText=tostring,requestRecompute=function() end,
+        recordError=function(_,e) errors[#errors+1]=e end,
+        recordStoreError=function(e) errors[#errors+1]=e end,
+        refreshHud=function() return true end,database=function() return NexusDB end,now=GetTime})
+    life.OnEvent("ADDON_LOADED","Nexus")
+    life.OnEvent("PLAYER_ENTERING_WORLD")
+    local readyTurn
+    for turn=1,10000 do
+        H.now=H.now+1/60
+        life.OnUpdate(1/60)
+        if Nexus.Scheduler.IsInitialized() then Nexus.Scheduler.Tick(H.now) end
+        if life.IsInitialized() and not readyTurn then
+            readyTurn=turn
+            assert(not next(ownerCalls),"maintenance was not deferred")
+        end
+        if readyTurn and Nexus.BuildCatalog.DebugStats().maintenanceCommits==1
+            and not Nexus.BuildCatalog.RootState().candidate then break end
+    end
+    assert(#errors==0,"real startup/maintenance errors: "..table.concat(errors,","))
+    assert(readyTurn and readyTurn<1000,"startup serialized behind background maintenance")
+    assert(ownerCalls.DataCompaction==1 and ownerCalls.DataRetention==1,
+        "automatic owners did not initialize exactly once")
+    assert(Nexus.BuildCatalog.DebugStats().maintenanceCommits==1,
+        "deferred maintenance work disappeared")
+    assert(NexusDB.futureRoot.keep and Nexus.BuildCatalog.Count()==100,
+        "startup or maintenance lost retained data")
+    for id,input in pairs(rows) do
+        local row=S.Durable()[id]
+        assert(row.futureBuild.keep==input.futureBuild.keep and row.fingerprint==input.fingerprint
+            and #row.echoes==79,"build identity or unknown fields changed")
+        for i,echo in ipairs(input.echoes) do
+            assert(row.echoes[i].spellId==echo.spellId and row.echoes[i].quality==echo.quality
+                and row.echoes[i].stacks==echo.stacks,"retained Echo data changed")
+        end
+    end
+    print("Real no-predrain startup, registration, deferred one-shot maintenance and data parity PASS")
+end
+
+-- Scheduler ownership: batching must stop at this exact startup ticket even
+-- when its completion subscriber starts another catalog candidate.
+do
+    local function Scenario(cost,settle,noClock)
+        local clock,pumps=0,0
+        local ticket={state="pending"}
+        local db={}
+        local store={Init=function() return {state="ready"} end,
+            Settings=function() return {} end}
+        local N={VERSION="test",Store=store,
+            DiagnosticLogs={Init=function() return true end},
+            CommunityBuilds={Init=function() return {state="pending",phase="identities",
+                mutationTicket=ticket} end},
+            BuildCatalog={PumpRootAdmission=function()
+                pumps=pumps+1;clock=clock+cost
+                if pumps==settle then ticket.state="committed" end
+                return {state="pending"}
+            end,RootState=function() return {state="ROOT_ADMITTED",candidate=true} end}}
+        local A={Init=function() end,Ready=function() return false end,
+            RivalDetected=function() return false end}
+        debugprofilestop=function() return clock end
+        if noClock then debugprofilestop=nil end
+        local life=Nexus.MainInternals.Lifecycle.New({nexus=N,
+            bindDependencies=function() return {Store=store,Adapter=A,Model={},Panel={}} end,
+            ensureAutomation=function() return {Initialize=function() end} end,
+            print=function() end,errorText=tostring,requestRecompute=function() end,
+            recordError=function(_,e) error(e) end,recordStoreError=function(e) error(e) end,
+            refreshHud=function() return true end,database=function() return db end,now=GetTime})
+        life.OnEvent("PLAYER_ENTERING_WORLD")
+        life.OnUpdate(0.01)
+        return pumps
+    end
+    assert(Scenario(0,nil,false)==32,"Community startup exceeded or lost hard slice cap")
+    assert(Scenario(0.75,nil,false)==3,"Community startup reset its soft deadline")
+    assert(Scenario(0,nil,true)==1,"Community startup lost missing-clock fallback")
+    assert(Scenario(0,3,false)==3,"Community startup batched a subscriber's foreign candidate")
+    print("Community ticket-only cap, deadline, fallback and replacement-owner stop PASS")
+end

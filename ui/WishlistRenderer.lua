@@ -164,6 +164,14 @@ function Renderer.New(options)
     end
 
 
+local function DismissSaveConfirmation()
+    Controller.CancelApply()
+    if type(StaticPopup_Hide) == "function" then
+        StaticPopup_Hide("WISHLISTREALIZER_UPDATE_WISHLIST")
+        StaticPopup_Hide("WISHLISTREALIZER_CREATE_WISHLIST")
+    end
+end
+
 local function ApplyPending()
     local text = wishlistNameBox and wishlistNameBox._NexusRawText
         and wishlistNameBox:_NexusRawText()
@@ -378,6 +386,7 @@ end
 local function LoadEditorForLoadout(slot)
     slot = tonumber(slot)
     if not slot then return end
+    DismissSaveConfirmation()
     local ok, mode = Controller.SelectLoadout(slot)
     if not ok then return end
     SyncFulfilledDraftTargets()
@@ -734,6 +743,13 @@ end
 -- Frame construction
 ------------------------------------------------------------------------
 
+local function HideEditorTransients()
+    DismissSaveConfirmation()
+    HideDisplayPopup()
+    HideWishlistSwitchMenu()
+    HideLoadoutSwitchMenu()
+end
+
 local function EnsureFrame()
     if frame then return frame end
     local function SafeDisplay(value, maxBytes, allowEmpty, allowLineBreaks)
@@ -806,11 +822,7 @@ local function EnsureFrame()
         end
     end)
     frame:SetScript("OnShow", function() hideServerEchoUI() end)
-    frame:SetScript("OnHide", function()
-        HideDisplayPopup()
-        HideWishlistSwitchMenu()
-        HideLoadoutSwitchMenu()
-    end)
+    frame:SetScript("OnHide", HideEditorTransients)
     frame:Hide()
 
     titleText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -2038,6 +2050,7 @@ end
 
     function M.Prepare(config)
         EnsureFrame()
+        DismissSaveConfirmation()
         config = type(config) == "table" and config or {}
         if config.attach and Nexus.Panel and Nexus.Panel.AttachMenuFrame then
             Nexus.Panel.AttachMenuFrame(frame)

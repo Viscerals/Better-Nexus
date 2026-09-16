@@ -8,7 +8,7 @@
 
 - Stage: 50
 - Checkpoint: 50.3
-- Status: IN_REVIEW
+- Status: IN_PROGRESS
 - Branch: `refactor/native-startup-usability`
 - Starting head: native smoke candidate `09d9ff36a1be5d5abe91a627876d4bcd230a5df0`, tree `e2d3037b29a9d0cede76f3bbaa441e09dd3e9a9f`
 - Worktree: `.native-startup-usability-worktree` beneath the established Better-Nexus checkout
@@ -403,7 +403,18 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Active issues
 
-- None.
+- [ ] ISSUE-NATIVE-STALE-SAVE: Old Wishlist confirmation can change a new editor association
+  - Impact: MAJOR
+  - Status: IN_PROGRESS
+  - Owner: agent
+  - Unblock Condition: Focused regression and independent recheck PASS; native confirm/cancel/reopen on the coherent replacement remains pending.
+- [ ] ISSUE-NATIVE-STARTUP-SERIALIZATION: Required Community repairs wait behind automatic maintenance and one-slice catalog writes
+  - Impact: MAJOR
+  - Status: IN_PROGRESS
+  - Owner: agent
+  - Unblock Condition: Offline no-predrain regression and independent recheck PASS; measure replacement native readiness and complete update before closing this issue.
+  - Evidence Needed: Independent exact f34216a reproduction and corrected public UI/controller checks.
+  - Notes: Confirmed independently on both review axes. Correct under current standing native authority; no unrelated repair wave.
 
 ## Blockers
 

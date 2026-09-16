@@ -163,6 +163,7 @@ StaticPopupDialogs["WISHLISTREALIZER_UPDATE_WISHLIST"] = {
     text = "Save %d / 79 Echoes to '%s'?\nThis updates the associated server wishlist in place.",
     button1 = "Save Changes",
     button2 = "Cancel",
+    OnCancel = function(_, data) wishlistController.CancelApply(data) end,
     OnAccept = function(self, data)
         AcceptApply(data)
     end,
@@ -173,6 +174,7 @@ StaticPopupDialogs["WISHLISTREALIZER_CREATE_WISHLIST"] = {
     text = "Create '%s' with %d / 79 Echoes?\nThis saves to a new server wishlist slot and automatically assigns it to the active Saved Build. Existing wishlists will not be overwritten.",
     button1 = "Create Wishlist",
     button2 = "Cancel",
+    OnCancel = function(_, data) wishlistController.CancelApply(data) end,
     OnAccept = function(self, data)
         AcceptApply(data)
     end,

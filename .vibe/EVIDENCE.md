@@ -1826,3 +1826,50 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   Current recovered Valentinew profile is not proof of historical recovery by
   the replacement. Native speedup, corrected dialog, controlled-peer Sync,
   publication, new gameplay capture and real backup recovery remain unverified.
+
+### Native test.21 failure and bounded startup/popup follow-up
+
+- Frozen test.21 source was f34216a70ec4c7ff6a50a1d62bd1c889b23fbdff,
+  tree e09be4530ecd84b2788349effb631266a0171e90. ZIP SHA-256
+  15471e05d86ac0d8901c24fdf4db3b0a7a1229b7d220fcaf36cf3743d781aa8f,
+  648496 bytes. All 72 installed files matched before native entry.
+- Native test.21 failed usable readiness: after 863.185 seconds commands still
+  reported not initialized. Incomplete peak update 39.828700006008 ms is NOT
+  a completed-startup performance result. Later counters proved forward work:
+  phase identities, rootPumps85449, maintenanceCommits1, putChanges4,
+  generation6, servingGeneration7. No restart/nontermination was established.
+  WoW was closed normally; no gameplay/resource/publication action occurred.
+- No-predrain real lifecycle reproduction identified background retention
+  ahead of Community and single-slice processing of Community's own writes.
+  Coordinator now retains automatic maintenance until required Community work
+  and ordinary character registration finish. Standalone/no-Community startup
+  retains previous behavior. Maintenance remains one slice per ordinary turn.
+- Only the exact retained Community ticket gets up to 32 existing slices under
+  the shared startup soft 2 ms clock. Cancellation/completion stops batching
+  even if a subscriber starts another candidate. Missing timer uses one slice.
+  Required cleanup/identity repairs still finish before readiness.
+- Exact f34216a independent Standards/Spec reviews both confirmed stale save
+  confirmation could change a later editor association. Source now invalidates
+  confirmations/retries on close/context/cancel, binds prepared UI data to the
+  original draft and context, and rejects duplicate acceptance. Existing direct
+  programmatic payload behavior and every prior assertion remain unchanged.
+- Focused tests and independent delta reviews pass. Real no-predrain 100-row
+  test preserves all Echo data, identities and unknown fields; maintenance
+  runs exactly once after registration. A separate reviewer exercised 20 real
+  identity repairs. These are offline results, not native speedup evidence.
+- Failed checks preserved: initial driver-region annotation failure (39-case
+  bootstrap test now 39/39); renderer upvalue margin (callback extraction now
+  passes unchanged margin assertion); missing-Community idle recomputation
+  (deferral narrowed to actual Community startup; original test passes).
+  Historical failures and the old packages remain unchanged.
+- Current integrated runtime receipts and native results are kept externally
+  under native-startup-20260916. Native corrected popup, exact replacement
+  readiness, ordinary manual Sync, gameplay/DPS and peer scenarios remain
+  pending until the replacement is installed and exercised.
+- Integrated follow-up inventory completed 245/245 runnable, exit 0, with
+  tests/run_legacy_backup_smoke.lua the sole manual skip. Receipt is
+  integrated-startup-popup-accepted/inventory.json; it identifies dirty tested
+  bytes above f34216a, not an exact-head claim. No later product changes.
+  PR58 four and catalog six expected-red confirmations both exit 0 and preserve
+  product bytes. Metadata, security policy, analyzer/exporter, release-policy,
+  source package and secret checks pass. No paid API or GitHub action.

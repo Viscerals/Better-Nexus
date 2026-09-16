@@ -1107,26 +1107,7 @@ local function BootstrapSlice(C)
         C.state = SS.READY
         C.result = {state="ready", result="BOOTSTRAP_COMMITTED",
             decision=C.sealed}
-        local db = C.database
-        local readOnly = C.catalogSummary and C.catalogSummary.readOnly
-        -- AUTHORITY-COORDINATOR-DRIVE BEGIN. This is AuthorityBootstrapCoordinatorV1
-        -- itself, the sole startup sequencing owner named at architecture
-        -- lines 1207-1211. Every surface below is handed to OwnerCall by
-        -- reference and invoked by the coordinator with C in hand; no
-        -- dependent drives another domain here.
-        if not readOnly then
-            if Nexus.DataCompaction and Nexus.DataCompaction.Init
-                and not OwnerCall(C, "DataCompaction.Init",
-                    Nexus.DataCompaction.Init, db) then
-                return
-            end
-            if Nexus.DataRetention and Nexus.DataRetention.Init
-                and not OwnerCall(C, "DataRetention.Init",
-                    Nexus.DataRetention.Init, db) then
-                return
-            end
-        end
-        -- AUTHORITY-COORDINATOR-DRIVE END
+        if not C.deferAutomaticMaintenance then C:StartAutomaticMaintenance() end
         return
     end
 end
@@ -1331,8 +1312,47 @@ local function StoreMutationSlice(C)
     return C.result
 end
 
-function AuthorityBootstrap.New()
+function AuthorityBootstrap.New(options)
     local C = {state=SS.UNBOUND, result={state="pending", store=SS.UNBOUND}}
+    C.deferAutomaticMaintenance = type(options)=="table"
+        and options.deferAutomaticMaintenance==true
+    -- Required Community startup owns its cursors before background maintenance
+    -- can replace their serving root. Standalone Store callers retain the old
+    -- immediate initialization; MainLifecycle releases this once after entry
+    -- and ordinary character registration have completed.
+    function C:StartAutomaticMaintenance()
+        if self.automaticMaintenanceStarted then return self.result end
+        if self.result.state=="failed" then return self.result end
+        if self.state~=SS.READY then return {state="pending"} end
+        local catalog=Nexus.BuildCatalog
+        if NexusDB~=self.database
+            or catalog and catalog.BoundDatabase
+                and catalog.BoundDatabase()~=self.database then
+            self.automaticMaintenanceStarted=true
+            self.state=SS.INVALID
+            self.result={state="failed",reason="STORE_INVALID",detail="SOURCE_DRIFT"}
+            return self.result
+        end
+        local root=catalog and catalog.RootState and catalog.RootState()
+        if root and (root.state~="ROOT_ADMITTED" or root.candidate) then
+            return {state="pending"}
+        end
+        self.automaticMaintenanceStarted=true
+        -- AUTHORITY-COORDINATOR-DRIVE BEGIN. The same bootstrap coordinator
+        -- retains this once-only owner initialization until MainLifecycle has
+        -- finished required Community startup and ordinary registration.
+        -- Dependents do not call maintenance owners or their pumps directly.
+        if not (self.catalogSummary and self.catalogSummary.readOnly) then
+            if Nexus.DataCompaction and Nexus.DataCompaction.Init
+                and not OwnerCall(self,"DataCompaction.Init",
+                    Nexus.DataCompaction.Init,self.database) then return self.result end
+            if Nexus.DataRetention and Nexus.DataRetention.Init then
+                OwnerCall(self,"DataRetention.Init",Nexus.DataRetention.Init,self.database)
+            end
+        end
+        -- AUTHORITY-COORDINATOR-DRIVE END
+        return self.result
+    end
     function C:State() return self.state end
     function C:Result() return self.result end
     function C:IsReady() return self.state == SS.READY end
