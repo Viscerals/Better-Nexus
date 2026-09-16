@@ -405,11 +405,11 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 - [ ] ISSUE-NATIVE-SYNC-PREPARATION: Manual preparation exceeds its request lifetime
   - Impact: MAJOR
-  - Status: DECISION_REQUIRED
-  - Owner: human
-  - Unblock Condition: Decide whether the existing soft2ms/hard32 timed allowance may apply only to preparation for an explicit manual Sync, while preserving ordinary background budgets and every validation/transport rule.
+  - Status: IN_PROGRESS
+  - Owner: agent
+  - Unblock Condition: Implement and validate the directly authorized manual-only2ms/32 preparation correction; freeze, focused review, exact package and bounded native retest. Stop if native preparation still expires.
   - Evidence Needed: test25 native preparing at261.433seconds; terminal dropped/expired/sent0 observed510.565seconds. Existing startup-only authorization expressly excludes Sync and maintenance. Specific question already sent; no general approval requested.
-  - Notes: Pending and sent lifetime source regressions/reviews PASS; native expiry reached. Exact transition time not sampled. No timed Sync batching implemented. Current exact product e9e4923/test.25 preserved; native cold Sync usability remains FAIL, not an established infinite loop.
+  - Notes: Direct attachment2d7b5643 SHA256159a88934e0aa57eb0c71ee573e6effe3feb8cbe19b85c2857e1e2edc9c2eb51 resolves the scheduling decision. Historical counters unchanged. One bounded correction, no general campaign. Product e9e4923/test.25 preserved.
 
 ## Blockers
 

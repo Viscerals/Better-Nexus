@@ -1,5 +1,28 @@
 # CONTEXT
 
+## Current bounded manual preparation correction
+
+Direct attachment2d7b5643 SHA256
+159a88934e0aa57eb0c71ee573e6effe3feb8cbe19b85c2857e1e2edc9c2eb51
+authorizes manual-only2ms/32 preparation, one focused review, exact replacement
+and bounded native test. No general repair campaign/counter reset.
+Starting product e9e4923/test.25; clean continuation065ba3d. One writer remains
+in .native-startup-usability-worktree/refactor/native-startup-usability.
+Four production paths changed: MainLifecycle shared timed hash batch and scalar
+observations; SyncSession opaque retained-manual-owner second result; Sync
+facade documentation; BuildHashCache actual slice-progress second return.
+Only tests/run_main_lifecycle_parity.lua changed among tests. Original assertions
+retained, including unrelated catalog one-slice and unchanged300second expiry.
+Integrated245/245LuaJIT PASS; manual backup skip. Parse321/321,68TOCupvalue max60,
+package/toolchain/metadata/workflow/analyzer/exporter/security/gitleaks PASS.
+Real manual owner tests cap32,softdeadline,fallback,repeat clicks,one logical
+request with current hashes,reset/disconnect/expiry/supersession,invalidated
+cache continuation,no-progress yield and unchanged background allowance.
+Source review and exact native retest pending. Existing test25 installation
+and all historical packages remain unchanged. Native may still expire behind
+unrelated catalog work; if it does, preserve phase/timing and stop without
+increasing budget or lifetime. Earlier checkpoints below remain history.
+
 ## Current exact native checkpoint - test25
 
 Product candidate e9e4923f9848de16daf7c877e67ea889dda09f1e,

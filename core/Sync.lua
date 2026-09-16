@@ -3531,6 +3531,8 @@ end
 
 -- Safe before catalog/hash readiness: only expire or disconnect a retained
 -- request. This never pumps recovery, hashes, or transport ahead of their gate.
+-- The additive second result is an opaque identity while an explicit manual
+-- request owns preparation. Repeated clicks keep that same identity.
 function Sync.UpdatePendingRequestStatus()
     return Session.UpdatePendingRequestStatus()
 end

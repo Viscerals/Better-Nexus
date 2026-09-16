@@ -310,7 +310,7 @@ local function PumpWarmJob()
         return false
     end
     if job.phase == "summary" then
-        local summary, done, err =
+        local summary, done, err, progress =
             job.catalog.SummaryCursorNext(job.summaryCursor)
         if err then
             RestartWarmJob()
@@ -326,7 +326,8 @@ local function PumpWarmJob()
             job.buildRows = job.buildRows + 1
         end
         if done then job.phase = "tombstone" end
-        return false
+        return false, type(summary) == "table" or done == true
+            or progress == "COPY_PENDING"
     end
     local id, tombstone, done =
         job.catalog.TombstoneNext(job.tombstoneCursor)
@@ -336,7 +337,7 @@ local function PumpWarmJob()
     end
     if done or id == nil then
         FinishWarmCollection(job)
-        return false
+        return false, true
     end
     local bucket = Bucket(id)
     local key = EntryKey("t", id)
@@ -346,7 +347,7 @@ local function PumpWarmJob()
     job.tombstoneRows = job.tombstoneRows + 1
     job.tombstoneCounts[bucket] = job.tombstoneCounts[bucket] + 1
     job.tombstoneCursor = id
-    return false
+    return false, true
 end
 
 local function StartHashJob()
@@ -482,7 +483,7 @@ function Cache.Pump()
     end
     state.stats.maxHashWorkPerPump = math.max(
         state.stats.maxHashWorkPerPump, work)
-    if not HashesCurrent() then return false end
+    if not HashesCurrent() then return false, work > 0 end
     if state.initializing then
         if CurrentBuildRevision() ~= state.targetRevision then
             InvalidateAll()
@@ -494,7 +495,7 @@ function Cache.Pump()
         state.targetRevision = nil
         state.stats.fullRebuilds = state.stats.fullRebuilds + 1
     end
-    return state.initialized
+    return state.initialized, work > 0
 end
 
 local function BucketWithinOneCall(entries)

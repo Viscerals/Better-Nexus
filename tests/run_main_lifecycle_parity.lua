@@ -924,3 +924,151 @@ do
     debugprofilestop,time=savedClock,savedTime
     print("Real lifecycle manual expiry during catalog preparation -- OK")
 end
+
+-- Manual-only allowance: real session, cache, catalog and lifecycle. The
+-- earlier fixture above deliberately keeps unrelated maintenance pending;
+-- its unchanged one-slice and expiry assertions remain mandatory.
+do
+    Nexus={VERSION="manual-budget-test"}
+    local H=dofile("tests/harness.lua")
+    local S=dofile("tests/catalog_authority_support.lua")
+    for _,path in ipairs({"data/DefaultProfile.lua","data/BundledBuilds.lua",
+        "core/Store.lua","core/DpsCapture.lua","core/MainLifecycle.lua",
+        "core/BuildHashCache.lua","core/Codec.lua","core/SyncProtocol.lua",
+        "core/SyncTransport.lua","core/SyncCompatibility.lua",
+        "core/SyncReconciler.lua","core/SyncInbound.lua","core/SyncDiagnostics.lua",
+        "core/SyncSession.lua","core/Sync.lua"}) do dofile(path) end
+    local oldClock,oldTime=debugprofilestop,time
+    local clock,clockStep=0,0.01
+    debugprofilestop=function() clock=clock+clockStep;return clock end
+    time=function() return 2000000000+math.floor(H.now) end
+    local rows={}
+    for i=1,100 do rows["manual-budget-"..i]=S.LocalBuild("manual-budget-"..i,79) end
+    NexusDB=S.Database(rows,nil,{settings={},chars={},dpsCapture={},
+        dataCompaction={schemaVersion=1,version=1,last={migrationVersion=1}}})
+    WishlistRealizerDB=nil
+    local adapter={Init=function() end,Ready=function() return true end,
+        RivalDetected=function() return false end,OnEvent=function() end,
+        RequestSlots=function() end,SetSoloPicker=function() end}
+    local automation={Initialize=function() end,OnUpdate=function() end}
+    local life=Nexus.MainInternals.Lifecycle.New({nexus=Nexus,
+        bindDependencies=function() return {Store=Nexus.Store,Adapter=adapter,
+            Model={},Panel={Init=function() end}} end,
+        ensureAutomation=function() return automation end,print=function() end,
+        recordError=function(s,e) error(s..":"..tostring(e)) end,
+        recordStoreError=function(e) error(e) end,errorText=tostring,
+        requestRecompute=function() end,refreshHud=function() return true end,
+        database=function() return NexusDB end,now=GetTime})
+    life.OnEvent("ADDON_LOADED","Nexus");life.OnEvent("PLAYER_ENTERING_WORLD")
+    for _=1,100000 do
+        H.now=H.now+0.001;life.OnUpdate(0.001)
+        if life.IsInitialized() and Nexus.BuildHashCache.Stats().initialized
+            and not Nexus.BuildCatalog.RootState().candidate then break end
+    end
+    assert(life.IsInitialized() and Nexus.BuildHashCache.Stats().initialized,
+        "manual-budget fixture must finish real prerequisite work")
+    local sync=Nexus.Sync
+    local function Cold()
+        dofile("core/BuildHashCache.lua")
+        sync.Init(Nexus.Codec,adapter)
+        H.sentChatMessages={}
+        clockStep=0.01
+        return Nexus.BuildHashCache
+    end
+    local function Count(cache)
+        local s=cache.Stats();return s.warmPumps+s.hashPumps
+    end
+    local cache=Cold()
+    assert(sync.RequestSync()==nil,"cold manual request must prepare")
+    local _,owner=sync.UpdatePendingRequestStatus()
+    assert(owner~=nil,"real manual session must identify its retained preparation")
+    for _=1,3 do assert(sync.RequestSync()==nil) end
+    local _,sameOwner=sync.UpdatePendingRequestStatus()
+    assert(owner==sameOwner,"repeated intent replaced its preparation owner")
+    local before=Count(cache)
+    life.OnUpdate(0.01)
+    assert(Count(cache)-before==32,"combined manual update must advance exactly32 cheap slices")
+    assert(sync.Stats().preparingRequest and #H.sentChatMessages==0,
+        "partial preparation sent incomplete hashes")
+    clockStep=1.1
+    before=Count(cache);life.OnUpdate(0.01)
+    assert(Count(cache)-before<=2 and Count(cache)>before,
+        "soft deadline must yield with real cursor progress")
+    debugprofilestop=nil
+    before=Count(cache);life.OnUpdate(0.01)
+    assert(Count(cache)-before==1,"missing timer must keep one safe slice")
+    debugprofilestop=function() clock=clock+0.01;return clock end
+    local sentAt
+    for _=1,1000 do
+        before=Count(cache);H.now=H.now+0.1;life.OnUpdate(0.1)
+        assert(Count(cache)-before<=32,"phase transition multiplied the budget")
+        if sync.Stats().queueOutcome=="sent" then sentAt=H.now;break end
+    end
+    assert(sentAt and sync.Stats().terminalReason=="none","real manual preparation failed to dispatch")
+    local expectedBuild,expectedDps=sync.GetCompatibilityHashes()
+    local requests=0
+    for _,message in ipairs(H.sentChatMessages) do
+        local wire=message.text:gsub("||","|")
+        if wire:find("^WLRQ|") then
+            requests=requests+1
+            assert(wire:match("^WLRQ|[^|]+|([^|]+)|")==expectedBuild,
+                "dispatched stale or incomplete build hash")
+            assert(wire:match("^WLRQ|[^|]+|[^|]+|([^|]+)|")==expectedDps,
+                "dispatched stale or incomplete DPS hash")
+        end
+    end
+    assert(requests==1,"duplicate clicks duplicated logical request")
+    local _,afterSend=sync.UpdatePendingRequestStatus()
+    assert(afterSend==nil,"sent request retained accelerated preparation")
+    for _,stop in ipairs({"background","reset","disconnect","expiry"}) do
+        cache=Cold()
+        if stop~="background" then assert(sync.RequestSync()==nil) end
+        if stop=="reset" then sync.Init(Nexus.Codec,adapter) end
+        if stop=="disconnect" then H.joinedChannels.wrbuildssync=nil end
+        if stop=="expiry" then H.now=H.now+301 end
+        before=Count(cache);life.OnUpdate(0.01)
+        assert(Count(cache)-before<=1,stop.." retained boosted allowance")
+        assert(#H.sentChatMessages==0,stop.." sent a request")
+        H.joinedChannels.wrbuildssync=7
+    end
+    for _,stop in ipairs({"no-progress","mid-expiry","superseded","invalid-timer"}) do
+        cache=Cold();assert(sync.RequestSync()==nil)
+        local pump,calls=cache.Pump,0
+        cache.Pump=function()
+            calls=calls+1
+            if stop=="no-progress" then return false,false end
+            local ready,progress=pump()
+            if stop=="mid-expiry" then H.now=H.now+301 end
+            if stop=="superseded" then
+                sync.Init(Nexus.Codec,adapter);assert(sync.RequestSync()==nil)
+            end
+            return ready,progress
+        end
+        if stop=="invalid-timer" then debugprofilestop=function() return 0/0 end end
+        life.OnUpdate(0.01)
+        assert(calls==1,stop.." did not stop the current shared batch")
+        assert(#H.sentChatMessages==0,stop.." sent premature traffic")
+        cache.Pump=pump
+        debugprofilestop=function() clock=clock+0.01;return clock end
+    end
+    cache=Cold();assert(sync.RequestSync()==nil)
+    before=Count(cache);life.OnUpdate(0.01)
+    Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED,{})
+    local beforeRestart=Count(cache)
+    life.OnUpdate(0.01)
+    assert(Count(cache)>beforeRestart and Count(cache)-beforeRestart<=32,
+        "invalidated real cache lost continuation or its shared cap")
+    local _,currentOwner=sync.UpdatePendingRequestStatus()
+    assert(currentOwner~=nil,"generation invalidation lost the explicit intent")
+    for _=1,1000 do
+        H.now=H.now+0.1;life.OnUpdate(0.1)
+        if sync.Stats().queueOutcome=="sent" then break end
+    end
+    assert(sync.Stats().queueOutcome=="sent","invalidated request never dispatched")
+    local startupMax=Nexus.startupTiming.maxUpdateMs
+    life.OnUpdate(0.1)
+    assert(Nexus.startupTiming.maxUpdateMs==startupMax,
+        "post-ready instrumentation rewrote startup evidence")
+    debugprofilestop,time=oldClock,oldTime
+    print("Real manual preparation ownership, shared cap, deadline, fallback and dispatch -- OK")
+end

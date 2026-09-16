@@ -2038,3 +2038,44 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   advisory warnings (acceptance item count and installed catalog location).
 - Post-reload /nexus log errors: no errors recorded. Native startup/reload
   PASS; cold manual preparation FAIL. Whole-addon usability NOT COMPLETE.
+
+## Manual-only timed preparation authorization and prospective paths
+
+- Direct attachment2d7b5643 SHA256
+  159a88934e0aa57eb0c71ee573e6effe3feb8cbe19b85c2857e1e2edc9c2eb51.
+  Starting clean continuation065ba3d7b5672f647d99b24b4a64d2a5a0ac35df,
+  tree4d2c744a763837d6153b2eb52d93d3a6ca334db8. Product/package source
+  e9e4923f9848de16daf7c877e67ea889dda09f1e,
+  tree3ebda4a02243d2299b1cb0ceb6e16ce1368dea33 matches identity receipt.
+- Before any product/test edit, planned paths and reasons:
+  core/MainLifecycle.lua: single shared manual-only timed preparation batch,
+  bounded fallback and session-only scalar timing; existing background paths stay.
+  core/SyncSession.lua: existing status-only call supplies opaque manual-owner
+  identity without exposing mutable session authority or changing its lifetime.
+  core/Sync.lua: preserve facade forwarding and document its additive result.
+  core/BuildHashCache.lua: report actual bounded-slice progress as additive
+  Pump return, so a waiting/restarting cursor cannot spin inside a batch.
+  tests/run_main_lifecycle_parity.lua: real owner/cold/invalidation/budget and
+  stop-path regression coverage while retaining all existing assertions.
+  tests/run_sync_protocol_parity.lua and tests/run_stage36_lifecycle_safety.lua:
+  directly affected owner and actual command/button consumer checks if needed.
+  Workflow STATE/CONTEXT/EVIDENCE/HISTORY records only; no new production module.
+- Starting real100x79 supported synthetic reproduction at301.1sec:
+  preparingfalse,queuedropped,terminalexpired,samecandidate3011pumps,sent0.
+  Command uses LuaJIT21 and external sync-manual-deadline-red.lua; exit0 proves
+  the expiration symptom. It is not a claimed new deadline-regression failure.
+- Catalog/Store/rebind/automatic maintenance remain prerequisites on their
+  ordinary allowance. No manual request owns those unrelated mutations.
+  Hash preparation alone may use the new allowance while manual ownership lives.
+- New fixture first failed setup due to missing VERSION; corrected test setup.
+  Genuine RED then at retained manual owner assertion on starting product.
+  Corrected shared batch GREEN; existing expiration reproduction remains
+  unchanged and PASS as a deadline guard, not claimed repaired maintenance.
+- Complete integrated-manual-budget/inventory.json:245/245PASS,exit0;
+  tests/run_legacy_backup_smoke.lua manual skip. All three real entry consumer
+  suites pass unchanged (command,CommunityRenderer,Leaderboard).
+- Parse321/321,upvalue68TOC3669functions/max60,package72files68Lua,toolchain,
+  metadata,workflow,analyzer,exporter,security policy,gitleaks PASS. No Fengari
+  profiles rerun. No startup/background/transport/deadline assertions relaxed.
+- Scope used four production files and one existing test; prospectively listed
+  run_sync_protocol_parity.lua/run_stage36_lifecycle_safety.lua needed no edits.

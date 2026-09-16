@@ -64,6 +64,8 @@ function Session.New(options)
     local lastRequestId = nil
     local pendingRequest = nil
     local pendingHashRequest = nil
+    -- Opaque identity only; no mutable session state is exposed to scheduling.
+    local manualPreparationOwner = nil
     local requestedLoadouts = {}
     local pendingReplacementCount = 0
     local recoveryQueue, recoveryHead, recoveryTail = {}, 1, 0
@@ -647,7 +649,8 @@ function Session.New(options)
             SetTerminal(not connected and "disconnected" or "expired")
             return false
         end
-        return true
+        return true, autoConverge.active and autoConverge.mode == "manual"
+            and manualPreparationOwner or nil
     end
 
     -- One session-owned intent waits for the existing hash owner. No timer or
@@ -704,6 +707,7 @@ function Session.New(options)
             log("SYNC", "manual convergence superseded automatic request")
         end
         autoSyncPending = false
+        manualPreparationOwner = {}
         autoConverge.active = true
         autoConverge.pass = 0
         autoConverge.stable = 0
@@ -911,6 +915,7 @@ function Session.New(options)
     end
 
     function M.Reset()
+        manualPreparationOwner = nil
         joinRetryTicker, joinAttempts = 0, 0
         receiveWindowUntil = 0
         receiveAbsoluteUntil = 0

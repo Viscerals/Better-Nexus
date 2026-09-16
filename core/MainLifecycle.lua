@@ -53,6 +53,11 @@ function Lifecycle.New(options)
     local startupTiming = {updates=0, slices=0, maxBatchMs=0, maxUpdateMs=0, overshoots=0,
         maxOvershootMs=0, fallbackUpdates=0}
     Nexus.startupTiming = startupTiming
+    local MANUAL_MS, MANUAL_SLICES = 2, 32
+    local manualTiming = {updates=0,slices=0,maxBatchMs=0,maxUpdateMs=0,
+        overshoots=0,fallbackUpdates=0}
+    Nexus.manualSyncTiming = manualTiming
+    local observedManualOwner, manualUpdateActive
     local CompleteWorldEntry
     local lagWarnedAt = -math.huge
     local LAG_THRESHOLD = 1.5
@@ -70,10 +75,10 @@ function Lifecycle.New(options)
 
     local function RunIsolatedOwner(source, callback, ...)
         local state = isolatedFailures[source]
-        local ok, value = pcall(callback, ...)
+        local ok, value, detail = pcall(callback, ...)
         if ok then
             state.active, state.message = false, nil
-            return true, value
+            return true, value, detail
         end
         local message = tostring(ErrorText(value))
         if not state.active or state.message ~= message then
@@ -485,12 +490,44 @@ function Lifecycle.New(options)
             or type(cache.Pump) ~= "function" then
             return true
         end
-        local ok, ready = pcall(cache.Pump)
+        local ok, ready, progressed = pcall(cache.Pump)
         if not ok then
             RecordError("BuildHashCache.Pump", ready)
             return false
         end
-        return ready == true
+        return ready == true, progressed == true
+    end
+
+    -- Only the existing manual hash-preparation owner receives this allowance.
+    -- Catalog, rebind and maintenance are prerequisites, never accelerated here.
+    -- This is one batch per lifecycle update, shared by all command/UI entries.
+    local function PumpManualHashBatch(owner)
+        local started, previous = StartupClock(), nil
+        previous = started
+        local ready = false
+        for slice=1,MANUAL_SLICES do
+            local ok, _, current = RunIsolatedOwner("Sync.UpdatePendingRequestStatus",
+                Nexus.Sync.UpdatePendingRequestStatus)
+            if not ok or current ~= owner then break end
+            local before = StartupClock()
+            local timed = started ~= nil and before ~= nil and before >= previous
+            if timed and before-started >= MANUAL_MS then break end
+            if not timed and slice > 1 then break end
+            local progressed
+            ready, progressed = PumpBuildHashCacheSlice()
+            manualTiming.slices = manualTiming.slices + 1
+            local finished = StartupClock()
+            timed = timed and finished ~= nil and finished >= before
+            if timed then
+                manualTiming.maxBatchMs = math.max(manualTiming.maxBatchMs,finished-started)
+                if finished-started > MANUAL_MS then
+                    manualTiming.overshoots = manualTiming.overshoots + 1
+                end
+                previous = finished
+            else manualTiming.fallbackUpdates = manualTiming.fallbackUpdates + 1 end
+            if ready or not progressed or not timed or finished-started >= MANUAL_MS then break end
+        end
+        return ready
     end
 
     function CompleteWorldEntry(event)
@@ -715,16 +752,35 @@ function Lifecycle.New(options)
         -- pending catalog slice and the one cache slice. DPS capture and
         -- automation keep their per-frame turn; their own catalog writes are
         -- retained pending tickets and never block the frame.
+        local manualOwner
         if Nexus.Sync and type(Nexus.Sync.UpdatePendingRequestStatus)=="function" then
-            RunIsolatedOwner("Sync.UpdatePendingRequestStatus",
+            local ok, _, owner = RunIsolatedOwner("Sync.UpdatePendingRequestStatus",
                 Nexus.Sync.UpdatePendingRequestStatus)
+            if ok then manualOwner = owner end
+        end
+        if manualOwner then
+            manualUpdateActive = true
+            manualTiming.updates = manualTiming.updates + 1
+            if observedManualOwner ~= manualOwner then
+                observedManualOwner = manualOwner
+                manualTiming.startedAt, manualTiming.readyAt, manualTiming.sentAt = GetTime(), nil, nil
+            end
         end
         local catalogReady = PumpCatalogRootAdmissionSlice()
-        local buildHashesReady = catalogReady and PumpBuildHashCacheSlice()
+        local buildHashesReady
+        if catalogReady then
+            buildHashesReady = manualOwner and PumpManualHashBatch(manualOwner)
+                or not manualOwner and PumpBuildHashCacheSlice()
+            if manualOwner and buildHashesReady and manualTiming.readyAt == nil then
+                manualTiming.readyAt = GetTime()
+            end
+        end
         local Adapter = dependencies.Adapter
         if not Adapter.Ready() then return end
         if Nexus.Sync and catalogReady and buildHashesReady then
             RunIsolatedOwner("Sync.OnUpdate", Nexus.Sync.OnUpdate, elapsed)
+            if manualOwner and type(Nexus.Sync.Stats)=="function"
+                and Nexus.Sync.Stats().queueOutcome=="sent" then manualTiming.sentAt=GetTime() end
         end
         if Nexus.DpsCapture then
             RunIsolatedOwner("DpsCapture.OnUpdate",
@@ -734,12 +790,16 @@ function Lifecycle.New(options)
         if automation then automation.OnUpdate(elapsed) end
     end
 
-    local function FinishStartupUpdate(started, ...)
+    local function FinishStartupUpdate(started, wasStartup, ...)
         if started ~= nil then
             local finished = StartupClock()
             if finished ~= nil and finished >= started then
-                startupTiming.maxUpdateMs = math.max(
-                    startupTiming.maxUpdateMs, finished - started)
+                if manualUpdateActive then
+                    manualTiming.maxUpdateMs = math.max(manualTiming.maxUpdateMs,finished-started)
+                elseif wasStartup then
+                    startupTiming.maxUpdateMs = math.max(
+                        startupTiming.maxUpdateMs, finished - started)
+                end
             end
         end
         return ...
@@ -749,13 +809,15 @@ function Lifecycle.New(options)
         -- Include dependent initialization and world-entry completion in the
         -- observed full update cost, not just the soft-budget coordinator loop.
         local started
-        if not initialized and not bootstrapPumping then started = StartupClock() end
+        local wasStartup = not initialized and not bootstrapPumping
+        manualUpdateActive = false
+        if not bootstrapPumping then started = StartupClock() end
         local performance = Nexus and Nexus.Performance
         if performance and type(performance.Measure) == "function" then
-            return FinishStartupUpdate(started,
+            return FinishStartupUpdate(started, wasStartup,
                 performance.Measure("lifecycle.update", RunUpdate, elapsed,started))
         end
-        return FinishStartupUpdate(started, RunUpdate(elapsed,started))
+        return FinishStartupUpdate(started, wasStartup, RunUpdate(elapsed,started))
     end
 
     local M = {}
