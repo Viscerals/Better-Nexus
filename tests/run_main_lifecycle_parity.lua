@@ -930,7 +930,7 @@ end
 
 -- Same supported 100x79 input, real retention prerequisite, and real wire.
 -- Simulated time advances on EVERY lifecycle update, including preparation.
-do
+for _,initialOvershoot in ipairs({false,true}) do
     Nexus={VERSION="manual-prerequisite-test"}
     local H=dofile("tests/harness.lua")
     local S=dofile("tests/catalog_authority_support.lua")
@@ -969,6 +969,18 @@ do
         refreshHud=function() return true end,database=function() return NexusDB end,now=GetTime})
     life.OnEvent("ADDON_LOADED","Nexus");life.OnEvent("PLAYER_ENTERING_WORLD")
     local requestedAt,observedCandidate,readyAt,sentAt
+    local initialSliceInjected=false
+    if initialOvershoot then
+        local pump=C.PumpRootAdmission
+        C.PumpRootAdmission=function(expected)
+            local prior=C.ManualPreparationStatus()
+            local result,progress=pump(expected)
+            if requestedAt and not initialSliceInjected and prior.relevant and prior.pumps==0 then
+                clock=clock+5;initialSliceInjected=true
+            end
+            return result,progress
+        end
+    end
     for _=1,5000 do
         local rootBefore=C.DebugStats().rootPumps
         local hashBefore=cache.Stats().warmPumps+cache.Stats().hashPumps
@@ -998,6 +1010,12 @@ do
     assert(observedCandidate,"same-input reproduction did not exercise the catalog prerequisite")
     assert(sentAt and readyAt and sentAt-requestedAt<300,
         "100x79 manual Sync expired before real prerequisite and hashes completed")
+    if initialOvershoot then
+        assert(initialSliceInjected,"initial maintenance slice fault was not exercised")
+        assert(Nexus.manualSyncTiming.maxBatchMs>=5 and Nexus.manualSyncTiming.overshoots>=1,
+            "initial prerequisite overshoot was omitted from complete preparation cost")
+        assert(Nexus.manualSyncTiming.maxUpdateMs>=5,"complete update omitted initial prerequisite")
+    end
     local requests=0
     for _,message in ipairs(H.sentChatMessages) do
         if message.text:gsub("||","|"):find("^WLRQ|") then requests=requests+1 end
@@ -1011,8 +1029,8 @@ do
         assert(actual.futureBuild.keep==row.futureBuild.keep and #actual.echoes==79,
             "preparation changed the supported source records")
     end
-    print(string.format("100x79 real prerequisite ready %.3fs / sent %.3fs -- OK",
-        readyAt-requestedAt,sentAt-requestedAt))
+    print(string.format("100x79 real prerequisite initialOvershoot=%s ready %.3fs / sent %.3fs -- OK",
+        tostring(initialOvershoot),readyAt-requestedAt,sentAt-requestedAt))
     debugprofilestop,time=savedClock,savedTime
 end
 

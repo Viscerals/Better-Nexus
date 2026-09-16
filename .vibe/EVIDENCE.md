@@ -2184,3 +2184,10 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   Read-only GitHub verified PR70 open/draft,head55640b2,expected branch; local
   ancestry exit0. Installed/package remains test26; current correction is not
   installed. All five player-report statuses remain open and separately listed.
+- Focused review3292da8: StandardsPASS; SpecFAIL oneP2 measurement omission when
+  ordinary initial prerequisite slice exhausts the softdeadline before the
+  loop. Complete-update timing was correct; batchmax/overshoot omitted that
+  slice. Added a real100x79 initialslice5ms probe: RED at costassertion; record
+  prior-slice elapsed before loop -> GREEN. Same ownership/budget/lifetime.
+  Successor retains the original snapshot, all assertions and nativeFAIL.
+  Same focused campaign rechecks this narrow delta; no new review campaign.

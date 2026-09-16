@@ -516,6 +516,14 @@ function Lifecycle.New(options)
         local priorSlices = math.max(0, initial.totalPumps - preparationPumps)
         if priorSlices > 0 then
             started = started and preparationElapsed and started-preparationElapsed or nil
+            -- The initial slice can exhaust the allowance before the loop.
+            -- Record its cost even when no additional slice may run.
+            if preparationElapsed ~= nil then
+                manualTiming.maxBatchMs = math.max(manualTiming.maxBatchMs,preparationElapsed)
+                if preparationElapsed > MANUAL_MS then
+                    manualTiming.overshoots = manualTiming.overshoots + 1
+                end
+            end
         end
         previous = started
         manualTiming.slices = manualTiming.slices + priorSlices
