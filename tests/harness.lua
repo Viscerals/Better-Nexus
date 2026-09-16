@@ -935,14 +935,10 @@ end
 -- ordinary scheduler turns until startup completes before it may assert
 -- anything about an initialized addon.
 --
--- The completion signal is deliberately INDEPENDENT of anything a caller
--- asserts. Nexus.Scheduler.IsInitialized() becomes true only inside
--- MainLifecycle's Initialize (core/MainLifecycle.lua, the Scheduler.Init
--- owner), which runs only once the coordinator has reached STORE_READY and
--- released its dependents (line 1519). None of the fixtures that use this
--- helper reference the Scheduler at all, so waiting on it cannot make any of
--- their assertions vacuous -- unlike waiting on a caller's own subject, which
--- is deliberately NOT done.
+-- Scheduler initialization now precedes retained Community startup work.
+-- Its presence alone is not readiness. The lifecycle stamps readyAt only
+-- after the complete dependent/world-entry sequence; wait for that signal,
+-- independently of each fixture's product assertions.
 --
 -- BuildCatalog's ROOT_ADMITTED status is explicitly NOT the signal: the
 -- coordinator releases BuildCatalog.Init at STORE_AUTHORITY_PENDING, several
@@ -957,7 +953,8 @@ function H.AuthorityBootstrapComplete()
         return false
     end
     local ok, initialized = pcall(scheduler.IsInitialized)
-    return ok and initialized == true
+    return ok and initialized == true and type(Nexus.startupTiming)=="table"
+        and Nexus.startupTiming.readyAt~=nil
 end
 
 -- Drives scheduler turns with the smallest useful step, so the simulated clock

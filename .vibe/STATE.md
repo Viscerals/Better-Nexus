@@ -9,19 +9,23 @@
 - Stage: 50
 - Checkpoint: 50.3
 - Status: IN_REVIEW
-- Branch: `test/usable-beta-stabilization`
-- Starting head: frozen Wave 3 `7efbd2608b8f016bd405692e8669c5082a508d14`, tree `8ceb2eb9decf9b1cb87096e78e33d5a87f76d5b5`
-- Worktree: `C:\T3\BN\usable-beta-stabilization`
+- Branch: `refactor/native-startup-usability`
+- Starting head: native smoke candidate `09d9ff36a1be5d5abe91a627876d4bcd230a5df0`, tree `e2d3037b29a9d0cede76f3bbaa441e09dd3e9a9f`
+- Worktree: `.native-startup-usability-worktree` beneath the established Better-Nexus checkout
 - Base: exact PR #68 head `6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f`
 
 ## Objective (current checkpoint)
 
-Complete one finite controlled tester-stabilization attempt from frozen Wave 3.
-Correct MASTER-W3-002, 007, and 010 through real consumers. Assess 009 and
-characterize 003-006. Defer 001/008 under the explicit tester contract unless a
-normal enabled trigger is demonstrated. Preserve the historical Wave 3 FAIL and
-3/3/0 counters. One freeze and one independent tester-profile campaign; no
-automatic post-review repair.
+Continue the explicitly authorized native tester validation from 09d9ff3.
+Attribute the full startup update before any correction; test reversible
+Wishlist save/reload and ordinary Sync on Valentinew with automation OFF.
+Repair only demonstrated supported functional/native usability blockers, freeze
+one coherent package and complete the authorized whole-addon independent review.
+Direct continuation authorization SHA-256:
+5ee89b99d465978fa2677ff924bcd0dd50dcb755b6b01a3ff529b5aa9d783182.
+All older scope statements below are historical where superseded by this direct
+authorization. Preserve historical FAILs and counters 3/3/0. No public release,
+GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Deliverables (current checkpoint)
 
@@ -443,6 +447,10 @@ automatic post-review repair.
 
 ## Recommended next action
 
-- Complete the authorized tester implementation under the current profile.
-- Do not continue unrelated checkpoints, push, modify PRs, package, install,
-  access live SavedVariables, or run native WoW. No post-review repair is authorized.
+- Freeze the integrated native startup, popup and empty-catalog candidate;
+  package exact bytes and run the authorized independent functional review.
+- Install only after verified addon/profile backup with WoW closed. Verify
+  file parity, build identity, full startup timing and native dialog behavior.
+- Current direct native continuation supersedes historical packaging/native
+  and post-review limits above. Repair demonstrated supported blockers only;
+  no public release, GitHub write, resource spending or synthetic traffic.

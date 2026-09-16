@@ -31,6 +31,8 @@ function Lifecycle.New(options)
     local GetTime = assert(options.now, "MainLifecycle requires clock")
 
     local initialized = false
+    local preparedDatabase
+    local communityFailure
     local syncInitialized = false
     local dpsInitialized = false
     local dependencies = nil
@@ -281,59 +283,80 @@ function Lifecycle.New(options)
             return false
         end
         local db = Database()
-        local okLogs, initializedLogs, errLogs =
-            pcall(Nexus.DiagnosticLogs.Init, db)
-        if not okLogs or initializedLogs == false then
-            RecordError("DiagnosticLogs.Init", okLogs and errLogs or initializedLogs)
-        end
-        if Nexus.Errors and Nexus.Errors.Init then
-            local okErrors, initializedErrors, errErrors = pcall(Nexus.Errors.Init)
-            if not okErrors or initializedErrors == false then
-                RecordError("Errors.Init", okErrors and errErrors or initializedErrors)
-            end
-        end
-        if Nexus.Scheduler and Nexus.Scheduler.Init then
-            local okScheduler, schedulerFrame = pcall(Nexus.Scheduler.Init)
-            if not okScheduler or not schedulerFrame then
-                RecordError("Scheduler.Init",
-                    okScheduler and "frame unavailable" or schedulerFrame)
-            end
-        end
-        if Nexus.PeerDebug and Nexus.PeerDebug.Init then
-            local okPeerDebug, peerDebugError = pcall(Nexus.PeerDebug.Init)
-            if not okPeerDebug then
-                RecordError("PeerDebug.Init", peerDebugError)
-            end
-        end
-        if Nexus.Updates and Nexus.Updates.Init then
-            Nexus.Updates.Init({
-                notify=function(version)
-                    Print("Update " .. tostring(version)
-                        .. " is available. Installation is manual; open the Nexus update notice to copy the releases page.")
-                end,
-                refresh=function()
-                    if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
-                end,
-            })
-        end
-
         local automation = EnsureAutomation()
         if not automation then return false end
-        automation.Initialize()
-        Adapter.Init({OnStatus=Print}, Store)
-        if Nexus.LogViewer and Nexus.LogViewer.Init then
-            Nexus.LogViewer.Init(options.logViewerProvider,
-                options.clearDiagnosticLogs)
+        if preparedDatabase ~= db then
+            communityFailure=nil
+            local okLogs, initializedLogs, errLogs =
+                pcall(Nexus.DiagnosticLogs.Init, db)
+            if not okLogs or initializedLogs == false then
+                RecordError("DiagnosticLogs.Init", okLogs and errLogs or initializedLogs)
+            end
+            if Nexus.Errors and Nexus.Errors.Init then
+                local okErrors, initializedErrors, errErrors = pcall(Nexus.Errors.Init)
+                if not okErrors or initializedErrors == false then
+                    RecordError("Errors.Init", okErrors and errErrors or initializedErrors)
+                end
+            end
+            if Nexus.Scheduler and Nexus.Scheduler.Init then
+                local okScheduler, schedulerFrame = pcall(Nexus.Scheduler.Init)
+                if not okScheduler or not schedulerFrame then
+                    RecordError("Scheduler.Init",
+                        okScheduler and "frame unavailable" or schedulerFrame)
+                end
+            end
+            if Nexus.PeerDebug and Nexus.PeerDebug.Init then
+                local okPeerDebug, peerDebugError = pcall(Nexus.PeerDebug.Init)
+                if not okPeerDebug then
+                    RecordError("PeerDebug.Init", peerDebugError)
+                end
+            end
+            if Nexus.Updates and Nexus.Updates.Init then
+                Nexus.Updates.Init({
+                    notify=function(version)
+                        Print("Update " .. tostring(version)
+                            .. " is available. Installation is manual; open the Nexus update notice to copy the releases page.")
+                    end,
+                    refresh=function()
+                        if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
+                    end,
+                })
+            end
+
+            automation.Initialize()
+            Adapter.Init({OnStatus=Print}, Store)
+            if Nexus.LogViewer and Nexus.LogViewer.Init then
+                Nexus.LogViewer.Init(options.logViewerProvider,
+                    options.clearDiagnosticLogs)
+            end
+            if Nexus.WishlistEditor and Nexus.WishlistEditor.Init then
+                Nexus.WishlistEditor.Init(Adapter, Model)
+            end
+            if Nexus.WishlistOverlay and Nexus.WishlistOverlay.Init then
+                Nexus.WishlistOverlay.Init(Adapter, Model)
+                if db.overlayShown then Nexus.WishlistOverlay.Show() end
+            end
+            preparedDatabase=db
         end
-        if Nexus.WishlistEditor and Nexus.WishlistEditor.Init then
-            Nexus.WishlistEditor.Init(Adapter, Model)
-        end
-        if Nexus.WishlistOverlay and Nexus.WishlistOverlay.Init then
-            Nexus.WishlistOverlay.Init(Adapter, Model)
-            if db.overlayShown then Nexus.WishlistOverlay.Show() end
-        end
+        if communityFailure then return false end
         if Nexus.CommunityBuilds and Nexus.CommunityBuilds.Init then
-            Nexus.CommunityBuilds.Init(Adapter, Model)
+            local started=StartupClock()
+            local ok,result=pcall(Nexus.CommunityBuilds.Init,Adapter,Model)
+            local finished=StartupClock()
+            if started and finished and finished>=started then
+                startupTiming.communityMaxMs=math.max(
+                    startupTiming.communityMaxMs or 0,finished-started)
+                startupTiming.communityTotalMs=(startupTiming.communityTotalMs or 0)
+                    + finished-started
+            end
+            startupTiming.communityPhase=type(result)=="table" and result.phase or nil
+            if not ok or type(result)=="table" and result.state=="failed" then
+                communityFailure=not ok and result or result.reason
+                    or "COMMUNITY_STARTUP_FAILED"
+                RecordError("CommunityBuilds.Init",communityFailure)
+                return false
+            end
+            if type(result)=="table" and result.state=="pending" then return false end
         end
         if Nexus.Leaderboard and Nexus.Leaderboard.Init then
             Nexus.Leaderboard.Init(Adapter, Model)
@@ -554,10 +577,19 @@ function Lifecycle.New(options)
             -- coordinator (a Store stub) behaviour is unchanged: Initialize
             -- runs now and its explicit result alone decides readiness.
             if bootstrapCoordinator == nil or BootstrapCoordinatorIsReady() then
+                local started=StartupClock()
                 Initialize()
                 if initialized then
                     worldEntryPending = false
                     CompleteWorldEntry(event)
+                    startupTiming.readyAt=GetTime()
+                    startupTiming.readySeconds=startupTiming.readyAt
+                        - startupTiming.worldEnteredAt
+                end
+                local finished=StartupClock()
+                if started and finished and finished>=started then
+                    startupTiming.maxUpdateMs=math.max(
+                        startupTiming.maxUpdateMs,finished-started)
                 end
             end
         elseif event == "PLAYER_LEVEL_UP" then
@@ -608,13 +640,21 @@ function Lifecycle.New(options)
             -- and post-ready mutation scheduling below remain one-slice paths.
             -- Dependents are released only when the coordinator itself reaches
             -- STORE_READY (line 1519), never because this call completed.
-            if bootstrapCoordinator ~= nil then
+            if bootstrapCoordinator ~= nil or worldEntryPending then
                 if bootstrapPumping then return end
-                local result = PumpBootstrapBatch()
+                local result = bootstrapCoordinator and PumpBootstrapBatch()
                 local failed = type(result) == "table"
                     and result.state == "failed"
                 if worldEntryPending
-                    and (failed or BootstrapCoordinatorIsReady()) then
+                    and (failed or bootstrapCoordinator==nil or BootstrapCoordinatorIsReady()) then
+                    -- Community cleanup may retain a real catalog mutation.
+                    -- The existing lifecycle scheduler owns its next slice;
+                    -- the complete update timer still covers this work.
+                    if preparedDatabase then
+                        PumpAuthorityRebind()
+                        PumpStoreMutationSlice()
+                        PumpCatalogRootAdmissionSlice()
+                    end
                     Initialize()
                     if initialized then
                         worldEntryPending = false

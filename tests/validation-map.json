@@ -2,6 +2,27 @@
   "schema": 1,
   "routes": [
     {
+      "id": "community-startup-continuation",
+      "patterns": ["^core/(CommunityController|MainLifecycle)\\.lua$", "^ui/CommunityBuilds\\.lua$", "^tests/(harness|run_community_startup_continuation)\\.lua$"],
+      "groups": ["runtime", "performance", "catalog"],
+      "tests": ["tests/run_community_startup_continuation.lua", "tests/run_main_lifecycle_parity.lua", "tests/run_main_contract_characterization.lua", "tests/run_community_builds.lua", "tests/run_integration.lua"],
+      "full_required": true
+    },
+    {
+      "id": "wishlist-native-confirmation-layer",
+      "patterns": ["^ui/WishlistRenderer\\.lua$", "^tests/run_tome_and_popup_ui\\.lua$"],
+      "groups": ["runtime", "ui"],
+      "tests": ["tests/run_tome_and_popup_ui.lua", "tests/run_wishlist_editor.lua", "tests/run_wishlist_refresh_budget.lua"],
+      "full_required": true
+    },
+    {
+      "id": "bundled-catalog-retirement",
+      "patterns": ["^data/BundledBuilds\\.lua$", "^tests/fixtures/.*", "^tests/run_bundled_catalog_retirement\\.lua$"],
+      "groups": ["runtime", "catalog", "packaging"],
+      "tests": ["tests/run_bundled_catalog_retirement.lua", "tests/run_bundled_build_export.lua", "tests/run_build_catalog_migration.lua", "tests/run_community_catalog_status.lua", "tests/run_startup_catalog_cost.lua", "tests/run_stage35_live_failure_characterization.lua"],
+      "full_required": true
+    },
+    {
       "id": "pr58-authority-pair-repair",
       "patterns": [
         "^core/(CandidateEvidence|DataRetention|DpsCapture|ViewProjections)\\.lua$",

@@ -1,5 +1,6 @@
 local H = dofile("tests/harness.lua")
-dofile("data/BundledBuilds.lua")
+-- Preserve every historical exporter assertion on the retired reference.
+dofile("tests/fixtures/BundledBuilds-1.19.4-reference.lua")
 dofile("core/BuildCatalog.lua")
 
 local bundle = Nexus.BundledBuilds

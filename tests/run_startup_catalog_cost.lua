@@ -3,7 +3,8 @@
 -- cannot expose full-library defensive-copy pressure.
 local H = dofile("tests/harness.lua")
 local S = dofile("tests/catalog_authority_support.lua")
-dofile("data/BundledBuilds.lua")
+-- Keep the original large-data workload after retiring the release seed.
+dofile("tests/fixtures/BundledBuilds-1.19.4-reference.lua")
 dofile("data/DefaultProfile.lua")
 -- The shipped login sequence loads the compatibility hash owner between the
 -- catalog and Store (Nexus.toc order). MASTER-W2-006 refuses any one-call

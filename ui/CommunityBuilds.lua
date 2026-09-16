@@ -228,11 +228,12 @@ end
 -- The admin can publish real builds from the Post Build flow.
 
 function M.Init(adapter, model)
-    ControllerInstance().Initialize(adapter, Nexus.BundledBuilds)
+    local result=ControllerInstance().Initialize(adapter, Nexus.BundledBuilds)
     -- Bind before the first render so direct startup consumers such as Peer
     -- Debug and ExplainBuild use the same Saved relationship authority.
     BindSavedProjectionRelation()
     RendererInstance()
+    return result
 end
 
 function M.Select(id)

@@ -10,6 +10,17 @@ assert(#missing==2,"unknown tome detector should exclude learned tomes and repor
 NexusDB=NexusDB or {}
 Nexus.WishlistEditor.Init(A,Nexus.Model)
 Nexus.WishlistEditor.Show()
+-- Native 3.3.5 reproduced DIALOG/50 editor covering StaticPopup1 at
+-- DIALOG/1, including its Save Changes button. The editor must stay below
+-- the client's confirmation layer; increasing a global popup is not ours.
+local strataOrder = {BACKGROUND=1,LOW=2,MEDIUM=3,HIGH=4,DIALOG=5,
+    FULLSCREEN=6,FULLSCREEN_DIALOG=7,TOOLTIP=8}
+local editor = assert(_G.NexusEditorFrame)
+local popupStrata, popupLevel = "DIALOG", 1
+assert(strataOrder[editor:GetFrameStrata()] < strataOrder[popupStrata]
+    or (editor:GetFrameStrata() == popupStrata
+        and editor:GetFrameLevel() < popupLevel),
+    "Wishlist editor covers native Save Changes confirmation")
 Nexus.WishlistEditor.ToggleDisplayPopup()
 local popup=_G.NexusDisplayPopup
 assert(popup and popup:IsShown(),"display settings popup did not open")

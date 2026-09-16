@@ -1,5 +1,42 @@
 # CONTEXT
 
+## Current native continuation - 2026-09-16
+
+Latest continuation authority SHA-256:
+7bb435e0d4af65b882a5aae3ad3e287a779dfd06dddcad6c87292546dadb9107.
+Community startup now retains its defensive-copy cursor across updates, then
+settles generation-bound cleanup and identity mutations before readiness.
+The integrated LuaJIT inventory passed 245/245; only the explicit manual
+backup smoke is skipped. The popup strata correction and empty seed are in
+the same candidate. The CI inventory guard now requires all 245 tests.
+Current installed package remains exact test.20-09d9ff3; replacement native
+timing, dialog interactions and whole-addon independent review remain pending.
+WoW was disconnected at login and is now closed for backup/install. Do not
+automate authentication. Continue packaging/review independently of login.
+Confirmed supported-use blockers may be repaired under current authority;
+older post-review prohibitions below remain historical for this native task.
+
+User additionally retired the outdated packaged bundled builds. Preserve the
+exact 504-build catalog under tests/fixtures/BundledBuilds-1.19.4-reference.lua
+for reference and unchanged heavy regression workloads; ship an empty generated
+seed until opt-in current-patch builds are verified. Do not purge existing saved
+records. The user deferred repopulation until an active player base exists;
+an empty runtime seed is intentional and does not block this candidate. StutterAlert is
+enabled by direct user request; its existing legacy profiler and monitoring are
+on. No StutterAlert source change has been necessary.
+
+Direct user attachment SHA-256 5ee89b99d465978fa2677ff924bcd0dd50dcb755b6b01a3ff529b5aa9d783182
+authorizes native continuation and demonstrated usability corrections on the
+existing refactor/native-startup-usability worktree from 09d9ff3. The exact
+test.20 package passed bounded startup/reload/main-view smoke on the already
+recovered Valentinew profile. Full updates peaked at 1285.0821/1031.3468ms;
+attribute the owner before changing behavior. Test reversible Wishlist persistence
+and ordinary Sync; no resource spending, automation enablement or junk publication.
+Controlled-peer convergence and unavailable combat remain NOT RUN. Freeze one
+coherent package, then fresh Astra/xhigh whole-addon review. No paid API or public
+release. The package does not recover historical relayPairs state. Historical
+authority and limits below remain history, not contradictory current instructions.
+
 ## Current tester-stabilization authority
 
 Complete one finite controlled tester-stabilization attempt from frozen Wave 3.

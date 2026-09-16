@@ -656,7 +656,8 @@ do
         Nexus={}
         dofile("tests/harness.lua")
         dofile("data/DefaultProfile.lua")
-        dofile("data/BundledBuilds.lua")
+        -- Preserve the heavy differential workload independently of release data.
+        dofile("tests/fixtures/BundledBuilds-1.19.4-reference.lua")
         dofile("core/Codec.lua")
         dofile("core/Store.lua")
         dofile("core/MainLifecycle.lua")

@@ -118,7 +118,8 @@ Check(communitySource:find("CandidateEvidence.Build",1,true)
 -- revision-owned buckets, but Leaderboard Open Build still forwards raw ID.
 ------------------------------------------------------------------------
 
-dofile("data/BundledBuilds.lua")
+-- Retain the exact historical receipt and all of its characterization assertions.
+dofile("tests/fixtures/BundledBuilds-1.19.4-reference.lua")
 dofile("core/BuildCatalog.lua")
 local collisionDb = {communityBuilds={},syncTombstones={}}
 local navigationBundle = {

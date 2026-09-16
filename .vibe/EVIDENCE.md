@@ -1733,3 +1733,96 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
 - Complete current Lua inventory: The complete current Lua inventory on the exact freeze-candidate bytes (started 2026-09-13 05:52:43, finished 08:20:22 local, untracked log SHA-256 `ddd714a6fddf473a26b6ebfac7b800e7abadb90b13d04601770dba8928c63fb5`, 64,381 bytes): `Lua suite: 243/243 passed` with the single explicit manual `tests/run_legacy_backup_smoke.lua` skip (244 discovered, 243 runnable)..
 - Pre-freeze Fast on the dirty bytes: Fast on the final dirty bytes (started 2026-09-13 03:21:32 local, 7,313.486 s): 163 passed, 0 failed, 0 unavailable, 1 nonblocking no-BaseRef skip (`git-diff-check-range`), including the shared artifact path policy, the PR58 expected-red oracle, and the 58-test mapped plan with the complete semantic envelope..
 - Path reconciliation before freeze: The pre-freeze inventory is exactly 105 tracked modified paths, zero staged, zero untracked, zero protected, and zero outside the parent packet plus Amendments 1-5 (34 parent paths, of which 30 changed; 27 + 2 + 42 + 1 + 3 amendment tests changed; `tests/run_builds_resilience.lua` of Amendment 3 passed unedited). Ordinal LF path-list SHA-256 `79a8c22d52d39b9eb6ca0185bc91b54e568c283bc181c86f6e3dbf50787d63d1`..
+
+## 50.3 native continuation and bundled catalog retirement - 2026-09-16
+
+- Direct native continuation attachment SHA-256
+  `5ee89b99d465978fa2677ff924bcd0dd50dcb755b6b01a3ff529b5aa9d783182`.
+  Later direct user instruction retires the outdated packaged builds, not
+  personal saved data. Existing sole source writer remains on
+  `refactor/native-startup-usability`, HEAD `09d9ff3`; changes below are dirty
+  working-tree evidence, not a new accepted exact candidate.
+- Preserve the original 504-build catalog as byte-identical offline reference
+  `tests/fixtures/BundledBuilds-1.19.4-reference.lua`, SHA-256
+  `8a806d4d80091d1d185c1a2f0e4bcb5a4c14827d3ecad495f52a57ab000fa531`.
+  Existing exporter generates an empty runtime seed from
+  `tests/fixtures/empty-community-catalog.lua`; no verified current-patch input
+  has been supplied. Current-patch exports are required to populate it.
+  No saved player builds, Wishlists, DPS or unknown fields are purged.
+- Five existing heavy tests load the preserved reference explicitly. Their
+  assertions and workload remain unchanged. New retirement regression first
+  failed with `retired builds still ship in the runtime catalog`, then passed
+  for fresh-profile emptiness and supported existing-data preservation.
+- Complete working-tree LuaJIT inventory: 244/244 passed, exit 0. Explicit
+  manual skip remains `tests/run_legacy_backup_smoke.lua`. Mixed-client 14/14
+  and semantic envelope 23/23 are included. This receipt precedes the popup
+  layer change below; it is not exact-head acceptance of later bytes.
+- Native temporary attribution: Community initialization 1504.2585000396 ms
+  inside a 1547.003099978 ms peak complete startup update. Subsequent run with
+  StutterAlert enabled: legacy cleanup 312.18130004406 ms, catalog init
+  0.25450003147125 ms, overlay identity repair 730.18050003052 ms. Both cleanup
+  paths synchronously drain defensive-copy record cursors. Synthetic original
+  bundled workload reproduced 3552 record-cursor calls in one initialization.
+  Correction remains pending; catalog retirement alone is not its proof.
+- StutterAlert enabled in ACP by direct user instruction. Existing profiler
+  reports CVar=1, CVarBool=1, CPU APIs=yes, mode=legacy, monitoring=on,
+  savedPreference=on, canonical=on. No StutterAlert source change.
+- Native reversible Wishlist test: one selected Echo changed x1 to x2;
+  save succeeded, reload retained x2 and total 42/79. Restored x1 and saved
+  original total 41/79. Automation stayed OFF; no owned Echo/loadout/resource
+  action or public publication. Final restored-value reload check pending.
+- Native confirmation defect reproduced twice: editor DIALOG/50 covers Save
+  Changes popup DIALOG/1. Closing editor exposes the confirmation and allows
+  save. Added red-capable ordering regression; it fails on old source. Lowered
+  only editor strata to HIGH; original popup assertions retained. Focused
+  Wishlist suite 23/23 passed, exit 0. Native correction not installed yet.
+- Both temporary startup probes restored to exact package file hashes.
+  Original test.19 ZIP and test.20 ZIP remain unchanged. Installed files still
+  use test.20 and the old bundled seed. No replacement ZIP, implementation
+  commit, GitHub mutation or acceptance claim in this continuation.
+- Current package-content/syntax check passes: 72 files, 68 Lua, 2817565 bytes,
+  manifest SHA-256 `3b2edfc20af5fd6a4fbeb117c432340277ed78febf2233d1e09aaa9f845fcbf5`.
+  Package parity and temporary cleanup true; reference/tests not packaged.
+  `git diff --check` passes. Whole-addon review and integrated native acceptance
+  remain pending. Controlled-peer convergence, native publication, new combat
+  capture and historical backup recovery remain NOT RUN.
+- Final restored-value reload completed: existing not-assigned Wishlist shows
+  original Echo x1, 41/79 total, 41 entries, 6 locked. Closed editor without
+  further edits. All 72 installed package files now match the original exact
+  test.20 manifest after diagnostic removal. Current source changes remain
+  uninstalled; no readiness claim for them.
+
+### Native continuation: integrated Community and popup correction
+
+- Latest direct continuation SHA-256:
+  `7bb435e0d4af65b882a5aae3ad3e287a779dfd06dddcad6c87292546dadb9107`.
+- Original Community startup reproduced 3834 defensive-copy cursor calls in
+  one callback with the populated reference. New regression fails on original
+  behavior. Startup now retains one cursor, processes at most 32 units per
+  call with a soft 2 ms clock budget (one unit without a usable clock), then
+  settles the existing cleanup/repair mutation tickets. No hard 2 ms claim.
+- Regressions cover empty fresh and existing data, populated preserved
+  reference, later growth, unknown durable fields, pending/cancel/rebind,
+  concurrent-generation refusal and exactly-once dependent initialization.
+  Lifecycle readiness includes Community completion; full-update timing
+  includes mutation pumping and final dependent/world-entry work.
+- Integrated LuaJIT inventory: 245/245 runnable, exit 0; sole manual skip
+  `tests/run_legacy_backup_smoke.lua`. Receipt:
+  `native-startup-20260916/integrated-startup-first/inventory.json` under the
+  established local visualization evidence root. This receipt describes dirty
+  integrated bytes above HEAD 09d9ff3, not a later exact-head gate.
+- Included integration 70/70, semantic envelope 23/23, mixed-client 14/14.
+  Lua 5.1 parse 321/321, upvalue compatibility boundary, metadata, security
+  policy, SavedVariables analyzer self-test and bundled exporter checks pass.
+- Workflow policy initially failed honestly: expected 243 versus actual 245.
+  Updated only the release workflow inventory guard to 245. Policy now passes
+  without assertion changes. No workflow dispatched or GitHub mutation.
+- Historical expected-red wrappers: PR58 four confirmations and catalog six
+  confirmations, both exit 0, product bytes unchanged. Secret scan found no
+  leaks; release license/policy passes. Package source: 72 files, 68 Lua,
+  2824191 bytes, parity/temporary cleanup true; manifest SHA-256
+  `43eca04a8e10775327c78c8ec95e42b27a0bb789af3e81b1d54a198afdfec4d2`.
+- Existing test.19/test.20 archives and historical failures stay unchanged.
+  Current recovered Valentinew profile is not proof of historical recovery by
+  the replacement. Native speedup, corrected dialog, controlled-peer Sync,
+  publication, new gameplay capture and real backup recovery remain unverified.

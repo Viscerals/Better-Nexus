@@ -751,7 +751,9 @@ local function EnsureFrame()
     end
     frame:SetSize(1040, 680)
     frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
+    -- StaticPopup confirmations use DIALOG in the native 3.3.5 client.
+    -- Keep this editor below them so Save/Cancel remain visible and clickable.
+    frame:SetFrameStrata("HIGH")
     frame:SetFrameLevel(50)
     frame:EnableMouse(true)
     frame:SetMovable(true)

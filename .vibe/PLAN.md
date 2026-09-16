@@ -52,7 +52,17 @@ depends_on: [50.1]
 
 depends_on: [50.2]
 
-- Status: `IN_REVIEW`
+- Status: `IN_PROGRESS`
+- Current native continuation: attribute the ~1 second full startup update;
+  correct demonstrated supported blockers only; verify reversible Wishlist
+  save/reload and ordinary Sync; freeze and independently review the coherent
+  tester package. Current source 09d9ff3, build test.20-09d9ff3. This direct
+  September 16 authorization supersedes the historical native/post-review
+  restrictions below only for this purpose. Historical counters stay 3/3/0.
+- Integrated continuation now passes 245/245 LuaJIT tests. Freeze the bounded
+  Community continuation, popup correction and empty runtime seed together;
+  package, independently review and verify native behavior. Keep historical
+  gates distinct. Repair confirmed supported blockers under current authority.
 - Objective:
   - Complete one finite controlled tester-stabilization attempt from frozen Wave 3.
     Correct MASTER-W3-002, 007, and 010 through real consumers. Assess 009 and

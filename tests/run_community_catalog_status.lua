@@ -46,7 +46,8 @@ local function ClearTombstoneTerminal(id)
     return AwaitMutation(Nexus.BuildCatalog.ClearTombstone(id))
 end
 
-dofile("data/BundledBuilds.lua")
+-- Historical large-library fixture; not the current release seed.
+dofile("tests/fixtures/BundledBuilds-1.19.4-reference.lua")
 dofile("data/DefaultProfile.lua")
 dofile("core/Store.lua")
 

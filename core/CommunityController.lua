@@ -73,6 +73,7 @@ function Controller.New(options)
         and options.notify or print
     local pendingCatalogMutations = setmetatable({}, {__mode="k"})
     local pendingPublications = {}
+    local startupJob
 
     local function PeerRecord(kind, fields)
         local debugOwner = Nexus and Nexus.PeerDebug
@@ -872,15 +873,10 @@ function Controller.New(options)
         editDraft = nil
     end
 
-    function M.RemoveLegacyBuilds()
-        local db = Store()
-        for id, build in pairs(db) do
-            if build and tostring(build.author or ""):lower() == "wr team" then
-                RemoveOverlay(id)
-                if selectedId == id then selectedId = nil end
-            end
-        end
-        return db
+    -- Startup owns enumeration and continuation. This operation consumes one
+    -- detached row, never a complete defensive-copy collection.
+    function M.RemoveLegacyBuilds(id, onComplete)
+        return RemoveOverlay(id, onComplete)
     end
 
 
@@ -2431,33 +2427,21 @@ function Controller.New(options)
         }
     end
 
-    function M.RepairOverlayIdentities()
-        local catalog = Catalog()
-        if not (catalog and type(catalog.Get) == "function") then return 0 end
-        local changed = 0
-        for id, build in pairs(Store()) do
-            local _, source = catalog.Get(id)
-            if source == "overlay" and type(build.echoes) == "table"
-                and #build.echoes > 0 then
-                -- Detached candidate: never rewrite a published durable row.
-                local candidate = ShallowCopy(build)
-                local oldFingerprint = candidate.fingerprint
-                local oldHash = candidate.fingerprintHash
-                local oldCount = candidate.echoCount
-                local oldAvailable = candidate.loadoutAvailable
-                local oldNeeds = candidate.needsFullBuild
-                if RefreshBuildIdentity(candidate)
-                    and (oldFingerprint ~= candidate.fingerprint
-                        or oldHash ~= candidate.fingerprintHash
-                        or oldCount ~= candidate.echoCount
-                        or oldAvailable ~= candidate.loadoutAvailable
-                        or oldNeeds ~= candidate.needsFullBuild) then
-                    local saved = SaveBuild(candidate)
-                    if saved then changed = changed + 1 end
-                end
-            end
+    local function RepairedIdentity(build)
+        if type(build.echoes) ~= "table" or #build.echoes == 0 then return nil end
+        local candidate = ShallowCopy(build)
+        if RefreshBuildIdentity(candidate)
+            and (build.fingerprint ~= candidate.fingerprint
+                or build.fingerprintHash ~= candidate.fingerprintHash
+                or build.echoCount ~= candidate.echoCount
+                or build.loadoutAvailable ~= candidate.loadoutAvailable
+                or build.needsFullBuild ~= candidate.needsFullBuild) then
+            return candidate
         end
-        return changed
+    end
+
+    function M.RepairOverlayIdentities(candidate, onComplete)
+        return SaveBuild(candidate, onComplete)
     end
 
     local function PublicationTarget(source, ownerKey)
@@ -2967,13 +2951,115 @@ function Controller.New(options)
     function M.Initialize(adapter, bundledBuilds)
         Adapter = adapter
         local catalog = Catalog()
-        if catalog and type(catalog.Init) == "function" then
-            catalog.Init(type(NexusDB) == "table" and NexusDB or {},
-                bundledBuilds)
+        local database = NexusDB
+        local function Result(job)
+            return {state=job.state,reason=job.reason,phase=job.phase}
         end
-        M.RemoveLegacyBuilds()
-        M.RepairOverlayIdentities()
-        return true
+        if not (catalog and catalog.BeginRecordCursor and catalog.RootState) then
+            return {state="failed",reason="COMMUNITY_CATALOG_UNAVAILABLE"}
+        end
+        if not startupJob or startupJob.database ~= database
+            or startupJob.catalog ~= catalog or startupJob.bundle ~= bundledBuilds then
+            -- A previous callback may still settle, but cannot resume this job.
+            startupJob = {database=database,catalog=catalog,bundle=bundledBuilds,
+                state="pending",phase="scan",removals={},repairs={},index=1}
+            catalog.Init(type(database)=="table" and database or {},bundledBuilds)
+        end
+        local job = startupJob
+        local function Fail(why)
+            job.state,job.reason="failed",why or "COMMUNITY_STARTUP_FAILED"
+            job.cursor,job.removals,job.repairs=nil,nil,nil
+            return Result(job)
+        end
+        if job.state ~= "pending" then return Result(job) end
+        local root = catalog.RootState()
+        if job.pending then return Result(job) end
+        if root.state ~= "ROOT_ADMITTED" then
+            return Fail(root.reason or root.state)
+        end
+        if root.candidate then return Result(job) end
+        if job.generation and (root.generation ~= job.generation
+            or root.servingGeneration ~= job.servingGeneration) then
+            return Fail("COMMUNITY_SOURCE_CHANGED")
+        end
+        job.generation,job.servingGeneration=root.generation,root.servingGeneration
+
+        local function Clock()
+            if type(debugprofilestop) ~= "function" then return nil end
+            local ok,value=pcall(debugprofilestop)
+            if ok and type(value)=="number" and value==value
+                and value>=0 and value<math.huge then return value end
+        end
+        local started=Clock()
+        for unit=1,32 do
+            if job.phase=="scan" then
+                if not job.cursor then
+                    local token,why=catalog.BeginRecordCursor()
+                    if not token then return Fail(why) end
+                    job.cursor=token
+                end
+                local page,why=catalog.RecordCursorNext(job.cursor)
+                if why or type(page)~="table" then return Fail(why) end
+                if page.done then
+                    job.cursor=nil
+                    job.phase="legacy"
+                elseif page.record then
+                    local build=page.record
+                    if tostring(build.author or ""):lower()=="wr team" then
+                        job.removals[#job.removals+1]=page.id
+                    elseif page.source=="overlay" then
+                        local candidate=RepairedIdentity(build)
+                        if candidate then job.repairs[#job.repairs+1]=candidate end
+                    end
+                end
+            else
+                local list=job.phase=="legacy" and job.removals or job.repairs
+                local item=list[job.index]
+                if item==nil then
+                    if job.phase=="legacy" then
+                        job.phase,job.index="identities",1
+                    else
+                        job.state,job.phase="ready","complete"
+                        job.removals,job.repairs=nil,nil
+                        return Result(job)
+                    end
+                else
+                    local removing=job.phase=="legacy"
+                    local function Complete(outcome)
+                        if startupJob~=job then return end
+                        job.pending=nil
+                        if not outcome.committed then
+                            Fail(outcome.reason)
+                            return
+                        end
+                        if removing and selectedId==item then selectedId=nil end
+                        local current=catalog.RootState()
+                        job.generation,job.servingGeneration=
+                            current.generation,current.servingGeneration
+                        job.index=job.index+1
+                    end
+                    local ok,why,ticket
+                    if removing then ok,why,ticket=M.RemoveLegacyBuilds(item,Complete)
+                    else ok,why,ticket=M.RepairOverlayIdentities(item,Complete) end
+                    if ok==nil and why=="ROOT_MUTATION_PENDING" then
+                        job.pending=ticket
+                        return Result(job)
+                    end
+                    -- No overlay beneath an immutable legacy bundled row is
+                    -- a normal no-op, not a failed required removal.
+                    if not ok and not (removing and why==nil) then return Fail(why) end
+                    if removing and ok and selectedId==item then selectedId=nil end
+                    local current=catalog.RootState()
+                    job.generation,job.servingGeneration=
+                        current.generation,current.servingGeneration
+                    job.index=job.index+1
+                end
+            end
+            local finished=Clock()
+            if not started or not finished or finished<started
+                or finished-started>=2 then break end
+        end
+        return Result(job)
     end
 
     return M
