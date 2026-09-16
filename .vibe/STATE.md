@@ -403,25 +403,13 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Active issues
 
-- [x] ISSUE-NATIVE-STALE-SAVE: Old Wishlist confirmation can change a new editor association
+- [ ] ISSUE-NATIVE-SYNC-PREPARATION: Manual preparation exceeds its request lifetime
   - Impact: MAJOR
-  - Status: RESOLVED
-  - Owner: agent
-  - Unblock Condition: Focused regression and independent recheck PASS; native test23 confirm/cancel/reopen and reversible edit/reload/restoration PASS. Original restored values verified again on exact test24.
-- [x] ISSUE-NATIVE-STARTUP-SERIALIZATION: Required Community repairs wait behind automatic maintenance and one-slice catalog writes
-  - Impact: MAJOR
-  - Status: RESOLVED
-  - Owner: agent
-  - Unblock Condition: Offline no-predrain regression and independent recheck PASS; exact test23 and test24 native readiness and complete-update measurements PASS for the tested previously recovered profile.
-  - Evidence Needed: Independent exact f34216a reproduction and corrected public UI/controller checks.
-  - Notes: Confirmed independently on both review axes. Correct under current standing native authority; no unrelated repair wave.
-- [ ] ISSUE-NATIVE-SYNC-LIFETIME: Readiness gating suspends manual request expiry
-  - Impact: MAJOR
-  - Status: IN_PROGRESS
-  - Owner: agent
-  - Unblock Condition: Pending and sent-active real-path regressions PASS, integrated validation/review, and native outcome on one exact replacement.
-  - Evidence Needed: test24 native sent1 with terminal none beyond317seconds; independent sent-deadline RED and corrected GREEN.
-  - Notes: No scheduling budget expansion. Previous long preparation remains separate; manual-only batching requires resolving the explicit startup-only boundary.
+  - Status: DECISION_REQUIRED
+  - Owner: human
+  - Unblock Condition: Decide whether the existing soft2ms/hard32 timed allowance may apply only to preparation for an explicit manual Sync, while preserving ordinary background budgets and every validation/transport rule.
+  - Evidence Needed: test25 native preparing at261.433seconds; terminal dropped/expired/sent0 observed510.565seconds. Existing startup-only authorization expressly excludes Sync and maintenance. Specific question already sent; no general approval requested.
+  - Notes: Pending and sent lifetime source regressions/reviews PASS; native expiry reached. Exact transition time not sampled. No timed Sync batching implemented. Current exact product e9e4923/test.25 preserved; native cold Sync usability remains FAIL, not an established infinite loop.
 
 ## Blockers
 
@@ -465,10 +453,12 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Recommended next action
 
-- Freeze the integrated native startup, popup and empty-catalog candidate;
-  package exact bytes and run the authorized independent functional review.
-- Install only after verified addon/profile backup with WoW closed. Verify
-  file parity, build identity, full startup timing and native dialog behavior.
+- Preserve frozen e9e4923/test.25 package and its verified installed bytes.
+- Resume the existing writer when the specific manual-only scheduling
+  decision is resolved. Do not silently extend startup-only budgets.
+- Startup, popup and integrated source checks are recorded. Cold manual Sync
+  remains failed; button success, new combat, publication, convergence and
+  historical backup recovery are not established by the current session.
 - Current direct native continuation supersedes historical packaging/native
   and post-review limits above. Repair demonstrated supported blockers only;
   no public release, GitHub write, resource spending or synthetic traffic.

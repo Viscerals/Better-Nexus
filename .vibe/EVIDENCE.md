@@ -2003,3 +2003,38 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
   native-startup-20260916/integrated-sync-sent-deadline/inventory.json.
   Prior exact-base expected-red and unchanged policy results remain applicable;
   no historical FAIL was rewritten and no FengariFull rerun occurred.
+
+## Native test25 exact package and remaining manual preparation
+
+- Frozen e9e4923f9848de16daf7c877e67ea889dda09f1e,
+  tree3ebda4a02243d2299b1cb0ceb6e16ce1368dea33, test.25-e9e4923.
+  Exact650755byte archive SHA256
+  919413cd3c9216915db257aff7425cda53c4866699e58b611c0d966524f90262.
+  Existing export/injection/archive procedure,72files68Lua; source/package
+  parity and68/68packaged parse PASS. Installed72/72 after631file verified
+  backup exact-e9e4923-20260916-142007. No WTF manual edit.
+- Initial native ready40.176sec; complete startup update max17.1691ms,
+  Communitymax8.9205ms. Existing recovered Valentinew profile. No identical
+  data speed-ratio claim, hard2ms claim, or packaged relayPairs recovery.
+- One manual request18:23:38.700Z: still Preparing at261.433seconds;
+  at510.565seconds preparingfalse,dropped,expired,sent0. Exact terminal
+  transition was not sampled. Real-path offline301.1second proofs remain
+  distinct. Manual preparation failed to send within its lifetime.
+- Board status then sending/total13 describes other queued work, not an
+  active manual convergence. Native UI responsive, log errors empty when
+  sampled. StutterAlert Nexus35ms on navigation recorded without an invented
+  pass threshold or claim of severe repeatable stall.
+- No further manual request/button test, publication, fabricated combat,
+  resource use or automation toggle. Remote convergence and real historical
+  backup recovery remain NOT RUN. One normal exact-package reload follows.
+- Proposed manual-only2ms/32-slice preparation remains unimplemented. The
+  specific question resolves the explicit startup-only scheduling boundary;
+  it is not another request for general standing completion authority.
+- Exact test25 reload ready78.297sec, complete startup max33.4261ms,
+  Communitycomplete/max6.7739ms. /nexus status works with exact build and
+  automation OFF. Same profile location/addons/foreground, but normal prior
+  processing changed data; no matched-input speed-ratio claim. Installed72/72
+  parity and exact ZIP hash reverified. Strict state validation PASS, two
+  advisory warnings (acceptance item count and installed catalog location).
+- Post-reload /nexus log errors: no errors recorded. Native startup/reload
+  PASS; cold manual preparation FAIL. Whole-addon usability NOT COMPLETE.

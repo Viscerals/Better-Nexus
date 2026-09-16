@@ -1,5 +1,38 @@
 # CONTEXT
 
+## Current exact native checkpoint - test25
+
+Product candidate e9e4923f9848de16daf7c877e67ea889dda09f1e,
+tree 3ebda4a02243d2299b1cb0ceb6e16ce1368dea33; test.25-e9e4923.
+Exact ZIP650755bytes, SHA256
+919413cd3c9216915db257aff7425cda53c4866699e58b611c0d966524f90262.
+Installed72/72 parity after verified631file addon/WTF backup. Source product
+bytes remain frozen; subsequent changes are workflow records only.
+Integrated245/245 LuaJIT PASS, manual backup skip; independent Standards and
+Spec focused sent-lifetime reviews PASS. Whole-addon and earlier delta reviews
+remain separate applicable evidence, not a new architecture acceptance.
+Native initial ready40.176sec, full startup max17.1691ms,
+Communitymax8.9205ms. Existing previously recovered profile, not fresh data.
+Save dialog and reversible Wishlist save/reload/restoration passed on test23;
+restored41/79,x1,6locked,Notassigned confirmed on test24. Those source paths
+are unchanged in test25. No claim test25 itself repeated the entire edit cycle.
+One manual Sync at18:23:38.700Z stayed Preparing at261.433seconds. At510.565
+seconds local diagnostic proved preparingfalse,dropped,expired,sent0. Native
+transition time was not sampled; offline301.1second real-path tests establish
+the deadline behavior. Board then showed other queued work (sending,total13),
+not the expired manual request still converging. Cold preparation remains a
+supported usability FAIL. No second request/button test, remote convergence,
+combat, publication or historical backup recovery was performed.
+Manual-only soft2ms/hard32 preparation proposal awaits the specific user
+decision: prior direct timed-startup authority explicitly excludes Sync and
+maintenance. No general approval or new repair wave is needed for other
+in-scope corrections. Do not silently expand that scheduling contract.
+Exact-package reload ready78.297sec, fullmax33.4261ms,
+Communitycomplete/max6.7739ms. /nexus status works, exact label, autoOFF.
+Post-reload installed72/72 parity and archive SHA verified. Full receipt:
+external native-startup-20260916/test25-native.md.
+All following current-worded sections are earlier preserved checkpoints.
+
 ## Latest native checkpoint - sent Sync expiry
 
 Frozen/installed test.24-baecbbf source baecbbf224179fa4ec1fd7e31fa7938549828018,

@@ -1,6 +1,29 @@
 # HISTORY
 
+## Native Sync request lifetime correction - 2026-09-16
+
+ISSUE-NATIVE-SYNC-LIFETIME resolved in exact e9e4923/test.25 for source behavior:
+pending and sent-active absolute deadlines run before readiness gates.
+Real-path RED->GREEN tests and independent Standards/Spec PASS; integrated
+245/245 LuaJIT PASS with manual backup skip. Native preparing request reached
+dropped/expired/sent0 by510.565seconds (exact transition not sampled).
+Native sent-active branch remains offline-proven, not directly repeated in
+test25 because its request expired before sending. Prior test24 failure stays.
+Separate current ISSUE-NATIVE-SYNC-PREPARATION retains the usability blocker.
+
 This file is non-authoritative. Archive completed checkpoints, resolved issues, and consolidation notes here.
+
+## Native issues resolved - 2026-09-16
+
+- ISSUE-NATIVE-STALE-SAVE: RESOLVED. Focused regression and independent recheck
+  PASS; test23 native confirm/cancel/reopen and reversible edit/reload/restoration
+  PASS. Original41/79,EmberSparkx1,6locked,Notassigned verified on exact test24.
+- ISSUE-NATIVE-STARTUP-SERIALIZATION: RESOLVED for the observed previously
+  recovered profile. Real no-predrain and independent recheck PASS. Exact test23
+  and test24 reach readiness with measured complete updates16.7-24.9ms, not the
+  former approximately one-second Community callback. Test25 initial40.176sec,
+  fullmax17.1691ms. No identical-data speed ratio or hard2ms bound is claimed.
+  Current Sync preparation/lifetime evidence is separate and not accepted here.
 
 ## Completed checkpoints
 
