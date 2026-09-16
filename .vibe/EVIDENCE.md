@@ -1,5 +1,27 @@
 # EVIDENCE
 
+## Startup terminal-result retention follow-up — 2026-09-16
+
+- User standing-completion follow-up authorizes correcting the independent
+  early STORE_INVALID finding, focused recheck, native measurement and package.
+- Regression added before fix: real Store, invalid unrelated 184-byte key,
+  updates before world entry failed with errors=0. Retaining the terminal
+  result while stopping pumps restores exactly one STORE_INVALID report.
+  Four early/late x timer/fallback cases pass. Existing assertions preserved.
+- Session-only maxUpdateMs includes the complete RunUpdate callback, dependent
+  initialization and world-entry completion. Deterministic test proves a 40 ms
+  dependent initialization remains visible when coordinator work costs zero.
+- Real-catalog differential now distinguishes fresh synthetic profiles,
+  supported 1/100-character existing profiles, and a synthetic already-recovered
+  archive. Final content, identities and work match one-slice scheduling.
+  Unrecovered relayPairs with an unrelated long key is refused and preserved;
+  no archive is created. The shipped package contains no local recovery helper.
+- core/Store.lua is unchanged from 58bd462. Real producer Wishlist keys and
+  the scoped 2048-byte compatibility correction remain intact.
+- Prior candidate/review/evidence are retained unchanged. Exact successor
+  receipts and independent/native outcomes continue in the existing external
+  native-startup-20260916 evidence location.
+
 ## Native startup usability amendment — 2026-09-16
 
 - Direct user authorization: attachment e3ccaa1c-7f0f-48a9-a2f8-cdba46914e58.

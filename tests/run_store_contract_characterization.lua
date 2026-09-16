@@ -250,6 +250,12 @@ do
     Boundary("other field bounded",function(db)
         db.chars.synthetic.other={[string.rep("x",184)]={}}
     end,false)
+    Boundary("unrecovered relayPairs remains refused and preserved",function(db)
+        db.chars.synthetic.relayPairs={[string.rep("r",764)]={keep=true}}
+    end,false)
+    assert(NexusDB.chars.synthetic.relayPairs[string.rep("r",764)].keep
+        and NexusDB.nexusNativeRecoveryRelayPairs764==nil,
+        "package must not perform the one-off local recovery")
     Boundary("settings field bounded",function(db)
         db.settings.lockDesignTargetsBySlot={[string.rep("x",184)]={}}
     end,false)

@@ -42,11 +42,11 @@ function Lifecycle.New(options)
     -- because bootstrap advances bounded work across scheduler turns.
     local worldEntryPending = false
     local bootstrapPumping = false
-    local bootstrapTerminal = false
+    local bootstrapTerminal = nil
     local STARTUP_MS, STARTUP_SLICES = 2, 32
     -- Session-only scalar observations, like lastLagElapsed below. Never saved,
     -- never used as readiness, and no samples or player content are retained.
-    local startupTiming = {updates=0, slices=0, maxBatchMs=0, overshoots=0,
+    local startupTiming = {updates=0, slices=0, maxBatchMs=0, maxUpdateMs=0, overshoots=0,
         maxOvershootMs=0, fallbackUpdates=0}
     Nexus.startupTiming = startupTiming
     local CompleteWorldEntry
@@ -151,7 +151,10 @@ function Lifecycle.New(options)
     -- Native startup amendment: one shared soft deadline across all phases,
     -- plus an unconditional slice cap. Missing/broken clocks retain one slice.
     local function PumpBootstrapBatch()
-        if bootstrapPumping or bootstrapTerminal then return nil end
+        if bootstrapPumping then return nil end
+        -- Keep the terminal result for a world-entry request that arrives
+        -- after the final pump. Stopping work must not discard its refusal.
+        if bootstrapTerminal then return bootstrapTerminal end
         bootstrapPumping = true
         local started = StartupClock()
         local previous = started
@@ -177,7 +180,7 @@ function Lifecycle.New(options)
             end
             if type(result) == "table"
                 and (result.state == "ready" or result.state == "failed") then
-                bootstrapTerminal = true
+                bootstrapTerminal = result
                 break
             end
             if not timed or elapsed >= STARTUP_MS
@@ -614,13 +617,13 @@ function Lifecycle.New(options)
                     and (failed or BootstrapCoordinatorIsReady()) then
                     Initialize()
                     if initialized then
+                        worldEntryPending = false
+                        CompleteWorldEntry("PLAYER_ENTERING_WORLD")
                         startupTiming.readyAt = GetTime()
                         if startupTiming.worldEnteredAt ~= nil then
                             startupTiming.readySeconds = startupTiming.readyAt
                                 - startupTiming.worldEnteredAt
                         end
-                        worldEntryPending = false
-                        CompleteWorldEntry("PLAYER_ENTERING_WORLD")
                     elseif failed then
                         -- Terminal authority failure. Initialize recorded the
                         -- attributed reason once; dependents stay withheld and
@@ -657,12 +660,28 @@ function Lifecycle.New(options)
         if automation then automation.OnUpdate(elapsed) end
     end
 
+    local function FinishStartupUpdate(started, ...)
+        if started ~= nil then
+            local finished = StartupClock()
+            if finished ~= nil and finished >= started then
+                startupTiming.maxUpdateMs = math.max(
+                    startupTiming.maxUpdateMs, finished - started)
+            end
+        end
+        return ...
+    end
+
     local function OnUpdate(elapsed)
+        -- Include dependent initialization and world-entry completion in the
+        -- observed full update cost, not just the soft-budget coordinator loop.
+        local started
+        if not initialized and not bootstrapPumping then started = StartupClock() end
         local performance = Nexus and Nexus.Performance
         if performance and type(performance.Measure) == "function" then
-            return performance.Measure("lifecycle.update", RunUpdate, elapsed)
+            return FinishStartupUpdate(started,
+                performance.Measure("lifecycle.update", RunUpdate, elapsed))
         end
-        return RunUpdate(elapsed)
+        return FinishStartupUpdate(started, RunUpdate(elapsed))
     end
 
     local M = {}

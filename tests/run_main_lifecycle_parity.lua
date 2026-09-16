@@ -552,7 +552,9 @@ do
         local deps={}
         for k,v in pairs(dependencies) do deps[k]=v end
         deps.Store=S
-        deps.Adapter={Init=function() releases=releases+1 end,
+        deps.Adapter={Init=function()
+                releases=releases+1;clock=clock+(config.initCost or 0)
+            end,
             Ready=function() return false end, OnEvent=function() end,
             RivalDetected=function() return false end,RequestSlots=function() end,
             SetSoloPicker=function() end}
@@ -570,7 +572,7 @@ do
         life.OnEvent("ADDON_LOADED","Nexus")
         life.OnEvent("PLAYER_ENTERING_WORLD")
         life.OnUpdate(0.01)
-        return life, function() return calls,releases,mutations end
+        return life, function() return calls,releases,mutations end, N.startupTiming
     end
     local life, counts=Scenario({})
     assert(counts()==32,"startup must advance 32 progressing cheap slices, not one per frame")
@@ -601,6 +603,10 @@ do
     assert(counts()==2,"terminal failure must not restart batching")
     life,counts=Scenario({recursive=true})
     assert(counts()==32,"recursive update must not start a competing pump")
+    local measured
+    life,counts,measured=Scenario({ready=3,initCost=40})
+    assert(measured.maxUpdateMs==40 and measured.maxBatchMs==0,
+        "full startup-update metric must include dependent initialization")
     debugprofilestop=previousClock
     print("Timed startup cap, deadline, overshoot, progress, fallback, terminal and recursion -- OK")
 end
@@ -620,7 +626,7 @@ do
         for _,k in ipairs(keys) do out[#out+1]=Encode(k).."="..Encode(v[k]) end
         out[#out+1]="}"; return table.concat(out,"|")
     end
-    local function Run(size,timed,invalid)
+    local function Run(size,timed,invalid,recovered)
         Nexus={}
         dofile("tests/harness.lua")
         dofile("data/DefaultProfile.lua")
@@ -637,7 +643,7 @@ do
         local archive={schemaVersion=1,chars={synthetic={relayPairs={
             [string.rep("r",764)]={keep="synthetic"}}}}}
         NexusDB={settingsVersion=2,settings={},chars=chars,futureRoot={keep=true},
-            nexusNativeRecoveryRelayPairs764=archive}
+            nexusNativeRecoveryRelayPairs764=recovered and archive or nil}
         WishlistRealizerDB=nil
         local originalRoot=NexusDB
         local releases,failures=0,{}
@@ -666,10 +672,15 @@ do
         end
         assert(NexusDB==originalRoot and NexusDB.chars==chars,
             "scheduling replaced preserved source identities")
-        assert(NexusDB.nexusNativeRecoveryRelayPairs764==archive
-            and archive.chars.synthetic.relayPairs[string.rep("r",764)].keep=="synthetic",
-            "recovery archive changed")
-        assert(NexusDB.futureRoot.keep and chars.synthetic1.future.keep==1,
+        if recovered then
+            assert(NexusDB.nexusNativeRecoveryRelayPairs764==archive
+                and archive.chars.synthetic.relayPairs[string.rep("r",764)].keep=="synthetic",
+                "recovery archive changed")
+        else
+            assert(NexusDB.nexusNativeRecoveryRelayPairs764==nil,
+                "startup must not invent a recovery archive")
+        end
+        assert(NexusDB.futureRoot.keep and (size==0 or chars.synthetic1.future.keep==1),
             "unknown data changed")
         if invalid then
             assert(not L.IsInitialized() and releases==0 and #failures==1,
@@ -687,14 +698,59 @@ do
             "terminal startup repeated work or initialization")
         return Encode(NexusDB),table.concat(failures,","),updates,slices
     end
-    for _,profile in ipairs({{1,false},{100,false},{1,true}}) do
-        local a,ar,au,as=Run(profile[1],false,profile[2])
-        local b,br,bu,bs=Run(profile[1],true,profile[2])
+    for _,profile in ipairs({{0,false,false},{1,false,false},{100,false,false},
+        {1,false,true},{1,true,false}}) do
+        local a,ar,au,as=Run(profile[1],false,profile[2],profile[3])
+        local b,br,bu,bs=Run(profile[1],true,profile[2],profile[3])
         assert(a==b and ar==br and as==bs,
             "timed schedule changed final content, refusal, or coordinator work")
         assert(bu<au,"timed schedule did not reduce frame-bound startup turns")
         print("Real catalog parity: chars="..profile[1].." invalid="..tostring(profile[2])
+            .." recovered="..tostring(profile[3])
             .." originalUpdates="..au.." timedUpdates="..bu.." slices="..as.." -- OK")
     end
     debugprofilestop=savedClock
+end
+
+-- Independent-review reproduction: terminal failure can precede world entry.
+-- This uses real Store refusal, not a stub that merely reports failure.
+do
+    local savedClock=debugprofilestop
+    for _,timed in ipairs({false,true}) do
+        for _,early in ipairs({false,true}) do
+            Nexus={}
+            dofile("tests/harness.lua")
+            dofile("data/DefaultProfile.lua")
+            dofile("core/Store.lua")
+            dofile("core/MainLifecycle.lua")
+            local clock=0
+            debugprofilestop=nil
+            if timed then debugprofilestop=function() clock=clock+0.01;return clock end end
+            NexusDB={settingsVersion=2,settings={},chars={synthetic={
+                other={[string.rep("x",184)]={}}}}}
+            WishlistRealizerDB=nil
+            local errors={}
+            local L=Nexus.MainInternals.Lifecycle.New({nexus=Nexus,
+                bindDependencies=function() return {Store=Nexus.Store} end,
+                ensureAutomation=function() error("dependent released") end,
+                print=function() end,recordError=function(_,e) error(e) end,
+                recordStoreError=function(e) errors[#errors+1]=e end,
+                errorText=tostring,requestRecompute=function() end,
+                refreshHud=function() return true end,
+                database=function() return NexusDB end,now=GetTime})
+            L.OnEvent("ADDON_LOADED","Nexus")
+            if early then for i=1,3 do L.OnUpdate(0.01) end end
+            L.OnEvent("PLAYER_ENTERING_WORLD")
+            for i=1,3 do L.OnUpdate(0.01) end
+            assert(not L.IsInitialized() and #errors==1 and errors[1]=="STORE_INVALID",
+                "early terminal result lost: timed="..tostring(timed)
+                    .." early="..tostring(early).." errors="..#errors)
+            local slices=Nexus.startupTiming.slices
+            for i=1,3 do L.OnUpdate(0.01) end
+            assert(#errors==1 and Nexus.startupTiming.slices==slices,
+                "terminal result must not repeat work or error reporting")
+        end
+    end
+    debugprofilestop=savedClock
+    print("Real Store early/late world entry x timer/fallback: 4/4 -- OK")
 end
