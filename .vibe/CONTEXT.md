@@ -2,6 +2,22 @@
 
 ## Current bounded manual preparation correction
 
+TERMINAL NATIVE FAIL: test.26-fc1e567 expired without readiness/dispatch.
+Source fc1e567f1f7a74a371451f2acdf3e1ba87c0a593,
+tree fa358c7262d072db983f448eaeb5b040e8d8b3f5,package651575bytes,
+SHA2560c6fa65a485c99e12dca39d5f2f05038f37f419fe18c832e30380ab0afe38740.
+Exact integrated245/245PASS,parse321/321,StandardsPASS/SpecPASS. First-dispatch
+timing overwrite found in review was fixed with RED/GREEN real second-pass test.
+Native startup48.921sec/max18.1062ms. Cold manual expiry observed333.307sec;
+no readyAt or sentAt,416hashslices,full manual max11.1197ms,messages sent0.
+Last catalog snapshot:admitted serving root,candidatepending4667pumps;
+hashwarm417,restarts0,buildRows0,hashPumps0. Private subphase UNKNOWN.
+Native navigation responsive,Errors empty. Stop-on-expiry reached. Warm control
+and replacement reload NOT RUN; no larger budget/lifetime or repair authorized.
+Exact source/ZIP/install and addon/fullWTF backup preserved. Full local receipt:
+C:/Users/Valentine/.codex/visualizations/2026/09/07/01a07ae8-93de-7243-8ba6-abce5576c3c2/native-startup-20260916/manual-preparation-current.md
+The earlier pending paragraphs below are historical.
+
 Direct attachment2d7b5643 SHA256
 159a88934e0aa57eb0c71ee573e6effe3feb8cbe19b85c2857e1e2edc9c2eb51
 authorizes manual-only2ms/32 preparation, one focused review, exact replacement

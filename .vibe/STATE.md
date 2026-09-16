@@ -312,7 +312,7 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Workflow state
 
-- [ ] RUN_STOPPED
+- [x] RUN_STOPPED
 - [ ] RUN_CONTEXT_CAPTURE
 - [x] STAGE_DESIGNED
 - [x] MAINTENANCE_CYCLE_DONE
@@ -410,6 +410,8 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
   - Unblock Condition: Implement and validate the directly authorized manual-only2ms/32 preparation correction; freeze, focused review, exact package and bounded native retest. Stop if native preparation still expires.
   - Evidence Needed: test25 native preparing at261.433seconds; terminal dropped/expired/sent0 observed510.565seconds. Existing startup-only authorization expressly excludes Sync and maintenance. Specific question already sent; no general approval requested.
   - Notes: Direct attachment2d7b5643 SHA256159a88934e0aa57eb0c71ee573e6effe3feb8cbe19b85c2857e1e2edc9c2eb51 resolves the scheduling decision. Historical counters unchanged. One bounded correction, no general campaign. Product e9e4923/test.25 preserved.
+  - Native result: test.26-fc1e567 still expired. At333.307seconds since first owner observation: preparingfalse,queuedropped,terminalexpired,readyAtnil,sentAtnil,messages sent0. Hashslices416; last catalog snapshot candidatepending with4667pumps. Full manual-update max11.1197ms. The exact private subphase is UNKNOWN.
+  - Stop condition: The direct authorization requires stopping on native preparation expiry. No warm-control retry, reload, larger budget/lifetime or additional repair may start. Preserve fc1e567/package/backup and the native receipt.
 
 ## Blockers
 
@@ -453,6 +455,12 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Recommended next action
 
+- CURRENT TERMINAL: MANUAL SYNC STILL BLOCKED. Bounded manual-only correction
+  fc1e567f1f7a74a371451f2acdf3e1ba87c0a593 has245/245LuaJIT and focused
+  Standards/Spec PASS, but native cold request expired without dispatch.
+  Preserve test.26 exact ZIP and installed72/72parity. Do not resume a worker.
+  User must choose any further scope after this explicit stop-on-expiry boundary.
+  Older recommendations below are historical and do not authorize continuation.
 - Preserve frozen e9e4923/test.25 package and its verified installed bytes.
 - Resume the existing writer when the specific manual-only scheduling
   decision is resolved. Do not silently extend startup-only budgets.

@@ -2087,3 +2087,26 @@ new issue stays DECISION_REQUIRED/owner human, and all acceptance flags remain.
 - Regression RED exit1 at later convergence pass overwrote first dispatch time;
   nil-only capture GREEN exit0 through the real second request. Earlier frozen
   candidate is preserved. Same focused review will recheck this narrow delta.
+- Final source fc1e567f1f7a74a371451f2acdf3e1ba87c0a593,
+  treefa358c7262d072db983f448eaeb5b040e8d8b3f5. Same focused Standards and Spec
+  review PASS. Exact frozen integrated245/245PASS,manual backup skip;
+  parse321/321,packaged68/68,upvalue boundary and release policy PASS.
+- test.26-fc1e567 exact ZIP651575bytes,
+  SHA2560c6fa65a485c99e12dca39d5f2f05038f37f419fe18c832e30380ab0afe38740.
+  Existing exporter/injection only; manifest72files,installed72/72hash parity.
+  Full addon/WTF backup exact-fc1e567-20260916-152650:631files109770968bytes.
+- Native Valentinew existing previously recovered profile,autoOFF:startup ready
+  48.921sec,fullstartupmax18.1062ms. One /nexus sync at19:31:46.054Z preparing.
+  At138.231sec:ready/sentnil,slices416,maxBatch1.7958ms,fullmax6.3957ms.
+  Catalog serving admitted but candidatepending4667pumps;hashwarm417,
+  restarts0,buildRows0,hashPumps0. Exact private subphase not exposed:UNKNOWN.
+- Expiry observed333.307sec,not exact terminal-transition time:ready/sentnil,
+  slicesstill416,maxBatch1.7958ms,fullmanualmax11.1197ms,preparingfalse,
+  queuedropped,terminalexpired. Refreshed diagnostic confirmsmessages sent0.
+  Native navigation responsive,Errors empty;StutterAlertengine53-170ms not
+  attributed to Nexus. No repeatable unusable stall established.
+- Direct stop-on-expiry reached. Warm control and replacement reload NOT RUN.
+  No new manual request,repair,budget/lifetime increase,gameplay,publication,
+  controlled-peer test,backup recovery or GitHub mutation. Counters unchanged.
+  Full external receipt: native-startup-20260916/manual-preparation-current.md
+  beneath the established visualization evidence directory.
