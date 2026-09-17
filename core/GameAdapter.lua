@@ -654,6 +654,16 @@ local function GrantedSignature(granted)
     return table.concat(out, ",")
 end
 
+-- Shared, read-only current-request evidence. A new response can confirm
+-- an empty run without changing its represented spell counts. Observation here
+-- does not bypass Owned's run/ghost checks or grant ownership by elapsed time.
+local function CurrentOwnedResponse(granted)
+    return ownedRequestGeneration == ownedGeneration
+        and type(granted) == "table"
+        and (granted ~= ownedBaselineRef
+            or GrantedSignature(granted) ~= ownedBaselineSig)
+end
+
 function A.Owned()
     projectionStatus.owned.calls = projectionStatus.owned.calls + 1
     local cat = A.Catalog()
@@ -697,10 +707,7 @@ function A.Owned()
     -- table is the supported confirmed-empty signal.
     local level = A.Level()
     local ghost = (level <= 1 and distinct >= GHOST_OWNED)
-    local currentResponse = ownedRequestGeneration == ownedGeneration
-        and type(granted) == "table"
-        and (granted ~= ownedBaselineRef
-            or GrantedSignature(granted) ~= ownedBaselineSig)
+    local currentResponse = CurrentOwnedResponse(granted)
     if (currentResponse or (ownedGeneration == 0 and distinct > 0))
         and not ghost then
         ownedConfirmedGeneration = ownedGeneration
@@ -2806,7 +2813,14 @@ local function CaptureEchoSnapshot()
     end
     return {
         slots=slotsSig,
-        granted=grantedSig,
+        -- Projection validity is semantic state too: a fresh confirmed-empty
+        -- reply must invalidate a cached unsynced Owned result. Latch the
+        -- observed confirmation in the fingerprint once Owned has accepted it,
+        -- so repeated equivalent replies do not cause recomputation churn.
+        -- The getter remains the authority; this only schedules a fresh read.
+        granted=grantedSig .. "|run:" .. tostring(ownedGeneration)
+            .. "|response:" .. ((ownedConfirmedGeneration == ownedGeneration
+                or CurrentOwnedResponse(granted)) and "1" or "0"),
         locked=lockedSig,
         discovery=discoveredSig .. "|" .. disabledSig,
         activeSlot=activeSlot,

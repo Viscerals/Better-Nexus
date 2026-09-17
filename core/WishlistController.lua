@@ -191,7 +191,10 @@ function Controller.New(options)
         end
         for _, row in pairs(state.pendingLock) do
             if row and tonumber(row.spellId) then
-                AddLockedToken(row.spellId, row.stacks, row.replaces)
+                -- Locally designed slots omit stacks for their one-copy form.
+                -- Match PlanLockCommit rather than dropping them from the token.
+                AddLockedToken(row.spellId, row.stacks == nil and 1 or row.stacks,
+                    row.replaces)
             end
         end
         for spellId, replacement in pairs(state.fulfilledDraftTargets) do
@@ -1078,7 +1081,11 @@ function Controller.New(options)
             state.applyRetry = state.applyRetry or {
                 slot=slot,name=name,echoes=echoes,tries=0,
                 candidateSerial=guard and guard.candidateSerial,
-                draftToken=guard and guard.draftToken,
+                -- A spacing retry belongs to this complete editor draft,
+                -- including designed locks, not only its ordinary wire list.
+                draftToken=guard and (guard.draftToken
+                    or guard.confirmation and guard.confirmation.draftToken)
+                    or CurrentDraftToken(),
                 applyToken=guard and guard.applyToken
                     or ApplyPayloadToken(slot,name,echoes),
                 editingContext=state.editingContext,
@@ -1204,6 +1211,12 @@ function Controller.New(options)
                 notify("|cffff6060Nexus:|r Copy retry refused because its preview is stale.")
                 return false, "stale_candidate"
             end
+        elseif retry.draftToken ~= CurrentDraftToken() then
+            -- Do not upload the old list and commit locks from an edited draft.
+            -- Leave that draft intact so the user can explicitly confirm it.
+            state.applyRetry = nil
+            notify("|cffff6060Nexus:|r Save cancelled: the editor changed. Review and save again.")
+            return false, "stale_confirmation"
         elseif retry.applyToken ~= ApplyPayloadToken(
             retry.slot,retry.name,retry.echoes) then
             state.applyRetry = nil

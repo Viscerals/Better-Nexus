@@ -177,3 +177,198 @@ print(string.format(
     fallbackAfter.planCompiles,
     fallbackAfter.wishlistFingerprints,
     fallbackAfter.autoLockEvaluations))
+
+-- BN-PR71-REVIEW-002: current-request confirmation must reach cached consumers.
+-- Services are synthetic. Notification installation, adapter reconciliation,
+-- fallback comparison, projection cache and Policy are production functions.
+-- Read-only upvalue inspection locates the existing cache functions; no private
+-- state is injected and no production testing export is added.
+do
+    local function Setup(initial, level)
+        Nexus, NexusDB = {}, {}
+        local clock, granted, requests = 100, initial, 0
+        GetTime = function() return clock end
+        UnitLevel = function() return level end
+        UnitName = function() return "Synthetic" end
+        GetRealmName = function() return "Review" end
+        UnitClass = function() return "Mage", "MAGE", 8 end
+        local svc = {
+            GetGrantedPerks=function() return granted end,
+            RequestGrantedPerks=function() requests=requests+1 end,
+            GetServerBuildSlots=function() return {} end,
+            GetServerMaxSlots=function() return 5 end,
+            GetServerActiveSlot=function() return 0 end,
+            GetLockedPerks=function() return {} end,
+            GetDiscoveredEchoes=function() return {} end,
+            IsTomeEchoDisabled=function() return false end,
+        }
+        ProjectEbonhold = {PerkService=svc,EchoJournal={OnDataChanged=function() end}}
+        hooksecurefunc = function(owner, key, callback)
+            local original = owner[key]
+            owner[key] = function(...)
+                local value = original(...)
+                callback(...)
+                return value
+            end
+        end
+        dofile("core/GameAdapter.lua")
+        dofile("logic/Model.lua")
+        dofile("logic/Policy.lua")
+        local A = Nexus.GameAdapter
+        local catalog = {rows={},familyOf={},levers={}}
+        for id=1001,1030 do
+            catalog.rows[id] = {spellId=id,name="Echo"..id,quality=3,maxStack=1}
+            catalog.familyOf[id] = "family:"..id
+        end
+        A.Catalog = function() return catalog end
+        local state, settings = {}, {}
+        local store = {State=function() return state end,Settings=function() return settings end}
+        A.Init({},store)
+        A.OnEvent("PLAYER_ENTERING_WORLD")
+        local signature = assert(A.AutomationSignature())
+        A.ConsumeDirty()
+        dofile("core/AutomationRuntime.lua")
+        local noop = function() end
+        local runtime = Nexus.MainInternals.AutomationRuntime.New({nexus=Nexus,
+            model=Nexus.Model,policy=Nexus.Policy,ratchet={},strategy={},store=store,
+            adapter=A,readout={},defaultProfile={},viewModel={},wishlistModel={},
+            renderPanel=noop,renderIdlePanel=noop,buildProgress=noop,
+            buildPanelProgress=noop,appendAudit=noop,appendAutoLockEvent=noop,
+            print=noop,recordError=noop,now=GetTime})
+        local functions, seen = {}, {}
+        local function Inspect(fn)
+            if type(fn)~="function" or seen[fn] then return end
+            seen[fn] = true
+            local index = 1
+            while true do
+                local name, value = debug.getupvalue(fn,index)
+                if not name then break end
+                if name=="ReadProjection" or name=="UpdateProjectionRevisions"
+                    or name=="SameFallbackSignature" then functions[name]=value end
+                if type(value)=="function" then Inspect(value) end
+                index = index + 1
+            end
+        end
+        for _, fn in pairs(runtime) do Inspect(fn) end
+        assert(functions.ReadProjection and functions.UpdateProjectionRevisions
+            and functions.SameFallbackSignature, "real consumer closures missing")
+        local calls = 0
+        local function Read()
+            local r = {A.PresentationRevisions()}
+            functions.UpdateProjectionRevisions(r[1],r[2],r[3],r[4],r[7],r[8],r[9],r[10])
+            return functions.ReadProjection("owned",r[6],level,function()
+                calls = calls + 1
+                return A.Owned()
+            end)
+        end
+        local function Reason(owned)
+            return Nexus.Policy.Decide({board={cards={{spellId=1001,
+                family=catalog.familyOf[1001],quality=3}}},owned=owned,
+                plan={advisorOnly=true},level=level,catalog=catalog}).reason
+        end
+        return {adapter=A,read=Read,reason=Reason,signature=signature,
+            same=functions.SameFallbackSignature,
+            calls=function() return calls end,
+            requests=function() return requests end,
+            replace=function(value) granted=value end,
+            advance=function(delta) clock=clock+delta end,
+            level=function(value) level=value end,
+            notify=function() ProjectEbonhold.EchoJournal.OnDataChanged() end}
+    end
+
+    for _, route in ipairs({"notification","fallback","getter-first"}) do
+        local f = Setup({},20)
+        local A = f.adapter
+        local first = f.read()
+        assert(not first.synced and f.calls()==1 and f.reason(first)=="unsynced")
+        assert(not A.Owned().synced, "unchanged pre-request empty table became trusted")
+        f.advance(6)
+        assert(f.same(f.signature,assert(A.AutomationSignature())),
+            "elapsed time alone changed ownership evidence")
+        assert(f.read()==first and f.calls()==1)
+        f.replace({})
+        f.advance(1)
+        if route=="getter-first" then
+            assert(A.Owned().synced, "supported fresh empty reply was not confirmed")
+        end
+        if route~="fallback" then f.notify(); A.Poll() end
+        local after = assert(A.AutomationSignature())
+        assert(not f.same(f.signature,after),
+            "fresh confirmation must change the actual automation fallback signature: "..route)
+        local _, _, dirty = A.ConsumeDirty()
+        if route~="fallback" then assert(dirty, "notified readiness transition was not dirty") end
+        local ready = f.read()
+        assert(ready.synced and ready.total==0 and f.calls()==2,
+            "legitimate confirmation did not refresh the actual owned projection")
+        assert(f.reason(ready)=="advisor", "Policy still waits for ownership after confirmation")
+        local settledCalls = f.calls()
+        for _=1,5 do
+            f.advance(1); f.replace({}); f.notify(); A.Poll()
+            assert(f.same(after,assert(A.AutomationSignature())),
+                "equivalent fresh replies caused confirmation churn")
+            local _, _, again = A.ConsumeDirty()
+            assert(not again and f.read()==ready and f.calls()==settledCalls,
+                "equivalent confirmed replies caused dirty/cache churn")
+        end
+        -- A run reset invalidates both confirmation and its cached projection.
+        f.advance(1); A.RunBoundaryReset()
+        local waiting = f.read()
+        assert(not waiting.synced and f.reason(waiting)=="unsynced",
+            "previous-generation confirmation survived the reset")
+        local resetSig = assert(A.AutomationSignature())
+        f.advance(20); f.notify(); A.Poll()
+        assert(f.same(resetSig,assert(A.AutomationSignature())) and not f.read().synced,
+            "old unchanged response was accepted in a new generation")
+        f.advance(1); f.replace({}); f.notify(); A.Poll()
+        assert(f.read().synced, "fresh new-generation empty reply did not recover")
+        print("PR71 owned confirmation route="..route.." -- OK")
+    end
+
+    -- Late legitimate responses remain useful after the existing finite retries.
+    do
+        local f = Setup({},20)
+        assert(not f.read().synced)
+        for _=1,8 do f.advance(6); f.adapter.Poll(); assert(not f.read().synced) end
+        assert(f.requests()==5, "ownership acquisition must retain its five-attempt bound")
+        f.advance(1); f.replace({}); f.notify(); f.adapter.Poll()
+        assert(f.read().synced and f.requests()==5,
+            "late confirmed-empty response needs another request or reload")
+        print("PR71 response after bounded retry exhaustion -- OK")
+    end
+
+    -- Content can be unchanged while the current-run response identity changes.
+    do
+        local old = {group={{spellId=1001}}}
+        local f = Setup(old,20)
+        f.adapter.RunBoundaryReset()
+        assert(not f.read().synced, "unchanged previous-run contents became trusted")
+        local before = assert(f.adapter.AutomationSignature())
+        f.advance(1); f.replace({group={{spellId=1001}}}); f.notify(); f.adapter.Poll()
+        local ready = f.read()
+        assert(ready.synced and ready.bySpell[1001]==1
+            and not f.same(before,assert(f.adapter.AutomationSignature())),
+            "fresh equal nonempty response did not invalidate the untrusted cache")
+        print("PR71 same-content new-generation response -- OK")
+    end
+
+    -- Malformed snapshots remain unpublished; level-one ghost protection stays.
+    do
+        local f = Setup({},20)
+        assert(not f.read().synced)
+        f.advance(1); f.replace({group="malformed"}); f.notify(); f.adapter.Poll()
+        assert(f.adapter.AutomationSignature()==nil and not f.read().synced,
+            "malformed reply published a trusted projection")
+        f.advance(1); f.replace({}); f.notify(); f.adapter.Poll()
+        assert(f.read().synced, "valid response failed after a malformed snapshot")
+        local ghost = {group={}}
+        for id=1001,1025 do ghost.group[#ghost.group+1]={spellId=id} end
+        f = Setup({},1)
+        assert(not f.read().synced)
+        f.advance(1); f.replace(ghost); f.notify(); f.adapter.Poll()
+        local refused = f.read()
+        assert(not refused.synced and refused.ghostSuspect,
+            "response fingerprint bypassed the level-one ghost guard")
+        print("PR71 malformed-response and ghost controls -- OK")
+    end
+    print("PR71 ownership notification/fallback/cache/Policy regressions: 6 groups -- OK")
+end
