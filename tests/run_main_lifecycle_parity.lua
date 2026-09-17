@@ -797,7 +797,13 @@ do
         "core/SyncSession.lua","core/Sync.lua"}) do dofile(path) end
     local savedClock,savedTime=debugprofilestop,time
     Nexus.VERSION="synthetic-deadline-probe"
-    debugprofilestop=function() return os.clock()*1000 end
+    -- Deliberately slow initial processing proves startup cannot consume the
+    -- request's observation window. This clock measures synthetic work only.
+    local startupClock=0
+    debugprofilestop=function()
+        startupClock=startupClock+(H.now<1250 and 0.6 or 0.3)
+        return startupClock
+    end
     time=function() return 2000000000+math.floor(H.now) end
     local rows={}
     for i=1,100 do
@@ -828,8 +834,21 @@ do
         now=GetTime})
     life.OnEvent("ADDON_LOADED","Nexus")
     life.OnEvent("PLAYER_ENTERING_WORLD")
-    local requestedAt,retainedGeneration,initialPumps
+    local startupAt=H.now
     for turn=1,5000 do
+        H.now=H.now+0.1
+        life.OnUpdate(0.1);Nexus.Scheduler.Tick(H.now)
+        assert(#errors==0,table.concat(errors,";"))
+        if life.IsInitialized() then break end
+    end
+    assert(life.IsInitialized(),"deadline fixture startup did not complete")
+    local startupCompleted=H.now
+    debugprofilestop=nil
+    local requestedAt,retainedGeneration,initialPumps=H.now
+    local accepted,requestWhy=sync.RequestSync()
+    assert(accepted==nil and requestWhy=="preparing sync data")
+    local observedBeforeDeadline=false
+    for turn=1,3011 do
         H.now=H.now+0.1
         local beforeRoot,beforePumps=catalog.RootState(),catalog.DebugStats().rootPumps
         life.OnUpdate(0.1)
@@ -839,25 +858,23 @@ do
                 "deadline handling expanded the ordinary catalog budget")
         end
         assert(#errors==0,table.concat(errors,";"))
-        if life.IsInitialized() and not requestedAt then
-            -- Keep the real expiry assertions under the supported one-slice
-            -- fallback. The timed same-input case below must instead send.
-            debugprofilestop=nil
-            local ok,why=sync.RequestSync()
-            assert(ok==nil and why=="preparing sync data")
-            requestedAt=H.now
-        end
         local root=catalog.RootState()
         if requestedAt and root.candidate and not retainedGeneration then
             retainedGeneration=root.generation
             initialPumps=catalog.DebugStats().rootPumps
         end
         if requestedAt and H.now-requestedAt>=299 and H.now-requestedAt<300 then
+            observedBeforeDeadline=true
             assert(sync.Stats().preparingRequest and sync.Stats().terminalReason=="none",
                 "manual request expired before the unchanged deadline")
         end
         if requestedAt and H.now-requestedAt>=301 then break end
     end
+    assert(observedBeforeDeadline and H.now-requestedAt>=301,
+        "fixture did not observe the promised pre/post-request deadline interval")
+    print("Expiry phases: startup="..(startupCompleted-startupAt)
+        .." requestedAt="..requestedAt.." final="..H.now
+        .." requestElapsed="..(H.now-requestedAt).." ended=request interval")
     local root,stats=catalog.RootState(),sync.Stats()
     assert(root.candidate and root.generation==retainedGeneration,
         "deadline fixture must retain its ordinary catalog candidate")
@@ -894,6 +911,15 @@ do
     end
     assert(cache.Stats().initialized and not catalog.RootState().candidate,
         "sent-deadline fixture must complete real preparation")
+    local realHousekeep=sync.Housekeep
+    local isolatedCleanupCalls=0
+    sync.Housekeep=function()
+        isolatedCleanupCalls=isolatedCleanupCalls+1
+        return realHousekeep()
+    end
+    life.OnUpdate(0)
+    assert(isolatedCleanupCalls==0,
+        "ready lifecycle must leave housekeeping solely to Transport.Pump")
     local sentBefore=sync.Stats().sent
     local sentRequestAt=H.now
     assert(sync.RequestSync()==true,"prepared request must be accepted")
@@ -905,6 +931,14 @@ do
         "fixture must reach real transport send before catalog invalidation: "
             ..tostring(sync.Stats().queueOutcome).."/"..tostring(sync.Stats().sent)
             .."/"..tostring(catalog.RootState().candidate))
+    -- Real transport packets after dispatch, queued by the production facade.
+    -- Once a catalog mutation gates Sync, expired heads must still drain
+    -- without sending or accelerating that unrelated mutation.
+    local housekeepingQueuedAt=H.now
+    for i=1,70 do
+        assert(sync.BroadcastDps("housekeeping-"..i,"Alice",1000+i,80,"dummy"),
+            "housekeeping fixture must enqueue through production Sync")
+    end
     local put,putWhy,putTicket=catalog.Put(S.LocalBuild("sent-deadline-new",79))
     assert(put==nil and putWhy=="ROOT_MUTATION_PENDING" and putTicket.state=="pending",
         "later supported write must retain a real pending catalog candidate")
@@ -923,7 +957,39 @@ do
     assert(sync.Stats().terminalReason=="expired" and sync.Stats().queueOutcome=="sent",
         "sent request remained active past its absolute deadline while catalog was pending")
     assert(sync.Stats().sent==sentBefore+1,"expiry must not resend a request")
+    H.now=math.max(H.now,housekeepingQueuedAt+301)
+    local staleBefore=sync.WorkState().stale
+    assert(staleBefore>0,"housekeeping fixture must expose expired queued work")
+    for _=1,3 do
+        local isolatedBefore=isolatedCleanupCalls
+        local prior=sync.WorkState().expiredRemoved
+        local pumps=catalog.DebugStats().rootPumps
+        life.OnUpdate(0.1)
+        assert(isolatedCleanupCalls==isolatedBefore+1,
+            "gated lifecycle must call isolated housekeeping exactly once")
+        assert(sync.WorkState().expiredRemoved-prior<=32,
+            "housekeeping exceeded the existing bulk cleanup cap")
+        assert(catalog.DebugStats().rootPumps-pumps<=1,
+            "housekeeping accelerated ordinary catalog work")
+    end
+    local work=sync.WorkState()
+    assert(work.stale==0 and work.sending==0,
+        "post-dispatch expired queue remained behind catalog readiness: "
+            ..tostring(work.stale).." stale/"..tostring(work.sending).." sending")
+    assert(sync.Stats().sent==sentBefore+1,"housekeeping sent traffic behind readiness")
     assert(#errors==0,table.concat(errors,";"))
+    local housekeep=sync.Housekeep
+    sync.Housekeep=function() error("housekeeping isolation probe") end
+    for _=1,2 do life.OnUpdate(0.1) end
+    assert(#errors==1 and errors[1]:find("Sync.Housekeep",1,true)
+        and errors[1]:find("housekeeping isolation probe",1,true),
+        "housekeeping errors must be attributed and repeated failures deduplicated")
+    sync.Housekeep=housekeep;life.OnUpdate(0.1)
+    sync.Housekeep=function() error("housekeeping isolation probe") end
+    life.OnUpdate(0.1)
+    assert(#errors==2,"successful housekeeping must reset isolated failure state")
+    sync.Housekeep=housekeep
+    sync.Housekeep=realHousekeep
     debugprofilestop,time=savedClock,savedTime
     print("Real lifecycle manual expiry during catalog preparation -- OK")
 end

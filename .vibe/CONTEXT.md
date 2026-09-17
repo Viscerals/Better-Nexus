@@ -1,5 +1,64 @@
 # CONTEXT
 
+## Current combined offline authorization - 2026-09-17
+
+Housekeeping means bounded expiry/cancellation bookkeeping, not transport send,
+hash preparation or catalog mutation. Full Sync remains behind readiness.
+Terminal Share cleanup defers its view refresh to the ready full update.
+One reviewed tools/lua-inventory.json lists245runnable and1manual test;
+discovery must match exact identities, not merely its own count. LuaJIT is
+primary; complete duplicate Fengari is supplementary. Unique JS tests remain.
+Old expiry fixture reproduced its assertion after only219.8sec postrequest
+under controlled slow startup in LuaJIT and Fengari. New separate setup/request
+phases measure301.1sec and preserve all expiry/no-send checks. Historical
+Fast's exact timings were not logged; the reproduced fixture defect does not
+prove that unrecorded timing. Latest local development244/245 had only missing
+source-backed Housekeep documentation registration; now corrected, rerun pending.
+Final development inventory245/245PASS; cumulativeFast106/106PASS with no skips
+or unavailable checks. Deferred refresh was placed after the ready Sync update;
+its real terminal and lifecycle fixtures were rerun and PASS. One freeze next,
+then exact-head final gates and fresh focused review. Source is not yet accepted.
+No native activity performed under this combined task.
+
+Attachment1a4aa118 SHA2561492dadb73777ac886699c85879ad8399dda5cf333ede2b2fb856e75176bab68
+authorizes finishing the preserved dirty housekeeping attempt, inventory/CI
+alignment and exact expiry-fixture diagnosis. Routine in-scope development
+failures may be corrected/retested. Stop on failed final frozen gate or blocking
+finalreview, scope/contract/privacy conflict. Same writer/worktree/9364ac9base.
+Permission delta and exact helper/config registrations recorded once in existing
+external prerequisite-review-publication.md. All native/client/profile actions
+remain forbidden; routine continue cannot reopen them. Historical stop below
+is preserved and explicitly superseded for this uncommitted combined task.
+
+## Current override - offline post-dispatch housekeeping only
+
+STOPPED 2026-09-17: focused post-edit validation failed. Real production
+lifecycle reproduction first confirmed70expired packets retained behind a
+pending catalog mutation. The minimal split adds Transport.Housekeep and
+Sync.Housekeep, called only when the full lifecycle Sync path is withheld.
+However the new isolated callback was not registered in isolatedFailures;
+focused LuaJIT exits1 at MainLifecycle.lua80: attempt to index local 'state'
+(a nil value), called from line837. No further correction attempted because
+the user's explicit stop-on-validation-failure condition applies.
+Preserve dirty3productionfiles+1test and prior4workflowfiles. HEAD remains
+9364ac9e6b00b2bdfd3d74a8c9273e37609bbcb6; no freeze, review, replacementZIP,
+PR71update, install, liveprofileaccess or gameaction in this attempt.
+Replacement native checks NOT RUN - DEFERRED BY USER, including after any
+future routine continue. The five player reports below remain unchanged.
+
+The latest direct user message authorizes one bounded offline post-dispatch
+housekeeping correction from9364ac9, focused/integrated checks, exact freeze,
+fresh Astra/xhigh focused review, unique verified ZIP and normal fast-forward
+source publication to existing PR71. No additional attempt after failed final
+validation/review. Preserve2ms/32preparation allowance,300second lifetime,
+transport rules,counters and the five independent player reports below.
+ALL replacement native checks: NOT RUN - DEFERRED BY USER. Do not launch or
+interact with game/launcher, install client files, or access liveWTF/SavedVariables.
+Leave any running game untouched. Native stage needs later explicit authority;
+routine continue cannot reopen it. Deliver offline package then wait.
+Current four dirty workflow files are prior authorized notes; no active writer
+or test tied to this worktree was found. Keep the same source branch and writer.
+
 ## Outstanding player reports - carry through every handoff
 
 Manual-Sync prerequisite correction remains FIRST implementation task. These
@@ -8,15 +67,15 @@ All three supplied files exist in the user's local Downloads directory:
 message (5).txt (332582bytes), Testing Wishlist issue.mp4 (160393888bytes),
 testing vid 2.mp4 (76544151bytes). Text header independently matches
 test.20-09d9ff3; PRIEST-state strings present. DK video build/session UNKNOWN.
-Videos are preserved, not yet inspected in this continuation. Do not conflate
+Videos are preserved and inspected through local frame extraction. Do not conflate
 the text snapshot and DK video or ask for full WTF/full export by default.
 
 | Report | Explicit current status | Required next evidence |
 | --- | --- | --- |
-| Priest six designed locked Echoes disappear after save/reopen; invalid assignment; panel unavailable until reload | not reproduced, with the evidence limitation | Inspect Testing Wishlist issue.mp4; reproduce exact save/assignment input and identify build. Prior save-dialog tests do not resolve it. |
-| DK recommendation remains unsynced across >23minute observations; reload plus Echo UI helps | needs a specific missing build/input | Match testing vid 2.mp4 build/session; trace exact unsynced predicate, not Community/Leaderboard hashes by assumption. |
+| Priest six designed locked Echoes disappear after save/reopen; invalid assignment; panel unavailable until reload | not reproduced on current candidate, with evidence limitations | Video70sec:79/79,6locks,71entries;72sec saved message with locks;78sec First Run/invalid loadout;200sec same named editor has65entries and empty locks. Edited gap prevents locating durable loss versus key/association lookup. Match video build and save/reopen keys. Prior popup tests do not resolve it. |
+| DK recommendation remains unsynced across >23minute observations; reload plus Echo UI helps | specific missing build/input required | Video0/35sec unsynced; clocks span about24minutes across a cut; reload50-55sec precedes later recommendations. Policy.lua485 tests owned nil/not synced at level>1. GameAdapter.Owned confirms current RequestGrantedPerks generation and response reference/content; unrelated to manual hash readiness. Failed response/generation and video build remain unknown. |
 | Wanted offered Echo not preserved by Freeze | needs a specific missing build/input | Reconstruct exact board, desired/owned copies, qualities, charges and real guarantee. Card Freeze is not locked Echoes or Auto-Lock. |
-| Full diagnostic export causes severe lag | not reproduced, with the evidence limitation | Separate collection, formatting and copy-window rendering; do not request another full export first. |
+| Full diagnostic export causes severe lag | not reproduced, with the evidence limitation | MainDiagnostics snapshots before first yield; formatting yields but each page provider and final concatenation are synchronous. LogViewer.FinishExport performs inert conversion/SetText/highlight separately. Measure stages before correction; no second full export requested. |
 | Slow startup on distributed tester build | needs a specific missing build/input | Text is test20; identify each affected distributed build and compare existing later startup fixes before duplicating work. |
 
 No reporter confirmation on an identified corrected build exists for these
@@ -25,6 +84,56 @@ blanket repair authority. Retain explicit statuses at next checkpoint/final.
 
 ## Current bounded manual preparation correction
 
+CURRENT 2026-09-16: source9364ac9e6b00b2bdfd3d74a8c9273e37609bbcb6,
+treeeaec8aeffc4fabf637d07db09d2828359cc86188. Integrated245/245LuaJIT,
+parse321/321 PASS; manual tests/run_legacy_backup_smoke.lua remains skipped.
+Fresh focused Astra/xhigh Standards PASS and Spec PASS on this exact successor.
+3292da8 Spec timing-metric FAIL remains history; initial-slice cost corrected.
+Exact installed test.27-9364ac9 ZIP653096bytes,72/72parity, SHA256
+57da87cd1cec8d65d0550c05b3badb95fef722d70f89af90916145aa8c00c7c8.
+Existing exporter with Release.lua label injection only; prior packages preserved.
+Verified addon/WTF backup exact-9364ac9-20260916-175954 before installation.
+PR71 https://github.com/Viscerals/Better-Nexus/pull/71 is the sole review draft,
+review/native-tester-fixes stacked on PR70 at55640b2, normally fast-forwarded.
+No historical PR mutation, private-data publication, release or distribution.
+
+NATIVE test27, Valentinew, automation OFF, existing previously recovered profile:
+one /nexus sync at22:02:37.013Z; started341906.772,ready341947.121,
+sent341948.218. Readiness40.349sec,firstdispatch41.446sec, no preparation expiry.
+Manual maxbatch16.8109ms/fullupdate32.9925ms: soft2ms is not a hard cap.
+Startupready41.574sec/fullmax19.7929ms. Errors view empty before reload.
+PREPARATION COMPLETED AND REQUEST SENT; controlled-peer convergence UNVERIFIED.
+Later post-dispatch catalog put/rows then retention/rows showed progress,
+CATALOG_COMMIT_PENDING; Leaderboard cleaning,total41, bulkstale29 earlier.
+These snapshots do not establish the exact cold private phase or an infinite loop.
+Already-ready control NOT RUN: no unblocked ready state observed. No forced
+readiness, second cold request, budget/lifetime increase or additional repair.
+Authorized short /reload22:16:30.109Z returned samebuild/autoOFF; startupready
+41.129sec/fullmax14.6922ms; status snapshot/Wishlist/owned counts unchanged.
+Catalog stillnotready retention/witness-capture at the reload observation.
+Normal reload is not real backup recovery or whole-addon acceptance.
+Native button repetitions, peer convergence, gameplay/publication and historical
+backup recovery remain unverified. Current continuation receipt:
+established private visualization root/native-startup-20260916/prerequisite-review-publication.md.
+Package: established private visualization root/internal-test-9364ac9-exact/
+Better-Nexus-internal-test-9364ac9-exact.zip. Product source remains frozen.
+Read-only postdispatch trace: SyncSession634-653 stops the additional manual
+allowance after pending slots empty. MainLifecycle814-835 uses ordinary slices
+and gates Sync.OnUpdate on catalog/hashready. Sync.OnUpdate3515 calls
+Transport.Pump, whose first work prunes stale queue heads. Diagnostics268
+reports cleaning for stale backlog. This explains how cleanup can wait behind
+catalog work; it does not prove an infinite loop or justify a budget increase.
+Separate bounded correction needs explicit scope before implementation;
+real-path symptom reproduction first. Current preparation attempt is complete.
+No new repair worker starts automatically. Missing player inputs remain video
+build/session identities and the exact Freeze incident, not an entire WTF export.
+Dispatcher discrepancy: after blocked triage with next_role_hint=stop, next
+selected issues_triage again because checkpoint status is BLOCKED. Do not loop
+or clear workflow flags to force a different route. The explicit new-scope
+decision is still pending; stop substantive work at that boundary. No writer
+restart or third duplicate triage is authorized by the dispatcher hint alone.
+
+The following pre-freeze and test26 paragraphs are preserved historical checkpoints.
 Additional prerequisite correction is entering focused review under attachment58929bbb.
 Single writer continues from c045734 with one coherent source/test freeze. Same-root
 retention is proven to progress too slowly under the ordinary allowance; the

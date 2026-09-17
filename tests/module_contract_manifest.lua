@@ -23,7 +23,7 @@ local syncSymbols = Symbols("Sync", {
     "RequestLoadout", "RequestFullLoadoutSync", "BroadcastBuild",
     "BroadcastMine", "BroadcastBuildSummary", "BroadcastDpsRecord", "BroadcastDps", "BroadcastDelete",
     "HandleIncoming", "RequestSync", "GetLeaderboardSyncStatus",
-    "TombstoneCount", "OnUpdate", "UpdatePendingRequestStatus", "HandleStatusRequest", "FlushStatusReply",
+    "TombstoneCount", "OnUpdate", "Housekeep", "UpdatePendingRequestStatus", "HandleStatusRequest", "FlushStatusReply",
     "SendStatusTo", "Init",
 })
 Append(syncSymbols, Symbols("Responder", {

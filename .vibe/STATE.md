@@ -16,6 +16,14 @@
 
 ## Objective (current checkpoint)
 
+CURRENT 2026-09-17: complete the authorized combined offline housekeeping and
+tester CI correction from 9364ac9. Attachment1a4aa118 supersedes the prior dirty
+attempt stop only within its exact scope. No game, client installation or live
+profile access. Finish in-scope development, freeze once, exact-head gates,
+fresh Astra/xhigh review, ZIP and normal PR71 fast-forward. Final gate/review
+failure stops this attempt. All five reports and historical 3/3/0 remain.
+The following native objective is historical and does not reopen native work.
+
 Continue the explicitly authorized native tester validation from 09d9ff3.
 Attribute the full startup update before any correction; test reversible
 Wishlist save/reload and ordinary Sync on Valentinew with automation OFF.
@@ -403,19 +411,30 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Active issues
 
-- [ ] ISSUE-NATIVE-SYNC-PREPARATION: Manual preparation exceeds its request lifetime
+- [ ] ISSUE-NATIVE-SYNC-POST-DISPATCH: Ready-state control and terminal convergence not established
   - Impact: MAJOR
-  - Status: IN_PROGRESS
-  - Owner: agent
-  - Unblock Condition: Implement and validate the directly authorized manual-only2ms/32 preparation correction; freeze, focused review, exact package and bounded native retest. Stop if native preparation still expires.
-  - Evidence Needed: test25 native preparing at261.433seconds; terminal dropped/expired/sent0 observed510.565seconds. Existing startup-only authorization expressly excludes Sync and maintenance. Specific question already sent; no general approval requested.
-  - Notes: Direct attachment2d7b5643 SHA256159a88934e0aa57eb0c71ee573e6effe3feb8cbe19b85c2857e1e2edc9c2eb51 resolves the scheduling decision. Historical counters unchanged. One bounded correction, no general campaign. Product e9e4923/test.25 preserved.
-  - Native result: test.26-fc1e567 still expired. At333.307seconds since first owner observation: preparingfalse,queuedropped,terminalexpired,readyAtnil,sentAtnil,messages sent0. Hashslices416; last catalog snapshot candidatepending with4667pumps. Full manual-update max11.1197ms. The exact private subphase is UNKNOWN.
-  - Stop condition: The direct authorization requires stopping on native preparation expiry. No warm-control retry, reload, larger budget/lifetime or additional repair may start. Preserve fc1e567/package/backup and the native receipt.
+  - Status: DEFERRED
+  - Owner: human
+  - Unblock Condition: Attachment1a4aa118 explicitly authorizes the combined dirty offline correction and CI alignment. Complete its gates and fresh review once; final frozen failure stops. Native evidence remains deferred to later explicit user authorization.
+  - Offline result: Registered bounded cleanup, exactly-once terminal handling, gated deferred refresh, valid FIFO and error-isolation regressions pass. Native housekeeping, already-ready behavior and convergence remain unverified; routine continue cannot reopen native work.
+  - Evidence Needed: test27 sent once, then catalog put/rows and retention/rows progressed while UI showed cleaning; after authorized reload catalog remained retention/witness-capture. No unblocked already-ready state or controlled-peer terminal proof observed.
+  - Notes: Already-ready control NOT RUN; normal reload PASS for startup/status only. Budget2ms/32 and lifetime300seconds unchanged. This is not proof of an infinite loop. Player-report statuses are independent in CONTEXT.
+  - Diagnosis: Offline real-lifecycle fixture confirms70expired queued packets retained behind catalog readiness. A minimal cleanup split was attempted; focused validation exits1 at MainLifecycle.lua80 because Sync.Housekeep is absent from isolatedFailures. No follow-up fix, freeze, review, package or publication performed.
 
 ## Blockers
 
-- None.
+- Current: no new general authorization is needed for the combined offline task.
+  The prior dirty-attempt decision is superseded by verified attachment1a4aa118.
+  Native testing remains outside the runnable offline scope. Prior stops below
+  remain history, not instructions to restart or block this authorized correction.
+
+- Current stop: post-edit focused LuaJIT validation failed at MainLifecycle.lua80.
+  Honor the explicit stop-on-failure boundary; no automatic second correction.
+  No game/client/profile actions. Native stage requires later explicit authority.
+- The following native acceptance gap remains a deferred limitation only.
+- Full native acceptance remains unverified: no already-ready control or
+  controlled-peer terminal proof. The bounded prerequisite correction passed;
+  do not reinterpret this review gap as an authorized additional repair.
 
 ## Deferred work
 
@@ -446,6 +465,21 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Last completed loop
 
+- Combined offline implementation ready for one freeze. Development LuaJIT
+  inventory245/245 and cumulative Fast106/106 passed. Final refresh ordering
+  has fresh terminal/lifecycle PASS. Security tools PASS; no native checks.
+  Exact-head final gates and fresh focused review still REQUIRED, not claimed.
+  Final results bind the frozen hash through the existing external receipt.
+  No product edits after a failed final frozen gate or blocking review.
+
+- Current review: focused source Standards/Spec PASS, exact package verified,
+  cold native readiness/dispatch PASS and short reload PASS. Full checkpoint
+  acceptance NOT established; status BLOCKED, no auto-advance. Post-dispatch
+  work remains pending, five player reports stay open. No checkpoint-hygiene
+  signals identified. No new product edits follow from this receipt.
+- Trust check: correctness/scope/evidence/state-transition checked; preserve
+  uncertainty on terminal convergence, warm control and video build matching.
+- The Wave 3 loop description below is historical.
 - Wave 3 continuation reached a coherent candidate: every current Lua test
   and the pre-freeze Fast gate pass on the dirty bytes, every dirty path is
   inside the parent packet plus Amendments 1-5, and this freeze commit is the
@@ -455,6 +489,27 @@ GitHub mutation, paid API, resource spending or adversarial traffic.
 
 ## Recommended next action
 
+- CURRENT: finish combined offline development validation. The missing isolated
+  owner is registered. Pending-state cleanup passes; CI uses reviewed245+1
+  inventory and primary LuaJIT. Deadline fixture now separates finite startup
+  from a measured301sec request window. Final freeze/review/package still pending.
+- The prior dirty-attempt stop below is superseded by attachment1a4aa118.
+
+- CURRENT STOP: preserve the dirty postdispatch correction and failure receipt.
+  New Sync.Housekeep isolated owner is unregistered; focused test exits1 before
+  validating the fix. Do not silently patch/retry after the user's stop condition.
+  No replacement ZIP or published source update exists for this failed attempt.
+- Earlier result/recommendation paragraphs below are historical.
+- CURRENT RESULT: test27 cold preparation and first dispatch verified natively;
+  focused review Standards/Spec PASS and integrated245/245PASS on9364ac9.
+  Exact package installed72/72; short reload returns samebuild/autoOFF.
+  Preserve the remaining ready-state/terminal native limitation and five open
+  player reports. No automatic repair follows from read-only triage.
+- CURRENT PUBLICATION: PR71 review/native-tester-fixes at9364ac9, stacked on
+  PR70 at55640b2. Update its public-safe status brief; no receipt-only commit
+  is needed. Source remains frozen; checkpoint-only edits may remain dirty.
+- The recommendations below are historical snapshots superseded by the current
+  result and latest explicit publication/continuation instruction.
 - CURRENT COHERENT CHECKPOINT: real prerequisite cancellation, expiry,
   disconnect, supersession, generation, no-progress, fallback and unrelated
   admission controls PASS. Integrated LuaJIT245/245 PASS with the existing

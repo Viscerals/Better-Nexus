@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: Run Full validation regardless of changed paths
+        description: Legacy input; complete primary Full validation is always required
         required: false
         default: true
         type: boolean
@@ -106,8 +106,8 @@ jobs:
           $base = $env:BASE_REF
           $plan = ./tools/Get-ChangedTestPlan.ps1 -BaseRef $base | ConvertFrom-Json
           $paths = @($plan.paths)
-          $forceFull = $env:EVENT_NAME -eq 'push' -or ($env:EVENT_NAME -eq 'workflow_dispatch' -and $env:DISPATCH_FULL -eq 'true')
-          $fullRequired = $forceFull -or [bool] $plan.full_required
+          # Tester policy requires a complete primary Lua inventory at this SHA.
+          $fullRequired = $true
           "base_ref=$base" >> $env:GITHUB_OUTPUT
           "full_required=$($fullRequired.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "documentation_only=$(([bool] $plan.documentation_only).ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
@@ -118,9 +118,8 @@ jobs:
     name: fast-quality
     needs: preflight
     runs-on: ubuntu-latest
-    # Local direct-parent Fast took 115m; the cumulative PR range selects more work.
-    # Internal 175m budget leaves diagnostic time within the authorized 180m ceiling.
-    timeout-minutes: 180
+    # Native Lua selections plus unique non-Lua checks; no duplicate Fengari suite.
+    timeout-minutes: 30
     steps:
       - name: Check out the exact reviewed tree
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -144,11 +143,13 @@ jobs:
       - name: Bootstrap tracked quality tools
         shell: pwsh
         run: ./tools/Bootstrap-QualityTools.ps1
+      - name: Install primary LuaJIT runtime
+        run: sudo apt-get update && sudo apt-get install --yes luajit
       - name: Run Fast quality profile
         shell: pwsh
         env:
           BASE_REF: ${{ needs.preflight.outputs.base_ref }}
-        run: ./tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef $env:BASE_REF -BudgetSeconds 10500
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Fast -BaseRef $env:BASE_REF -LuaRuntime luajit -BudgetSeconds 1500
       - name: Write compact Fast summary
         if: always()
         shell: pwsh
@@ -230,10 +231,9 @@ jobs:
   full-quality:
     name: full-quality
     needs: preflight
-    if: needs.preflight.outputs.full_required == 'true'
     runs-on: ubuntu-latest
-    # Recorded local Full: 145m. Allow measured work plus finite host overhead.
-    timeout-minutes: 180
+    # Complete primary LuaJIT inventory is required by this dependency graph.
+    timeout-minutes: 30
     steps:
       - name: Check out the exact reviewed tree
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -257,11 +257,13 @@ jobs:
       - name: Bootstrap tracked quality tools
         shell: pwsh
         run: ./tools/Bootstrap-QualityTools.ps1
+      - name: Install primary LuaJIT runtime
+        run: sudo apt-get update && sudo apt-get install --yes luajit
       - name: Run Full quality profile once
         shell: pwsh
         env:
           BASE_REF: ${{ needs.preflight.outputs.base_ref }}
-        run: ./tools/Invoke-QualityGate.ps1 -Mode Full -BaseRef $env:BASE_REF -BudgetSeconds 10500
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Full -BaseRef $env:BASE_REF -LuaRuntime luajit -BudgetSeconds 1500
       - name: Write compact Full summary
         if: always()
         shell: pwsh
@@ -325,11 +327,13 @@ jobs:
       - name: Bootstrap tracked quality tools
         shell: pwsh
         run: ./tools/Bootstrap-QualityTools.ps1
+      - name: Install primary LuaJIT runtime
+        run: sudo apt-get update && sudo apt-get install --yes luajit
       - name: Run Package quality profile without publication
         shell: pwsh
         env:
           BASE_REF: ${{ needs.preflight.outputs.base_ref }}
-        run: ./tools/Invoke-QualityGate.ps1 -Mode Package -BaseRef $env:BASE_REF
+        run: ./tools/Invoke-QualityGate.ps1 -Mode Package -BaseRef $env:BASE_REF -LuaRuntime luajit
       - name: Verify no package output was retained
         if: always()
         shell: pwsh
@@ -377,5 +381,5 @@ jobs:
           "### Final quality gate" >> $env:GITHUB_STEP_SUMMARY
           $rows | ForEach-Object { "- $_" >> $env:GITHUB_STEP_SUMMARY }
           $requiredFailed = $env:PREFLIGHT_RESULT -ne 'success' -or $env:FAST_RESULT -ne 'success' -or $env:SECURITY_RESULT -ne 'success' -or $env:PACKAGE_RESULT -ne 'success'
-          $fullInvalid = if ($env:FULL_REQUIRED -eq 'true') { $env:FULL_RESULT -ne 'success' } else { $env:FULL_RESULT -notin @('skipped', 'success') }
+          $fullInvalid = $env:FULL_RESULT -ne 'success'
           if ($requiredFailed -or $fullInvalid) { throw 'Selected quality policy was not satisfied.' }

@@ -103,7 +103,7 @@ jobs:
         run: |
           uname -sr
           luajit -v
-          node tools/Run-LuaSuite.js --runtime luajit --expected-count 245 --timeout-seconds 600
+          node tools/Run-LuaSuite.js --runtime luajit --timeout-seconds 600
 
       - name: Check bounded Lua diagnostic contents
         id: diagnostics

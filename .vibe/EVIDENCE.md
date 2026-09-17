@@ -1,5 +1,107 @@
 # EVIDENCE
 
+## Combined offline housekeeping and tester CI - 2026-09-17
+
+- Development completion: normal-user LuaJIT2.1.1774896198 viaLupa2.8 inventory
+  executed/completed245/245, allPASS; manualbackup remains excluded. Cumulative
+  Fast106/106PASS. Final deferred-refresh ordering (after ready update) received
+  fresh real world-terminal and MainLifecycle focusedPASS. Development runs
+  are not exact-head frozen acceptance; one freeze and final gates follow.
+  Existing external receipts preserve all earlier failing development logs.
+
+- Authority attachment1a4aa118, SHA2561492dadb73777ac886699c85879ad8399dda5cf333ede2b2fb856e75176bab68,
+  supersedes the prior uncommitted-attempt stop within exact scope. One writer,
+  baseline9364ac9e6b00b2bdfd3d74a8c9273e37609bbcb6. No native/client/profile action.
+- Original product RED retained70expired queued packets behind catalog readiness.
+  Missing-owner error is a separate implementation omission. Registration now
+  preserves attribution, repeated-error suppression and reset after success.
+  Housekeep reuses the existing cleanup cap, no channel resolution/send/pacing;
+  terminal Share refresh is coalesced until after a ready full Sync update.
+- Original expiry fixture measured with real host timer passes in isolated
+  LuaJIT and Fengari runs. Controlled slow-startup clock reproduces the exact
+  assertion in both: requestedAt1280.2,final1500,elapsed219.8,loop5000 bound,
+  Preparing=true,terminal=none. Corrected separate finite phases finish at1581.3,
+  elapsed301.1; LuaJIT and focused Fengari PASS. Historical CI timing was not
+  logged: its exact requestedAt remains UNKNOWN, not retroactively proved.
+  Product300second lifetime unchanged. Both predeadline and terminal assertions
+  remain; full duplicate Fengari inventory NOT RUN -- SUPPLEMENTARY.
+- Static tools/lua-inventory.json lists245runnable+1manual,246discovered. Exact
+  path matching and duplicate/missing/unfinished record checks retained.
+  Full now requires same-candidate complete LuaJIT, Fast selects primary LuaJIT,
+  unique JS expected-reds remain required. Graph makes Full mandatory. No pins,
+  dependency locks, release authority or diagnostic content limits changed.
+- Runner synthetic tests exercise actual Full command capture, native invocation,
+  count/path mismatch, omitted/duplicate/incomplete records and manual exclusion.
+  Workflow aggregation rejects missing/cancelled/failed/skipped primary jobs.
+- First development inventory244/245 failed only source-backed Housekeep docs;
+  exact registration added, original assertion retained,total218->219.
+  First development Fast47pass/59fail could not read sandbox-owned LuaJIT under
+  normal-user execution. Same Lupa2.8/LuaJIT runtime installed under ignored
+  worktree tools; normal-user Fast106pass/0fail/0skip/0unavailable then PASS.
+  Final deferred-refresh ordering receives fresh focused checks before freeze.
+- Security tools: Gitleaks noleaks,Actionlint exit0,Zizmor nofindings,
+  PSScriptAnalyzer blocking0/newadvisory0. Pinned bootstrap initially refused
+  Python3.14 wheel absent from its hash lock; unchanged bootstrap with installed
+  Python3.13 PASS. No lock/dependency upgrade or hash bypass.
+- Current PR71 remains open/draft at9364ac9; PR70 remains55640b2. No GitHub writes
+  yet in this combined task. Final exact-head gates, focused review, unique ZIP
+  and review-only normal fast-forward remain required after one freeze.
+- Native NOT RUN -- DEFERRED BY USER. Five reports remain separately open with
+  evidence limits in CONTEXT; no association-based resolution. Historical
+  architecture FAIL, prior Fast/Full failures and3/3/0counters unchanged.
+
+## Post-dispatch offline attempt stopped - 2026-09-17
+
+- Current user explicitly defers all game/client/installation/liveprofile work.
+  No such actions were taken. The same worktree/writer starts from9364ac9.
+- Extended existing tests/run_main_lifecycle_parity.lua with70packets enqueued
+  through Sync.BroadcastDps after real request dispatch, then a real pending
+  catalog mutation and expiry. Expected RED exit1:70stale/70sending remain.
+  Initial fixture timing showed0stale/70sending; corrected the synthetic clock
+  to the packets' own300second lifetime before accepting the reproduction.
+- Minimal production delta: MainLifecycle gate-closed cleanup call;
+  Sync.Housekeep facade; SyncTransport.Housekeep factors existing bounded
+  pruning/attempt-settlement from Pump. No configured limits or transport
+  admission/send/throttle rules changed. Source is dirty, not accepted.
+- Focused post-edit command: existing Python/Lupa LuaJIT21 dofile of
+  tests/run_main_lifecycle_parity.lua. Exit1 at core/MainLifecycle.lua80:
+  attempt to index local 'state' (a nil value), through new line837 callback.
+  Sync.Housekeep was not added to the predeclared isolatedFailures table.
+- STOP under explicit user condition. No second correction/retest, integrated
+  run, freeze, independent review, package, PRupdate or native step performed.
+  All5playerreports remain open; replacement native checks NOT RUN-DEFERRED BY USER.
+
+## Exact prerequisite correction, native dispatch and review publication — 2026-09-16
+
+- Frozen9364ac9e6b00b2bdfd3d74a8c9273e37609bbcb6/treeeaec8aeffc4fabf637d07db09d2828359cc86188.
+  Exact LuaJIT245/245 PASS, manual backup skip; parse321/321 PASS.
+  Focused Astra/xhigh Standards PASS/Spec PASS after initial-slice metric
+  regression RED then GREEN. Historical3292 Spec FAIL preserved.
+- Exact test.27-9364ac9 package653096bytes,72files/68Lua,source parity except
+  existing supported Release.lua label injection; installed72/72 after verified
+  addon/fullWTF backup. ZIP SHA256
+  57da87cd1cec8d65d0550c05b3badb95fef722d70f89af90916145aa8c00c7c8.
+- Supported100x79 production fixture simulatedready11.5sec/sent12.6sec.
+  Actual native cold request22:02:37.013Z:ready40.349sec/sent41.446sec;
+  maxcomplete manualupdate32.9925ms.2ms is soft,32slices shared,300sec unchanged.
+  Startupready41.574sec/fullmax19.7929ms; errorsview empty; autoOFF.
+- Short authorized reload22:16:30.109Z:ready41.129sec/fullmax14.6922ms;
+  same build/status counts. Existing previously recovered profile, not fresh
+  data or real backup recovery. No resources/gameplay/publication actions.
+- Postdispatch catalog/queue stillpending and progressing; readycontrol NOT RUN,
+  controlled-peer convergence UNVERIFIED. No cold privatephase attribution,
+  infinite-loop claim, forced readiness or new correction. test26 expiry remains.
+- PR71 review/native-tester-fixes, stacked on PR70 at55640b2; targeted normal
+  push then fast-forward9364ac9 verified head/tree/base/open/draft.16commits,
+  36files,+47261/-44437. PR69/70 unchanged; no private evidence uploaded.
+- Both private videos inspected read-only; all five report statuses retained
+  in CONTEXT. Wishlist save/invalid-assignment/later missing locks observed,
+  exact loss boundary/build unknown. DK predicate is owned.synced, not manual
+  hash readiness. Freeze incident unmatched; export stages identified without
+  measured split; test20 Priest text does not identify DK session/current build.
+- Current source remains frozen. These workflow-record edits are not a new
+  product candidate and are not committed merely to publish evidence.
+
 ## Startup author fixture admission correction — 2026-09-16
 
 - Exact 377d623 inventory stopped at tests/run_startup_catalog_cost.lua:172:

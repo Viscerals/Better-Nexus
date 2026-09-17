@@ -30,7 +30,7 @@ local expected = {
     "ResponseStats", "SendStatusTo", "Stats", "TombstoneCount", "WorkState",
     -- Native continuation adds one status-only lifecycle entry. Keep the exact
     -- surface assertion and every prior member; no permissive wildcard.
-    "UpdatePendingRequestStatus",
+    "UpdatePendingRequestStatus", "Housekeep",
 }
 local actual = {}
 for name, value in pairs(Nexus.Sync) do

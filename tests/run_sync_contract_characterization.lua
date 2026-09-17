@@ -25,7 +25,7 @@ local publicFunctions = {
     "RequestFullLoadoutSync", "BroadcastBuild", "BroadcastMine",
     "BroadcastBuildSummary", "BroadcastDpsRecord", "BroadcastDps",
     "BroadcastDelete", "HandleIncoming", "RequestSync",
-    "GetLeaderboardSyncStatus", "TombstoneCount", "OnUpdate",
+    "GetLeaderboardSyncStatus", "TombstoneCount", "OnUpdate", "Housekeep",
     "HandleStatusRequest", "FlushStatusReply", "SendStatusTo", "Init",
 }
 for _, name in ipairs(publicFunctions) do

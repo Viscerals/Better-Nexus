@@ -451,6 +451,28 @@ Check(viewRefreshes == refreshesBeforeExpiry + 1,
 -- Repeated local send failures retain the packet only through the fixed
 -- transport attempt bound, then expose one dropped terminal.
 FreshDb()
+H.joinedChannels = {}
+local cleanupShare = AdmitShare("housekeeping-expired-share")
+local cleanupRefreshes,cleanupSends = viewRefreshes,#H.sentChatMessages
+clock=clock+121
+Sync.Housekeep()
+local cleanupTerminal=ShareStatus("housekeeping-expired-share")
+Check(cleanupTerminal and cleanupTerminal.terminal
+        and cleanupTerminal.outcome=="expired" and cleanupShare.outcome=="queued",
+    "housekeeping must settle the exact real Share")
+Check(viewRefreshes==cleanupRefreshes and #H.sentChatMessages==cleanupSends,
+    "housekeeping callback crossed refresh or send readiness gate")
+Sync.Housekeep()
+Check((Sync.Stats().operationExpired or 0)==1 and viewRefreshes==cleanupRefreshes,
+    "housekeeping repeated a terminal notification")
+Sync.OnUpdate(0)
+Check(viewRefreshes==cleanupRefreshes+1,
+    "ready Sync must release the coalesced deferred refresh")
+Sync.OnUpdate(0)
+Check(viewRefreshes==cleanupRefreshes+1 and (Sync.Stats().operationExpired or 0)==1,
+    "ready continuation repeated terminal refresh or accounting")
+
+FreshDb()
 local realSendChatMessage = SendChatMessage
 SendChatMessage = function() error("stage36 send failure") end
 local droppedShare = AdmitShare("dropped-share")

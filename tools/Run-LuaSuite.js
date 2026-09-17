@@ -6,10 +6,8 @@ const { spawn, spawnSync } = require("child_process");
 
 const root = path.resolve(__dirname, "..");
 const runner = path.join(root, "tools", "run-lua.js");
-const manualTests = new Map([
-    ["run_legacy_backup_smoke.lua",
-        "requires an explicitly authorized SavedVariables backup path"],
-]);
+const expectation = require("./lua-inventory.json");
+const manualTests = new Map(expectation.manual.map((row) => [path.basename(row.path), row.reason]));
 const discovered = fs.readdirSync(path.join(root, "tests"))
     .filter((name) => /^run_.*\.lua$/.test(name))
     .sort();
@@ -30,6 +28,7 @@ function auditInventory(value) {
     const seen = value.results.map((row) => row.path);
     const errors = [];
     if (new Set(expected).size !== expected.length) errors.push("duplicate scheduling");
+    if (new Set(value.manual.map((row) => row.path)).size !== value.manual.length) errors.push("duplicate manual exclusions");
     if (value.discovered !== expected.length + value.manual.length) errors.push("discovery mismatch");
     if (new Set(seen).size !== seen.length) errors.push("duplicate results");
     for (const name of expected) if (!seen.includes(name)) errors.push(`missing: ${name}`);
@@ -40,33 +39,66 @@ function auditInventory(value) {
     return { ok: errors.length === 0, errors };
 }
 
+function validateInventory(manifest, expectedCount = expectation.runnable.length) {
+    const actual = [...manifest.runnable].sort();
+    const expected = [...expectation.runnable].sort();
+    if (expectedCount !== expected.length || actual.length !== expected.length
+        || actual.some((name, i) => name !== expected[i])
+        || new Set(expected).size !== expected.length
+        || new Set(expectation.manual.map((row) => row.path)).size !== expectation.manual.length
+        || expectation.manual.some((row) => expected.includes(row.path))
+        || manifest.discovered !== expected.length + expectation.manual.length
+        || !expectation.manual.every((row) => fs.existsSync(path.join(root, row.path)))) {
+        throw new Error("incomplete or duplicate discovered inventory");
+    }
+}
+
+function runtimeCommand(runtime, name) {
+    if (runtime === "fengari") return { executable: process.execPath, args: [runner, name] };
+    // Existing Windows offline setup embeds native LuaJIT through Lupa. It is
+    // explicit, never an automatic fallback or a substitute for CI's luajit.
+    if (runtime === "luajit-lupa") return {
+        executable: process.env.NEXUS_LUAJIT_PYTHON || "python",
+        args: ["-c", "from lupa.luajit21 import LuaRuntime;import sys;LuaRuntime().globals().dofile(sys.argv[1])", name],
+    };
+    return { executable: runtime, args: [name] };
+}
+
 async function main(argv) {
     const manifest = { ...inventory(), results: [], result: "incomplete" };
-    if (argv.includes("--list")) { console.log(JSON.stringify(manifest)); return 0; }
-    let runtime = "fengari";
-    let timeoutSeconds = 5400; // Recorded Fengari semantic envelope: 3783 seconds.
-    let expectedCount = 243;
+    let runtime = "luajit";
+    let timeoutSeconds = 600;
+    let expectedCount = expectation.runnable.length;
+    let selected = null, list = false;
     for (let index = 0; index < argv.length; index += 1) {
         const option = argv[index];
         if (option === "--runtime") runtime = argv[++index];
         else if (option === "--timeout-seconds") timeoutSeconds = Number(argv[++index]);
         else if (option === "--expected-count") expectedCount = Number(argv[++index]);
+        else if (option === "--test") selected = argv[++index];
+        else if (option === "--list") list = true;
         else throw new Error(`unknown argument: ${option}`);
     }
     if (!runtime || !Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 10500
         || !Number.isInteger(expectedCount) || expectedCount < 1) throw new Error("invalid inventory limits");
-    if (manifest.runnable.length !== expectedCount || new Set(manifest.runnable).size !== expectedCount
-        || manifest.discovered !== expectedCount + manifest.manual.length
-        || !manifest.manual.every((row) => fs.statSync(path.join(root, row.path)).isFile())) {
-        throw new Error("incomplete or duplicate discovered inventory");
+    validateInventory(manifest, expectedCount);
+    if (list) { console.log(JSON.stringify(manifest)); return 0; }
+    if (selected !== null) {
+        if (!manifest.runnable.includes(selected)) throw new Error("selected test is outside the reviewed inventory");
+        manifest.runnable = [selected];
+        manifest.discovered = 1 + manifest.manual.length;
     }
-    const output = path.join(root, "build", "lua-suite");
+    manifest.scope = selected === null ? "complete" : "selected";
+    const output = path.join(root, "build", selected === null ? "lua-suite" : "lua-selected");
     const identity = spawnSync("git", ["-c", `safe.directory=${root.replace(/\\/g, "/")}`,
         "show", "-s", "--format=%H %T", "HEAD"], { cwd: root, encoding: "utf8", timeout: 5000 });
     const [head = "unknown", tree = "unknown"] = identity.status === 0 ? identity.stdout.trim().split(" ") : [];
-    const version = runtime === "fengari" ? { status: 0,
+    const version = runtime === "luajit-lupa" ? spawnSync(process.env.NEXUS_LUAJIT_PYTHON || "python",
+        ["-c", "from lupa.luajit21 import LuaRuntime;import lupa;print('Lupa '+lupa.__version__+'; '+LuaRuntime().eval('jit.version'))"],
+        { cwd: root, encoding: "utf8", timeout: 5000 }) : runtime === "fengari" ? { status: 0,
         stdout: `Fengari ${JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8")).packages["node_modules/fengari"].version}; Node ${process.version}`, stderr: "" }
         : spawnSync(runtime, [runtime === "luajit" ? "-v" : "--version"], { cwd: root, encoding: "utf8", timeout: 5000 });
+    if (version.status !== 0) throw new Error(`runtime unavailable: ${runtime}`);
     Object.assign(manifest, { head, tree, platform: process.platform, architecture: process.arch,
         runtime, runtime_version: version.status === 0 ? (version.stdout + version.stderr).trim() : "unknown" });
     fs.mkdirSync(output, { recursive: true });
@@ -93,11 +125,10 @@ async function main(argv) {
         console.log(`Lua inventory runtime=${runtime} runnable=${manifest.runnable.length} manual=${manifest.manual.length}`);
         for (const name of manifest.runnable) {
             if (interrupted) break;
-            const executable = runtime === "fengari" ? process.execPath : runtime;
-            const args = runtime === "fengari" ? [runner, name] : [name];
+            const { executable, args } = runtimeCommand(runtime, name);
             const row = { path: name, result: "running", started_at: new Date().toISOString(),
                 runtime, command: safe([executable, ...args].join(" ")), completed_at: null,
-                exit_code: null, log: `build/lua-suite/${path.basename(name)}.log` };
+                exit_code: null, log: `build/${selected === null ? "lua-suite" : "lua-selected"}/${path.basename(name)}.log` };
             manifest.results.push(row);
             save();
             console.log(`TEST START ${name} at=${row.started_at} runtime=${runtime} command=${row.command} log=${row.log}`);
@@ -146,4 +177,4 @@ async function main(argv) {
 
 if (require.main === module) main(process.argv.slice(2)).then((code) => { process.exitCode = code; })
     .catch((error) => { console.error(error); process.exitCode = 1; });
-module.exports = { auditInventory, inventory };
+module.exports = { auditInventory, inventory, validateInventory, runtimeCommand };

@@ -50,6 +50,16 @@ depends_on: [50.1]
 
 ### 50.3 - Controlled tester stabilization after rejected Wave 3 (#22)
 
+CURRENT OVERRIDE 2026-09-17: attachment1a4aa118 authorizes only the combined
+post-dispatch housekeeping and tester CI correction from9364ac9. Complete
+offline development -> one freeze -> exact-head Fast/Full/Security/Package ->
+fresh focused Astra/xhigh Standards/Spec review -> exact internal ZIP -> normal
+PR71 fast-forward. Stop on final frozen gate/review failure. Native/client/live
+profile actions are forbidden until later explicit authority. Prior native
+instructions below are historical. Five player reports remain separate/open.
+Full means complete primary LuaJIT plus retained non-Lua checks for this profile;
+duplicate complete Fengari is supplementary, not a required gate.
+
 depends_on: [50.2]
 
 - Status: `IN_PROGRESS`
@@ -64,7 +74,7 @@ depends_on: [50.2]
   package, independently review and verify native behavior. Keep historical
   gates distinct. Repair confirmed supported blockers under current authority.
 - Demo commands (accepted runtime policy; no multi-hour Fengari rerun):
-  - `node tools/Run-LuaSuite.js --runtime luajit --expected-count 245 --timeout-seconds 600`
+    - `node tools/Run-LuaSuite.js --runtime luajit --timeout-seconds 600`
   - `node tests/run-quality-toolchain.js`
   - `node tools/Test-PackageSource.js .`
   - Native: verify exact installed build, startup timing, Wishlist save/reload

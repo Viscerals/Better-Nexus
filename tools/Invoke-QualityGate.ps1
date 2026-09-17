@@ -10,6 +10,9 @@ param(
     [Parameter()]
     [string] $BaseRef,
 
+    [ValidateSet('luajit', 'luajit-lupa')]
+    [string] $LuaRuntime = 'luajit',
+
     [ValidateRange(1, 10500)]
     [int] $BudgetSeconds = 10500,
 
@@ -305,6 +308,12 @@ function Add-PowerShellCheck {
         -Blocking $Blocking -UnavailableExitCodes $UnavailableExitCodes
 }
 
+function Add-LuaCheck {
+    param([string] $Id, [string] $Test)
+    Add-NodeCheck -Id $Id -Arguments @('tools/Run-LuaSuite.js', '--runtime', $LuaRuntime,
+        '--test', $Test, '--timeout-seconds', '600')
+}
+
 function Add-GitDiffCheckSet {
     [CmdletBinding()]
     param()
@@ -366,8 +375,7 @@ try {
                     continue
                 }
                 if ($test.EndsWith('.lua')) {
-                    Add-NodeCheck -Id "mapped-$([System.IO.Path]::GetFileNameWithoutExtension($test))" `
-                        -Arguments @('tools/run-lua.js', $test)
+                    Add-LuaCheck -Id "mapped-$([System.IO.Path]::GetFileNameWithoutExtension($test))" -Test $test
                 }
                 else {
                     Add-NodeCheck -Id "mapped-$([System.IO.Path]::GetFileNameWithoutExtension($test))" `
@@ -379,22 +387,26 @@ try {
             Add-GitDiffCheckSet
         }
         elseif ($Mode -eq 'Full') {
-            Invoke-QualityCheck -Id 'lua-suite' -FilePath $node.Source -Arguments @('tools/Run-LuaSuite.js') -TimeoutSeconds $BudgetSeconds
+            Invoke-QualityCheck -Id 'lua-suite' -FilePath $node.Source `
+                -Arguments @('tools/Run-LuaSuite.js', '--runtime', $LuaRuntime, '--timeout-seconds', '600') -TimeoutSeconds $BudgetSeconds
+            Write-Host 'Tester runtime policy: complete LuaJIT primary; duplicate Fengari inventory NOT RUN -- SUPPLEMENTARY. Unique JavaScript runners remain required.'
             Add-CheckResult -Id 'lua-suite-manual-legacy-backup' -Result skipped `
                 -Command 'manual: tests/run_legacy_backup_smoke.lua <authorized-backup>' `
                 -Reason 'requires an explicitly authorized SavedVariables backup path' `
                 -Blocking $false -LogLines @('Manual SavedVariables smoke test was not run.')
             Add-NodeCheck -Id 'lua51-parse' -Arguments @('tools/parse-lua51.js', '.', '--tests')
             Add-NodeCheck -Id 'upvalue-boundary' -Arguments @('tests/run-upvalue-compatibility.js')
-            Add-NodeCheck -Id 'integration' -Arguments @('tools/run-lua.js', 'tests/run_integration.lua')
-            Add-NodeCheck -Id 'hostile-sync' -Arguments @('tools/run-lua.js', 'tests/run_sync_hostile_fuzz.lua')
+            Add-LuaCheck -Id 'integration' -Test 'tests/run_integration.lua'
+            Add-LuaCheck -Id 'hostile-sync' -Test 'tests/run_sync_hostile_fuzz.lua'
+            Add-NodeCheck -Id 'pr58-expected-red' -Arguments @('tests/run-pr58-expected-red.js')
+            Add-NodeCheck -Id 'catalog-authority-expected-red' -Arguments @('tests/run-catalog-authority-expected-red.js')
             Add-NodeCheck -Id 'bundled-exporter' -Arguments @('tests/run-bundled-build-export.js')
             Add-NodeCheck -Id 'savedvariables-analyzer' -Arguments @('tests/run-savedvariables-analyzer.js')
             Add-NodeCheck -Id 'package-metadata' -Arguments @('tests/run-package-metadata.js')
             Add-NodeCheck -Id 'package-source' -Arguments @('tools/Test-PackageSource.js', '.')
-            Add-NodeCheck -Id 'module-contracts' -Arguments @('tools/run-lua.js', 'tests/run_module_contract_characterization.lua')
-            Add-NodeCheck -Id 'privacy' -Arguments @('tools/run-lua.js', 'tests/run_security_hardening.lua')
-            Add-NodeCheck -Id 'stutteralert' -Arguments @('tools/run-lua.js', 'tests/run_stutteralert_integration.lua')
+            Add-LuaCheck -Id 'module-contracts' -Test 'tests/run_module_contract_characterization.lua'
+            Add-LuaCheck -Id 'privacy' -Test 'tests/run_security_hardening.lua'
+            Add-LuaCheck -Id 'stutteralert' -Test 'tests/run_stutteralert_integration.lua'
             Add-PowerShellCheck -Id 'release-policy' -Arguments @('tools/Test-ReleasePolicy.ps1')
             Add-GitDiffCheckSet
         }
@@ -402,7 +414,7 @@ try {
             Add-NodeCheck -Id 'package-source' -Arguments @('tools/Test-PackageSource.js', '.')
             Add-NodeCheck -Id 'package-metadata' -Arguments @('tests/run-package-metadata.js')
             Add-NodeCheck -Id 'package-lua51' -Arguments @('tools/parse-lua51.js', '.')
-            Add-NodeCheck -Id 'package-privacy' -Arguments @('tools/run-lua.js', 'tests/run_security_hardening.lua')
+            Add-LuaCheck -Id 'package-privacy' -Test 'tests/run_security_hardening.lua'
             Add-PowerShellCheck -Id 'release-policy' -Arguments @('tools/Test-ReleasePolicy.ps1')
             Add-GitDiffCheckSet
         }

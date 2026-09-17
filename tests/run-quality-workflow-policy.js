@@ -41,7 +41,10 @@ assert.match(classifyStep, /EVENT_NAME: \$\{\{ github\.event_name \}\}/,
     "path classification cannot distinguish push and manual full-forcing events");
 assert(!workflow.includes("git diff --name-only"),
     "workflow bypasses the shared binary-safe path classifier");
-assert.match(workflow, /full-quality:[\s\S]*if: needs\.preflight\.outputs\.full_required == 'true'/);
+const fullJob = workflow.match(/^  full-quality:[\s\S]*?(?=^  package-quality:)/m)?.[0] || "";
+assert.match(fullJob, /needs: preflight/);
+assert(!/^    if:/m.test(fullJob), "complete primary inventory must not be optional");
+assert.match(workflow, /\$fullRequired = \$true/);
 assert.match(workflow, /quality-gate:[\s\S]*if: always\(\)/);
 assert.match(workflow, /quality-gate:[\s\S]*needs: \[preflight, fast-quality, security-quality, full-quality, package-quality\]/);
 assert.match(workflow, /PACKAGE_RESULT: \$\{\{ needs\.package-quality\.result \}\}/);
@@ -59,13 +62,10 @@ assert(!/^\s+paths(?:-ignore)?:/m.test(workflow));
 for (const job of ["candidate", "release-policy", "lua-regression"]) {
     assert.match(release, new RegExp(`^  ${job}:`, "m"), `missing release job: ${job}`);
 }
-const releaseRunnerCount = release.match(/Run-LuaSuite\.js --runtime luajit --expected-count (\d+) --timeout-seconds 600/);
-assert(releaseRunnerCount, "release Lua runner-count guard is missing");
-assert.strictEqual(
-    Number(releaseRunnerCount[1]),
-    normalLuaRunnerFiles.length,
-    "release Lua runner-count guard does not match the enumerated normal runner inventory"
-);
+assert.match(release, /Run-LuaSuite\.js --runtime luajit --timeout-seconds 600/);
+assert(!release.includes("--expected-count"), "workflow must use the shared reviewed inventory");
+const expected = require("../tools/lua-inventory.json");
+assert.deepStrictEqual([...expected.runnable].sort(), normalLuaRunnerFiles.sort().map((name) => `tests/${name}`));
 assert.match(release, /candidate_sha: \$\{\{ steps\.resolve\.outputs\.candidate_sha \}\}/);
 assert.strictEqual((release.match(/ref: \$\{\{ needs\.candidate\.outputs\.candidate_sha \}\}/g) || []).length, 2);
 assert.strictEqual((release.match(/Verify exact candidate checkout/g) || []).length, 2);
@@ -78,8 +78,14 @@ assert.match(release, /historical=6f6204dc9e94b0339f2c9cbacf0c5de8b98a539f/);
 assert.match(release, /expected_tree=0d293768d6c7a14d78a9b9ee9b3844d2b9bad3b6/);
 assert.match(release, /lua-regression:[\s\S]*timeout-minutes: 15/);
 for (const profile of ["Fast", "Full"]) {
-    assert.match(workflow, new RegExp(`Invoke-QualityGate\\.ps1 -Mode ${profile} -BaseRef \\$env:BASE_REF -BudgetSeconds 10500`));
+    assert.match(workflow, new RegExp(`Invoke-QualityGate\\.ps1 -Mode ${profile} -BaseRef \\$env:BASE_REF -LuaRuntime luajit -BudgetSeconds 1500`));
 }
+assert.strictEqual((workflow.match(/sudo apt-get install --yes luajit/g) || []).length, 3);
+const gate = fs.readFileSync(path.join(root, "tools/Invoke-QualityGate.ps1"), "utf8");
+assert.match(gate, /\[string\] \$LuaRuntime = 'luajit'/);
+assert.match(gate, /'tools\/Run-LuaSuite.js', '--runtime', \$LuaRuntime, '--timeout-seconds', '600'/);
+assert.match(gate, /'pr58-expected-red'[\s\S]*'catalog-authority-expected-red'/);
+assert(!gate.includes("'tools/run-lua.js'"), "quality profile silently uses supplementary runtime");
 assert(!/continue-on-error/.test(workflow + release));
 assert.strictEqual((workflow.match(/if: failure\(\) \|\| cancelled\(\)/g) || []).length, 2);
 assert.match(release, /Upload failed or interrupted Lua diagnostics\s+if: \(failure\(\) \|\| cancelled\(\)\) && steps\.diagnostics\.outcome == 'success'/);
@@ -121,7 +127,8 @@ try {
             assert.notStrictEqual(runAggregate({ [job]: result }).status, 0, `${job}=${result} passed`);
         }
     }
-    assert.strictEqual(runAggregate({ FULL_REQUIRED: "false", FULL_RESULT: "skipped" }).status, 0);
+    assert.notStrictEqual(runAggregate({ FULL_REQUIRED: "false", FULL_RESULT: "skipped" }).status, 0,
+        "same-candidate primary inventory cannot be skipped");
 } finally {
     fs.rmSync(aggregateScratch, { recursive: true, force: true });
 }

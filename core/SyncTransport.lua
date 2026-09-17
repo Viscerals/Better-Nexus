@@ -769,10 +769,17 @@ function Transport.New(options)
         return controlPacket, controlPacket ~= nil
     end
 
-    function T.Pump(elapsed)
+    -- Queue housekeeping has no channel, hash or catalog dependency. Keep the
+    -- existing bounded cleanup and attempt settlement separate from sending.
+    function T.Housekeep()
         local current = now()
         ExpireAttemptCancellation(current)
         PruneStaleHeads(current)
+        return current
+    end
+
+    function T.Pump(elapsed)
+        local current = T.Housekeep()
         if current < (throttlePauseUntil or 0) then return end
         ticker = ticker + (elapsed or 0)
         local interval = current < (throttleSlowUntil or 0)

@@ -1,5 +1,18 @@
 # HISTORY
 
+## Manual prerequisite correction native dispatch - 2026-09-16
+
+- [x] ISSUE-NATIVE-SYNC-PREPARATION: Manual preparation exceeds its request lifetime
+  - Impact: MAJOR
+  - Status: RESOLVED
+  - Owner: agent
+  - Unblock Condition: Implement and validate the directly authorized manual-only2ms/32 preparation correction; freeze, focused review, exact package and bounded native retest. Stop if native preparation still expires.
+  - Evidence Needed: test25 native preparing at261.433seconds; terminal dropped/expired/sent0 observed510.565seconds. Existing startup-only authorization expressly excludes Sync and maintenance. Specific question already sent; no general approval requested.
+  - Notes: Direct attachment2d7b5643 SHA256159a88934e0aa57eb0c71ee573e6effe3feb8cbe19b85c2857e1e2edc9c2eb51 resolves the scheduling decision. Historical counters unchanged. One bounded correction, no general campaign. Product e9e4923/test.25 preserved.
+  - Native result: test.26-fc1e567 still expired. At333.307seconds since first owner observation: preparingfalse,queuedropped,terminalexpired,readyAtnil,sentAtnil,messages sent0. Hashslices416; last catalog snapshot candidatepending with4667pumps. Full manual-update max11.1197ms. The exact private subphase is UNKNOWN.
+  - Historical stop condition: test26 expiry stopped that attempt. The later explicit prerequisite authorization permitted test27, without changing limits.
+  - Resolution: Exact9364ac9/test.27-9364ac9 focused review Standards/Spec PASS; integrated245/245PASS. Native cold readiness40.349sec/firstdispatch41.446sec, no preparation expiry. This resolves only preparation/dispatch, not convergence or player reports.
+
 ## Native Sync request lifetime correction - 2026-09-16
 
 ISSUE-NATIVE-SYNC-LIFETIME resolved in exact e9e4923/test.25 for source behavior:

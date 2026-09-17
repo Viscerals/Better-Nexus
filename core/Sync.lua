@@ -701,7 +701,11 @@ function Operation.Transition(status, outcome, reason, fields)
             -- Terminal failure is rare and user-actionable. Route one
             -- coalesced view refresh so an already-open owned-build detail can
             -- expose Retry Share without polling or rebuilding on every tick.
-            pcall(Sync.RequestDataViewRefresh)
+            if Operation.housekeeping then
+                Operation.housekeepingRefreshPending = true
+            else
+                pcall(Sync.RequestDataViewRefresh)
+            end
         end
     end
     return true
@@ -3512,6 +3516,15 @@ function Sync.TombstoneCount()
     return type(status) == "table" and tonumber(status.tombstoneCount) or 0
 end
 
+-- Safe while catalog/hash readiness gates the full update. This cannot
+-- prepare requests, retry transfers, admit packets, or send network traffic.
+function Sync.Housekeep()
+    Operation.housekeeping = true
+    local ok, err = pcall(Transport.Housekeep)
+    Operation.housekeeping = false
+    if not ok then error(err, 0) end
+end
+
 function Sync.OnUpdate(elapsed)
     Inbound.CleanExpired()
     ProcessPendingResponses(elapsed)
@@ -3527,6 +3540,12 @@ function Sync.OnUpdate(elapsed)
     Session.UpdateAutoSync(elapsed)
     Session.UpdateAutoConvergence()
     Session.UpdateJoinRetry(elapsed)
+    -- A refresh can initiate legacy catalog repair. Release it only after
+    -- the already-ready update, not before its transport validation work.
+    if Operation.housekeepingRefreshPending then
+        Operation.housekeepingRefreshPending = false
+        pcall(Sync.RequestDataViewRefresh)
+    end
 end
 
 -- Safe before catalog/hash readiness: only expire or disconnect a retained
@@ -3559,6 +3578,7 @@ function Sync.SendStatusTo(target)
 end
 
 function Sync.Init(codec, adapter)
+    Operation.housekeeping, Operation.housekeepingRefreshPending = false, false
     catalogMutationIdentity = {}
     Codec, Adapter = codec, adapter
     -- Explicit Init remains the destructive session boundary. Publish exact

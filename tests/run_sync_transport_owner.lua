@@ -254,3 +254,38 @@ assert(NexusDB == originalDb and NexusDB.sentinel == "keep"
     "transport tests mutated persistence or gameplay state")
 
 print("durable Sync transport ownership, saturation, order, and retry -- OK")
+
+-- Housekeeping shares the existing bounded head cleanup, without selection,
+-- channel resolution, pacing advancement or sending. Live FIFO entries stay.
+do
+    local h=NewHarness({maxBulk=100,maxControl=100,sendInterval=1})
+    local t=h.transport
+    for i=1,70 do
+        assert(t.Enqueue("expired|"..i,{expiresAt=101,transferId="old-"..i}))
+    end
+    assert(t.Enqueue("valid|first",{expiresAt=999,transferId="live1"}))
+    assert(t.Enqueue("valid|second",{expiresAt=999,transferId="live2"}))
+    assert(t.EnqueueControl("control|valid",{expiresAt=999,transferId="live3"}))
+    h.SetClock(102)
+    for i=1,3 do
+        local before=t.Snapshot()
+        t.Housekeep()
+        local after=t.Snapshot()
+        assert(after.expiredRemoved-before.expiredRemoved<=32)
+        assert(h.Attempts()==0 and #h.sent==0,"housekeeping sent a packet")
+        assert(after.control==1,"housekeeping removed a valid control")
+    end
+    local settled=t.Snapshot()
+    assert(settled.bulk==2 and settled.outstandingTransfers==3,
+        "cleanup damaged valid queues or transfer accounting")
+    t.Housekeep()
+    assert(t.Snapshot().expiredRemoved==70,"terminal cleanup repeated")
+    t.Pump(0)
+    assert(h.Attempts()==0,"housekeeping advanced send pacing")
+    for _=1,3 do t.Pump(1) end
+    assert(h.sent[1].payload=="control||valid"
+        and h.sent[2].payload=="valid||first"
+        and h.sent[3].payload=="valid||second","valid FIFO or control priority changed")
+    assert(t.Snapshot().outstandingTransfers==0)
+    print("Housekeeping bounded cleanup, no send, pacing, FIFO and accounting -- OK")
+end

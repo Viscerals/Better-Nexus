@@ -58,6 +58,10 @@ async function runnerTests() {
         fs.writeFileSync(path.join(fixture, "tests/run_a.lua"), 'console.log("A");\n');
         fs.writeFileSync(path.join(fixture, "tests/run_b.lua"), 'console.error("B"); process.exit(7);\n');
         fs.writeFileSync(path.join(fixture, "tests/run_legacy_backup_smoke.lua"), 'throw Error("manual test must not run");\n');
+        fs.writeFileSync(path.join(fixture, "tools/lua-inventory.json"), JSON.stringify({
+            runnable: ["tests/run_a.lua", "tests/run_b.lua"],
+            manual: [{ path: "tests/run_legacy_backup_smoke.lua", reason: "manual fixture" }],
+        }));
         const suite = spawnSync(process.execPath, [path.join(fixture, "tools/Run-LuaSuite.js"),
             "--runtime", process.execPath, "--expected-count", "2", "--timeout-seconds", "2"],
         { cwd: fixture, encoding: "utf8", timeout: 10000 });
@@ -66,12 +70,20 @@ async function runnerTests() {
         assert.deepStrictEqual(inventory.runnable, ["tests/run_a.lua", "tests/run_b.lua"]);
         assert.strictEqual(inventory.manual[0].path, "tests/run_legacy_backup_smoke.lua");
         assert.deepStrictEqual(inventory.results.map((row) => row.result), ["pass", "fail"]);
-        const { auditInventory } = require(path.join(fixture, "tools/Run-LuaSuite.js"));
+        const { auditInventory, validateInventory, runtimeCommand } = require(path.join(fixture, "tools/Run-LuaSuite.js"));
+        assert.deepStrictEqual(runtimeCommand("luajit", "tests/run_a.lua"),
+            { executable: "luajit", args: ["tests/run_a.lua"] });
+        validateInventory(inventory);
+        assert.throws(() => validateInventory({ ...inventory, runnable: ["tests/run_a.lua", "tests/run_missing.lua"] }),
+            /incomplete or duplicate/);
+        assert.throws(() => validateInventory({ ...inventory, runnable: ["tests/run_a.lua", "tests/run_a.lua"] }),
+            /incomplete or duplicate/);
         assert.strictEqual(auditInventory(inventory).ok, false);
         const good = { ...inventory, results: inventory.results.map((row) => ({ ...row, result: "pass", exit_code: 0 })) };
         assert.strictEqual(auditInventory(good).ok, true);
         for (const results of [good.results.slice(1), [...good.results, good.results[0]],
             [...good.results, { path: "tests/unexpected.lua", result: "pass" }],
+            good.results.map((row) => ({ ...row, completed_at: null })),
             good.results.map((row) => ({ ...row, result: "running" }))]) {
             assert.strictEqual(auditInventory({ ...good, results }).ok, false);
         }
@@ -111,6 +123,37 @@ async function runnerTests() {
             "-----BEGIN " + "PRIVATE KEY-----\n"]) {
             assert.notStrictEqual(checkContents(unsafe).status, 0, "existing diagnostic content policy accepted private content");
         }
+        // Execute the unchanged Full branch of the copied PowerShell runner.
+        // Test doubles capture commands only; this is not product validation.
+        const gateSource = fs.readFileSync(gate, "utf8");
+        fs.writeFileSync(path.join(fixture, "tools/Get-ChangedTestPlan.ps1"),
+            "'{\"paths\":[],\"deleted_paths\":[],\"tests\":[]}'\n");
+        fs.copyFileSync(path.join(root, "tools/ArtifactPathPolicy.ps1"),
+            path.join(fixture, "tools/ArtifactPathPolicy.ps1"));
+        for (const name of ["Test-ReleasePolicy.ps1", "Test-GitDiffCheck.ps1"]) {
+            fs.writeFileSync(path.join(fixture, "tools", name), "exit 0\n");
+        }
+        for (const match of gateSource.matchAll(/'(tools\/[^']+\.js|tests\/[^']+\.js)'/g)) {
+            if (match[1].endsWith("Write-ValidationSummary.js")) continue;
+            fs.writeFileSync(path.join(fixture, match[1]),
+                'require("fs").appendFileSync("commands.jsonl", JSON.stringify(process.argv.slice(1))+"\\n");\n');
+        }
+        const fullCapture = spawnSync(pwsh, ["-NoProfile", "-File", gate,
+            "-Mode", "Full", "-BaseRef", "fixture-base"],
+        { cwd: fixture, encoding: "utf8", timeout: 15000 });
+        assert.strictEqual(fullCapture.status, 0, `${fullCapture.stdout}\n${fullCapture.stderr}`);
+        const commands = fs.readFileSync(path.join(fixture, "commands.jsonl"), "utf8")
+            .trim().split("\n").map(JSON.parse);
+        const complete = commands.filter((args) => args[0].endsWith("Run-LuaSuite.js") && !args.includes("--test"));
+        assert.strictEqual(complete.length, 1, "actual Full must execute one complete inventory");
+        assert.deepStrictEqual(complete[0].slice(1), ["--runtime", "luajit", "--timeout-seconds", "600"]);
+        for (const name of ["run-pr58-expected-red.js", "run-catalog-authority-expected-red.js",
+            "parse-lua51.js", "run-upvalue-compatibility.js", "Test-PackageSource.js"]) {
+            assert(commands.some((args) => args[0].endsWith(name)), `Full omitted ${name}`);
+        }
+        const fullSummary = JSON.parse(fs.readFileSync(path.join(fixture, "build/verify/summary.json"), "utf8"));
+        assert(fullSummary.checks.some((row) => row.id === "lua-suite-manual-legacy-backup"
+            && row.result === "skipped" && row.blocking === false));
         console.log("CI runner synthetic tests: dual streams, live partial evidence, timeout, inventory and fail-closed aggregate -- OK");
     } finally {
         fs.rmSync(fixture, { recursive: true, force: true });

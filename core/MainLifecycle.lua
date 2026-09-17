@@ -66,6 +66,7 @@ function Lifecycle.New(options)
         ["Sync.Init"]={active=false,message=nil},
         ["Sync.OnWorldEntry"]={active=false,message=nil},
         ["Sync.OnUpdate"]={active=false,message=nil},
+        ["Sync.Housekeep"]={active=false,message=nil},
         ["Sync.UpdatePendingRequestStatus"]={active=false,message=nil},
         ["DpsCapture.Init"]={active=false,message=nil},
         ["DpsCapture.OnUpdate"]={active=false,message=nil},
@@ -829,7 +830,14 @@ function Lifecycle.New(options)
             end
         end
         local Adapter = dependencies.Adapter
-        if not Adapter.Ready() then return end
+        local adapterReady = Adapter.Ready()
+        if not (adapterReady and catalogReady and buildHashesReady)
+            and Nexus.Sync and type(Nexus.Sync.Housekeep)=="function" then
+            -- The ready path already performs this once inside transport.
+            -- Do not send or multiply cleanup when readiness is withheld.
+            RunIsolatedOwner("Sync.Housekeep", Nexus.Sync.Housekeep)
+        end
+        if not adapterReady then return end
         if Nexus.Sync and catalogReady and buildHashesReady then
             RunIsolatedOwner("Sync.OnUpdate", Nexus.Sync.OnUpdate, elapsed)
             if manualOwner and manualTiming.sentAt==nil and type(Nexus.Sync.Stats)=="function"
