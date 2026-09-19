@@ -33,7 +33,7 @@ end
 local function openConfirm(mode)
     local data,err=Nexus.OrbRuntime.Prepare(mode);if not data then notify(false,err);return end
     if not confirmation then
-        confirmation=newWindow("NexusOrbApproval",610,465);confirmation:SetFrameStrata("FULLSCREEN_DIALOG");confirmation:SetFrameLevel(160)
+        confirmation=newWindow("NexusOrbApproval",610,505);confirmation:SetFrameStrata("FULLSCREEN_DIALOG");confirmation:SetFrameLevel(160)
         confirmation.title=text(confirmation,18,-18,570,24,"Approve this Orb run")
         confirmation.summary=text(confirmation,18,-50,570,94)
         local sf=CreateFrame("ScrollFrame",nil,confirmation,"UIPanelScrollFrameTemplate")
@@ -44,11 +44,12 @@ local function openConfirm(mode)
         confirmation.check:SetPoint("TOPLEFT",20,-347);confirmation.check:SetSize(26,26);confirmation.check:EnableMouse(true)
         confirmation.check:SetFrameLevel(164)
         text(confirmation,52,-349,530,50,"I approve the listed source copies and this spending limit. Stop prevents new submissions; it cannot undo a submitted Orb.")
-        confirmation.go=button(confirmation,205,-416,165,"Confirm & start",function()
+        confirmation.closeNotice=text(confirmation,20,-400,570,38,"Closing the window does not stop an approved run. Use Pause or Stop.")
+        confirmation.go=button(confirmation,205,-456,165,"Confirm & start",function()
             if not confirmation.check:GetChecked() or not approvalData then return end
             local ok,e=Nexus.OrbRuntime.Confirm(approvalData.token);approvalData=nil;confirmation:Hide();notify(ok,e)
         end)
-        button(confirmation,385,-416,130,"Cancel",function()approvalData=nil;confirmation:Hide()end)
+        button(confirmation,385,-456,130,"Cancel",function()approvalData=nil;confirmation:Hide()end)
         confirmation:SetScript("OnHide",function()approvalData=nil end)
     end
     approvalData=data;confirmation.check:SetChecked(false)
@@ -103,7 +104,7 @@ function UI.Refresh()
 end
 local function ensure()
     if frame then return end
-    frame=newWindow("NexusOrbPanel",820,630);rows={};targetRows={};frame.mutations={};frame.configure={}
+    frame=newWindow("NexusOrbPanel",820,710);rows={};targetRows={};frame.mutations={};frame.configure={}
     text(frame,20,-18,670,28,"Orbs / Lost Memories - refine an existing rolled build")
     button(frame,748,-14,50,"Close",function() frame:Hide() end)
     frame.assigned=button(frame,20,-48,180,"Use assigned Wishlist",function()notify(Nexus.OrbRuntime.UseAssignedWishlist())end)
@@ -186,7 +187,8 @@ local function ensure()
             OnAccept=function()notify(Nexus.OrbRuntime.ConfirmLimit(a.token))end}
         StaticPopup_Show("NEXUS_ORB_INCREASE")
     end)
-    frame.status=text(frame,20,-548,775,50);frame.notice=text(frame,20,-601,775,22)
+    frame.status=text(frame,20,-548,775,92);frame.notice=text(frame,20,-641,775,22)
+    frame.closeNotice=text(frame,20,-675,775,26,"Closing the window does not stop an approved run. Use Pause or Stop.")
     frame.mutations={frame.start,frame.single,frame.pause,frame.resume,frame.stop,frame.increase,suggest,frame.choose,frame.assigned,frame.recycle}
     frame.configure={frame.start,frame.single,suggest,frame.choose,frame.recycle,frame.assigned}
     frame:SetScript("OnShow",function()UI.Refresh()end)

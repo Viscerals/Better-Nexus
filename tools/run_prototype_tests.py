@@ -7,6 +7,8 @@ from __future__ import annotations
 import argparse, ctypes.util, hashlib, json, os, pathlib, shutil, subprocess, sys, time
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 NAMES=['parse','boot','wishlist','lock_evidence','ownership','typed_hash','transport','automation','manual_sync','diagnostics','features','planner_reference','startup','startup_evidence','startup_failure','startup_validation','startup_drift','startup_budget','startup_persistence','startup_source_change','role_selection','role_boundaries','role_persistence','role_export','current_locks','loading_status','loading_local','current_locks_reload','current_locks_exact','orbs','orbs_controls','orbs_ambiguity','orbs_same_echo','orbs_prerequisites','orbs_reload','orbs_policy','orbs_ui','orbs_context','orbs_permanent','orbs_loading','help','terminology']
+NAMES += ['orbs_review_sources','orbs_review_lifecycle','orbs_review_same_id','orbs_review_recheck','orbs_review_availability','orbs_review_ordering','orbs_review_disclosure','orbs_review_recovery','terminology_consumers']
+
 def main() -> int:
     ap=argparse.ArgumentParser()
     ap.add_argument('--runtime',choices=['auto','luajit','lua54'],default='auto')

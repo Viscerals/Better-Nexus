@@ -1,9 +1,15 @@
-# Nexus P1.5 — Experimental player guide
+# Nexus P1.5.1 — Experimental player guide
 
 Nexus helps you work toward an Echo build: create or import a Wishlist, follow
 recommendations or enable selected automatic actions, share builds, and compare
 recorded DPS. P1.5 adds **Orbs / Lost Memories** refinement with explicit source
-and spending approval, and applies the approved terminology/help changes.
+and spending approval. P1.5.1 corrects the demonstrated source-protection,
+confirmation, and Recheck defects and completes the reviewed wording paths.
+
+**Real-resource Orb testing is not approved for this replacement.** Native
+capabilities, notification order, and quality-consumption behavior remain
+unverified. No installation or native test follows this package automatically.
+Any real-resource test requires a separate user decision.
 
 This is an experimental prototype, not a stable release. Check the exact package
 build label and checksum supplied beside the ZIP. Never substitute an older
@@ -111,12 +117,16 @@ resource arrival, import, ordinary Auto, or reopening its window.
 
 The controller requests **one Orb per replacement**, observes the actual offer,
 chooses the first missing exact target in your ordered list or an approved safe
-fallback, and waits for fresh ownership plus charge/result confirmation before
+fallback, and waits for the observed offer/selection lifecycle, exact ownership
+change, and charge/result confirmation before
 another spend. It does not use the ordinary WishlistPlanner on Orb boards.
 
-Required exact target copies and permanent copies are protected. The candidate
+Required exact rolled copies, granted copies needed for future permanent targets,
+and permanent copies are protected. One granted copy cannot satisfy both roles.
+The candidate
 source respects the reference's lowest-quality-family sacrifice behavior. A
-source that could ambiguously refer to a permanent copy is conservatively
+source that could ambiguously refer to a permanent copy or multiple qualities
+of the same ID is conservatively
 excluded. Some apparently extra copies may therefore be unavailable as sources.
 The run can stop with an unmet target when your approved source pool is exhausted.
 
@@ -126,9 +136,13 @@ plan still has permanent targets you do not own.
 
 **Starting turns ordinary Automation OFF; finishing never turns it back ON.**
 The game's auto-accept and competing pickers must be off. Unknown or unavailable
-client capabilities disable only Orb mode with the missing capability named.
+client capabilities disable the affected Orb action with the missing capability
+named. Tome-dependent availability uses discovered/observed Echo evidence and a
+known disable-state answer; spellbook knowledge is not used as a substitute.
 
 ### Pause, Stop, uncertainty, and budgets
+
+Closing the window does not stop an approved run. Use Pause or Stop.
 
 - Pause/Stop prevents new submissions. It cannot undo an accepted spend.
 - A submitted result may settle passively while paused or stopped.
@@ -143,11 +157,14 @@ client capabilities disable only Orb mode with the missing capability named.
 - On reload/reconnect the run does not resume. A saved pending-operation marker
   is passive recovery evidence, not a restart instruction.
 
-The same Echo can be removed and received again without a net count change. Nexus
-requires fresh evidence as well as the one-copy/one-Orb reconciliation; it does
-not treat an unchanged old snapshot as success. If reconciliation remains
-uncertain, resolve the native offer and use Recheck. Do not clear the recovery
-marker to force another run.
+The same ID and quality can be removed and received again without a net count
+change. The supported API cannot distinguish that result from stale ownership.
+Nexus pauses with a specific reason and retains pending ownership and exposure.
+A new table, lower charge count, or uncorrelated selection-result notice cannot
+resolve that ambiguity. Recheck does not establish proof by returning the same
+contents. No automatic retry is made. A same-ID result at a different quality
+can settle when its exact state change and original offer/selection are observed.
+Do not clear the recovery marker to force another run.
 
 ## Community, DPS, Sync, and loading
 
@@ -195,16 +212,17 @@ commands as generic fixes without understanding their effects.
 
 ## Verification and remaining limitations
 
-P1.5 is tested with synthetic services and real Nexus adapters/controllers/UI
-handlers under Lua 5.4 compatibility shims. It is NOT native WoW, LuaJIT, the
-complete upstream regression campaign, or a new independent acceptance review.
-See the delivered test and verification reports for exact counts and hashes.
+P1.5.1 uses synthetic services and real Nexus adapters/controllers/UI handlers
+under the established LuaJIT 2.1 / Lua 5.1 Windows route. It uses no Lua 5.4
+compatibility shims. These tests are not native WoW verification or the complete
+upstream regression campaign. See the delivered source/package test receipts
+and focused independent review for exact results, counts, hashes, and limitations.
 
 New Orb capability discovery, source choice, action/result reconciliation, and
 UI interaction must be verified in the actual client before relying on them.
 No real Orb was spent to produce this package. Source compatibility with a
 reference is not proof of the server's behavior, universal API availability,
-or native safety/performance. Do not approve valuable copies for initial tests.
+or native safety/performance. This package does not authorize a spending test.
 
 The original videos, data-recovery history, native timing, full peer convergence,
 and historical-backup recovery are not retroactively resolved by these offline

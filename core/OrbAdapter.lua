@@ -7,6 +7,8 @@ local O = {}
 A.Orbs = O
 local owner, ownerContext
 local observations = { serial=0, grantedRef=nil, grantedSig=nil }
+local selectionSerial,selection=0,nil
+local watched={}
 local MAX_ROWS = 512
 local function integer(n, minimum)
     return type(n)=="number" and n==math.floor(n) and n<math.huge
@@ -118,27 +120,42 @@ function O.Read()
     local okAuto,auto=pcall(opts.GetSetting,opts,"autoAcceptLoadoutEchoes")
     if not okAuto or type(auto)~="boolean" then return nil,"Cannot verify the game's automatic Echo-choice setting." end
     local host=hostPending(pe);if host==nil then return nil,"Cannot verify pending game actions." end
+    -- Use the existing Nexus / supplied integration discovery boundary.
+    -- Missing optional availability information is unknown, never permission.
+    local okD,discovered=call(svc,"GetDiscoveredEchoes")
+    local discoveryKnown=pe.Perks and pe.Perks.discoveredEchoes~=nil and okD and type(discovered)=="table"
+    local observed={}
+    for k,n in pairs(granted) do if n>0 then observed[tonumber(k:match("^(%d+):"))]=true end end
+    for k,n in pairs(locks) do if n>0 then observed[tonumber(k:match("^(%d+):"))]=true end end
+    for _,c in ipairs(board) do observed[c.spellId]=true end
     local rows={}
     for id,row in pairs(cat.rows) do
         local raw=pe.PerkDatabase and pe.PerkDatabase[id]
         local g=raw and tonumber(raw.groupId)
-        local learned=not raw or not raw.requiredSpell or raw.requiredSpell==0
-            or (type(IsSpellKnown)=="function" and IsSpellKnown(raw.requiredSpell))
+        local gated=raw and raw.requiredSpell and raw.requiredSpell~=0
+        local learned=not gated or (discoveryKnown and (discovered[id]~=nil or observed[id]==true))
         local mask=tonumber(row.classMask or (raw and raw.classMask)) or 0
         local allowedClass=mask==0 or mask==1535 or (bit and bit.band and bit.band(mask,cat.playerMask or 0)~=0)
-        local disabled=false
-        if type(svc.IsTomeEchoDisabled)=="function" then
-            local okD,d=call(svc,"IsTomeEchoDisabled",id)
-            if not okD then return nil,"Cannot verify Echo availability." end
-            disabled=d==true
+        local disabled,reason=false,nil
+        if gated then
+            if not discoveryKnown then reason="Echo discovery data or GetDiscoveredEchoes is unavailable."
+            elseif not learned then reason="This Echo has not been discovered or observed."
+            elseif type(svc.IsTomeEchoDisabled)~="function" then reason="PerkService.IsTomeEchoDisabled is unavailable."
+            else
+                local okDisabled,d=call(svc,"IsTomeEchoDisabled",id)
+                if not okDisabled or type(d)~="boolean" then reason="PerkService.IsTomeEchoDisabled did not provide a known answer."
+                elseif d then disabled=true;reason="The server reports that this Echo is disabled." end
+            end
         end
         rows[id]={spellId=id,name=row.name or (GetSpellInfo and GetSpellInfo(id)) or ("Echo "..id),
             quality=row.quality or 0,maxStack=tonumber(row.maxStack) or 1,
-            group=integer(g,1) and ("g:"..g) or ("s:"..id),available=allowedClass and learned and not disabled}
+            group=integer(g,1) and ("g:"..g) or ("s:"..id),available=allowedClass and learned and not disabled and not reason,
+            availabilityReason=reason or (not allowedClass and "This Echo is unavailable to this class." or nil)}
     end
     local s={known=true,charges=charges,offerPending=pending,board=board,boardKey=table.concat(parts,","),
         granted=granted,locked=locks,grantStamp=observations.serial,grantedKey=sig,lockedKey=signature(locks),
-        hostPending=host,autoAccept=auto,catalog=rows,context=ctx(pe,svc,orb),at=GetTime and GetTime() or 0}
+        hostPending=host,autoAccept=auto,catalog=rows,context=ctx(pe,svc,orb),at=GetTime and GetTime() or 0,
+        selectionSerial=selectionSerial,selection=copy(selection)}
     return s
 end
 function O.SameContext(a,b) return same(a,b) end
@@ -151,7 +168,29 @@ function O.Acquire(s)
     if fresh.offerPending or #fresh.board>0 or fresh.hostPending or A.InFlight() then return nil,"Resolve the current Echo action first." end
     if fresh.autoAccept then return nil,"Turn off the game's automatic Echo acceptance before starting Orb mode." end
     if A.RivalDetected and A.RivalDetected() then return nil,"Disable the other Echo automation addon before using Orb mode." end
-    owner={};ownerContext=fresh.context;return owner,fresh
+    owner={};ownerContext=fresh.context;selection=nil
+    local svc=ownerContext.svc
+    if not watched[svc] and type(hooksecurefunc)=="function" then
+        -- Observe native manual settlement without replacing any game handler.
+        -- The pending ID and exact visible offer tie this observation to a choice.
+        local ok=pcall(hooksecurefunc,svc,"SelectPerk",function(id)
+            if not owner or ownerContext.svc~=svc then return end
+            local s=O.Read()
+            if not s or not s.offerPending or #s.board~=3 or ownerContext.pe.Perks.pendingSelectSpellId~=id then return end
+            local chosen
+            for _,c in ipairs(s.board) do if c.spellId==id then
+                local k=id..":"..c.quality
+                if chosen and chosen~=k then return end
+                chosen=k
+            end end
+            if chosen then
+                selectionSerial=selectionSerial+1
+                selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp}
+            end
+        end)
+        if ok then watched[svc]=true end
+    end
+    return owner,fresh
 end
 function O.Release(token)
     if token~=owner then return false end
@@ -183,6 +222,11 @@ end
 function O.Select(token,index,expectedBoard,id)
     local s,err=validate(token);if not s then return nil,"REJECTED",err end
     local c=s.board[index]
+    for _,other in ipairs(s.board) do
+        if c and other.spellId==id and other.quality~=c.quality then
+            return nil,"REJECTED","The ID-only choice interface cannot distinguish the offered qualities. Resolve the offer manually."
+        end
+    end
     if not s.offerPending or s.hostPending or not c or not c.selectable or c.spellId~=id
         or not s.catalog[id] or not s.catalog[id].available
         or s.boardKey~=expectedBoard then return nil,"REJECTED","The Orb offer changed or another action is pending." end

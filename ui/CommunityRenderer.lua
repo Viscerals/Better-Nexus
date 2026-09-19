@@ -1953,7 +1953,7 @@ local function EnsureFrame()
     titleText:SetPoint("TOP",0,-12)
     titleText:SetJustifyH("CENTER")
     frame._titleText = titleText
-    titleText:SetText("Nexus  —  Builds")
+    titleText:SetText("Nexus  —  Build Library")
 
     local closeBtn = CreateFrame("Button",nil,frame,"UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT",-6,-6)
@@ -2088,14 +2088,14 @@ local function EnsureFrame()
 
     -- Primary navigation is centered and visually separate from filtering.
     local navBar = CreateFrame("Frame",nil,frame)
-    navBar:SetSize(314,24)
+    navBar:SetSize(332,24)
     navBar:SetPoint("TOPLEFT",18,-12)
     frame._navBar = navBar
 
     local buildsTab = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
-    buildsTab:SetSize(92,22)
+    buildsTab:SetSize(110,22)
     buildsTab:SetPoint("LEFT",0,0)
-    buildsTab:SetText("|cffffd200Builds|r")
+    buildsTab:SetText("|cffffd200Build Library|r")
     buildsTab:Disable()
 
     leaderboardBtn = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")

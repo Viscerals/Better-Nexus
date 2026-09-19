@@ -38,14 +38,19 @@ function P.Progress(targets,s)
     return result
 end
 function P.Sources(targets,s,excluded)
-    local needed,groups={},{}
+    local needed,groups,qualities={},{},{}
     for _,t in ipairs(targets or {}) do
-        if t.role=="rolled" then needed[t.key]=(needed[t.key] or 0)+t.copies end
+        -- A granted copy reserved for a future permanent slot is not also a
+        -- rolled target copy. Only existing exact permanent ownership offsets it.
+        local reserve=t.role=="rolled" and t.copies or math.max(0,t.copies-((s.locked or {})[t.key] or 0))
+        needed[t.key]=(needed[t.key] or 0)+reserve
     end
     for k,count in pairs(s.granted or {}) do
         local id,q=k:match("^(%d+):(%d+)$");id,q=tonumber(id),tonumber(q)
         local row=s.catalog[id]
-        if row then
+        if row and count>0 then
+            if qualities[id] and qualities[id]~=q then qualities[id]=false
+            elseif qualities[id]==nil then qualities[id]=q end
             local group=groups[row.group] or {};groups[row.group]=group
             group[#group+1]={key=k,spellId=id,quality=q,name=row.name,group=row.group,
                 count=count,excess=math.max(0,count-(needed[k] or 0)),excluded=excluded and excluded[k]==true}
@@ -62,7 +67,9 @@ function P.Sources(targets,s,excluded)
             -- that same identity on an undocumented client. Conservatively exclude it.
             local anyLocked=false
             for k,n in pairs(s.locked or {}) do if n>0 and tonumber(k:match("^(%d+):"))==first.spellId then anyLocked=true end end
-            if not anyLocked then sources[#sources+1]=first end
+            -- ConfirmSpend accepts only an ID. Multiple owned qualities of
+            -- that ID cannot be approved by guessing which one it consumes.
+            if not anyLocked and qualities[first.spellId]~=false then sources[#sources+1]=first end
         end
     end
     table.sort(sources,function(a,b)

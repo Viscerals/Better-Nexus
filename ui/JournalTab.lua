@@ -49,7 +49,7 @@ end
 
 local ASSET = "Interface\\AddOns\\ProjectEbonhold\\assets\\"
 local NOTE1 = "Compares the assigned Wishlist with the ACTIVE Saved Build."
-local NOTE2 = "|cff8a8a8aSet associations on the game's My Builds screen; loadout activation remains server-controlled and level-1-only.|r"
+local NOTE2 = "|cff8a8a8aSet associations in My Builds. Saved Build activation requires the server's supported level and state.|r"
 
 ------------------------------------------------------------------------
 -- Text lines
@@ -82,6 +82,7 @@ local function DoRefresh()
     local cy = -6
 
     local function AddLine(text, font, indent)
+        text=Nexus.UserText and Nexus.UserText.Message(text) or text
         indent = indent or 0
         local fs = AcquireLine()
         fs:SetFontObject(font or "GameFontHighlightSmall")

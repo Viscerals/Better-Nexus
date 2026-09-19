@@ -890,10 +890,10 @@ local function EnsureFrame()
     close:SetPoint("TOPRIGHT", -6, -6)
 
     local buildsNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    buildsNav:SetSize(88, 22)
+    buildsNav:SetSize(108, 22)
     buildsNav:SetPoint("TOPLEFT", 18, -12)
-    buildsNav:SetText("Builds")
-    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(buildsNav,"Builds") end
+    buildsNav:SetText("Build Library")
+    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(buildsNav,"Build Library") end
     buildsNav:SetScript("OnClick", function()
         frame:Hide()
         if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end
@@ -1186,14 +1186,14 @@ local function EnsureFrame()
     local communityBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     communityBtn:SetSize(140, 22)
     communityBtn:SetPoint("TOPRIGHT", -34, -126)
-    communityBtn:SetText("Nexus Builds")
+    communityBtn:SetText("Build Library")
     communityBtn:SetScript("OnClick", function()
         Controller.OpenCommunity()
     end)
     communityBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Browse and post shared wishlists", 1, 1, 1)
-        GameTooltip:AddLine("Opens Nexus Builds -- see what other players running", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Opens Build Library -- see what other players running", 0.8, 0.8, 0.8, true)
         GameTooltip:AddLine("Nexus have posted, or share your own.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
@@ -1700,7 +1700,7 @@ local function RefreshView(catalogRevision)
             candidateButtons[1]:Show()
             for i = 2, #candidateButtons do candidateButtons[i]:Hide() end
         else
-            trackingText:SetText("|cff888888No wishlist yet|r -- build one below, or check Nexus Builds.")
+            trackingText:SetText("|cff888888No wishlist yet|r -- build one below, or check Build Library.")
             for _, b in ipairs(candidateButtons) do b:Hide() end
         end
     end

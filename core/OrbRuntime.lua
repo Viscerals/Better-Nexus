@@ -5,6 +5,7 @@ local M={};Nexus.OrbRuntime=M
 local P=assert(Nexus.OrbPolicy);local B=assert(Nexus.GameAdapter.Orbs)
 local config,run,approval,frame,configOwner
 local advancing=false
+local passiveDepth=0
 local OFFER_TIMEOUT,RESULT_TIMEOUT=10,12
 local function copy(t)
     if type(t)~="table" then return t end
@@ -186,7 +187,7 @@ local function preflight()
     end
     for _,t in ipairs(m.progress.items) do
         local r=m.s.catalog[t.spellId]
-        if t.role=="rolled" and t.missing>0 and (not r or not r.available or r.quality~=t.quality) then return nil,"A missing target is currently unavailable: "..(r and r.name or t.spellId).."." end
+        if t.role=="rolled" and t.missing>0 and (not r or not r.available or r.quality~=t.quality) then return nil,"A missing target is currently unavailable: "..(r and r.name or t.spellId)..". "..(r and r.availabilityReason or "") end
     end
     if m.s.charges<1 then return nil,"No confirmed Orbs are available." end
     if m.s.autoAccept then return nil,"Turn off the game's automatic Echo acceptance first." end
@@ -261,13 +262,27 @@ function M.Confirm(token)
     approval=nil;ensureFrame();M.Pump();return true
 end
 local function finishResult(s,p)
+    -- Neither a new table nor an Orb decrement proves a result. Require the
+    -- original offer and a selection observed within that offer's lifecycle.
+    if not p.offerKey or not p.selectionAttempted or not p.selectedKey
+        or not p.offeredKeys or not p.offeredKeys[p.selectedKey] then return false end
     if p.restored and not p.baselineStamp then p.baselineStamp=s.grantStamp;return false end
     local fresh=s.grantStamp>(p.restored and p.baselineStamp or p.selectionStamp or p.beforeStamp)
-    if not fresh or s.offerPending or #s.board>0 or s.hostPending then return false end
+    if s.offerPending or #s.board>0 or s.hostPending then return false end
     if s.lockedKey~=p.lockedKey then pause("Permanent Echoes changed during the operation. Resolve the result manually.");return false end
     if s.charges~=p.chargesBefore-1 then return false end
     local gained,status=P.SingleGain(p.before,p.removed,s.granted)
     if status=="WAIT" then return false end
+    if status=="CONFIRMED" and gained==p.removed then
+        -- Even a source-removal observation followed by an equal-content
+        -- snapshot can be a reordered stale response. The supported API has
+        -- no correlated operation ID/revision for this same-quality outcome.
+        if p.selectedKey==p.removed then
+            pause("The same-ID, same-quality result is indistinguishable from stale ownership data. The client supplies no correlated completion evidence. Pending exposure is retained; no retry is allowed.")
+        end
+        return false
+    end
+    if not fresh then return false end
     if status~="CONFIRMED" or (p.selectedKey and gained~=p.selectedKey) then
         pause("Echo ownership does not match the expected replacement. No further Orb will be spent.");return false
     end
@@ -292,8 +307,33 @@ local function finishResult(s,p)
     else setState("READY","Replacement confirmed. Preparing the next approved Orb.") end
     return true
 end
-function M.Pump()
+local function observeLifecycle(s,p)
+    local changed=false
+    if s.offerPending and #s.board==3 then
+        if p.offerKey and p.offerKey~=s.boardKey then
+            pause("The pending Orb offer changed unexpectedly. Resolve the original operation manually.");return false
+        end
+        if not p.offerKey then
+            p.offerKey=s.boardKey;p.offeredKeys={}
+            for _,c in ipairs(s.board) do p.offeredKeys[P.Key(c.spellId,c.quality)]=true end
+            changed=true
+        end
+    end
+    local sel=s.selection
+    if sel and sel.serial>(p.beforeSelectionSerial or 0) and sel.boardKey==p.offerKey then
+        if p.selectedKey and p.selectedKey~=sel.key then
+            pause("A different choice was submitted during the pending operation. Resolve it manually.");return false
+        end
+        if not p.selectionAttempted then
+            p.selectionAttempted=true;p.selectedKey=sel.key;p.selectionStamp=sel.grantStamp;changed=true
+        end
+    end
+    if changed then local ok,e=savePending();if not ok then pause(e);return false end end
+    return true
+end
+function M.Pump(passive)
     init();if advancing or (not run.running and not run.pending) then return end
+    passive=passive==true or passiveDepth>0
     advancing=true
     local function step()
         local s,err=B.Read();if not s then pause(err);return end
@@ -302,12 +342,14 @@ function M.Pump()
             if p.guid~=s.context.guid then pause("The earlier Orb action belongs to another character.");return end
             if not p.baselineStamp then p.baselineStamp=s.grantStamp end
             if finishResult(s,p) then return end
+            if run.state=="PAUSED" then return end
             setState("RECOVERY","An earlier action remains unresolved. Resolve the native offer, then Recheck; no new spend is allowed.")
             return
         end
         if run.context and not B.SameContext(run.context,s.context) then pause("Character, run, or loadout changed. The pending operation will not be replayed.");return end
         if p then
             if s.lockedKey~=p.lockedKey then pause("Permanent Echoes changed; no further Orb action will be submitted.");return end
+            if not observeLifecycle(s,p) then return end
             if not p.spendConfirmed and s.charges==p.chargesBefore-1 and s.offerPending then
                 p.spendConfirmed=true;run.spent=run.spent+1;run.reserved=0
                 local ok,e=savePending();if not ok then pause(e);return end
@@ -315,7 +357,7 @@ function M.Pump()
                 pause("The Orb balance changed unexpectedly. No further action will be submitted.");return
             end
             if finishResult(s,p) then return end
-            if not run.running then return end
+            if not run.running or passive then return end
             if not entriesStillMatch() then pause("The selected Wishlist changed; resolve the pending offer manually.");return end
             if p.selectionAttempted then
                 setState("WAIT_RESULT","Waiting for a fresh server response confirming the selected replacement.")
@@ -354,7 +396,7 @@ function M.Pump()
             end
             return
         end
-        if not run.running then return end
+        if not run.running or passive then return end
         if not entriesStillMatch() then pause("The selected Wishlist changed; review a new run before spending.");return end
         local progress=P.Progress(run.targets,s)
         if progress.rolledMissing==0 then
@@ -364,7 +406,7 @@ function M.Pump()
         for _,target in ipairs(progress.items) do
             local row=s.catalog[target.spellId]
             if target.role=="rolled" and target.missing>0 and (not row or not row.available or row.quality~=target.quality) then
-                pause("A required target is no longer available. No next Orb will be spent.");return
+                pause("A required target is no longer available. "..(row and row.availabilityReason or "").." No next Orb will be spent.");return
             end
         end
         if run.spent+run.reserved>=run.limit then terminal("LIMIT","The approved Orb limit was reached.");return end
@@ -379,7 +421,7 @@ function M.Pump()
         if not source then terminal("NO_SOURCES","No approved safe source copies remain. Review a new run to change the pool.");return end
         local recycle=source.key==run.recycleKey
         p={before=copy(s.granted),lockedKey=s.lockedKey,removed=source.key,chargesBefore=s.charges,
-            beforeStamp=s.grantStamp,since=now(),guid=s.context.guid,spendConfirmed=false}
+            beforeStamp=s.grantStamp,beforeSelectionSerial=s.selectionSerial,since=now(),guid=s.context.guid,spendConfirmed=false}
         run.pending=p;run.reserved=1
         local ok,e=savePending();if not ok then run.pending=nil;run.reserved=0;pause(e);return end
         if not recycle then run.remaining[source.key]=math.max(0,(run.remaining[source.key] or 0)-1) end
@@ -443,8 +485,17 @@ function M.Recheck()
     if run.pending and run.pending.restored and not run.pending.baselineStamp then
         local s=B.Read();if s then run.pending.baselineStamp=s.grantStamp end
     end
-    local ok,err=B.RequestRefresh();if not ok then return nil,err end
-    if run.pending then ensureFrame();M.Pump() end
+    -- A refresh can invoke synchronous notifications. All nested Pump calls
+    -- remain passive until this handler returns, including ready offers.
+    passiveDepth=passiveDepth+1
+    local success,ok,err=pcall(function()
+        local refreshed,why=B.RequestRefresh()
+        if run.pending then ensureFrame();M.Pump(true) end
+        return refreshed,why
+    end)
+    passiveDepth=passiveDepth-1
+    if not success then return nil,"The read-only refresh failed; no new action was requested." end
+    if not ok then return nil,err end
     return true,"Requested an Orb/ownership refresh. No Orb or choice was submitted."
 end
 function M.BlocksOrdinary()

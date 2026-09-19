@@ -60,6 +60,10 @@ Starting disables ordinary Automation; it does not automatically re-enable it. T
 
 Pause/Stop prevents new submissions, not a spend already accepted. The native offer remains accessible. Recheck only requests balance/ownership data. A missing response retains spending exposure; no automatic repeat is sent.
 
+Closing the window does not stop an approved run. Use Pause or Stop.
+
+Real-resource Orb testing remains unavailable pending a separate user decision and native capability confirmation. A same-ID, same-quality result cannot be distinguished from stale ownership by the supported API. It stays paused with pending exposure. Recheck cannot prove it by returning an unchanged table.
+
 Resume retains the approved usage and source limits. Increasing a limit needs another confirmation. Login, reconnect, new resources, or reload never automatically restart spending. An unresolved earlier action must settle before a new run.]]},
  {id="troubleshooting",title="Loading and troubleshooting",text=[[The loading panel shows the current step, work where measurable, and elapsed time. A percentage applies only to that step, never a guessed whole-startup total. /nexus loading reopens it.
 

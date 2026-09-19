@@ -5,6 +5,7 @@ local T={};Nexus.UserText=T
 local reasons={
     ["unsynced"]="Waiting for current Echo data from the server - automatic choices paused",
     ["waiting for owned-echo sync"]="Waiting for current Echo data from the server - automatic choices paused",
+    ["waiting for owned-state sync"]="Waiting for current Echo data from the server - automatic choices paused",
     ["no wishlist set - advisor only"]="No Wishlist assigned - recommendations only",
     ["no wishlist"]="Assign a Wishlist to use its targets",
     ["waiting for three-card board"]="Waiting for the next three Echo choices",
@@ -13,6 +14,12 @@ local reasons={
     ["Orb offer active -- manual action required"]="An Orb offer is active; use Orb mode or resolve it in the game",
     ["Take wanted Echo (Pilot)"]="Take a needed Echo",
     ["Take available Echo (Pilot)"]="Take an available Echo",
+    ["Freeze wanted Echo before search (Pilot)"]="Freeze a needed Echo before searching for another target",
+    ["Banish to find Wishlist targets (Pilot)"]="Banish to find Wishlist targets",
+    ["Reroll: no requested Echo on board (Pilot)"]="Reroll: no requested Echo on board",
+    ["Take available filler (Pilot)"]="Take an available Echo outside the Wishlist",
+    ["Take filler; search unavailable (Pilot)"]="Take an Echo outside the Wishlist; no permitted Banish or Reroll action",
+    ["Wishlist complete; take filler (Pilot)"]="Wishlist complete; take an Echo outside the Wishlist",
     ["Take wanted Echo"]="Take a needed Echo",
     ["invalid wishlist"]="This Wishlist cannot be used yet. Open it in the editor to check its targets",
     ["invalid loadout"]="This Saved Build is unavailable or not valid for this action. Check My Builds",
@@ -29,10 +36,30 @@ local reasons={
     ["bracket fishing: reroll filler guarantee"]="Reroll the unneeded guaranteed offer under the enabled policy",
     ["tight horizon"]="Few selections remain",
     ["drain guaranteed queue"]="Process the confirmed saved-build sequence",
+    ["Tome levers"]="Echo availability controls",
+    ["flag demotions cleared (they re-arm on fresh evidence)"]="Temporary safety-assumption disablements cleared; new evidence can disable them again",
 }
+local function availabilityName(id)
+    local a=Nexus.GameAdapter
+    local catalog=a and a.Catalog and a.Catalog()
+    local lever=catalog and catalog.levers and catalog.levers[tonumber(id)]
+    local name=lever and lever.tomeName
+    return name and (tostring(name).." (control #"..id..")") or ("Echo-availability control #"..id)
+end
 function T.Message(value)
     local s=tostring(value or "")
     if reasons[s] then return reasons[s] end
+    local prefix,body=s:match("^(L%d+ %-%- )(.*)$")
+    if prefix then return prefix..T.Message(body) end
+    body=s:match("^waiting: (.*)$")
+    if body then return T.Message(body) end
+    local id=s:match("^disabling off%-wishlist tome lever (%d+)$")
+    if id then return "Disabling off-Wishlist "..availabilityName(id) end
+    id=s:match("^re%-enabling wishlist tome lever (%d+)$")
+    if id then return "Enabling Wishlist "..availabilityName(id) end
+    local detail
+    id,detail=s:match("^lever (%d+): (.*)$")
+    if id then return availabilityName(id)..": "..detail:gsub("non%-conformant data","unsupported availability data") end
     if s:find("locked roles remain unknown",1,true) or s:find("awaiting authoritative lock evidence",1,true)
         or s:find("waiting for authoritative locked%-Echo evidence") then
         return "Choose this Wishlist's permanent-slot targets in the editor. Your planned build does not have to match the equipped build. Details: "..s
@@ -53,7 +80,7 @@ function T.Message(value)
     end
     if s:find("no net gain",1,true) then return "Not saved: no additional matching Wishlist copies were confirmed." end
     if s:find("coverage lost:",1,true) then return "Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets." end
-    if s:match("^[A-Z][A-Z_]+$") then return "This action is not available yet. Check the status or diagnostics. Details: "..s end
+    if s:match("^[A-Z][A-Z0-9_]+$") then return "This action is not available yet. Check the status or diagnostics. Details: "..s end
     s=s:gsub("Take wanted Echo %(Pilot%)","Take a needed Echo")
         :gsub("Wishlist identity found; ","")
         :gsub("Choose locked targets","Choose permanent targets")
@@ -61,6 +88,7 @@ function T.Message(value)
         :gsub("TARGET:","WISHLIST:")
         :gsub("OWNED this run:","Rolled Echoes this run:")
         :gsub(" %(synced%)"," (server confirmed)")
+        :gsub(" %(not synced yet%)"," (waiting for current Echo data from the server)")
         :gsub("UNARMED","Saved-build guarantees not confirmed")
         :gsub("ARMED","Saved-build guarantees confirmed")
          :gsub("tight horizon","few selections remain")

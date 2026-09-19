@@ -370,10 +370,10 @@ function Projection.New(options)
         local editState
         if savedKind == "saved" then
             editState = validPublishedId
-                and "Uploaded. Upload Build again to publish title/description or loadout changes."
-                or "Local server loadout. Edit its title/description, then Upload Build when ready."
+                and "Shared. Share Build again to update the shared title, description, or Echo list."
+                or "Your server Saved Build. Edit its title/description, then Share Build to send it to other Nexus users."
         elseif mine and loadoutLocked then
-            editState = "|cffffd200Leaderboard loadout locked.|r Title and description may still be edited."
+            editState = "|cffffd200Echo list is read-only: a DPS record is attached.|r Title/description remain editable. Share a new build to use different Echoes."
         elseif mine then
             editState = "You own this build. Edit can also replace its Echoes from your active wishlist."
         end
@@ -398,8 +398,8 @@ function Projection.New(options)
             deleteText=admin and not mine and "Remove" or "Stop Sharing",
             editState=editState,
             actionText=savedKind == "saved"
-                and (validPublishedId and "Update Upload" or "Upload Build")
-                or (hasLoadout and "Copy into Editor" or "Request Loadout"),
+                and (validPublishedId and "Update Shared Build" or "Share Build")
+                or (hasLoadout and "Copy into Editor" or "Request full Echo list"),
             detailsAvailable=context.detailsAvailable == true,
             dummyRows=Copy(dummy),lkRows=Copy(lk),
             dummyPersonal=Copy(dummyPersonal),lkPersonal=Copy(lkPersonal),

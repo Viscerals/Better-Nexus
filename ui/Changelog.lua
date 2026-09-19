@@ -5,7 +5,7 @@ local M = {}
 Nexus.Changelog = M
 
 local VERSION = "1.20.0-beta.1"
-local RELEASE_KEY = "prototype-P1.5-orbs-help"
+local RELEASE_KEY = "prototype-P1.5.1-orb-review"
 local frame
 local shownThisSession = false
 
@@ -43,25 +43,26 @@ local function Create()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
-    title:SetText("Nexus prototype P1.5")
+    title:SetText("Nexus prototype P1.5.1")
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     body:SetPoint("TOPLEFT", 28, -52)
     body:SetPoint("RIGHT", -28, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
-    body:SetText([[|cffffd200Clearer controls and repeatable help|r
-- /nexus help opens Getting Started, Wishlist, rolling, DPS, Orbs, and troubleshooting pages.
-- Extra copies replaces 'shed'; permanent targets and card Freeze have distinct labels.
-- Build lists continue to prepare in the background while ready local tools remain usable.
+    body:SetText([[|cffffd200Reviewed Orb controls and wording|r
+- Required rolled copies and acquired future permanent targets stay protected.
+- Recheck only refreshes and reconciles; it submits no choice or Orb.
+- Build Library, recommendations, and shared-build details use the reviewed labels.
+- /nexus help retains all seven guide pages.
 
 |cffffd200Optional Orb refinement|r
 - /nexus orbs opens the plan; opening it spends nothing.
-- Review exact targets, replaceable copies, and a run limit before confirming Start.
-- Stop blocks further actions but cannot undo an accepted spend.
+- Closing the window does not stop an approved run. Use Pause or Stop.
+- Same-ID, same-quality results remain paused when completion cannot be proved.
 
-Experimental: native gameplay is not verified by the offline tests.
-Back up the previous addon and matching WTF before testing.]])
+Experimental: native gameplay is not verified by offline tests.
+Real-resource Orb testing requires a separate user decision.]])
 
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(92, 24)

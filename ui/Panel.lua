@@ -817,15 +817,15 @@ local function EnsureFrame()
 
     buildsBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     buildsBtn:SetSize(104, 22)
-    buildsBtn:SetText("Builds")
-    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(buildsBtn,"Builds") end
+    buildsBtn:SetText("Build Library")
+    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(buildsBtn,"Build Library") end
     buildsBtn:SetScript("OnClick", function()
         CloseOtherNexusWindows()
         if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end
     end)
     buildsBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Builds", 1, 1, 1)
+        GameTooltip:AddLine("Build Library", 1, 1, 1)
         GameTooltip:AddLine("Open My Builds and browse shared community builds.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
@@ -1798,6 +1798,10 @@ end
 function M.Render(model)
     if type(model) ~= "table" then return false end
     local candidate = DefensiveCopy(model)
+    if Nexus.UserText then
+        candidate.recommendation=Nexus.UserText.Message(candidate.recommendation)
+        candidate.status=Nexus.UserText.Message(candidate.status)
+    end
     local signatures = ModelSignatures(candidate)
     renderStats.calls = renderStats.calls + 1
     EnsureFrame()
@@ -1848,7 +1852,7 @@ function M.Refresh()
 end
 function M.SetStatus(status)
     if not M._lastModel then return false end
-    local nextStatus = SafeText(status)
+    local nextStatus = SafeText(Nexus.UserText and Nexus.UserText.Message(status) or status)
     if SafeText(M._lastModel.status) == nextStatus then return false end
     M._lastModel.status = nextStatus
     if renderState.signatures then

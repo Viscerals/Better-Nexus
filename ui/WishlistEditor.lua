@@ -100,7 +100,7 @@ wishlistController = WishlistControllerFactory.New({
             Nexus.CommunityBuilds.Show()
             return true
         end
-        print("|cffff6060Nexus:|r Nexus Builds unavailable")
+        print("|cffff6060Nexus:|r Build Library unavailable")
         return false
     end,
 })
@@ -330,8 +330,8 @@ function RolePicker.UseOwned(automatic)
     for i,row in ipairs(state.rows) do row.selected=selected[i] end
     state.usedCurrentLocks=automatic==true
     state.message=automatic==true
-        and "Using your current matching permanent locks. The split still needs to fit 79 ordinary / 6 locked."
-        or "Matching owned locks suggested. Review them, then confirm your intended plan."
+        and "Using matching current permanent Echoes. The plan must fit 79 rolled copies / 6 permanent targets."
+        or "Matching current permanent Echoes suggested as targets. Review them, then confirm your plan."
     RolePicker.Render()
     local total=RolePicker.Count()
     return count>0 and total-count>0 and total-count<=79 and count<=6
@@ -342,7 +342,7 @@ function RolePicker.Accept()
     if not state then return false end
     local total,locked=RolePicker.Count()
     if locked>6 or total-locked>79 or total-locked<1 then
-        RolePicker.Message("Select up to six permanent-slot copies so no more than 79 ordinary copies remain.")
+        RolePicker.Message("Select up to six permanent-slot copies so no more than 79 rolled copies remain.")
         return false
     end
     local echoes,ordinary,lockedRows={},{},{}
