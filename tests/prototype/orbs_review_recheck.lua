@@ -1,6 +1,7 @@
 local H=dofile('tests/prototype/orbs_support.lua');local M,O=H.M,H.O
 local f=Nexus.OrbPanel.Show();local recheck,close
-for _,b in ipairs(H.frames)do if b:GetParent()==f then
+for _,b in ipairs(H.frames)do if b:GetParent()==f and b:GetText()=='Advanced'then b:Click()end end
+for _,b in ipairs(H.frames)do if b:GetParent()==f or b:GetParent()==f.advanced then
  if b:GetText()=='Recheck' then recheck=b elseif b:GetText()=='Close' then close=b end end end
 assert(recheck and close)
 local function readOnly()

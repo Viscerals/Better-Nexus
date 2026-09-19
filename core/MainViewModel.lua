@@ -350,6 +350,7 @@ function ViewModel.New(options)
         end
         local out = Copy(type(input.base) == "table" and input.base or {})
         out.status = input.status
+        out.assignment = Copy(input.assignment)
         if out.level == nil then out.level = input.level or 0 end
         out.updateNotice = Copy(input.updateNotice)
         if out.updateNotice then out.updateNotice.releaseUrl = input.releaseUrl end

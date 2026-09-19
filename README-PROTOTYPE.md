@@ -1,14 +1,15 @@
-# Nexus P1.5.1 — Experimental player guide
+# Nexus P1.6 — Experimental player guide
 
 Nexus helps you work toward an Echo build: create or import a Wishlist, follow
 recommendations or enable selected automatic actions, share builds, and compare
-recorded DPS. P1.5 adds **Orbs / Lost Memories** refinement with explicit source
-and spending approval. P1.5.1 corrects the demonstrated source-protection,
-confirmation, and Recheck defects and completes the reviewed wording paths.
+recorded DPS. This continuation simplifies **Orbs / Lost Memories** around the
+assigned Wishlist and one explicit Start. It retains the P1.5.1 source, result
+confirmation, and read-only Recheck safeguards.
 
 **Real-resource Orb testing is not approved for this replacement.** Native
 capabilities, notification order, and quality-consumption behavior remain
-unverified. No installation or native test follows this package automatically.
+unverified. Bounded native Help, assignment-persistence, and controlled Sync tests
+are authorized separately for this exact build. All spending remains prohibited.
 Any real-resource test requires a separate user decision.
 
 This is an experimental prototype, not a stable release. Check the exact package
@@ -103,17 +104,20 @@ Open `/nexus orbs` or **Orbs / Lost Memories** in the main menu. Merely opening
 it cannot spend an Orb. The mode is OFF by default and does not start on login,
 resource arrival, import, ordinary Auto, or reopening its window.
 
-1. Select a resolved Wishlist or use the assigned one.
-2. Check exact missing rolled targets; move their priority with Up/Down.
-3. **Suggest safe source pool**, then inspect every approved source and count.
-   Use +/- or Exclude to protect additional copies. Clearing exclusions does
-   not automatically authorize new sources.
-4. Set the maximum Orbs for this run. The initial default is 10 but is not consent.
-5. Optionally permit safe unwanted offers to be selected and recycled. Recycling
-   is OFF by default. Without it, an offer without a needed target pauses.
-6. Choose **Review single Orb** (cap 1) or **Review & start**.
-7. Read the complete scrollable source list, balance, cap, and recycling option;
-   check the explicit approval box and choose **Confirm & start**.
+1. Check the assigned Wishlist, missing rolled copies, permanent-target limits,
+   and confirmed Orb balance. Unknown or loading is never shown as zero.
+2. Enter the maximum Orbs for this run. The initial default of 10 is not consent.
+3. **Start** approves that maximum and automatic use of eligible surplus copies,
+   including safe unwanted replacements and recycling after confirmation.
+4. The run continues after each confirmed result. Use Pause or Stop when needed.
+   Advanced contains optional source exclusions and a read-only Recheck.
+
+The main panel, Wishlist tools, and Orb view use the same assignment. There is no
+second Orb target selector. If no assignment exists, use My Builds or the editor.
+A known assignment shows **Restoring assigned Wishlist...** while active identity
+is unavailable. Duplicate names and reordered slots cannot replace its exact
+saved contents. An absent server mirror is explained; the saved plan is retained.
+Server-list absence alone is not proof of deletion.
 
 The controller requests **one Orb per replacement**, observes the actual offer,
 chooses the first missing exact target in your ordered list or an approved safe
@@ -128,7 +132,7 @@ source respects the reference's lowest-quality-family sacrifice behavior. A
 source that could ambiguously refer to a permanent copy or multiple qualities
 of the same ID is conservatively
 excluded. Some apparently extra copies may therefore be unavailable as sources.
-The run can stop with an unmet target when your approved source pool is exhausted.
+The run can stop with an unmet target when no safe surplus source remains.
 
 Rolled targets and permanent targets are separate. Orbs do not create or replace
 permanent slots; the run stops when rolled targets are complete, even when the
@@ -147,9 +151,14 @@ Closing the window does not stop an approved run. Use Pause or Stop.
 - Pause/Stop prevents new submissions. It cannot undo an accepted spend.
 - A submitted result may settle passively while paused or stopped.
 - A pending offer remains available in the game's normal interface.
-- Resume keeps the same approved source pool and usage; it cannot replay an
-  ambiguous or already-attempted selection.
-- A higher limit needs explicit review/confirmation and then explicit Resume.
+- Active loadout, assignment, or target changes pause new submissions. The
+  original pending operation keeps its original target until settlement.
+- Explicit Resume adopts the new resolved assignment, recalculates protection,
+  and retains the same maximum and all confirmed/unresolved usage. It cannot
+  replay an ambiguous or already-attempted selection.
+- The compact main-panel row provides progress and Pause/Resume/Stop while the
+  detailed window is closed.
+- The maximum cannot be edited during an active or paused run.
 - Confirmed usage and unresolved spending exposure both count against the cap.
 - A missing response never makes the allowance available for another spend.
 - Offer/result timeouts permit one bounded read-only refresh, then pause.
@@ -212,7 +221,7 @@ commands as generic fixes without understanding their effects.
 
 ## Verification and remaining limitations
 
-P1.5.1 uses synthetic services and real Nexus adapters/controllers/UI handlers
+This continuation uses synthetic services and real Nexus adapters/controllers/UI handlers
 under the established LuaJIT 2.1 / Lua 5.1 Windows route. It uses no Lua 5.4
 compatibility shims. These tests are not native WoW verification or the complete
 upstream regression campaign. See the delivered source/package test receipts
@@ -231,4 +240,5 @@ data, errors, or severe stalls. Preserve evidence rather than deleting fields.
 
 Detailed historical notes are in the source archive under docs, not duplicated
 as old install instructions here. The source review and tests remain available
-with the exact release ZIP; GitHub, T3, and your installed game were not changed.
+with the exact experimental ZIP. Native results are recorded separately against
+the exact package; an offline pass is not native confirmation.

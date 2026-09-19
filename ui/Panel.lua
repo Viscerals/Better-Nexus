@@ -126,6 +126,7 @@ local function ModelSignatures(model)
             serverStatus=model.serverStatus,
             showPerformance=showPerformance,
             layoutRevision=layoutKey,
+            assignment=model.assignment,
         }),
         performance = Signature({
             performance=type(model.progress) == "table" and model.progress.performance or nil,
@@ -1600,9 +1601,14 @@ local function ApplyModel(model, signatures)
         -- with an equally-weighted second option.
         frame:SetHeight((activeRoll and 428 or 278) - statusHeightReduction)
         SetPoint(setupText, "TOP", frame, "TOP", 0, contentTop - 18)
-        setupText:SetText("Assign a wishlist to this loadout")
+        local assignment=model.assignment or {}
+        local restoring=assignment.state=="restoring" or assignment.state=="loading"
+        setupText:SetText(restoring and "Restoring assigned Wishlist..."
+            or (assignment.state=="unavailable" and "Assigned Wishlist is unavailable" or "Assign a wishlist to this loadout"))
         SetPoint(setupHint, "TOP", frame, "TOP", 0, contentTop - 48)
-        setupHint:SetText("Assign an existing wishlist to this loadout, or create a new one. No Saved Build is required.")
+        setupHint:SetText((restoring or assignment.state=="unavailable") and (assignment.note or "Waiting for the saved assignment and current loadout data.")
+            or "Assign an existing wishlist to this loadout, or create a new one. No Saved Build is required.")
+        if restoring then setupGetStartedBtn:Hide();setupImportBtn:Hide()end
         setupGetStartedBtn:ClearAllPoints()
         setupGetStartedBtn:SetPoint("TOP", frame, "TOP", 0, contentTop - 96)
         setupImportBtn:ClearAllPoints()
@@ -1805,6 +1811,8 @@ function M.Render(model)
     local signatures = ModelSignatures(candidate)
     renderStats.calls = renderStats.calls + 1
     EnsureFrame()
+
+    if Nexus.OrbPanel then Nexus.OrbPanel.AttachMainPanel(frame)end
 
     -- A widget tree is a mutable object, so the visibility boundary is the
     -- transaction: hide while applying, and publish commit/model/signature

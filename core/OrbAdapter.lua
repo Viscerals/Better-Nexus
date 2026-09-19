@@ -71,6 +71,18 @@ local function hostPending(pe)
         or p.pendingFreezeIndex~=nil or p.pendingReroll==true
         or p.pendingLockSpellId~=nil or p.pendingUnlockSpellId~=nil
 end
+function O.Balance()
+    local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService
+    if type(orb)~="table" or type(orb.IsStateKnown)~="function" or type(orb.GetCharges)~="function" then
+        return nil,"unsupported","The client does not expose the Orb balance capability."
+    end
+    local ok,known=call(orb,"IsStateKnown")
+    if not ok or type(known)~="boolean" then return nil,"unknown","Orb balance state is unavailable." end
+    if not known then return nil,"loading","Waiting for the server's Orb balance." end
+    local read,n=call(orb,"GetCharges")
+    if not read or not integer(n,0) then return nil,"unknown","Orb balance is unavailable or invalid." end
+    return n,"confirmed"
+end
 function O.Read()
     local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService;local orb=pe and pe.OrbService
     for _,name in ipairs({"IsStateKnown","GetCharges","IsOfferPending","ConfirmSpend","RequestCharges"}) do
@@ -168,6 +180,19 @@ function O.Read()
     return s
 end
 function O.SameContext(a,b) return same(a,b) end
+function O.SameOwner(a,b)
+    return type(a)=="table" and type(b)=="table" and a.pe==b.pe and a.svc==b.svc
+        and a.orb==b.orb and a.guid==b.guid and a.generation==b.generation and a.level==b.level
+end
+function O.Rebind(token,expected)
+    if not owner or token~=owner then return nil,"This run no longer owns Orb actions." end
+    local fresh,err=O.Read();if not fresh then return nil,err end
+    if not O.SameOwner(ownerContext,fresh.context) or not expected or not same(expected.context,fresh.context)
+        or fresh.offerPending or #fresh.board>0 or fresh.hostPending or A.InFlight() then
+        return nil,"The original owner or a pending action prevents resuming."
+    end
+    ownerContext=fresh.context;return true
+end
 function O.IsOwned() return owner~=nil end
 function O.Acquire(s)
     if owner then return nil,"Orb mode already owns an operation." end
@@ -213,7 +238,7 @@ local function validate(token)
     if A.DIAGNOSTIC_PASSIVE then return nil,"Actions are blocked in passive diagnostics." end
     return s
 end
-function O.Spend(token,key,expected)
+function O.Spend(token,key,expected,guard)
     local s,err=validate(token);if not s then return nil,"REJECTED",err end
     if s.offerPending or #s.board>0 or s.hostPending or A.InFlight() or s.charges<1 then
         return nil,"REJECTED","Another choice is pending or no Orbs remain."
@@ -223,12 +248,13 @@ function O.Spend(token,key,expected)
         return nil,"REJECTED","The approved source or balance changed before spending."
     end
     local id=tonumber(tostring(key):match("^(%d+):%d+$"));if not id then return nil,"REJECTED","Invalid source." end
+    if guard and guard(s)~=true then return nil,"REJECTED","Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
     local ok,value=pcall(ownerContext.orb.ConfirmSpend,id,1)
     if not ok then return nil,"AMBIGUOUS","The spend call failed; its server outcome is unknown. No repeat will be sent." end
     if value==false then return nil,"REJECTED","The game refused the Orb spend." end
     return true,"SUBMITTED"
 end
-function O.Select(token,index,expectedBoard,id)
+function O.Select(token,index,expectedBoard,id,guard)
     local s,err=validate(token);if not s then return nil,"REJECTED",err end
     local c=s.board[index]
     for _,other in ipairs(s.board) do
@@ -239,6 +265,7 @@ function O.Select(token,index,expectedBoard,id)
     if not s.offerPending or s.hostPending or not c or not c.selectable or c.spellId~=id
         or not s.catalog[id] or not s.catalog[id].available
         or s.boardKey~=expectedBoard then return nil,"REJECTED","The Orb offer changed or another action is pending." end
+    if guard and guard(s)~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
     if not ok or (v~=true and v~=false) then return nil,"AMBIGUOUS","The selection outcome is unknown. No selection will be repeated." end
     if v==false then return nil,"REJECTED","The game refused the Orb choice. Resolve the offer manually." end

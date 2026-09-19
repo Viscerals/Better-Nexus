@@ -48,13 +48,13 @@ DPS capture depends on Details! and its supported events. A read-only Echo list 
 Sync Now checks for shared builds and records. Preparing, request sent, receiving updates, and finished are distinct. Sent does not prove peer convergence. Removing expired requests is bounded queue housekeeping.
 
 The addon uses its normal live sharing network. Do not flood it or test malformed traffic. Older PR #68 peers cannot fully converge on locked-bearing builds; new-peer success must be tested separately.]]},
- {id="orbs",title="Orbs / Lost Memories",text=[[Orb mode refines existing rolled Echoes toward a selected resolved Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace permanent slots. Once rolled targets are complete it stops, even if the plan still has unmet permanent targets.
+ {id="orbs",title="Orbs / Lost Memories",text=[[Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace permanent slots. Once rolled targets are complete it stops, even if the plan still has unmet permanent targets.
 
-1. Open /nexus orbs. Select a Wishlist or use the assigned one.
-2. Review outstanding exact targets and their order (topmost missing target first).
-3. Suggest a source pool, then approve only copies you will allow to be removed. Permanent and required target copies are protected. Exclude additional Echoes if desired.
-4. Choose a per-run limit. Review single Orb caps the run at one. Review & start shows a confirmation; nothing spends merely by opening the panel.
-5. Optionally approve safe unwanted offers to be selected and recycled. Without a safe target or approved fallback, the run pauses for manual resolution.
+1. Open /nexus orbs. Its Wishlist is the same assignment shown in the main panel. Use My Builds or the Wishlist Editor if none is assigned.
+2. Check missing rolled copies, permanent-target limits, and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
+3. Enter the maximum Orbs. Start explicitly approves that maximum and automatic use of eligible surplus copies, including safe recycling. Opening the window approves nothing.
+4. One Start continues after each confirmed result. It stops at target completion, the maximum, insufficient balance, no safe source, or uncertainty. Permanent and required copies stay protected. Advanced provides optional exclusions and read-only Recheck.
+5. Changing the active loadout, assignment or targets pauses new actions. An already-submitted operation remains bound to its original target. After it settles, explicit Resume adopts the new target and retains all usage against the same maximum.
 
 Starting disables ordinary Automation; it does not automatically re-enable it. The game and other addons' competing pickers must be off. Unknown capabilities disable only Orb mode.
 
@@ -62,9 +62,11 @@ Pause/Stop prevents new submissions, not a spend already accepted. The native of
 
 Closing the window does not stop an approved run. Use Pause or Stop.
 
+Compact progress and Pause/Resume/Stop remain in the main Nexus panel when this window is closed.
+
 Real-resource Orb testing remains unavailable pending a separate user decision and native capability confirmation. A same-ID, same-quality result cannot be distinguished from stale ownership by the supported API. It stays paused with pending exposure. Recheck cannot prove it by returning an unchanged table.
 
-Resume retains the approved usage and source limits. Increasing a limit needs another confirmation. Login, reconnect, new resources, or reload never automatically restart spending. An unresolved earlier action must settle before a new run.]]},
+Resume retains confirmed usage and unresolved exposure. Login, reconnect, new resources, or reload never automatically restart spending. An unresolved earlier action must settle before a new run. Missing confirmation can prevent further Orb use indefinitely; Resume, Recheck and reload are not guaranteed fixes.]]},
  {id="troubleshooting",title="Loading and troubleshooting",text=[[The loading panel shows the current step, work where measurable, and elapsed time. A percentage applies only to that step, never a guessed whole-startup total. /nexus loading reopens it.
 
 Wishlist tools and ordinary rolling can be available after local validation while shared builds still prepare. Rolling also needs its own fresh ownership/board/resource state. Gray Build Library/Leaderboard tabs mean those shared views are not ready.
@@ -98,12 +100,21 @@ H.Pages=pages
 local function refresh()
     local p=pages[index];frame.title:SetText("Nexus Help - "..p.title);frame.body:SetText(p.text)
     frame.page:SetText("Page "..index.." / "..#pages)
-    if frame.content then frame.content:SetHeight(math.max(414,frame.body:GetStringHeight()+24)) end
+    if frame.content then
+        frame.body:SetHeight(0)
+        local measured=frame.body:GetStringHeight()
+        local height=math.max(414,tonumber(measured) or 0)
+        frame.body:SetHeight(height);frame.content:SetHeight(height+24)
+    end
 end
 local function ensure()
     if frame then return end
     frame=CreateFrame("Frame","NexusHelpWindow",UIParent);frame:SetSize(660,540);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
-    frame:SetFrameStrata("DIALOG");frame:SetFrameLevel(150);frame:EnableMouse(true);frame:SetMovable(true)
+    -- The supported 3.3.5 client clamps high child levels: the previous parent
+    -- rendered at 129 while scroll/content/buttons rendered at 128 underneath.
+    -- Stay below that ceiling and set every interactive/content layer explicitly.
+    frame:SetFrameStrata("DIALOG");frame:SetFrameLevel(30);frame:EnableMouse(true);frame:SetMovable(true)
+    frame:SetClampedToScreen(true)
     frame:RegisterForDrag("LeftButton");frame:SetScript("OnDragStart",function(self)self:StartMoving()end)
     frame:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
     frame:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
@@ -111,11 +122,14 @@ local function ensure()
     frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge");frame.title:SetPoint("TOPLEFT",20,-20)
     local scroll=CreateFrame("ScrollFrame","NexusHelpScroll",frame,"UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT",20,-56);scroll:SetSize(595,414)
+    scroll:SetFrameLevel(31)
     local child=CreateFrame("Frame",nil,scroll);child:SetSize(590,650);scroll:SetScrollChild(child);frame.content=child
+    child:SetPoint("TOPLEFT",scroll,"TOPLEFT",0,0);child:SetFrameLevel(32)
     frame.body=child:CreateFontString(nil,"OVERLAY","GameFontHighlight");frame.body:SetPoint("TOPLEFT",0,0)
     frame.body:SetWidth(585);frame.body:SetJustifyH("LEFT");frame.body:SetJustifyV("TOP");frame.body:SetWordWrap(true)
     local function b(x,w,label,fn)
         local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("BOTTOMLEFT",x,20);f:SetSize(w,25);f:SetText(label)
+        f:SetFrameLevel(32)
         f:SetScript("OnClick",function()fn();scroll:SetVerticalScroll(0)end);return f
     end
     b(20,90,"Previous",function()index=math.max(1,index-1);refresh()end)
@@ -127,6 +141,6 @@ local function ensure()
 end
 function H.Show(id)
     ensure();if id then for i,p in ipairs(pages) do if p.id==id then index=i end end end
-    refresh();frame:Show();return frame
+    frame:Show();refresh();return frame
 end
 function H.Hide()if frame then frame:Hide()end end

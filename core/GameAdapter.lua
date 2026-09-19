@@ -1651,24 +1651,8 @@ local function ResolveAssociation(loadoutSlot)
                 return c
             end
         end
-        -- A server wishlist can be edited and then recreated/reindexed, which
-        -- changes both its Echo fingerprint and numeric designed slot. Follow
-        -- a unique exact-name match and immediately refresh the stored slot/key.
-        -- Duplicate names are deliberately not guessed.
-        local oldSlot, oldName = tonumber(saved.slot), tostring(saved.name or "")
-        if oldName ~= "" then
-            local nameMatch, nameMatches = nil, 0
-            for _, c in ipairs(candidates) do
-                if tostring(c.name or "") == oldName then
-                    nameMatch, nameMatches = c, nameMatches + 1
-                end
-            end
-            if nameMatches == 1 and nameMatch
-                and tonumber(nameMatch.slot) ~= oldSlot then
-                saved.slot, saved.key, saved.name = nameMatch.slot, nameMatch.key, nameMatch.name
-                return nameMatch
-            end
-        end
+        -- A name or a reused/reordered slot cannot authorize new contents.
+        -- Only an explicit assignment/save can replace the stored identity.
     end
     -- No key means an incomplete/old record. Slot fallback is accepted once
     -- only and upgraded immediately.
@@ -1694,18 +1678,7 @@ end
 local function ResolveFirstRunWishlist()
     local state = Store and Store.State and Store.State()
     local saved = state and state.firstRunWishlist
-    if type(saved) ~= "table" then
-        local unique, only, count = {}, nil, 0
-        for _, linked in pairs((state and state.loadoutWishlists) or {}) do
-            local candidate = CandidateFromStoredRecord(linked)
-            if candidate and not unique[candidate.key] then
-                unique[candidate.key] = true
-                only, count = linked, count + 1
-            end
-        end
-        if count ~= 1 then return nil end
-        saved = only
-    end
+    if type(saved) ~= "table" then return nil end
     local candidates = A.GetWishlistCandidates()
     local wantedKey, wantedName = tostring(saved.key or ""), tostring(saved.name or "")
     if wantedKey ~= "" then
@@ -1718,16 +1691,6 @@ local function ResolveFirstRunWishlist()
             end
         end
     end
-    if wantedName ~= "" then
-        local match, count = nil, 0
-        for _, c in ipairs(candidates) do
-            if tostring(c.name or "") == wantedName then match, count = c, count + 1 end
-        end
-        if count == 1 and match then
-            saved.slot, saved.key, saved.name = match.slot, match.key, match.name
-            return match
-        end
-    end
     return CandidateFromStoredRecord(saved)
 end
 
@@ -1737,6 +1700,11 @@ function A.GetFirstRunWishlist()
     return candidate
 end
 
+function WishlistRoles.StampAssignment(state, record)
+    state.wishlistAssignmentSerial=(tonumber(state.wishlistAssignmentSerial) or 0)+1
+    record.assignmentId="assigned:"..tostring(state.wishlistAssignmentSerial)
+end
+
 function A.SetFirstRunWishlist(wishlistSlot, candidate)
     wishlistSlot = tonumber(wishlistSlot)
     local selected, why = SelectWishlistCandidate(wishlistSlot, candidate)
@@ -1744,6 +1712,7 @@ function A.SetFirstRunWishlist(wishlistSlot, candidate)
     local record = StoredWishlistRecord(selected)
     if not record then return false, "invalid wishlist" end
     if not UpdateStoreState(function(state)
+        WishlistRoles.StampAssignment(state,record)
         state.firstRunWishlist = record
     end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
@@ -1754,6 +1723,7 @@ function A.SetFirstRunWishlistIdentity(name, echoes)
     local record = StoredWishlistRecord({name=name, echoes=echoes})
     if not record then return false end
     if not UpdateStoreState(function(state)
+        WishlistRoles.StampAssignment(state,record)
         state.firstRunWishlist = record
     end) then return false end
     MarkWishlistProjectionDirty()
@@ -1909,6 +1879,7 @@ function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes)
     local record = StoredWishlistRecord({name=name, echoes=echoes})
     if not record then return false, "invalid wishlist" end
     if not UpdateStoreState(function(state)
+        WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
         state.firstRunWishlist = nil
@@ -1942,6 +1913,8 @@ function A.SetFirstLoadoutWishlistIdentity(name, echoes)
     if not record then return false, "invalid wishlist" end
     local mirrored = StoredWishlistRecord(record)
     if not UpdateStoreState(function(state)
+        WishlistRoles.StampAssignment(state,record)
+        mirrored.assignmentId=record.assignmentId
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[1] = record
         state.firstRunWishlist = mirrored
@@ -1969,6 +1942,7 @@ function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
     local record = StoredWishlistRecord(selected)
     if not record then return false, "invalid wishlist" end
     if not UpdateStoreState(function(state)
+        WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
         state.firstRunWishlist = nil
@@ -1986,6 +1960,7 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     })
     if not record then return false end
     if not UpdateStoreState(function(state)
+        WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
         state.firstRunWishlist = nil
@@ -2010,6 +1985,13 @@ function A.Wishlist()
     projectionStatus.wishlist.calls = projectionStatus.wishlist.calls + 1
     A._wishlistNote = nil
     local slots = A.Slots()
+    if not slots or slots.activeKnown==false then
+        local saved = Store and Store.State and Store.State()
+        local known = saved and (saved.firstRunWishlist
+            or (type(saved.loadoutWishlists)=="table" and next(saved.loadoutWishlists)))
+        A._wishlistNote = known and "Restoring assigned Wishlist..." or "Waiting for loadout data..."
+        return nil
+    end
     local activeSlot = slots and tonumber(slots.activeSlot) or 0
     local maxSlots = slots and (tonumber(slots.maxSlots) or 5) or 5
     if activeSlot < 1 or activeSlot > maxSlots then
@@ -2026,6 +2008,10 @@ function A.Wishlist()
         local state = Store and Store.State and Store.State()
         if state and type(state.firstRunWishlist) == "table" then
             A._wishlistNote = "First-run wishlist data is temporarily unavailable; waiting for the server mirror."
+            return nil
+        end
+        if state and type(state.loadoutWishlists)=="table" and next(state.loadoutWishlists)then
+            A._wishlistNote="Restoring assigned Wishlist..."
             return nil
         end
         A._wishlistNote = "Choose or create a wishlist to begin your first run."
@@ -2078,6 +2064,62 @@ function A.Wishlist()
 end
 
 function A.WishlistNote() return A._wishlistNote end
+
+-- One read-only assignment projection for the HUD, editor-facing status and
+-- Orb controller. Local permanent designs are part of the assigned target,
+-- even when the server stores only the 79 rolled copies. No Orb-only cache
+-- or name match can replace this authority.
+function A.AssignedWishlist()
+    local slots=A.Slots()
+    local _,live=UpdateStoreState(function(row)return row end)
+    local state=type(live)=="table" and live or (Store and Store.State and Store.State() or {})
+    local active=slots and tonumber(slots.activeSlot)
+    local saved=active and active>0 and state.loadoutWishlists and state.loadoutWishlists[active]
+        or state.firstRunWishlist
+    local w=A.Wishlist()
+    local result={state="unassigned",activeSlot=active,owner=Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey(),
+        note=A.WishlistNote(),name=type(saved)=="table" and saved.name or nil}
+    if not slots or slots.activeKnown==false then
+        result.state=(state.firstRunWishlist or (type(state.loadoutWishlists)=="table" and next(state.loadoutWishlists)))
+            and "restoring" or "loading"
+        return result
+    end
+    if not w then
+        if result.note=="Restoring assigned Wishlist..." then result.state="restoring"
+        elseif saved then result.state="unavailable" end
+        return result
+    end
+    result.state="ready";result.name=w.name;result.wishlist=w;result.entries={}
+    result.key=A.WishlistKey(w.entries)
+    result.identity=type(saved)=="table" and (saved.assignmentId or saved.key) or result.key
+    local permanent={}
+    for _,e in ipairs(w.entries or {}) do
+        local row={spellId=e.spellId,quality=e.quality,stacks=e.stacks,locked=e.locked==true}
+        result.entries[#result.entries+1]=row
+        if row.locked then permanent[row.spellId]=(permanent[row.spellId] or 0)+(row.stacks or 1) end
+    end
+    local targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key]
+    if targets and next(targets) then
+        A._assignmentTargetModel=A._assignmentTargetModel or Nexus.WishlistModel.New()
+        local rows=A._assignmentTargetModel.TargetMapEntries(targets,A.Catalog())
+        if not rows then
+            result.state="unavailable";result.note="Assigned permanent targets are unavailable. Open the Wishlist Editor to inspect them."
+            return result
+        end
+        for _,e in ipairs(rows) do
+            local extra=e.copies-(permanent[e.spellId] or 0)
+            if extra>0 then result.entries[#result.entries+1]={spellId=e.spellId,quality=e.row.quality,stacks=extra,locked=true} end
+        end
+    end
+    -- An absent mirror is not deletion proof. Keep the local exact plan and
+    -- explain its absence without silently switching to a namesake.
+    if type(saved)=="table" and saved.slot then
+        local found=false
+        for _,candidate in ipairs(LiveWishlistCandidates(slots)) do if candidate.key==saved.key then found=true;break end end
+        if not found then result.mirrorNote="Assigned Wishlist is absent from the current server list. Its saved plan is retained. Refresh the list or reassign deliberately." end
+    end
+    return result
+end
 
 function A.GetLoadoutCandidates()
     local slots = A.Slots()
@@ -2170,8 +2212,10 @@ function A.Slots()
     -- above maxSlots, which are never verified on a real payload.
     local fieldPresent = anyFalse or not designedTrue
     for _, s in pairs(bySlot) do s.verifiedFieldPresent = fieldPresent end
-    local active = tonumber(svc and SafeCall(svc.GetServerActiveSlot)) or 0
-    return { bySlot = bySlot, activeSlot = active, maxSlots = maxSlots }
+    local rawActive = svc and SafeCall(svc.GetServerActiveSlot)
+    local active = tonumber(rawActive)
+    local activeKnown=active~=nil and active>=0 and active==math.floor(active)
+    return { bySlot = bySlot, activeSlot = activeKnown and active or 0, activeKnown=activeKnown,maxSlots = maxSlots }
 end
 
 -- NOTE: this is a READ (asks the server to re-send slot data), so it has

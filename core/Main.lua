@@ -456,6 +456,10 @@ local function BuildHudDisplayModel(base)
     -- result are copied when read, before a later provider can mutate them.
     local baseSnapshot = viewModel.Copy(type(base) == "table" and base or {})
     local input = {base=baseSnapshot,status=StatusLine()}
+    local assignment=Adapter.AssignedWishlist and DisplayCall(Adapter.AssignedWishlist)
+    if assignment then
+        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name}
+    end
     if baseSnapshot.level == nil then
         input.level = DisplayCall(Adapter and Adapter.Level) or 0
     end
@@ -749,13 +753,18 @@ end
 EH = CreateFrame("Frame")
 EH:RegisterEvent("ADDON_LOADED")
 EH:RegisterEvent("PLAYER_ENTERING_WORLD")
+EH:RegisterEvent("PLAYER_LEAVING_WORLD")
+EH:RegisterEvent("PLAYER_LOGOUT")
 EH:RegisterEvent("PLAYER_LEVEL_UP")
 EH:RegisterEvent("CHAT_MSG_CHANNEL")
 EH:RegisterEvent("PLAYER_REGEN_DISABLED")
 EH:RegisterEvent("PLAYER_REGEN_ENABLED")
-EH:SetScript("OnEvent", function(_, ...)
+EH:SetScript("OnEvent", function(_, event, ...)
+    if event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
+        if AutomationRuntime and AutomationRuntime.AutoEnabled() then AutomationRuntime.ToggleAuto()end
+    end
     local lifecycle = Lifecycle()
-    if lifecycle then return lifecycle.OnEvent(...) end
+    if lifecycle then return lifecycle.OnEvent(event, ...) end
 end)
 EH:RegisterEvent("CHAT_MSG_WHISPER")
 EH:SetScript("OnUpdate", function(_, elapsed)

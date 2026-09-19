@@ -5,7 +5,7 @@ local M = {}
 Nexus.Changelog = M
 
 local VERSION = "1.20.0-beta.1"
-local RELEASE_KEY = "prototype-P1.5.1-orb-review"
+local RELEASE_KEY = "prototype-P1.6-assigned-orbs"
 local frame
 local shownThisSession = false
 
@@ -43,22 +43,22 @@ local function Create()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
-    title:SetText("Nexus prototype P1.5.1")
+    title:SetText("Nexus prototype P1.6")
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     body:SetPoint("TOPLEFT", 28, -52)
     body:SetPoint("RIGHT", -28, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
-    body:SetText([[|cffffd200Reviewed Orb controls and wording|r
-- Required rolled copies and acquired future permanent targets stay protected.
-- Recheck only refreshes and reconciles; it submits no choice or Orb.
-- Build Library, recommendations, and shared-build details use the reviewed labels.
-- /nexus help retains all seven guide pages.
+    body:SetText([[|cffffd200Assigned Wishlist and visible Help|r
+- Orb mode uses the same assigned Wishlist as the main panel.
+- Enter a maximum and Start once to approve safe surplus copies and recycling.
+- Required rolled copies and future permanent targets remain protected.
+- Help retains seven topics with corrected text and navigation layering.
 
 |cffffd200Optional Orb refinement|r
-- /nexus orbs opens the plan; opening it spends nothing.
-- Closing the window does not stop an approved run. Use Pause or Stop.
+- Target changes pause the run. Resume retains its used and pending budget.
+- Close keeps an approved run active; main-panel Pause/Stop remain available.
 - Same-ID, same-quality results remain paused when completion cannot be proved.
 
 Experimental: native gameplay is not verified by offline tests.

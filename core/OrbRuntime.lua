@@ -37,7 +37,7 @@ local function init()
     config={name=c.name or "No Wishlist selected",entries=copy(c.entries or {}),sources=copy(c.sources or {}),
         excluded=copy(c.excluded or {}),recycle=c.recycle==true,maxOrbs=integer(c.maxOrbs,1,10000) and c.maxOrbs or 10,
         pending=copy(c.pending),fingerprint=c.fingerprint,selectedSlot=c.selectedSlot,origin=c.origin}
-    run={state="IDLE",reason="Choose targets, review replaceable copies, then Start.",running=false,spent=0,reserved=0,limit=0,recent={}}
+    run={state="IDLE",reason="Choose a maximum, then Start to use safe surplus copies for the assigned Wishlist.",running=false,spent=0,reserved=0,limit=0,recent={}}
     if type(config.pending)=="table" then
         run.pending=copy(config.pending);run.pending.restored=true;run.pending.since=now()
         run.pending.refreshRequested=false;run.pending.baselineStamp=nil
@@ -92,46 +92,55 @@ local function entriesStillMatch()
     return false
 end
 function M.SelectWishlist(candidate)
-    if not editable() then return nil,"Stop and settle the current Orb operation before changing targets." end
-    local resolved,status=Nexus.GameAdapter.ResolveWishlistEvidence(candidate)
-    if not resolved or status~="actionable" then return nil,"Open this Wishlist in the editor and confirm its permanent targets first." end
-    local targets,err=P.Normalize(resolved.echoes);if not targets then return nil,err end
-    config.entries=copy(resolved.echoes);config.name=resolved.name or "Wishlist"
-    config.fingerprint=fingerprint(config.entries);config.selectedSlot=resolved.slot;config.origin="selected"
-    config.sources={};config.excluded={}
-    return changedConfig()
+    return nil,"Orb mode uses the assigned Wishlist. Change its assignment through My Builds or the Wishlist Editor."
 end
 function M.UseAssignedWishlist()
     if not editable() then return nil,"Stop and settle the current Orb operation before changing targets." end
-    local wl=Nexus.GameAdapter.Wishlist();if not wl then return nil,"Assign a resolved Wishlist first, or choose one in this panel." end
-    local targets,err=P.Normalize(wl.entries);if not targets then return nil,err end
-    config.entries=copy(wl.entries);config.name=wl.name;config.fingerprint=fingerprint(config.entries)
-    config.selectedSlot=nil;config.origin="assigned";config.sources={};config.excluded={}
+    local a=Nexus.GameAdapter.AssignedWishlist()
+    if a.state~="ready" then return nil,a.note or "Assign a resolved Wishlist through My Builds or the Wishlist Editor." end
+    local targets,err=P.Normalize(a.entries);if not targets then return nil,err end
+    config.entries=copy(a.entries);config.name=a.name;config.fingerprint=fingerprint(config.entries)
+    config.selectedSlot=nil;config.origin="assigned";config.sources={}
     return changedConfig()
 end
 function M.MoveTarget(index,delta)
-    if not editable() then return nil,"Targets are fixed during this run." end
-    local j=index+delta
-    if not integer(index,1,#config.entries) or not integer(j,1,#config.entries) then return false end
-    config.entries[index],config.entries[j]=config.entries[j],config.entries[index]
-    -- Order is a user preference; comparison to original source remains multiset based.
-    return changedConfig()
+    return nil,"Target order follows the assigned Wishlist. Edit the Wishlist to change its targets."
 end
 local function sameContent(a,b)
-    local x,y={},{};for _,e in ipairs(a or {}) do x[#x+1]=fingerprint({e}) end
-    for _,e in ipairs(b or {}) do y[#y+1]=fingerprint({e}) end
-    table.sort(x);table.sort(y);return table.concat(x,",")==table.concat(y,",")
+    local function counts(entries)
+        local out={}
+        for _,e in ipairs(entries or {})do
+            local key=tostring(e.spellId)..":"..tostring(e.quality)..":"..tostring(e.locked==true)
+            out[key]=(out[key]or 0)+(tonumber(e.stacks)or 1)
+        end
+        return out
+    end
+    local x,y=counts(a),counts(b)
+    for k,v in pairs(x)do if y[k]~=v then return false end end
+    for k,v in pairs(y)do if x[k]~=v then return false end end
+    return true
+end
+local function binding(a)
+    return {owner=a.owner,activeSlot=a.activeSlot,identity=a.identity,entries=copy(a.entries)}
+end
+local function matches(a,b)
+    return a and b and b.state=="ready" and a.owner==b.owner and a.activeSlot==b.activeSlot
+        and a.identity==b.identity and sameContent(a.entries,b.entries)
+end
+local function assigned()
+    local a=Nexus.GameAdapter.AssignedWishlist()
+    if not run.running and not run.pending and not run.token then
+        local entries=a.state=="ready" and a.entries or {}
+        if not sameContent(config.entries,entries) then config.sources={} end
+        config.entries=copy(entries);config.name=a.name or "No assigned Wishlist"
+        config.selectedSlot=nil;config.origin="assigned"
+    end
+    return a
 end
 entriesStillMatch=function()
-    if config.origin=="assigned" then
-        local w=Nexus.GameAdapter.Wishlist();return w and sameContent(config.entries,w.entries) or false
-    end
-    if not config.selectedSlot then return true end
-    for _,c in ipairs(Nexus.GameAdapter.GetWishlistCandidates()) do if c.slot==config.selectedSlot then
-        local r,st=Nexus.GameAdapter.ResolveWishlistEvidence(c)
-        return st=="actionable" and r and sameContent(config.entries,r.echoes) or false
-    end end
-    return false
+    local a=Nexus.GameAdapter.AssignedWishlist()
+    if run.binding and (run.token or run.pending) then return matches(run.binding,a) end
+    return a.state=="ready" and sameContent(config.entries,a.entries)
 end
 function M.SetLimit(n)
     init();n=tonumber(n)
@@ -172,13 +181,15 @@ function M.SuggestSources()
     config.sources=proposed;return changedConfig()
 end
 local function inspect()
+    local assignment=assigned()
+    if assignment.state~="ready" then return nil,assignment.note or "Assign a Wishlist before starting Orb mode." end
     local targets,err=P.Normalize(config.entries);if not targets then return nil,err end
     local s,e=B.Read();if not s then return nil,e end
     local prog=P.Progress(targets,s)
     local sources=P.Sources(targets,s,config.excluded)
-    return {targets=targets,s=s,progress=prog,sources=sources}
+    return {targets=targets,s=s,progress=prog,sources=sources,assignment=assignment}
 end
-local function preflight()
+local function preflight(automatic)
     local m,err=inspect();if not m then return nil,err end
     if not entriesStillMatch() then return nil,"The selected Wishlist changed or is unavailable. Choose it again before starting." end
     if m.progress.rolledMissing==0 then
@@ -195,25 +206,29 @@ local function preflight()
     if Nexus.GameAdapter.RivalDetected() then return nil,"Disable the other Echo automation addon before starting Orb mode." end
     local capacity=0;local permitted={}
     for _,r in ipairs(m.sources) do
-        local n=config.sources[r.key] or 0
+        local n=automatic and r.excess or (config.sources[r.key] or 0)
         if not integer(n,0,r.excess) then return nil,"Your approved replaceable counts changed. Review them again." end
         if n>0 then permitted[r.key]=n;capacity=capacity+n end
     end
-    for k,n in pairs(config.sources) do if n>0 and not permitted[k] then return nil,"An approved source is no longer safe. Review the replacement pool." end end
-    if capacity<1 then return nil,"Choose at least one replaceable copy and approve it before starting." end
+    if not automatic then
+        for k,n in pairs(config.sources) do if n>0 and not permitted[k] then return nil,"An approved source is no longer safe. Review the replacement pool." end end
+    end
+    if capacity<1 then return nil,"No safe surplus copies are available. Required and permanent copies remain protected." end
     m.permitted=permitted;m.capacity=capacity;return m
 end
 function M.Prepare(mode)
     init();if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,"An Orb run is already active or unresolved. Stop/settle it before starting another." end
-    local m,err=preflight();if not m then return nil,err end
+    local automatic=mode=="assigned"
+    local m,err=preflight(automatic);if not m then return nil,err end
     local limit=mode=="single" and 1 or config.maxOrbs
     approval={token={},model=m,entries=copy(config.entries),sources=copy(m.permitted),
-        excluded=copy(config.excluded),recycle=config.recycle,limit=limit,created=now()}
+        excluded=copy(config.excluded),recycle=automatic or config.recycle,automatic=automatic,
+        binding=binding(m.assignment),limit=limit,created=now()}
     local listed={};for _,s in ipairs(m.sources) do if m.permitted[s.key] then
         listed[#listed+1]={name=s.name,spellId=s.spellId,quality=s.quality,copies=m.permitted[s.key],key=s.key}
     end end
     return {token=approval.token,limit=limit,charges=m.s.charges,sources=listed,targets=copy(m.progress.items),
-        name=config.name,recycle=config.recycle,sourceCopies=m.capacity}
+        name=config.name,recycle=approval.recycle,sourceCopies=m.capacity}
 end
 local function turnAutoOff()
     -- The master permission is SESSION state in AutomationRuntime, not a
@@ -229,7 +244,7 @@ end
 local function ensureFrame()
     if frame then frame:Show();return end
     frame=CreateFrame("Frame","NexusOrbRuntime",UIParent)
-    frame:RegisterEvent("PLAYER_LOGOUT");frame:RegisterEvent("PLAYER_LEAVING_WORLD")
+    frame:RegisterEvent("PLAYER_LOGOUT");frame:RegisterEvent("PLAYER_LEAVING_WORLD");frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:SetScript("OnEvent",function()
         init();if run.running or run.pending then
             run.running=false;setState("PAUSED","Session interrupted. Orb spending will not restart automatically.")
@@ -250,16 +265,24 @@ function M.Confirm(token)
     init();local a=approval
     if not a or a.token~=token or now()-a.created>60 then return nil,"The confirmation expired. Review the plan again." end
     if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,"An Orb run already owns this action." end
-    local m,err=preflight();if not m then return nil,err end
+    local m,err=preflight(a.automatic);if not m then return nil,err end
     if not sameContent(a.entries,config.entries) or not B.SameContext(a.model.s.context,m.s.context)
+        or not matches(a.binding,m.assignment)
         or a.model.s.grantedKey~=m.s.grantedKey or a.model.s.lockedKey~=m.s.lockedKey
         or a.model.s.charges~=m.s.charges then approval=nil;return nil,"Echoes or resources changed while confirming. Review again." end
     local off,e=turnAutoOff();if not off then return nil,e end
     local tokenOwner,live=B.Acquire(m.s);if not tokenOwner then return nil,live end
     run={state="READY",running=true,reason="Approved. Preparing one Orb replacement.",token=tokenOwner,
         targets=copy(a.model.targets),entries=copy(config.entries),remaining=copy(a.sources),excluded=copy(a.excluded),
-        recycle=a.recycle,limit=a.limit,spent=0,reserved=0,recent={},context=live.context}
+        recycle=a.recycle,automatic=a.automatic,binding=copy(a.binding),name=config.name,
+        limit=a.limit,spent=0,reserved=0,recent={},context=live.context}
     approval=nil;ensureFrame();M.Pump();return true
+end
+function M.Start(value)
+    init()
+    if value~=nil then local ok,e=M.SetLimit(value);if not ok then return nil,e end end
+    local a,e=M.Prepare("assigned");if not a then return nil,e end
+    return M.Confirm(a.token)
 end
 local function finishResult(s,p)
     -- Neither a new table nor an Orb decrement proves a result. Require the
@@ -293,6 +316,11 @@ local function finishResult(s,p)
     run.pending=nil
     local ok,err=savePending();if not ok then run.pending=p;pause(err);return false end
     if p.restored then terminal("STOPPED","Previous result confirmed. No spending restarted; review a new run explicitly.");return true end
+    if run.targetChanged then
+        setState(run.state=="STOPPED" and "STOPPED" or "PAUSED","Original replacement confirmed. Review the new assigned Wishlist, then Resume; usage is unchanged.")
+        if run.state=="STOPPED" then release() end
+        return true
+    end
     local progress=P.Progress(run.targets,s)
     run.recycleKey=nil
     if p.kind=="RECYCLE" and run.recycle then
@@ -348,7 +376,14 @@ function M.Pump(passive)
             setState("RECOVERY","An earlier action remains unresolved. Resolve the native offer, then Recheck; no new spend is allowed.")
             return
         end
-        if run.context and not B.SameContext(run.context,s.context) then pause("Character, run, or loadout changed. The pending operation will not be replayed.");return end
+        if run.context and not B.SameOwner(run.context,s.context) then pause("Character, run, or service changed. The pending operation will not be replayed.");return end
+        local a=assigned()
+        local displayTargets=a.state=="ready" and P.Normalize(a.entries)
+        run.displayProgress=displayTargets and P.Progress(displayTargets,s) or nil
+        if run.binding and (not matches(run.binding,a) or not B.SameContext(run.context,s.context)) then
+            run.targetChanged=true
+            if run.state~="STOPPED" then pause("The active loadout or assigned Wishlist changed. The original operation stays pending; Resume requires settlement and a resolved assignment.") end
+        end
         if p then
             if s.lockedKey~=p.lockedKey then pause("Permanent Echoes changed; no further Orb action will be submitted.");return end
             if not observeLifecycle(s,p) then return end
@@ -384,7 +419,9 @@ function M.Pump(passive)
                 p.selectionAttempted=true;p.selectedKey=decision.key;p.kind=decision.kind
                 p.selectionStamp=s.grantStamp;p.since=now();p.refreshRequested=false
                 local saved,e=savePending();if not saved then p.selectionAttempted=false;pause(e);return end
-                local accepted,kind,reason=B.Select(run.token,decision.index,s.boardKey,decision.spellId)
+                local accepted,kind,reason=B.Select(run.token,decision.index,s.boardKey,decision.spellId,function()
+                    return run.running and entriesStillMatch()
+                end)
                 -- An attempt rejected by the adapter before SelectPerk is not
                 -- a selection lifecycle. Preserve the receipt, but never use
                 -- its proposed key as proof that a choice was submitted.
@@ -405,7 +442,7 @@ function M.Pump(passive)
             return
         end
         if not run.running or passive then return end
-        if not entriesStillMatch() then pause("The selected Wishlist changed; review a new run before spending.");return end
+        if not entriesStillMatch() then pause("The assigned Wishlist changed. Review it and Resume without resetting this run's usage.");return end
         local progress=P.Progress(run.targets,s)
         if progress.rolledMissing==0 then
             terminal(progress.permanentMissing==0 and "COMPLETE" or "ROLLED_COMPLETE",
@@ -425,18 +462,22 @@ function M.Pump(passive)
         local source
         local safe=P.Sources(run.targets,s,run.excluded)
         for _,r in ipairs(safe) do if r.key==run.recycleKey then source=r;break end end
-        if not source then for _,r in ipairs(safe) do if (run.remaining[r.key] or 0)>0 then source=r;break end end end
-        if not source then terminal("NO_SOURCES","No approved safe source copies remain. Review a new run to change the pool.");return end
+        if not source then for _,r in ipairs(safe) do if run.automatic or (run.remaining[r.key] or 0)>0 then source=r;break end end end
+        if not source then terminal("NO_SOURCES","No safe surplus source copies remain. Required and permanent copies stay protected.");return end
         local recycle=source.key==run.recycleKey
         p={before=copy(s.granted),lockedKey=s.lockedKey,removed=source.key,chargesBefore=s.charges,
             beforeStamp=s.grantStamp,beforeSelectionSerial=s.selectionSerial,since=now(),guid=s.context.guid,spendConfirmed=false}
         run.pending=p;run.reserved=1
         local ok,e=savePending();if not ok then run.pending=nil;run.reserved=0;pause(e);return end
-        if not recycle then run.remaining[source.key]=math.max(0,(run.remaining[source.key] or 0)-1) end
-        local accepted,kind,reason=B.Spend(run.token,source.key,s)
+        if not recycle and not run.automatic then run.remaining[source.key]=math.max(0,(run.remaining[source.key] or 0)-1) end
+        local accepted,kind,reason=B.Spend(run.token,source.key,s,function(live)
+            if not run.running or not entriesStillMatch() then return false end
+            for _,r in ipairs(P.Sources(run.targets,live,run.excluded))do if r.key==source.key and r.excess>0 then return true end end
+            return false
+        end)
         if not accepted then
             if kind=="REJECTED" then
-                if not recycle then run.remaining[source.key]=(run.remaining[source.key] or 0)+1 end
+                if not recycle and not run.automatic then run.remaining[source.key]=(run.remaining[source.key] or 0)+1 end
                 run.pending=nil;run.reserved=0;savePending()
             else p.ambiguous=true;savePending() end
             pause(reason);return
@@ -460,7 +501,18 @@ function M.Resume()
     init();if run.state~="PAUSED" then return nil,"Only an explicitly paused run can resume." end
     if run.pending and (run.pending.restored or run.pending.selectionAttempted) then return nil,"The submitted result is still unresolved. Recheck or finish the native offer manually; no repeat is allowed." end
     local s,err=B.Read();if not s then return nil,err end
-    if not run.context or not B.SameContext(run.context,s.context) or not entriesStillMatch() then return nil,"The original run no longer matches. Stop and review a new run after settlement." end
+    if not run.context or not B.SameOwner(run.context,s.context) then return nil,"The original character/run/service no longer matches. This run cannot resume." end
+    local a=assigned()
+    if run.pending and (run.targetChanged or not matches(run.binding,a) or not B.SameContext(run.context,s.context)) then
+        return nil,"The original operation must settle before Resume can adopt a changed assignment. Pending exposure is retained."
+    end
+    if not run.pending then
+        if a.state~="ready" then return nil,a.note or "Wait for the assigned Wishlist to resolve." end
+        local targets,why=P.Normalize(a.entries);if not targets then return nil,why end
+        local rebound,reason=B.Rebind(run.token,s);if not rebound then return nil,reason end
+        run.context=s.context;run.binding=binding(a);run.targets=targets;run.entries=copy(a.entries);run.name=a.name
+        config.entries=copy(a.entries);config.name=a.name;run.targetChanged=nil;run.recycleKey=nil
+    end
     if run.pending and run.pending.ambiguous then
         if not run.pending.spendConfirmed then return nil,"The spend outcome remains unknown. No action will be repeated." end
         run.pending.ambiguous=nil
@@ -515,10 +567,27 @@ function M.BlocksOrdinary()
     return run and (run.running or run.pending~=nil or (run.state=="PAUSED" or run.state=="LIMIT")) or false
 end
 function M.Status()
-    init();local m,err=inspect()
+    init();local a=assigned();local m,err=inspect()
     local r={state=run.state,reason=run.reason,error=err,running=run.running,pending=run.pending~=nil,
-        spent=run.spent,reserved=run.reserved,limit=run.limit,config=copy(config),recent=copy(run.recent)}
+        spent=run.spent,reserved=run.reserved,limit=run.limit,config=copy(config),recent=copy(run.recent),
+        assignment=copy(a),targetChanged=run.targetChanged,operationName=run.name}
+    r.config.name=a.name or "No assigned Wishlist";r.config.entries=copy(a.entries or {})
     r.config.pending=nil
-    if m then r.charges=m.s.charges;r.progress=copy(m.progress);r.sources=copy(m.sources);r.catalog=copy(m.s.catalog) end
+    r.charges,r.balanceState,r.balanceReason=B.Balance()
+    if m then
+        r.charges=m.s.charges;r.progress=P.Progress(assert(P.Normalize(a.entries)),m.s)
+        r.sources=copy(m.sources);r.catalog=copy(m.s.catalog);run.displayProgress=copy(r.progress)
+    end
+    local can,why=preflight(true)
+    r.canStart=not run.running and not run.pending and run.state~="PAUSED" and run.state~="LIMIT" and can~=nil
+    r.startReason=why
+    r.canResume=run.state=="PAUSED" and not (run.pending and (run.targetChanged or run.pending.restored or run.pending.selectionAttempted))
     return r
+end
+function M.CompactStatus()
+    init();if run.limit==0 and not run.pending then return nil end
+    local remaining=run.displayProgress and run.displayProgress.rolledMissing
+    return {state=run.state,running=run.running,pending=run.pending~=nil,spent=run.spent,reserved=run.reserved,
+        limit=run.limit,remaining=remaining,reason=run.reason,
+        canResume=run.state=="PAUSED" and not (run.pending and (run.targetChanged or run.pending.restored or run.pending.selectionAttempted))}
 end
