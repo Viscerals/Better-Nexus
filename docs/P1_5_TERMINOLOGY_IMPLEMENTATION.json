@@ -1,0 +1,587 @@
+{
+  "scope": "All 55 approved P1.4 grouped terminology/help proposals, plus new Orb guide. Raw internal protocol/state/diagnostic identifiers intentionally preserved. No native visual proof.",
+  "items": [
+    {
+      "id": "T01",
+      "prior_label": "Builds / My Builds / Saved Build / Loadout / Snapshot / Wishlist / destination",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua",
+        "ui/WishlistEditor.lua",
+        "ui/JournalTab.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Build Library, server My Builds/Saved Build, selected loadout, desired Wishlist and Snapshot defined separately."
+    },
+    {
+      "id": "T02",
+      "prior_label": "Assign / associated / destination wishlist / Clear association",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/WishlistController.lua",
+        "ui/JournalTab.lua",
+        "ui/WishlistRenderer.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Assignment/unassignment explained separately from creating, saving or activating; underlying ownership unchanged."
+    },
+    {
+      "id": "T03",
+      "prior_label": "First Run",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/JournalTab.lua"
+      ],
+      "implementation": "Zero-slot first run, unavailable and empty-numbered-slot labels distinguished without changing branch selection."
+    },
+    {
+      "id": "T04",
+      "prior_label": "Swap / Loadout: choose build",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua",
+        "ui/JournalTab.lua"
+      ],
+      "implementation": "My Builds/Open My Builds labels describe navigation rather than promising activation."
+    },
+    {
+      "id": "T05",
+      "prior_label": "Use Current Build / Browse Proven Builds",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/QuickStart.lua"
+      ],
+      "implementation": "Set up current build, Import/Create Wishlist, Browse Community builds; no proven-build claim."
+    },
+    {
+      "id": "T06",
+      "prior_label": "LOCKED ECHOES ... Nexus can only read these, never lock/unlock them",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/MainDiagnostics.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Current permanent Echoes are counted/displayed; false never-lock/unlock claim removed. Optional automation documented separately."
+    },
+    {
+      "id": "T07",
+      "prior_label": "Locked / designed locks / locked-slot targets / frozen / Lock / Unlock",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/WishlistEditor.lua",
+        "ui/WishlistRenderer.lua",
+        "ui/WishlistOverlay.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Current permanent Echoes, permanent-slot targets, frozen offers, read-only Echo list and position-lock vocabulary distinguished."
+    },
+    {
+      "id": "T08",
+      "prior_label": "Automate locked Echo slots / Checked: ... automatically once each is acquired",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/WishlistEditor.lua",
+        "ui/WishlistRenderer.lua"
+      ],
+      "implementation": "Automatic permanent-slot text requires both master Automation and the separate option plus validated ownership/capability."
+    },
+    {
+      "id": "T09",
+      "prior_label": "Nexus will unlock this one and lock the new one in automatically once it’s acquired",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/WishlistRenderer.lua",
+        "core/WishlistController.lua"
+      ],
+      "implementation": "Replacement tooltip/notice avoids promising automatic lock changes merely after target selection."
+    },
+    {
+      "id": "T10",
+      "prior_label": "79 total Echoes / 79/79 wishlist / 6 designed locks / entries / variants / names",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/WishlistEditor.lua",
+        "ui/WishlistRenderer.lua",
+        "core/WishlistController.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "79 rolled copies plus six permanent-slot targets; save count clearly separate from designed targets."
+    },
+    {
+      "id": "T11",
+      "prior_label": "Confirm roles & edit / Confirm roles & assign / complete split / locked copies",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/WishlistRenderer.lua"
+      ],
+      "implementation": "Permanent-target confirmation terminology; source/role preservation unaffected."
+    },
+    {
+      "id": "T12",
+      "prior_label": "Suggest my matching locks / Untagged Wishlist roles / currentlocks",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/Main.lua",
+        "ui/WishlistRenderer.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Current-lock default explained as matching intended targets; existing confirmed plans are not rewritten."
+    },
+    {
+      "id": "T13",
+      "prior_label": "Wishlist identity found / authoritative lock evidence / server mirror / roles remain unknown",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/UserText.lua",
+        "core/WishlistController.lua",
+        "ui/WishlistRenderer.lua"
+      ],
+      "implementation": "Resolvable permanent-target choice separated from waiting for actual server lock data; raw detail retained, no advice to delete original Wishlist."
+    },
+    {
+      "id": "T14",
+      "prior_label": "Save complete — immediate readback was non-canonical",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/AutomationRuntime.lua"
+      ],
+      "implementation": "Unconfirmed-save branch now says request sent, confirmation missing; confirmed branch still requires confirmation."
+    },
+    {
+      "id": "T15",
+      "prior_label": "Paste an EBH1 wishlist string / wishlist + locked Echoes, as an EBH1 string",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/WishlistEditor.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Wishlist import code instead of unexplained EBH1; Nexus-only role-marker distinction documented."
+    },
+    {
+      "id": "T16",
+      "prior_label": "Load Import / imported as new wishlist ... Review and Create Wishlist",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/WishlistEditor.lua",
+        "core/WishlistController.lua"
+      ],
+      "implementation": "Open imported draft; import/save/assignment separate actions."
+    },
+    {
+      "id": "T17",
+      "prior_label": "invalid wishlist / invalid loadout / payload changed / preview is stale",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/UserText.lua",
+        "core/WishlistController.lua"
+      ],
+      "implementation": "Invalid build/plan/stale draft gives a known reason/action and preserves raw detail without forcing acceptance."
+    },
+    {
+      "id": "T18",
+      "prior_label": "Auto: ON / Auto Mode; tooltip lists picks, Banish and Reroll",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua",
+        "core/Main.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Automation master permission and per-action spending/slot effects explained."
+    },
+    {
+      "id": "T19",
+      "prior_label": "Take wanted Echo (Pilot) / Freeze ... before search / search unavailable",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/UserText.lua",
+        "ui/Readout.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Player action labels omit Pilot suffix; policy provenance remains in About and documentation."
+    },
+    {
+      "id": "T20",
+      "prior_label": "+106 / -15 beside a card",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Readout.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Normal recommendation lines use need/category descriptions rather than unexplained signed priority numbers; diagnostics remain intact."
+    },
+    {
+      "id": "T21",
+      "prior_label": "Filler picks are correct behavior / It will be replaced in a future run",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Off-Wishlist picks explained without claiming every choice is correct or guaranteed to be replaced."
+    },
+    {
+      "id": "T22",
+      "prior_label": "TO SHED / Echoes to shed / incomplete tooltip / will shed next run",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua",
+        "core/Main.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "EXTRA COPIES and complete explanatory tooltip; no delete or future replacement promise."
+    },
+    {
+      "id": "T23",
+      "prior_label": "TO LOCK / locked-slot targets to acquire",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua",
+        "ui/WishlistRenderer.lua"
+      ],
+      "implementation": "Permanent targets remaining in place of TO LOCK."
+    },
+    {
+      "id": "T24",
+      "prior_label": "unsynced / waiting for owned-echo sync",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/UserText.lua",
+        "core/MainDiagnostics.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Waiting for current Echo data is distinct from shared-build network Sync."
+    },
+    {
+      "id": "T25",
+      "prior_label": "armed / unarmed / arms the guarantee / seeds one",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/UserText.lua",
+        "core/Main.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Saved-build guarantee confirmation language replaces armed/unarmed on normal display; raw states remain support evidence."
+    },
+    {
+      "id": "T26",
+      "prior_label": "banked / returns later / tight horizon / bracket fishing / drain guaranteed queue",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/UserText.lua",
+        "ui/Readout.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Expected later/held offer/remaining-choice language; predictions distinguished from confirmed live-card guarantees."
+    },
+    {
+      "id": "T27",
+      "prior_label": "B:n R:n F:n / [G] / [X] [~] [ ]",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua",
+        "core/Main.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Charge names and overlay symbol legend supplied; diagnostic abbreviations retained as stable support format."
+    },
+    {
+      "id": "T28",
+      "prior_label": "tome lever / anchor / diversity / flag demotions",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/Main.lua",
+        "core/UserText.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Advanced assumption and Echo-availability control terms explained; raw IDs preserved when a reliable display name is unavailable."
+    },
+    {
+      "id": "T29",
+      "prior_label": "This is NOT an addon error. The addon is correct. / Missing Tomes",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua"
+      ],
+      "implementation": "Server-reported availability explanation replaces categorical claims that Nexus cannot be wrong."
+    },
+    {
+      "id": "T30",
+      "prior_label": "Orb state active or unknown / waiting for three-card board / pending-pick count",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/UserText.lua",
+        "core/GameAdapter.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Ordinary rolling waits during Orb-owned/unknown states; real Orb mode uses a distinct permitted path."
+    },
+    {
+      "id": "T31",
+      "prior_label": "Qualified Only / Unqualified / proven builds",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/CommunityRenderer.lua",
+        "ui/QuickStart.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Both DPS records / missing required records; no qualification-as-quality implication."
+    },
+    {
+      "id": "T32",
+      "prior_label": "Strongest Pair / Avg",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Leaderboard.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Both records plus explicit highest-single-result ranking and display-only average explanation."
+    },
+    {
+      "id": "T33",
+      "prior_label": "Global best / ranked records / Connected to the Nexus sync mesh",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Nameplate.lua",
+        "ui/Leaderboard.lua",
+        "ui/CommunityRenderer.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Known/shared record language without claiming a live connection or universal best result."
+    },
+    {
+      "id": "T34",
+      "prior_label": "Publish / Share / Post / Uploading",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/CommunityRenderer.lua",
+        "core/CommunityController.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Share Build vocabulary and local save/server-save distinction."
+    },
+    {
+      "id": "T35",
+      "prior_label": "Delete / Remove / Stop Sharing",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/CommunityRenderer.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Stop Sharing/removing a shared record differs from server My Builds deletion; exact action semantics retained."
+    },
+    {
+      "id": "T36",
+      "prior_label": "Echo list locked by leaderboard record / Leaderboard loadout locked",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/CommunityRenderer.lua",
+        "core/CommunityController.lua",
+        "ui/Leaderboard.lua"
+      ],
+      "implementation": "Read-only Echo list tied to DPS records, not a permanent-lock metaphor."
+    },
+    {
+      "id": "T37",
+      "prior_label": "Show Performance / PERFORMANCE / Perf",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Panel.lua",
+        "ui/LogViewer.lua",
+        "core/MainDiagnostics.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "DPS records versus runtime Performance diagnostics."
+    },
+    {
+      "id": "T38",
+      "prior_label": "Copy into Editor / Open Build / Request Loadout / Echo rows",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Leaderboard.lua",
+        "ui/CommunityRenderer.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Request full Echo list; copying opens a draft and does not activate/spend."
+    },
+    {
+      "id": "T39",
+      "prior_label": "record fingerprint / Echo evidence / Class unavailable / Legacy",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/CommunityRenderer.lua",
+        "ui/Leaderboard.lua",
+        "core/UserText.lua"
+      ],
+      "implementation": "Missing/older/class/record mismatch display language; raw fingerprints and support fields are not rewritten."
+    },
+    {
+      "id": "T40",
+      "prior_label": "Sync Now / syncing / preparing / sending / cleaning / throttled",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/Main.lua",
+        "core/MainDiagnostics.lua",
+        "ui/Panel.lua",
+        "ui/CommunityRenderer.lua",
+        "ui/Leaderboard.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Preparing, sent, receiving, cleaning-expired and completion remain distinct; underlying transport unchanged."
+    },
+    {
+      "id": "T41",
+      "prior_label": "Preparing build identities / Committing prepared Community data / validation steps / no readiness checks were bypassed",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/LoadingStatus.lua"
+      ],
+      "implementation": "Plain-language loading phases replace build identities/commit jargon; no fake readiness or scheduler changes."
+    },
+    {
+      "id": "T42",
+      "prior_label": "Current phase: n/N (%) / Nexus ready / local tools ready",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/LoadingStatus.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "This-step percentage and local versus shared availability explicit; no overall ETA promise."
+    },
+    {
+      "id": "T43",
+      "prior_label": "Fixes: flags | undemote | anchor <id|off> | restore | err",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/Main.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Advanced troubleshooting commands explained as specific effects, not generic fixes."
+    },
+    {
+      "id": "T44",
+      "prior_label": "Copy Full Diagnostic Log / Select All / one compact diagnostic block",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/LogViewer.lua",
+        "core/MainDiagnostics.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Prepare full diagnostic report / Select this page; complete copy requires pages in order."
+    },
+    {
+      "id": "T45",
+      "prior_label": "Boards / Mismatch / State / AutoLock / Perf / Peer Test / provider error",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/LogViewer.lua",
+        "core/MainDiagnostics.lua"
+      ],
+      "implementation": "Recent choices, manual overrides, status, permanent-slot actions, performance and advanced peer diagnostics."
+    },
+    {
+      "id": "T46",
+      "prior_label": "guarantees of responsiveness in export text: so gameplay stays responsive / you may keep playing",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/MainDiagnostics.lua",
+        "ui/LogViewer.lua"
+      ],
+      "implementation": "No guarantee that export will avoid hitches; large reports may take a moment."
+    },
+    {
+      "id": "T47",
+      "prior_label": "Optimizer / readout notes “loadout activation ... level-1-only”",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Readout.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Recommendation wording and server-supported activation limits; no claim every Wishlist is a Snapshot."
+    },
+    {
+      "id": "T48",
+      "prior_label": "ROOT_*, STORE_*, evidence/source drift, mirror, schema, receipt, generation, fingerprint, payload",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/UserText.lua",
+        "core/Main.lua",
+        "core/WishlistController.lua"
+      ],
+      "implementation": "Known-condition explanations with retained Details/raw codes, not arbitrary suppression or validation bypass."
+    },
+    {
+      "id": "T49",
+      "prior_label": "shed [Echo] / loadout cleaned up / wishlist rotation / exact progress / no net gain / pollution / baseline / ratchet",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/AutomationRuntime.lua",
+        "core/UserText.lua",
+        "core/MainDiagnostics.lua"
+      ],
+      "implementation": "Save comparisons use gained/fewer matching copies; separate from the EXTRA COPIES panel. Raw Ratchet reason strings retained."
+    },
+    {
+      "id": "T50",
+      "prior_label": "Experimental integrated Nexus prototype — LoadoutPilot-derived ordinary rolling, Wishlists, Community, DPS, Snapshot and Sync.",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "Nexus.toc",
+        "core/Main.lua",
+        "ui/Help.lua",
+        "README-PROTOTYPE.md"
+      ],
+      "implementation": "Concrete player-task description including optional Orb refinement; experimental limitations and provenance separate."
+    },
+    {
+      "id": "H01",
+      "prior_label": "One-time Welcome to Nexus; Later records hasSeenQuickStart",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/QuickStart.lua",
+        "ui/Panel.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Persistent Help/Getting Started controls and seven pages, no mandatory wizard."
+    },
+    {
+      "id": "H02",
+      "prior_label": "/nexus help and /nexus print a short command list without descriptions",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/Main.lua",
+        "core/MainCommands.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "/nexus help/guide/tutorial reopen real guide, not just a terse command list."
+    },
+    {
+      "id": "H03",
+      "prior_label": "Help omits reroll, freeze, currentlocks, prototype; only loading dispatches before initialization",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "core/MainCommands.lua",
+        "ui/Help.lua"
+      ],
+      "implementation": "Early help/orbs/loader routing; reroll/freeze/currentlocks/prototype and Orb control meanings documented."
+    },
+    {
+      "id": "H04",
+      "prior_label": "README current test.9005 instructions followed by historical test.9004 instructions and absent docs/tools paths",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "README-PROTOTYPE.md",
+        "docs/P1_4_README_HISTORICAL.md"
+      ],
+      "implementation": "Current P1.5 install/user guide replaces mixed old instructions; full older README preserved only in source history."
+    },
+    {
+      "id": "H05",
+      "prior_label": "Nexus 1.20 Beta changelog / Faster large libraries / migrates additively",
+      "status": "IMPLEMENTED",
+      "paths": [
+        "ui/Changelog.lua"
+      ],
+      "implementation": "Current P1.5-specific changelog and seen key; no unsupported faster/migration guarantee."
+    }
+  ]
+}

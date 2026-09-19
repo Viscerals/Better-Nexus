@@ -1,0 +1,26 @@
+[
+  {
+    "test": "wishlist",
+    "exit": 1,
+    "expected_failed_assertion": "changed draft cancels",
+    "expected_failure_confirmed": true,
+    "seconds": 0.6186855429996285,
+    "output": "tests/prototype/wishlist.lua:22: changed draft cancels\n"
+  },
+  {
+    "test": "ownership",
+    "exit": 1,
+    "expected_failed_assertion": "empty confirmation invalidates cache revisions",
+    "expected_failure_confirmed": true,
+    "seconds": 0.643263165999997,
+    "output": "tests/prototype/ownership.lua:3: empty confirmation invalidates cache revisions\n"
+  },
+  {
+    "test": "typed_hash",
+    "exit": 1,
+    "expected_failed_assertion": "typed build material",
+    "expected_failure_confirmed": true,
+    "seconds": 0.625582771000154,
+    "output": "tests/prototype/typed_hash.lua:2: typed build material\n"
+  }
+]

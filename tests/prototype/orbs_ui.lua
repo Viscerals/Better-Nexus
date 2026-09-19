@@ -1,0 +1,30 @@
+local H=dofile('tests/prototype/orbs_support.lua');local M,A,O=H.M,H.A,H.O
+local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
+local function button(label,parent)
+ for _,b in ipairs(H.frames)do if b.kind=='Button' and b:GetText()==label and (not parent or b:GetParent()==parent)then return b end end
+ error('button not found: '..label)
+end
+H.OrbPlan();local before=H.Count('orb-spend')
+SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel)
+check(f:IsShown() and f:GetWidth()==820 and f:GetHeight()==630,'bounded Orb window')
+check(H.Count('orb-spend')==before,'show is read-only with respect to gameplay')
+button('Suggest safe source pool',f):Click();check(H.Count('orb-spend')==before,'pool suggestion spends nothing')
+f.limit:SetText('3');button('Review & start',f):Click()
+local approve=assert(NexusOrbApproval)
+check(approve:IsShown() and approve:GetFrameStrata()=='FULLSCREEN_DIALOG','explicit confirmation above bounded panel')
+check(approve.summary:GetText():find('Maximum: 3',1,true) and approve.sources:GetText():find('Disposable',1,true),'confirmation shows cap and complete proposed sources')
+button('Confirm & start',approve):Click();check(H.Count('orb-spend')==before,'unchecked approval cannot spend')
+button('Cancel',approve):Click();check(not approve:IsShown() and H.Count('orb-spend')==before,'cancel has no game action')
+button('Review single Orb',f):Click();approve.check:SetChecked(true)
+O.charges=9;button('Confirm & start',approve):Click();check(H.Count('orb-spend')==before,'changed balance refuses real confirmation handler')
+O.charges=10;button('Review single Orb',f):Click();approve.check:SetChecked(true)
+button('Confirm & start',approve):Click();check(H.Count('orb-spend')==before+1 and M.Status().limit==1,'real Start handler executes single transaction')
+button('Pause',f):Click();check(not M.Status().running,'real Pause handler')
+H.Offer();check(H.Count('take')==0,'paused offer remains accessible without auto-selection')
+button('Resume',f):Click();check(H.Count('take')==1,'real Resume selects known target')
+H.Result(410002,2);check(M.Status().state=='COMPLETE','UI-started operation confirms target')
+button('Help',f):Click();check(NexusHelpWindow:IsShown(),'Orb-specific help accessible')
+Nexus.Help.Hide();f:Hide();check(H.Count('orb-spend')==before+1,'closing panel/help creates no action')
+-- Ordinary auto must remain off through the actual session owner.
+check(Nexus.RecomputeStats().autoEnabled==false,'UI-run completion leaves ordinary Auto OFF')
+print('PASS real Orb UI review/confirm/pause/resume/help handlers='..checks)

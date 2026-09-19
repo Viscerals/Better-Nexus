@@ -1,0 +1,128 @@
+-- Reopenable read-only guide. Available before saved data or shared data is ready.
+Nexus=Nexus or {}
+local H={};Nexus.Help=H
+local frame,index= nil,1
+local pages={
+ {id="start",title="Getting started",text=[[Nexus helps you work toward an Echo build. Create or import a Wishlist, choose its planned permanent-slot targets, and assign it to a Saved Build. Follow the recommendations, or explicitly enable the actions you want automated. Shared builds and Leaderboards show records known to this client.
+
+1. Back up your Nexus folder and WTF with WoW closed before testing.
+2. Open Wishlists, or use /nexus editor. Create a plan or import a Wishlist code.
+3. Check exact qualities/copies and the planned permanent targets. Save it.
+4. Assign that Wishlist to the intended loadout in My Builds.
+5. Review recommendations with Automation OFF first.
+
+A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Snapshot is the saved-run mode with confirmed saved-build behavior; a Designed Wishlist does not inherit those guarantees.
+
+This is an experimental build. Reading this guide never spends, assigns, activates, or sends a Sync request.]]},
+ {id="wishlists",title="Wishlists and permanent targets",text=[[A complete plan can contain up to 79 rolled copies and 6 permanent-slot copies (85 total). Counts are copies, not unique names or list rows. Different qualities remain different targets.
+
+Current permanent Echoes are what you actually have. Permanent-slot targets are what the plan wants. A Frozen offer is a temporary offered card kept by the game's Freeze action; it is not a permanent slot.
+
+Untagged imports use your matching current permanent Echoes by default if that makes a valid 79+6 split. Existing confirmed plans are unchanged. When matching is insufficient, choose and confirm the intended permanent targets in the editor. You do not need to already own a desired plan.
+
+Import opens a draft. Save writes the plan; assignment selects which Wishlist a loadout uses. Unassign keeps the Wishlist. Nexus-only permanent-role markers should be imported in Nexus, not assumed compatible with every native importer.
+
+/nexus currentlocks off: choose future untagged plans manually.
+/nexus currentlocks on: use matching permanent targets by default.
+
+Opening or confirming targets does not lock/unlock anything. Automatic permanent-slot changes require both Automation and their separate option, plus ownership and safety checks.]]},
+ {id="rolling",title="Rolling and settings",text=[[Automation is a master permission, separate from per-action settings. OFF leaves recommendations available; it does not disable build sharing. Enabling automation can use permitted Banish/Reroll/Freeze charges and configured activation, save, or permanent-slot actions.
+
+Take chooses a needed offer. Banish removes an eligible offer. Reroll asks for new choices when enabled. Freeze preserves an eligible offered card. The planner considers remaining needs and choices; it does not always Freeze whenever two wanted cards appear.
+
+/nexus reroll on|off and /nexus freeze on|off change those permissions, not the master switch.
+
+EXTRA COPIES are rolled copies above exact Wishlist targets, including unrequested or different-quality copies. Target 2/current 5 means 3 extras. This display deletes nothing. A later run may reduce extras; replacement is not guaranteed.
+
+Needed, Target already met, and Not on Wishlist describe the current choice. Priority numbers in advanced diagnostics are not DPS or percentages. [G] means the server marks this current offer guaranteed; a predicted future entry is not the same evidence. Wishlist overlay: [X] meets the requested copy count; [~] has some but not all requested copies; [ ] has none. Those symbols are not network/loading states.
+
+Waiting for current Echo data means automatic choices are paused for ownership confirmation. It is not the Community Sync channel status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
+ {id="sharing",title="Shared builds and DPS",text=[[Build Library browses records known locally and shared by Nexus users. Copy into Editor creates a draft; it does not activate or spend. Share Build sends a listing to other users; it is separate from saving a Wishlist or a server Saved Build.
+
+Stop Sharing, an administrator removing a shared record, and deleting from My Builds are different actions. Read each confirmation. Do not infer that removing a shared listing deletes your server build.
+
+Both DPS records means the required Training Dummy and Lich King records are present, not that the build is proven optimal. The combined view is ranked by its highest single result; an average can be display-only. A missing record is not a verdict on build quality.
+
+DPS capture depends on Details! and its supported events. A read-only Echo list has attached DPS evidence; share a new build for a different Echo list.
+
+Sync Now checks for shared builds and records. Preparing, request sent, receiving updates, and finished are distinct. Sent does not prove peer convergence. Removing expired requests is bounded queue housekeeping.
+
+The addon uses its normal live sharing network. Do not flood it or test malformed traffic. Older PR #68 peers cannot fully converge on locked-bearing builds; new-peer success must be tested separately.]]},
+ {id="orbs",title="Orbs / Lost Memories",text=[[Orb mode refines existing rolled Echoes toward a selected resolved Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace permanent slots. Once rolled targets are complete it stops, even if the plan still has unmet permanent targets.
+
+1. Open /nexus orbs. Select a Wishlist or use the assigned one.
+2. Review outstanding exact targets and their order (topmost missing target first).
+3. Suggest a source pool, then approve only copies you will allow to be removed. Permanent and required target copies are protected. Exclude additional Echoes if desired.
+4. Choose a per-run limit. Review single Orb caps the run at one. Review & start shows a confirmation; nothing spends merely by opening the panel.
+5. Optionally approve safe unwanted offers to be selected and recycled. Without a safe target or approved fallback, the run pauses for manual resolution.
+
+Starting disables ordinary Automation; it does not automatically re-enable it. The game and other addons' competing pickers must be off. Unknown capabilities disable only Orb mode.
+
+Pause/Stop prevents new submissions, not a spend already accepted. The native offer remains accessible. Recheck only requests balance/ownership data. A missing response retains spending exposure; no automatic repeat is sent.
+
+Resume retains the approved usage and source limits. Increasing a limit needs another confirmation. Login, reconnect, new resources, or reload never automatically restart spending. An unresolved earlier action must settle before a new run.]]},
+ {id="troubleshooting",title="Loading and troubleshooting",text=[[The loading panel shows the current step, work where measurable, and elapsed time. A percentage applies only to that step, never a guessed whole-startup total. /nexus loading reopens it.
+
+Wishlist tools and ordinary rolling can be available after local validation while shared builds still prepare. Rolling also needs its own fresh ownership/board/resource state. Gray Build Library/Leaderboard tabs mean those shared views are not ready.
+
+Useful commands:
+/nexus panel - show/hide the main panel
+/nexus editor - edit Wishlists
+/nexus status - concise status/build identity
+/nexus sync - explicitly request shared-build Sync
+/nexus log errors - recorded errors
+/nexus perf - runtime timing diagnostics (not DPS)
+/nexus help - this guide, available during loading
+/nexus orbs - open Orb mode without spending
+
+Prepare full diagnostic report builds a paged report. Select this page and copy pages in order; it does not put every page on the clipboard. Large reports may take a moment. Report build label, exact action, expected/actual outcome, and a small error screenshot first.
+
+Do not delete saved data or run advanced reset commands on guesswork. Keep a matching addon/WTF backup for rollback with WoW closed. Native timing and recovery are not established by offline tests.]]},
+ {id="about",title="About and advanced details",text=[[Ordinary rolling is independently implemented from the supplied LoadoutPilot 1.3.6 / P103 reference. Orb decisions use its MemoryMode source/target/fallback behavior with Nexus-specific exact-quality, permanent-role, approval, budget, and confirmation safeguards.
+
+The reference archive is not a second runtime dependency. Source and reuse notices are in THIRD_PARTY.md. Neither algorithm is claimed mathematically optimal or universally safe without matching client evidence.
+
+This prototype uses a compatible global ChatThrottleLib where available, otherwise its disclosed private compatibility scheduler. That is not complete official-library/native acceptance.
+
+Advanced diagnostics retain raw reason codes and identifiers so support can distinguish failures. flags reads active safety assumptions; undemote clears recorded temporary assumption disablements; anchor changes the existing Adaptive Power preference; restore restores the prior host auto-accept setting; err displays the latest recorded error. These are troubleshooting tools, not generic fixes. Do not experiment with them to clear a loading message.
+
+/nexus prototype prints build/reference details. The installed README contains current user instructions; detailed historical tests belong to the source bundle.
+
+Known legacy compatibility and incomplete native validation remain disclosed. Back up saved data and test voluntarily.]]},
+}
+H.Pages=pages
+local function refresh()
+    local p=pages[index];frame.title:SetText("Nexus Help - "..p.title);frame.body:SetText(p.text)
+    frame.page:SetText("Page "..index.." / "..#pages)
+    if frame.content then frame.content:SetHeight(math.max(414,frame.body:GetStringHeight()+24)) end
+end
+local function ensure()
+    if frame then return end
+    frame=CreateFrame("Frame","NexusHelpWindow",UIParent);frame:SetSize(660,540);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
+    frame:SetFrameStrata("DIALOG");frame:SetFrameLevel(150);frame:EnableMouse(true);frame:SetMovable(true)
+    frame:RegisterForDrag("LeftButton");frame:SetScript("OnDragStart",function(self)self:StartMoving()end)
+    frame:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
+    frame:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
+    frame:SetBackdropColor(.035,.04,.05,1)
+    frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge");frame.title:SetPoint("TOPLEFT",20,-20)
+    local scroll=CreateFrame("ScrollFrame","NexusHelpScroll",frame,"UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT",20,-56);scroll:SetSize(595,414)
+    local child=CreateFrame("Frame",nil,scroll);child:SetSize(590,650);scroll:SetScrollChild(child);frame.content=child
+    frame.body=child:CreateFontString(nil,"OVERLAY","GameFontHighlight");frame.body:SetPoint("TOPLEFT",0,0)
+    frame.body:SetWidth(585);frame.body:SetJustifyH("LEFT");frame.body:SetJustifyV("TOP");frame.body:SetWordWrap(true)
+    local function b(x,w,label,fn)
+        local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("BOTTOMLEFT",x,20);f:SetSize(w,25);f:SetText(label)
+        f:SetScript("OnClick",function()fn();scroll:SetVerticalScroll(0)end);return f
+    end
+    b(20,90,"Previous",function()index=math.max(1,index-1);refresh()end)
+    b(118,90,"Next",function()index=math.min(#pages,index+1);refresh()end)
+    b(430,95,"Start page",function()index=1;refresh()end)
+    b(533,100,"Close",function()frame:Hide()end)
+    frame.page=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall");frame.page:SetPoint("BOTTOM",0,26)
+    frame:Hide();UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusHelpWindow"
+end
+function H.Show(id)
+    ensure();if id then for i,p in ipairs(pages) do if p.id==id then index=i end end end
+    refresh();frame:Show();return frame
+end
+function H.Hide()if frame then frame:Hide()end end

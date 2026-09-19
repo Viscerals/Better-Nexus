@@ -1,0 +1,16 @@
+[
+  {
+    "case": "startup",
+    "baseline": "Original supplied P1.1 source",
+    "exit": 1,
+    "stdout": "",
+    "stderr": "tests/prototype/startup.lua:5: EXPECTED RED: local readiness held behind pending Community\n"
+  },
+  {
+    "case": "startup_evidence",
+    "baseline": "Original supplied P1.1 source",
+    "exit": 1,
+    "stdout": "",
+    "stderr": "tests/prototype/startup_evidence.lua:10: EXPECTED RED: evidence initialized 664 times for one startup source\n"
+  }
+]
