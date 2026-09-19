@@ -15,6 +15,18 @@ local function button(parent,x,y,w,label,fn)
     b:SetFrameLevel(parent:GetFrameLevel()+2);b:EnableMouse(true);return b
 end
 local function enable(b,on)if on then b:Enable()else b:Disable()end end
+-- Legacy EditBox has no Button Enable/Disable API. Lock both input routes and
+-- release focus so an approved maximum cannot remain editable during a run.
+local function editLimit(on)
+    local e=frame.limit;e.editable=on==true
+    e:EnableMouse(e.editable);e:EnableKeyboard(e.editable);e:SetAlpha(e.editable and 1 or .5)
+    if not e.editable then e:ClearFocus()end
+end
+local function inactiveControls()
+    editLimit(false)
+    for _,b in ipairs(frame.mutations)do b:Disable()end
+    frame.advanced:Hide();frame:SetHeight(445)
+end
 local function name(s)return tostring(s or ""):gsub("|","||"):gsub("[%c]"," "):sub(1,100)end
 local function notify(ok,err)
     if frame then frame.notice:SetText(err or (ok and "" or "No change."))end
@@ -30,14 +42,15 @@ local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="
     WAIT_RESULT="Waiting for result confirmation",PAUSED="Paused",STOPPED="Stopped",COMPLETE="Targets complete",
     ROLLED_COMPLETE="Rolled targets complete",LIMIT="Maximum reached",OUT_OF_ORBS="No Orbs remain",
     NO_SOURCES="No safe surplus copies remain",RECOVERY="Previous result is unresolved"}
-function UI.Refresh()
+local function refresh()
     if not frame or not frame:IsShown()then return end
     local ready=Nexus.StartupStatus and Nexus.StartupStatus()
     if not ready or not ready.coreReady then
         frame.plan:SetText("Restoring assigned Wishlist...")
         frame.status:SetText("Reading local saved data. Shared-library loading is not required.")
         frame.balance:SetText("Orb balance: loading")
-        for _,b in ipairs(frame.mutations)do b:Disable()end
+        frame.targets:SetText("");frame.permanent:SetText("");frame.usage:SetText("")
+        inactiveControls()
         return
     end
     local s=Nexus.OrbRuntime.Status();frame.snapshot=s
@@ -50,7 +63,7 @@ function UI.Refresh()
     frame.balance:SetText(s.charges~=nil and ("Confirmed Orb balance: "..s.charges)
         or ("Orb balance: "..(s.balanceState or "unknown")..". "..(s.balanceReason or "")))
     frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume" or "Start"))
-    enable(frame.start,s.running or s.canResume or s.canStart);enable(frame.stop,busy);enable(frame.assigned,not busy);enable(frame.limit,not busy)
+    editLimit(not busy)
     if not frame.limit:HasFocus()then frame.limit:SetText(tostring(busy and s.limit or s.config.maxOrbs))end
     frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or s.config.maxOrbs)
         ..(s.reserved>0 and ("; unresolved exposure: "..s.reserved)or ""))
@@ -58,8 +71,6 @@ function UI.Refresh()
     frame.status:SetText((phases[s.state]or s.state).."\n"..(reason or s.error or ""))
     if s.targetChanged then frame.status:SetText(frame.status:GetText().."\nOriginal operation: "..name(s.operationName))end
     frame.assignmentNote:SetText(a.mirrorNote or "")
-    if advanced then frame.advanced:Show()else frame.advanced:Hide()end
-    frame:SetHeight(advanced and 660 or 445)
     if advanced then
         local rows=s.sources or {};sourcePage=math.max(1,math.min(sourcePage,math.max(1,math.ceil(#rows/4))))
         for i,r in ipairs(frame.sourceRows)do
@@ -70,10 +81,22 @@ function UI.Refresh()
         enable(frame.clearExclusions,not busy)
         frame.sourcePage:SetText("Eligible sources "..sourcePage.." / "..math.max(1,math.ceil(#rows/4)))
     end
+    enable(frame.start,s.running or s.canResume or s.canStart);enable(frame.stop,busy);enable(frame.assigned,not busy)
+    if advanced then frame.advanced:Show()else frame.advanced:Hide()end
+    frame:SetHeight(advanced and 660 or 445)
+end
+function UI.Refresh()
+    if not frame or not frame:IsShown()then return end
+    local ok,err=pcall(refresh)
+    if not ok then
+        inactiveControls()
+        frame.status:SetText("Orb panel refresh failed. Controls are unavailable.")
+        error(err,0)
+    end
 end
 local function ensure()
     if frame then return end
-    frame=CreateFrame("Frame","NexusOrbPanel",UIParent);frame:SetSize(620,445);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
+    frame=CreateFrame("Frame","NexusOrbPanel",UIParent);frame:Hide();frame:SetSize(620,445);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
     frame:SetFrameStrata("DIALOG");frame:SetFrameLevel(30);frame:EnableMouse(true);frame:SetMovable(true);frame:SetClampedToScreen(true)
     frame:RegisterForDrag("LeftButton");frame:SetScript("OnDragStart",function(self)self:StartMoving()end)
     frame:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
@@ -89,7 +112,11 @@ local function ensure()
     text(frame,20,-190,225,24,"Maximum Orbs this run:")
     frame.limit=CreateFrame("EditBox",nil,frame,"InputBoxTemplate");frame.limit:SetSize(65,25);frame.limit:SetPoint("TOPLEFT",225,-188)
     frame.limit:SetFrameLevel(32);frame.limit:SetAutoFocus(false);frame.limit:SetNumeric(true);frame.limit:SetMaxLetters(5)
-    frame.limit:SetScript("OnEnterPressed",function(self)notify(Nexus.OrbRuntime.SetLimit(tonumber(self:GetText())));self:ClearFocus()end)
+    frame.limit:SetScript("OnEditFocusGained",function(self)if not self.editable or not frame:IsShown()then self:ClearFocus()end end)
+    frame.limit:SetScript("OnEnterPressed",function(self)
+        if not self.editable then self:ClearFocus();return end
+        local ok,err=Nexus.OrbRuntime.SetLimit(tonumber(self:GetText()));self:ClearFocus();notify(ok,err)
+    end)
     frame.limit:SetScript("OnEscapePressed",function(self)self:ClearFocus();UI.Refresh()end)
     frame.start=button(frame,326,-188,120,"Start",function()notify(primary(tonumber(frame.limit:GetText())))end)
     frame.stop=button(frame,461,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
@@ -99,7 +126,7 @@ local function ensure()
     button(frame,20,-414,85,"Help",function()Nexus.Help.Show("orbs")end)
     button(frame,115,-414,95,"Advanced",function()advanced=not advanced;UI.Refresh()end)
     button(frame,515,-414,85,"Close",function()frame:Hide()end)
-    frame.advanced=CreateFrame("Frame",nil,frame);frame.advanced:SetSize(590,205);frame.advanced:SetPoint("TOPLEFT",15,-446);frame.advanced:SetFrameLevel(31)
+    frame.advanced=CreateFrame("Frame",nil,frame);frame.advanced:Hide();frame.advanced:SetSize(590,205);frame.advanced:SetPoint("TOPLEFT",15,-446);frame.advanced:SetFrameLevel(31)
     local af=frame.advanced
     button(af,5,-4,100,"Recheck",function()notify(Nexus.OrbRuntime.Recheck())end)
     frame.clearExclusions=button(af,116,-4,195,"Clear source exclusions",function()notify(Nexus.OrbRuntime.ClearExclusions())end)
@@ -114,7 +141,10 @@ local function ensure()
     button(af,380,-151,85,"Next",function()sourcePage=sourcePage+1;UI.Refresh()end)
     frame.assignmentNote=text(af,5,-180,565,31)
     frame.mutations={frame.start,frame.stop,frame.assigned,frame.clearExclusions}
+    for _,r in ipairs(frame.sourceRows)do frame.mutations[#frame.mutations+1]=r.exclude end
+    inactiveControls()
     frame:SetScript("OnShow",function()UI.Refresh()end)
+    frame:SetScript("OnHide",function()editLimit(false)end)
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
     frame:Hide();UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbPanel"
 end
