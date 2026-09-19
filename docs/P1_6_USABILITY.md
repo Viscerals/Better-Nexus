@@ -70,14 +70,21 @@ is preserved. Ambiguous server mirrors do not identify a row for overwrite;
 the exact local plan remains readable. The loadout confirmation gate preserves
 the unresolved operation across later notifications and reload.
 
+The second candidate, `61b890c`, passed those original probes and 69 scripts,
+but the reviewer demonstrated a remaining complete-design loss in the actual
+Journal picker and Editing dropdown. Their UI snapshots omitted the new
+assignment/design fields. Those exact failing control probes are also preserved
+and retained unchanged. The normal selection, associated Edit, row gear and
+Editing dropdown now carry the complete plan and mark only the exact assignment.
+
 ## Validation boundary
 
 The 54 prior prototype scripts are retained. Three UI scripts were updated for
 the explicitly approved replacement of the old review/checkbox screen and the
 move of Recheck to Advanced. Their source-protection, confirmation, exposure and
-zero-mutation assertions remain. Fifteen new scripts exercise actual controller,
-adapter, main/detail UI and restoration paths. The current inventory is 69.
-The two independent negative probes are retained byte-for-byte as regressions.
+zero-mutation assertions remain. Eighteen new scripts exercise actual controller,
+adapter, main/detail UI and restoration paths. The current inventory is 72.
+Four independent negative probes are retained byte-for-byte as regressions.
 The earlier positive loadout-switch fixture assumed correlation it did not
 supply; it now requires retained pending exposure rather than false settlement.
 Same-loadout target-change settlement and finite-budget Resume remain tested.

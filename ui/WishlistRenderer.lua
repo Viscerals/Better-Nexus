@@ -330,8 +330,10 @@ local function ShowWishlistSwitchMenu(anchor)
         local c = candidates[i]
         if c then
             local assignedSlot, assignedName = CandidateAssignment(c)
-            local current = editingContext and ((editingContext.key and c.key == editingContext.key)
-                or tonumber(editingContext.slot) == tonumber(c.slot))
+            local current=editingContext and ((editingContext.assignmentId and c.assignmentId
+                and editingContext.assignmentId==c.assignmentId) or (not editingContext.assignmentId
+                and not c.assignmentId and ((editingContext.key and c.key==editingContext.key)
+                    or (c.slot and tonumber(editingContext.slot)==tonumber(c.slot)))))
             local wishlistLabel = DisplayUntrusted(c.name, 1024, false)
                 or ("Wishlist " .. tostring(c.slot))
             local displayAssignedName = assignedName
@@ -356,6 +358,8 @@ local function ShowWishlistSwitchMenu(anchor)
                 slot = c.slot, name = c.name, key = c.key, echoes = c.echoes,
                 lockEvidenceVersion = c.lockEvidenceVersion,
                 lockEvidenceStatus = c.lockEvidenceStatus,
+                evidenceSource=c.evidenceSource,
+                assignmentId=c.assignmentId,designTargets=c.designTargets,
                 loadoutName = assignedName or "Not assigned",
             }
             local openAssignedSlot = assignedSlot

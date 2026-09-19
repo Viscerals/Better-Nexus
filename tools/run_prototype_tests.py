@@ -13,6 +13,8 @@ NAMES += ['orbs_assigned','help_layout','assignment_restore','orbs_target_change
 NAMES += ['assignment_distinct_designs','orbs_loadout_result_alias']
 NAMES += ['assignment_design_lifecycle']
 NAMES += ['orbs_loadout_early_change']
+NAMES += ['assignment_journal_picker','assignment_editing_menu']
+NAMES += ['assignment_journal_controls']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

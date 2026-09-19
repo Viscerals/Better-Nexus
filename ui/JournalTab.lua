@@ -1110,7 +1110,9 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 wishlistPickerRows[i] = row
             end
             row:ClearAllPoints(); row:SetPoint("TOPLEFT", 6, -24 - (i-1)*rowH)
-            local selected = linked and linked.key and cKey and linked.key == cKey
+            local selected = linked and ((linked.assignmentId and c.assignmentId
+                and linked.assignmentId==c.assignmentId) or (not linked.assignmentId
+                and not c.assignmentId and linked.key and cKey and linked.key==cKey))
             local editor=Nexus.WishlistEditor
             local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose locked targets"
             local evidenceSuffix = c.lockEvidenceStatus == "unavailable"
@@ -1123,6 +1125,8 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 slot=cSlot, name=cName, key=cKey,
                 lockEvidenceVersion=c.lockEvidenceVersion,
                 lockEvidenceStatus=c.lockEvidenceStatus,
+                evidenceSource=c.evidenceSource,
+                assignmentId=c.assignmentId,designTargets=c.designTargets,
                 echoes={},
             }
             for echoIndex = 1, #(cEchoes or {}) do
@@ -1166,6 +1170,8 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                         echoes = cEchoes,
                         lockEvidenceVersion = c.lockEvidenceVersion,
                         lockEvidenceStatus = c.lockEvidenceStatus,
+                        evidenceSource=c.evidenceSource,
+                        assignmentId=c.assignmentId,designTargets=c.designTargets,
                         loadoutName = loadoutName,
                     }, (tonumber(active) and tonumber(active) > 0) and active or nil)
                 else
@@ -1251,6 +1257,10 @@ local function RefreshAssociationRows()
                 name = linked.name,
                 key = linked.key,
                 echoes = linked.echoes,
+                lockEvidenceVersion=linked.lockEvidenceVersion,
+                lockEvidenceStatus=linked.lockEvidenceStatus,
+                evidenceSource=linked.evidenceSource,
+                assignmentId=linked.assignmentId,designTargets=linked.designTargets,
                 loadoutName = loadoutName,
             }, firstRun and nil or active)
         else

@@ -832,6 +832,7 @@ function Controller.New(options)
             slot = tonumber(wishlist.slot),
             name = tostring(wishlist.name or "Wishlist"),
             key = wishlist.key,
+            assignmentId=wishlist.assignmentId,
             loadoutSlot = tonumber(loadoutSlot),
             loadoutName = tostring(wishlist.loadoutName or ""),
         }
