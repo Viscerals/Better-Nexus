@@ -2,6 +2,8 @@
 Nexus=Nexus or {}
 local H={};Nexus.Help=H
 local frame,index= nil,1
+-- Keep the complete Help window above the Orb dialog's 30-33 layer band.
+local HELP_LEVEL=40
 local pages={
  {id="start",title="Getting started",text=[[Nexus helps you work toward an Echo build. Create or import a Wishlist, choose its planned permanent-slot targets, and assign it to a Saved Build. Follow the recommendations, or explicitly enable the actions you want automated. Shared builds and Leaderboards show records known to this client.
 
@@ -112,10 +114,9 @@ end
 local function ensure()
     if frame then return end
     frame=CreateFrame("Frame","NexusHelpWindow",UIParent);frame:SetSize(660,540);frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
-    -- The supported 3.3.5 client clamps high child levels: the previous parent
-    -- rendered at 129 while scroll/content/buttons rendered at 128 underneath.
-    -- Stay below that ceiling and set every interactive/content layer explicitly.
-    frame:SetFrameStrata("DIALOG");frame:SetFrameLevel(30);frame:EnableMouse(true);frame:SetMovable(true)
+    -- The earlier high-level Help layout rendered its parent at 129 above
+    -- children at 128. Keep this band low and every child above its backdrop.
+    frame:SetFrameStrata("DIALOG");frame:SetFrameLevel(HELP_LEVEL);frame:EnableMouse(true);frame:SetMovable(true)
     frame:SetClampedToScreen(true)
     frame:RegisterForDrag("LeftButton");frame:SetScript("OnDragStart",function(self)self:StartMoving()end)
     frame:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
@@ -124,14 +125,14 @@ local function ensure()
     frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge");frame.title:SetPoint("TOPLEFT",20,-20)
     local scroll=CreateFrame("ScrollFrame","NexusHelpScroll",frame,"UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT",20,-56);scroll:SetSize(595,414)
-    scroll:SetFrameLevel(31)
+    scroll:SetFrameLevel(HELP_LEVEL+1)
     local child=CreateFrame("Frame",nil,scroll);child:SetSize(590,650);scroll:SetScrollChild(child);frame.content=child
-    child:SetPoint("TOPLEFT",scroll,"TOPLEFT",0,0);child:SetFrameLevel(32)
+    child:SetPoint("TOPLEFT",scroll,"TOPLEFT",0,0);child:SetFrameLevel(HELP_LEVEL+2)
     frame.body=child:CreateFontString(nil,"OVERLAY","GameFontHighlight");frame.body:SetPoint("TOPLEFT",0,0)
     frame.body:SetWidth(585);frame.body:SetJustifyH("LEFT");frame.body:SetJustifyV("TOP");frame.body:SetWordWrap(true)
     local function b(x,w,label,fn)
         local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("BOTTOMLEFT",x,20);f:SetSize(w,25);f:SetText(label)
-        f:SetFrameLevel(32)
+        f:SetFrameLevel(HELP_LEVEL+2)
         f:SetScript("OnClick",function()fn();scroll:SetVerticalScroll(0)end);return f
     end
     b(20,90,"Previous",function()index=math.max(1,index-1);refresh()end)

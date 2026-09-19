@@ -16,6 +16,7 @@ NAMES += ['orbs_loadout_early_change']
 NAMES += ['assignment_journal_picker','assignment_editing_menu']
 NAMES += ['assignment_journal_controls']
 NAMES += ['orbs_legacy_editbox_idle','orbs_legacy_editbox_busy','orbs_legacy_editbox_loading']
+NAMES += ['orbs_help_layers']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
