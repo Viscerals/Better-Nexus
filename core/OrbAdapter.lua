@@ -130,14 +130,22 @@ function O.Read()
     for _,c in ipairs(board) do observed[c.spellId]=true end
     local rows={}
     for id,row in pairs(cat.rows) do
-        local raw=pe.PerkDatabase and pe.PerkDatabase[id]
-        local g=raw and tonumber(raw.groupId)
-        local gated=raw and raw.requiredSpell and raw.requiredSpell~=0
+        local raw=type(pe.PerkDatabase)=="table" and pe.PerkDatabase[id]
+        -- The ordinary adapter deliberately retains its last complete catalog
+        -- during source loss. Keep its group/requirement metadata, but require
+        -- a matching live entry before this row can authorize an Orb action.
+        local g=tonumber(row.groupId)
+        local gated=(tonumber(row.requiredSpell) or 0)~=0
+        local metadataKnown=type(raw)=="table"
+            and tonumber(raw.requiredSpell or 0)==(tonumber(row.requiredSpell) or 0)
+            and tonumber(raw.groupId or 0)==(tonumber(row.groupId) or 0)
         local learned=not gated or (discoveryKnown and (discovered[id]~=nil or observed[id]==true))
         local mask=tonumber(row.classMask or (raw and raw.classMask)) or 0
         local allowedClass=mask==0 or mask==1535 or (bit and bit.band and bit.band(mask,cat.playerMask or 0)~=0)
         local disabled,reason=false,nil
-        if gated then
+        if not metadataKnown then
+            reason="The live Echo catalog entry is unavailable or changed. Wait for verified catalog data."
+        elseif gated then
             if not discoveryKnown then reason="Echo discovery data or GetDiscoveredEchoes is unavailable."
             elseif not learned then reason="This Echo has not been discovered or observed."
             elseif type(svc.IsTomeEchoDisabled)~="function" then reason="PerkService.IsTomeEchoDisabled is unavailable."
@@ -150,6 +158,7 @@ function O.Read()
         rows[id]={spellId=id,name=row.name or (GetSpellInfo and GetSpellInfo(id)) or ("Echo "..id),
             quality=row.quality or 0,maxStack=tonumber(row.maxStack) or 1,
             group=integer(g,1) and ("g:"..g) or ("s:"..id),available=allowedClass and learned and not disabled and not reason,
+            sourceAvailable=metadataKnown,
             availabilityReason=reason or (not allowedClass and "This Echo is unavailable to this class." or nil)}
     end
     local s={known=true,charges=charges,offerPending=pending,board=board,boardKey=table.concat(parts,","),

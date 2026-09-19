@@ -53,7 +53,8 @@ function P.Sources(targets,s,excluded)
             elseif qualities[id]==nil then qualities[id]=q end
             local group=groups[row.group] or {};groups[row.group]=group
             group[#group+1]={key=k,spellId=id,quality=q,name=row.name,group=row.group,
-                count=count,excess=math.max(0,count-(needed[k] or 0)),excluded=excluded and excluded[k]==true}
+                count=count,excess=math.max(0,count-(needed[k] or 0)),excluded=excluded and excluded[k]==true,
+                sourceAvailable=row.sourceAvailable}
         end
     end
     local sources={}
@@ -62,7 +63,7 @@ function P.Sources(targets,s,excluded)
         -- The game may remove the lowest owned quality in a family. Never jump
         -- over a protected low-quality copy to authorize a seemingly safe higher one.
         local first=g[1]
-        if first and first.excess>0 and not first.excluded then
+        if first and first.excess>0 and not first.excluded and first.sourceAvailable~=false then
             -- Passing only an ID cannot disambiguate locked/unlocked copies of
             -- that same identity on an undocumented client. Conservatively exclude it.
             local anyLocked=false

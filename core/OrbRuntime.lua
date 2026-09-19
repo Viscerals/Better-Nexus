@@ -265,6 +265,7 @@ local function finishResult(s,p)
     -- Neither a new table nor an Orb decrement proves a result. Require the
     -- original offer and a selection observed within that offer's lifecycle.
     if not p.offerKey or not p.selectionAttempted or not p.selectedKey
+        or not (p.choiceMayHaveBeenSent or p.choiceObserved)
         or not p.offeredKeys or not p.offeredKeys[p.selectedKey] then return false end
     if p.restored and not p.baselineStamp then p.baselineStamp=s.grantStamp;return false end
     local fresh=s.grantStamp>(p.restored and p.baselineStamp or p.selectionStamp or p.beforeStamp)
@@ -327,6 +328,7 @@ local function observeLifecycle(s,p)
         if not p.selectionAttempted then
             p.selectionAttempted=true;p.selectedKey=sel.key;p.selectionStamp=sel.grantStamp;changed=true
         end
+        if not p.choiceObserved then p.choiceObserved=true;changed=true end
     end
     if changed then local ok,e=savePending();if not ok then pause(e);return false end end
     return true
@@ -383,7 +385,13 @@ function M.Pump(passive)
                 p.selectionStamp=s.grantStamp;p.since=now();p.refreshRequested=false
                 local saved,e=savePending();if not saved then p.selectionAttempted=false;pause(e);return end
                 local accepted,kind,reason=B.Select(run.token,decision.index,s.boardKey,decision.spellId)
-                if not accepted then p.selectionAmbiguous=kind=="AMBIGUOUS";p.selectionRefused=kind=="REJECTED";savePending();pause(reason);return end
+                -- An attempt rejected by the adapter before SelectPerk is not
+                -- a selection lifecycle. Preserve the receipt, but never use
+                -- its proposed key as proof that a choice was submitted.
+                p.choiceMayHaveBeenSent=accepted==true or kind=="AMBIGUOUS"
+                p.selectionAmbiguous=kind=="AMBIGUOUS";p.selectionRefused=kind=="REJECTED"
+                local recorded,recordError=savePending();if not recorded then pause(recordError);return end
+                if not accepted then pause(reason);return end
                 setState("WAIT_RESULT","Choice sent; waiting for the confirmed replacement.")
             elseif not s.offerPending and #s.board>0 then
                 pause("A different Echo choice appeared. Resolve it manually before continuing.");return

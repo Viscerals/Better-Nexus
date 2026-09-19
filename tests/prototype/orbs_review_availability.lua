@@ -1,5 +1,6 @@
 local H=dofile('tests/prototype/orbs_support.lua');local M,A=H.M,H.A
 H.db[410002].requiredSpell=12345
+assert(A.CheckCatalogSource()) -- Publish the fixture's changed discovery requirement.
 H.perks.discoveredEchoes={[410002]=true}
 H.service.GetDiscoveredEchoes=function()return H.perks.discoveredEchoes end
 H.service.IsTomeEchoDisabled=function()return false end

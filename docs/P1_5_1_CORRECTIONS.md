@@ -21,6 +21,9 @@ The imported snapshot does not establish upstream ancestry.
   or uncorrelated positive selection notice cannot establish completion.
   Pending ownership and original exposure persist. There is no automatic retry.
   Same-ID/different-quality results retain a confirmable exact state delta.
+  An adapter rejection before SelectPerk cannot establish a choice lifecycle,
+  even if a later snapshot matches the proposed key. Confirmed/ambiguous calls
+  and independently observed native choices are recorded separately from intent.
 - Passive manual settlement uses an observation of the existing SelectPerk
   service and its pending ID on the exact offer. It does not replace a handler.
   If that observation cannot be made, missing evidence remains unresolved.
@@ -34,6 +37,9 @@ The imported snapshot does not establish upstream ancestry.
   Missing, failed or nonboolean optional capability results disable the affected
   action with a reason. Ungated targets remain available. IsSpellKnown is not a
   replacement for discovered Echoes.
+  Loss or change of a live catalog entry disables that entry's Orb actions.
+  The cached authoritative group/requirement metadata remains intact, so source
+  loss cannot erase either tome gating or family-level copy protection.
 - I3: normal Panel, Community projection/renderer, Journal, and role-picker
   consumers carry the corrected text. Raw policy reasons, saved keys, protocol
   values and gameplay decisions are preserved. See the 55-row terminology ledger.
@@ -45,7 +51,11 @@ external correction evidence directory. All seven were rerun on the exact
 P1.5 baseline. Their zero exit status demonstrates a defect or gap; it is not a
 product safety result. Five fail-capable regressions were recorded red before
 the product correction. The correction inventory has the original 42 scripts
-plus nine new scripts. The source run reports 51 pass, zero fail or not-run.
+plus twelve new scripts. The final source run is recorded in the delivery receipt.
+The fresh independent review found two further edge cases in the first candidate:
+pre-call selection rejection and loss of live catalog metadata (both availability
+and protected-family consequences). Its three exact fail-capable probes were
+copied as regressions; the preserved review receipts record their failures.
 
 The original `orbs_same_echo` assumption that a new equal-content table proves
 same-quality completion was replaced with a required unresolved assertion and
