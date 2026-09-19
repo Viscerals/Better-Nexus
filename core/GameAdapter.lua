@@ -1026,6 +1026,50 @@ end
 -- hash collisions; neither input order nor the permanent-slot display matters.
 local WishlistRoles = { VERSION=1, MAX_RECORDS=128 }
 
+function WishlistRoles.CopyDesign(value)
+    if type(value)~="table" then return value end
+    local out={}
+    for key,item in pairs(value) do out[key]=WishlistRoles.CopyDesign(item) end
+    return out
+end
+
+-- Keep assignment records within the existing six-level saved graph bound.
+-- The runtime target map has two extra wrapper tables; persist its exact rows.
+function WishlistRoles.EncodeDesign(targets)
+    if targets==nil then return nil end
+    local model=Nexus.WishlistModel.New()
+    local entries=model.TargetMapEntries(targets)
+    if not entries then return nil,"invalid permanent design" end
+    local rows={}
+    for _,target in ipairs(entries) do
+        local source=type(target.value)=="table" and target.value.rows
+            or {{spellId=target.spellId,stacks=target.copies,replaces=target.replaces}}
+        for _,row in ipairs(source) do
+            rows[#rows+1]={spellId=row.spellId,quality=row.quality,stacks=row.stacks,
+                replaces=row.replaces or target.replaces}
+        end
+    end
+    return rows
+end
+
+function WishlistRoles.DecodeDesign(rows)
+    if rows==nil then return nil end
+    if type(rows)~="table" or #rows>6 then return false end
+    local targets,count={},0
+    for index,row in pairs(rows) do
+        if type(index)~="number" or index<1 or index>#rows or index~=math.floor(index)
+            or type(row)~="table" or type(row.spellId)~="number" then return false end
+        count=count+1
+        local target=targets[row.spellId] or {version=1,copies=0,rows={}}
+        targets[row.spellId]=target
+        target.copies=target.copies+(tonumber(row.stacks) or 0)
+        target.rows[#target.rows+1]={spellId=row.spellId,quality=row.quality,stacks=row.stacks,
+            replaces=row.replaces,locked=true,sourceRole="locked"}
+    end
+    if count~=#rows or not Nexus.WishlistModel.New().TargetMapEntries(targets) then return false end
+    return targets
+end
+
 function WishlistRoles.Content(echoes)
     local normalized = NormalizeWishlistEchoes(echoes, nil, false)
     if not normalized then return nil end
@@ -1061,6 +1105,8 @@ function WishlistRoles.Projection(candidate, echoes, source)
         slot=candidate.slot,name=candidate.name,count=#echoes,
         echoes=echoes,key=WishlistIdentity(echoes),active=candidate.active,
         stored=candidate.stored,
+        assignmentId=candidate.assignmentId,
+        designTargets=WishlistRoles.CopyDesign(candidate.designTargets),
         lockEvidenceVersion=WISHLIST_LOCK_EVIDENCE_VERSION,
         lockEvidenceStatus="authoritative",
         evidenceSource=WishlistRoles.IsLocal(source) and source or "user-confirmed",
@@ -1165,6 +1211,10 @@ end
 
 local function StoredWishlistRecord(candidate)
     candidate = type(candidate) == "table" and candidate or {}
+    local design=candidate.designTargets
+    if design==nil then design=WishlistRoles.DecodeDesign(candidate.designRows) end
+    local designRows,designError=WishlistRoles.EncodeDesign(design)
+    if designError then return nil end
     local echoes, hasLockEvidence = NormalizeWishlistEchoes(
         candidate.echoes, candidate.lockEvidenceVersion,
         candidate.lockEvidenceStatus ~= "unavailable")
@@ -1177,6 +1227,8 @@ local function StoredWishlistRecord(candidate)
     local record = {
         slot=tonumber(candidate.slot), name=tostring(candidate.name or ""),
         key=key,
+        assignmentId=candidate.assignmentId,
+        designRows=designRows,
     }
     if echoes then record.echoes = echoes end
     if hasLockEvidence then
@@ -1194,6 +1246,8 @@ end
 
 local function CandidateFromStoredRecord(saved)
     if type(saved) ~= "table" then return nil end
+    local design=WishlistRoles.DecodeDesign(saved.designRows)
+    if saved.designRows==nil then design=WishlistRoles.CopyDesign(saved.designTargets) end
     local echoes, hasLockEvidence = NormalizeWishlistEchoes(
         saved.echoes, saved.lockEvidenceVersion, false)
     if not echoes then echoes = WishlistEchoesFromIdentity(saved.key) end
@@ -1204,6 +1258,8 @@ local function CandidateFromStoredRecord(saved)
     local candidate = {
         slot=tonumber(saved.slot), name=tostring(saved.name or ""),
         count=#echoes, echoes=echoes, key=key, active=false, stored=true,
+        assignmentId=saved.assignmentId,
+        designTargets=design,
         evidenceSource=(saved.evidenceSource == "verified-active"
             or WishlistRoles.IsLocal(saved.evidenceSource)) and saved.evidenceSource or nil,
         lockEvidenceVersion=hasLockEvidence
@@ -1230,6 +1286,8 @@ local function CandidateSnapshot(candidate, expectedSlot)
     local snapshot = {
         slot=tonumber(candidate.slot), name=tostring(candidate.name or ""),
         count=#echoes, echoes=echoes, key=key, active=false,
+        assignmentId=candidate.assignmentId,
+        designTargets=WishlistRoles.CopyDesign(candidate.designTargets),
         evidenceSource=(candidate.evidenceSource == "verified-active"
             or WishlistRoles.IsLocal(candidate.evidenceSource)) and candidate.evidenceSource or nil,
         lockEvidenceVersion=hasLockEvidence
@@ -1239,6 +1297,47 @@ local function CandidateSnapshot(candidate, expectedSlot)
         snapshot.lockEvidenceStatus = "unavailable"
     end
     return snapshot
+end
+
+-- A server upload carries rolled contents only. Equal rolled contents cannot
+-- identify a local permanent design. Keep that design on its exact assignment;
+-- use a unique exact-content/name mirror only to locate its editable server row.
+function WishlistRoles.ResolveSaved(saved, candidates)
+    local fallback=CandidateFromStoredRecord(saved)
+    if not fallback then return nil end
+    local content=WishlistRoles.Content(fallback.echoes)
+    local matches,named={},{}
+    for _,candidate in ipairs(candidates) do
+        if candidate.key==fallback.key and WishlistRoles.Content(candidate.echoes)==content then
+            matches[#matches+1]=candidate
+            if candidate.name==fallback.name then named[#named+1]=candidate end
+        end
+    end
+    local mirror=#named==1 and named[1] or (#named==0 and #matches==1 and matches[1] or nil)
+    if fallback.designTargets~=nil then
+        -- The permanent rows are not in the mirror. A differently named plan
+        -- with the same rolled rows cannot identify this design's server slot.
+        mirror=#named==1 and named[1] or nil
+        fallback.slot=mirror and mirror.slot or nil
+        fallback.mirrorUnavailable=not mirror
+        return fallback
+    end
+    if mirror then
+        mirror.assignmentId=saved.assignmentId
+        return mirror
+    end
+    fallback.slot=nil;fallback.mirrorUnavailable=true
+    return fallback
+end
+
+function WishlistRoles.Wishlist(candidate, source, hasQuality)
+    local wishlist=EchoesToWishlist(candidate.echoes,candidate.name,source,hasQuality,candidate.slot)
+    if wishlist then
+        wishlist.assignmentId=candidate.assignmentId
+        wishlist.designTargets=WishlistRoles.CopyDesign(candidate.designTargets)
+        wishlist.mirrorUnavailable=candidate.mirrorUnavailable
+    end
+    return wishlist
 end
 
 -- Public wrapper: a stable, content-based wishlist identity (spellId:stacks
@@ -1514,12 +1613,24 @@ function A.GetWishlistCandidates()
     -- associated; never infer an unrelated candidate from a recycled slot.
     local state = Store and Store.State and Store.State()
     if not state then return out end
-    local seen = {}
+    local seen,seenAssignments = {},{}
     for _, candidate in ipairs(out) do
         if candidate.key then seen[candidate.key] = true end
     end
     local function Add(saved)
         local candidate = CandidateFromStoredRecord(saved)
+        if candidate and candidate.designTargets~=nil and candidate.assignmentId then
+            if seenAssignments[candidate.assignmentId] then return end
+            seenAssignments[candidate.assignmentId]=true
+            candidate=WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(slots))
+            candidate=ResolveWishlistEvidence(candidate,slots)
+            for index,live in ipairs(out) do
+                if candidate.slot and live.slot==candidate.slot and live.designTargets==nil then
+                    out[index]=candidate;return
+                end
+            end
+            out[#out+1]=candidate;return
+        end
         if not candidate or seen[candidate.key] then return end
         seen[candidate.key] = true
         candidate = ResolveWishlistEvidence(candidate, slots)
@@ -1573,8 +1684,10 @@ end
 
 local function SelectWishlistCandidate(wishlistSlot, candidate)
     wishlistSlot = tonumber(wishlistSlot)
-    if not wishlistSlot or wishlistSlot < 1
-        or wishlistSlot ~= math.floor(wishlistSlot) then
+    local localPlan=type(candidate)=="table" and candidate.designTargets~=nil
+        and type(candidate.assignmentId)=="string"
+    if (not wishlistSlot or wishlistSlot < 1
+        or wishlistSlot ~= math.floor(wishlistSlot)) and not localPlan then
         return nil, "invalid wishlist slot"
     end
     local snapshot = candidate ~= nil
@@ -1592,6 +1705,9 @@ local function SelectWishlistCandidate(wishlistSlot, candidate)
     -- resolve the exact evidence needed to create that very association.
     local live = LiveWishlistCandidates(slots)
     if snapshot then
+        if snapshot.designTargets~=nil then
+            return Select(WishlistRoles.ResolveSaved(snapshot,live))
+        end
         for _, current in ipairs(live) do
             if current.key == snapshot.key then return Select(current) end
         end
@@ -1638,21 +1754,10 @@ local function ResolveAssociation(loadoutSlot)
         return nil
     end
 
-    local candidates = A.GetWishlistCandidates()
+    local candidates = LiveWishlistCandidates(A.Slots())
     local wantedKey = saved.key
     if wantedKey and wantedKey ~= "" then
-        for _, c in ipairs(candidates) do
-            if c.key == wantedKey then
-                -- Keep the current server slot/name synchronized after slot
-                -- reordering while the Echo identity remains stable.
-                if not WishlistRequiresLockEvidence(c) then
-                    saved.slot, saved.name = c.slot, c.name
-                end
-                return c
-            end
-        end
-        -- A name or a reused/reordered slot cannot authorize new contents.
-        -- Only an explicit assignment/save can replace the stored identity.
+        return WishlistRoles.ResolveSaved(saved,candidates)
     end
     -- No key means an incomplete/old record. Slot fallback is accepted once
     -- only and upgraded immediately.
@@ -1679,19 +1784,7 @@ local function ResolveFirstRunWishlist()
     local state = Store and Store.State and Store.State()
     local saved = state and state.firstRunWishlist
     if type(saved) ~= "table" then return nil end
-    local candidates = A.GetWishlistCandidates()
-    local wantedKey, wantedName = tostring(saved.key or ""), tostring(saved.name or "")
-    if wantedKey ~= "" then
-        for _, c in ipairs(candidates) do
-            if c.key == wantedKey then
-                if not WishlistRequiresLockEvidence(c) then
-                    saved.slot, saved.name = c.slot, c.name
-                end
-                return c
-            end
-        end
-    end
-    return CandidateFromStoredRecord(saved)
+    return WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(A.Slots()))
 end
 
 function A.GetFirstRunWishlist()
@@ -1766,16 +1859,7 @@ local function ReadLoadoutWishlistState(loadoutSlot)
     end
 
     local expectedKey = saved.key
-    local candidate
-    if type(expectedKey) == "string" and expectedKey ~= "" then
-        for _, current in ipairs(LiveWishlistCandidates(slots)) do
-            if current.key == expectedKey then
-                candidate = current
-                break
-            end
-        end
-    end
-    candidate = candidate or CandidateFromStoredRecord(saved)
+    local candidate=WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(slots))
     if not candidate then
         return nil, expectedKey and expectedKey ~= ""
             and "invalid-schema" or "association-mismatch", expectedKey
@@ -1866,7 +1950,7 @@ function A.GetLoadoutWishlistSlot(loadoutSlot)
     return c and tonumber(c.slot) or nil
 end
 
-function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes)
+function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets)
     loadoutSlot = tonumber(loadoutSlot)
     local slots = A.Slots()
     if not slots or not loadoutSlot or loadoutSlot < 1
@@ -1876,7 +1960,7 @@ function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes)
     if not IsPopulatedLoadout(loadoutSlot, slots) then
         return false, "that loadout slot is empty or unavailable"
     end
-    local record = StoredWishlistRecord({name=name, echoes=echoes})
+    local record = StoredWishlistRecord({name=name, echoes=echoes,designTargets=designTargets})
     if not record then return false, "invalid wishlist" end
     if not UpdateStoreState(function(state)
         WishlistRoles.StampAssignment(state,record)
@@ -1908,8 +1992,8 @@ end
 --     leveling 1-79), A.Wishlist() reads ONLY this, via
 --     ResolveFirstRunWishlist -- ResolveAssociation is never even reached
 --     yet since there's no active slot to resolve.
-function A.SetFirstLoadoutWishlistIdentity(name, echoes)
-    local record = StoredWishlistRecord({name=name, echoes=echoes})
+function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
+    local record = StoredWishlistRecord({name=name, echoes=echoes,designTargets=designTargets})
     if not record then return false, "invalid wishlist" end
     local mirrored = StoredWishlistRecord(record)
     if not UpdateStoreState(function(state)
@@ -1952,11 +2036,11 @@ function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
 end
 
 
-function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes)
+function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets)
     loadoutSlot, wishlistSlot = tonumber(loadoutSlot), tonumber(wishlistSlot)
     if not loadoutSlot or not wishlistSlot then return false end
     local record = StoredWishlistRecord({
-        slot=wishlistSlot, name=name, echoes=echoes,
+        slot=wishlistSlot, name=name, echoes=echoes,designTargets=designTargets,
     })
     if not record then return false end
     if not UpdateStoreState(function(state)
@@ -2002,8 +2086,7 @@ function A.Wishlist()
                 return nil
             end
             A._wishlistNote = "First-run wishlist target"
-            return EchoesToWishlist(starter.echoes, starter.name,
-                "first-run-wishlist", false, starter.slot)
+            return WishlistRoles.Wishlist(starter,"first-run-wishlist",false)
         end
         local state = Store and Store.State and Store.State()
         if state and type(state.firstRunWishlist) == "table" then
@@ -2030,9 +2113,7 @@ function A.Wishlist()
             end
             return nil
         end
-        return EchoesToWishlist(linked.echoes, linked.name,
-            "loadout-association", linked.evidenceSource == "verified-active",
-            linked.slot)
+        return WishlistRoles.Wishlist(linked,"loadout-association",linked.evidenceSource=="verified-active")
     end
     local state = Store and Store.State and Store.State()
     if state and type(state.loadoutWishlists) == "table"
@@ -2055,8 +2136,7 @@ function A.Wishlist()
             end)
             MarkWishlistProjectionDirty()
         end
-        return EchoesToWishlist(starter.echoes, starter.name,
-            "loadout-association", false, starter.slot)
+        return WishlistRoles.Wishlist(starter,"loadout-association",false)
     end
     A._wishlistNote = "Loadout " .. tostring(activeSlot)
         .. " has no wishlist association. Set it in the Echo Journal."
@@ -2098,8 +2178,9 @@ function A.AssignedWishlist()
         result.entries[#result.entries+1]=row
         if row.locked then permanent[row.spellId]=(permanent[row.spellId] or 0)+(row.stacks or 1) end
     end
-    local targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key]
-    if targets and next(targets) then
+    local targets=w.designTargets
+    if targets==nil then targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key] end
+    if targets~=nil then
         A._assignmentTargetModel=A._assignmentTargetModel or Nexus.WishlistModel.New()
         local rows=A._assignmentTargetModel.TargetMapEntries(targets,A.Catalog())
         if not rows then
@@ -2113,7 +2194,9 @@ function A.AssignedWishlist()
     end
     -- An absent mirror is not deletion proof. Keep the local exact plan and
     -- explain its absence without silently switching to a namesake.
-    if type(saved)=="table" and saved.slot then
+    if w.mirrorUnavailable then
+        result.mirrorNote="Assigned Wishlist has no distinct current server mirror. Its exact saved plan is retained. Refresh the list or reassign deliberately."
+    elseif type(saved)=="table" and saved.slot then
         local found=false
         for _,candidate in ipairs(LiveWishlistCandidates(slots)) do if candidate.key==saved.key then found=true;break end end
         if not found then result.mirrorNote="Assigned Wishlist is absent from the current server list. Its saved plan is retained. Refresh the list or reassign deliberately." end

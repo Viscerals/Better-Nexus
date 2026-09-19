@@ -175,6 +175,14 @@ contents. No automatic retry is made. A same-ID result at a different quality
 can settle when its exact state change and original offer/selection are observed.
 Do not clear the recovery marker to force another run.
 
+Changing the active loadout during a pending operation also prevents reliable
+confirmation: ownership responses do not identify their originating loadout.
+The pending receipt and exposure remain, including after returning to the old
+loadout, Recheck, Stop or reload. A matching snapshot from a different loadout
+cannot permit another spend. Assignment changes within the same loadout still
+permit passive settlement when the original offer, selection and exact result
+are confirmed.
+
 ## Community, DPS, Sync, and loading
 
 **Share Build** is different from saving a Wishlist or a server Saved Build.

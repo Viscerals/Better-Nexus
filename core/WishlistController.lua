@@ -254,6 +254,7 @@ function Controller.New(options)
     -- Store.State(), which is the distinction that matters -- the DURABLE_READ
     -- no longer hands out writable durable state.
     local function LockDesignTargets()
+        if state.currentDesignTargets~=nil then return state.currentDesignTargets end
         local account = AccountRoot()
         local old = account.lockDesignTargets
         local key = state.currentLockKey or 0
@@ -507,8 +508,9 @@ function Controller.New(options)
         return state.pickOffset
     end
 
-    function M.LoadPendingEchoes(echoes, trustOrder)
+    function M.LoadPendingEchoes(echoes, trustOrder, designTargets)
         if trustOrder == nil then trustOrder = true end
+        state.currentDesignTargets=designTargets
         state.pending = {}
         state.pendingLock = {}
         state.fulfilledDraftTargets = {}
@@ -569,7 +571,7 @@ function Controller.New(options)
         if state.pendingSeeded then return false end
         state.pendingSeeded = true
         local wishlist = Adapter and Adapter.Wishlist and Adapter.Wishlist()
-        if wishlist then M.LoadPendingEchoes(wishlist.entries or {}, false) end
+        if wishlist then M.LoadPendingEchoes(wishlist.entries or {}, false,wishlist.designTargets) end
         if not wishlist then TouchPresentation() end
         return wishlist ~= nil
     end
@@ -737,6 +739,7 @@ function Controller.New(options)
         state.pendingLoadoutOpen = nil
         state.pendingSeeded = true
         state.currentLockKey = 0
+        state.currentDesignTargets={}
         state.candidateContext = nil
         state.candidateApplyToken = nil
         state.applyRetry = nil
@@ -800,7 +803,7 @@ function Controller.New(options)
         state.candidateApplyToken = nil
         state.applyRetry = nil
         state.createTargetContext = nil
-        if type(wishlist) ~= "table" or not tonumber(wishlist.slot) then
+        if type(wishlist) ~= "table" or type(wishlist.echoes)~="table" then
             notify("|cffff6060Nexus:|r Associated wishlist data is unavailable.")
             return false
         end
@@ -832,7 +835,7 @@ function Controller.New(options)
             loadoutSlot = tonumber(loadoutSlot),
             loadoutName = tostring(wishlist.loadoutName or ""),
         }
-        M.LoadPendingEchoes(wishlist.echoes or {}, false)
+        M.LoadPendingEchoes(wishlist.echoes or {}, false,wishlist.designTargets)
         return true
     end
 
@@ -845,7 +848,7 @@ function Controller.New(options)
         if name == "" then name = "Saved Build " .. tostring(slot) end
         local linked = Adapter and Adapter.GetLoadoutWishlist
             and Adapter.GetLoadoutWishlist(slot)
-        if linked and tonumber(linked.slot) then
+        if linked then
             linked.loadoutName = name
             return M.BeginWishlist(linked, slot), "wishlist"
         end
@@ -888,7 +891,7 @@ function Controller.New(options)
         end
         local firstRun = Adapter and Adapter.GetFirstRunWishlist
             and Adapter.GetFirstRunWishlist()
-        if firstRun and tonumber(firstRun.slot) then
+        if firstRun then
             return M.BeginWishlist(firstRun, nil), "wishlist", false
         end
         M.ResetNewWishlistDraft()
@@ -942,8 +945,10 @@ function Controller.New(options)
                 and type(row.echoes) == "table" and #row.echoes > 0 then
                 local linked = Adapter.GetLoadoutWishlist
                     and Adapter.GetLoadoutWishlist(slotId)
-                if linked and ((candidate.key and linked.key == candidate.key)
-                    or tonumber(linked.slot) == tonumber(candidate.slot)) then
+                local exact=linked and candidate.assignmentId and linked.assignmentId==candidate.assignmentId
+                if linked and (exact or (not candidate.assignmentId
+                    and ((candidate.key and linked.key==candidate.key)
+                        or (candidate.slot and tonumber(linked.slot)==tonumber(candidate.slot))))) then
                     local name = tostring(row.name or "")
                     if name == "" then name = "Saved Build " .. tostring(slotId) end
                     if slotId == active then return slotId, name end
@@ -1046,7 +1051,6 @@ function Controller.New(options)
     end
 
     local function CommitLockDesignTargets(echoes)
-        local previousKey = state.currentLockKey or 0
         local existing = LockDesignTargets()
         local lockedBySpell = LockedBySpell()
         local fresh = DraftModel.PlanLockCommit(state.pending, state.pendingLock,
@@ -1057,10 +1061,10 @@ function Controller.New(options)
         local committed, commitReason = UpdateStoreState(function(character)
             character.lockDesignTargetsBySlot =
                 character.lockDesignTargetsBySlot or {}
-            character.lockDesignTargetsBySlot[nextKey] = fresh
-            if previousKey ~= nextKey
-                and character.lockDesignTargetsBySlot[previousKey] == existing then
-                character.lockDesignTargetsBySlot[previousKey] = nil
+            -- Preserve legacy plans. New saves carry their own complete design
+            -- on the durable assignment; equal rolled contents are not an ID.
+            if character.lockDesignTargetsBySlot[nextKey]==nil then
+                character.lockDesignTargetsBySlot[nextKey] = fresh
             end
         end)
         if not committed then return false, commitReason or "local_state_unavailable" end
@@ -1080,6 +1084,7 @@ function Controller.New(options)
             end
         end
         state.currentLockKey = nextKey
+        state.currentDesignTargets=fresh
         state.fulfilledDraftTargets = {}
         for id, value in pairs(fresh) do
             local copies = DraftModel.TargetCopies(value, id)
@@ -1087,7 +1092,7 @@ function Controller.New(options)
                 state.fulfilledDraftTargets[id] = value
             end
         end
-        return true
+        return true,nil,fresh
     end
 
     local function TryApply(slot, name, echoes, guard)
@@ -1111,7 +1116,7 @@ function Controller.New(options)
                 notify("|cffff6060Nexus:|r Wishlist uploaded, but the editor changed; local targets were not reassigned. Review and save again.")
                 return false, "uploaded_draft_changed"
             end
-            local committed, commitReason = CommitLockDesignTargets(echoes)
+            local committed, commitReason, designTargets = CommitLockDesignTargets(echoes)
             if not committed then
                 state.applyRetry = nil
                 notify("|cffff6060Nexus:|r Wishlist uploaded, but local designed targets could not be saved. Your draft is preserved.")
@@ -1121,15 +1126,15 @@ function Controller.New(options)
             if state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
                 associated, associationReason = Adapter.UpdateWishlistAssociationAfterSave(
-                    state.editingContext.loadoutSlot, slot, name, echoes)
+                    state.editingContext.loadoutSlot, slot, name, echoes, designTargets)
             elseif state.createTargetContext and Adapter.SetLoadoutWishlistIdentity then
                 associated, associationReason = Adapter.SetLoadoutWishlistIdentity(
-                    state.createTargetContext.loadoutSlot, name, echoes)
+                    state.createTargetContext.loadoutSlot, name, echoes, designTargets)
                 if associated then notify("|cff4dff80Nexus:|r assigned '" .. tostring(name)
                     .. "' to " .. tostring(state.createTargetContext.loadoutName
                         or "the active Saved Build") .. ".") end
             elseif Adapter.SetFirstLoadoutWishlistIdentity then
-                associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, echoes)
+                associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
             end
             if associated ~= true then
                 state.applyRetry = nil
@@ -1166,6 +1171,10 @@ function Controller.New(options)
         if not (Adapter and Adapter.UploadWishlist) then
             notify("|cffff6060Nexus:|r adapter not ready.")
             return nil, "adapter"
+        end
+        if state.editingContext and not tonumber(state.editingContext.slot) then
+            notify("|cffff9040Nexus:|r This saved plan has no distinct current server mirror. Refresh the list before saving; no other Wishlist will be overwritten.")
+            return nil,"mirror_unresolved"
         end
         local current, staleReason = CandidateCurrent()
         if not current then

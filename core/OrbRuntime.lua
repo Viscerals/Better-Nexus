@@ -285,6 +285,14 @@ function M.Start(value)
     return M.Confirm(a.token)
 end
 local function finishResult(s,p)
+    -- Ownership responses do not identify the originating loadout. Once that
+    -- boundary changes, even an exact replacement delta can belong elsewhere.
+    -- Keep this uncertainty across Recheck, return-to-slot, and reload.
+    if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+        if not p.loadoutChanged then p.loadoutChanged=true;savePending() end
+        pause("The original loadout cannot be verified after a loadout change or an incomplete older receipt. Ownership responses do not identify the original loadout. Pending exposure is retained; no retry is allowed.")
+        return false
+    end
     -- Neither a new table nor an Orb decrement proves a result. Require the
     -- original offer and a selection observed within that offer's lifecycle.
     if not p.offerKey or not p.selectionAttempted or not p.selectedKey
@@ -385,6 +393,9 @@ function M.Pump(passive)
             if run.state~="STOPPED" then pause("The active loadout or assigned Wishlist changed. The original operation stays pending; Resume requires settlement and a resolved assignment.") end
         end
         if p then
+            if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+                finishResult(s,p);return
+            end
             if s.lockedKey~=p.lockedKey then pause("Permanent Echoes changed; no further Orb action will be submitted.");return end
             if not observeLifecycle(s,p) then return end
             if not p.spendConfirmed and s.charges==p.chargesBefore-1 and s.offerPending then
@@ -466,6 +477,7 @@ function M.Pump(passive)
         if not source then terminal("NO_SOURCES","No safe surplus source copies remain. Required and permanent copies stay protected.");return end
         local recycle=source.key==run.recycleKey
         p={before=copy(s.granted),lockedKey=s.lockedKey,removed=source.key,chargesBefore=s.charges,
+            originalSlot=s.context.slot,
             beforeStamp=s.grantStamp,beforeSelectionSerial=s.selectionSerial,since=now(),guid=s.context.guid,spendConfirmed=false}
         run.pending=p;run.reserved=1
         local ok,e=savePending();if not ok then run.pending=nil;run.reserved=0;pause(e);return end

@@ -499,6 +499,9 @@ end
 -- over would just reintroduce the same cross-character bleed one more time.
 -- It's left in place, orphaned and never read again.
 local function LockDesignTargetsFor(wishlist, knownKey)
+    if type(wishlist)=="table" and wishlist.designTargets~=nil then
+        return wishlist.designTargets
+    end
     local legacy = NexusDB and NexusDB.lockDesignTargets
     if type(legacy) == "table" then
         UpdateStoreState(function(state)

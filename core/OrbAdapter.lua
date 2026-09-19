@@ -210,7 +210,8 @@ function O.Acquire(s)
         local ok=pcall(hooksecurefunc,svc,"SelectPerk",function(id)
             if not owner or ownerContext.svc~=svc then return end
             local s=O.Read()
-            if not s or not s.offerPending or #s.board~=3 or ownerContext.pe.Perks.pendingSelectSpellId~=id then return end
+            if not s or not same(ownerContext,s.context) or not s.offerPending or #s.board~=3
+                or ownerContext.pe.Perks.pendingSelectSpellId~=id then return end
             local chosen
             for _,c in ipairs(s.board) do if c.spellId==id then
                 local k=id..":"..c.quality

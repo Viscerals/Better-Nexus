@@ -66,6 +66,8 @@ Compact progress and Pause/Resume/Stop remain in the main Nexus panel when this 
 
 Real-resource Orb testing remains unavailable pending a separate user decision and native capability confirmation. A same-ID, same-quality result cannot be distinguished from stale ownership by the supported API. It stays paused with pending exposure. Recheck cannot prove it by returning an unchanged table.
 
+If the active loadout changes during a pending operation, ownership responses cannot identify the original loadout. That action stays unresolved even after returning to the old loadout. Recheck, Resume and reload cannot remove this uncertainty or restore its allowance.
+
 Resume retains confirmed usage and unresolved exposure. Login, reconnect, new resources, or reload never automatically restart spending. An unresolved earlier action must settle before a new run. Missing confirmation can prevent further Orb use indefinitely; Resume, Recheck and reload are not guaranteed fixes.]]},
  {id="troubleshooting",title="Loading and troubleshooting",text=[[The loading panel shows the current step, work where measurable, and elapsed time. A percentage applies only to that step, never a guessed whole-startup total. /nexus loading reopens it.
 

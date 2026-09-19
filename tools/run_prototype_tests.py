@@ -10,6 +10,9 @@ NAMES=['parse','boot','wishlist','lock_evidence','ownership','typed_hash','trans
 NAMES += ['orbs_review_sources','orbs_review_lifecycle','orbs_review_same_id','orbs_review_recheck','orbs_review_availability','orbs_review_ordering','orbs_review_disclosure','orbs_review_recovery','terminology_consumers']
 NAMES += ['orbs_review_rejected_selection','orbs_review_catalog','orbs_review_catalog_grouping']
 NAMES += ['orbs_assigned','help_layout','assignment_restore','orbs_target_changes','orbs_assigned_protection','orbs_main_controls','session_permissions','orbs_assignment_races','orbs_assigned_resources','assignment_identity','orbs_loadout_change']
+NAMES += ['assignment_distinct_designs','orbs_loadout_result_alias']
+NAMES += ['assignment_design_lifecycle']
+NAMES += ['orbs_loadout_early_change']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

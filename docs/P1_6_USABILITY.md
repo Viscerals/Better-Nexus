@@ -15,14 +15,18 @@ target selector, source-count approval screen or per-result Start requirement.
 Advanced retains explicit exclusions and the passive Recheck handler.
 
 The runtime reserves rolled targets and unmet permanent targets, including the
-editor's durable permanent-design sidecar. Permanent copies, mixed-quality
+editor's complete per-assignment permanent design. Permanent copies, mixed-quality
 ID-only ambiguity, catalog-loss family barriers and explicit exclusions remain
 protected. Eligibility and assignment binding are checked again inside the
 actual adapter submission path after its fresh read.
 
 Active-loadout, assignment-identity or relevant target changes pause further
 mutations. A pending operation retains its original target and confirmation
-evidence. After settlement, explicit Resume adopts the new target and retains
+evidence. A loadout change during a pending action makes its ownership response
+uncorrelated; the receipt and exposure remain unresolved. Recheck, a return to
+the old slot and reload cannot establish the missing correlation. An assignment
+change on the same loadout permits passive settlement with the original evidence.
+After confirmed settlement, explicit Resume adopts the new target and retains
 the same maximum and spent/reserved exposure. Safe confirmed results continue
 automatically until a defined terminal or pause condition.
 
@@ -55,13 +59,28 @@ reordered server slots and duplicate names do not authorize different contents.
 An absent server mirror is explained while preserving the local exact plan;
 absence alone is not treated as confirmed deletion.
 
+The first candidate, `6f8de3d`, failed independent review despite 65 passing
+prototype scripts. Two exact negative probes demonstrated a permanent-design
+collision between plans sharing rolled contents and false result settlement
+from another loadout. Both failed source/package receipts and the candidate
+are preserved. Each saved assignment now carries detached, bounded permanent
+rows with exact copies, quality and replacement intent. The normal main model,
+editor, assignment picker and Orb projection consume that design. Legacy data
+is preserved. Ambiguous server mirrors do not identify a row for overwrite;
+the exact local plan remains readable. The loadout confirmation gate preserves
+the unresolved operation across later notifications and reload.
+
 ## Validation boundary
 
 The 54 prior prototype scripts are retained. Three UI scripts were updated for
 the explicitly approved replacement of the old review/checkbox screen and the
 move of Recheck to Advanced. Their source-protection, confirmation, exposure and
-zero-mutation assertions remain. Eleven new scripts exercise actual controller,
-adapter, main/detail UI and restoration paths. The current inventory is 65.
+zero-mutation assertions remain. Fifteen new scripts exercise actual controller,
+adapter, main/detail UI and restoration paths. The current inventory is 69.
+The two independent negative probes are retained byte-for-byte as regressions.
+The earlier positive loadout-switch fixture assumed correlation it did not
+supply; it now requires retained pending exposure rather than false settlement.
+Same-loadout target-change settlement and finite-budget Resume remain tested.
 
 Tests run through the unchanged installed OBS LuaJIT 2.1 / Lua 5.1 ctypes route,
 with the supplied LoadoutPilot reference. Ordinary policy and optimizer logic
