@@ -339,8 +339,8 @@ local function ShowWishlistSwitchMenu(anchor)
             local displayAssignedName = assignedName
                 and DisplayUntrusted(assignedName, 1024, false) or nil
             local suffix = displayAssignedName
-                and ("  |cff777777Assigned: " .. displayAssignedName .. "|r")
-                or "  |cff666666Unassigned|r"
+                and ("  |cff777777Saved Build: " .. displayAssignedName .. "|r")
+                or "  |cff666666Saved Build: None|r"
             row._label:SetText(wishlistLabel
                 .. CandidateEvidenceSuffix(c) .. suffix)
             if current then
@@ -360,7 +360,7 @@ local function ShowWishlistSwitchMenu(anchor)
                 lockEvidenceStatus = c.lockEvidenceStatus,
                 evidenceSource=c.evidenceSource,
                 assignmentId=c.assignmentId,designTargets=c.designTargets,
-                loadoutName = assignedName or "Not assigned",
+                loadoutName = assignedName or "None",
             }
             local openAssignedSlot = assignedSlot
             row:SetScript("OnClick", function()
@@ -1715,11 +1715,11 @@ local function RefreshView(catalogRevision)
             local buildLabel = DisplayUntrusted(
                     editingContext.loadoutName, 1024, false)
                 or (editingContext.loadoutSlot and ("Saved Build " .. tostring(editingContext.loadoutSlot)))
-                or "Not assigned"
+                or "None"
             local displayWishlistName = DisplayUntrusted(
                 editingContext.name, 1024, false) or "Wishlist"
             editContextText:SetText("Wishlist: |cff7fd5ff" .. displayWishlistName
-                .. "|r   •   Assigned to: |cffffffff" .. buildLabel .. "|r")
+                .. "|r   •   Saved Build: |cffffffff" .. buildLabel .. "|r")
         else
             titleText:SetText("Create New Wishlist")
             if createTargetContext then

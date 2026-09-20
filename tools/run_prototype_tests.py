@@ -20,6 +20,7 @@ NAMES += ['orbs_help_layers']
 NAMES += ['assignment_first_run_edit']
 NAMES += ['assignment_first_run_unassign']
 NAMES += ['assignment_first_run_reselect','assignment_first_run_handoff']
+NAMES += ['journal_picker_layers','wishlist_editor_context_label']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

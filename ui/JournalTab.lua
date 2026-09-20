@@ -1035,7 +1035,9 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
     if not wishlistPicker then
         wishlistPicker = CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
         wishlistPicker:SetFrameStrata("TOOLTIP")
-        wishlistPicker:SetFrameLevel(500)
+        -- Native high-level rendering put this opaque parent above Unassign.
+        -- TOOLTIP supplies the overlay order; keep its child levels low.
+        wishlistPicker:SetFrameLevel(50)
         wishlistPicker:SetToplevel(true)
         wishlistPicker:SetClampedToScreen(true)
         wishlistPicker:EnableMouse(true)
@@ -1201,6 +1203,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
             wishlistPicker.clearRow = row
         end
+        row:SetFrameLevel(wishlistPicker:GetFrameLevel() + 2)
         row:ClearAllPoints(); row:SetPoint("TOPLEFT",6,-24-#wishes*rowH); row:SetPoint("RIGHT",-6,0)
         row:SetScript("OnClick", function()
             if tonumber(active) and tonumber(active) > 0 then A.ClearLoadoutWishlist(active)
