@@ -58,7 +58,7 @@ for label,run in pairs({verified=verified,unverified=unverified})do
   assert(state.action.planner=='pilot103','the one ordinary planner decides: '..label)
  end
  assert(run.seen.predicted==0 and run.seen.historical==0,'no future offer is inferred and the historical model is never called: '..label)
- assert(not run.notes:lower():find('guaranteed queue',1,true) and run.notes:find('none is assumed',1,true),'Journal estimate assumes no future offer: '..label)
+ assert(not run.notes:lower():find('guaranteed queue',1,true) and run.notes:find('no future random roll is assumed',1,true),'Journal estimate assumes no future offer: '..label)
 end
 assert(#verified.actions>=1 and Actions(verified)==Actions(unverified),'submitted actions are identical when only saved verification differs: '..Actions(verified)..' vs '..Actions(unverified))
 assert(verified.notes==unverified.notes,'Journal notes are identical when only saved verification differs')

@@ -13,7 +13,7 @@ local pages={
 4. Assign that Wishlist to the intended loadout in My Builds.
 5. Review recommendations with Automation OFF first.
 
-A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Snapshot is the saved-run mode. A valid Saved Build proves its identity, contents and owner. It does not guarantee any future Echo offer, for a Snapshot or for a Designed Wishlist.
+A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Snapshot is the saved-run mode. A valid Saved Build proves its identity, contents and owner. Nexus treats no future random Echo roll as guaranteed, for a Snapshot or for a Designed Wishlist.
 
 This is an experimental build. Reading this guide never spends, assigns, activates, or sends a Sync request.]]},
  {id="wishlists",title="Wishlists and permanent targets",text=[[A complete plan can contain up to 79 rolled copies and 6 permanent-slot copies (85 total). Counts are copies, not unique names or list rows. Different qualities remain different targets.
@@ -36,7 +36,7 @@ Take chooses a needed offer. Banish removes an eligible offer. Reroll asks for n
 
 EXTRA COPIES are rolled copies above exact Wishlist targets, including unrequested or different-quality copies. Target 2/current 5 means 3 extras. This display deletes nothing. A later run may reduce extras; replacement is not guaranteed.
 
-Needed, Target already met, and Not on Wishlist describe the current choice. Priority numbers in advanced diagnostics are not DPS or percentages. [G] means the server marks this current offer guaranteed. Nexus predicts no future offer; every later offer is random. Wishlist overlay: [X] meets the requested copy count; [~] has some but not all requested copies; [ ] has none. Those symbols are not network/loading states.
+Needed, Target already met, and Not on Wishlist describe the current choice. Priority numbers in advanced diagnostics are not DPS or percentages. [G] means the server marks this current offer guaranteed. A card the game shows as held or frozen is observed state. Nexus does not assume any future random Echo roll. Wishlist overlay: [X] meets the requested copy count; [~] has some but not all requested copies; [ ] has none. Those symbols are not network/loading states.
 
 Waiting for current Echo data means automatic choices are paused for ownership confirmation. It is not the Community Sync channel status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
  {id="sharing",title="Shared builds and DPS",text=[[Build Library browses records known locally and shared by Nexus users. Copy into Editor creates a draft; it does not activate or spend. Share Build sends a listing to other users; it is separate from saving a Wishlist or a server Saved Build.

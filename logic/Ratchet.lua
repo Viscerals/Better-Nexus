@@ -593,7 +593,7 @@ function M.RunsEstimate(plan, owned, queue, support, catalog)
         text = "wishlist complete - 0 wanted echoes pending"
     else
         text = string.format(
-            "~%d wishlist echo%s pending; future offers are random and none is assumed (rate unmeasured)",
+            "~%d wishlist echo%s pending; no future random roll is assumed (rate unmeasured)",
             pending, pending == 1 and "" or "es")
     end
     return { text = text, unknown = true }
