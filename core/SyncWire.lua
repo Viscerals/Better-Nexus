@@ -95,6 +95,16 @@ local function Route(payload,metadata)
     end
     return "legacy",nil,escaped
 end
+-- The persistent reasons this wire cannot transmit now, or nil. Read-only:
+-- unlike CanDispatch it counts nothing, so a scheduler may ask every frame.
+-- Momentary CTL queueing or bandwidth waits are not reported; they clear
+-- within ordinary send pacing.
+function Wire.Blocked()
+    if Wire.suspended then return "transport suspended" end
+    if Combat() then return "combat" end
+    if not Ctl() then return "CTL unavailable" end
+    return nil
+end
 function Wire.CanDispatch(payload,metadata)
     if Wire.suspended then return false,"transport suspended" end
     if type(payload)~="string" then return false,"invalid payload" end

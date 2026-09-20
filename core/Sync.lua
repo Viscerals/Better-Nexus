@@ -1744,15 +1744,23 @@ end
 -- Outbound and deferred inbound work therefore alternate: while valid outbound
 -- traffic waits, one real transmission must happen between two submissions.
 -- The catalog stays ready in the meantime, so ordinary send pacing decides
--- when that transmission happens. When transport cannot send at all (not
--- connected, or paused by a throttle) the catalog is not left idle. Nothing
--- is dropped, reordered or extended: each item keeps its fixed deadline.
+-- when that transmission happens. Admission yields only to a transmission
+-- that can actually happen: when the channel is absent, a throttle pause is
+-- active, or the wire itself reports a persistent blocker (suspended, combat,
+-- no throttle library), no send is possible and the catalog is not left
+-- idle. Nothing is dropped, reordered or extended: each item keeps its fixed
+-- deadline.
 function Responder.Admission.OutboundOwed()
     local transport = Transport.Snapshot()
     local waiting = (tonumber(transport.outbound) or 0)
         - (tonumber(transport.estimatedStaleBacklog) or 0)
     if waiting <= 0 then return false end
     if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
+        return false
+    end
+    -- The same owner Transport asks before every dispatch.
+    local wire = Nexus.SyncWire
+    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
         return false
     end
     return (stats.sent or 0) == Responder.Admission.sentAtSubmission
