@@ -1741,20 +1741,28 @@ end
 -- full Sync turn until that transaction ends. Transport only sends in a full
 -- turn, so a queue that submits in every ready turn leaves outbound traffic,
 -- including the user's explicit Sync Now request, with no turn at all.
--- Outbound and deferred inbound work therefore alternate: while valid outbound
--- traffic waits, one real transmission must happen between two submissions.
+-- Outbound and deferred inbound work therefore alternate, and the outbound
+-- unit is a whole transfer, never a single chunk: a catalog transaction
+-- between two chunks outlasts the chunks' own deadline.
+--  * Sync's paced owners (response election, recovery, send pacing) only
+--    accumulate time in full turns. After the catalog becomes ready they get
+--    one continuous RESPONSE_ELECTION_DELAY window before any submission, or
+--    they would never produce the outbound work that is then owed.
+--  * A started multi-chunk transfer is never interrupted.
+--  * While response work is pending or valid outbound traffic waits, one
+--    whole unit must be transmitted between two submissions. Outbound goes
+--    first.
+--  * Apart from a started transfer, admission never yields for more than
+--    PENDING_TTL of continuous ready time, so sustained outbound work cannot
+--    hold deferred inbound work until its deadline.
 -- The catalog stays ready in the meantime, so ordinary send pacing decides
--- when that transmission happens. Admission yields only to a transmission
+-- when a transmission happens. Admission yields only to a transmission
 -- that can actually happen: when the channel is absent, a throttle pause is
 -- active, or the wire itself reports a persistent blocker (suspended, combat,
 -- no throttle library), no send is possible and the catalog is not left
 -- idle. Nothing is dropped, reordered or extended: each item keeps its fixed
 -- deadline.
 function Responder.Admission.OutboundOwed()
-    local transport = Transport.Snapshot()
-    local waiting = (tonumber(transport.outbound) or 0)
-        - (tonumber(transport.estimatedStaleBacklog) or 0)
-    if waiting <= 0 then return false end
     if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
         return false
     end
@@ -1763,7 +1771,27 @@ function Responder.Admission.OutboundOwed()
     if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
         return false
     end
-    return (stats.sent or 0) == Responder.Admission.sentAtSubmission
+    local progress = Transport.OutboundProgress()
+    if progress.midTransfer then return true end
+    local readyFor = Now() - (Responder.Admission.readySince or Now())
+    if readyFor >= PENDING_TTL then return false end
+    if readyFor < RESPONSE_ELECTION_DELAY then return true end
+    local pending = Reconciler.Counts()
+    if progress.waiting <= 0 and (tonumber(pending.total) or 0) <= 0 then
+        return false
+    end
+    return progress.unitsSent == (Responder.Admission.unitsAtSubmission or -1)
+        or Responder.Admission.unitsAtSubmission == nil
+end
+
+-- Full Sync turns are continuous while the catalog is ready. A gap means the
+-- lifecycle withheld them, so the continuous ready window starts again.
+function Responder.Admission.NoteTurn()
+    local current = Now()
+    if not Responder.Admission.turnAt or current - Responder.Admission.turnAt > 1 then
+        Responder.Admission.readySince = current
+    end
+    Responder.Admission.turnAt = current
 end
 
 -- Runs only behind the lifecycle's full catalog readiness gate, after the
@@ -1794,8 +1822,9 @@ function Responder.Admission.Pump()
             if outcome == "busy" then return end
             if outcome == "ticket" then
                 -- One accepted submission per turn; the next one waits for a
-                -- real transmission while outbound traffic is owed.
-                Responder.Admission.sentAtSubmission = stats.sent or 0
+                -- whole transmitted unit while outbound work is owed.
+                Responder.Admission.unitsAtSubmission =
+                    Transport.OutboundProgress().unitsSent
             end
         end
         Responder.Admission.Remove(entry)
@@ -1807,7 +1836,8 @@ function Responder.Admission.Reset()
         Responder.Admission.Fail(Responder.Admission.order[1], nil, "explicit reset")
     end
     Responder.Admission.order, Responder.Admission.byKey, Responder.Admission.count = {}, {}, 0
-    Responder.Admission.sentAtSubmission = nil
+    Responder.Admission.unitsAtSubmission = nil
+    Responder.Admission.readySince, Responder.Admission.turnAt = nil, nil
 end
 
 local function StoreSummary(data, transportSender, context, onComplete,
@@ -3901,6 +3931,7 @@ function Sync.PumpPreparedShare(elapsed)
 end
 
 function Sync.OnUpdate(elapsed)
+    Responder.Admission.NoteTurn()
     Responder.Admission.Expire()
     Inbound.CleanExpired()
     ProcessPendingResponses(elapsed)

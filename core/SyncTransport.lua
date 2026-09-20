@@ -909,6 +909,12 @@ function Transport.New(options)
             lastSent = {packet=packet,isControl=isControl,sentAt=current,
                 requeued=false}
             stats.sent = (stats.sent or 0) + 1
+            -- One outbound unit is a whole transfer: its last chunk, or a
+            -- packet that is not part of a sequence.
+            if (tonumber(packet.metadata.chunkOrdinal) or 1)
+                >= (tonumber(packet.metadata.chunkTotal) or 1) then
+                stats.unitsSent = (stats.unitsSent or 0) + 1
+            end
             log("TX", "attempted %d chars ch=%s: %s",
                 #escaped, tostring(channel), packet.payload:sub(1, 44))
             observe("send_attempted", {outcome="api returned",bytes=#escaped,
@@ -949,6 +955,24 @@ function Transport.New(options)
 
     function T.ThrottleRemaining()
         return math.max(0, (throttlePauseUntil or 0) - now())
+    end
+
+    -- Read-only view for schedulers. `waiting` counts valid queued packets,
+    -- `midTransfer` is true while a started multi-chunk transfer still has a
+    -- valid chunk at either queue head, `unitsSent` counts completed units.
+    function T.OutboundProgress()
+        local current = now()
+        local function Continues(packet)
+            return packet ~= nil and not StaleReason(packet, current)
+                and (tonumber(packet.metadata.chunkOrdinal) or 1) > 1
+        end
+        local snapshot = T.Snapshot()
+        return {
+            waiting=math.max(0, (tonumber(snapshot.outbound) or 0)
+                - (tonumber(snapshot.estimatedStaleBacklog) or 0)),
+            midTransfer=Continues(control[controlHead]) or Continues(bulk[bulkHead]),
+            unitsSent=tonumber(stats.unitsSent) or 0,
+        }
     end
 
     function T.CancelRequest(requestId, requester)
