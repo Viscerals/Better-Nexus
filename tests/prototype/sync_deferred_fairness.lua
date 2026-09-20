@@ -37,6 +37,7 @@ SendChatMessage=function(text,...)
  return send(text,...)
 end
 Pressure(40,'fair-a-')
+local enqueuedAt=H.now
 assert(Deferred()==40,'fixture: forty valid inbound items wait for admission')
 local before=Requests(H)
 H.Advance(7,.05)
@@ -55,13 +56,18 @@ print(string.format('OBSERVED request_sent=%s after=%.1fs deferred_items_admitte
  tostring(sentAt~=nil),(sentAt or H.now)-started,servedFirst,tostring(deferredAtSend),
  Nexus.Sync.Stats().admissionExpired,tostring(Nexus.Sync.Stats().terminalReason),tostring(Nexus.Sync.Stats().queueOutcome)))
 assert(sentAt~=nil,'the explicit Sync Now request is transmitted')
--- Fair progress: the request may wait for the one catalog transaction that is
--- already in flight and for one more turn. It must not wait behind the queue.
-assert(servedFirst<=2 and deferredAtSend>=30,'an explicit Sync Now request is not starved behind deferred inbound admissions: '..servedFirst..' were admitted first, '..tostring(deferredAtSend)..' still waited')
+-- Fair progress: the request may wait for the catalog transaction that is
+-- already in flight and for the turns in which it is prepared and paced. It
+-- must not wait behind the queue. On 8ab9fc2 this count was 8 to 40.
+assert(servedFirst<=3 and deferredAtSend>=30,'an explicit Sync Now request is not starved behind deferred inbound admissions: '..servedFirst..' were admitted first, '..tostring(deferredAtSend)..' still waited')
 assert(Requests(H)==before+1,'exactly one request was transmitted')
 
 -- 2. Deferred valid inbound work still progresses after the send: fair both ways.
-T.Until(H,function()return Deferred()==0 and C.ManualPreparationStatus().ready end,60000)
+T.Until(H,function()return Deferred()==0 end,60000)
+-- The queue is empty no later than the fixed per-item deadline, measured from
+-- arrival. The last accepted transaction may still be committing after that.
+local drainedAfter=H.now-enqueuedAt
+T.Until(H,function()return C.ManualPreparationStatus().ready end,60000)
 local stats=Nexus.Sync.Stats()
 assert(stats.admissionResolved>resolvedAtSend,'deferred items keep being admitted after the request was sent')
 assert(stats.admissionResolved+stats.admissionExpired+stats.admissionCancelled+stats.admissionSuperseded==40,'every retained item reached exactly one terminal state')
@@ -76,7 +82,7 @@ assert(stats.malformedRejected==0,'valid inbound items were never reclassified a
 print('PASS manual request sent under deferred pressure; '..committed..' deferred items committed, '..stats.admissionExpired..' expired')
 
 -- 3. Fixed deadline: yielding extends nothing.
-assert(H.now-started<=301+7 and stats.admissionExpired==40-committed-stats.admissionCancelled-stats.admissionSuperseded,'every item that was not admitted expired at its own fixed deadline')
+assert(drainedAfter<=300+1 and stats.admissionExpired==40-committed-stats.admissionCancelled-stats.admissionSuperseded,'every item that was not admitted expired at its own fixed 300-second deadline; yielding extended none: '..drainedAfter)
 for i=1,40 do if not C.Get('fair-a-'..i)then assert(H.puts['fair-a-'..i].accepted==0,'an expired item was never submitted')end end
 H.Advance(30,.05)
 assert(Committed(C,'fair-a-')==committed,'no expired item is stored later')
