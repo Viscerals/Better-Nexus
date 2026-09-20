@@ -927,11 +927,11 @@ function Lifecycle.New(options)
                 community.PumpPendingShare)
             if not ok or pending then catalogReady = false end
             if not ok or pending or submitted then buildHashesReady = false end
-            -- This one pump serves a pending Share and a pending local removal.
-            -- The label names that shared gate; it does not prove a pending wire
-            -- Share.
-            shareGate = not ok and "pending-share-error" or pending and "pending-share"
-                or submitted and "share-submitted" or nil
+            -- This one pump serves a pending Share and a pending local removal;
+            -- the label names the shared gate, not which of the two is pending.
+            shareGate = not ok and "community-operation-error"
+                or pending and "community-operation-pending"
+                or submitted and "community-operation-submitted" or nil
         end
         if catalogReady then
             if manualOwner and buildHashesReady and manualTiming.readyAt == nil then
