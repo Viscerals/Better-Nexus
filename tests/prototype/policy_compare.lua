@@ -14,7 +14,7 @@ local runtime=os.getenv('NEXUS_POLICY_RUNTIME') or 'current'
 assert(runtime=='current' or runtime=='test9020','known runtime preparation')
 local catalog=P.Catalog({f1={[0]=1001,[1]=1011},f2={[0]=1002},f3={[0]=1003},f4={[0]=1004},f5={[0]=1005}})
 local plan=P.Plan(catalog,{{spellId=1001,stacks=2},{spellId=1002,stacks=1}})
-local savedEchoes={{spellId=1001,family='f1',quality=0,stacks=2},{spellId=1002,family='f2',quality=0,stacks=1}}
+local savedEchoes=P.Echoes(catalog,{{spellId=1001,stacks=2},{spellId=1002,stacks=1}})
 local boards={
  {'two-wanted',{{spellId=1001},{spellId=1002},{spellId=1003}}},
  {'one-wanted',{{spellId=1001},{spellId=1003},{spellId=1004}}},
@@ -61,6 +61,14 @@ end
 local dump=os.getenv('NEXUS_POLICY_DUMP')
 if dump then local f=assert(io.open(dump,'w'));f:write(table.concat(lines,'\n'),'\n');f:close()end
 print('ROOT '..P.root..' RUNTIME '..runtime)
+-- Adapter-shape discriminator from the independent rolling review: exact q0
+-- target, q1 sibling offered beside the other wanted Echo, verified saved row.
+local review=P.Decide({catalog=catalog,plan=plan,horizon=2,cards={{spellId=1011},{spellId=1002},{spellId=1003}},
+ charges={trustworthy=true,banish=1,freeze=1,reroll=0},allowFreeze=true,allowBanish=true,
+ owned=P.Owned(catalog,{}),locked=P.Owned(catalog,{}),activeRow={verified=true,echoes=savedEchoes},runtime=runtime})
+print('REVIEW_STATE '..tostring(review.type)..':'..tostring(review.spellId)..':'..tostring(review.index)
+ ..' multiQuality='..tostring(Nexus.Model.FamilyMultiQuality(catalog,catalog.familyOf[1001])))
+assert(review.spellId==1002 and review.index==2,'the wrong-quality sibling is never chosen over the exact wanted Echo')
 print('SCENARIOS '..scenarios..' DECISIONS '..#lines..' VERIFICATION_DEPENDENT '..dependent..' FINGERPRINT '..P.Fingerprint(lines))
 -- As a maintained test this runs on the current source with the current
 -- preparation, where saved verification must change no decision.

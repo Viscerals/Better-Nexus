@@ -5,7 +5,7 @@ P.Load()
 assert(table.concat(P.order,','):find('WishlistPilot.lua,logic\\OrbPolicy.lua,logic\\Policy.lua',1,true),'WishlistPilot loads before Policy, as in the TOC')
 local catalog=P.Catalog({f1={[0]=1001,[1]=1011},f2={[0]=1002},f3={[0]=1003},f4={[0]=1004}})
 local plan=P.Plan(catalog,{{spellId=1001,stacks=1},{spellId=1002,stacks=1}})
-local saved={verified=true,echoes={{spellId=1001,family='f1',quality=0,stacks=1}}}
+local saved={verified=true,echoes=P.Echoes(catalog,{{spellId=1001,stacks=1}})}
 local unsaved={verified=false,echoes=saved.echoes}
 local search={trustworthy=true,banish=1,freeze=1,reroll=0}
 local function Base(extra)
@@ -14,6 +14,28 @@ local function Base(extra)
  for k,v in pairs(extra or {})do input[k]=v end
  return input
 end
+
+-- 0. The adapter projects production shapes. These are the fields the real
+-- Model reads; a catalog or plan without them silently takes another branch.
+local f1,f2=catalog.familyOf[1001],catalog.familyOf[1002]
+assert(f1==catalog.familyOf[1011] and f1~=f2 and type(catalog.familyMembers[f1])=='table' and #catalog.familyMembers[f1]==2,'quality siblings share one production family with both members')
+assert(catalog.families==nil and catalog.rows[1001].maxStack==5 and catalog.rows[1011].quality==1,'catalog comes from the real EchoCatalogSource, not an invented shape')
+assert(Nexus.Model.FamilyMultiQuality(catalog,f1)==true and Nexus.Model.FamilyMultiQuality(catalog,f2)==false,'production Model sees the multi-quality family')
+local tiers=plan.targets[f1].qualityTiers
+assert(#tiers==1 and tiers[1].q==0 and tiers[1].n==1 and tiers[1].spellId==1001 and plan.targets[f1].wishedQuality==0,'exact single-tier target as GameAdapter builds it')
+local merged=P.Plan(catalog,{{spellId=1011,stacks=1},{spellId=1001,stacks=2}})
+local target=merged.targets[f1]
+assert(target.targetStacks==3 and target.wishedQuality==0 and #target.qualityTiers==2 and target.qualityTiers[1].q==0 and target.qualityTiers[1].n==2
+ and target.qualityTiers[2].q==1 and target.qualityTiers[2].n==1 and merged.requestedCounts[1001]==2 and merged.requestedCounts[1011]==1,'same-family targets merge into sorted tiers; none is overwritten')
+-- Discriminating state from the independent review: target exact 1001 (q0) x2
+-- and 1002; the board offers the q1 sibling 1011. The sibling is not the
+-- requested Echo, so the wanted 1002 is taken, not 1011.
+local exact=P.Plan(catalog,{{spellId=1001,stacks=2},{spellId=1002,stacks=1}})
+local shaped=P.Decide({catalog=catalog,plan=exact,horizon=2,cards={{spellId=1011},{spellId=1002},{spellId=1003}},
+ charges={trustworthy=true,banish=1,freeze=1,reroll=0},allowFreeze=true,allowBanish=true,
+ activeRow={verified=true,echoes=P.Echoes(catalog,{{spellId=1001,stacks=2},{spellId=1002,stacks=1}})}})
+assert(shaped.spellId==1002 and shaped.index==2 and shaped.type~='wait','wrong-quality sibling is not chosen over the exact wanted Echo: '..P.Line(shaped))
+print('PASS adapter projects the production catalog and Wishlist shapes: '..P.Line(shaped))
 
 -- 1. Dispatch and useful progress. A targetless Wait is not adapter success.
 local action=P.Decide(Base({activeRow=unsaved}))
@@ -24,7 +46,7 @@ print('PASS real TOC-order dispatch makes useful progress: '..reference)
 
 -- 2. Metadata invariance: only saved verification, old flags or a stale
 -- prefilled queue change. Ownership, board, resources and horizon are fixed.
-local stale={entries={{spellId=1001,family='f1',wanted=true,quality=0},{spellId=1002,family='f2',wanted=true,quality=0}}}
+local stale={entries={{spellId=1001,family=catalog.familyOf[1001],wanted=true,quality=0},{spellId=1002,family=catalog.familyOf[1002],wanted=true,quality=0}}}
 local oldFlags={DISABLE_SUPPRESSES_GUARANTEE=true,REROLL_HOLDS_GUARANTEED=true}
 local variants={
  {'verified saved row',{activeRow=saved}},
@@ -50,7 +72,7 @@ local plain=Nexus.Ratchet.RunsEstimate(plan,owned,nil,nil,catalog)
 local withStale=Nexus.Ratchet.RunsEstimate(plan,owned,stale,nil,catalog)
 assert(plain.text==withStale.text and plain.unknown==true,'estimate ignores any supplied queue')
 assert(plain.text:find('2 wishlist echoes pending',1,true) and not plain.text:lower():find('guaranteed',1,true) and not plain.text:find('queue',1,true),'estimate reports known deficits only: '..plain.text)
-local historical=Nexus.Ratchet.HistoricalGuaranteeQueue(saved.echoes,owned,plan,{}, {},catalog)
+local historical=Nexus.Ratchet.HistoricalGuaranteeQueue(saved.echoes,owned,plan,{},{},catalog)
 assert(#historical.entries==1,'historical fixture stays available under its explicit name only')
 print('PASS no inferred queue; estimate: '..plain.text)
 

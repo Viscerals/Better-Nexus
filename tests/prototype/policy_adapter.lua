@@ -9,7 +9,7 @@
 -- The root is NEXUS_POLICY_ROOT or the current directory, so the same adapter
 -- drives the immutable test.9020 baseline and a corrected candidate.
 local Adapter={}
-local PURE={'data\\DefaultProfile.lua','logic\\Model.lua','logic\\Strategy.lua','logic\\Ratchet.lua',
+local PURE={'data\\DefaultProfile.lua','core\\EchoCatalogSource.lua','logic\\Model.lua','logic\\Strategy.lua','logic\\Ratchet.lua',
  'logic\\WishlistPilot.lua','logic\\OrbPolicy.lua','logic\\Policy.lua'}
 function Adapter.Load(root)
  root=(root or os.getenv('NEXUS_POLICY_ROOT') or '.'):gsub('\\','/')
@@ -22,44 +22,100 @@ function Adapter.Load(root)
  end
  Nexus=nil
  for _,entry in ipairs(order)do dofile(root..'/'..entry:gsub('\\','/'))end
- assert(Nexus.WishlistPilot and Nexus.Policy and Nexus.Strategy and Nexus.Ratchet and Nexus.Model,'pure rolling modules loaded')
+ assert(Nexus.WishlistPilot and Nexus.Policy and Nexus.Strategy and Nexus.Ratchet and Nexus.Model and Nexus.EchoCatalogSource,'pure rolling modules loaded')
  Adapter.root,Adapter.order=root,order
  return Nexus
 end
--- Synthetic catalog. Families may hold several quality siblings.
+-- Production-shaped catalog. The synthetic PerkDatabase rows go through the
+-- real pure core/EchoCatalogSource.lua Materialize, exactly as GameAdapter
+-- does, so the result has the production fields: rows, familyOf,
+-- familyMembers, familyName and levers. Quality siblings share one groupId and
+-- therefore one production family key ("g<groupId>"); a single Echo is its
+-- own family ("s<spellId>"). Input: { name = { [quality] = spellId, ... } }.
 function Adapter.Catalog(families)
- local catalog={rows={},familyOf={},families={},familyName={},levers={}}
- for family,ids in pairs(families)do
-  catalog.families[family]={};catalog.familyName[family]=family
-  for quality,id in pairs(ids)do
-   catalog.rows[id]={spellId=id,family=family,quality=quality,maxStacks=5,name=family..'-q'..quality,requiredLevel=1}
-   catalog.familyOf[id]=family
-   table.insert(catalog.families[family],id)
+ local names={}
+ for name in pairs(families)do names[#names+1]=name end
+ table.sort(names)
+ local database={}
+ for group,name in ipairs(names)do
+  local members=0
+  for _ in pairs(families[name])do members=members+1 end
+  for quality,id in pairs(families[name])do
+   database[id]={maxStack=5,quality=quality,groupId=members>1 and group or 0,classMask=0,minLevel=1,
+    requiredSpell=0,comment=name..'-q'..quality}
   end
-  table.sort(catalog.families[family])
  end
- return catalog
+ local catalog,why=Nexus.EchoCatalogSource.Materialize(database,nil)
+ return assert(catalog,why)
 end
--- Real Strategy.Compile from exact Wishlist entries {spellId,stacks}.
-function Adapter.Plan(catalog,entries)
- local wishlist={entries={},byFamily={}}
- for _,e in ipairs(entries)do
-  wishlist.entries[#wishlist.entries+1]={spellId=e.spellId,stacks=e.stacks or 1}
-  local row=assert(catalog.rows[e.spellId],'wishlist entry in catalog')
-  wishlist.byFamily[row.family]={spellId=e.spellId,targetStacks=e.stacks or 1,wishedQuality=row.quality}
+-- Exact copy of the shape GameAdapter's EchoesToWishlist builds for a designed
+-- build (core/GameAdapter.lua 782-841, echoHasQuality=false): quality comes
+-- from the catalog row, a family's entries are merged into one target, and
+-- every quality keeps its own tier. It is duplicated here only because that
+-- function is local to an event-driven module.
+function Adapter.Wishlist(catalog,echoes,name)
+ local entries,byFamily={}, {}
+ for i=1,#echoes do
+  local e=echoes[i]
+  local id=type(e)=='table' and tonumber(e.spellId)
+  if id and catalog.rows[id] then
+   local fam=catalog.familyOf[id] or ('s'..tostring(id))
+   local stacks=tonumber(e.stacks) or 1
+   if stacks<1 then stacks=1 end
+   local q=catalog.rows[id].quality or 0
+   entries[#entries+1]={spellId=id,quality=q,stacks=stacks,family=fam}
+   local t=byFamily[fam]
+   if not t then
+    byFamily[fam]={targetStacks=stacks,wishedQuality=q,spellId=id,qualityTiers={{q=q,n=stacks,spellId=id}}}
+   else
+    t.targetStacks=t.targetStacks+stacks
+    if q<t.wishedQuality then t.wishedQuality=q end
+    local found=false
+    for _,tier in ipairs(t.qualityTiers)do
+     if tier.q==q then tier.n=tier.n+stacks;found=true;break end
+    end
+    if not found then t.qualityTiers[#t.qualityTiers+1]={q=q,n=stacks,spellId=id}end
+   end
+  end
  end
+ for _,t in pairs(byFamily)do
+  if #t.qualityTiers>1 then table.sort(t.qualityTiers,function(a,b)return a.q<b.q end)end
+ end
+ if #entries==0 then return nil end
+ return {name=tostring(name or ''),entries=entries,byFamily=byFamily,source='designed'}
+end
+-- Real Strategy.Compile from exact Wishlist entries {spellId,stacks}. The
+-- runtime also passes WishlistWithLockTargets; this adapter models a Wishlist
+-- with no permanent-slot targets, and permanent copies arrive through `locked`.
+function Adapter.Plan(catalog,entries)
+ local wishlist=assert(Adapter.Wishlist(catalog,entries,'adapter'),'wishlist entries resolve in the catalog')
  local plan=Nexus.Strategy.Compile(catalog,wishlist,{})
- for _,e in ipairs(entries)do
-  assert(plan.requestedCounts[e.spellId]==(e.stacks or 1),'compiled plan carries the exact requested count')
+ local expected={}
+ for _,e in ipairs(entries)do expected[e.spellId]=(expected[e.spellId] or 0)+(e.stacks or 1)end
+ for id,count in pairs(expected)do
+  assert(plan.requestedCounts[id]==count,'compiled plan carries the exact requested count')
  end
  return plan
 end
+-- Saved-row echoes as GameAdapter.Slots rows carry them, with the catalog family.
+function Adapter.Echoes(catalog,echoes)
+ local out={}
+ for i,e in ipairs(echoes)do
+  local row=assert(catalog.rows[e.spellId],'saved echo in catalog')
+  out[i]={spellId=e.spellId,family=catalog.familyOf[e.spellId],quality=row.quality,stacks=e.stacks or 1}
+ end
+ return out
+end
+-- GameAdapter.Owned / LockedOwned projection fields used by the policy.
 function Adapter.Owned(catalog,bySpell,synced)
- local owned={synced=synced~=false,bySpell={},byFamily={}}
+ local owned={synced=synced~=false,bySpell={},byFamily={},distinct=0,total=0}
  for id,count in pairs(bySpell or {})do
-  owned.bySpell[id]=count
-  local family=catalog.familyOf[id]
-  if family then owned.byFamily[family]=(owned.byFamily[family] or 0)+count end
+  if catalog.rows[id] then
+   owned.bySpell[id]=count
+   local family=catalog.familyOf[id]
+   owned.byFamily[family]=(owned.byFamily[family] or 0)+count
+   owned.distinct=owned.distinct+1;owned.total=owned.total+count
+  end
  end
  return owned
 end
@@ -67,8 +123,12 @@ local function Cards(catalog,cards)
  local out={}
  for i,c in ipairs(cards)do
   local row=catalog.rows[c.spellId] or {}
-  local card={spellId=c.spellId,family=row.family,quality=row.quality}
-  for k,v in pairs(c)do card[k]=v end
+  -- GameAdapter.Board: spellId, quality, family from the catalog, and the
+  -- four observed flags as booleans.
+  local card={spellId=c.spellId,quality=c.quality or row.quality or 0,
+   family=catalog.familyOf[c.spellId] or ('s'..tostring(c.spellId)),
+   isFrozen=c.isFrozen and true or false,isCarried=c.isCarried and true or false,
+   isGuaranteed=c.isGuaranteed and true or false,justFrozen=c.justFrozen and true or false}
   out[i]=card
  end
  return out
