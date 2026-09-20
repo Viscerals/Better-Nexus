@@ -29,6 +29,11 @@ Share. Withheld requests remain queued. The normal transport retains its bulk
 fairness turn when full readiness returns. Requests, recovery, full-loadout
 responses, bulk broadcasts and handshakes do not gain an early update.
 
+Passive housekeeping also inspects a bounded, rotating slice of the control
+queue. Expired or invalidated owned Shares settle even when a live withheld
+request remains at the head. This releases their queue capacity and publishes
+one terminal result without sending, retrying, or changing their deadline.
+
 The current catalog owner proof must remain valid. Each approved send also
 retains its player, database, catalog and binding scope. A scope change before
 an Edit commit prevents broadcasting. A scope change after admission settles
@@ -71,7 +76,7 @@ record, queue admission, chat message or API return alone is not peer receipt.
 
 ## Offline coverage and remaining limits
 
-The retained 85 prototype scripts remain unchanged. Five new LuaJIT scripts
+The retained 85 prototype scripts remain unchanged. Six new LuaJIT scripts
 exercise real Share and Edit controls, source snapshots, catalog tickets,
 ordinary lifecycle callbacks, operation receipts and paced wire submission.
 They cover real Put and retention candidates, delayed notifications, unchanged

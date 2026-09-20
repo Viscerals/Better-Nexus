@@ -40,6 +40,7 @@ function Transport.New(options)
 
     local bulk, bulkHead, bulkTail = {}, 1, 0
     local control, controlHead, controlTail = {}, 1, 0
+    local preparedCleanupIndex = 1
     local ticker = 0
     local throttlePauseUntil, throttleSlowUntil = 0, 0
     local lastAttempt = -math.huge
@@ -665,7 +666,7 @@ function Transport.New(options)
         if isControl then packet = control[selectedIndex or controlHead]
         else packet = bulk[bulkHead] end
         if isControl and selectedIndex and selectedIndex > controlHead then
-            -- Restricted dispatch removes only its selected Share. Retain
+            -- Restricted dispatch or cleanup removes only its selected Share. Retain
             -- every withheld control packet and the relative FIFO order.
             for index = selectedIndex, controlTail - 1 do
                 control[index] = control[index + 1]
@@ -725,14 +726,49 @@ function Transport.New(options)
         return inspected, expired, superseded
     end
 
+    local function PrunePreparedShares(current)
+        local inspected, expired, superseded = 0, 0, 0
+        -- A live requeued request can withhold the head. Rotate through a
+        -- bounded slice so owned Share receipts still settle without sending.
+        local remaining = math.min(cleanupBudget, QueueDepth(true))
+        for _ = 1, remaining do
+            if preparedCleanupIndex < controlHead
+                or preparedCleanupIndex > controlTail then
+                preparedCleanupIndex = controlHead
+            end
+            local packet = control[preparedCleanupIndex]
+            if not packet then break end
+            inspected = inspected + 1
+            local reason, detail
+            if packet.metadata.queueClass == "share"
+                and packet.metadata.operationKind == "share"
+                and OperationState(packet) then
+                reason, detail = StaleReason(packet, current)
+            end
+            if reason then
+                Pop(true, preparedCleanupIndex)
+                ObserveOperationTerminal(packet, reason, {reason=detail or reason,
+                    attempts=packet.metadata.attempts,
+                    queue=QueueDepth(true) + QueueDepth(false)})
+                if reason == "expired" then expired = expired + 1
+                else superseded = superseded + 1 end
+            else
+                preparedCleanupIndex = preparedCleanupIndex + 1
+            end
+        end
+        return inspected, expired, superseded
+    end
+
     local function PruneStaleHeads(current)
         local controlInspected, controlExpired, controlSuperseded =
             PruneQueue(true, current)
         local bulkInspected, bulkExpired, bulkSuperseded =
             PruneQueue(false, current)
-        local inspected = controlInspected + bulkInspected
-        local expired = controlExpired + bulkExpired
-        local superseded = controlSuperseded + bulkSuperseded
+        local preparedInspected, preparedExpired, preparedSuperseded =
+            PrunePreparedShares(current)
+        local inspected = controlInspected + bulkInspected + preparedInspected
+        local expired = controlExpired + bulkExpired + preparedExpired
+        local superseded = controlSuperseded + bulkSuperseded + preparedSuperseded
         local removed = expired + superseded
         stats.cleanupInspected = (stats.cleanupInspected or 0) + inspected
         stats.expiredInspected = (stats.expiredInspected or 0) + expired
@@ -954,6 +990,7 @@ function Transport.New(options)
         end
         bulk, bulkHead, bulkTail = {}, 1, 0
         control, controlHead, controlTail = {}, 1, 0
+        preparedCleanupIndex = 1
         ticker = 0
         throttlePauseUntil, throttleSlowUntil = 0, 0
         lastAttempt = -math.huge
