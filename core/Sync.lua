@@ -1660,6 +1660,10 @@ end
 function Responder.Admission.Defer(fields)
     local key = tostring(fields.kind) .. ":" .. type(fields.id) .. ":"
         .. tostring(fields.id)
+    -- Settle cancelled and expired items first. An item retained in an earlier
+    -- scope is not a prior claim in this one: it must not make a fresh valid
+    -- receipt a duplicate, refuse its owner, or count against the bounds.
+    Responder.Admission.Expire()
     local prior = Responder.Admission.byKey[key]
     if prior then
         if prior.owner ~= fields.owner then
