@@ -250,3 +250,14 @@ Detailed historical notes are in the source archive under docs, not duplicated
 as old install instructions here. The source review and tests remain available
 with the exact experimental ZIP. Native results are recorded separately against
 the exact package; an offline pass is not native confirmation.
+
+## Stop Sharing result text
+
+Stop Sharing reports whether local removal was refused, is waiting for its
+accepted catalog operation, or has completed. The record remains present while
+local removal is pending. Queue admission alone does not prove local removal.
+Local removal does not prove removal on another client.
+
+Remote withdrawal remains unavailable with the current Sync protocol. A local
+removal can finish while its withdrawal is not queued. The panel states this
+limit. No automatic removal retry or resource spending is added.

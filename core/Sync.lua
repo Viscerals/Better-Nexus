@@ -2670,7 +2670,7 @@ function Sync.BroadcastDps(buildId, player, dps, level, category)
     })
 end
 
-function Sync.BroadcastDelete(build)
+function Sync.BroadcastDelete(build, onLocalComplete)
     if not build then return false end
     local id, wireWhy = WireBuildId(build.id)
     if not id then return false, wireWhy end
@@ -2708,7 +2708,9 @@ function Sync.BroadcastDelete(build)
             stamp=tonumber((time and time()) or 0) or 0,author=author,
             ownerKey=localOwner,ownerVerified=true,
         }
-    local function Complete(tombStored, tombStoreWhy)
+    local localRemoval = {localRemoved=false,localPending=false,
+        queueAdmitted=false,retryPending=false}
+    local function Finish(tombStored, tombStoreWhy)
         if not tombStored then
             stats.storageRejected = (stats.storageRejected or 0) + 1
             local refused, operationWhy = Operation.NewDelete(id, tomb)
@@ -2746,12 +2748,28 @@ function Sync.BroadcastDelete(build)
         ClearPendingDelete(id, tomb)
         return false, "REMOTE_TOMBSTONE_ORDER_UNPROVEN", Operation.Copy(status)
     end
+    local function Complete(tombStored, tombStoreWhy)
+        local queued, why, status = Finish(tombStored, tombStoreWhy)
+        localRemoval.localPending = false
+        localRemoval.localRemoved = tombStored == true
+        localRemoval.storageReason = not tombStored and tombStoreWhy or nil
+        localRemoval.queueAdmitted = queued == true
+        localRemoval.queueReason = not queued and why or nil
+        return queued, why, status, localRemoval
+    end
     local tombStored, tombStoreWhy, ticket = CatalogSetTombstone(id, tomb, {source="local"})
     if tombStored == nil and tombStoreWhy == "ROOT_MUTATION_PENDING" then
-        if not BindCatalogCompletion(ticket, Complete) then
+        if not BindCatalogCompletion(ticket, function(stored, why)
+            Complete(stored, why)
+            if type(onLocalComplete) == "function" then onLocalComplete(localRemoval) end
+        end) then
             return Complete(false, "INVALID_MUTATION_TICKET")
         end
-        return false, tombStoreWhy
+        -- Wire admission remains false. This separate receipt proves that the
+        -- original local ticket was accepted; callers must not submit it again.
+        localRemoval.localPending = true
+        localRemoval.storageReason = tombStoreWhy
+        return false, tombStoreWhy, nil, localRemoval
     end
     return Complete(tombStored, tombStoreWhy)
 end

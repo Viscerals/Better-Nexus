@@ -2798,7 +2798,7 @@ function Controller.New(options)
         return true, #echoes
     end
 
-    function M.DeleteBuild(id)
+    function M.DeleteBuild(id, onComplete)
         local b = LoadBuild(id)
         if not b then
             local refusal = RootRefusal()
@@ -2819,13 +2819,35 @@ function Controller.New(options)
             return false, "server Saved Builds cannot be deleted here"
         end
         local outcome = {
-            localRemoved=false,queueAdmitted=false,retryPending=false,
+            localRemoved=false,localPending=false,queueAdmitted=false,retryPending=false,
         }
+        local function CompleteRemoval()
+            if outcome.localRemoved and selectedId == id then selectedId = nil end
+            if type(onComplete) == "function" then onComplete(outcome.localRemoved, outcome) end
+            refreshView()
+        end
+        local function SyncRemoval(receipt)
+            for _, key in ipairs({"localRemoved","localPending","storageReason",
+                "queueAdmitted","retryPending","queueReason"}) do
+                outcome[key] = receipt[key]
+            end
+        end
         if owner then
             local sync = Nexus and Nexus.Sync
             if sync and type(sync.BroadcastDelete) == "function" then
-                local called, queued, why = pcall(sync.BroadcastDelete, b)
+                local called, queued, why, _, removal = pcall(sync.BroadcastDelete, b,
+                    function(receipt)
+                        SyncRemoval(receipt)
+                        CompleteRemoval()
+                    end)
                 if called then
+                    if type(removal) == "table" then
+                        SyncRemoval(removal)
+                        if outcome.localPending or outcome.localRemoved then
+                            if outcome.localRemoved and selectedId == id then selectedId = nil end
+                            return true, outcome
+                        end
+                    end
                     outcome.queueAdmitted = queued == true
                     if not queued then
                         outcome.retryPending = why == "queued for retry"
@@ -2855,6 +2877,7 @@ function Controller.New(options)
             }, {source="local"}, function(terminal)
                 -- The retained row-to-tombstone transaction settles the local
                 -- removal exactly once from its terminal committed ticket.
+                outcome.localPending = false
                 if terminal.committed == true then
                     if selectedId == id then selectedId = nil end
                     outcome.localRemoved = true
@@ -2865,12 +2888,14 @@ function Controller.New(options)
                     outcome.queueReason = outcome.queueReason
                         or outcome.storageReason
                 end
+                CompleteRemoval()
             end)
             if tombstoned == nil and tombstoneWhy == "ROOT_MUTATION_PENDING" then
                 -- Accepted and retained: the same outcome table reports
                 -- localRemoved=false with this storage reason until the
                 -- terminal ticket above settles it.
                 outcome.storageReason = tombstoneWhy
+                outcome.localPending = true
                 return true, outcome
             end
             if tombstoned then tombstoneWhy = nil end

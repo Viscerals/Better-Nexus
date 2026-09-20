@@ -235,8 +235,8 @@ function Renderer.New(options)
             and #build.echoes > 0
     end
 
-    local function DeleteBuild(id)
-        return ControllerInstance().DeleteBuild(id)
+    local function DeleteBuild(id, onComplete)
+        return ControllerInstance().DeleteBuild(id, onComplete)
     end
 
     local function EditBuild(id, title, description, link)
@@ -292,6 +292,37 @@ function Renderer.New(options)
         timeout=0, whileDead=true, hideOnEscape=true,
     }
 
+    local function StopSharingReason(value)
+        if value == "ROOT_MUTATION_PENDING" or value == "ROOT_ADMISSION_PENDING" then
+            return "the shared build catalog is still preparing"
+        elseif value == "REMOTE_TOMBSTONE_ORDER_UNPROVEN" then
+            return "remote withdrawal is not supported by the available Sync protocol"
+        end
+        return type(value) == "string" and value ~= "" and value
+            or "local removal was not confirmed"
+    end
+
+    local function ShowStopSharingResult(ok, result)
+        local outcome = type(result) == "table" and result or {}
+        if outcome.localRemoved == true then
+            if outcome.queueAdmitted then
+                print("|cff4dff80Nexus:|r Build stopped sharing locally; withdrawal queued. Peer removal is not confirmed.")
+            elseif outcome.retryPending then
+                print("|cffffc040Nexus:|r Build stopped sharing locally; the Sync queue is full. Withdrawal retry is pending. Peer removal is not confirmed.")
+            else
+                print("|cffffc040Nexus:|r Build stopped sharing locally; withdrawal not queued: "
+                    .. StopSharingReason(outcome.queueReason or "Sync unavailable") .. ". Peer removal is not confirmed.")
+            end
+        elseif ok and outcome.localPending == true then
+            print("|cffffc040Nexus:|r Stop Sharing accepted. Waiting for local removal; the shared record is still present. Peer removal is not confirmed.")
+        elseif not ok then
+            print("|cffff6060Nexus:|r Stop Sharing refused: "
+                .. StopSharingReason(outcome.storageReason or outcome.queueReason or result) .. ".")
+        else
+            print("|cffffc040Nexus:|r Stop Sharing: local removal is not confirmed. Peer removal is not confirmed.")
+        end
+    end
+
     local function FinishStopSharing(id)
         local build = LoadBuild(id)
         if not build or not IsOwnBuild(build) then
@@ -299,20 +330,8 @@ function Renderer.New(options)
             M.Refresh()
             return
         end
-        local ok, result = DeleteBuild(id)
-        if not ok then
-            print("|cffff6060Nexus:|r " .. tostring(result))
-        else
-            local outcome = type(result) == "table" and result or {}
-            if outcome.queueAdmitted then
-                print("|cff4dff80Nexus:|r Build stopped sharing locally; withdrawal queued.")
-            elseif outcome.retryPending then
-                print("|cffffc040Nexus:|r Build stopped sharing locally; the Sync queue is full. Withdrawal retry is pending.")
-            else
-                print("|cffffc040Nexus:|r Build stopped sharing locally; withdrawal not queued: "
-                    .. tostring(outcome.queueReason or "Sync unavailable") .. ".")
-            end
-        end
+        local ok, result = DeleteBuild(id, ShowStopSharingResult)
+        ShowStopSharingResult(ok, result)
         M.Refresh()
     end
 

@@ -25,6 +25,7 @@ NAMES += ['share_catalog_contention','share_catalog_lifecycle','share_inbound_li
 NAMES += ['share_send_liveness','share_send_guards','share_transport_prepared']
 NAMES += ['share_edit_liveness','share_edit_guards']
 NAMES += ['share_terminal_cleanup']
+NAMES += ['stop_sharing_refusal','stop_sharing_pending','stop_sharing_outcomes']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
