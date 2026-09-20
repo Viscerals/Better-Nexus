@@ -87,6 +87,7 @@ function Lifecycle.New(options)
         ["Sync.OnUpdate"]={active=false,message=nil},
         ["Sync.Housekeep"]={active=false,message=nil},
         ["Sync.UpdatePendingRequestStatus"]={active=false,message=nil},
+        ["CommunityBuilds.PumpPendingShare"]={active=false,message=nil},
         ["DpsCapture.Init"]={active=false,message=nil},
         ["DpsCapture.OnUpdate"]={active=false,message=nil},
         ["DpsCapture.OnCombatStart"]={active=false,message=nil},
@@ -900,6 +901,16 @@ function Lifecycle.New(options)
         else
             catalogReady = PumpCatalogRootAdmissionSlice()
             if catalogReady then buildHashesReady = PumpBuildHashCacheSlice() end
+        end
+        -- Give one explicitly approved Share the next normal admission turn
+        -- before Sync can start another incoming write. This does not pump or
+        -- bypass catalog work. A new write invalidates the prepared hash view.
+        local community = Nexus.CommunityBuilds
+        if community and type(community.PumpPendingShare) == "function" then
+            local ok, pending, submitted = RunIsolatedOwner("CommunityBuilds.PumpPendingShare",
+                community.PumpPendingShare)
+            if not ok or pending then catalogReady = false end
+            if not ok or pending or submitted then buildHashesReady = false end
         end
         if catalogReady then
             if manualOwner and buildHashesReady and manualTiming.readyAt == nil then

@@ -44,6 +44,7 @@ function Controller.New(options)
     local lastSavedLoadoutImport = 0
     local savedImportJob
     local lastShareOutcome
+    local pendingShare
     local savedRelatedCache, savedRelatedCacheRevision = {}, -1
     local savedImportStats = {
         jobs=0,jobStarts=0,pumps=0,workUnits=0,maxWorkPerPump=0,
@@ -2033,6 +2034,9 @@ function Controller.New(options)
 
     function M.PostCurrentWishlist(title, description, selectedWishlist, selectedClass)
         if not (Adapter and Adapter.Wishlist) then return false, "adapter not ready" end
+        if pendingShare then
+            return false, "A Share is already waiting for local saving.", lastShareOutcome
+        end
         PeerRecord("share_confirmed", {outcome="button confirmed"})
 
         -- A selected Echo Wishlist is identified by its server slot.  Do not
@@ -2106,15 +2110,43 @@ function Controller.New(options)
             sent=false,sendCompleted=false,peerStored=nil,
             confirmation="unavailable",
         }
+        local catalog = Catalog()
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        local operation = {database=NexusDB,catalog=catalog,owner=localOwner,
+            binding=preparation and preparation.binding,submitted=false,finished=false}
+        local function SameOwner()
+            if operation.database ~= NexusDB or operation.catalog ~= Catalog()
+                or operation.owner ~= CurrentVerifiedOwnerKey() then return false end
+            if operation.binding ~= nil then
+                local current = type(catalog.ManualPreparationStatus) == "function"
+                    and catalog.ManualPreparationStatus() or nil
+                -- ownerAgrees also includes evidence freshness. A source edit
+                -- may change that after the exact local ticket commits; it is
+                -- not a change of player/database/catalog binding. Readiness
+                -- is checked separately before the one local submission.
+                return current and current.binding == operation.binding or false
+            end
+            return true
+        end
+        operation.sameOwner = SameOwner
+        pendingShare, lastShareOutcome = operation, outcome
         local function CompleteLocalSave(committed, why)
+            if operation.finished then return outcome.localSaved end
+            operation.finished = true
+            if pendingShare == operation then pendingShare = nil end
             outcome.buildRevision = BuildRevision()
             outcome.localSaved = committed == true
+            outcome.localPending = false
+            outcome.localStage = committed and "saved" or "failed"
             PeerRecord("share_local", {id=id,
                 outcome=committed and "saved" or "rejected",
                 reason=why,revision=outcome.buildRevision})
-            if not committed then
-                outcome.queueReason = why or "local save failed"
+            if not committed or not SameOwner() then
+                outcome.queueReason = not committed and (why or "local save failed")
+                    or "Share stopped: the player or catalog changed."
                 lastShareOutcome = outcome
+                if operation.notify then notify("Share not sent: " .. tostring(outcome.queueReason)) end
                 return false
             end
             local admitted, queueWhy, syncStatus = BroadcastIfPossible(record, true)
@@ -2146,33 +2178,65 @@ function Controller.New(options)
             if D and D.BroadcastBestForBuild then
                 pcall(D.BroadcastBestForBuild, id)
             end
+            if operation.notify then
+                notify(outcome.queueAdmitted
+                    and "Share saved locally and queued. Peer storage confirmation is unavailable."
+                    or ("Share saved locally; not queued: " .. tostring(outcome.queueReason)))
+            end
             return true
         end
-
-        local saved, saveWhy = SaveBuild(record, function(ticket)
-            CompleteLocalSave(ticket.committed == true,
-                ticket.committed == true and ticket.storedAs or ticket.reason)
-        end)
-        if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" then
-            -- The local save is one retained catalog mutation. The post is
-            -- accepted exactly once here: the same retained outcome table
-            -- reports localSaved=false and queueReason=ROOT_MUTATION_PENDING
-            -- until its terminal ticket runs CompleteLocalSave, which then
-            -- queues the one broadcast. Reporting the retained save as a
-            -- failure would leave the Share popup open and invite a duplicate
-            -- post of the same draft.
-            outcome.queueReason = saveWhy
-            lastShareOutcome = outcome
-            PeerRecord("share_local", {id=id,outcome="pending",
-                reason=saveWhy,revision=outcome.buildRevision})
+        operation.complete = CompleteLocalSave
+        operation.submit = function()
+            -- One submission of this immutable record. A rejection is terminal;
+            -- a retained ticket owns settlement. Neither path retries Put.
+            operation.submitted = true
+            local saved, saveWhy = SaveBuild(record, function(ticket)
+                CompleteLocalSave(ticket.committed == true,
+                    ticket.committed == true and ticket.storedAs or ticket.reason)
+            end)
+            if operation.finished then
+                return outcome.localSaved, outcome.localSaved and id or outcome.queueReason, outcome
+            end
+            if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" then
+                operation.notify = true
+                outcome.localPending, outcome.localStage = true, "saving"
+                outcome.queueReason = saveWhy
+                PeerRecord("share_local", {id=id,outcome="pending",
+                    reason=saveWhy,revision=outcome.buildRevision})
+                return true, id, outcome
+            end
+            CompleteLocalSave(saved == true, saveWhy or "local save failed")
+            return saved == true, saved and id or outcome.queueReason, outcome
+        end
+        if preparation and preparation.ownerAgrees == true
+            and preparation.relevant == true and not preparation.ready
+            and localOwner ~= nil then
+            -- Retain one explicit Share intent behind existing incoming work.
+            -- The lifecycle submits it at the next ordinary admitted boundary.
+            operation.notify = true
+            outcome.localPending, outcome.localStage = true, "waiting-catalog"
+            outcome.queueReason = "ROOT_MUTATION_PENDING"
+            PeerRecord("share_local", {id=id,outcome="waiting",
+                reason=outcome.queueReason,revision=outcome.buildRevision})
             return true, id, outcome
         end
-        if not saved then
-            CompleteLocalSave(false, saveWhy or "local save failed")
-            return false, saveWhy or "local save failed", outcome
+        return operation.submit()
+    end
+
+    function M.PumpPendingShare()
+        local operation = pendingShare
+        if not operation then return false, false end
+        if operation.submitted then return true, false end
+        if not operation.sameOwner() then
+            operation.complete(false, "Share stopped: the player or catalog changed.")
+            return false, false
         end
-        CompleteLocalSave(true, saveWhy)
-        return true, id, outcome
+        local catalog = operation.catalog
+        local preparation = type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        if not preparation or preparation.ready ~= true then return true, false end
+        operation.submit()
+        return pendingShare ~= nil, true
     end
 
     function M.ShareStatus(id)

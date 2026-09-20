@@ -253,6 +253,11 @@ function M.ShareStatus(id)
     return ControllerInstance().ShareStatus(id)
 end
 
+function M.PumpPendingShare()
+    if not communityController then return false, false end
+    return communityController.PumpPendingShare()
+end
+
 function M.CanRetryShare(id)
     return ControllerInstance().CanRetryShare(id)
 end

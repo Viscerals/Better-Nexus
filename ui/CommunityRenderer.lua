@@ -757,7 +757,9 @@ local function EnsurePostPopup()
             return
         end
         outcome=type(outcome)=="table" and outcome or {}
-        if outcome.sendCompleted then
+        if outcome.localPending then
+            print("|cffffc040Nexus:|r Share accepted. Waiting to save locally; nothing has been sent.")
+        elseif outcome.sendCompleted then
             print("|cff4dff80Nexus:|r Build saved locally and sent. Peer storage confirmation is unavailable.")
         elseif outcome.queueAdmitted then
             print("|cff4dff80Nexus:|r Build saved locally and queued for sharing. Peer storage confirmation is unavailable.")
