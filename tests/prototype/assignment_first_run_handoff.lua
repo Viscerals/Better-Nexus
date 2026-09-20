@@ -78,4 +78,3 @@ for _,method in ipairs({'selected-source','identity'})do
 end
 assert(#H.actions==0,'all companion cases remain local with no gameplay or upload')
 print('PASS actual repeated/different picker changes; complete matching handoff; selected-source and identity setters; unrelated/legacy/nil/false/no-handoff guards')
-
