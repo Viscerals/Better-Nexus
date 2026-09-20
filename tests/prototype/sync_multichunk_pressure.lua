@@ -10,12 +10,22 @@ local function Run(stage)
  A.H.perks.serverBuildSlots[102].echoes=echoes
  local chunks,pressed={},false
  local function Stats()return A.e.Nexus.Sync.Stats()end
+ -- The admission counter is read inside the sender's real send calls. Sync
+ -- transmits first and runs deferred admission afterwards in the same turn, so
+ -- a value read after that turn would charge the last chunk with the admission
+ -- that correctly follows a completed transfer. Observe only; calls pass through.
+ local atTransmission={}
+ for _,name in ipairs({'SendChatMessage','SendAddonMessage'})do
+  local real=A.e[name]
+  A.e[name]=function(...)atTransmission[#A.H.sent+1]=Stats().admissionResolved;return real(...)end
+ end
  P.before=function(p,q,code)
   if p~=A then return end
   if code=='WLRB' then
    local text=p.H.sent[p.cursor].text:gsub('||','|'):gsub('^P%d+:','')
    local id,index,total=text:match('^WLRB|[^|]+|([^|]+)|[^|]+|(%d+)/(%d+)|')
-   chunks[#chunks+1]={time=p.H.now,id=id,index=tonumber(index),total=tonumber(total),resolved=Stats().admissionResolved}
+   chunks[#chunks+1]={time=p.H.now,id=id,index=tonumber(index),total=tonumber(total),
+    resolved=assert(atTransmission[p.cursor],'every transmitted chunk was observed at its send call')}
   end
   -- Sixteen valid summaries from verified owners plus one that takes the
   -- ticket, through the real receive callback, at the chosen stage.
@@ -31,28 +41,39 @@ local function Run(stage)
   assert(A.e.Nexus.Sync.WorkState().deferredAdmissions==16,'fixture: sixteen deferred items behind one accepted holder')
  end
  local id=P.Post(A,'NEXUS-TEST-MULTICHUNK-'..stage)
- local source
- P.Until(function()
-  source=source or A.e.Nexus.BuildCatalog.Get(id)
-  return P.Full(B,id)~=nil
- end,9000)
+ -- The wait may end without completion. The no-interleaving check below
+ -- runs first in either case, so a product that interleaves is reported as
+ -- interleaving, not only as a transfer that never finished.
+ local completed=pcall(P.Until,function()return P.Full(B,id)~=nil end,9000)
  assert(pressed,'fixture: pressure was applied at the '..stage..' stage')
- source=assert(A.e.Nexus.BuildCatalog.Get(id));assert(#source.echoes==79,'real owner Share saved the exact 79-entry record')
+ local source=assert(A.e.Nexus.BuildCatalog.Get(id));assert(#source.echoes==79,'real owner Share saved the exact 79-entry record')
+ -- Every attempt is one contiguous run of chunk 1..n with one total. A retry
+ -- is a separate attempt and is never mixed with the one before it. In every
+ -- complete attempt, no deferred admission was started between its chunks,
+ -- and ordinary send pacing is unchanged.
+ local attempts,current={},nil
+ for _,c in ipairs(chunks)do
+  if c.id==id then
+   if c.index==1 then current={total=c.total};attempts[#attempts+1]=current
+   else assert(current and c.total==current.total and c.index==#current+1,'chunks of one attempt are contiguous: '..c.index..'/'..c.total)end
+   current[#current+1]=c
+  end
+ end
+ local complete,first=0,nil
+ for _,attempt in ipairs(attempts)do
+  assert(attempt.total>1,'the transfer really uses several chunks: '..attempt.total)
+  for i=2,#attempt do
+   assert(attempt[i].resolved==attempt[i-1].resolved,'a started transfer is not interleaved with deferred admissions: chunk '..attempt[i].index..'/'..attempt.total..' followed '..(attempt[i].resolved-attempt[i-1].resolved)..' admission(s)')
+   assert(attempt[i].time-attempt[i-1].time>=1.1-1e-6,'ordinary send pacing is unchanged')
+  end
+  if #attempt==attempt.total then complete=complete+1;first=first or attempt end
+ end
+ assert(completed,'the exact record completes under deferred pressure without any extended deadline')
  local row=P.Full(B,id)
  assert(row.ownerKey==source.ownerKey and row.lastModified==source.lastModified and B.T.Equal(row.echoes,source.echoes),'receiver committed the exact record: every ID, quality and copy')
- -- The first complete transfer of this ID: no catalog transaction was started
- -- between its chunks, and ordinary send pacing is unchanged.
- local first,total={},chunks[1].total
- assert(total>1,'the transfer really uses several chunks: '..total)
- for _,c in ipairs(chunks)do if c.id==id and #first<total and c.index==#first+1 then first[#first+1]=c end end
- assert(#first==total,'every chunk of one transfer was transmitted: '..#first..'/'..total)
- local interrupted=0
- for i=2,#first do
-  if first[i].resolved~=first[i-1].resolved then interrupted=interrupted+1 end
-  assert(first[i].time-first[i-1].time>=1.1-1e-6,'ordinary send pacing is unchanged')
- end
- local resolvedDuring=first[#first].resolved-first[1].resolved
- assert(interrupted==0 and resolvedDuring==0,'a started transfer is not interleaved with deferred admissions: '..resolvedDuring..' admitted between its chunks')
+ assert(complete>=1,'at least one attempt transmitted every chunk')
+ local total,resolvedDuring=first.total,first[#first].resolved-first[1].resolved
+ assert(resolvedDuring==0,'no deferred admission inside the first complete attempt')
  assert(Stats().expiredDropped==nil or Stats().expiredDropped==0,'no outbound chunk expired')
  -- Deferred inbound work is not abandoned: it proceeds after the transfer.
  local resolvedAtComplete=Stats().admissionResolved
