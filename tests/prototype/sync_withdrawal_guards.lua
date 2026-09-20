@@ -1,6 +1,6 @@
 -- Remote withdrawal stays unsupported while protocol 7 proves no edit/delete
--- order. These checks hold the refusal consistently: a stale or foreign WLRD
--- hides nothing, and no local path emits a WLRD.
+-- order. These checks hold the refusal consistently: no new inbound WLRD, at
+-- any stamp, hides a stored row, and no local path emits a WLRD.
 local P=dofile('tests/prototype/sync_pair_support.lua')
 local A,B=P.Boot({'GuardAlpha','GuardBeta'},0)
 local C=B.e.Nexus.BuildCatalog
@@ -22,8 +22,12 @@ local malformed,storage=B.e.Nexus.Sync.Stats().malformedRejected,B.e.Nexus.Sync.
 Delete(A.name,revision-1);Intact('stale same-owner withdrawal must not hide the newer committed row')
 Delete(A.name,revision-1);Intact('replayed stale withdrawal changes nothing')
 Delete(A.name,1);Intact('reordered much older withdrawal changes nothing')
-assert(B.e.Nexus.Sync.Stats().malformedRejected==malformed and B.e.Nexus.Sync.Stats().storageRejected==storage,'a stale withdrawal is a benign skip, not a malformed or storage failure')
-print('PASS stale, replayed and reordered same-owner withdrawals leave the newer row visible')
+Delete(A.name,revision);Intact('equal-stamp direct-owner withdrawal proves no order and must not hide the row')
+Delete(A.name,revision+1);Intact('later-stamp direct-owner withdrawal proves no order and must not hide the row')
+Delete(A.name,revision+100000);Intact('far-later direct-owner withdrawal proves no order and must not hide the row')
+assert(B.e.Nexus.Sync.Stats().malformedRejected==malformed and B.e.Nexus.Sync.Stats().storageRejected==storage,'an order-unproved withdrawal is refused as such, not as a malformed or storage failure')
+assert(B.e.Nexus.Sync.Stats().withdrawalOrderRefused==6,'each of the six direct-owner withdrawals was refused for unproved order')
+print('PASS direct-owner withdrawals at older, equal and later stamps leave the stored row visible')
 Delete('WrongOwner-Ebonhold',revision+100);Intact('wrong-owner withdrawal cannot hide the row at any stamp')
 print('PASS wrong-owner withdrawal is refused')
 
@@ -51,11 +55,21 @@ Intact('receiver keeps the exact row: remote withdrawal is not claimed')
 assert(A.e.Nexus.BuildCatalog.TombstoneState(id).state=='CURRENT_DENY','the local tombstone is unchanged by the refused wire')
 print('PASS Stop Sharing is zero-wire on the originating and the responder path; remote row remains')
 
--- Retained handling, stated as a limit and not as proof of order: an older
--- peer's direct-owner WLRD at or after the stored revision still reserves the
--- ID. The raw row is retained and hidden; nothing is deleted.
+-- A reservation that already exists is preserved exactly. It is seeded through
+-- the catalog owner, as an earlier client version stored it; no wire path
+-- creates one any more.
+local owner=C.Get(id).ownerKey
+local seeded={stamp=revision,author=A.name,ownerKey=owner,ownerVerified=true}
+local stored,why,ticket=C.SetTombstone(id,seeded,{source='remote',sender=A.name})
+assert(stored==true or (stored==nil and type(ticket)=='table'),'fixture: existing remote reservation seeded: '..tostring(why))
+P.Until(function()return P.Ready(B) and C.TombstoneState(id).state=='OPAQUE_BLOCK_ALL' end)
+assert(C.Get(id)==nil and B.e.NexusDB.authorityBundle.communityBuilds[id]~=nil,'the existing reservation hides the row and retains its raw contents')
+local refused=B.e.Nexus.Sync.Stats().withdrawalOrderRefused
 Delete(A.name,revision)
-assert(C.Get(id)==nil and C.TombstoneState(id).state=='OPAQUE_BLOCK_ALL','established direct-owner handling is unchanged for an equal stamp')
-assert(B.e.NexusDB.authorityBundle.communityBuilds[id]~=nil,'the opaque reservation hides the row and retains its raw contents')
+assert(C.TombstoneState(id).state=='OPAQUE_BLOCK_ALL' and B.e.Nexus.Sync.Stats().withdrawalOrderRefused==refused,'an exact replay of an existing reservation stays an idempotent no-op')
+Delete(A.name,revision+5)
+assert(C.TombstoneState(id).state=='OPAQUE_BLOCK_ALL' and C.TombstoneState(id).stamp==revision,'an unequal replay changes nothing')
+A.H.Advance(10,.05);A.e.SlashCmdList.NEXUS('sync');B.H.Advance(10,.05);B.e.SlashCmdList.NEXUS('sync');P.Advance(60)
+assert(C.Get(id)==nil and C.TombstoneState(id).state=='OPAQUE_BLOCK_ALL','the existing reservation still denies inbound rows for its ID')
 assert(#A.H.actions==0 and #B.H.actions==0,'zero gameplay mutation')
-print('PASS legacy direct-owner withdrawal handling is retained unchanged at an equal stamp')
+print('PASS an existing reservation is preserved: replay is a no-op, conflict changes nothing, inbound rows stay denied')

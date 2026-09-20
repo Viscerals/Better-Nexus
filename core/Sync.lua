@@ -1587,8 +1587,9 @@ end
 -- ordinary admission is available again. The complete inbound handler runs
 -- again at that point, so owner, revision, pending-replacement and tombstone
 -- state are rechecked against the then-current catalog. Only the ticket that
--- submission returns may report success; expiry, overflow and reset settle
--- as the same storage refusal the item would have received before.
+-- submission returns may report success; expiry, overflow, reset and a
+-- changed catalog scope settle as the same storage refusal the item would
+-- have received before.
 --
 -- Each item has one fixed deadline, PENDING_MAX_AGE from its own arrival.
 -- Other catalog work never extends it. An item whose turn does not come in
@@ -1624,6 +1625,33 @@ function Responder.Admission.Fail(entry, counter, detail)
         tostring(entry.id), tostring(detail))
     entry.settle(false, false, "storage")
     return true
+end
+
+-- The scope an item was validated in: this Sync session, this catalog owner,
+-- its bound database and binding generation, and the local player. An item is
+-- never submitted into any other scope.
+function Responder.Admission.Scope()
+    local catalog = Catalog()
+    local preparation = catalog
+        and type(catalog.ManualPreparationStatus) == "function"
+        and catalog.ManualPreparationStatus() or nil
+    return {
+        identity=catalogMutationIdentity,catalog=catalog,
+        database=catalog and type(catalog.BoundDatabase) == "function"
+            and catalog.BoundDatabase() or nil,
+        savedVariables=NexusDB,
+        binding=preparation and preparation.binding or nil,
+        owner=CurrentOwnerKey(),
+    }
+end
+
+function Responder.Admission.SameScope(entry)
+    local scope, current = entry.scope, Responder.Admission.Scope()
+    for _, key in ipairs({"identity", "catalog", "database", "savedVariables",
+        "binding", "owner"}) do
+        if scope[key] ~= current[key] then return false end
+    end
+    return current.catalog ~= nil and current.database ~= nil
 end
 
 -- Returns "deferred", "duplicate", "rejected" or "overflow". One entry per
@@ -1673,6 +1701,7 @@ function Responder.Admission.Defer(fields)
         sender=fields.sender,context=fields.context,run=fields.run,
         settle=fields.settle,enqueuedAt=current,
         expiresAt=current + PENDING_MAX_AGE,
+        scope=Responder.Admission.Scope(),
     }
     Responder.Admission.byKey[key] = entry
     Responder.Admission.order[#Responder.Admission.order + 1] = entry
@@ -1690,7 +1719,12 @@ function Responder.Admission.Expire()
     local current, index = Now(), 1
     while Responder.Admission.order[index] do
         local entry = Responder.Admission.order[index]
-        if current >= entry.expiresAt then
+        if not Responder.Admission.SameScope(entry) then
+            -- A changed player, database or binding cancels the item. It is
+            -- never carried into the new scope.
+            Responder.Admission.Fail(entry, "admissionCancelled",
+                "catalog scope changed")
+        elseif current >= entry.expiresAt then
             Responder.Admission.Fail(entry, "admissionExpired",
                 "catalog admission wait expired")
         else
@@ -1711,7 +1745,15 @@ function Responder.Admission.Pump()
             and catalog.ManualPreparationStatus() or nil
         if preparation and preparation.ready ~= true then return end
         local entry = Responder.Admission.order[1]
-        if entry.run(entry) == "busy" then return end
+        -- Rechecked at the point of submission, after Expire above, because
+        -- an earlier entry in this same turn can change nothing about scope
+        -- but a rebind can complete between turns.
+        if not Responder.Admission.SameScope(entry) then
+            Responder.Admission.Fail(entry, "admissionCancelled",
+                "catalog scope changed")
+        elseif entry.run(entry) == "busy" then
+            return
+        end
         Responder.Admission.Remove(entry)
     end
 end
@@ -3392,55 +3434,23 @@ local function HandleDelete(sender, buildId, stamp, originAuthor, context,
             tostring(existing.title), author, tostring(existing.author))
         return false
     end
-    -- Refusal-only guard. A withdrawal stamped before the stored revision is
-    -- a replay or a reordered message from before that revision existed, so it
-    -- must not hide the newer record behind an opaque reservation. This proves
-    -- no order for an equal or later stamp, which keeps the established
-    -- handling. Row edits use max(now, previous + 1) while a tombstone uses
-    -- the clock, so a genuine removal that follows rapid edits can also carry
-    -- a lower stamp. It is refused too and the row stays visible: a failed
-    -- withdrawal, which protocol 7 never proved, instead of a hidden record.
-    local existingStamp = tonumber(existing.lastModified)
-        or tonumber(existing.postedAt) or 0
-    if (tonumber(stamp) or 0) < existingStamp then
-        Responder.NoteContextOutcome(context, "duplicate", "stale")
-        LogEvent("RX", "skip delete of '%s': stamp %s is older than stored revision %s",
-            tostring(buildId), tostring(stamp), tostring(existingStamp))
-        return true
-    end
-    local tomb = {
-        stamp=tonumber(stamp) or 0,author=author,
-        ownerKey=existingOwner,
-        ownerVerified=true,
-    }
-    local function Complete(tombStored)
-        if not tombStored then
-            stats.storageRejected = (stats.storageRejected or 0) + 1
-            Responder.NoteContextOutcome(context, "rejected", "storage")
-            LogEvent("RX", "REJECT delete of '%s': local storage refused",
-                tostring(existing.title))
-            return false
-        end
-        seenRemoteIds[buildId] = nil
-        Responder.Work.ForgetHotBuild(buildId)
-        Session.ClearRequestedLoadout(buildId)
-        LogEvent("RX","DELETED '%s' from origin %s (relay %s)",
-            tostring(existing.title), author, tostring(sender))
-        Sync.RequestDataViewRefresh()
-        RequestRetention("remote delete received")
-        Responder.NoteContextOutcome(context, "updated", "accepted")
-        return true
-    end
-    local tombStored, why, ticket = CatalogSetTombstone(buildId, tomb,
-        {source="remote", sender=sender})
-    if tombStored == nil and why == "ROOT_MUTATION_PENDING" then
-        if not BindCatalogCompletion(ticket, function(ok)
-            local accepted = Complete(ok)
-            if type(onComplete) == "function" then onComplete(accepted) end
-        end) then return Complete(false) end
-        return nil, why
-    end
-    return Complete(tombStored)
+    -- REMOTE_TOMBSTONE_ORDER_UNPROVEN, inbound. A WLRD carries an ID, a clock
+    -- stamp and an author. It carries no target revision or digest and no
+    -- operation order that is comparable with a row edit: edits use
+    -- max(now, previous + 1) while a tombstone uses the clock. So no stamp,
+    -- older, equal or later, proves that this withdrawal follows the stored
+    -- revision, and a verified direct owner proves authorship only. A new
+    -- withdrawal therefore never creates a reservation and never hides a
+    -- stored row. This claims no order rule and enables no remote withdrawal.
+    -- Reservations that already exist are untouched above: an exact replay is
+    -- a no-op, an unequal one a conflict, and they keep denying inbound rows.
+    -- The remote CatalogSetTombstone path that followed had no other caller.
+    stats.withdrawalOrderRefused = (stats.withdrawalOrderRefused or 0) + 1
+    Responder.NoteContextOutcome(context, "rejected", "tombstone")
+    LogEvent("RX", "REJECT delete of '%s' from %s: REMOTE_TOMBSTONE_ORDER_UNPROVEN (stamp %s, stored revision %s)",
+        tostring(buildId), tostring(sender), tostring(stamp),
+        tostring(existing.lastModified or existing.postedAt))
+    return false
 end
 
 -- CHAT_MSG_CHANNEL handler. The wire has | escaped to || on send;

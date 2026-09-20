@@ -110,6 +110,26 @@ T.Until(H,function()return C.ManualPreparationStatus().ready end);H.Advance(10,.
 assert(C.Get(id)==nil and H.puts[id].accepted==0,'reset item is never submitted')
 print('PASS explicit reset cancels deferred admission')
 
+-- 6b. A retained item never crosses into another player, database or binding.
+for _,change in ipairs({'database','binding','owner'})do
+ H,C=A.Boot();A.Hold(C);id='deferred-summary-scope-'..change
+ A.Receive(id,'Peer',A.base+10,'Scoped before '..change..' change')
+ assert(Deferred()==1,'fixture: item retained before the scope change')
+ if change=='database' then NexusDB=H.Clone(NexusDB);C.BeginRootAdmission(NexusDB,Nexus.BundledBuilds)
+ elseif change=='binding' then C.BeginRootAdmission(NexusDB,Nexus.BundledBuilds)
+ else UnitName=function()return 'DifferentPlayer','Ebonhold' end end
+ -- A rebind also fails the earlier holder's own ticket; count only this item.
+ local refusedBefore=Stats().storageRejected
+ Nexus.Sync.Housekeep()
+ assert(Deferred()==0 and Stats().admissionCancelled==1 and Stats().storageRejected==refusedBefore+1,'scope change cancels the item at once as a storage refusal: '..change)
+ if change~='owner' then
+  T.Until(H,function()return C.ManualPreparationStatus().ready end)
+  H.Advance(20,.05);T.Until(H,function()return C.ManualPreparationStatus().ready end)
+ else H.Advance(20,.05) end
+ assert(C.Get(id)==nil and H.puts[id].accepted==0 and H.puts[id].calls==1,'cancelled item is never submitted into the new scope: '..change)
+ print('PASS deferred item cancelled on '..change..' change; no cross-scope write')
+end
+
 -- 7. Bounds: per-sender and total caps fail as ordinary storage refusals.
 H,C=A.Boot();A.Hold(C)
 for i=1,17 do A.Receive('bounded-'..i,'Peer',A.base+i) end

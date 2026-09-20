@@ -27,7 +27,8 @@ local DEFAULT_STATS = {
     operationThrottleExhausted=0, operationAccepted=0,
     operationRejected=0,
     admissionDeferred=0, admissionResolved=0, admissionExpired=0,
-    admissionSuperseded=0, admissionOverflow=0,
+    admissionSuperseded=0, admissionOverflow=0, admissionCancelled=0,
+    withdrawalOrderRefused=0,
 }
 
 local function Number(value)
