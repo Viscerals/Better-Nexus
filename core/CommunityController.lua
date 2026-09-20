@@ -1604,7 +1604,7 @@ function Controller.New(options)
         return M.PumpSavedLoadoutImport(25)
     end
 
-    local function BroadcastIfPossible(record, retryOnFull)
+    local function BroadcastIfPossible(record, sendOptions)
         local sync = Nexus.Sync
         local callback = sync and (sync.BroadcastBuildSummary
             or sync.BroadcastBuild)
@@ -1614,7 +1614,8 @@ function Controller.New(options)
             return false, "sync unavailable", nil
         end
         local called, admitted, why, status = pcall(callback, record,
-            retryOnFull and {retryOnFull=true} or nil)
+            sendOptions == true and {retryOnFull=true}
+                or type(sendOptions) == "table" and sendOptions or nil)
         local ok = called and admitted ~= false
         PeerRecord("share_queue", {id=record and record.id,
             outcome=ok and "admitted" or "rejected",
@@ -2665,6 +2666,10 @@ function Controller.New(options)
         local b = LoadBuild(id)
         if not b then return false, "not found" end
         if not IsOwnBuild(b) then return false, "not your build" end
+        local catalog, database, owner = Catalog(), NexusDB, CurrentVerifiedOwnerKey()
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        local binding = preparation and preparation.binding
 
         -- Validate every candidate field before mutating any part of the record.
         local nextTitle = tostring(title or ""):gsub("^%s+",""):gsub("%s+$","")
@@ -2701,26 +2706,51 @@ function Controller.New(options)
             b.userDescription = nextDescription
         end
         b.lastModified = NextStamp(b.lastModified or b.postedAt)
-        local saved, saveWhy = SaveBuild(b, function(ticket)
-            -- A retained edit broadcasts only from its terminal committed
-            -- ticket; a failed ticket is reported by the retained-mutation
-            -- owner and broadcasts nothing.
-            if ticket.committed == true and savedKind == "ordinary" then
-                BroadcastIfPossible(b)
+        local outcome = {id=b.id,localSaved=false,localPending=false,queueAdmitted=false,
+            sent=false,sendCompleted=false,confirmation="unavailable"}
+        local finished = false
+        local function Complete(committed, why)
+            if finished then return end
+            finished, outcome.localPending, outcome.localSaved = true, false, committed == true
+            if not committed then
+                outcome.message = "Build update failed: " .. tostring(why or "storage refused")
+                return
             end
+            outcome.message = "Build details saved locally."
+            if savedKind ~= "ordinary" then return end
+            local current = catalog and type(catalog.ManualPreparationStatus) == "function"
+                and catalog.ManualPreparationStatus() or nil
+            if database ~= NexusDB or catalog ~= Catalog() or owner ~= CurrentVerifiedOwnerKey()
+                or binding ~= nil and (not current or binding ~= current.binding) then
+                outcome.queueReason = "player or catalog changed"
+            else
+                -- Track this explicit same-ID approval without a queue-full
+                -- retry. Its immutable summary uses the existing Share owner.
+                local admitted, reason = BroadcastIfPossible(b, {explicit=true})
+                outcome.queueAdmitted, outcome.queueReason = admitted == true, reason
+            end
+            outcome.message = outcome.queueAdmitted
+                and "Build details saved locally and queued. Peer storage confirmation is unavailable."
+                or "Build details saved locally; not queued: " .. tostring(outcome.queueReason)
+        end
+        local saved, saveWhy, ticket = SaveBuild(b, function(terminal)
+            Complete(terminal.committed == true, terminal.reason)
+            if terminal.committed == true then notify(outcome.message) end
         end)
-        if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" then
+        if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
             -- Accepted and retained: the edit is one retained catalog
             -- mutation whose terminal ticket settles it; the reason lets a
             -- caller distinguish the retained state from a completed save.
-            return true, saveWhy
+            outcome.localPending = true
+            outcome.message = "Build update accepted. Waiting to save locally; nothing has been sent."
+            return true, saveWhy, outcome
         end
         if not saved then return false, saveWhy or "build storage refused" end
         -- Editing a server Saved Build mirror is local-only. It reaches the
         -- community only through the explicit Upload Build action (or a DPS
         -- record path handled by DpsCapture).
-        if savedKind == "ordinary" then BroadcastIfPossible(b) end
-        return true
+        Complete(true)
+        return true, nil, outcome
     end
 
     function M.UpdateFromWishlist(id)
@@ -3006,10 +3036,10 @@ function Controller.New(options)
     function M.CommitEditDraft()
         if not editDraft then return false, "not found" end
         local draft = editDraft
-        local ok, err = M.EditBuild(
+        local ok, err, outcome = M.EditBuild(
             draft.id, draft.title, draft.description, draft.link)
         if ok then editDraft = nil end
-        return ok, err
+        return ok, err, outcome
     end
 
     function M.Initialize(adapter, bundledBuilds,updateStarted,maxUnits)

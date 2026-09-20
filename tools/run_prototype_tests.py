@@ -22,6 +22,8 @@ NAMES += ['assignment_first_run_unassign']
 NAMES += ['assignment_first_run_reselect','assignment_first_run_handoff']
 NAMES += ['journal_picker_layers','wishlist_editor_context_label']
 NAMES += ['share_catalog_contention','share_catalog_lifecycle','share_inbound_listing']
+NAMES += ['share_send_liveness','share_send_guards','share_transport_prepared']
+NAMES += ['share_edit_liveness','share_edit_guards']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

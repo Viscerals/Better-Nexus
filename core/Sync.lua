@@ -746,6 +746,17 @@ function Operation.RunObserver(owner, source, kind, fields, metadata)
     end
 end
 
+function Operation.ShareScopeCurrent(status)
+    local scope = status and status.preparedScope
+    if not scope then return true end
+    local catalog = Catalog()
+    if scope.database ~= NexusDB or scope.catalog ~= catalog
+        or scope.owner ~= CurrentOwnerKey() then return false end
+    local current = catalog and type(catalog.ManualPreparationStatus) == "function"
+        and catalog.ManualPreparationStatus() or nil
+    return scope.binding == nil or current and current.binding == scope.binding or false
+end
+
 local function ObserveTransport(kind, fields, metadata, context)
     local status = type(context) == "table" and context.operationStatus or nil
     if type(status) == "table" then
@@ -997,6 +1008,7 @@ Transport = TransportFactory.New({
     escapedLen=EscapedLen,
     log=LogEvent,
     stats=stats,
+    operationCurrent=Operation.ShareScopeCurrent,
     resolveChannel=ResolveSendChannel,
     channelLabel=function() return channelIndex end,
     sendChat=function(...) return SendChatMessage(...) end,
@@ -1286,7 +1298,15 @@ end
 function Operation.NewShare(build)
     local id = tostring(build and build.id or ""):sub(1, MAX_BUILD_ID_BYTES)
     local version = Operation.ShareVersion(build)
-    return Operation.New("share", id, version, Operation.shareById[id])
+    local status, why = Operation.New("share", id, version, Operation.shareById[id])
+    if status then
+        local catalog = Catalog()
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        status.preparedScope = {database=NexusDB,catalog=catalog,owner=CurrentOwnerKey(),
+            binding=preparation and preparation.binding}
+    end
+    return status, why
 end
 
 local function FinishPendingShare(reason, expired, superseded)
@@ -1363,10 +1383,11 @@ end
 local function BroadcastSummary(build, options)
     local retryOnFull = type(options) == "table"
         and options.retryOnFull == true
+    local explicit = retryOnFull or type(options) == "table" and options.explicit == true
     local status
     local prepared, why = Responder.PrepareSummary(build)
     if not prepared then
-        if retryOnFull then
+        if explicit then
             local id = tostring(build and build.id or ""):sub(1,
                 MAX_BUILD_ID_BYTES)
             local previous = Operation.shareById[id]
@@ -1385,7 +1406,7 @@ local function BroadcastSummary(build, options)
         end
         return false, why, Operation.Copy(status)
     end
-    if retryOnFull then
+    if explicit then
         local id = tostring(build and build.id or ""):sub(1,
             MAX_BUILD_ID_BYTES)
         local version = Operation.ShareVersion(build)
@@ -1397,7 +1418,9 @@ local function BroadcastSummary(build, options)
         end
         -- A new explicit confirmation supersedes only an older summary that
         -- never entered Transport. Already admitted FIFO work is untouched.
-        FinishPendingShare("superseded by newer Share Build", false, true)
+        if retryOnFull then
+            FinishPendingShare("superseded by newer Share Build", false, true)
+        end
         local statusWhy
         status, statusWhy = Operation.NewShare(build)
         if not status then return false, statusWhy end
@@ -1423,7 +1446,7 @@ local function BroadcastSummary(build, options)
     if not queued then
         if status then
             status.queueReason = queueWhy or "queue rejected"
-            if queueWhy == "sync queue full" then
+            if queueWhy == "sync queue full" and retryOnFull then
                 status.retryOutcome = "pending"
                 status.expiresAt = Now() + SHARE_RETRY_MAX_AGE
                 status.retryAttempts = 0
@@ -3541,6 +3564,23 @@ end
 function Sync.Housekeep()
     Operation.housekeeping = true
     local ok, err = pcall(Transport.Housekeep)
+    Operation.housekeeping = false
+    if not ok then error(err, 0) end
+end
+
+-- Only already-admitted manual Share summaries can progress behind the full
+-- update gate. The passive catalog proof must still describe this owner's
+-- admitted root. No preparation, new admission, retry or handshake runs here.
+function Sync.PumpPreparedShare(elapsed)
+    local catalog = Catalog()
+    local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+        and catalog.ManualPreparationStatus() or nil
+    if not (preparation and preparation.ownerAgrees
+        and (preparation.ready or preparation.relevant)) then
+        return Sync.Housekeep()
+    end
+    Operation.housekeeping = true
+    local ok, err = pcall(Transport.PumpPreparedShare, elapsed)
     Operation.housekeeping = false
     if not ok then error(err, 0) end
 end

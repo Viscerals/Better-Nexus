@@ -660,11 +660,18 @@ function Transport.New(options)
         pcall(addMessageFilter, "UI_ERROR_MESSAGE", QuietWaitNotice)
     end
 
-    local function Pop(isControl)
+    local function Pop(isControl, selectedIndex)
         local packet
-        if isControl then packet = control[controlHead]
+        if isControl then packet = control[selectedIndex or controlHead]
         else packet = bulk[bulkHead] end
-        if isControl then
+        if isControl and selectedIndex and selectedIndex > controlHead then
+            -- Restricted dispatch removes only its selected Share. Retain
+            -- every withheld control packet and the relative FIFO order.
+            for index = selectedIndex, controlTail - 1 do
+                control[index] = control[index + 1]
+            end
+            control[controlTail], controlTail = nil, controlTail - 1
+        elseif isControl then
             control[controlHead] = nil
             controlHead = controlHead + 1
             if controlHead > controlTail then
@@ -683,6 +690,10 @@ function Transport.New(options)
 
     local function StaleReason(packet, current)
         if not packet then return nil end
+        if OperationState(packet) and type(options.operationCurrent) == "function"
+            and options.operationCurrent(packet.context.operationStatus) ~= true then
+            return "superseded", "player or catalog changed"
+        end
         local requestScope = RequestScope(packet.metadata)
         if requestScope ~= "" and cancelledRequests[requestScope] == true then
             return "superseded"
@@ -700,11 +711,11 @@ function Transport.New(options)
             else packet = bulk[bulkHead] end
             if not packet then break end
             inspected = inspected + 1
-            local reason = StaleReason(packet, current)
+            local reason, detail = StaleReason(packet, current)
             if not reason then break end
             Pop(isControl)
             if OperationState(packet) then
-                ObserveOperationTerminal(packet, reason, {reason=reason,
+                ObserveOperationTerminal(packet, reason, {reason=detail or reason,
                     attempts=packet.metadata.attempts,
                     queue=QueueDepth(true) + QueueDepth(false)})
             end
@@ -756,11 +767,28 @@ function Transport.New(options)
         lastSent = nil
     end
 
-    local function SelectPacket(current)
+    local function SelectPacket(current, preparedShareOnly)
         local controlPacket = control[controlHead]
         local bulkPacket = bulk[bulkHead]
         if StaleReason(controlPacket, current) then controlPacket = nil end
         if StaleReason(bulkPacket, current) then bulkPacket = nil end
+        if preparedShareOnly then
+            -- EnqueueControl prioritizes Shares, but a throttled earlier
+            -- non-Share can be pushed ahead of them. Inspect only the bounded
+            -- control queue; never release that unrelated packet to make room.
+            for index = controlHead, controlTail do
+                local packet = control[index]
+                local state = OperationState(packet)
+                local status = packet.context and packet.context.operationStatus
+                if packet.metadata.queueClass == "share"
+                    and packet.metadata.operationKind == "share"
+                    and state and not state.terminal and status.kind == "share"
+                    and not status.terminal and not StaleReason(packet, current) then
+                    return packet, true, index
+                end
+            end
+            return nil
+        end
         if controlPacket and (not bulkPacket
             or consecutiveControl < controlBurstLimit) then
             return controlPacket, true
@@ -778,7 +806,7 @@ function Transport.New(options)
         return current
     end
 
-    function T.Pump(elapsed)
+    local function Pump(elapsed, preparedShareOnly)
         local current = T.Housekeep()
         if current < (throttlePauseUntil or 0) then return end
         ticker = ticker + (elapsed or 0)
@@ -787,7 +815,7 @@ function Transport.New(options)
         if ticker < interval then return end
         ticker = 0
 
-        local packet, isControl = SelectPacket(current)
+        local packet, isControl, selectedIndex = SelectPacket(current, preparedShareOnly)
         if not packet then return end
 
         if type(options.canDispatch)=="function" then
@@ -801,7 +829,7 @@ function Transport.New(options)
             log("TX", "DROPPED oversize msg (%d>%d): %s",
                 #escaped, chatLimit, packet.payload:sub(1, 40))
             stats.oversizeDropped = (stats.oversizeDropped or 0) + 1
-            Pop(isControl)
+            Pop(isControl, selectedIndex)
             ObserveDropped(packet, {outcome="dropped",reason="oversize",
                 queue=T.Snapshot().outbound})
             return
@@ -836,7 +864,7 @@ function Transport.New(options)
             ok, accepted = pcall(sendChat, escaped, "CHANNEL", nil, channel)
         end
         if ok and accepted~=false then
-            Pop(isControl)
+            Pop(isControl, selectedIndex)
             if isControl then
                 consecutiveControl = consecutiveControl + 1
             else
@@ -854,7 +882,7 @@ function Transport.New(options)
             stats.sendFailures = (stats.sendFailures or 0) + 1
             throttlePauseUntil = math.max(throttlePauseUntil or 0, current + 2)
             if packet.metadata.attempts >= maxAttempts then
-                Pop(isControl)
+                Pop(isControl, selectedIndex)
                 stats.retryExhausted = (stats.retryExhausted or 0) + 1
                 log("TX", "SendChatMessage FAILED ch=%s; retry exhausted",
                     tostring(channelLabel()))
@@ -870,6 +898,17 @@ function Transport.New(options)
                     packet.context)
             end
         end
+    end
+
+    function T.Pump(elapsed)
+        return Pump(elapsed, false)
+    end
+
+    -- An explicit Share already owns immutable, prepared wire bytes. Catalog
+    -- preparation may withhold other traffic without starving this admission.
+    -- Use the same ticker, throttle, wire checks and operation settlement.
+    function T.PumpPreparedShare(elapsed)
+        return Pump(elapsed, true)
     end
 
     function T.ThrottleRemaining()

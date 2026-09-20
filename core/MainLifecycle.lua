@@ -86,6 +86,7 @@ function Lifecycle.New(options)
         ["Sync.OnWorldEntry"]={active=false,message=nil},
         ["Sync.OnUpdate"]={active=false,message=nil},
         ["Sync.Housekeep"]={active=false,message=nil},
+        ["Sync.PumpPreparedShare"]={active=false,message=nil},
         ["Sync.UpdatePendingRequestStatus"]={active=false,message=nil},
         ["CommunityBuilds.PumpPendingShare"]={active=false,message=nil},
         ["DpsCapture.Init"]={active=false,message=nil},
@@ -921,9 +922,14 @@ function Lifecycle.New(options)
         local adapterReady = Adapter.Ready()
         if not (adapterReady and catalogReady and buildHashesReady)
             and syncInitialized and Nexus.Sync and type(Nexus.Sync.Housekeep)=="function" then
-            -- The ready path already performs this once inside transport.
-            -- Do not send or multiply cleanup when readiness is withheld.
-            RunIsolatedOwner("Sync.Housekeep", Nexus.Sync.Housekeep)
+            -- One transport turn per frame. Prepared manual Share bytes do
+            -- not depend on a later catalog/hash candidate. Everything else
+            -- retains the full readiness gate and passive expiry handling.
+            if adapterReady and type(Nexus.Sync.PumpPreparedShare)=="function" then
+                RunIsolatedOwner("Sync.PumpPreparedShare", Nexus.Sync.PumpPreparedShare, elapsed)
+            else
+                RunIsolatedOwner("Sync.Housekeep", Nexus.Sync.Housekeep)
+            end
         end
         if not adapterReady then return end
         if syncInitialized and Nexus.Sync and catalogReady and buildHashesReady then

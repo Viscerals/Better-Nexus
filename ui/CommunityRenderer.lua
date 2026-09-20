@@ -921,8 +921,8 @@ local function EnsureEditPopup()
     saveBtn:SetScript("OnClick",function()
         if not ControllerInstance().UpdateEditDraft(
             editTitleBox:_NexusRawText(), editDescBox:_NexusRawText()) then return end
-        local ok, err = ControllerInstance().CommitEditDraft()
-        if ok then print("|cff4dff80Nexus:|r build updated and re-shared."); ClearEditDescriptionFocus(); p:Hide(); M.Refresh()
+        local ok, err, outcome = ControllerInstance().CommitEditDraft()
+        if ok then print("|cff4dff80Nexus:|r " .. tostring(outcome and outcome.message or "Build details saved locally.")); ClearEditDescriptionFocus(); p:Hide(); M.Refresh()
         else print("|cffff6060Nexus:|r "..tostring(err)) end
     end)
     pcall(function()
@@ -1050,10 +1050,10 @@ local function EnsureDetailPanel(parent)
         if linkBox._nexusBoundBuildId ~= selected then return end
         local build = selected and LoadBuild(selected)
         if not build or not IsOwnBuild(build) then return end
-        local ok, err = EditBuild(
+        local ok, err, outcome = EditBuild(
             selected, build.title, build.description, link)
         if ok then
-            print("|cff4dff80Nexus:|r Discord build link saved.")
+            print("|cff4dff80Nexus:|r " .. tostring(outcome and outcome.message or "Build details saved locally."))
             M.Refresh()
         else
             print("|cffff6060Nexus:|r " .. tostring(err))
