@@ -1798,6 +1798,23 @@ function WishlistRoles.StampAssignment(state, record)
     record.assignmentId="assigned:"..tostring(state.wishlistAssignmentSerial)
 end
 
+function WishlistRoles.FirstRunHandoff(state)
+    local first = state.firstRunWishlist
+    local handoff = type(state.loadoutWishlists) == "table" and state.loadoutWishlists[1]
+    return type(first) == "table" and type(handoff) == "table"
+        and type(first.assignmentId) == "string" and first.assignmentId ~= ""
+        and handoff.assignmentId == first.assignmentId
+end
+
+function WishlistRoles.ReplaceFirstRun(state, record)
+    -- Prove ownership before stamping the replacement. An explicit picker
+    -- change must keep its existing bootstrap handoff on the same target.
+    local handoff = WishlistRoles.FirstRunHandoff(state)
+    WishlistRoles.StampAssignment(state,record)
+    state.firstRunWishlist = record
+    if handoff then state.loadoutWishlists[1] = WishlistRoles.CopyDesign(record) end
+end
+
 function A.SetFirstRunWishlist(wishlistSlot, candidate)
     wishlistSlot = tonumber(wishlistSlot)
     local selected, why = SelectWishlistCandidate(wishlistSlot, candidate)
@@ -1805,8 +1822,7 @@ function A.SetFirstRunWishlist(wishlistSlot, candidate)
     local record = StoredWishlistRecord(selected)
     if not record then return false, "invalid wishlist" end
     if not UpdateStoreState(function(state)
-        WishlistRoles.StampAssignment(state,record)
-        state.firstRunWishlist = record
+        WishlistRoles.ReplaceFirstRun(state,record)
     end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
     return true
@@ -1816,8 +1832,7 @@ function A.SetFirstRunWishlistIdentity(name, echoes)
     local record = StoredWishlistRecord({name=name, echoes=echoes})
     if not record then return false end
     if not UpdateStoreState(function(state)
-        WishlistRoles.StampAssignment(state,record)
-        state.firstRunWishlist = record
+        WishlistRoles.ReplaceFirstRun(state,record)
     end) then return false end
     MarkWishlistProjectionDirty()
     return true
@@ -1825,13 +1840,9 @@ end
 
 function A.ClearFirstRunWishlist()
     if not UpdateStoreState(function(state)
-        local first = state.firstRunWishlist
-        local handoff = type(state.loadoutWishlists) == "table" and state.loadoutWishlists[1]
         -- Only the bootstrap's stamped slot-1 mirror belongs to this action.
         -- Equal names or contents cannot identify an unrelated assignment.
-        if type(first) == "table" and type(handoff) == "table"
-            and type(first.assignmentId) == "string" and first.assignmentId ~= ""
-            and handoff.assignmentId == first.assignmentId then
+        if WishlistRoles.FirstRunHandoff(state) then
             state.loadoutWishlists[1] = nil
         end
         -- False records an explicit first-run Unassign. Nil still means that

@@ -19,6 +19,7 @@ NAMES += ['orbs_legacy_editbox_idle','orbs_legacy_editbox_busy','orbs_legacy_edi
 NAMES += ['orbs_help_layers']
 NAMES += ['assignment_first_run_edit']
 NAMES += ['assignment_first_run_unassign']
+NAMES += ['assignment_first_run_reselect','assignment_first_run_handoff']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
