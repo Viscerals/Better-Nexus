@@ -13,7 +13,8 @@ function P.Boot(names,rows)
   local H=e.dofile('tests/prototype/harness.lua')
   e.UnitName=function()return name,'Ebonhold'end
   local T=e.dofile('tests/prototype/startup_support.lua')
-  e.NexusDB=T.Profile(rows or 5,0)
+  -- rows may be one size for both peers or one size per peer.
+  e.NexusDB=T.Profile(type(rows)=='table' and rows[i] or rows or 5,0)
   H.perks.serverBuildSlots={[102]={name='NEXUS-TEST-'..name,verified=false,echoes={{spellId=200001,quality=1,stacks=3}}}}
   T.Load();H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
   T.Until(H,function()return e.Nexus.StartupStatus().state=='ready' and e.Nexus.BuildCatalog.ManualPreparationStatus().ready end)

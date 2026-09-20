@@ -27,8 +27,11 @@ local function Run(stage)
    chunks[#chunks+1]={time=p.H.now,id=id,index=tonumber(index),total=tonumber(total),
     resolved=assert(atTransmission[p.cursor],'every transmitted chunk was observed at its send call')}
   end
-  -- Sixteen valid summaries from verified owners plus one that takes the
-  -- ticket, through the real receive callback, at the chosen stage.
+  -- Seventeen valid summaries from verified owners, through the real receive
+  -- callback, at the chosen stage. Until 3f5bcb0 the first one took the
+  -- sender's catalog and sixteen waited behind it. The sender owes its own
+  -- transfer at this moment, so all seventeen are now retained and none puts
+  -- a catalog transaction in front of the chunks.
   if pressed or code~=(stage=='summary' and 'WLBI' or 'WLRB') then return end
   pressed=true
   assert(P.Ready(A),'fixture: pressure begins on a ready sender')
@@ -38,13 +41,15 @@ local function Run(stage)
     o=A.e.Nexus.Identity.OwnerKey(owner,'Ebonhold'),c='MAGE',m=A.e.time()+i,h='a1',n=3}
    P.Channel(A,'WLBI|'..d.a..'|'..A.e.Nexus.Codec.Base64Encode(A.e.Nexus.Codec.JSONEncode(d)),d.a)
   end
-  assert(A.e.Nexus.Sync.WorkState().deferredAdmissions==16,'fixture: sixteen deferred items behind one accepted holder')
+  assert(A.e.Nexus.Sync.WorkState().deferredAdmissions==17 and P.Ready(A),'fixture: seventeen retained items; none took the catalog of a sender that owes a transfer')
  end
  local id=P.Post(A,'NEXUS-TEST-MULTICHUNK-'..stage)
  -- The wait may end without completion. The no-interleaving check below
  -- runs first in either case, so a product that interleaves is reported as
  -- interleaving, not only as a transfer that never finished.
- local completed=pcall(P.Until,function()return P.Full(B,id)~=nil end,9000)
+ local completed,stopped=pcall(P.Until,function()return P.Full(B,id)~=nil end,9000)
+ -- Only the bounded wait may end quietly. A fixture or hook error is reported as itself.
+ assert(completed or tostring(stopped):find('bounded paired test did not reach its condition',1,true),stopped)
  assert(pressed,'fixture: pressure was applied at the '..stage..' stage')
  local source=assert(A.e.Nexus.BuildCatalog.Get(id));assert(#source.echoes==79,'real owner Share saved the exact 79-entry record')
  -- Every attempt is one contiguous run of chunk 1..n with one total. A retry

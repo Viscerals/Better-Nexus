@@ -104,7 +104,16 @@ Arrive('expiry-')
 assert(Stats().admissionHeld==1 and Deferred()==1 and H.puts['expiry-1']==nil,'fixture: the item is held and retained before the catalog is asked')
 H.now=H.now+301;H.Advance(.05,.05)
 assert(Stats().terminalReason=='expired' and Stats().queueOutcome=='dropped','the request expires at its own unchanged 300-second lifetime')
-T.Until(H,function()return C.ManualPreparationStatus().ready end,8000)
+-- The holder's commit queues its own full-record recovery request. That is
+-- independent owed work, not the expired manual intent: it drains through the
+-- real lifecycle, and only then is nothing owed.
+local requests=Sent(H)
+T.Until(H,function()
+ local work=Nexus.Sync.WorkState()
+ return C.ManualPreparationStatus().ready and work.recovery==0 and work.outbound==0 and work.pendingResponses==0 and work.pendingLoadouts==0 and work.deferredAdmissions==0
+end,12000)
+assert(Sent(H)==requests and Stats().preparingRequest~=true,'no new manual request was created after the expiry')
+assert(H.puts['expiry-1']==nil and C.Get('expiry-1')==nil and Stats().admissionExpired>=1,'the item that expired with the request was never submitted or stored')
 local before=Stats().admissionHeld
 Arrive('expiry-')
 assert(Stats().admissionHeld==before and Accepted(H,'expiry-')==1,'after the request expired nothing is held; a valid arrival takes the ready catalog directly')

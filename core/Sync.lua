@@ -1749,12 +1749,14 @@ end
 --    one continuous RESPONSE_ELECTION_DELAY window before any submission, or
 --    they would never produce the outbound work that is then owed.
 --  * A started multi-chunk transfer is never interrupted.
---  * While response work is pending or valid outbound traffic waits, one
---    whole unit must be transmitted between two submissions. Outbound goes
---    first.
---  * Apart from a started transfer, admission never yields for more than
---    PENDING_TTL of continuous ready time, so sustained outbound work cannot
---    hold deferred inbound work until its deadline.
+--  * While a response or loadout is pending, admission yields: its election
+--    and bucket delays accumulate only in full turns, and a unit sent for
+--    other work is not its turn. While only valid outbound traffic waits,
+--    one whole unit must be transmitted between two submissions. Outbound
+--    goes first.
+--  * Apart from a started transfer, admission never yields to owed work for
+--    more than PENDING_TTL of continuous ready time, so sustained outbound
+--    work cannot hold deferred inbound work until its deadline.
 -- The catalog stays ready in the meantime, so ordinary send pacing decides
 -- when a transmission happens. Admission yields only to a transmission
 -- that can actually happen: when the channel is absent, a throttle pause is
@@ -1773,13 +1775,32 @@ function Responder.Admission.OutboundOwed()
     end
     local progress = Transport.OutboundProgress()
     if progress.midTransfer then return true end
-    local readyFor = Now() - (Responder.Admission.readySince or Now())
-    if readyFor >= PENDING_TTL then return false end
-    if readyFor < RESPONSE_ELECTION_DELAY then return true end
-    local pending = Reconciler.Counts()
-    if progress.waiting <= 0 and (tonumber(pending.total) or 0) <= 0 then
+    local current = Now()
+    local readySince = Responder.Admission.readySince or current
+    local pending = (tonumber(Reconciler.Counts().total) or 0) > 0
+    local owed = progress.waiting > 0 or pending
+    -- The yield cap runs from the first turn in which retained items
+    -- yielded to owed work within this continuous ready period. Idle ready
+    -- time before the work existed does not spend it; a later arrival or a
+    -- later request does not restart it. Newly owed work is served first,
+    -- as at the first submission: a unit sent for earlier work is not its
+    -- turn.
+    if not owed then
+        Responder.Admission.yieldSince = nil
+        Responder.Admission.unitsAtSubmission = nil
+    else
+        Responder.Admission.yieldSince = math.max(
+            Responder.Admission.yieldSince or current, readySince)
+    end
+    if current - readySince < RESPONSE_ELECTION_DELAY then return true end
+    if not owed then return false end
+    if current - Responder.Admission.yieldSince >= PENDING_TTL then
         return false
     end
+    -- A pending response or loadout has not had its turn because some other
+    -- unit was sent: its election and bucket delays accumulate only in full
+    -- turns. It is served first, inside the cap above.
+    if pending then return true end
     return progress.unitsSent == (Responder.Admission.unitsAtSubmission or -1)
         or Responder.Admission.unitsAtSubmission == nil
 end
@@ -1811,6 +1832,55 @@ function Responder.Admission.RequestHold()
     return true
 end
 
+-- The same turn is owed to a peer's transaction. A received reconciliation
+-- or loadout request is answered only in a full Sync turn, and it expires
+-- after PENDING_TTL without one; a queued loadout recovery request is sent
+-- only in a full turn. On a busy channel every ready moment of the catalog
+-- was taken by the next valid inbound record, so a responder never reached
+-- a turn and the exact full record was never serialized. While such work is
+-- owed and the wire can send, a valid inbound item is retained in this same
+-- bounded owner instead. Nothing is refused that would not be refused for a
+-- busy catalog, and no lifetime changes. Owed work is a pending response or
+-- loadout, a started transfer, valid queued outbound packets, or a queued
+-- recovery request that has not reached the wire.
+-- Retention is only the entry and has no clock of its own: the pump below
+-- decides when the item is submitted, with its whole-unit alternation and
+-- its PENDING_TTL yield cap. A transaction already in flight when the
+-- request arrives is never cut short; if it outlasts PENDING_TTL the request
+-- still expires.
+function Responder.Admission.Owed()
+    local progress = Transport.OutboundProgress()
+    if progress.midTransfer or progress.waiting > 0
+        or (tonumber(Reconciler.Counts().total) or 0) > 0 then return true end
+    -- A queued recovery request reaches the wire only in a full turn.
+    local session = Session and type(Session.WorkSnapshot) == "function"
+        and Session.WorkSnapshot() or nil
+    return session ~= nil and (tonumber(session.recovery) or 0) > 0
+end
+
+function Responder.Admission.OwedHold()
+    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
+        return false
+    end
+    local wire = Nexus.SyncWire
+    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
+        return false
+    end
+    return Responder.Admission.Owed()
+end
+
+-- FIFO place. An item that finds the catalog ready while older items are
+-- still retained queues behind them; a direct write would overtake them at
+-- every ready moment and leave them to expire behind newer traffic. A busy
+-- catalog is asked as before and gives its ordinary refusal.
+function Responder.Admission.Behind()
+    if Responder.Admission.count == 0 then return false end
+    local catalog = Catalog()
+    local preparation = catalog
+        and type(catalog.ManualPreparationStatus) == "function"
+        and catalog.ManualPreparationStatus() or nil
+    return preparation ~= nil and preparation.ready == true
+end
 -- Full Sync turns are continuous while the catalog is ready. A gap means the
 -- lifecycle withheld them, so the continuous ready window starts again.
 function Responder.Admission.NoteTurn()
@@ -1825,7 +1895,11 @@ end
 -- transport turn. The passive status read means a still-busy catalog receives
 -- no further Put call.
 function Responder.Admission.Pump()
-    if Responder.Admission.count == 0 then return end
+    if Responder.Admission.count == 0 then
+        Responder.Admission.yieldSince = nil
+        Responder.Admission.unitsAtSubmission = nil
+        return
+    end
     Responder.Admission.Expire()
     if Responder.Admission.OutboundOwed() then
         stats.admissionYielded = (stats.admissionYielded or 0) + 1
@@ -1865,6 +1939,7 @@ function Responder.Admission.Reset()
     Responder.Admission.order, Responder.Admission.byKey, Responder.Admission.count = {}, {}, 0
     Responder.Admission.unitsAtSubmission = nil
     Responder.Admission.readySince, Responder.Admission.turnAt = nil, nil
+    Responder.Admission.yieldSince = nil
 end
 
 local function StoreSummary(data, transportSender, context, onComplete,
@@ -2072,15 +2147,17 @@ local function StoreSummary(data, transportSender, context, onComplete,
         end
         return stored, storedAs
     end
-    local held = not deferredEntry and Responder.Admission.RequestHold()
+    local held = not deferredEntry and (Responder.Admission.RequestHold()
+        or Responder.Admission.OwedHold())
+    local behind = not deferredEntry and Responder.Admission.Behind()
     local stored, storedAs
-    if not held then
+    if not (held or behind) then
         stored, storedAs = Submit()
         if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then
             return nil, false, storedAs
         end
     end
-    if held or Responder.Admission.Busy(stored, storedAs) then
+    if held or behind or Responder.Admission.Busy(stored, storedAs) then
         if deferredEntry then return nil, false, "ADMISSION_BUSY" end
         if held then stats.admissionHeld = (stats.admissionHeld or 0) + 1 end
         local disposition = Responder.Admission.Defer({
@@ -3384,15 +3461,17 @@ local function CommitReceivedBuild(payload, transportSender, context,
                 return accepted
             end)
     end
-    local held = not deferredEntry and Responder.Admission.RequestHold()
+    local held = not deferredEntry and (Responder.Admission.RequestHold()
+        or Responder.Admission.OwedHold())
+    local behind = not deferredEntry and Responder.Admission.Behind()
     local stored, storedWhy
-    if not held then
+    if not (held or behind) then
         stored, storedWhy = Submit()
         if stored == nil and storedWhy == "ROOT_MUTATION_PENDING" then
             return nil, storedWhy
         end
     end
-    if held or Responder.Admission.Busy(stored, storedWhy) then
+    if held or behind or Responder.Admission.Busy(stored, storedWhy) then
         if deferredEntry then return nil, "ADMISSION_BUSY" end
         if held then stats.admissionHeld = (stats.admissionHeld or 0) + 1 end
         local disposition = Responder.Admission.Defer({

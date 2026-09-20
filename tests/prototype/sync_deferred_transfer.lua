@@ -14,12 +14,20 @@ for _,p in ipairs({A,B})do
   return ok,why,ticket
  end
 end
+local function Idle(p)
+ local work=p.e.Nexus.Sync.WorkState()
+ return P.Ready(p) and work.pendingResponses==0 and work.pendingLoadouts==0 and work.outbound==0 and work.recovery==0 and work.deferredAdmissions==0
+end
 local contention=0
 -- A valid unrelated third-party summary through the real receive callback
 -- makes the receiver busy exactly when the summary and full record arrive.
 P.before=function(p,q,code)
  if code~='WLBI' and code~='WLRB' then return end
  if not P.Ready(q) then return end
+ -- Real contention needs an arrival that takes the catalog. A receiver that
+ -- owes a response, a transfer or a recovery request, or that still retains
+ -- older items, retains this one too; the fixture then waits for a later packet.
+ if not Idle(q) then return end
  contention=contention+1
  local data={id='pair-contention-'..contention,t='Synthetic contention',a='Other-Ebonhold',
   o=q.e.Nexus.Identity.OwnerKey('Other','Ebonhold'),c='MAGE',m=q.e.time(),h='a1',n=3}
@@ -40,14 +48,30 @@ local function Writes(p,id,stamp)
  end
  return refusedSummary,refusedFull,acceptedSummary,acceptedFull
 end
+local function Retained(p,kind,id)
+ local n,needle=0,"DEFER "..kind.." '"..id.."'"
+ for _,line in ipairs(p.e.Nexus.Sync.EventLog())do
+  if tostring(type(line)=='table' and (line.text or line.message or line[1]) or line):find(needle,1,true) then n=n+1 end
+ end
+ return n
+end
 local function Transfer(from,to,title)
+ -- The contention must be in flight before the receiver owes anything.
+ P.Until(function()return Idle(to) and Idle(from) end)
  local id=P.Post(from,title)
  P.Until(function()return P.Full(to,id)end)
  local source,row=from.e.Nexus.BuildCatalog.Get(id),P.Full(to,id)
  assert(#row.echoes==1 and row.echoes[1].spellId==200001 and row.echoes[1].quality==1 and row.echoes[1].stacks==3,'receiver commits the exact three-copy source')
  assert(row.id==id and row.ownerKey==source.ownerKey and row.lastModified==source.lastModified and row.title==title and row.isMine~=true,'receiver owner, revision and title match the source')
  local refusedSummary,refusedFull,acceptedSummary,acceptedFull=Writes(to,id)
- assert(refusedSummary>=1 and refusedFull>=1,'fixture reached the real busy refusal for both the summary and the full record')
+ -- The summary meets the real busy refusal: the contention was in flight before
+ -- the receiver owed anything. The full record arrives later; by then the
+ -- receiver may owe a response or still retain the summary, and it is then
+ -- retained before the catalog is asked. Either way the product's own per-ID
+ -- record must show that each of the two was retained, and each refused write
+ -- was the real busy refusal (checked in Writes).
+ assert(refusedSummary>=1,'fixture reached the real busy refusal for the summary')
+ assert(Retained(to,'summary',id)>=1 and Retained(to,'build',id)>=1,'both the summary and the full record were retained by the deferred owner')
  assert(acceptedSummary==1 and acceptedFull==1,'each retained item was submitted exactly once')
  local stats=to.e.Nexus.Sync.Stats()
  assert(stats.storageRejected==0 and stats.malformedRejected==0 and stats.admissionExpired==0 and stats.admissionOverflow==0,'busy refusals were deferred, never reported as storage or schema failures')

@@ -25,6 +25,11 @@ P.before=function(p,q,code)
  local data={id='scope-full-holder-'..held,t='Synthetic holder',a='Other-Ebonhold',o=B.e.Nexus.Identity.OwnerKey('Other','Ebonhold'),c='MAGE',m=B.e.time(),h='a1',n=3}
  P.Channel(B,'WLBI|Other-Ebonhold|'..B.e.Nexus.Codec.Base64Encode(B.e.Nexus.Codec.JSONEncode(data)),'Other-Ebonhold')
 end
+-- The holder below must really take the receiver's catalog. While the receiver
+-- owes a response, a valid arrival is retained instead, so the fixture first
+-- lets the peers' own start-up exchange finish.
+P.Until(function()local w=B.e.Nexus.Sync.WorkState();return P.Ready(B) and w.pendingResponses==0 and w.outbound==0 end)
+P.Advance(40)
 local id=P.Post(A,'NEXUS-TEST-FULL-NEW-SCOPE')
 P.Until(function()return #chunks>0 and full.calls>0 and B.e.Nexus.Sync.WorkState().deferredAdmissions==1 end)
 assert(full.accepted==0 and P.Full(B,id)==nil,'fixture: the real full record was refused without a ticket and retained')
