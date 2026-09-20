@@ -159,6 +159,10 @@ local RelayEligible
 local recentBuildBroadcast = {}
 local BUILD_BROADCAST_DEDUPE = 2
 local Responder = {state={hotBuildGeneration=0}, Work={}}
+-- Session-only owner of validated inbound items that the catalog refused
+-- without a ticket because another transaction owned admission. It is a field
+-- because this chunk is at the Lua limit of 200 local variables.
+Responder.Admission = {order={}, byKey={}, count=0, maxTotal=64, maxPerSender=16}
 local catalogMutationIdentity
 local PendingDeleteCount
 
@@ -480,6 +484,7 @@ function Sync.WorkState()
         pendingDeletes=PendingDeleteCount(),
         pendingDeleteDiscovery=Operation.deleteDiscoveryComplete and 0 or 1,
         pendingShares=pendingShare and 1 or 0,
+        deferredAdmissions=Responder.Admission.count,
         limits={
             maxGlobal=MAX_INFLIGHT_GLOBAL,
             maxPerSender=MAX_INFLIGHT_PER_SENDER,
@@ -822,6 +827,11 @@ Compatibility = CompatibilityFactory.New({
     end,
     getTombstones=TombstoneMap,
     localOwnsTomb=LocalOwnsVerifiedTomb,
+    -- REMOTE_TOMBSTONE_ORDER_UNPROVEN applies to every outbound path, not only
+    -- the originating Stop Sharing. Protocol 7 carries no target revision or
+    -- comparable operation order, so answering a reconciliation request must
+    -- not emit the withdrawal the originating operation refused to send.
+    tombstoneWireAllowed=function() return false end,
     relayEligible=function(build) return RelayEligible(build) end,
     myName=MyName,
     currentOwnerKey=CurrentOwnerKey,
@@ -1483,11 +1493,11 @@ function Sync.GetShareStatus(id)
     return Operation.Copy(status)
 end
 
-local function DeleteWireMessage(id, tomb, responseContext)
-    return string.format("%s|%s|%s|%s|%s%s", CODE_DELETE, MyName(),
-        tostring(id), tostring(TombStamp(tomb)), TombAuthor(tomb),
-        Responder.ContextSuffix(responseContext, false))
-end
+-- DeleteWireMessage, the WLRD encoder, was removed with its last caller. The
+-- responder was the only remaining sender, and it now refuses a tombstone
+-- candidate as REMOTE_TOMBSTONE_ORDER_UNPROVEN exactly as the originating
+-- delete does. The inbound WLRD decoder is unchanged for older peers; its
+-- fields are code, sender, ID, tombstone stamp, author and optional context.
 
 function Operation.NewDelete(id, tomb, registerActive)
     local version = tostring(TombStamp(tomb)) .. ":" .. TombAuthor(tomb)
@@ -1546,9 +1556,11 @@ local function PumpPendingDeletes(elapsed)
     --
     -- Discovery is kept: it is reachable, it publishes
     -- `Operation.deleteDiscoveryComplete`, and it honestly returns zero.
-    -- DeleteWireMessage itself is kept for the RESPONDER path, which answers a
-    -- peer's reconciliation request and is how tombstones legitimately
-    -- propagate now that the originating send emits nothing.
+    -- The RESPONDER path no longer encodes a withdrawal either: answering a
+    -- peer's reconciliation request emitted the WLRD that the originating
+    -- operation had refused as REMOTE_TOMBSTONE_ORDER_UNPROVEN. Both paths are
+    -- now zero-wire. Remote withdrawal stays unsupported until the protocol
+    -- carries a comparable edit/delete order.
     Operation.DiscoverPendingDeletes(32)
 end
 
@@ -1564,7 +1576,156 @@ function Sync.RequestDataViewRefresh()
     end
 end
 
-local function StoreSummary(data, transportSender, context, onComplete)
+------------------------------------------------------------------------
+-- Deferred inbound admission
+------------------------------------------------------------------------
+
+-- Catalog.Put answers `false` plus a root-pending reason, and no ticket, when
+-- another transaction owns admission. Nothing was accepted, so that is not a
+-- pending operation. It is also not a verdict on the item. The validated item
+-- is retained here, bounded and session-only, and is submitted once when
+-- ordinary admission is available again. The complete inbound handler runs
+-- again at that point, so owner, revision, pending-replacement and tombstone
+-- state are rechecked against the then-current catalog. Only the ticket that
+-- submission returns may report success; expiry, overflow and reset settle
+-- as the same storage refusal the item would have received before.
+--
+-- Each item has one fixed deadline, PENDING_MAX_AGE from its own arrival.
+-- Other catalog work never extends it. An item whose turn does not come in
+-- that time fails as a storage refusal, even while the catalog keeps working.
+function Responder.Admission.Busy(stored, why)
+    return stored == false and (why == "ROOT_MUTATION_PENDING"
+        or why == "ROOT_ADMISSION_PENDING")
+end
+
+function Responder.Admission.Remove(entry)
+    if Responder.Admission.byKey[entry.key] ~= entry then return false end
+    Responder.Admission.byKey[entry.key] = nil
+    for index, candidate in ipairs(Responder.Admission.order) do
+        if candidate == entry then
+            table.remove(Responder.Admission.order, index)
+            break
+        end
+    end
+    Responder.Admission.count = #Responder.Admission.order
+    return true
+end
+
+function Responder.Admission.Fail(entry, counter, detail)
+    if not Responder.Admission.Remove(entry) then return false end
+    if counter then
+        stats.storageRejected = (stats.storageRejected or 0) + 1
+        stats[counter] = (stats[counter] or 0) + 1
+    end
+    Responder.NoteContextOutcome(entry.context, "rejected", "storage")
+    PeerObserve("receiver_commit", {id=entry.id,peer=entry.sender,
+        outcome="store_failed",reason=detail})
+    LogEvent("RX", "REJECT deferred %s '%s': %s", tostring(entry.kind),
+        tostring(entry.id), tostring(detail))
+    entry.settle(false, false, "storage")
+    return true
+end
+
+-- Returns "deferred", "duplicate", "rejected" or "overflow". One entry per
+-- kind and ID: an older or equal revision never displaces the retained one,
+-- and a different owner claim cannot take over its place in the queue.
+function Responder.Admission.Defer(fields)
+    local key = tostring(fields.kind) .. ":" .. type(fields.id) .. ":"
+        .. tostring(fields.id)
+    local prior = Responder.Admission.byKey[key]
+    if prior then
+        if prior.owner ~= fields.owner then
+            Responder.NoteContextOutcome(fields.context, "rejected", "ownership")
+            return "rejected"
+        end
+        local promotes = fields.stamp == prior.stamp
+            and fields.direct == true and prior.direct ~= true
+            and fields.digest == prior.digest
+        if fields.stamp < prior.stamp then
+            Responder.NoteContextOutcome(fields.context, "duplicate", "stale")
+            return "duplicate"
+        end
+        if fields.stamp == prior.stamp and not promotes then
+            local same = fields.digest == prior.digest
+            Responder.NoteContextOutcome(fields.context,
+                same and "duplicate" or "rejected",
+                same and "duplicate" or "integrity")
+            return same and "duplicate" or "rejected"
+        end
+        Responder.Admission.Remove(prior)
+        stats.admissionSuperseded = (stats.admissionSuperseded or 0) + 1
+        Responder.NoteContextOutcome(prior.context, "duplicate", "stale")
+        prior.settle(true, false)
+    end
+    local fromSender = 0
+    for _, candidate in ipairs(Responder.Admission.order) do
+        if candidate.sender == fields.sender then fromSender = fromSender + 1 end
+    end
+    if Responder.Admission.count >= Responder.Admission.maxTotal
+        or fromSender >= Responder.Admission.maxPerSender then
+        stats.admissionOverflow = (stats.admissionOverflow or 0) + 1
+        return "overflow"
+    end
+    local current = Now()
+    local entry = {
+        key=key,kind=fields.kind,id=fields.id,stamp=fields.stamp,
+        owner=fields.owner,direct=fields.direct == true,digest=fields.digest,
+        sender=fields.sender,context=fields.context,run=fields.run,
+        settle=fields.settle,enqueuedAt=current,
+        expiresAt=current + PENDING_MAX_AGE,
+    }
+    Responder.Admission.byKey[key] = entry
+    Responder.Admission.order[#Responder.Admission.order + 1] = entry
+    Responder.Admission.count = #Responder.Admission.order
+    stats.admissionDeferred = (stats.admissionDeferred or 0) + 1
+    PeerObserve("receiver_commit", {id=fields.id,peer=fields.sender,
+        outcome="deferred",reason="catalog admission pending"})
+    LogEvent("RX", "DEFER %s '%s': catalog admission pending",
+        tostring(fields.kind), tostring(fields.id))
+    return "deferred"
+end
+
+function Responder.Admission.Expire()
+    if Responder.Admission.count == 0 then return end
+    local current, index = Now(), 1
+    while Responder.Admission.order[index] do
+        local entry = Responder.Admission.order[index]
+        if current >= entry.expiresAt then
+            Responder.Admission.Fail(entry, "admissionExpired",
+                "catalog admission wait expired")
+        else
+            index = index + 1
+        end
+    end
+end
+
+-- Runs only behind the lifecycle's full catalog readiness gate. The passive
+-- status read means a still-busy catalog receives no further Put call.
+function Responder.Admission.Pump()
+    if Responder.Admission.count == 0 then return end
+    Responder.Admission.Expire()
+    local catalog = Catalog()
+    while Responder.Admission.order[1] do
+        local preparation = catalog
+            and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        if preparation and preparation.ready ~= true then return end
+        local entry = Responder.Admission.order[1]
+        if entry.run(entry) == "busy" then return end
+        Responder.Admission.Remove(entry)
+    end
+end
+
+function Responder.Admission.Reset()
+    while Responder.Admission.order[1] do
+        Responder.Admission.Fail(Responder.Admission.order[1], nil, "explicit reset")
+    end
+    Responder.Admission.order, Responder.Admission.byKey, Responder.Admission.count = {}, {}, 0
+end
+
+local function StoreSummary(data, transportSender, context, onComplete,
+        deferredEntry)
+    local received = data
     local validated, validationReason = Protocol.ValidateNetworkSummary(data)
     if not validated then
         Responder.NoteContextOutcome(context, "rejected",
@@ -1763,6 +1924,34 @@ local function StoreSummary(data, transportSender, context, onComplete)
             return Complete(false, "INVALID_MUTATION_TICKET")
         end
         return nil, false, storedAs
+    end
+    if Responder.Admission.Busy(stored, storedAs) then
+        if deferredEntry then return nil, false, "ADMISSION_BUSY" end
+        local disposition = Responder.Admission.Defer({
+            kind="summary",id=id,stamp=stamp,owner=record.ownerKey or "",
+            direct=true,digest=newHash .. "|" .. tostring(newLinkHash or ""),
+            sender=transportSender,context=context,
+            settle=function(...)
+                if type(onComplete) == "function" then onComplete(...) end
+            end,
+            run=function(entry)
+                local accepted, changed, rejection = StoreSummary(received,
+                    transportSender, context, onComplete, entry)
+                if accepted == nil and rejection == "ADMISSION_BUSY" then
+                    return "busy"
+                end
+                Responder.Admission.Remove(entry)
+                stats.admissionResolved = (stats.admissionResolved or 0) + 1
+                if accepted == nil and rejection == "ROOT_MUTATION_PENDING" then
+                    return "ticket"
+                end
+                entry.settle(accepted, changed, rejection)
+                return "terminal"
+            end,
+        })
+        if disposition == "deferred" then return nil, false, "ROOT_MUTATION_PENDING" end
+        if disposition == "duplicate" then return true, false end
+        if disposition == "rejected" then return false, false end
     end
     return Complete(stored, storedAs)
 end
@@ -2123,9 +2312,11 @@ function Responder.PrepareCandidate(item, bucketState)
                 bucketState.responseContext)
         end
     else
-        prepared = {messages={DeleteWireMessage(item.id, item.tomb,
-            bucketState.responseContext)},
-            tomb=true, id=item.id, tombstone=item.tomb}
+        -- Refuse before encoder invocation, as the originating delete does.
+        -- Candidate selection already withholds these; this holds the same
+        -- zero-wire result if a tombstone candidate is ever supplied.
+        Reconciler.NoteStat("tombstoneWireRefused", 1)
+        return nil, "REMOTE_TOMBSTONE_ORDER_UNPROVEN"
     end
     if not prepared then return nil, why end
     if not prepared.wireCost then
@@ -2870,7 +3061,7 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
 end
 
 local function CommitReceivedBuild(payload, transportSender, context,
-        onComplete)
+        onComplete, deferredEntry)
     local directOwner = Identity.TransportOwns(
         payload.ownerKey, transportSender)
     local existing, existingSource = CatalogGet(payload.id)
@@ -3034,6 +3225,37 @@ local function CommitReceivedBuild(payload, transportSender, context,
     if stored == nil and storedWhy == "ROOT_MUTATION_PENDING" then
         return nil, storedWhy
     end
+    if Responder.Admission.Busy(stored, storedWhy) then
+        if deferredEntry then return nil, "ADMISSION_BUSY" end
+        local disposition = Responder.Admission.Defer({
+            kind="build",id=payload.id,
+            stamp=tonumber(payload.lastModified) or 0,
+            owner=payloadOwner or "",direct=directOwner == true,
+            digest=tostring(HashText(replacementFingerprint) or "") .. "|"
+                .. tostring(HashText(payload.link) or ""),
+            sender=transportSender,context=context,
+            settle=function(accepted)
+                if type(onComplete) == "function" then onComplete(accepted) end
+            end,
+            run=function(entry)
+                local accepted, pendingWhy = CommitReceivedBuild(payload,
+                    transportSender, context, onComplete, entry)
+                if accepted == nil and pendingWhy == "ADMISSION_BUSY" then
+                    return "busy"
+                end
+                Responder.Admission.Remove(entry)
+                stats.admissionResolved = (stats.admissionResolved or 0) + 1
+                if accepted == nil and pendingWhy == "ROOT_MUTATION_PENDING" then
+                    return "ticket"
+                end
+                entry.settle(accepted)
+                return "terminal"
+            end,
+        })
+        if disposition == "deferred" then return nil, "ROOT_MUTATION_PENDING" end
+        if disposition == "duplicate" then return true end
+        if disposition == "rejected" then return false end
+    end
     return Complete(stored, storedWhy)
 end
 
@@ -3169,6 +3391,22 @@ local function HandleDelete(sender, buildId, stamp, originAuthor, context,
         LogEvent("RX","REJECT delete of '%s': origin %s is not the author (%s)",
             tostring(existing.title), author, tostring(existing.author))
         return false
+    end
+    -- Refusal-only guard. A withdrawal stamped before the stored revision is
+    -- a replay or a reordered message from before that revision existed, so it
+    -- must not hide the newer record behind an opaque reservation. This proves
+    -- no order for an equal or later stamp, which keeps the established
+    -- handling. Row edits use max(now, previous + 1) while a tombstone uses
+    -- the clock, so a genuine removal that follows rapid edits can also carry
+    -- a lower stamp. It is refused too and the row stays visible: a failed
+    -- withdrawal, which protocol 7 never proved, instead of a hidden record.
+    local existingStamp = tonumber(existing.lastModified)
+        or tonumber(existing.postedAt) or 0
+    if (tonumber(stamp) or 0) < existingStamp then
+        Responder.NoteContextOutcome(context, "duplicate", "stale")
+        LogEvent("RX", "skip delete of '%s': stamp %s is older than stored revision %s",
+            tostring(buildId), tostring(stamp), tostring(existingStamp))
+        return true
     end
     local tomb = {
         stamp=tonumber(stamp) or 0,author=author,
@@ -3553,6 +3791,7 @@ function Sync.GetLeaderboardSyncStatus()
         pendingDeletes=PendingDeleteCount(),
         pendingDeleteDiscovery=Operation.deleteDiscoveryComplete and 0 or 1,
         pendingShares=pendingShare and 1 or 0,
+        deferredAdmissions=Responder.Admission.count,
     })
     return Diagnostics.ProjectLeaderboardStatus({
         work=work,
@@ -3580,6 +3819,8 @@ end
 -- Safe while catalog/hash readiness gates the full update. This cannot
 -- prepare requests, retry transfers, admit packets, or send network traffic.
 function Sync.Housekeep()
+    -- Passive expiry only: a deferred inbound item is never submitted here.
+    Responder.Admission.Expire()
     Operation.housekeeping = true
     local ok, err = pcall(Transport.Housekeep)
     Operation.housekeeping = false
@@ -3597,6 +3838,7 @@ function Sync.PumpPreparedShare(elapsed)
         and (preparation.ready or preparation.relevant)) then
         return Sync.Housekeep()
     end
+    Responder.Admission.Expire()
     Operation.housekeeping = true
     local ok, err = pcall(Transport.PumpPreparedShare, elapsed)
     Operation.housekeeping = false
@@ -3604,6 +3846,7 @@ function Sync.PumpPreparedShare(elapsed)
 end
 
 function Sync.OnUpdate(elapsed)
+    Responder.Admission.Pump()
     Inbound.CleanExpired()
     ProcessPendingResponses(elapsed)
     Session.PumpRecovery(elapsed)
@@ -3676,6 +3919,7 @@ function Sync.Init(codec, adapter)
             Operation.Transition(status, "reset", "explicit reset")
         end
     end
+    Responder.Admission.Reset()
     Inbound.Reset()
     Session.Reset()
     Compatibility.Reset()

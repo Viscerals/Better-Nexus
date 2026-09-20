@@ -17,14 +17,20 @@ assert(p.data.id==id and H.deleteCalls==0,'reopen and changed selection do not r
 local foreign=L.D.Busy(H,C)
 p.button1:Click();L.Restored(p,'DIALOG',1)
 L.D.NoTable(H.stopMessages)
-assert(H.deleteCalls==1 and submitted[1]==id and H.tombstoneCalls==2 and #H.tombstoneTickets==0,'one original-ID acceptance retains both existing refused admission attempts and owns no removal ticket')
-assert(H.stopMessages[#H.stopMessages]:find('Stop Sharing refused: the shared build catalog is still preparing.',1,true),'NATIVE07 busy refusal retained after closing/reopening under confirmation')
-assert(T.Equal(C.Get(id),old) and T.Equal(C.Get('synthetic-startup-2'),other),'refusal preserves original and newly selected record')
-T.Until(H,function()return foreign.committed and C.ManualPreparationStatus().ready end)
+-- The busy catalog retains this one original-ID approval instead of refusing
+-- it. Nothing is submitted until ordinary admission returns.
+assert(H.deleteCalls==0 and H.tombstoneCalls==0 and #H.tombstoneTickets==0,'busy acceptance submits nothing and owns no removal ticket yet')
+assert(H.stopMessages[#H.stopMessages]:find('Waiting for local removal',1,true),'busy acceptance after closing/reopening under confirmation reports pending local work')
+assert(T.Equal(C.Get(id),old) and T.Equal(C.Get('synthetic-startup-2'),other),'waiting approval preserves original and newly selected record')
+T.Until(H,function()return foreign.committed end)
+T.Until(H,function()return #H.tombstoneTickets==1 end)
+assert(H.deleteCalls==1 and submitted[1]==id and H.tombstoneCalls==1,'later admission submits the original approved ID exactly once')
+T.Until(H,function()return H.tombstoneTickets[1].committed end)
 H.Advance(2,.05)
-assert(H.deleteCalls==1 and H.tombstoneCalls==2,'dismissal and later admission do not retry refusal')
-assert(T.Equal(C.Get(id),old) and T.Equal(C.Get('synthetic-startup-2'),other),'refused operation retains both records after later catalog readiness')
-assert(#H.sent==wire and #H.actions==0,'refusal lifecycle sends no wire or resource action')
+assert(H.deleteCalls==1 and H.tombstoneCalls==1,'dismissal and terminal completion do not resubmit')
+assert(C.Get(id)==nil and T.Equal(C.Get('synthetic-startup-2'),other),'only the originally approved record is removed; the newly selected record is unchanged')
+assert(H.stopMessages[#H.stopMessages]:find('stopped sharing locally',1,true) and H.stopMessages[#H.stopMessages]:find('remote withdrawal is not supported',1,true),'terminal result and remote limitation are reported')
+assert(#H.sent==wire and #H.actions==0,'waiting lifecycle sends no wire or resource action')
 restore()
 -- A separate ready fixture covers accepted removal. The preserved baseline
 -- also hides the old detail button after the mixed busy/selection sequence;
@@ -49,4 +55,4 @@ assert(message:find('stopped sharing locally',1,true) and message:find('remote w
 assert(C.Get(id)==nil and T.Equal(C.Get('synthetic-startup-2'),other),'only originally approved shared record removed')
 assert(H.deleteCalls==1 and H.tombstoneCalls==1,'terminal callback and popup hide do not repeat deletion')
 assert(#H.sent==wire and #H.actions==0,'popup lifecycle sends no unsupported wire or gameplay action')
-restore();print('PASS actual Stop Sharing Close/reopen, original-ID acceptance, refusal/no retry, pending and committed result lifecycle')
+restore();print('PASS actual Stop Sharing Close/reopen, original-ID acceptance, busy waiting with one submission, pending and committed result lifecycle')

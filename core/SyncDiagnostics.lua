@@ -26,6 +26,8 @@ local DEFAULT_STATS = {
     operationSuperseded=0, operationReset=0,
     operationThrottleExhausted=0, operationAccepted=0,
     operationRejected=0,
+    admissionDeferred=0, admissionResolved=0, admissionExpired=0,
+    admissionSuperseded=0, admissionOverflow=0,
 }
 
 local function Number(value)
@@ -177,6 +179,7 @@ function Diagnostics.New(options)
             pendingDeletes=Number(input.pendingDeletes),
             pendingDeleteDiscovery=Number(input.pendingDeleteDiscovery),
             pendingShares=Number(input.pendingShares),
+            deferredAdmissions=Number(input.deferredAdmissions),
             knownPeers=Number(session.knownPeers),
             maxOutboundQueue=Number(limits.maxOutboundQueue),
             maxControlQueue=Number(limits.maxControlQueue),
@@ -234,7 +237,8 @@ function Diagnostics.New(options)
             preparing=Number(reconciliation.total)
                 + Number(input.pendingDeletes)
                 + Number(input.pendingDeleteDiscovery)
-                + Number(input.pendingShares),
+                + Number(input.pendingShares)
+                + Number(input.deferredAdmissions),
             recovery=Number(session.recovery),
             pass=Number(session.pass),
             outstandingTransfers=Number(transport.outstandingTransfers),

@@ -45,6 +45,9 @@ function Controller.New(options)
     local savedImportJob
     local lastShareOutcome
     local pendingShare
+    -- Explicit Stop Sharing approvals waiting for catalog admission. Bounded,
+    -- session-only, one entry per exact ID.
+    local pendingRemovals, MAX_PENDING_REMOVALS = {}, 8
     local savedRelatedCache, savedRelatedCacheRevision = {}, -1
     local savedImportStats = {
         jobs=0,jobStarts=0,pumps=0,workUnits=0,maxWorkPerPump=0,
@@ -2224,9 +2227,52 @@ function Controller.New(options)
         return operation.submit()
     end
 
+    -- The lifecycle gives a waiting removal the same ordinary admission turn
+    -- as a waiting Share. Scope, ownership and the approved revision are
+    -- rechecked first; a change is a terminal refusal, never a later submit.
+    local function PumpPendingRemoval()
+        local operation = pendingRemovals[1]
+        if not operation then return false, false end
+        local outcome = operation.outcome
+        local function Refuse(reason)
+            table.remove(pendingRemovals, 1)
+            outcome.localPending, outcome.localStage = false, "failed"
+            outcome.storageReason, outcome.queueReason = reason, reason
+            if operation.onComplete then operation.onComplete(false, outcome) end
+            refreshView()
+            return #pendingRemovals > 0, false
+        end
+        local catalog = operation.catalog
+        local preparation = type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        if operation.database ~= NexusDB or catalog ~= Catalog()
+            or operation.owner ~= CurrentVerifiedOwnerKey()
+            or not preparation or preparation.binding ~= operation.binding then
+            return Refuse("the player or catalog changed after approval")
+        end
+        if preparation.ready ~= true then return true, false end
+        local build = LoadBuild(operation.id)
+        if not build or not IsOwnBuild(build)
+            or Identity.SavedMirrorKind(build) == "saved"
+            or (tonumber(build.lastModified) or tonumber(build.postedAt) or 0)
+                ~= operation.revision then
+            return Refuse("the shared build changed after approval")
+        end
+        table.remove(pendingRemovals, 1)
+        outcome.localPending, outcome.localStage, outcome.storageReason = false, "submitted", nil
+        local ok, result = M._SubmitRemoval(operation.id, build, true, outcome,
+            operation.onComplete)
+        if not (type(result) == "table" and result.localPending) then
+            -- Settled without a retained ticket: report it once, as returned.
+            if operation.onComplete then operation.onComplete(ok, result) end
+            refreshView()
+        end
+        return #pendingRemovals > 0, true
+    end
+
     function M.PumpPendingShare()
         local operation = pendingShare
-        if not operation then return false, false end
+        if not operation then return PumpPendingRemoval() end
         if operation.submitted then return true, false end
         if not operation.sameOwner() then
             operation.complete(false, "Share stopped: the player or catalog changed.")
@@ -2821,6 +2867,37 @@ function Controller.New(options)
         local outcome = {
             localRemoved=false,localPending=false,queueAdmitted=false,retryPending=false,
         }
+        if owner then
+            for _, waiting in ipairs(pendingRemovals) do
+                -- The one retained approval already owns this exact ID.
+                if waiting.id == id then return true, waiting.outcome end
+            end
+            local catalog = Catalog()
+            local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+                and catalog.ManualPreparationStatus() or nil
+            if preparation and preparation.ownerAgrees == true
+                and preparation.relevant == true and not preparation.ready
+                and CurrentVerifiedOwnerKey() ~= nil
+                and #pendingRemovals < MAX_PENDING_REMOVALS then
+                -- Retain one explicit Stop Sharing approval behind existing
+                -- catalog work, as Share does. Nothing is removed or sent yet.
+                outcome.localPending, outcome.localStage = true, "waiting-catalog"
+                outcome.storageReason = "ROOT_MUTATION_PENDING"
+                pendingRemovals[#pendingRemovals + 1] = {
+                    id=id,revision=tonumber(b.lastModified) or tonumber(b.postedAt) or 0,
+                    database=NexusDB,catalog=catalog,owner=CurrentVerifiedOwnerKey(),
+                    binding=preparation.binding,outcome=outcome,
+                    onComplete=type(onComplete) == "function" and onComplete or nil,
+                }
+                return true, outcome
+            end
+        end
+        return M._SubmitRemoval(id, b, owner, outcome, onComplete)
+    end
+
+    -- One submission of an approved removal. A refusal here is terminal; a
+    -- retained ticket owns settlement. Neither path submits again.
+    function M._SubmitRemoval(id, b, owner, outcome, onComplete)
         local function CompleteRemoval()
             if outcome.localRemoved and selectedId == id then selectedId = nil end
             if type(onComplete) == "function" then onComplete(outcome.localRemoved, outcome) end

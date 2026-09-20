@@ -39,6 +39,10 @@ function Compatibility.New(options)
     local chatLimit = assert(options.chatLimit, "chat limit required")
     local chatSafety = assert(options.chatSafety, "chat safety required")
     local noteStat = options.noteStat or function() end
+    -- The coordinator decides whether a locally owned tombstone may become a
+    -- response candidate. Absent a decision, the established selection holds.
+    local tombstoneWireAllowed = type(options.tombstoneWireAllowed) == "function"
+        and options.tombstoneWireAllowed or function() return true end
     local candidateCache
     local C = {}
 
@@ -353,7 +357,10 @@ function Compatibility.New(options)
         snapshot.cursor = id
         local bucket = C.BuildBucket(id)
         snapshot.claimSafeByBucket[bucket] = false
-        if localOwnsTomb(tombstone) then
+        if localOwnsTomb(tombstone) and not tombstoneWireAllowed(tombstone) then
+            -- The bucket stays claim-unsafe above; only the wire is withheld.
+            noteStat("tombstoneWireRefused", 1)
+        elseif localOwnsTomb(tombstone) then
             local copy = {
                 stamp=C.TombStamp(tombstone), author=C.TombAuthor(tombstone),
                 ownerKey=tombstone.ownerKey,
