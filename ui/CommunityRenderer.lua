@@ -409,6 +409,21 @@ function Renderer.New(options)
     StaticPopupDialogs["NEXUS_STOP_SHARING_BUILD"] = {
         text = "Stop sharing '%s'?\nThis removes only the shared Nexus record. Server Saved Builds and Wishlists are unchanged.",
         button1 = "Stop Sharing", button2 = "Cancel",
+        OnShow = function(self)
+            -- StaticPopup slots are shared. Raise only this confirmation above
+            -- the DIALOG Library, and retain the slot's layer for later reuse.
+            if self._nexusStopSharingStrata == nil then
+                self._nexusStopSharingStrata = self:GetFrameStrata()
+            end
+            self:SetFrameStrata("FULLSCREEN_DIALOG")
+        end,
+        OnHide = function(self)
+            local strata = self._nexusStopSharingStrata
+            if strata then
+                self._nexusStopSharingStrata = nil
+                self:SetFrameStrata(strata)
+            end
+        end,
         OnAccept = function(_, data)
             if type(data) == "table" and data.id then
                 FinishStopSharing(data.id)

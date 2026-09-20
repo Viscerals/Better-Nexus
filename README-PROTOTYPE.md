@@ -261,3 +261,8 @@ Local removal does not prove removal on another client.
 Remote withdrawal remains unavailable with the current Sync protocol. A local
 removal can finish while its withdrawal is not queued. The panel states this
 limit. No automatic removal retry or resource spending is added.
+
+The Stop Sharing confirmation stays above the Build Library. Closing or
+reopening the Library keeps that confirmation bound to the original record.
+Cancel or Escape dismisses it without removal. The shared popup slot returns
+to its prior layer when the confirmation closes.
