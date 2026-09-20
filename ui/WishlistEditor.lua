@@ -724,7 +724,9 @@ function M.OpenForWishlist(wishlist, loadoutSlot)
     end
     SyncFulfilledDraftTargets()
     local renderer = RendererInstance()
-    renderer.Prepare()
+    -- This can be the first editor entry after reload. Install the same menu
+    -- hide/restore hooks as Show/NewWishlist before suppressing the main HUD.
+    renderer.Prepare({attach=true})
     HideServerEchoUI()
     renderer.Prepare({close=true})
     renderer.ShowFrame()

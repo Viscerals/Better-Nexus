@@ -1252,6 +1252,8 @@ local function RefreshAssociationRows()
             print("|cffff6060Nexus:|r Associate a wishlist first.")
         elseif editor and type(editor.OpenForWishlist) == "function" then
             HideWishlistPicker()
+            -- Zero/empty slots use the first-run assignment. Lua's
+            -- `firstRun and nil or active` would pass slot 0 as a loadout.
             editor.OpenForWishlist({
                 slot = linked.slot,
                 name = linked.name,
@@ -1262,7 +1264,7 @@ local function RefreshAssociationRows()
                 evidenceSource=linked.evidenceSource,
                 assignmentId=linked.assignmentId,designTargets=linked.designTargets,
                 loadoutName = loadoutName,
-            }, firstRun and nil or active)
+            }, not firstRun and active or nil)
         else
             print("|cffff6060Nexus:|r Nexus Wishlist Editor is unavailable.")
         end

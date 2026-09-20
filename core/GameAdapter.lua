@@ -2037,8 +2037,10 @@ end
 
 
 function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets)
-    loadoutSlot, wishlistSlot = tonumber(loadoutSlot), tonumber(wishlistSlot)
-    if not loadoutSlot or not wishlistSlot then return false end
+    loadoutSlot, wishlistSlot = PositiveInteger(loadoutSlot), PositiveInteger(wishlistSlot)
+    -- Slot 0 is the first-run context, never a numbered loadout association.
+    -- Refuse invalid identifiers before clearing its durable assignment.
+    if not loadoutSlot or not wishlistSlot then return false, "invalid slot" end
     local record = StoredWishlistRecord({
         slot=wishlistSlot, name=name, echoes=echoes,designTargets=designTargets,
     })
