@@ -8,6 +8,8 @@
 -- Diagnostic only: no Sync behavior is changed or claimed. Synthetic data only.
 local S=dofile('tests/prototype/sync_admission_support.lua');local T=S.T
 local function Line(text,name)return ('\n'..text):match('\n('..name..' [^\n]*)') end
+-- Older report lines start with key=value instead of a line name.
+local function Keyed(text,key)return ('\n'..text):match('\n('..key..'=[^\n]*)') end
 local function Field(line,key)return line and line:match('%f[%w_]'..key..'=(%S+)') end
 
 -- 0. Before the gate is reached nothing is inferred: unknown, then the
@@ -116,4 +118,76 @@ assert(Field(gate,'owner')=='manual-request' and Field(gate,'last_observed')=='c
 assert(tonumber(Field(manual,'updates'))>0 and tonumber(Field(manual,'slices'))>=tonumber(Field(manual,'updates')) and Field(manual,'wait_reason')=='CATALOG_COMMIT_PENDING','manual preparation updates, slices and wait reason are shown: '..tostring(manual))
 assert(tonumber(Field(pending,'retained_inbound'))==Nexus.Sync.WorkState().deferredAdmissions and tonumber(Field(pending,'retained_inbound'))>=1,'retained inbound count is the existing owner\'s')
 assert(#H.actions==0,'zero gameplay mutation')
-print(string.format('PASS read-only gate status in the Advanced peer report: unknown and community start-up distinguished, %d catalog phases bound, hash gate and open gate named, manual owner shown, 40 passive reads',count))
+
+-- 6. A source that is missing or fails is shown as unknown, never as false,
+-- zero or none. The swap exists only inside the report call the real viewer
+-- makes, so the lifecycle keeps its own getters.
+H,C=S.Boot(5);D,V=Nexus.PeerDebug,Nexus.LogViewer
+assert(D.Start('')~=false);V.Show('peer')
+local function ViaViewer(before,after)
+ local original,seen,text=D.Report,false,nil
+ D.Report=function(...)
+  if seen then return original(...) end
+  seen=true;before();text=original(...);after()
+  return text
+ end
+ T.Until(H,function()return seen end,100)
+ D.Report=original
+ local shown=(NexusLogScroll.scrollChild:GetText():gsub('||','|'))
+ assert(shown:find(assert(Line(text,'catalog_preparation')),1,true),'the real viewer rendered this report')
+ return text
+end
+T.Until(H,function()return Nexus.StartupStatus().syncGate=='open' end,20000)
+D.SelectBuild('synthetic-startup-1')
+local summaries=0
+local getSummary=C.GetSummary;C.GetSummary=function(...)summaries=summaries+1;return getSummary(...)end
+-- With an agreeing, ready catalog the existing selected-build evidence is still read and shown.
+text=ViaViewer(function()end,function()end)
+assert(summaries>=1 and not Keyed(text,'selected_build'):find('not read',1,true) and not Keyed(text,'locked_evidence'):find('not read',1,true),
+ 'existing selected-build explanation is preserved when the passive status proves the read gate has nothing to change')
+for _,mode in ipairs({'missing','throwing'})do
+ local getter=C.ManualPreparationStatus;summaries=0
+ text=ViaViewer(function()C.ManualPreparationStatus=mode=='throwing' and function()error('isolated unavailable diagnostic capability')end or nil end,
+  function()C.ManualPreparationStatus=getter end)
+ prep=Line(text,'catalog_preparation')
+ for _,key in ipairs({'ready','relevant','owner_agrees','reason','kind','phase','pumps','work','row','index','generation','binding','total_pumps'})do
+  assert(Field(prep,key)=='unknown','a '..mode..' getter shows '..key..'=unknown, not a false or zero claim: '..tostring(prep))
+ end
+ assert(Field(prep,'read')=='unavailable','the line says the read was unavailable')
+ assert(summaries==0 and Keyed(text,'locked_evidence'):find('locked_evidence=unavailable locked_reason=not read: catalog status unavailable',1,true)
+  and Keyed(text,'selected_build'):find('unavailable, not read: catalog status unavailable',1,true),'without a passive status the catalog is not read, and the report says so specifically')
+end
+-- The analogous new projections.
+local startupStatus,hashStats,workState,timing=Nexus.StartupStatus,Nexus.BuildHashCache.Stats,Nexus.Sync.WorkState,Nexus.manualSyncTiming
+text=ViaViewer(function()
+ Nexus.StartupStatus=function()error('isolated')end;Nexus.BuildHashCache.Stats=function()error('isolated')end
+ Nexus.Sync.WorkState=function()error('isolated')end;Nexus.manualSyncTiming=nil
+end,function()Nexus.StartupStatus,Nexus.BuildHashCache.Stats,Nexus.Sync.WorkState,Nexus.manualSyncTiming=startupStatus,hashStats,workState,timing end)
+for name,keys in pairs({lifecycle_gate={'last_observed','owner','adapter_ready','catalog_ready','hashes_ready','startup','phase','sync_ready'},
+ hash_walk={'phase','pending','prepared_rows','observed_revision','dirty_buckets'},
+ manual_preparation={'updates','slices','overshoots','fallback_updates','max_batch_ms','wait_reason','catalog_phase','catalog_kind'},
+ sync_pending={'responses','loadouts','shares','recovery','retained_inbound'}})do
+ local line=Line(text,name);assert(Field(line,'read')=='unavailable','unavailable source is named: '..name)
+ for _,key in ipairs(keys)do assert(Field(line,key)=='unknown',name..' '..key..' is unknown when its source fails: '..tostring(line))end
+end
+
+-- 7. Selected build plus source drift, through the real viewer. The report
+-- must not be the reader that invalidates the root. It says why the evidence
+-- was not read; the catalog's own validation is unchanged and still finds the
+-- drift at its next ordinary read.
+summaries=0
+local invalidationsBefore
+text=ViaViewer(function()
+ assert(NexusDB.authorityBundle).communityBuilds={}          -- synthetic drift, only at the report boundary
+ invalidationsBefore=C.DebugStats().driftInvalidations
+end,function()end)
+assert(C.DebugStats().driftInvalidations==invalidationsBefore and summaries==0,'the actual viewer report did not invalidate a drifted catalog and did not pass the read gate')
+prep=Line(text,'catalog_preparation')
+assert(Field(prep,'read')=='ok' and Field(prep,'owner_agrees')=='false' and Field(prep,'reason')=='OWNER_OR_GENERATION_MISMATCH','the disagreement itself is shown: '..tostring(prep))
+assert(Keyed(text,'locked_evidence'):find('locked_reason=not read: catalog source, owner or binding disagrees',1,true)
+ and Keyed(text,'selected_build'):find('unavailable, not read: catalog source, owner or binding disagrees',1,true),'unavailable evidence is named specifically, never shown as a result')
+C.GetSummary=getSummary
+C.GetSummary('synthetic-startup-1')
+assert(C.DebugStats().driftInvalidations==invalidationsBefore+1,'catalog validation is unchanged: its own next read still invalidates the drifted root')
+assert(#H.actions==0,'zero gameplay mutation')
+print(string.format('PASS read-only gate status in the Advanced peer report: unknown and community start-up distinguished, %d catalog phases bound, hash gate and open gate named, manual owner shown, 40 passive reads, failed sources unknown, drifted selected build not read',count))

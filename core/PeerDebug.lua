@@ -307,18 +307,52 @@ function PeerDebug.Report()
     -- invalidate a drifted root. The new lines take nothing from Sync.Stats,
     -- which writes a live field; sync_pending reuses the work snapshot this
     -- report already fetched above.
-    local function Observed(value)
-        if value == nil then return "unknown" end
-        return tostring(value == true)
+    -- A source that is missing or fails is nil here, and every field read
+    -- from it is shown as "unknown", never as false, zero or none. `absent`
+    -- is what a nil field means inside a source that was read successfully.
+    local function Shown(source, key, limit, absent)
+        if type(source) ~= "table" then return "unknown" end
+        local value = source[key]
+        if value == nil then return absent or "unknown" end
+        if type(value) == "boolean" then return tostring(value) end
+        return CleanText(value, limit or 16)
     end
-    local preparation = SafeCall(Nexus.BuildCatalog, "ManualPreparationStatus", {})
-    local startup = SafeCall(Nexus, "StartupStatus", {})
+    local function Availability(source)
+        return type(source) == "table" and "ok" or "unavailable"
+    end
+    local preparation = SafeCall(Nexus.BuildCatalog, "ManualPreparationStatus", nil)
+    if type(preparation) ~= "table" then preparation = nil end
+    local startup = SafeCall(Nexus, "StartupStatus", nil)
+    if type(startup) ~= "table" then startup = nil end
     local manual = type(Nexus.manualSyncTiming) == "table"
-        and Nexus.manualSyncTiming or {}
+        and Nexus.manualSyncTiming or nil
+    local hashWalk = type(buildCache) == "table" and buildCache.available == true
+        and buildCache or nil
+    local pendingWork = type(work) == "table" and work.pendingResponses ~= nil
+        and work or nil
+    -- The selected-build explanations read Catalog.GetSummary, which passes
+    -- the catalog read gate: on a drifted source, a changed owner or another
+    -- database that read invalidates the root or records a rebind. They run
+    -- only when the passive status proves the gate has nothing to change:
+    -- the serving root's own token agrees and no foreign candidate exists.
+    -- Otherwise the report says specifically why they are unavailable.
+    local catalogRead
+    if not preparation then
+        catalogRead = "catalog status unavailable"
+    elseif preparation.ownerAgrees ~= true then
+        catalogRead = "catalog source, owner or binding disagrees"
+    elseif preparation.ready ~= true and preparation.relevant ~= true then
+        catalogRead = "catalog admission or rebind in progress"
+    end
     local lockedStatus, lockedReason = "unavailable", "no selected build"
-    if selectedBuildId then
+    local communityExplanation = "no selected build"
+    if selectedBuildId and catalogRead then
+        lockedReason = "not read: " .. catalogRead
+        communityExplanation = "unavailable, not read: " .. catalogRead
+    elseif selectedBuildId then
         lockedStatus, lockedReason =
             PeerDebug.ExplainLockedEvidence(selectedBuildId)
+        communityExplanation = PeerDebug.ExplainBuild(selectedBuildId)
     end
     local out = {
         "NEXUS PEER TEST REPORT",
@@ -407,48 +441,46 @@ function PeerDebug.Report()
             CleanText(buildRevision, 16),CleanText(dpsRevision, 16),
             buildCache.initialized and "warm" or "cold",
             dpsCache.initialized and "warm" or "cold"),
-        string.format("lifecycle_gate last_observed=%s owner=%s adapter_ready=%s catalog_ready=%s hashes_ready=%s startup=%s phase=%s sync_ready=%s",
-            CleanText(startup.syncGate or "unknown", 32),
-            CleanText(startup.syncGateOwner or "unknown", 24),
-            Observed(startup.syncGateAdapterReady),
-            Observed(startup.syncGateCatalogReady),
-            Observed(startup.syncGateHashesReady),
-            CleanText(startup.state or "unknown", 16),
-            CleanText(startup.phase or "unknown", 32),
-            tostring(startup.syncReady == true)),
-        string.format("catalog_preparation ready=%s relevant=%s owner_agrees=%s reason=%s kind=%s phase=%s pumps=%s work=%s row=%s index=%s generation=%s binding=%s total_pumps=%s",
-            tostring(preparation.ready == true), tostring(preparation.relevant == true),
-            tostring(preparation.ownerAgrees == true),
-            CleanText(preparation.reason or "unknown", 40),
-            CleanText(preparation.kind or "none", 24),
-            CleanText(preparation.phase or "none", 32),
-            CleanText(preparation.pumps or 0, 16), CleanText(preparation.work or 0, 16),
-            CleanText(preparation.row or 0, 16), CleanText(preparation.index or 0, 16),
-            CleanText(preparation.generation or "unknown", 16),
-            CleanText(preparation.binding or "unknown", 16),
-            CleanText(preparation.totalPumps or 0, 16)),
+        string.format("lifecycle_gate read=%s last_observed=%s owner=%s adapter_ready=%s catalog_ready=%s hashes_ready=%s startup=%s phase=%s sync_ready=%s",
+            Availability(startup),
+            Shown(startup, "syncGate", 32), Shown(startup, "syncGateOwner", 24),
+            Shown(startup, "syncGateAdapterReady"),
+            Shown(startup, "syncGateCatalogReady"),
+            Shown(startup, "syncGateHashesReady"),
+            Shown(startup, "state", 16), Shown(startup, "phase", 32),
+            Shown(startup, "syncReady")),
+        string.format("catalog_preparation read=%s ready=%s relevant=%s owner_agrees=%s reason=%s kind=%s phase=%s pumps=%s work=%s row=%s index=%s generation=%s binding=%s total_pumps=%s",
+            Availability(preparation),
+            Shown(preparation, "ready"), Shown(preparation, "relevant"),
+            Shown(preparation, "ownerAgrees"),
+            Shown(preparation, "reason", 40),
+            Shown(preparation, "kind", 24, "none"),
+            Shown(preparation, "phase", 32, "none"),
+            Shown(preparation, "pumps"), Shown(preparation, "work"),
+            Shown(preparation, "row"), Shown(preparation, "index"),
+            Shown(preparation, "generation"), Shown(preparation, "binding"),
+            Shown(preparation, "totalPumps")),
         -- Walk progress only. Hash readiness is hashes_ready in the line
         -- above: a warm cache can still hold dirty buckets.
-        string.format("hash_walk phase=%s pending=%s prepared_rows=%s observed_revision=%s dirty_buckets=%s",
-            CleanText(buildCache.phase or "unknown", 24),
-            tostring(buildCache.pending == true),
-            CleanText(buildCache.preparedRows or 0, 16),
-            CleanText(buildCache.revision or "unknown", 16),
-            CleanText(buildCache.dirtyBuckets or 0, 8)),
-        string.format("manual_preparation updates=%s slices=%s overshoots=%s fallback_updates=%s max_batch_ms=%s wait_reason=%s catalog_phase=%s catalog_kind=%s",
-            CleanText(manual.updates or 0, 16), CleanText(manual.slices or 0, 16),
-            CleanText(manual.overshoots or 0, 16),
-            CleanText(manual.fallbackUpdates or 0, 16),
-            CleanText(string.format("%.2f", tonumber(manual.maxBatchMs) or 0), 16),
-            CleanText(manual.waitReason or "none", 40),
-            CleanText(manual.catalogPhase or "none", 32),
-            CleanText(manual.catalogKind or "none", 24)),
-        string.format("sync_pending responses=%s loadouts=%s shares=%s recovery=%s retained_inbound=%s",
-            CleanText(transport.pendingResponses or 0, 16),
-            CleanText(transport.pendingLoadouts or 0, 16),
-            CleanText(transport.pendingShares or 0, 16),
-            CleanText(transport.recovery or 0, 16),
-            CleanText(transport.deferredAdmissions or 0, 16)),
+        string.format("hash_walk read=%s phase=%s pending=%s prepared_rows=%s observed_revision=%s dirty_buckets=%s",
+            Availability(hashWalk),
+            Shown(hashWalk, "phase", 24), Shown(hashWalk, "pending"),
+            Shown(hashWalk, "preparedRows"), Shown(hashWalk, "revision"),
+            Shown(hashWalk, "dirtyBuckets", 8)),
+        string.format("manual_preparation read=%s updates=%s slices=%s overshoots=%s fallback_updates=%s max_batch_ms=%s wait_reason=%s catalog_phase=%s catalog_kind=%s",
+            Availability(manual),
+            Shown(manual, "updates"), Shown(manual, "slices"),
+            Shown(manual, "overshoots"), Shown(manual, "fallbackUpdates"),
+            manual and type(manual.maxBatchMs) == "number"
+                and CleanText(string.format("%.2f", manual.maxBatchMs), 16) or "unknown",
+            Shown(manual, "waitReason", 40, "none"),
+            Shown(manual, "catalogPhase", 32, "none"),
+            Shown(manual, "catalogKind", 24, "none")),
+        string.format("sync_pending read=%s responses=%s loadouts=%s shares=%s recovery=%s retained_inbound=%s",
+            Availability(pendingWork),
+            Shown(pendingWork, "pendingResponses"), Shown(pendingWork, "pendingLoadouts"),
+            Shown(pendingWork, "pendingShares"), Shown(pendingWork, "recovery"),
+            Shown(pendingWork, "deferredAdmissions")),
         string.format("dps_counts stored=%s hash_eligible=%s published_board=%s displayed_rows=%s",
             dpsCache.initialized and CleanText(
                 dpsCache.storedRows or dpsCache.rows or 0, 16)
@@ -482,8 +514,7 @@ function PeerDebug.Report()
                 or "cold"),
         string.format("selected_build=%s community=%s",
             CleanText(selectedBuildId or "none", 56),
-            CleanText(selectedBuildId and PeerDebug.ExplainBuild(selectedBuildId)
-                or "no selected build", MAX_TEXT)),
+            CleanText(communityExplanation, MAX_TEXT)),
         string.format("locked_evidence=%s locked_reason=%s",
             CleanText(lockedStatus or "unavailable", 24),
             CleanText(lockedReason or "", MAX_TEXT)),
