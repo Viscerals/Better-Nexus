@@ -1737,11 +1737,37 @@ function Responder.Admission.Expire()
     end
 end
 
--- Runs only behind the lifecycle's full catalog readiness gate. The passive
--- status read means a still-busy catalog receives no further Put call.
+-- A submission makes the catalog busy, and the lifecycle then withholds every
+-- full Sync turn until that transaction ends. Transport only sends in a full
+-- turn, so a queue that submits in every ready turn leaves outbound traffic,
+-- including the user's explicit Sync Now request, with no turn at all.
+-- Outbound and deferred inbound work therefore alternate: while valid outbound
+-- traffic waits, one real transmission must happen between two submissions.
+-- The catalog stays ready in the meantime, so ordinary send pacing decides
+-- when that transmission happens. When transport cannot send at all (not
+-- connected, or paused by a throttle) the catalog is not left idle. Nothing
+-- is dropped, reordered or extended: each item keeps its fixed deadline.
+function Responder.Admission.OutboundOwed()
+    local transport = Transport.Snapshot()
+    local waiting = (tonumber(transport.outbound) or 0)
+        - (tonumber(transport.estimatedStaleBacklog) or 0)
+    if waiting <= 0 then return false end
+    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
+        return false
+    end
+    return (stats.sent or 0) == Responder.Admission.sentAtSubmission
+end
+
+-- Runs only behind the lifecycle's full catalog readiness gate, after the
+-- transport turn. The passive status read means a still-busy catalog receives
+-- no further Put call.
 function Responder.Admission.Pump()
     if Responder.Admission.count == 0 then return end
     Responder.Admission.Expire()
+    if Responder.Admission.OutboundOwed() then
+        stats.admissionYielded = (stats.admissionYielded or 0) + 1
+        return
+    end
     local catalog = Catalog()
     while Responder.Admission.order[1] do
         local preparation = catalog
@@ -1755,8 +1781,14 @@ function Responder.Admission.Pump()
         if not Responder.Admission.SameScope(entry) then
             Responder.Admission.Fail(entry, "admissionCancelled",
                 "catalog scope changed")
-        elseif entry.run(entry) == "busy" then
-            return
+        else
+            local outcome = entry.run(entry)
+            if outcome == "busy" then return end
+            if outcome == "ticket" then
+                -- One accepted submission per turn; the next one waits for a
+                -- real transmission while outbound traffic is owed.
+                Responder.Admission.sentAtSubmission = stats.sent or 0
+            end
         end
         Responder.Admission.Remove(entry)
     end
@@ -1767,6 +1799,7 @@ function Responder.Admission.Reset()
         Responder.Admission.Fail(Responder.Admission.order[1], nil, "explicit reset")
     end
     Responder.Admission.order, Responder.Admission.byKey, Responder.Admission.count = {}, {}, 0
+    Responder.Admission.sentAtSubmission = nil
 end
 
 local function StoreSummary(data, transportSender, context, onComplete,
@@ -3860,7 +3893,7 @@ function Sync.PumpPreparedShare(elapsed)
 end
 
 function Sync.OnUpdate(elapsed)
-    Responder.Admission.Pump()
+    Responder.Admission.Expire()
     Inbound.CleanExpired()
     ProcessPendingResponses(elapsed)
     Session.PumpRecovery(elapsed)
@@ -3876,6 +3909,8 @@ function Sync.OnUpdate(elapsed)
     Session.UpdateAutoSync(elapsed)
     Session.UpdateAutoConvergence()
     Session.UpdateJoinRetry(elapsed)
+    -- After the request, response and transport turn above, never before it.
+    Responder.Admission.Pump()
     -- A refresh can initiate legacy catalog repair. Release it only after
     -- the already-ready update, not before its transport validation work.
     if Operation.housekeepingRefreshPending then
