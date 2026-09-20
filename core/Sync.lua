@@ -1784,6 +1784,33 @@ function Responder.Admission.OutboundOwed()
         or Responder.Admission.unitsAtSubmission == nil
 end
 
+-- A validated inbound item that finds the catalog ready normally takes it at
+-- once. While the user's explicit manual request is still unsent, that write
+-- costs the request its turn: every commit invalidates the hash walk the
+-- request waits for, the lifecycle withholds every full Sync turn until the
+-- catalog and the hash are both ready, and at a large catalog the request
+-- expires unsent behind a chain of direct writes. The lifecycle already gives
+-- a pending Share the next admission turn; this gives the same to a manual
+-- request. The item is not refused, dropped or delayed beyond its own
+-- deadline: it enters this same bounded, scoped owner, keeps its validation,
+-- fixed deadline, scope capture and FIFO place, and is submitted by the pump
+-- after the request's transmission. The hold is bounded by the request's own
+-- fixed lifetime, and it never waits for a transmission the wire cannot make.
+-- A full owner refuses a held item exactly as it refuses one that found the
+-- catalog busy: a counted storage refusal, never a silent drop.
+function Responder.Admission.RequestHold()
+    if not (Session and type(Session.ManualRequestUnsent) == "function"
+        and Session.ManualRequestUnsent()) then return false end
+    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
+        return false
+    end
+    local wire = Nexus.SyncWire
+    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
+        return false
+    end
+    return true
+end
+
 -- Full Sync turns are continuous while the catalog is ready. A gap means the
 -- lifecycle withheld them, so the continuous ready window starts again.
 function Responder.Admission.NoteTurn()
@@ -2028,22 +2055,34 @@ local function StoreSummary(data, transportSender, context, onComplete,
         RequestRetention("build summary received")
         return true, true
     end
-    local stored, storedAs, ticket = CatalogPut(record, {source="remote",
-        sender=transportSender})
-    if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then
-        if not BindCatalogCompletion(ticket, function(ok, why)
-            if type(onComplete) == "function" then
-                onComplete(Complete(ok, why))
-            else
-                Complete(ok, why)
+    local function Submit()
+        local stored, storedAs, ticket = CatalogPut(record, {source="remote",
+            sender=transportSender})
+        if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then
+            if not BindCatalogCompletion(ticket, function(ok, why)
+                if type(onComplete) == "function" then
+                    onComplete(Complete(ok, why))
+                else
+                    Complete(ok, why)
+                end
+            end) then
+                return false, "INVALID_MUTATION_TICKET"
             end
-        end) then
-            return Complete(false, "INVALID_MUTATION_TICKET")
+            return nil, storedAs
         end
-        return nil, false, storedAs
+        return stored, storedAs
     end
-    if Responder.Admission.Busy(stored, storedAs) then
+    local held = not deferredEntry and Responder.Admission.RequestHold()
+    local stored, storedAs
+    if not held then
+        stored, storedAs = Submit()
+        if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then
+            return nil, false, storedAs
+        end
+    end
+    if held or Responder.Admission.Busy(stored, storedAs) then
         if deferredEntry then return nil, false, "ADMISSION_BUSY" end
+        if held then stats.admissionHeld = (stats.admissionHeld or 0) + 1 end
         local disposition = Responder.Admission.Defer({
             kind="summary",id=id,stamp=stamp,owner=record.ownerKey or "",
             direct=true,digest=newHash .. "|" .. tostring(newLinkHash or ""),
@@ -2069,6 +2108,10 @@ local function StoreSummary(data, transportSender, context, onComplete,
         if disposition == "deferred" then return nil, false, "ROOT_MUTATION_PENDING" end
         if disposition == "duplicate" then return true, false end
         if disposition == "rejected" then return false, false end
+        -- "overflow": the bounded owner is full. Held or busy, the item gets
+        -- the same counted storage refusal; a held item never takes the
+        -- catalog the request is waiting for.
+        stored, storedAs = false, "ROOT_MUTATION_PENDING"
     end
     return Complete(stored, storedAs)
 end
@@ -3332,18 +3375,26 @@ local function CommitReceivedBuild(payload, transportSender, context,
         Sync.RequestDataViewRefresh()
         return true
     end
-    local stored, storedWhy = StoreReceivedBuild(
-        payload, directOwner, transportSender, matchedReplacement,
-        replacementFingerprint, function(completed, completedWhy)
-            local accepted = Complete(completed, completedWhy)
-            if type(onComplete) == "function" then onComplete(accepted) end
-            return accepted
-        end)
-    if stored == nil and storedWhy == "ROOT_MUTATION_PENDING" then
-        return nil, storedWhy
+    local function Submit()
+        return StoreReceivedBuild(
+            payload, directOwner, transportSender, matchedReplacement,
+            replacementFingerprint, function(completed, completedWhy)
+                local accepted = Complete(completed, completedWhy)
+                if type(onComplete) == "function" then onComplete(accepted) end
+                return accepted
+            end)
     end
-    if Responder.Admission.Busy(stored, storedWhy) then
+    local held = not deferredEntry and Responder.Admission.RequestHold()
+    local stored, storedWhy
+    if not held then
+        stored, storedWhy = Submit()
+        if stored == nil and storedWhy == "ROOT_MUTATION_PENDING" then
+            return nil, storedWhy
+        end
+    end
+    if held or Responder.Admission.Busy(stored, storedWhy) then
         if deferredEntry then return nil, "ADMISSION_BUSY" end
+        if held then stats.admissionHeld = (stats.admissionHeld or 0) + 1 end
         local disposition = Responder.Admission.Defer({
             kind="build",id=payload.id,
             stamp=tonumber(payload.lastModified) or 0,
@@ -3372,6 +3423,8 @@ local function CommitReceivedBuild(payload, transportSender, context,
         if disposition == "deferred" then return nil, "ROOT_MUTATION_PENDING" end
         if disposition == "duplicate" then return true end
         if disposition == "rejected" then return false end
+        -- "overflow": the same counted storage refusal, held or busy.
+        stored, storedWhy = false, "ROOT_MUTATION_PENDING"
     end
     return Complete(stored, storedWhy)
 end

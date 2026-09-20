@@ -653,6 +653,15 @@ function Session.New(options)
             and manualPreparationOwner or nil
     end
 
+    -- Read-only. True while the user's explicit manual request has been
+    -- accepted but not transmitted: it is waiting for the hash owner, or it is
+    -- queued and unsent. Its own fixed absolute lifetime bounds this.
+    function M.ManualRequestUnsent()
+        return autoConverge.active == true and autoConverge.mode == "manual"
+            and (pendingHashRequest ~= nil or pendingRequest ~= nil)
+            and now() < Number(autoConverge.absoluteUntil)
+    end
+
     -- One session-owned intent waits for the existing hash owner. No timer or
     -- callback survives reset. Validate queued bytes again before transport so
     -- an intervening generation change cannot send an obsolete digest.
