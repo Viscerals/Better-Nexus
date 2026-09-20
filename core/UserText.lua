@@ -31,11 +31,11 @@ local reasons={
     ["preparing"]="Preparing shared-build data",
     ["cleaning"]="Removing expired requests",
     ["throttled"]="Waiting for the permitted network send rate",
-    ["armed (guaranteed queue live)"]="Saved-build guarantees confirmed for this run",
-    ["Activate did not guarantee -- treating as unarmed"]="Activation did not confirm saved-build guarantees; no future guarantee is assumed",
+    ["armed (guaranteed queue live)"]="The server marked a current offer guaranteed; no future offer is assumed",
+    ["Activate did not guarantee -- treating as unarmed"]="No guaranteed offer was shown after activation; no future guarantee is assumed",
     ["bracket fishing: reroll filler guarantee"]="Reroll the unneeded guaranteed offer under the enabled policy",
     ["tight horizon"]="Few selections remain",
-    ["drain guaranteed queue"]="Process the confirmed saved-build sequence",
+    ["drain guaranteed queue"]="Use the offer shown on this board; no future offer is assumed",
     ["Tome levers"]="Echo availability controls",
     ["flag demotions cleared (they re-arm on fresh evidence)"]="Temporary safety-assumption disablements cleared; new evidence can disable them again",
 }
@@ -89,8 +89,8 @@ function T.Message(value)
         :gsub("OWNED this run:","Rolled Echoes this run:")
         :gsub(" %(synced%)"," (server confirmed)")
         :gsub(" %(not synced yet%)"," (waiting for current Echo data from the server)")
-        :gsub("UNARMED","Saved-build guarantees not confirmed")
-        :gsub("ARMED","Saved-build guarantees confirmed")
+        :gsub("UNARMED","No guaranteed offer observed")
+        :gsub("ARMED","Guaranteed current offer observed; no future offer is assumed")
          :gsub("tight horizon","few selections remain")
         :gsub("bracket fishing","searching with the enabled Banish/Reroll actions")
         :gsub("tome lever ","Echo-availability control #")
@@ -100,7 +100,7 @@ function T.Message(value)
     return s
 end
 function T.Annotation(value)
-    return ({wanted="Needed",["returns later"]="Expected later from saved-build sequence",
+    return ({wanted="Needed",["returns later"]="Not taken now; a later offer is not guaranteed",
         banked="Held offer",filler="Not on Wishlist",["low quality"]="Different quality from target",
         ["target met"]="Target already met",["wrong quality"]="Different quality from target"})[value] or T.Message(value)
 end

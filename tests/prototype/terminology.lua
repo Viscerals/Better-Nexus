@@ -8,7 +8,7 @@ check(T.Message('MISSING_UNKNOWN_CODE'):find('Details: MISSING_UNKNOWN_CODE',1,t
 local d=T.Message('exact wishlist progress regressed 25 (gained 6, shed 31 exact stacks)')
 check(d:find('25 fewer Wishlist copies',1,true) and d:find('31 fewer',1,true),'save comparison retains exact counts')
 check(not d:find('shed',1,true),'no confusing shed wording in save comparison')
-check(T.Annotation('returns later')=='Expected later from saved-build sequence','expectation distinct from guarantee')
+check(T.Annotation('returns later')=='Not taken now; a later offer is not guaranteed','no unproven offer is said to return')
 check(T.Message('wishlist does not exactly match the verified active loadout; locked roles remain unknown.'):find('Choose this Wishlist',1,true),'role wait has actionable explanation')
 check(T.Message('cleanup-only save added new excess/wrong-quality pollution'):find('Not saved:',1,true),'save refusal stays refusal')
 Nexus.Panel.Show()

@@ -318,9 +318,23 @@ function Policy.Decide(state)
     if type(state) == "table" and state.ordinaryBoardAllowed == false then
         return {type="wait", reason="Orb state active or unknown", annotations={}, deltas={}}
     end
-    if type(state) == "table" and state.snapshotVerified ~= true
-        and Nexus.WishlistPilot then
+    -- Current-game contract: there are no guaranteed future Echo rolls. Saved
+    -- verification is identity, contents and ownership evidence; it selects no
+    -- planner. Every ordinary board uses the one planner that holds no
+    -- future-offer assumption, and that planner keeps its own incomplete-state
+    -- refusals. `snapshotVerified` is deliberately not read here.
+    if type(state) == "table" and Nexus.WishlistPilot then
         return Nexus.WishlistPilot.DecideNexus(state)
+    end
+    -- Reached only when the ordinary planner is not loaded, which the
+    -- production TOC never allows. The historical scoring below must then see
+    -- no inferred queue, so an old flag or a prefilled state cannot restore a
+    -- guarantee-based decision.
+    if type(state) == "table" then
+        local view = {}
+        for key, value in pairs(state) do view[key] = value end
+        view.queue, view.snapshotVerified = { entries = {} }, nil
+        state = view
     end
     local annotations = {}
     if type(state) ~= "table" then

@@ -29,11 +29,11 @@ local rawLabels={
  {'waiting: unsynced','Waiting for current Echo data'},
  {'waiting for owned-state sync','Waiting for current Echo data'},
  {'waiting for owned-echo sync','Waiting for current Echo data'},
- {'armed (guaranteed queue live)','Saved-build guarantees confirmed'},
+ {'armed (guaranteed queue live)','no future offer is assumed'},
  {'Activate did not guarantee -- treating as unarmed','no future guarantee is assumed'},
  {'tight horizon: take guaranteed','few selections remain'},
  {'bracket fishing: reroll filler guarantee','enabled policy'},
- {'drain guaranteed queue','confirmed saved-build sequence'},
+ {'drain guaranteed queue','no future offer is assumed'},
  {'disabling off-wishlist tome lever 12345','Echo-availability control #12345'},
  {'ROOT_MUTATION_PENDING','Saving is still in progress'},
  {'MISSING_REVIEW_CODE','Details: MISSING_REVIEW_CODE'},
@@ -51,7 +51,7 @@ for _,annotation in ipairs({'banked','returns later'})do
  model.cards={{text=Nexus.Readout.CardLine({name='Echo',quality=1,isGuaranteed=true},annotation,12)}}
  model.recommendation='Take'
  assert(Nexus.Panel.Render(model))
- check(texts():find(annotation=='banked' and 'Held offer' or 'Expected later from saved-build sequence',1,true),'T26 actual card fontstring')
+ check(texts():find(annotation=='banked' and 'Held offer' or 'a later offer is not guaranteed',1,true),'T26 actual card fontstring')
  check(texts():find('[Guaranteed offer]',1,true),'current guaranteed offer is distinct from prediction')
 end
 check(Nexus.Readout.QueueLines({entries={{name='Echo',wanted=true}}},1)[1]:find('(predicted)',1,true),'queue remains a prediction')

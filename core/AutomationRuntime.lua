@@ -2180,14 +2180,14 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
 
     local preparePerformance, prepareStarted = BeginPhase("boardPrepare")
     local activeRow = ActiveSlotRow(slots)
-    local snapshotVerified = activeRow and activeRow.verified == true
-    local queue = snapshotVerified and Ratchet.PredictQueue(activeRow.echoes or {},
-        owned, plan, flags, disabledLevers, catalog) or {entries={}}
+    -- No guaranteed future Echo rolls: the active saved row, verified or not,
+    -- supplies no predicted offers and selects no planner. Its verification
+    -- stays identity and ownership evidence for the owners that need it.
+    local queue = {entries={}}
     local charges = Adapter.Charges()
     local horizon = Adapter.Horizon()
     local state = {
         board = board, owned = owned, locked = locked, charges = charges, plan = plan,
-        snapshotVerified = snapshotVerified == true,
         ordinaryBoardAllowed = not Adapter.OrdinaryBoardAllowed or Adapter.OrdinaryBoardAllowed(),
         allowReroll = settings.autoReroll ~= false,
         allowFreeze = settings.autoFreeze ~= false,
@@ -3060,10 +3060,8 @@ local function JournalData()
     sections[#sections + 1] = { title = "Tome levers", lines = leverLines }
     local est = "no estimate (advisor mode)"
     if wishlist then
-        local activeRow = ActiveSlotRow(slots)
-        local queue = Ratchet.PredictQueue(activeRow and activeRow.echoes or {},
-            owned, plan, flags, disabledLevers, catalog)
-        local e = Ratchet.RunsEstimate(plan, owned, queue, nil)
+        -- The estimate counts known deficits only; no future offer is assumed.
+        local e = Ratchet.RunsEstimate(plan, owned, nil, nil)
         est = (e and e.text) or "estimate unavailable"
     end
     sections[#sections + 1] = { title = "Notes", lines = {

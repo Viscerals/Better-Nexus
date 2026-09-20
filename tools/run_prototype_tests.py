@@ -28,6 +28,7 @@ NAMES += ['share_terminal_cleanup']
 NAMES += ['stop_sharing_refusal','stop_sharing_pending','stop_sharing_outcomes']
 NAMES += ['stop_sharing_layers','stop_sharing_layer_lifecycle']
 NAMES += ['sync_deferred_admission','sync_deferred_transfer','sync_withdrawal_guards']
+NAMES += ['rolling_no_guarantee','rolling_no_guarantee_runtime','policy_compare']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
