@@ -34,6 +34,18 @@ P.before=function(p,q,code)
  P.Channel(q,'WLBI|Other-Ebonhold|'..q.e.Nexus.Codec.Base64Encode(q.e.Nexus.Codec.JSONEncode(data)),'Other-Ebonhold')
  assert(not P.Ready(q),'contention owns the receiver catalog')
 end
+-- The summary must meet the REAL busy refusal. That needs the contention above to be
+-- in flight when the summary arrives, and the contention only takes the catalog of an
+-- idle receiver. Between the Share and its summary the receiver can queue a packet of
+-- its own or owe a response; the summary would then be retained before the catalog is
+-- asked (1 of 52 runs on c173b25). Delivery of the summary is therefore postponed, as
+-- bounded channel latency, until the receiver is idle or its catalog is already busy.
+local postponed=0
+P.hold=function(p,q,code)
+ if code~='WLBI' or not P.Ready(q) or Idle(q) then return false end
+ postponed=postponed+1;assert(postponed<=1200,'bounded delivery delay: the receiver became idle within 60 simulated seconds')
+ return true
+end
 local function Writes(p,id,stamp)
  local refusedSummary,refusedFull,acceptedSummary,acceptedFull=0,0,0,0
  for _,put in ipairs(p.puts)do
@@ -58,6 +70,7 @@ end
 local function Transfer(from,to,title)
  -- The contention must be in flight before the receiver owes anything.
  P.Until(function()return Idle(to) and Idle(from) end)
+ postponed=0
  local id=P.Post(from,title)
  P.Until(function()return P.Full(to,id)end)
  local source,row=from.e.Nexus.BuildCatalog.Get(id),P.Full(to,id)

@@ -1,8 +1,8 @@
 -- Two isolated production runtimes in one process. Each peer has its own Lua
 -- globals, harness, synthetic profile and player identity. The bridge carries
 -- only packets captured from real SendChatMessage/SendAddonMessage calls into
--- the other peer's real receive events. It models no latency, loss or
--- throttling, and it is not native evidence.
+-- the other peer's real receive events. It models no loss or throttling, and
+-- no latency unless a test sets P.hold. It is not native evidence.
 local P={}
 function P.Boot(names,rows)
  local peers={}
@@ -20,7 +20,7 @@ function P.Boot(names,rows)
   T.Until(H,function()return e.Nexus.StartupStatus().state=='ready' and e.Nexus.BuildCatalog.ManualPreparationStatus().ready end)
   peers[i]={e=e,H=H,T=T,name=name..'-Ebonhold',cursor=#H.sent}
  end
- P.A,P.B,P.trace,P.before=peers[1],peers[2],{},nil
+ P.A,P.B,P.trace,P.before,P.hold=peers[1],peers[2],{},nil,nil
  return peers[1],peers[2]
 end
 function P.Channel(q,text,sender)
@@ -28,9 +28,13 @@ function P.Channel(q,text,sender)
 end
 local function Deliver(p,q)
  while p.cursor<#p.H.sent do
-  p.cursor=p.cursor+1;local packet=p.H.sent[p.cursor]
+  local packet=p.H.sent[p.cursor+1]
   -- The addon route prefixes the same wire code with its protocol tag.
   local code=packet.text:gsub('||','|'):match('^([^|]+)'):gsub('^P%d+:','')
+  -- Optional modelled delivery latency: a test may postpone the next packet of
+  -- this sender. Order is kept, nothing is dropped, and the test bounds the delay.
+  if P.hold and P.hold(p,q,code) then break end
+  p.cursor=p.cursor+1
   P.trace[#P.trace+1]={from=p.name,to=q.name,code=code,text=packet.text}
   if P.before then P.before(p,q,code) end
   if packet.route=='chat' and packet.kind=='CHANNEL' then P.Channel(q,packet.text,p.name)
