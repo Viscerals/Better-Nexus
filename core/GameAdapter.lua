@@ -1825,7 +1825,18 @@ end
 
 function A.ClearFirstRunWishlist()
     if not UpdateStoreState(function(state)
-        state.firstRunWishlist = nil
+        local first = state.firstRunWishlist
+        local handoff = type(state.loadoutWishlists) == "table" and state.loadoutWishlists[1]
+        -- Only the bootstrap's stamped slot-1 mirror belongs to this action.
+        -- Equal names or contents cannot identify an unrelated assignment.
+        if type(first) == "table" and type(handoff) == "table"
+            and type(first.assignmentId) == "string" and first.assignmentId ~= ""
+            and handoff.assignmentId == first.assignmentId then
+            state.loadoutWishlists[1] = nil
+        end
+        -- False records an explicit first-run Unassign. Nil still means that
+        -- an older assignment may be waiting for its active-loadout identity.
+        state.firstRunWishlist = false
     end) then return false end
     MarkWishlistProjectionDirty()
     return true
@@ -2095,7 +2106,8 @@ function A.Wishlist()
             A._wishlistNote = "First-run wishlist data is temporarily unavailable; waiting for the server mirror."
             return nil
         end
-        if state and type(state.loadoutWishlists)=="table" and next(state.loadoutWishlists)then
+        if state and state.firstRunWishlist ~= false
+            and type(state.loadoutWishlists)=="table" and next(state.loadoutWishlists)then
             A._wishlistNote="Restoring assigned Wishlist..."
             return nil
         end
