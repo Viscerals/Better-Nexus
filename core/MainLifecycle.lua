@@ -56,6 +56,12 @@ function Lifecycle.New(options)
     local startupTiming = {updates=0, slices=0, maxBatchMs=0, maxUpdateMs=0, overshoots=0,
         maxOvershootMs=0, fallbackUpdates=0}
     Nexus.startupTiming = startupTiming
+    -- Last observed state of the full Sync turn gate: the exact booleans the
+    -- gate below decided with, its reason, and whether a manual request
+    -- owned that update's preparation. Session-only scalars for the
+    -- diagnostic report, "unknown" until the gate is first reached. No
+    -- history, no counter, never read by any decision.
+    local syncGate = {reason="unknown", owner="unknown"}
     -- Read-only scalar snapshot. This does not pump, admit or authorize data.
     Nexus.StartupStatus = function()
         local failure=startupTiming.coreFailure or communityFailure
@@ -69,7 +75,11 @@ function Lifecycle.New(options)
             progressDone=startupTiming.communityProgressDone,
             progressTotal=startupTiming.communityProgressTotal,
             recordsSeen=startupTiming.communityRecordsSeen or 0,
-            coreSlices=startupTiming.slices or 0}
+            coreSlices=startupTiming.slices or 0,
+            syncGate=syncGate.reason, syncGateOwner=syncGate.owner,
+            syncGateAdapterReady=syncGate.adapterReady,
+            syncGateCatalogReady=syncGate.catalogReady,
+            syncGateHashesReady=syncGate.hashesReady}
     end
     local MANUAL_MS, MANUAL_SLICES = 2, 32
     local manualTiming = {updates=0,slices=0,maxBatchMs=0,maxUpdateMs=0,
@@ -856,6 +866,10 @@ function Lifecycle.New(options)
         -- One post-ready Store mutation slice per turn, before consumer reads.
         PumpStoreMutationSlice()
         if not communityReady then
+            -- Early return before the catalog, hash and adapter gate: those
+            -- three were not evaluated in this update.
+            syncGate.reason, syncGate.owner = "community-startup", "none"
+            syncGate.adapterReady, syncGate.catalogReady, syncGate.hashesReady = nil, nil, nil
             PumpCommunityStartup(updateStarted)
             local adapter=dependencies.Adapter
             if adapter.Ready() then
@@ -907,11 +921,14 @@ function Lifecycle.New(options)
         -- before Sync can start another incoming write. This does not pump or
         -- bypass catalog work. A new write invalidates the prepared hash view.
         local community = Nexus.CommunityBuilds
+        local shareGate
         if community and type(community.PumpPendingShare) == "function" then
             local ok, pending, submitted = RunIsolatedOwner("CommunityBuilds.PumpPendingShare",
                 community.PumpPendingShare)
             if not ok or pending then catalogReady = false end
             if not ok or pending or submitted then buildHashesReady = false end
+            shareGate = not ok and "pending-share-error" or pending and "pending-share"
+                or submitted and "share-submitted" or nil
         end
         if catalogReady then
             if manualOwner and buildHashesReady and manualTiming.readyAt == nil then
@@ -920,6 +937,13 @@ function Lifecycle.New(options)
         end
         local Adapter = dependencies.Adapter
         local adapterReady = Adapter.Ready()
+        syncGate.owner = manualOwner and "manual-request" or "none"
+        syncGate.adapterReady = adapterReady == true
+        syncGate.catalogReady, syncGate.hashesReady = catalogReady == true, buildHashesReady == true
+        syncGate.reason = not adapterReady and "adapter-not-ready"
+            or not (syncInitialized and Nexus.Sync) and "sync-not-initialized"
+            or shareGate or not catalogReady and "catalog-not-ready"
+            or not buildHashesReady and "hashes-not-ready" or "open"
         if not (adapterReady and catalogReady and buildHashesReady)
             and syncInitialized and Nexus.Sync and type(Nexus.Sync.Housekeep)=="function" then
             -- One transport turn per frame. Prepared manual Share bytes do

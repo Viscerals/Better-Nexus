@@ -297,6 +297,24 @@ function PeerDebug.Report()
         revisions and revisions.DPS_CHANGED)
     local protocol = SafeCall(Nexus.DpsCapture, "ProtocolVersion", "unknown")
     local rows = SnapshotEvents()
+    -- Passive scalar reads only. ManualPreparationStatus and
+    -- BuildHashCache.Stats return detached scalars; StartupStatus carries the
+    -- last observed booleans the lifecycle gate actually decided with; the
+    -- manual timing table holds session-only scalars. None of them pumps,
+    -- admits, invalidates, initializes or submits. Catalog.Status,
+    -- Catalog.RootState and the Community view snapshot are deliberately not
+    -- read: they pass the catalog read gate, which can record a rebind or
+    -- invalidate a drifted root. The new lines take nothing from Sync.Stats,
+    -- which writes a live field; sync_pending reuses the work snapshot this
+    -- report already fetched above.
+    local function Observed(value)
+        if value == nil then return "unknown" end
+        return tostring(value == true)
+    end
+    local preparation = SafeCall(Nexus.BuildCatalog, "ManualPreparationStatus", {})
+    local startup = SafeCall(Nexus, "StartupStatus", {})
+    local manual = type(Nexus.manualSyncTiming) == "table"
+        and Nexus.manualSyncTiming or {}
     local lockedStatus, lockedReason = "unavailable", "no selected build"
     if selectedBuildId then
         lockedStatus, lockedReason =
@@ -389,6 +407,48 @@ function PeerDebug.Report()
             CleanText(buildRevision, 16),CleanText(dpsRevision, 16),
             buildCache.initialized and "warm" or "cold",
             dpsCache.initialized and "warm" or "cold"),
+        string.format("lifecycle_gate last_observed=%s owner=%s adapter_ready=%s catalog_ready=%s hashes_ready=%s startup=%s phase=%s sync_ready=%s",
+            CleanText(startup.syncGate or "unknown", 32),
+            CleanText(startup.syncGateOwner or "unknown", 24),
+            Observed(startup.syncGateAdapterReady),
+            Observed(startup.syncGateCatalogReady),
+            Observed(startup.syncGateHashesReady),
+            CleanText(startup.state or "unknown", 16),
+            CleanText(startup.phase or "unknown", 32),
+            tostring(startup.syncReady == true)),
+        string.format("catalog_preparation ready=%s relevant=%s owner_agrees=%s reason=%s kind=%s phase=%s pumps=%s work=%s row=%s index=%s generation=%s binding=%s total_pumps=%s",
+            tostring(preparation.ready == true), tostring(preparation.relevant == true),
+            tostring(preparation.ownerAgrees == true),
+            CleanText(preparation.reason or "unknown", 40),
+            CleanText(preparation.kind or "none", 24),
+            CleanText(preparation.phase or "none", 32),
+            CleanText(preparation.pumps or 0, 16), CleanText(preparation.work or 0, 16),
+            CleanText(preparation.row or 0, 16), CleanText(preparation.index or 0, 16),
+            CleanText(preparation.generation or "unknown", 16),
+            CleanText(preparation.binding or "unknown", 16),
+            CleanText(preparation.totalPumps or 0, 16)),
+        -- Walk progress only. Hash readiness is hashes_ready in the line
+        -- above: a warm cache can still hold dirty buckets.
+        string.format("hash_walk phase=%s pending=%s prepared_rows=%s observed_revision=%s dirty_buckets=%s",
+            CleanText(buildCache.phase or "unknown", 24),
+            tostring(buildCache.pending == true),
+            CleanText(buildCache.preparedRows or 0, 16),
+            CleanText(buildCache.revision or "unknown", 16),
+            CleanText(buildCache.dirtyBuckets or 0, 8)),
+        string.format("manual_preparation updates=%s slices=%s overshoots=%s fallback_updates=%s max_batch_ms=%s wait_reason=%s catalog_phase=%s catalog_kind=%s",
+            CleanText(manual.updates or 0, 16), CleanText(manual.slices or 0, 16),
+            CleanText(manual.overshoots or 0, 16),
+            CleanText(manual.fallbackUpdates or 0, 16),
+            CleanText(string.format("%.2f", tonumber(manual.maxBatchMs) or 0), 16),
+            CleanText(manual.waitReason or "none", 40),
+            CleanText(manual.catalogPhase or "none", 32),
+            CleanText(manual.catalogKind or "none", 24)),
+        string.format("sync_pending responses=%s loadouts=%s shares=%s recovery=%s retained_inbound=%s",
+            CleanText(transport.pendingResponses or 0, 16),
+            CleanText(transport.pendingLoadouts or 0, 16),
+            CleanText(transport.pendingShares or 0, 16),
+            CleanText(transport.recovery or 0, 16),
+            CleanText(transport.deferredAdmissions or 0, 16)),
         string.format("dps_counts stored=%s hash_eligible=%s published_board=%s displayed_rows=%s",
             dpsCache.initialized and CleanText(
                 dpsCache.storedRows or dpsCache.rows or 0, 16)

@@ -30,6 +30,7 @@ NAMES += ['stop_sharing_layers','stop_sharing_layer_lifecycle']
 NAMES += ['sync_deferred_admission','sync_deferred_transfer','sync_withdrawal_guards','sync_deferred_scope','sync_deferred_fairness','sync_multichunk_pressure','sync_request_readiness','sync_request_full_record']
 NAMES += ['sync_responder_turn','sync_responder_aged','sync_responder_inflight','sync_responder_recovery']
 NAMES += ['rolling_no_guarantee','rolling_no_guarantee_runtime','policy_compare']
+NAMES += ['diagnostics_gate_status']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
