@@ -163,12 +163,12 @@ assert(accepted==false and message:find('two lists that do not agree',1,true) an
 print('PASS duplicate representation: counted once or refused, never summed')
 
 -- 6. Oversized or unresolved sources are refused at the button, with real counts.
-rows=Rows(85,0,true)
-Boot(Slot('ROLES-85-ORDINARY',rows));local before=H.Clone(H.perks.serverBuildSlots)
+rows=Rows(86,0,true)
+Boot(Slot('ROLES-86-ORDINARY',rows));local before=H.Clone(H.perks.serverBuildSlots)
 assert(Nexus.PeerDebug.Start('')~=false)
-local p=Share('ROLES-85-ORDINARY','ROLES-85-ORDINARY')
-print('MESSAGE '..Refused('85 explicit ordinary',p,before,'85 ordinary and 0 permanent','(85 total)','79 ordinary, 6 permanent and 85 total'))
-assert(Nexus.PeerDebug.Report():find('SEMANTIC_ENVELOPE ordinary=85 permanent=0 total=85',1,true),'the raw code and counts stay in the diagnostic report')
+local p=Share('ROLES-86-ORDINARY','ROLES-86-ORDINARY')
+print('MESSAGE '..Refused('86 explicit ordinary: no role choice can help',p,before,'86 ordinary and 0 permanent','(86 total)','79 ordinary, 6 permanent and 85 total'))
+assert(Nexus.PeerDebug.Report():find('SEMANTIC_ENVELOPE ordinary=86 permanent=0 total=86',1,true),'the raw code and counts stay in the diagnostic report')
 rows=Rows(80,5)
 Boot(Slot('ROLES-80-5',rows));before=H.Clone(H.perks.serverBuildSlots)
 p=Share('ROLES-80-5','ROLES-80-5')
@@ -180,7 +180,8 @@ assert(accepted==false and message:find('40 ordinary and 7 permanent',1,true) an
 rows=Rows(84,0)
 Boot(Slot('ROLES-UNSTATED',rows));before=H.Clone(H.perks.serverBuildSlots)
 p=Share('ROLES-UNSTATED','ROLES-UNSTATED')
-print('MESSAGE '..Refused('84 unstated',p,before,'84 Echo copies and no permanent-Echo roles','79 ordinary and 6 permanent'))
+local unresolved=Refused('84 unstated',p,before,'has 84 Echo copies','does not say which copies are permanent','at most 79 ordinary copies','Missing evidence:','Wishlist Editor and choose its permanent Echoes','active loadout','Nothing was shared')
+print('MESSAGE '..unresolved)
 print('PASS refusals: before acceptance, real counts, draft and source kept')
 
 -- 7. The same 84-copy mirror becomes shareable only through the adapter's own
@@ -215,7 +216,11 @@ print('PASS source change: selected source shared exactly; later source edit doe
 rows=Rows(84,0,true)
 Boot(Slot('ROLES-ALL-FALSE',rows));before=H.Clone(H.perks.serverBuildSlots)
 p=Share('ROLES-ALL-FALSE','ROLES-ALL-FALSE')
-Refused('84 explicit false, unconfirmed',p,before,'84 ordinary and 0 permanent')
+-- Review N2 (P2): not a counts-only refusal. It names the missing role information and the supported ways.
+local allFalse=Refused('84 explicit false, unconfirmed',p,before,'has 84 Echo copies','marks all of them as ordinary, which is not role information','up to 6 of them must be permanent Echoes','Missing evidence:','Wishlist Editor and choose its permanent Echoes','active loadout')
+assert(not allFalse:find('84 ordinary and 0 permanent',1,true),'not the counts-only message')
+assert(Nexus.PeerDebug.Start('')~=false);p._postGoBtn:Click()
+assert(Nexus.PeerDebug.Report():find('roles unresolved (ordinary=84 permanent=0 total=84)',1,true),'the counts stay in the diagnostic record')
 A=Nexus.GameAdapter;candidate=nil
 for _,c in ipairs(A.GetWishlistCandidates())do if c.slot==102 then candidate=c end end
 assert(candidate,'fixture: the adapter lists the all-false mirror')
@@ -239,7 +244,7 @@ assert(candidate.echoes[1].spellId==200401 and A.ConfirmWishlistRoles(candidate,
 p._postTitleBox:_NexusSetRawText('ROLES-STALE');printed={}
 local real=print;print=function(...)local t={};for i=1,select('#',...)do t[#t+1]=tostring((select(i,...)))end;printed[#printed+1]=table.concat(t,' ')end
 p._postGoBtn:Click();print=real
-assert(Nexus.CommunityBuilds.ShareStatus()==nil and #puts==0 and printed[#printed]:find('no permanent-Echo roles',1,true),'roles of other content are not applied: '..tostring(printed[#printed]))
+assert(Nexus.CommunityBuilds.ShareStatus()==nil and #puts==0 and printed[#printed]:find('does not say which copies are permanent',1,true),'roles of other content are not applied: '..tostring(printed[#printed]))
 print('PASS stale selection: roles of other content on the same slot are refused')
 
 -- 11. Review F6: the adapter omitted an unreadable server row. The rest is not the complete source.
@@ -275,3 +280,49 @@ local one=Rows(10,0);one[11]={spellId=200011,quality=1,stacks=2,locked=1}
 assert(Nexus.CommunityBuilds.PostCurrentWishlist('ROLES-ONE','Synthetic',{name='ROLES-ONE',echoes=one},'MAGE'))
 one[11].locked=true;Accepted('locked=1',one,10,2)
 print('PASS row validation before acceptance')
+
+-- 13. Review N3: array shape. A key outside 1..n cannot hide a hole; a present separate list must be a list;
+-- a copy count is read as stated.
+Boot(Slot('UNUSED',Rows(3,0)))
+local holed={[0]={spellId=200050,quality=0,stacks=1},[1]={spellId=200001,quality=1,stacks=1},[3]={spellId=200003,quality=3,stacks=1,locked=true}}
+Direct('ROLES-ZERO-KEY',{name='ROLES-ZERO-KEY',echoes=holed},'cannot be read')
+bad=Rows(10,0);bad[2.5]={spellId=200040,quality=0,stacks=1}
+Direct('ROLES-FRACTION-KEY',{name='ROLES-FRACTION-KEY',echoes=bad},'cannot be read')
+Direct('ROLES-LIST-IS-TEXT',{name='ROLES-LIST-IS-TEXT',echoes=Rows(10,0),lockedEchoes='200011'},'form that cannot be read')
+bad=Rows(10,0);bad[4].stacks=false
+Direct('ROLES-FALSE-COPIES',{name='ROLES-FALSE-COPIES',echoes=bad},'cannot be read')
+Direct('ROLES-HOLE-IN-PERMANENT',{name='ROLES-HOLE-IN-PERMANENT',echoes=Rows(10,0),lockedEchoes={[2]={spellId=200011,quality=1,stacks=1}}},'permanent Echo row that cannot be read')
+print('PASS array shape')
+
+-- 14. Review F9 / N4 / mutant n12: qualities. The harness catalog states quality i%4 for Echo i; this source states another.
+local function Shifted(n)local r=Rows(n,0);for i,e in ipairs(r)do e.quality=(i+1)%4 end;return r end
+rows=Shifted(84)
+Boot(Slot('ROLES-QUALITY',rows))
+A=Nexus.GameAdapter;candidate=nil
+for _,c in ipairs(A.GetWishlistCandidates())do if c.slot==102 then candidate=c end end
+assert(candidate.echoes[1].quality~=rows[1].quality,'fixture: the adapter candidate carries the catalog quality, the source another')
+chosen={};for i,e in ipairs(candidate.echoes)do chosen[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks,locked=i>78}end
+assert(A.ConfirmWishlistRoles(candidate,chosen,'user-confirmed'))
+Share('ROLES-QUALITY','ROLES-QUALITY')
+expected={};for i,e in ipairs(rows)do expected[i]={spellId=e.spellId,quality=e.quality,stacks=1,locked=i>78 or nil}end
+Accepted('source quality kept on the adapter-resolved path',expected,78,6)
+-- One Echo ID with two stated qualities, 84 copies, roles confirmed by ID only: which quality is permanent is not known.
+rows=Rows(82,0);rows[83]={spellId=200001,quality=2,stacks=1};rows[84]={spellId=200001,quality=3,stacks=1}
+Boot(Slot('ROLES-MIXED',rows));before=H.Clone(H.perks.serverBuildSlots)
+A=Nexus.GameAdapter;candidate=nil
+for _,c in ipairs(A.GetWishlistCandidates())do if c.slot==102 then candidate=c end end
+if candidate then
+ chosen={};for i,e in ipairs(candidate.echoes)do chosen[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks,locked=i>78}end
+ A.ConfirmWishlistRoles(candidate,chosen,'user-confirmed')
+end
+p=Share('ROLES-MIXED','ROLES-MIXED')
+local status=Nexus.CommunityBuilds.ShareStatus()
+if status then
+ -- Accepted only when the role evidence matches the exact ID-and-quality content.
+ local record=Accepted('mixed qualities with exact evidence',(function()local e={};for i,r in ipairs(rows)do e[i]={spellId=r.spellId,quality=r.quality,stacks=1,locked=i>78 or nil}end;return e end)(),78,6)
+ assert(record)
+else
+ Refused('mixed qualities without exact evidence',p,before,'Missing evidence:')
+end
+print('PASS qualities: the source quality is kept; mixed qualities are never guessed')
+

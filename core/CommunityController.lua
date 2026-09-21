@@ -1669,19 +1669,24 @@ function Controller.New(options)
         end
         -- Every row of a dense list, or nothing: a hole must not hide rows.
         local function Dense(list)
-            local count = 0
+            local count, length = 0, #list
             for index in pairs(list) do
-                if type(index) == "number" then count = count + 1 end
+                if type(index) == "number" then
+                    if index < 1 or index > length or index ~= math.floor(index) then return false end
+                    count = count + 1
+                end
             end
-            return count == #list
+            return count == length
         end
         local function Split(list)
             local ordinary, locked, unstated = {}, {}, 0
             if type(list) ~= "table" or not Dense(list) then return nil end
             for _, e in ipairs(list) do
                 if type(e) ~= "table" then return nil end
-                local copy = {spellId=e.spellId or e.id, quality=e.quality,
-                    stacks=e.stacks or e.count or 1}
+                local stacks = e.stacks
+                if stacks == nil then stacks = e.count end
+                if stacks == nil then stacks = 1 end
+                local copy = {spellId=e.spellId or e.id, quality=e.quality, stacks=stacks}
                 if not Whole(copy.spellId, 1) or not Whole(copy.stacks, 1)
                     or (copy.quality ~= nil and not Whole(copy.quality, 0)) then
                     return nil
@@ -1715,13 +1720,23 @@ function Controller.New(options)
             return nil, label .. " contains an Echo row that cannot be read. Nothing was shared.",
                 "malformed source row"
         end
-        if type(wl.lockedEchoes) == "table" and #wl.lockedEchoes > 0 then
+        if wl.lockedEchoes ~= nil and type(wl.lockedEchoes) ~= "table" then
+            return nil, label .. " states its permanent Echoes in a form that cannot be read. Nothing was shared.",
+                "malformed permanent list"
+        end
+        if type(wl.lockedEchoes) == "table" and next(wl.lockedEchoes) ~= nil then
             -- Same row checks as the inline list; every row here is permanent.
             local forced = {}
             for index, e in pairs(wl.lockedEchoes) do
-                forced[index] = type(e) == "table" and {spellId=e.spellId or e.id,
-                    quality=e.quality, stacks=e.stacks or e.count or 1,
-                    locked=true} or e
+                if type(e) == "table" then
+                    local stacks = e.stacks
+                    if stacks == nil then stacks = e.count end
+                    if stacks == nil then stacks = 1 end
+                    forced[index] = {spellId=e.spellId or e.id, quality=e.quality,
+                        stacks=stacks, locked=true}
+                else
+                    forced[index] = e
+                end
             end
             local _, separate = Split(forced)
             if not separate then
@@ -1750,7 +1765,7 @@ function Controller.New(options)
             return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
                 "malformed copy count"
         end
-        if #locked == 0 and counts.total > limits.ordinary then
+        if #locked == 0 and counts.total > limits.ordinary and counts.total <= limits.total then
             -- No permanent role is stated and the copies cannot all be ordinary.
             -- This includes the server mirror that marks every row false: the
             -- adapter does not take that as role evidence either. Only the
@@ -1795,31 +1810,42 @@ function Controller.New(options)
             for _, e in ipairs(resolvedLocked or {}) do combined[#combined + 1] = e end
             local settled = resolvedOrdinary and stillUnstated == 0
                 and #resolvedLocked > 0 and Ids(combined) == Ids(ordinary)
-            if not settled and unstated > 0 then
-                return nil, string.format("%s has %d Echo copies and no permanent-Echo roles. "
-                    .. "A Share holds at most %d ordinary and %d permanent copies, so the roles are needed. Missing evidence: %s. "
-                    .. "Choose the permanent Echoes in the Wishlist Editor, then share again. "
-                    .. "Nothing was shared and the source is unchanged.",
-                    label, counts.total, limits.ordinary, limits.locked,
-                    tostring(why or "no role choice is saved for this exact content")),
-                    "roles unresolved: " .. tostring(why or state or "no role evidence")
-            end
-            if settled then
-                -- The roles come from the adapter. A quality that the selected
-                -- source states for an ID stays the source's own.
-                local stated, mixed = {}, {}
-                for _, e in ipairs(ordinary) do
-                    if e.quality ~= nil then
-                        if stated[e.spellId] ~= nil and stated[e.spellId] ~= e.quality then
-                            mixed[e.spellId] = true
-                        end
-                        stated[e.spellId] = e.quality
-                    end
+            -- The roles come from the adapter. A quality that the selected
+            -- source states for an ID stays the source's own. When the source
+            -- states two qualities for one ID, the role evidence must match
+            -- that exact ID-and-quality content; otherwise it does not say
+            -- which quality the permanent copies have, and nothing is guessed.
+            local stated, mixed = {}, false
+            for _, e in ipairs(ordinary) do
+                if e.quality ~= nil then
+                    if stated[e.spellId] ~= nil and stated[e.spellId] ~= e.quality then mixed = true end
+                    stated[e.spellId] = e.quality
                 end
+            end
+            if settled and mixed and Population(combined) ~= Population(ordinary) then
+                settled = false
+                why = "the source states two qualities for one Echo, and the saved role evidence does not match that exact content"
+            end
+            if not settled then
+                -- The message names what is missing and the supported way to
+                -- supply it. A count alone does not tell the user what to do.
+                local marks = unstated == 0
+                    and "The server copy marks all of them as ordinary, which is not role information: "
+                    or "It does not say which copies are permanent: "
+                return nil, string.format("%s has %d Echo copies. %sa Share holds at most %d ordinary copies, "
+                    .. "so up to %d of them must be permanent Echoes, and Nexus must know which. Missing evidence: %s. "
+                    .. "To resolve it, open this Wishlist in the Wishlist Editor and choose its permanent Echoes, "
+                    .. "or make the matching Saved Build your active loadout so that Nexus can read its permanent Echoes. Then share again. "
+                    .. "Nothing was shared and the source is unchanged.",
+                    label, counts.total, marks, limits.ordinary, limits.locked,
+                    tostring(why or "no role choice is saved for this exact content")),
+                    string.format("roles unresolved (ordinary=%d permanent=%d total=%d): %s",
+                        counts.ordinary, counts.locked, counts.total,
+                        tostring(why or state or "no role evidence"))
+            end
+            do
                 for _, e in ipairs(combined) do
-                    if stated[e.spellId] ~= nil and not mixed[e.spellId] then
-                        e.quality = stated[e.spellId]
-                    end
+                    if not mixed and stated[e.spellId] ~= nil then e.quality = stated[e.spellId] end
                 end
                 ordinary, locked = resolvedOrdinary, resolvedLocked
                 counts = Counts()
@@ -1828,8 +1854,6 @@ function Controller.New(options)
                         "malformed copy count"
                 end
             end
-            -- Unsettled with every row explicitly ordinary: the envelope
-            -- refusal below states the real counts.
         end
         if #ordinary == 0 then
             return nil, label .. " has no ordinary Echoes to share.", "no ordinary Echoes"
@@ -2614,6 +2638,10 @@ function Controller.New(options)
             return false, "Share is not terminal"
         end
         local outcome = tostring(status.outcome or "")
+        -- A refusal that depends on the record itself repeats on every retry.
+        if outcome == "rejected" and tostring(status.reason or ""):find("too large", 1, true) then
+            return false, "the record is too large to send; a retry cannot change that"
+        end
         if outcome ~= "expired" and outcome ~= "dropped"
             and outcome ~= "throttle-exhausted" and outcome ~= "reset"
             and outcome ~= "rejected" then

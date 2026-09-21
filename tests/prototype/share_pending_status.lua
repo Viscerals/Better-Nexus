@@ -198,4 +198,56 @@ assert(p:IsShown() and p._shareStatus:GetText():find('Preparing "RETAINED-A"',1,
 T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).localSaved end)
 assert(not p._shareStatus:GetText():find('Preparing',1,true) and p._shareStatus:GetText():find('"RETAINED-A"',1,true),'the form no longer says Preparing after the save settled: '..p._shareStatus:GetText())
 assert(H.putCalls[id]==1,'one record')
+-- Review N5: the open form also follows the send, not only the local save.
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).sendCompleted end,8000)
+T.Until(H,function()return p._shareStatus:GetText():find('Sent "RETAINED-A"',1,true)~=nil end,400)
+assert(not p._shareStatus:GetText():find('queued for sharing',1,true),'the open form does not keep saying queued after the send')
 print('PASS retry beside a retained Share; open form follows the settlement')
+
+-- 10. Review N1 (P2): the refusal of the user's own click stays in the form through ordinary refreshes,
+-- with or without an earlier Share in the session, until a legitimate next action replaces it.
+H,C=S.Boot()
+first=S.Post('EARLIER-SENT-3');T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(first.id).sendCompleted end,8000)
+H.perks.serverBuildSlots[103]={name='TOO-MANY',verified=false,echoes={}}
+for i=1,86 do H.perks.serverBuildSlots[103].echoes[i]={spellId=200000+((i-1)%90)+1,quality=i%4,stacks=1,locked=false}end
+H.Notify();Nexus.GameAdapter.Poll()
+Nexus.CommunityBuilds.ShowPostBuild();p=assert(NexusPostPopup);if not p:IsShown()then Nexus.CommunityBuilds.ShowPostBuild()end   -- the form of THIS boot
+p._postWishlistBtn:Click()
+local chosenSource
+for _,f in ipairs(H.frames)do if f.kind=='Button' and f:IsVisible()then for _,r in ipairs({f:GetRegions()})do if r.GetText and tostring(r:GetText()):find('TOO-MANY',1,true)then chosenSource=f end end end end
+assert(chosenSource,'fixture: the oversized source is listed');chosenSource:Click()
+p._postTitleBox:_NexusSetRawText('REFUSED-CLICK')
+lines=Captured(function()p._postGoBtn:Click()end)
+local refusal=p._shareStatus:GetText()
+assert(refusal:find('86 ordinary and 0 permanent',1,true) and lines[1]:find('86 ordinary',1,true),'fixture: a click-time refusal is shown in the form: '..tostring(refusal))
+-- Ordinary refreshes of every kind: explicit refresh, window open/close, frames, an incoming catalog commit.
+Nexus.CommunityBuilds.Refresh();Nexus.CommunityBuilds.Show();Nexus.CommunityBuilds.Hide();Nexus.CommunityBuilds.Refresh()
+local ticket=S.Incoming(H,C);T.Until(H,function()return ticket.committed end)
+for i=1,40 do H.Advance(.05,.05)end;Nexus.CommunityBuilds.Refresh()
+assert(p:IsShown() and p._shareStatus:GetText()==refusal,'the refusal survives ordinary refreshes and is not replaced by the earlier Share: '..tostring(p._shareStatus:GetText()))
+assert(not p._shareStatus:GetText():find('EARLIER-SENT-3',1,true))
+-- Legitimate replacement 1: the user chooses another source.
+p._postWishlistBtn:Click()
+for _,f in ipairs(H.frames)do if f.kind=='Button' and f:IsVisible()then for _,r in ipairs({f:GetRegions()})do if r.GetText and tostring(r:GetText()):find(NAME,1,true)then chosenSource=f end end end end
+chosenSource:Click()
+assert(not p._shareStatus:GetText():find('86 ordinary',1,true),'choosing another source replaces the refusal')
+-- Legitimate replacement 2: a new click that is accepted.
+p._postTitleBox:_NexusSetRawText('ACCEPTED-AFTER-REFUSAL');lines=Captured(function()p._postGoBtn:Click()end)
+local accepted=Nexus.CommunityBuilds.ShareStatus();assert(accepted.title=='ACCEPTED-AFTER-REFUSAL','the new click is accepted: '..tostring(lines[1])..' / '..tostring(accepted.title))
+Nexus.CommunityBuilds.ShowPostBuild();if not p:IsShown()then Nexus.CommunityBuilds.ShowPostBuild()end
+assert(p._shareStatus:GetText():find('ACCEPTED-AFTER-REFUSAL',1,true) and not p._shareStatus:GetText():find('86 ordinary',1,true),'the next result replaces it')
+print('PASS a click-time refusal stays until a legitimate next action')
+
+-- 11. Review N8 / mutants n14, n19: Retry is named and offered only when a retry can change the result; the reason is shown.
+H,C=S.Boot();H.combat=true;first=S.Post('RETRY-WORDING');id=first.id
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).localSaved end)
+local realStatus=Nexus.Sync.GetShareStatus
+Nexus.Sync.GetShareStatus=function(wanted)local s=realStatus(wanted);if s and s.id==id then s.terminal,s.outcome,s.reason,s.sendCompleted,s.sent=true,'rejected','summary too large',false,false;s.version=tostring(C.Get(id).lastModified)end;return s end
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert(state=='stopped' and text:find('not sent: rejected (summary too large)',1,true) and not text:find('Retry',1,true),'a size rejection names its reason and no Retry: '..tostring(text))
+assert(select(1,Nexus.CommunityBuilds.CanRetryShare(id))==false,'and the existing owner does not offer a retry that cannot succeed')
+Nexus.Sync.GetShareStatus=function(wanted)local s=realStatus(wanted);if s and s.id==id then s.terminal,s.outcome,s.reason,s.sendCompleted,s.sent=true,'expired','expired',false,false;s.version=tostring(C.Get(id).lastModified)end;return s end
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert(state=='stopped' and text:find('Open the build to use Retry Share.',1,true) and select(1,Nexus.CommunityBuilds.CanRetryShare(id))==true,'an expiry still offers Retry: '..tostring(text))
+Nexus.Sync.GetShareStatus=realStatus
+print('PASS Retry wording and action follow what a retry can change')
