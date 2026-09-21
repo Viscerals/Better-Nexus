@@ -687,6 +687,11 @@ local function WishlistLabel(wl)
     if permanent==0 then
         for _,e in ipairs((wl and type(wl.lockedEchoes)=="table" and wl.lockedEchoes) or {}) do permanent=permanent+(tonumber(e.stacks or e.count) or 1) end
     end
+    -- The counts a Share of this source would really carry (for example the
+    -- saved permanent targets of an editor-made Wishlist). Read-only.
+    local controller=ControllerInstance()
+    local roles=type(controller.ShareSourceRoles)=="function" and controller.ShareSourceRoles(wl) or nil
+    if roles then count,permanent=roles.ordinary,roles.permanent end
     if permanent>0 then
         return string.format("[%s] %s  —  %d / 79 + %d / 6 permanent", kind, name, count, permanent)
     end
@@ -699,6 +704,13 @@ local function ShareStatusLine()
     if type(controller.ShareStatusText) ~= "function" then return nil end
     local ok, state, text = pcall(controller.ShareStatusText)
     if not ok or type(text) ~= "string" then return nil end
+    -- The role counts that this Share carries, so that a lost role is visible.
+    local okStatus, s = pcall(controller.ShareStatus)
+    if state ~= "refused" and okStatus and type(s) == "table"
+        and type(s.ordinaryCopies) == "number" and type(s.permanentCopies) == "number" then
+        text = text .. string.format(" Roles: %d ordinary + %d permanent Echo copies.",
+            s.ordinaryCopies, s.permanentCopies)
+    end
     local colour = state == "refused" and "|cffff6060"
         or (state == "preparing" or state == "stopped" or state == "saved") and "|cffffc040"
         or "|cff4dff80"
@@ -876,12 +888,29 @@ RefreshPostPopupPreview = function()
         or "Unnamed Echo Wishlist"
     local classToken=selectedClass or ControllerInstance().InferBuildClass(echoes) or ""
     postPopup._previewWishlist:SetText("|cffffd200"..wishlistName.."|r")
-    postPopup._previewSummary:SetText(string.format("|cff888888%d Echo rows in this source|r",#echoes))
+    -- The rows and role counts that a Share of this source carries. The
+    -- permanent rows of an editor-made Wishlist are not in its server copy.
+    local roles, rolesWhy = nil, nil
+    if type(ControllerInstance().ShareSourceRoles) == "function" then
+        roles, rolesWhy = ControllerInstance().ShareSourceRoles(wl)
+    end
+    if roles then
+        postPopup._previewSummary:SetText(string.format("|cff888888Shares %d ordinary + %d permanent Echo copies|r",
+            roles.ordinary, roles.permanent))
+        local shown = {}
+        for _, e in ipairs(echoes) do if not (e.locked == true or e.locked == 1) then shown[#shown + 1] = e end end
+        for _, e in ipairs(roles.lockedEchoes or {}) do
+            shown[#shown + 1] = {spellId=e.spellId, stacks=e.stacks, locked=true}
+        end
+        echoes = shown
+    else
+        postPopup._previewSummary:SetText("|cffff6060Roles not settled: Share Build states the reason|r")
+    end
     local cc=CLASS_COLOR[(classToken or ""):upper()] or {1,1,1}; postPopup._previewClass:SetTextColor(cc[1],cc[2],cc[3]); postPopup._previewClass:SetText("Posting as: "..(CLASS_LABEL[(classToken or ""):upper()] or classToken or "Select a class"))
     local child=postPopup._previewChild
     for i,row in ipairs(postPopup._previewRows or {}) do
         local e=echoes[i]
-        if e then row:ClearAllPoints(); row:SetPoint("TOPLEFT",child,"TOPLEFT",0,-(i-1)*22); row.icon:SetTexture(SpellIcon(e.spellId)); local stacks=tonumber(e.stacks) or 1; local suffix=stacks>1 and ("  x"..stacks) or ""; row.text:SetText(string.format("%02d. %s%s",i,EchoDisplayName(e.spellId),suffix)); row:Show() else row:Hide() end
+        if e then row:ClearAllPoints(); row:SetPoint("TOPLEFT",child,"TOPLEFT",0,-(i-1)*22); row.icon:SetTexture(SpellIcon(e.spellId)); local stacks=tonumber(e.stacks) or 1; local suffix=(stacks>1 and ("  x"..stacks) or "")..((e.locked==true or e.locked==1) and "  (permanent)" or ""); row.text:SetText(string.format("%02d. %s%s",i,EchoDisplayName(e.spellId),suffix)); row:Show() else row:Hide() end
     end
     child:SetHeight(math.max(1,#echoes*22)); pcall(function() postPopup._previewScroll:SetVerticalScroll(0) end)
 end

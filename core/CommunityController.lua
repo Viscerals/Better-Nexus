@@ -1753,6 +1753,129 @@ function Controller.New(options)
                     "permanent roles stated twice with different contents"
             end
         end
+        -- A Wishlist made in the Wishlist Editor keeps its permanent targets
+        -- beside its server copy: the server Wishlist holds only the ordinary
+        -- rows, and the plan's permanent design is saved with its local
+        -- assignment. The adapter binds that design to exactly one server
+        -- Wishlist slot (same rows and same name). For that exact slot the
+        -- design supplies the permanent rows, at any ordinary count. Evidence
+        -- that exists but does not match the source refuses; nothing is
+        -- guessed, and a source without a saved design is unchanged.
+        local function IdCopies(list)
+            local totals, parts = {}, {}
+            for _, e in ipairs(list) do
+                local k = tostring(e.spellId)
+                totals[k] = (totals[k] or 0) + (tonumber(e.stacks) or 0)
+            end
+            for k, copies in pairs(totals) do parts[#parts + 1] = k .. ":" .. tostring(copies) end
+            table.sort(parts)
+            return table.concat(parts, ",")
+        end
+        -- A quality that both lists state for one Echo ID must agree.
+        local function QualitiesAgree(a, b)
+            local stated = {}
+            for _, e in ipairs(a) do
+                if e.quality ~= nil then
+                    if stated[e.spellId] ~= nil and stated[e.spellId] ~= e.quality then return false end
+                    stated[e.spellId] = e.quality
+                end
+            end
+            for _, e in ipairs(b) do
+                if e.quality ~= nil and stated[e.spellId] ~= nil
+                    and stated[e.spellId] ~= e.quality then return false end
+            end
+            return true
+        end
+        local function PlanDesign()
+            local slot = tonumber(wl.slot)
+            if not slot or wl.sourceKind == "Saved Build" or not Adapter
+                or type(Adapter.GetWishlistCandidates) ~= "function" then
+                return nil
+            end
+            local okRead, known = pcall(Adapter.GetWishlistCandidates)
+            if not okRead or type(known) ~= "table" then
+                return false, "has a saved permanent-target plan that cannot be read.",
+                    "saved plan design unreadable"
+            end
+            local model = Nexus and Nexus.WishlistModel
+                and type(Nexus.WishlistModel.New) == "function" and Nexus.WishlistModel.New() or nil
+            local catalog = Adapter.Catalog and Adapter.Catalog() or nil
+            local found, unbound = {}, false
+            for _, c in ipairs(known) do
+                if type(c) == "table" and c.designTargets ~= nil then
+                    if tonumber(c.slot) == slot and c.mirrorUnavailable ~= true then
+                        found[#found + 1] = c
+                    elseif c.slot == nil and type(c.echoes) == "table"
+                        and tostring(c.name or "") == tostring(wl.name or "")
+                        and IdCopies(c.echoes) == IdCopies(ordinary) then
+                        -- The same plan rows and name, but the adapter cannot
+                        -- tell which server Wishlist this design belongs to.
+                        unbound = true
+                    end
+                end
+            end
+            if #found == 0 then
+                if unbound then
+                    return false, "matches a saved permanent-target plan, but Nexus cannot tell which server Wishlist that plan belongs to. "
+                        .. "Open the Wishlist in the Wishlist Editor and save it again.",
+                        "saved plan design not bound to one server Wishlist"
+                end
+                return nil
+            end
+            local design
+            for _, c in ipairs(found) do
+                if type(c.echoes) ~= "table" or IdCopies(c.echoes) ~= IdCopies(ordinary)
+                    or not QualitiesAgree(c.echoes, ordinary) then
+                    return false, "changed after its saved permanent-target plan was made, so the plan does not match it. "
+                        .. "Open the Wishlist in the Wishlist Editor and save it again.",
+                        "saved plan design does not match the source rows"
+                end
+                local entries = model and type(model.TargetMapEntries) == "function"
+                    and model.TargetMapEntries(c.designTargets, catalog) or nil
+                if not entries then
+                    return false, "has a saved permanent-target plan that cannot be read.",
+                        "saved plan design unreadable"
+                end
+                local rows = {}
+                for _, target in ipairs(entries) do
+                    local source = type(target.value) == "table" and type(target.value.rows) == "table"
+                        and target.value.rows or nil
+                    if source then
+                        for _, row in ipairs(source) do
+                            rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
+                                stacks=row.stacks, locked=true}
+                        end
+                    else
+                        rows[#rows + 1] = {spellId=target.spellId,
+                            quality=target.row and target.row.quality, stacks=target.copies, locked=true}
+                    end
+                end
+                local _, split = Split(rows)
+                if not split or #split == 0 then
+                    return false, "has a saved permanent-target plan that cannot be read.",
+                        "saved plan design unreadable"
+                end
+                if design and (Population(design) ~= Population(split)) then
+                    return false, "has two saved permanent-target plans that do not agree.",
+                        "saved plan designs disagree"
+                end
+                design = split
+            end
+            return design
+        end
+        local design, designMessage, designReason = PlanDesign()
+        if design == false then
+            return nil, label .. " " .. designMessage .. " Nothing was shared.", designReason
+        end
+        if design then
+            if #locked == 0 then
+                locked = design
+            elseif IdCopies(locked) ~= IdCopies(design) or not QualitiesAgree(locked, design) then
+                return nil, label .. " states permanent Echoes that differ from its saved permanent-target plan. "
+                    .. "Nothing was shared. Save the source again, then share it.",
+                    "permanent roles differ from the saved plan"
+            end
+        end
         local limits = evidence.SemanticLimits()
         local function Counts()
             local o = evidence.SemanticEnvelope(ordinary)
@@ -1880,6 +2003,19 @@ function Controller.New(options)
                     counts.ordinary, counts.locked, counts.total)
         end
         return ordinary, locked, counts
+    end
+
+    -- Read-only: the role counts that a Share of this source would carry, from
+    -- the same role reading as the Share itself. Nothing is saved or sent.
+    -- Returns {ordinary, permanent, lockedEchoes}; or nil and the message.
+    function M.ShareSourceRoles(wl)
+        if type(wl) ~= "table" then return nil, "no source selected" end
+        local rows = WishlistEchoes(wl)
+        if not rows or #rows == 0 then return nil, "the source has no Echoes" end
+        local ok, ordinary, locked, counts = pcall(ShareRoles, wl, rows)
+        if not ok then return nil, "Echo roles cannot be read" end
+        if not ordinary then return nil, locked end
+        return {ordinary=counts.ordinary, permanent=counts.locked, lockedEchoes=locked}
     end
 
     local function CanonicalFingerprintHash(text)
