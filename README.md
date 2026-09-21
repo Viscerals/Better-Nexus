@@ -69,11 +69,11 @@ python tools/build_package.py --label test.9999-abcdef0   # writes dist/Nexus-<l
   LoadoutPilot archive that this repository may not redistribute. Without it
   they are reported as **NOT RUN**, never as passed. If you hold the exact
   archive named in [THIRD_PARTY.md](THIRD_PARTY.md),
-  `python tools/prepare_pilot_reference.py <archive> <dir>` extracts the two
-  modules that `planner_reference` needs; pass `--reference <dir>`. That tool
-  does not extract `Memory/MemoryMode.lua`, which `orbs_policy` needs, so
-  `orbs_policy` stays NOT RUN and `--require-reference` fails until the tool is
-  corrected (tracked as a follow-up).
+  `python tools/prepare_pilot_reference.py <archive> <dir>` extracts the three
+  modules that these two tests load (keep `<dir>` outside the repository). Then
+  run `python tools/ci_check.py --reference <dir> --require-reference`; every
+  listed test must then run. The hosted CI has no such archive, so its result
+  stays "2 NOT RUN"; that is never a pass of those two tests.
 - Without `luajit`, `tools/run_prototype_tests.py --runtime lua54` can run the
   suite on Lua 5.4 with compatibility shims (needs `liblua5.4`). That result is
   labelled as such. It does not replace the LuaJIT run.
