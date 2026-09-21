@@ -372,9 +372,9 @@ function Lifecycle.New(options)
             end
             if Nexus.Updates and Nexus.Updates.Init then
                 Nexus.Updates.Init({
-                    notify=function(version)
-                        Print("Update " .. tostring(version)
-                            .. " is available. Installation is manual; open the Nexus update notice to copy the releases page.")
+                    notify=function(version, _, message)
+                        Print(type(message) == "string" and message
+                            or ("Nexus build " .. tostring(version) .. ": see /nexus update. Installation is manual."))
                     end,
                     refresh=function()
                         if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end

@@ -3,7 +3,8 @@
 
 Python 3.9+ and git. Run from a clean checkout:
 
-    python tools/build_package.py --label test.9999-abcdef0      # writes dist/Nexus-<label>.zip
+    python tools/build_package.py --label test.9999-abcdef0      # internal package: dist/Nexus-<label>.zip
+    python tools/build_package.py --label test.9999-abcdef0 --public   # package meant for a public test release
     python tools/build_package.py --check                        # content checks only; writes nothing
 
 The archive is built from the blobs of HEAD (not from working files, so the checkout's
@@ -15,7 +16,12 @@ Content rule, the same one the published test.9027 package used:
   * the six top-level files in TOP_LEVEL;
   * everything under core/, data/, logic/, third_party/, ui/;
   * nothing else: no tests, tools, docs, .github, SavedVariables, logs or archives.
-The only substitution is the display build label in data/Release.lua.
+Two declared substitutions in data/Release.lua, nothing else:
+  * buildLabel "source" -> the label;
+  * channel "development" -> "public-test" with --public, else "internal".
+Only a "public-test" package states its test number to peers (as <version>+test.<N>), so an
+internal or review package can never announce itself as a public update. tools/release_check.py
+verifies that label, version, tag, asset name and announced identity agree.
 A public release is a separate, human-authorized step (see RELEASE_SECURITY.md).
 """
 from __future__ import annotations
@@ -27,6 +33,8 @@ RUNTIME_DIRS = ['core', 'data', 'logic', 'third_party', 'ui']
 ALLOWED_SUFFIXES = {'.lua', '.toc', '.md'}
 LABEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$')
 SOURCE_LABEL = b'buildLabel = "source"'
+SOURCE_CHANNEL = b'channel = "development"'
+RUNTIME_LABEL = re.compile(r'^test\.[1-9]\d{0,9}-[0-9a-f]{7,12}$')
 
 
 def git(*args: str) -> bytes:
@@ -54,6 +62,8 @@ def check(files: dict[str, bytes]) -> list[str]:
         problems.append(f'packaged Lua file is not loaded by Nexus.toc: {name}')
     if files.get('data/Release.lua', b'').count(SOURCE_LABEL) != 1:
         problems.append('data/Release.lua must contain exactly one buildLabel = "source"')
+    if files.get('data/Release.lua', b'').count(SOURCE_CHANNEL) != 1:
+        problems.append('data/Release.lua must contain exactly one channel = "development"')
     return problems
 
 
@@ -61,13 +71,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--label', help='display build label, for example test.9999-abcdef0')
     ap.add_argument('--check', action='store_true', help='content checks only; no archive is written')
+    ap.add_argument('--public', action='store_true', help='mark the package as a public test build (it will state its test number to peers)')
     ap.add_argument('--allow-dirty', action='store_true', help='package HEAD although the working tree has changes')
     ns = ap.parse_args()
     if not ns.check and not ns.label:
         ap.error('give --label, or --check')
     if ns.label and not LABEL.match(ns.label):
         ap.error('label: letters, digits, dot, underscore and hyphen; at most 48 characters')
-    if ns.label and not re.match(r'^test\.\d+-[0-9a-f]{7,12}$', ns.label):
+    if ns.public and not (ns.label and RUNTIME_LABEL.match(ns.label)):
+        ap.error('--public needs a label of the form test.<number>-<7 to 12 hex digits>')
+    if ns.label and not RUNTIME_LABEL.match(ns.label):
         print('NOTE: the addon shows only labels of the form test.<number>-<7 to 12 hex digits>; this label will display as "source".')
 
     files = committed_files()
@@ -84,7 +97,7 @@ def main() -> int:
         print('The working tree has uncommitted changes. The archive is built from HEAD; commit first or pass --allow-dirty.')
         return 1
 
-    out = ROOT / 'dist' / f'Nexus-{ns.label}.zip'
+    out = ROOT / 'dist' / (f'Better-Nexus-{ns.label}.zip' if ns.public else f'Nexus-{ns.label}.zip')
     if out.exists():
         print(f'Refusing to overwrite {out}')
         return 1
@@ -93,6 +106,8 @@ def main() -> int:
         for name, data in files.items():
             if name == 'data/Release.lua':
                 data = data.replace(SOURCE_LABEL, f'buildLabel = "{ns.label}"'.encode())
+                channel = 'public-test' if ns.public else 'internal'
+                data = data.replace(SOURCE_CHANNEL, f'channel = "{channel}"'.encode())
             info = zipfile.ZipInfo('Nexus/' + name, (2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3   # same header on every platform

@@ -42,6 +42,10 @@ function Commands.New(options)
             Invoke(early=="loading" and "loading" or early=="orbs" and "orbs" or "help",nil,early)
             return
         end
+        if early=="update" or early=="updates" or early=="version" then
+            Invoke("update",nil,early)
+            return
+        end
         if not isInitialized() then
             if type(notInitialized) == "function" then notInitialized() end
             return

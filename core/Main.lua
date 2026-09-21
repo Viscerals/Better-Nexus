@@ -1115,6 +1115,13 @@ EnsureMainCommands = function()
                 CommandAnchor(settings, argument)
             end,
             help=function() CommandHelp() end,
+            update=function()
+                local status = Nexus.Updates and Nexus.Updates.Status and Nexus.Updates.Status()
+                if not status then Print("Update status is unavailable."); return end
+                Print(status.detail)
+                Print("Releases page: " .. status.url)
+                if Nexus.Panel and Nexus.Panel.ShowUpdateStatus then Nexus.Panel.ShowUpdateStatus() end
+            end,
         },
     })
     return MainCommands

@@ -37,7 +37,7 @@ local renderStats = {
 }
 
 StaticPopupDialogs["NEXUS_UPDATE_RELEASES"] = {
-    text = "Nexus %s was reported as available. Installation is manual. Copy the releases page below:",
+    text = "%s\n\nInstallation is manual. Nexus downloads and installs nothing. Copy the Releases page below:",
     button1 = "Close",
     hasEditBox = true,
     editBoxWidth = 380,
@@ -59,6 +59,17 @@ StaticPopupDialogs["NEXUS_UPDATE_RELEASES"] = {
 }
 
 local function SafeText(v) return v ~= nil and tostring(v) or "" end
+
+-- Read-only. Opening it marks the shown target as seen, so its chat notice is
+-- not repeated. It changes nothing else.
+function M.ShowUpdateStatus()
+    local updates = Nexus.Updates
+    if not (updates and updates.Status) then return false end
+    local status = updates.Status()
+    StaticPopup_Show("NEXUS_UPDATE_RELEASES", status.detail, status.url)
+    if status.candidate and updates.Dismiss then updates.Dismiss() end
+    return true, status
+end
 
 local function DefensiveCopy(value, seen)
     if type(value) ~= "table" then return value end
@@ -872,19 +883,23 @@ local function EnsureFrame()
             { text = "Orbs / Lost Memories", notCheckable = true,
               func = MenuAction(function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end) },
             {
-                text = (Nexus.Updates and Nexus.Updates.GetVisibleNotice
-                    and Nexus.Updates.GetVisibleNotice())
-                    and ("Update available: v" .. tostring(Nexus.Updates.GetVisibleNotice().version))
-                    or "No published update reported",
+                -- Never disabled: the Releases page and the installed build are
+                -- available with no report, no peer and no Community catalog.
+                text = (Nexus.Updates and Nexus.Updates.Status)
+                    and Nexus.Updates.Status().menu or "Open Releases page",
                 notCheckable = true,
-                disabled = not (Nexus.Updates and Nexus.Updates.GetVisibleNotice
-                    and Nexus.Updates.GetVisibleNotice()),
+                func = MenuAction(function() M.ShowUpdateStatus() end),
+            },
+            {
+                text = (Nexus.Updates and Nexus.Updates.Preference
+                    and Nexus.Updates.Preference() == "stable")
+                    and "Update notices: stable only (click for stable + test)"
+                    or "Update notices: stable + test builds (click for stable only)",
+                notCheckable = true,
                 func = MenuAction(function()
-                    local notice = Nexus.Updates and Nexus.Updates.GetVisibleNotice
-                        and Nexus.Updates.GetVisibleNotice()
-                    if notice then
-                        StaticPopup_Show("NEXUS_UPDATE_RELEASES", notice.version,
-                            Nexus.Updates.ReleaseUrl())
+                    if Nexus.Updates and Nexus.Updates.SetPreference then
+                        Nexus.Updates.SetPreference(
+                            Nexus.Updates.Preference() == "stable" and "test" or "stable")
                     end
                 end),
             },
@@ -966,8 +981,10 @@ local function EnsureFrame()
         local notice = M._lastModel and M._lastModel.updateNotice
         if notice then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Update available: v" .. tostring(notice.version), 1, 0.82, 0, true)
-            GameTooltip:AddLine("Click to copy the manual releases-page link.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine((notice.verified and "Update available: "
+                or "Newer build reported (unverified): ")
+                .. tostring(notice.display or notice.version), 1, 0.82, 0, true)
+            GameTooltip:AddLine("Open this menu for the manual Releases-page link.", 0.8, 0.8, 0.8, true)
         end
         GameTooltip:Show()
     end)
