@@ -60,6 +60,8 @@ jobs:
           second=$(sha256sum dist/Nexus-ci-check.zip | cut -d' ' -f1)
           rm -r dist
           test "$first" = "$second"
+      - name: Release identity consistency (fail-capable; publishes nothing)
+        run: python3 tools/release_selftest.py
       - name: No private or generated files are tracked
         run: |
           if git ls-files | grep -Ei '(^|/)(WTF|SavedVariables)(/|$)|\.(zip|bundle|log|bak)$'; then

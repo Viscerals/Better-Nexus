@@ -77,6 +77,7 @@ python tools/build_package.py --label test.9999-abcdef0   # writes dist/Nexus-<l
 - Without `luajit`, `tools/run_prototype_tests.py --runtime lua54` can run the
   suite on Lua 5.4 with compatibility shims (needs `liblua5.4`). That result is
   labelled as such. It does not replace the LuaJIT run.
+- Update notices and the one release identity (label, tag, asset, announced version) are described in [docs/UPDATE_NOTICES.md](docs/UPDATE_NOTICES.md). `python tools/release_selftest.py` proves that the release checks fail where they must.
 - `tools/build_package.py` never publishes. A public release is a separate,
   human-authorized step ([RELEASE_SECURITY.md](RELEASE_SECURITY.md)).
 - Offline tests use a synthetic harness. They do not prove behavior in the game
