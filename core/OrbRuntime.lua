@@ -44,7 +44,7 @@ local function init()
     run={state="IDLE",reason="Choose a maximum, then Start to use safe surplus copies for the assigned Wishlist.",running=false,spent=0,reserved=0,limit=0,recent={}}
     if type(config.pending)=="table" then
         run.pending=copy(config.pending);run.pending.restored=true;run.pending.since=now()
-        run.pending.refreshRequested=false;run.pending.baselineStamp=nil;run.pending.recoverySerial=nil
+        run.pending.refreshRequested=false;run.pending.baselineStamp=nil;run.pending.recoverySerial=nil;run.pending.recoveryMatched=nil
         run.state="RECOVERY";run.reason="An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open."
         run.recovery={kind="CHECKING",observing=false}
         run.spent=run.pending.spent or 0;run.reserved=run.pending.spendConfirmed and 0 or 1;run.limit=run.pending.limit or config.maxOrbs
@@ -71,7 +71,7 @@ end
 local function savePending()
     if run.pending then
         local p=copy(run.pending);p.context=nil;p.beforeSnapshot=nil;p.token=nil
-        p.spent=run.spent;p.limit=run.limit;p.since=nil;p.baselineStamp=nil;p.recoverySerial=nil
+        p.spent=run.spent;p.limit=run.limit;p.since=nil;p.baselineStamp=nil;p.recoverySerial=nil;p.recoveryMatched=nil
         config.pending=p
     else config.pending=nil end
     return write(config)
@@ -417,22 +417,30 @@ local function hasChoiceEvidence(p)
         and type(p.offeredKeys)=="table" and p.offeredKeys[p.selectedKey]==true
 end
 local function recoverObserve(s,p)
-    local observing=type(B.Watch)=="function" and B.Watch(s)==true
     if p.recoverySerial==nil then p.recoverySerial=s.selectionSerial or 0 end
-    -- finishResult owns the loadout-boundary pause; nothing is recorded across it.
-    if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then return "LOADOUT",observing end
+    -- finishResult owns the loadout-boundary pause. Nothing is observed or
+    -- recorded across it: the watcher is bound to the original loadout only, as
+    -- the live owner's context is.
+    if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+        if type(B.Unwatch)=="function" then B.Unwatch() end
+        return "LOADOUT",false
+    end
+    local observing=type(B.Watch)=="function" and B.Watch(s)==true
     if s.lockedKey~=p.lockedKey then return "PERMANENT_CHANGED",observing end
     if s.offerPending and #s.board==3 then
         run.recoveryFastUntil=now()+RECOVERY_FAST_WINDOW
         -- Tie an open offer to the saved action only on exact evidence: one Orb
         -- less than the receipt and ownership equal to the receipt, with or
         -- without the named source. A recorded offer must also be the same offer.
-        if s.charges~=p.chargesBefore-1 or not ownershipMatchesReceipt(s,p) then return "OFFER_UNMATCHED",observing end
         local firstSeen=not p.offerKey
-        if firstSeen and (p.selectionAttempted or s.hostPending) then
-            return p.selectionAttempted and "OFFER_UNMATCHED" or "CHECKING",observing
+        if s.charges~=p.chargesBefore-1 or not ownershipMatchesReceipt(s,p) or (firstSeen and p.selectionAttempted) then
+            -- A choice made on an unmatched offer is never evidence for this action.
+            p.recoveryMatched=nil;p.recoverySerial=math.max(p.recoverySerial,s.selectionSerial or 0)
+            return "OFFER_UNMATCHED",observing
         end
+        if firstSeen and s.hostPending then return "CHECKING",observing end
         if not observeLifecycle(s,p) then return "PAUSED",observing end
+        p.recoveryMatched=true
         if firstSeen and p.offerKey then
             p.offerSeenAfterReload=true
             if not p.spendConfirmed then p.spendConfirmed=true;run.spent=run.spent+1;run.reserved=0 end
@@ -440,6 +448,13 @@ local function recoverObserve(s,p)
         end
         return hasChoiceEvidence(p) and "WAIT_RESULT" or "OFFER_OPEN",observing
     end
+    -- The matched offer can close between two reads. A choice that the observer
+    -- recorded on that exact offer in this session is still consumed; any other
+    -- unconsumed observation is discarded.
+    if p.recoveryMatched and p.offerKey then
+        if not observeLifecycle(s,p) then return "PAUSED",observing end
+    end
+    p.recoverySerial=math.max(p.recoverySerial,s.selectionSerial or 0)
     if hasChoiceEvidence(p) then return "WAIT_RESULT",observing end
     if s.offerPending or #s.board>0 or s.hostPending then return "CHECKING",observing end
     if (s.charges==p.chargesBefore or s.charges==p.chargesBefore-1) and ownershipMatchesReceipt(s,p) then

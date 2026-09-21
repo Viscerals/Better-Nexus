@@ -97,6 +97,11 @@ also have the same offer identity. An offer first seen after the reload is
 marked `offerSeenAfterReload` in the receipt. This is the same evidence the live
 path uses for its first offer observation, checked more strictly.
 
+The watcher is bound to the original loadout only. A choice observed on an
+unmatched offer, or on another loadout, is discarded and is never evidence for
+the saved action. A choice recorded on the matched offer is still consumed when
+that offer closes between two recovery reads.
+
 | Recovery kind | Meaning | Text tells the player |
 |---|---|---|
 | `OFFER_OPEN`, observing | The matching offer is open | Choose in the game's offer window. Nexus records the choice and will not choose or spend. |
@@ -144,7 +149,8 @@ It also needs a panel control in `ui/OrbPanel.lua` and a Store field.
 
 Tests: `orb_review_reload_unobservable`, `orb_review_reload_manual_choice`,
 `orb_review_reload_offer_after_reload`, `orb_review_reload_offer_mismatch`,
-`orb_review_reload_no_observer`, `orb_review_reload_rejected_selection`.
+`orb_review_reload_no_observer`, `orb_review_reload_rejected_selection`,
+`orb_review_reload_other_loadout`, `orb_review_reload_choice_between_reads`.
 
 ## R3 - Reroll: outstanding need versus original Wishlist membership
 
