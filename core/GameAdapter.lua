@@ -2613,9 +2613,20 @@ local function CardBlocked(card)
     return card.isGuaranteed or card.isFrozen or card.isCarried or card.justFrozen
 end
 
+-- Text only. OrbRuntime owns the truthful reason for an Orb block: what the
+-- code can do about it and what it cannot. It changes no block.
+function A.OrbBlockReason(subject)
+    local runtime = Nexus.OrbRuntime
+    if not (runtime and type(runtime.BlockReason) == "function") then return nil end
+    local ok, reason = pcall(runtime.BlockReason, subject)
+    if ok and type(reason) == "string" and reason ~= "" then return reason end
+    return nil
+end
+
 function A.OrdinaryBoardAllowed()
     if (A.Orbs and A.Orbs.IsOwned()) or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary()) then
-        return false, "Orb refinement owns the current action; ordinary rolling is paused"
+        return false, A.OrbBlockReason("Ordinary rolling")
+            or "Orb refinement owns the current action; ordinary rolling is paused"
     end
     -- OrbAdapter owns the OrbService state classification (ServiceState). An
     -- absent OrbService is the explicit legacy capability and keeps ordinary
@@ -2756,7 +2767,7 @@ end
 ------------------------------------------------------------------------
 
 function A.Activate(slot)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     local level = UnitLevel("player") or 0
     if level ~= 1 and level ~= 80 then return false, "not level 1/80" end
@@ -2774,7 +2785,7 @@ function A.Activate(slot)
 end
 
 function A.Save(slot, name)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if (UnitLevel("player") or 0) ~= 80 then return false, "not level 80" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
@@ -2796,7 +2807,7 @@ end
 -- level-80-only for rolled loadouts) -- designing a wishlist isn't tied
 -- to being at cap. Same spacing guard as Save/Activate.
 function A.UploadWishlist(slot, name, echoes)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if type(echoes) ~= "table" or #echoes == 0 then return false, "no echoes" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
@@ -2856,7 +2867,7 @@ end
 local lastLockOpAt = -10
 
 function A.LockPerk(spellId)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     spellId = tonumber(spellId)
     if not spellId then return false, "invalid spellId" end
@@ -2873,7 +2884,7 @@ function A.LockPerk(spellId)
 end
 
 function A.UnlockPerk(spellId)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     spellId = tonumber(spellId)
     if not spellId then return false, "invalid spellId" end

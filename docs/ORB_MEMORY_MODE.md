@@ -74,6 +74,10 @@ the named source, unchanged permanent Echoes, and the original loadout. A manual
 choice observed in that offer, then the exact fresh ownership delta, settles the
 action. An action that ended while unobserved stays unresolved; the visible
 text says that it cannot be confirmed and that Recheck cannot settle it.
+The offer and the choice are also recorded at the moment of a manual choice
+(event-driven, through the same read-only observer), so the observation does not
+depend on the timed reads. A block that has no exit says so: the settlement path
+is only a proposal and is not built.
 
 Character/run/service/loadout change pauses the run. Resume rechecks the original
 context, targets, owner, and budget. A budget increase needs a new approval token

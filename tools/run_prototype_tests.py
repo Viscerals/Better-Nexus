@@ -40,6 +40,8 @@ NAMES += ['rolling_review_reroll_outstanding']
 NAMES += ['rolling_review_freeze_surplus']
 NAMES += ['orb_review_reload_other_loadout','orb_review_reload_choice_between_reads']
 NAMES += ['rolling_review_orb_state_recompute']
+NAMES += ['orb_review_reload_early_ownership','orb_review_reload_early_ownership_inexact','orb_review_reload_slow_cadence']
+NAMES += ['orb_review_reload_choice_event_guards','orb_review_reload_truthful_blocks']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

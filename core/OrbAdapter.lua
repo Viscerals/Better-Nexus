@@ -227,7 +227,7 @@ end
 -- The pending ID and exact visible offer tie this observation to a choice.
 -- The observer is read-only. It serves the action owner, or, after a reload,
 -- a passive recovery watcher that holds no action token and cannot mutate.
-local watcherContext
+local watcherContext,watcherNotify
 local function watchChoices(svc)
     if watched[svc] then return true end
     if type(hooksecurefunc)~="function" or type(svc)~="table" or type(svc.SelectPerk)~="function" then return false end
@@ -245,7 +245,16 @@ local function watchChoices(svc)
         end end
         if chosen then
             selectionSerial=selectionSerial+1
-            selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp}
+            -- onlyAction: the observed SelectPerk is the single host action in
+            -- flight, so "host pending" at this moment is this very choice.
+            local perks=c.pe.Perks
+            local only=perks.pendingBanishIndex==nil and perks.pendingFreezeIndex==nil
+                and perks.pendingReroll~=true and perks.pendingLockSpellId==nil and perks.pendingUnlockSpellId==nil
+            selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp,onlyAction=only}
+            -- Event-driven recovery observation: tell the passive watcher now,
+            -- so that it does not depend on its next timed read. Read-only
+            -- listener; an error in it never reaches the game's call.
+            if not owner and watcherNotify then pcall(watcherNotify) end
         end
     end)
     if ok then watched[svc]=true end
@@ -254,17 +263,17 @@ end
 -- Passive recovery watcher. It takes a snapshot that the caller just read, keeps
 -- only its context, and installs the read-only choice observer. It never sets
 -- the action owner, so Spend/Select/Rebind stay unavailable to the caller.
-function O.Watch(s)
+function O.Watch(s,notify)
     if type(s)~="table" or type(s.context)~="table" or type(s.context.svc)~="table" then
         return nil,"The current game state is unavailable."
     end
     if not watchChoices(s.context.svc) then
-        watcherContext=nil
+        watcherContext=nil;watcherNotify=nil
         return nil,"This client cannot observe a manual Echo choice."
     end
-    watcherContext=s.context;return true
+    watcherContext=s.context;watcherNotify=type(notify)=="function" and notify or nil;return true
 end
-function O.Unwatch() watcherContext=nil end
+function O.Unwatch() watcherContext=nil;watcherNotify=nil end
 function O.IsOwned() return owner~=nil end
 function O.Acquire(s)
     if owner then return nil,"Orb mode already owns an operation." end
