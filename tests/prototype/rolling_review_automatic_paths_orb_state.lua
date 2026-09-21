@@ -15,8 +15,11 @@ local function autoOn(H)
  check(m and m.auto==true,'fixture: ordinary automation is ON')
 end
 
--- Tome lever (level 1, StepArm).
+-- Tome lever (level 1, StepArm). Each run starts from fresh saved data; the
+-- blocked case runs BEFORE its control, so nothing the control sent or saved
+-- can keep the blocked case at zero.
 local function Lever(known)
+ NexusDB=nil;WishlistRealizerDB=nil
  local H=dofile('tests/prototype/harness.lua')
  ProjectEbonhold.OrbService={IsStateKnown=function()return known end,IsOfferPending=function()return false end}
  H.names[777001]='Tome of Gated Echo'
@@ -30,13 +33,14 @@ local function Lever(known)
  H.Advance(5,.1)
  return count(H,'toggle'),H
 end
-local sent=Lever(true)
-check(sent>=1,'control: with Orb state known the automatic lever step sends ('..sent..')')
 local blockedSent=Lever(false)
 check(blockedSent==0,'unknown Orb state: the automatic lever step sends nothing ('..blockedSent..')')
+local sent=Lever(true)
+check(sent>=1,'control: with Orb state known the automatic lever step sends ('..sent..')')
 
 -- Finished-run save (level 80, StepSave).
 local function Save(known)
+ NexusDB=nil;WishlistRealizerDB=nil
  local H=dofile('tests/prototype/harness.lua')
  local state=true
  ProjectEbonhold.OrbService={IsStateKnown=function()return state end,IsOfferPending=function()return false end}
@@ -52,13 +56,14 @@ local function Save(known)
  H.Advance(8,.1)
  return count(H,'save'),H
 end
-sent=Save(true)
-check(sent==1,'control: with Orb state known the finished run is saved once ('..sent..')')
 blockedSent=Save(false)
 check(blockedSent==0,'unknown Orb state: the finished run is not saved automatically ('..blockedSent..')')
+sent=Save(true)
+check(sent==1,'control: with Orb state known the finished run is saved once ('..sent..')')
 
 -- An existing OrbService without IsStateKnown blocks the same automatic path.
 do
+ NexusDB=nil;WishlistRealizerDB=nil
  local H=dofile('tests/prototype/harness.lua')
  ProjectEbonhold.OrbService={IsOfferPending=function()return false end}
  H.names[777001]='Tome of Gated Echo'

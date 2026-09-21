@@ -78,7 +78,9 @@ is the legacy exception. The case is now `MISSING_STATE` and blocks. The two
 mocks in `tests/prototype/automation.lua` were updated to what they stand for, a
 client that reports a known state (`IsStateKnown` returns true); none of its
 assertions changed. A throwing read of `ProjectEbonhold.OrbService` or of a
-member is now classified `MALFORMED` (blocked) instead of raising an error.
+member is now classified `MALFORMED` (blocked) instead of raising an error at
+the gate. (A table whose member lookup throws only on a later read can still
+raise an error out of `Take`; no mutation is sent in that case.)
 
 Tests: `tests/prototype/rolling_review_unknown_orb_state.lua` (the real
 `Take`, `Banish`, `Reroll`, `Freeze` and automatic rolling; red on `90b8e58`),
@@ -431,16 +433,19 @@ unknown, pending or not reportable:
 | `ToggleLever` | `StepArm`, 812 (disable) and 831 (re-enable) | `AutoAllowed()` (both inside the `automationAllowed` branch) | none found |
 | `Save` | `StepSave`, 2562 and 2673 | `AutoAllowed()` at the entry of `StepSave` | Saved Build controls of the game UI (not Nexus) |
 | `LockPerk`, `UnlockPerk` | automatic permanent-slot handling, 1891 / 1776 | `AutoAllowed()` checked again immediately before each send | Wishlist Editor lock switches reconcile through the same automatic handler |
-| `UploadWishlist` | none | - | `core/WishlistController.lua` 1111 (Wishlist Editor save), `core/CommunityController.lua` 3024 (copy a shared build) |
+| `UploadWishlist` | none | - | `core/WishlistController.lua` (Wishlist Editor save), `core/CommunityController.lua` (copy a shared build; the line moves when the Share work is merged) |
 | `Activate` | none | - | none in Nexus code |
 
 Test: `tests/prototype/rolling_review_automatic_paths_orb_state.lua` sends the
-automatic lever and save steps once with a known state (control) and zero times
-with an unknown state or a service without `IsStateKnown`. A mutant whose
-`AutoAllowed()` ignores the gate is red at the save step. The lever step stays
-at zero under that mutant too, because another existing guard also stops it; the
-lock and unlock paths are covered by reading (`AutoAllowed()` immediately
-before the send), not by a dedicated test.
+automatic lever and save steps zero times with an unknown state or a service
+without `IsStateKnown`, and once with a known state (control). Each run starts
+from fresh saved data, and each blocked case runs before its control. A mutant
+whose `AutoAllowed()` ignores the gate is red at the lever step and at the save
+step. (An earlier version ran the lever control first; saved state from that run
+kept the blocked lever case at zero under every mutant, and this document then
+wrongly named "another guard" as the cause. Found by the independent review of
+`08a3caa..d91fdd7`.) The lock and unlock paths are covered by reading
+(`AutoAllowed()` immediately before the send), not by a dedicated test.
 
 Manual user controls (`UploadWishlist` from the editor or a shared build) are
 not ordinary automation and were deliberately not gated.
