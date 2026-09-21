@@ -693,6 +693,18 @@ local function WishlistLabel(wl)
     return string.format("[%s] %s  —  %d / 79", kind, name, count)
 end
 
+-- The controller's one sentence for the latest Share, coloured by its state.
+local function ShareStatusLine()
+    local controller = ControllerInstance()
+    if type(controller.ShareStatusText) ~= "function" then return nil end
+    local ok, state, text = pcall(controller.ShareStatusText)
+    if not ok or type(text) ~= "string" then return nil end
+    local colour = state == "refused" and "|cffff6060"
+        or (state == "preparing" or state == "stopped" or state == "saved") and "|cffffc040"
+        or "|cff4dff80"
+    return colour .. text .. "|r", state
+end
+
 local function RefreshPostWishlistMenu()
     if not postWishlistMenu then return end
     for _, child in ipairs({postWishlistMenu:GetChildren()}) do child:Hide(); child:SetParent(nil) end
@@ -797,24 +809,18 @@ local function EnsurePostPopup()
             postTitleBox:_NexusRawText(), postDescBox:_NexusRawText(),
             wishlist, class)
         if not ok then
+            -- The form, its draft and its source stay. A retained earlier
+            -- Share keeps its own sentence; a refusal states its reason.
             print("|cffff6060Nexus:|r "..tostring(value))
+            p._shareStatus:SetText(outcome and ShareStatusLine()
+                or ("|cffff6060"..tostring(value).."|r"))
             return
         end
-        outcome=type(outcome)=="table" and outcome or {}
-        if outcome.localPending then
-            print("|cffffc040Nexus:|r Share accepted. Waiting to save locally; nothing has been sent.")
-        elseif outcome.sendCompleted then
-            print("|cff4dff80Nexus:|r Build saved locally and sent. Peer storage confirmation is unavailable.")
-        elseif outcome.queueAdmitted then
-            print("|cff4dff80Nexus:|r Build saved locally and queued for sharing. Peer storage confirmation is unavailable.")
-        elseif outcome.retryPending then
-            print("|cffffc040Nexus:|r Build saved locally; the Sync queue is full. One bounded retry is pending.")
-        else
-            print("|cffffc040Nexus:|r Build saved locally; not queued: "
-                ..tostring(outcome.queueReason or "Sync unavailable")..".")
-        end
+        -- One sentence, from the same owner that the status line reads.
+        print("Nexus: "..(ShareStatusLine() or "Share accepted."))
         ClearPostDescriptionFocus(); p:Hide(); M.Refresh()
     end)
+    local shareStatus=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); shareStatus:SetPoint("TOPLEFT",16,-396); shareStatus:SetSize(334,96); shareStatus:SetJustifyH("LEFT"); shareStatus:SetJustifyV("TOP"); p._shareStatus=shareStatus
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.ApplyFontTree then
         Nexus.LayoutMetrics.ApplyFontTree(p,"normal")
     end
@@ -827,6 +833,7 @@ end
 
 RefreshPostPopupPreview = function()
     if not postPopup or not postPopup:IsShown() then return end
+    postPopup._shareStatus:SetText(ShareStatusLine() or "")
     local wl, selectedClass = ControllerInstance().PostDraft()
     local echoes = ControllerInstance().WishlistEchoes(wl)
     if not wl or not echoes or #echoes==0 then
@@ -862,10 +869,19 @@ function M.ShowPostBuild()
         local _, classToken = UnitClass("player")
         selectedClass = (classToken and classToken ~= "UNKNOWN") and tostring(classToken) or ""
     end
+    -- A Share whose local save failed gives its approved draft back unchanged.
+    local failedTitle, failedDescription, failedSource, failedClass
+    if type(ControllerInstance().FailedShareDraft) == "function" then
+        failedTitle, failedDescription, failedSource, failedClass =
+            ControllerInstance().FailedShareDraft()
+    end
+    if failedTitle then
+        wl, selectedClass = failedSource or wl, failedClass or selectedClass
+    end
     ControllerInstance().BeginPostDraft(wl, selectedClass)
-    postTitleBox:_NexusSetRawText(
-        (wl and wl.name and wl.name~="") and wl.name or "")
-    postDescBox:_NexusSetRawText("")
+    postTitleBox:_NexusSetRawText(failedTitle
+        or ((wl and wl.name and wl.name~="") and wl.name or ""))
+    postDescBox:_NexusSetRawText(failedDescription or "")
     postDescBox:SetCursorPosition(0)
     postPopup._postDescScroll:SetVerticalScroll(0)
     local displayWishlistName = wl and DisplayRemoteText(
@@ -2564,6 +2580,12 @@ RenderSyncStatus = function(receiveCount)
     local syncStats = type(sync.Stats) == "function" and sync.Stats() or {}
     local preparing = syncStats.preparingRequest == true
     if preparing then syncStatusText:SetText("|cff7fd5ffPreparing sync data...|r") end
+    -- The latest Share of this session keeps its own line here, so its state
+    -- is still stated after the form or this window is closed and reopened.
+    local shareLine = ShareStatusLine()
+    if shareLine then
+        syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n" .. shareLine)
+    end
     if syncBtn then syncBtn:SetText(preparing and "Preparing..."
         or receiving and "Listening..." or "Sync Now") end
 end
