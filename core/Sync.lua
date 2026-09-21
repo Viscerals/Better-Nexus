@@ -954,6 +954,29 @@ function Sync.EnsureChannel()
     return false
 end
 
+-- A temporary channel join is asynchronous: the channel is listed a moment
+-- after the join call, so the lookup inside EnsureChannel can fail although
+-- the join succeeds. The join retry runs only inside the full Sync turn and
+-- needs JOIN_RETRY_INTERVAL of full-turn time, and every hold and yield of the
+-- deferred admission owner requires IsConnected. On a client whose catalog is
+-- kept busy by inbound records that retry never ran, so the client stayed
+-- unconnected for the whole session while channel traffic kept arriving.
+-- Channel traffic is itself proof of membership. This reads the channel list
+-- and records the slot the game reports, exactly like the "already in" branch
+-- of EnsureChannel. It never joins, sends, pumps or touches the catalog, it
+-- does nothing while an index is known, and it never reports a connection the
+-- game does not list. Every send still re-resolves its slot in
+-- ResolveSendChannel, and the join retry and its attempt cap are unchanged.
+function Sync.NoteChannelTraffic()
+    if channelIndex ~= nil and channelIndex > 0 then return false end
+    local idx = FindSyncChannel()
+    if not idx then return false end
+    channelIndex = idx
+    HideChannelFromChat()
+    LogEvent("CHAN","found '%s' at index %d from channel traffic", SYNC_CHANNEL, idx)
+    return true
+end
+
 function Sync.ChannelName()  return SYNC_CHANNEL end
 function Sync.ChannelIndex() return channelIndex end
 function Sync.IsConnected()  return channelIndex ~= nil and channelIndex > 0 end
@@ -3973,6 +3996,7 @@ Session = SessionFactory.New({
 })
 
 function Sync.HandleIncoming(text, sender)
+    Sync.NoteChannelTraffic()
     local accepted,reason=Inbound.HandleIncoming(text,sender)
     if accepted and Nexus.SyncWire then Nexus.SyncWire.ObservePeer(sender) end
     return accepted,reason

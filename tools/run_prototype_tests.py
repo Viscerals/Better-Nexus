@@ -31,6 +31,7 @@ NAMES += ['sync_deferred_admission','sync_deferred_transfer','sync_withdrawal_gu
 NAMES += ['sync_responder_turn','sync_responder_aged','sync_responder_inflight','sync_responder_recovery']
 NAMES += ['rolling_no_guarantee','rolling_no_guarantee_runtime','policy_compare']
 NAMES += ['diagnostics_gate_status']
+NAMES += ['sync_channel_late_join']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
