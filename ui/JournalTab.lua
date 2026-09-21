@@ -1423,7 +1423,13 @@ local function Install()
     pcall(function() PanelTemplates_TabResize(ourTab, 0) end)
     pcall(function() PanelTemplates_DeselectTab(ourTab) end)
     ourTab:Show()
-    ourTab:SetScript("OnClick", function() pcall(SelectOurTab) end)
+    -- A second click closes the Advisor again. When the host hides the
+    -- numbered tabs, no stock tab click is left to do that.
+    ourTab:SetScript("OnClick", function()
+        pcall(function()
+            if panel and panel:IsShown() then DeselectOurTab(true) else SelectOurTab() end
+        end)
+    end)
 
     -- Their tab numbering differs between client revisions. Never assume
     -- Tab1 is Loadouts: inspect the clicked tab after the stock handler runs.

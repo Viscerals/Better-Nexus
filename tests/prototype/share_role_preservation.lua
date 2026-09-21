@@ -193,7 +193,8 @@ local chosen={}
 for i,e in ipairs(candidate.echoes)do chosen[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks,locked=i>78}end
 assert(A.ConfirmWishlistRoles(candidate,chosen,'user-confirmed'),'fixture: real role confirmation')
 p._postGoBtn:Click()
-local expected={};for i,e in ipairs(chosen)do expected[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks,locked=e.locked or nil}end
+-- Review F9: the roles come from the adapter; ID, copies AND the quality that the selected source states stay the source's.
+local expected={};for i,e in ipairs(rows)do expected[i]={spellId=e.spellId,quality=e.quality,stacks=1,locked=i>78 or nil}end
 Accepted('confirmed design roles',expected,78,6)
 print('PASS confirmed-design roles resolve the same draft without retyping')
 
@@ -207,3 +208,70 @@ H.perks.serverBuildSlots[102].echoes=Rows(5,0,nil,200700)
 record=Accepted('selected second source',second,20,4)
 assert(record.title=='ROLES-SECOND','the record is the selected source, not the first listed one')
 print('PASS source change: selected source shared exactly; later source edit does not alter it')
+
+-- 9. Review F3: the server mirror that marks EVERY row false (80-85 copies). The adapter
+-- does not take that as role evidence. Unconfirmed: refused with the real counts.
+-- With the adapter's confirmed role choice for that exact content: shared as 78/6.
+rows=Rows(84,0,true)
+Boot(Slot('ROLES-ALL-FALSE',rows));before=H.Clone(H.perks.serverBuildSlots)
+p=Share('ROLES-ALL-FALSE','ROLES-ALL-FALSE')
+Refused('84 explicit false, unconfirmed',p,before,'84 ordinary and 0 permanent')
+A=Nexus.GameAdapter;candidate=nil
+for _,c in ipairs(A.GetWishlistCandidates())do if c.slot==102 then candidate=c end end
+assert(candidate,'fixture: the adapter lists the all-false mirror')
+chosen={};for i,e in ipairs(candidate.echoes)do chosen[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks,locked=i>78}end
+assert(A.ConfirmWishlistRoles(candidate,chosen,'user-confirmed'),'fixture: real role confirmation')
+p._postGoBtn:Click()
+expected={};for i,e in ipairs(rows)do expected[i]={spellId=e.spellId,quality=e.quality,stacks=1,locked=i>78 or nil}end
+Accepted('all-false mirror with confirmed roles',expected,78,6)
+print('PASS all-false mirror: refused unconfirmed, shared 78/6 when the adapter has the confirmed roles')
+
+-- 10. Review m10: confirmed roles of OTHER content on the same slot never apply to a stale selection.
+rows=Rows(84,0)
+Boot(Slot('ROLES-STALE',rows));before=nil
+Nexus.CommunityBuilds.ShowPostBuild();p=assert(NexusPostPopup)
+p._postWishlistBtn:Click();assert(MenuButton('ROLES-STALE')):Click()            -- the form now holds the first content
+local other=Rows(84,0,nil,200400)
+H.perks.serverBuildSlots[102].echoes=other;H.Notify();A=Nexus.GameAdapter;A.Poll()
+candidate=nil;for _,c in ipairs(A.GetWishlistCandidates())do if c.slot==102 then candidate=c end end
+chosen={};for i,e in ipairs(candidate.echoes)do chosen[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks,locked=i>78}end
+assert(candidate.echoes[1].spellId==200401 and A.ConfirmWishlistRoles(candidate,chosen,'user-confirmed'),'fixture: roles confirmed for the NEW content of the slot')
+p._postTitleBox:_NexusSetRawText('ROLES-STALE');printed={}
+local real=print;print=function(...)local t={};for i=1,select('#',...)do t[#t+1]=tostring((select(i,...)))end;printed[#printed+1]=table.concat(t,' ')end
+p._postGoBtn:Click();print=real
+assert(Nexus.CommunityBuilds.ShareStatus()==nil and #puts==0 and printed[#printed]:find('no permanent-Echo roles',1,true),'roles of other content are not applied: '..tostring(printed[#printed]))
+print('PASS stale selection: roles of other content on the same slot are refused')
+
+-- 11. Review F6: the adapter omitted an unreadable server row. The rest is not the complete source.
+rows=Rows(40,6);rows[46].spellId='not-a-number'
+Boot(Slot('ROLES-INCOMPLETE',rows));before=H.Clone(H.perks.serverBuildSlots)
+p=Share('ROLES-INCOMPLETE','ROLES-INCOMPLETE')
+Refused('unreadable server row',p,before,'cannot be read','not complete')
+print('PASS incomplete mirror is refused; no permanent row is dropped silently')
+
+-- 12. Review F7/F8/F12: every row is checked before acceptance; a hole hides nothing.
+Boot(Slot('UNUSED',Rows(3,0)))
+local function Direct(name,source,...)
+ local ok,message=Nexus.CommunityBuilds.PostCurrentWishlist(name,'Synthetic',source,'MAGE')
+ assert(ok==false and Nexus.CommunityBuilds.ShareStatus()==nil and #puts==0,name..': refused before acceptance, no catalog write')
+ for _,text in ipairs({...})do assert(tostring(message):find(text,1,true),name..': '..tostring(message))end
+ assert(not tostring(message):find('MALFORMED_ROW',1,true),name..': no raw catalog code')
+end
+local bad=Rows(10,2);bad[12].spellId=nil
+Direct('ROLES-BAD-ID',{name='ROLES-BAD-ID',echoes=bad},'cannot be read')
+bad=Rows(10,0);bad[3].stacks='2'
+Direct('ROLES-STRING-COPIES',{name='ROLES-STRING-COPIES',echoes=bad},'cannot be read')
+bad=Rows(10,0);bad[4].stacks=0
+Direct('ROLES-ZERO-COPIES',{name='ROLES-ZERO-COPIES',echoes=bad},'cannot be read')
+bad=Rows(10,0);bad[5].stacks=1.5
+Direct('ROLES-FRACTION',{name='ROLES-FRACTION',echoes=bad},'cannot be read')
+bad=Rows(10,0);bad[6].locked='yes'
+Direct('ROLES-TEXT-FLAG',{name='ROLES-TEXT-FLAG',echoes=bad},'cannot be read')
+bad=Rows(10,0);bad[12]={spellId=200012,quality=0,stacks=1}                       -- hole at 11
+Direct('ROLES-SPARSE',{name='ROLES-SPARSE',echoes=bad},'cannot be read')
+Direct('ROLES-BAD-PERMANENT',{name='ROLES-BAD-PERMANENT',echoes=Rows(10,0),lockedEchoes={{spellId=-4,stacks=1}}},'permanent Echo row that cannot be read')
+-- locked=1 is the second spelling the catalog's own envelope reads as permanent.
+local one=Rows(10,0);one[11]={spellId=200011,quality=1,stacks=2,locked=1}
+assert(Nexus.CommunityBuilds.PostCurrentWishlist('ROLES-ONE','Synthetic',{name='ROLES-ONE',echoes=one},'MAGE'))
+one[11].locked=true;Accepted('locked=1',one,10,2)
+print('PASS row validation before acceptance')

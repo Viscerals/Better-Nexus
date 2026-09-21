@@ -61,7 +61,15 @@ end
 -- 1. Lazy creation: nothing to attach to yet, and no frame is invented.
 assert(journal==nil and NexusJournalTab==nil and J.TryInstall()==false,'no journal yet: not installed, no frame created')
 assert(J.AttachmentStatus().mode=='none')
+-- Review F11: the first Install stops partway (synthetic failure after the tab and the panel exist).
+-- The next lifecycle call runs the Install body again; it must reuse every frame and hook.
+local realCreate,failedOnce=CreateFrame,false
+CreateFrame=function(kind,name,...)if name=='NexusJournalScroll' and not failedOnce then failedOnce=true;error('synthetic partial install failure')end;return realCreate(kind,name,...)end
 EJ.Show()
+assert(failedOnce and J.AttachmentStatus().installed==false and NexusJournalTab,'fixture: the Install body stopped after it created the tab')
+CreateFrame=realCreate
+EJ.Show()
+assert(J.AttachmentStatus().installed==true,'the second Install body completes')
 local tab=assert(NexusJournalTab,'first open installs the Advisor tab')
 Usable(tab)
 local status=J.AttachmentStatus()
@@ -120,7 +128,11 @@ print('PASS hub drag, close/reopen and UI scale')
 journal:Hide();assert(not tab:IsVisible() and not NexusJournalPanel:IsVisible(),'hidden with the journal on another progression tab')
 NexusJournalPanel:SetFrameLevel(1);journal:Show();Usable(tab)
 assert(NexusJournalPanel:GetFrameLevel()==journal:GetFrameLevel()+10 and not NexusJournalPanel:IsShown(),'back on Echoes: levels right, Advisor content closed until clicked')
-tab:Click();assert(NexusJournalPanel:IsVisible(),'Advisor content opens from the tab');journal:Hide();journal:Show()
+tab:Click();assert(NexusJournalPanel:IsVisible(),'Advisor content opens from the tab')
+-- Review F13: with the numbered tabs hidden no stock click closes the Advisor; a second click on its own tab does.
+tab:Click();assert(not NexusJournalPanel:IsShown() and tab:IsVisible(),'a second click closes the Advisor content')
+tab:Click();assert(NexusJournalPanel:IsVisible());journal:Hide();journal:Show()
+assert(not NexusJournalPanel:IsShown(),'reopening the journal starts with the Advisor content closed')
 -- The host restores the numbered tabs (standalone again): event-driven, without a reopen.
 for _,t in ipairs(tabs)do t:Show()end
 status=J.AttachmentStatus();assert(status.mode=='journal-tabs' and status.anchor=='ProjectEbonholdEchoJournalTab3','re-anchored when the numbered tabs returned')

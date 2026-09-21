@@ -809,6 +809,7 @@ function Controller.New(options)
                         name=live.name or (kind .. " " .. tostring(slot)),
                         count=#live.echoes,echoes=live.echoes,
                         active=slots.activeSlot == slot,sourceKind=kind,
+                        roleSourceValid=live.roleSourceValid,
                     }
                     seen[tostring(slot)] = true
                 end
@@ -1656,12 +1657,35 @@ function Controller.New(options)
             return nil, "Echo role validation is unavailable", "role validator unavailable"
         end
         local label = tostring(wl and wl.name ~= "" and wl.name or "This source")
+        if wl.roleSourceValid == false then
+            -- The adapter omitted a server row that it could not read. The
+            -- remaining rows are not the complete source.
+            return nil, label .. " contains a server Echo row that cannot be read, so its copies are not complete. "
+                .. "Nothing was shared.", "source mirror incomplete (roleSourceValid=false)"
+        end
+        local function Whole(value, minimum)
+            return type(value) == "number" and value >= minimum
+                and value == math.floor(value) and value < math.huge
+        end
+        -- Every row of a dense list, or nothing: a hole must not hide rows.
+        local function Dense(list)
+            local count = 0
+            for index in pairs(list) do
+                if type(index) == "number" then count = count + 1 end
+            end
+            return count == #list
+        end
         local function Split(list)
             local ordinary, locked, unstated = {}, {}, 0
+            if type(list) ~= "table" or not Dense(list) then return nil end
             for _, e in ipairs(list) do
                 if type(e) ~= "table" then return nil end
                 local copy = {spellId=e.spellId or e.id, quality=e.quality,
                     stacks=e.stacks or e.count or 1}
+                if not Whole(copy.spellId, 1) or not Whole(copy.stacks, 1)
+                    or (copy.quality ~= nil and not Whole(copy.quality, 0)) then
+                    return nil
+                end
                 if e.locked == true or e.locked == 1 then
                     copy.locked = true
                     locked[#locked + 1] = copy
@@ -1692,14 +1716,17 @@ function Controller.New(options)
                 "malformed source row"
         end
         if type(wl.lockedEchoes) == "table" and #wl.lockedEchoes > 0 then
-            local separate = {}
-            for _, e in ipairs(wl.lockedEchoes) do
-                if type(e) ~= "table" then
-                    return nil, label .. " contains a permanent Echo row that cannot be read. Nothing was shared.",
-                        "malformed permanent row"
-                end
-                separate[#separate + 1] = {spellId=e.spellId or e.id,
-                    quality=e.quality, stacks=e.stacks or e.count or 1, locked=true}
+            -- Same row checks as the inline list; every row here is permanent.
+            local forced = {}
+            for index, e in pairs(wl.lockedEchoes) do
+                forced[index] = type(e) == "table" and {spellId=e.spellId or e.id,
+                    quality=e.quality, stacks=e.stacks or e.count or 1,
+                    locked=true} or e
+            end
+            local _, separate = Split(forced)
+            if not separate then
+                return nil, label .. " contains a permanent Echo row that cannot be read. Nothing was shared.",
+                    "malformed permanent row"
             end
             -- The same permanent population stated twice is counted once. Two
             -- different statements give no exact answer; nothing is guessed.
@@ -1723,8 +1750,10 @@ function Controller.New(options)
             return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
                 "malformed copy count"
         end
-        if #locked == 0 and unstated > 0 and counts.total > limits.ordinary then
-            -- No role is stated and the copies cannot all be ordinary. Only the
+        if #locked == 0 and counts.total > limits.ordinary then
+            -- No permanent role is stated and the copies cannot all be ordinary.
+            -- This includes the server mirror that marks every row false: the
+            -- adapter does not take that as role evidence either. Only the
             -- adapter's own read-only evidence (a content-matched role choice or
             -- the exact verified active loadout) may supply the roles.
             local candidate = {slot=wl.slot, name=wl.name, count=#ordinary,
@@ -1764,8 +1793,9 @@ function Controller.New(options)
             local combined = {}
             for _, e in ipairs(resolvedOrdinary or {}) do combined[#combined + 1] = e end
             for _, e in ipairs(resolvedLocked or {}) do combined[#combined + 1] = e end
-            if not resolvedOrdinary or stillUnstated ~= 0 or #resolvedLocked == 0
-                or Ids(combined) ~= Ids(ordinary) then
+            local settled = resolvedOrdinary and stillUnstated == 0
+                and #resolvedLocked > 0 and Ids(combined) == Ids(ordinary)
+            if not settled and unstated > 0 then
                 return nil, string.format("%s has %d Echo copies and no permanent-Echo roles. "
                     .. "A Share holds at most %d ordinary and %d permanent copies, so the roles are needed. Missing evidence: %s. "
                     .. "Choose the permanent Echoes in the Wishlist Editor, then share again. "
@@ -1774,12 +1804,32 @@ function Controller.New(options)
                     tostring(why or "no role choice is saved for this exact content")),
                     "roles unresolved: " .. tostring(why or state or "no role evidence")
             end
-            ordinary, locked = resolvedOrdinary, resolvedLocked
-            counts = Counts()
-            if not counts then
-                return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
-                    "malformed copy count"
+            if settled then
+                -- The roles come from the adapter. A quality that the selected
+                -- source states for an ID stays the source's own.
+                local stated, mixed = {}, {}
+                for _, e in ipairs(ordinary) do
+                    if e.quality ~= nil then
+                        if stated[e.spellId] ~= nil and stated[e.spellId] ~= e.quality then
+                            mixed[e.spellId] = true
+                        end
+                        stated[e.spellId] = e.quality
+                    end
+                end
+                for _, e in ipairs(combined) do
+                    if stated[e.spellId] ~= nil and not mixed[e.spellId] then
+                        e.quality = stated[e.spellId]
+                    end
+                end
+                ordinary, locked = resolvedOrdinary, resolvedLocked
+                counts = Counts()
+                if not counts then
+                    return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
+                        "malformed copy count"
+                end
             end
+            -- Unsettled with every row explicitly ordinary: the envelope
+            -- refusal below states the real counts.
         end
         if #ordinary == 0 then
             return nil, label .. " has no ordinary Echoes to share.", "no ordinary Echoes"
@@ -2218,6 +2268,7 @@ function Controller.New(options)
                     count = #live.echoes,
                     echoes = live.echoes,
                     active = slots.activeSlot == wl.slot,
+                    roleSourceValid = live.roleSourceValid,
                 }
                 sourceEchoes = wl.echoes
             end
@@ -2316,7 +2367,7 @@ function Controller.New(options)
                     or "Share stopped: the player or catalog changed."
                 lastShareOutcome = outcome
                 -- The approved text and source stay available to the form.
-                failedShareDraft = not committed and {id=id,title=title,
+                failedShareDraft = not committed and SameOwner() and {id=id,title=title,
                     description=description,wishlist=selectedWishlist,
                     class=selectedClass} or nil
                 if operation.notify then notify("Nexus: " .. tostring(select(2, M.ShareStatusText(id)))) end
@@ -2471,8 +2522,10 @@ function Controller.New(options)
                 copy[key] = value
             end
         end
-        for key, value in pairs(type(remote) == "table" and remote or {}) do
-            copy[key] = value
+        -- Sync answers an unknown ID with its latest Share of any build. Only
+        -- the operation of this exact build may describe this build.
+        if type(remote) == "table" and tostring(remote.id) == tostring(current.id) then
+            for key, value in pairs(remote) do copy[key] = value end
         end
         copy.peerStored = nil
         copy.confirmation = "unavailable"
@@ -2499,21 +2552,33 @@ function Controller.New(options)
         end
         if s.localSaved ~= true then
             local why = tostring(s.queueReason or "local save failed")
-            if why == "SEMANTIC_ENVELOPE" then
+            local evidence = Nexus and Nexus.LoadoutEvidence
+            local limits = evidence and type(evidence.SemanticLimits) == "function"
+                and evidence.SemanticLimits() or nil
+            if why == "SEMANTIC_ENVELOPE" and limits then
                 why = string.format("the local catalog refused %d ordinary and %d permanent Echo copies; "
-                    .. "a Share holds at most 79 ordinary, 6 permanent and 85 total",
-                    tonumber(s.ordinaryCopies) or 0, tonumber(s.permanentCopies) or 0)
+                    .. "a Share holds at most %d ordinary, %d permanent and %d total",
+                    tonumber(s.ordinaryCopies) or 0, tonumber(s.permanentCopies) or 0,
+                    limits.ordinary, limits.locked, limits.total)
             end
-            return "refused", "Not shared: " .. name .. " — " .. why
-                .. ". Nothing was saved or sent. The Share form keeps the title, description and source."
+            -- The draft statement is made only when the form really has it.
+            local kept = failedShareDraft and failedShareDraft.id == s.id
+            return "refused", "Not shared: " .. name .. " — " .. why:gsub("%.+$", "")
+                .. ". Nothing was saved or sent."
+                .. (kept and " The Share form keeps the title, description and source." or "")
         end
         if s.sendCompleted == true then
             return "sent", "Sent " .. name .. " — peer receipt not confirmed."
         end
         if s.terminal == true then
-            return "stopped", "Saved " .. name .. " locally — not sent: "
-                .. tostring(s.outcome or s.queueReason or "stopped")
-                .. ". Open the build to see if Retry Share is available."
+            local why = tostring(s.outcome or "stopped")
+            if type(s.reason) == "string" and s.reason ~= "" and s.reason ~= "none"
+                and s.reason ~= why then
+                why = why .. " (" .. s.reason .. ")"
+            end
+            local retryable = M.CanRetryShare(s.id)
+            return "stopped", "Saved " .. name .. " locally — not sent: " .. why
+                .. (retryable and ". Open the build to use Retry Share." or ".")
         end
         if s.retryPending == true then
             return "queued", "Saved " .. name .. " locally — the Sync queue is full. One bounded retry is pending."
@@ -2522,7 +2587,7 @@ function Controller.New(options)
             return "queued", "Saved " .. name .. " locally — queued for sharing."
         end
         return "saved", "Saved " .. name .. " locally — not queued: "
-            .. tostring(s.queueReason or "Sync unavailable") .. "."
+            .. tostring(s.queueReason or "Sync unavailable"):gsub("%.+$", "") .. "."
     end
 
     -- The approved draft of a Share whose local save failed, for the form.
@@ -2599,7 +2664,7 @@ function Controller.New(options)
         outcome.sendCompleted = outcome.sendCompleted == true
         outcome.peerStored = nil
         outcome.confirmation = "unavailable"
-        lastShareOutcome = outcome
+        if not pendingShare then lastShareOutcome = outcome end
         local started = outcome.queueAdmitted or outcome.retryPending
         PeerRecord("share_retry_action", {id=id,
             outcome=started and "started" or "rejected",
