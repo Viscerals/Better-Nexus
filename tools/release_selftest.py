@@ -4,7 +4,8 @@
     python tools/release_selftest.py
 
 It builds one public and one internal package of HEAD into dist/, runs tools/release_check.py on
-consistent input (must pass) and on eight inconsistent inputs (each must fail), then deletes dist/.
+consistent input (must pass) and on inconsistent inputs (each must fail), then deletes dist/.
+It compares exit codes. It does not exercise --require-newer, because a CI checkout has no tags.
 """
 from __future__ import annotations
 import pathlib, re, shutil, subprocess, sys, zipfile
@@ -55,6 +56,24 @@ def main() -> int:
         expect('malformed label', run('tools/release_check.py', '--label', 'test.012-' + commit[:7]), False)
         sums.write_text('0' * 64 + f'  {public.name}\n', encoding='utf-8')
         expect('checksum file that does not match', run('tools/release_check.py', '--label', label, '--zip', str(public), '--sums', str(sums)), False)
+        expect('--sums without --zip', run('tools/release_check.py', '--label', label, '--sums', str(sums)), False)
+
+        # Crafted archives: a wrong packaged version, and an entry outside Nexus/.
+        def rewrite(target, change, extra=False):
+            target.parent.mkdir()
+            with zipfile.ZipFile(public) as z, zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as out:
+                for item in z.infolist():
+                    out.writestr(item, change(item.filename, z.read(item.filename)))
+                if extra:
+                    out.writestr('README-outside.txt', b'outside')
+
+        wrong_version = dist / 'wrong-version' / public.name
+        rewrite(wrong_version, lambda n, d: d.replace(f'version = "{version}"'.encode(), b'version = "9.9.9"')
+                if n.endswith('data/Release.lua') else d)
+        expect('packaged version that differs from the repository', run('tools/release_check.py', '--label', label, '--zip', str(wrong_version)), False)
+        outside = dist / 'outside' / public.name
+        rewrite(outside, lambda n, d: d, extra=True)
+        expect('entry outside Nexus/', run('tools/release_check.py', '--label', label, '--zip', str(outside)), False)
         expect('--public without a displayable label', run('tools/build_package.py', '--label', 'nightly', '--public', '--allow-dirty'), False)
 
         with zipfile.ZipFile(public) as z:

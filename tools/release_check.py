@@ -83,7 +83,11 @@ def main() -> int:
     if asset and not ns.internal and asset != identity['asset']:
         problems.append(f'asset {asset} differs from the derived asset {identity["asset"]}')
 
+    if ns.sums and not ns.zip:
+        problems.append('--sums needs --zip; no checksum was verified')
     if ns.require_newer:
+        if not subprocess.check_output(['git', 'tag', '--list'], cwd=ROOT, text=True).split():
+            problems.append('--require-newer: this clone has no tags at all; fetch tags first (git fetch --tags)')
         tags = subprocess.check_output(['git', 'tag', '--list', f'v{version}-test.*'], cwd=ROOT, text=True).split()
         numbers = [int(t.rsplit('.', 1)[1]) for t in tags if t.rsplit('.', 1)[1].isdigit()]
         if numbers and identity['test'] <= max(numbers):

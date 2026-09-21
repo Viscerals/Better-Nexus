@@ -29,16 +29,16 @@ end
 -- every visible label read. The test number orders builds of one release
 -- series. The commit suffix of the label names the source; it never orders.
 --   channel  "stable" | "public-test" | "internal" | "development"
---   announce the version this client states to peers. Only a public test
---            package adds its test number, as SemVer build metadata, which
---            existing peers already accept in the same field.
+--   announce the version this client states to peers, with SemVer build
+--            metadata that existing peers already accept in the same field:
+--            +test.<N> (public test), +dev, +internal, or none (stable).
 local MAX_TEST = 2147483647
 function Nexus.ReleaseIdentity()
     local release = type(Nexus.Release) == "table" and Nexus.Release or {}
     local version = type(release.version) == "string" and release.version or "0.0.0"
     local label = Nexus.RuntimeBuildLabel()
     local digits = label ~= "source" and label:match("^test%.(%d+)%-") or nil
-    local test = digits and #digits <= 10 and tonumber(digits) or nil
+    local test = digits and #digits <= 10 and digits:sub(1, 1) ~= "0" and tonumber(digits) or nil
     if test and (test < 1 or test > MAX_TEST) then test = nil end
     local installedChannel = "development"
     if release.channel == "stable" and not version:find("-", 1, true) then
@@ -47,11 +47,14 @@ function Nexus.ReleaseIdentity()
         installedChannel = release.channel == "public-test" and test and "public-test" or "internal"
     end
     local channel = installedChannel
+    -- Only a public test package states a test number. A development or
+    -- internal copy marks its version, so a raised version in a checkout can
+    -- never be read by a peer as a published release. A stable release states
+    -- the plain version.
     local announce = version
-    if channel == "public-test" then
-        local stated = version .. "+test." .. tostring(test)
-        if #stated <= 32 then announce = stated end
-    end
+    local mark = channel == "public-test" and ("+test." .. tostring(test))
+        or channel == "development" and "+dev" or channel == "internal" and "+internal" or ""
+    if #(version .. mark) <= 32 then announce = version .. mark end
     return {
         version = version, label = label, test = test, channel = channel,
         announce = announce,

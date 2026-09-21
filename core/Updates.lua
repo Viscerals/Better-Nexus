@@ -22,6 +22,10 @@ local notifiedTargets = {}            -- session only: one chat notice per targe
 local sessionBest = {}                -- best peer report of this session, per kind
 local peerObservations, peerObservationOrder = {}, {}
 local MAX_PEER_OBSERVATIONS = 32
+local MAX_SESSION_NOTICES = 3         -- chat lines about updates per session
+local MAX_SESSION_ADVISORIES = 8      -- stored peer-advisory changes per session
+local MAX_DISMISSED = 8
+local sessionNotices, sessionAdvisories = 0, 0
 local MAX_TEST = 2147483647
 local BUNDLED_AUTHORITY = "bundled-release"
 local BUNDLED_UNAVAILABLE = "bundled-release-unavailable"
@@ -60,11 +64,31 @@ local function Installed()
         announce=version, display=version}
 end
 
--- Release series without build metadata: "1.20.0-beta.1".
+-- Release series without build metadata, rebuilt from numbers and one fixed
+-- word: "1.20.0" or "1.20.0-beta.1". nil for every other shape. Free-form
+-- prerelease text (any other word, more identifiers, a host name) is never a
+-- series, so no text chosen by a peer is ever shown or stored.
+local SERIES_WORD = {alpha=true, beta=true, rc=true}
 local function Series(parsed)
     local text = string.format("%d.%d.%d", parsed.major, parsed.minor, parsed.patch)
-    if parsed.prereleaseText then text = text .. "-" .. parsed.prereleaseText end
-    return text
+    local pre = parsed.prerelease
+    if pre == nil then return text end
+    if type(pre) ~= "table" or #pre ~= 2 or not SERIES_WORD[pre[1].text]
+        or not pre[2].numeric or #pre[2].text > 4 then return nil end
+    return text .. "-" .. pre[1].text .. "." .. pre[2].text
+end
+
+-- What a PEER may report. Anything else is kept as a bounded diagnostic
+-- observation only:
+--   stable release     X.Y.Z             no prerelease, no build metadata
+--   public test build  X.Y.Z-word.N+test.M
+-- A prerelease without a public test number is not a public build: older
+-- published lines (for example 1.20.0-beta.3.community-off), internal packages
+-- and development checkouts all state one, and none of them is an upgrade.
+local function PeerReportable(parsed, test)
+    if not Series(parsed) then return false end
+    if parsed.prerelease == nil then return parsed.build == nil end
+    return test ~= nil
 end
 
 -- Exactly "test.<number>" as build metadata states a public test number.
@@ -136,9 +160,10 @@ local function Better(a, b)
 end
 
 local function Candidate(parsed, test, authority, observedAt, anyChannel)
+    local series = Series(parsed)
+    if not series then return nil end
     local kind = NewerKind(parsed, test)
     if not kind or not (anyChannel or Wanted(kind)) then return nil end
-    local series = Series(parsed)
     return {
         version=series, test=test, kind=kind, authority=authority,
         source=authority, observedAt=tonumber(observedAt) or 0,
@@ -192,6 +217,7 @@ local function SanitizeStoredNotice(bundled)
     bundled.observedAt = stored.observedAt
 end
 
+-- (The header comment above states the two evidence kinds.)
 -- The stored advisory has one slot for the best reported test build and one
 -- for the best reported stable release, so a stable-only user is never shown
 -- a test build and never loses a stable report behind one. A slot holds a
@@ -212,7 +238,9 @@ local function StoredSlot(kind, anyChannel)
         and Parse(stored.version) or nil
     local test = type(stored) == "table" and tonumber(stored.test) or nil
     if test and (test < 1 or test > MAX_TEST or test ~= math.floor(test)) then parsed = nil end
-    local candidate = parsed and not parsed.build
+    local reportable = parsed and not parsed.build and Series(parsed) ~= nil
+        and (parsed.prerelease == nil or test ~= nil)
+    local candidate = reportable
         and Candidate(parsed, test, PEER_ADVISORY, stored.observedAt, true) or nil
     if not candidate or candidate.kind ~= kind then
         root[SLOT[kind]] = nil               -- malformed, or no longer newer than this installation
@@ -226,8 +254,8 @@ local function StoredAdvisory()
     local test, stable = StoredSlot("test"), StoredSlot("stable")
     -- What peers state in this session is shown before a report that was only
     -- kept from an earlier session: an old false report must not hide it.
-    local liveTest = test and sessionBest.test and sessionBest.test.key == test.key
-    local liveStable = stable and sessionBest.stable and sessionBest.stable.key == stable.key
+    local liveTest = (test and sessionBest.test and sessionBest.test.key == test.key) and true or false
+    local liveStable = (stable and sessionBest.stable and sessionBest.stable.key == stable.key) and true or false
     if liveTest ~= liveStable then return liveTest and test or stable end
     if test and stable then return Better(test, stable) and test or stable end
     return test or stable
@@ -256,16 +284,30 @@ local function Message(candidate)
         .. " /nexus update shows the Releases page."
 end
 
+-- Seen targets, newest last, bounded. A target that was dismissed stays
+-- dismissed when a later one is dismissed too.
+local function Dismissed(key)
+    NexusDB = NexusDB or {}
+    local list = NexusDB.updateDismissed
+    if type(list) == "string" then list = {list}; NexusDB.updateDismissed = list end
+    if type(list) ~= "table" then return false end
+    for i = 1, math.min(#list, MAX_DISMISSED) do
+        if list[i] == key then return true end
+    end
+    return false
+end
+
 local function MaybeNotify(candidate)
     if type(candidate) ~= "table" or not Updates.IsEnabled() then return false end
-    if notifiedTargets[candidate.key] then return false end
-    NexusDB = NexusDB or {}
-    if NexusDB.updateDismissed == candidate.key then return false end
+    if notifiedTargets[candidate.key] or Dismissed(candidate.key) then return false end
+    -- A peer that raises its number in every request cannot fill the chat.
+    if sessionNotices >= MAX_SESSION_NOTICES then return false end
     if type(callbacks.notify) == "function" then
         local ok = pcall(callbacks.notify, candidate.display, Updates.ReleaseUrl(), Message(candidate))
         if not ok then return false end
     end
     notifiedTargets[candidate.key] = true
+    sessionNotices = sessionNotices + 1
     return true
 end
 
@@ -279,6 +321,7 @@ end
 function Updates.Init(nextCallbacks)
     callbacks = type(nextCallbacks) == "table" and nextCallbacks or {}
     notifiedTargets, sessionBest = {}, {}
+    sessionNotices, sessionAdvisories = 0, 0
     peerObservations, peerObservationOrder = {}, {}
     local settings = Settings()
     if settings.updateNotifications == nil then settings.updateNotifications = true end
@@ -310,6 +353,7 @@ function Updates.Observe(version, source)
     }
 
     local test = TestNumber(parsed)
+    if not PeerReportable(parsed, test) then return true, "peer observation" end
     local candidate = Candidate(parsed, test, PEER_ADVISORY, time and time() or 0, true)
     if not candidate then return true, "peer observation" end
     -- The best report of THIS session replaces a report kept from an earlier
@@ -319,6 +363,10 @@ function Updates.Observe(version, source)
     if best and not Better(candidate, best) then
         return true, "peer observation"
     end
+    if sessionAdvisories >= MAX_SESSION_ADVISORIES then
+        return true, "peer observation"          -- bounded: no further state change this session
+    end
+    sessionAdvisories = sessionAdvisories + 1
     sessionBest[candidate.kind] = candidate
     NexusDB = NexusDB or {}
     local root = type(NexusDB.updateAdvisory) == "table"
@@ -407,8 +455,12 @@ end
 function Updates.Dismiss()
     local candidate = Current()
     if not candidate then return false end
-    NexusDB = NexusDB or {}
-    NexusDB.updateDismissed = candidate.key
+    if not Dismissed(candidate.key) then
+        local list = type(NexusDB.updateDismissed) == "table" and NexusDB.updateDismissed or {}
+        list[#list + 1] = candidate.key
+        while #list > MAX_DISMISSED do table.remove(list, 1) end
+        NexusDB.updateDismissed = list
+    end
     notifiedTargets[candidate.key] = true
     return true
 end

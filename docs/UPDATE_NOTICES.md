@@ -22,25 +22,28 @@ Changing `published`, a label or a parser flag would not have fixed any of these
 | Order inside a series | the number `N`, compared numerically. The commit suffix names the source and never orders. | 9 < 10 < 9999 < 10000 |
 | Git tag | `v<version>-test.<N>` | `v1.20.0-beta.1-test.9028` |
 | Release asset | `Better-Nexus-test.<N>-<commit>.zip` | |
-| Announced to peers | `<version>+test.<N>`, at most 32 bytes, **public test packages only** | `1.20.0-beta.1+test.9028` |
+| Announced to peers | `<version>+test.<N>`, at most 32 bytes, **public test packages only**. Development source states `<version>+dev`, an internal package `<version>+internal`, a stable release the plain version. | `1.20.0-beta.1+test.9028` |
 | Shown in game | `<version> test.<N>` | `1.20.0-beta.1 test.9028` |
 
 `tools/build_package.py` makes two declared substitutions in `data/Release.lua`: the label, and the channel (`public-test` with `--public`, otherwise `internal`). `Nexus.ReleaseIdentity()` is the one function that the comparison, the announced version and every visible label read.
 
 | Channel | Meaning | Announces a test number |
 |---|---|---|
-| `development` | repository source (`buildLabel = "source"`) | no |
-| `internal` | review or internal package | no |
+| `development` | repository source (`buildLabel = "source"`) | no (`+dev`) |
+| `internal` | review or internal package | no (`+internal`) |
 | `public-test` | package built with `--public` for a public test release | yes |
 | `stable` | stable release | no (plain version) |
+
+No tool writes the `stable` channel yet. A stable release needs that one declared substitution added to `tools/build_package.py` when it is planned.
 
 ## How a client learns about a newer build
 
 1. A public test package states `<version>+test.<N>` in the **existing** version field of its ordinary Sync request (`WLRQ`). No packet gains a field. The `+…` part is SemVer build metadata: standard precedence ignores it, so every other user of `logic/Version.lua` is unaffected.
 2. The receiving client validates the request exactly as before (`SyncInbound`), then hands the parsed version to `Updates.Observe`.
-3. The observer compares against the installed identity: release series by SemVer precedence, then `N` inside the same series. Same or older builds, the old stable line, a version without a test number in the same series, a commit or any other build metadata, and malformed or oversized input produce nothing.
-4. A newer build becomes a **peer advisory**: "A newer Nexus test build was reported: … You have … Check GitHub Releases before updating. This report is not verified." One chat notice per new target per session; none after the user opened the notice; never for the same target twice in a session.
-5. The menu, `/nexus update`, the popup and Help show the installed build, the channel, the state and the locally configured Releases page. They work during loading, with no peer, no report and no Community catalog.
+3. A peer can report only two fixed shapes: a stable release `X.Y.Z` (no prerelease, no build metadata) or a public test build `X.Y.Z-<alpha|beta|rc>.<n>+test.<N>`. Every other valid version is kept as a bounded diagnostic observation only: a prerelease without a public test number (older published lines such as `1.20.0-beta.3.community-off`, internal packages, development checkouts, test.9027 itself), free-form prerelease text, a commit or any other build metadata. The shown text is rebuilt from numbers and those fixed words, so no text chosen by a peer reaches chat, the menu, the popup or saved data.
+4. The observer compares against the installed identity: release series by SemVer precedence, then `N` inside the same series. Same or older builds and the old stable line produce nothing.
+5. A newer build becomes a **peer advisory**: "A newer Nexus test build was reported: … You have … Check GitHub Releases before updating. This report is not verified." One chat notice per new target per session; none after the user opened the notice (the last eight seen targets are remembered); at most three update chat lines and eight stored advisory changes per session, so a peer that raises its number in every request cannot fill the chat or the saved data.
+6. The menu, `/nexus update`, the popup and Help show the installed build, the channel, the state and the locally configured Releases page. They work during loading, with no peer, no report and no Community catalog.
 
 Trusted evidence is only release metadata shipped inside the package (`Release.availableVersion`, optional `availableTest`). It keeps the wording "New Nexus test build available: …". A peer report never becomes that: not by a high number, not by many agreeing peers, not by a peer's own `published` flag. Stored peer state holds a validated version, a number and fixed words. It holds no peer name, no peer text and no link. The only link ever shown is `Release.releasesUrl`, checked against the fixed GitHub Releases form.
 
@@ -50,7 +53,8 @@ Preferences: update notices on/off (unchanged setting), and stable + test builds
 
 - **No evidence means unknown, not latest.** A client that meets no newer public test client learns nothing. The status then reads "Update status unknown". Nexus makes no network request, polls nothing and cannot read GitHub.
 - A fixed file inside an old ZIP cannot learn a later release. Changing a GitHub release page or metadata in a new ZIP does not update old clients.
-- A peer can state a false high version. The result is only an unverified report with the local Releases link. A report seen in the current session is shown before one that was only kept from an earlier session.
+- A peer can state a false high version in one of the two fixed shapes. The result is only an unverified report with the local Releases link. A report seen in the current session is shown before one that was only kept from an earlier session. Inside one session a false highest report still hides a real lower one; the bounds above limit the noise, not the falsehood.
+- `release_check.py --require-newer` compares with tags of the same release series only, and it needs the tags in the clone (`git fetch --tags`; it fails when the clone has no tags). It cannot know about other published lines.
 - **Rollout.** test.9027 and older clients do not show advisories (verified against the published test.9027 source: they accept the new announcement without refusal and show nothing). The first package built from this source with `--public` is the first build that supports these notices. Existing test.9027 installations need **one manual update** through Discord or GitHub before they can receive later advisories. Old immutable assets are not rewritten.
 
 ## One-time transition announcement (not sent yet)

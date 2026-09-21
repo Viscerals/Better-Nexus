@@ -52,9 +52,9 @@ end
 
 -- 1. Producer. Only a public test package states its test number; the packet gains no field.
 local source=Produce(nil)
-assert(Field(source,6)=='1.20.0-beta.1' and Field(source,7)==nil,'repository source announces the plain version: '..source)
+assert(Field(source,6)=='1.20.0-beta.1+dev' and Field(source,7)==nil,'repository source marks its announcement as development: '..source)
 local internal=Produce({label='test.9028-abcdef0',channel='internal'})
-assert(Field(internal,6)=='1.20.0-beta.1','an internal or review package never announces a public test number: '..internal)
+assert(Field(internal,6)=='1.20.0-beta.1+internal','an internal or review package never announces a public test number: '..internal)
 local request28=Produce({label='test.9028-abcdef0',channel='public-test'})
 assert(Field(request28,6)=='1.20.0-beta.1+test.9028' and Field(request28,7)==nil,'public test.9028 announces its number in the existing version field: '..request28)
 assert(#Field(request28,6)<=32 and Nexus.Version.Compare(Field(request28,6),'1.20.0-beta.1')==0,'build metadata leaves standard SemVer precedence unchanged')
@@ -127,7 +127,7 @@ assert(Reported({label='test.9999-abcdef0',channel='public-test'},'1.20.0-beta.1
 assert(Reported(PUBLIC27,'1.20.0-beta.1+test.9027')==nil,'same test: suppressed')
 assert(Reported(PUBLIC27,'1.20.0-beta.1+test.9026')==nil,'older test: suppressed')
 assert(Reported(PUBLIC27,'1.20.0-beta.1')==nil,'a peer without a test number (test.9027 itself, internal, source) reports nothing')
-assert(Reported(PUBLIC27,'1.20.0-beta.1+ffffff0')==nil and Reported(PUBLIC27,'1.20.0-beta.1+test.9027.ffffff0')==nil and Reported(PUBLIC27,'1.20.0-beta.1+zzz.99999')==nil,'a commit or other build metadata never orders builds')
+assert(Reported(PUBLIC27,'1.20.0-beta.1+ffffff0')==nil and Reported(PUBLIC27,'1.20.0-beta.1+test.9028.ffffff0')==nil and Reported(PUBLIC27,'1.20.0-beta.1+zzz.99999')==nil,'a commit or other build metadata never orders builds')
 assert(Reported(PUBLIC27,'1.20.0-beta.1+test.09999')==nil,'a padded number is not a test number')
 print('PASS numeric boundaries, same/older suppression, no commit-suffix precedence')
 
@@ -147,6 +147,15 @@ assert(Nexus.Updates.Status().state=='reported' and Nexus.Updates.Status().candi
 Boot(PUBLIC27);Ready();Nexus.Updates.SetEnabled(false)
 assert(Deliver(request28,'P4') and Chat('reported')==0 and Nexus.Updates.GetVisibleNotice()==nil,'notices disabled: no chat, no notice')
 s=Nexus.Updates.Status();assert(s.state=='disabled' and s.url=='https://github.com/Viscerals/Better-Nexus/releases' and s.installed=='1.20.0-beta.1 test.9027','opt-out keeps the installed label and the manual link')
+-- Review F2: older published lines state a higher SemVer prerelease in the same field. They are not upgrades.
+for _,old in ipairs({'1.20.0-beta.3.community-off','1.20.0-beta.2.community-off','1.20.0-beta.2','1.21.0-beta.1','1.20.0-rc.1'})do
+ assert(Reported(PUBLIC27,old)==nil,'a prerelease without a public test number is never reported: '..old)
+end
+-- Review F4: a development checkout or internal package with a raised version reports nothing.
+for _,raised in ipairs({'1.20.0-beta.2+dev','1.21.0+dev','1.21.0+internal','2.0.0-beta.1+internal','1.21.0+test.5'})do
+ assert(Reported(PUBLIC27,raised)==nil,'a marked development or internal version is never reported: '..raised)
+end
+assert(Reported(PUBLIC27,'1.20.0-rc.1+test.3')=='1.20.0-rc.1 test.3','a later fixed-form series with a public test number is reported')
 print('PASS release series, stable successor, no downgrade, stable-only / test-inclusive / opt-out')
 
 -- 7. Development source and internal packages: useful label, nothing claimed, nothing placed in a series.
@@ -163,7 +172,13 @@ for _,bad in ipairs({'1.20.0-beta.1+test.9028 http://x.example','http://evil.exa
  if not Deliver(request28,'Hostile',bad)then rejected=rejected+1 end
 end
 assert(Nexus.Updates.Status().state=='unknown' and Chat('reported')==0,'hostile or oversized versions produce no advisory ('..rejected..' refused by the decoder)')
-assert(Deliver(request28,'Liar','999.0.0+test.2147483647'))
+-- Review F1: free-form prerelease text is valid SemVer and passes the decoder. It is never shown or stored.
+for _,text in ipairs({'9.9.9-www.evil.example.zip','9.9.9-get-it-at.evil-nexus.com','9.9.9-beta.1.evil','9.9.9-BETA.1+test.5','9.9.9-beta.99999+test.5'})do
+ assert(Deliver(request28,'Texter',text),'fixture: the decoder accepts '..text)
+ assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateAdvisory==nil,'peer text never becomes an advisory: '..text)
+end
+for _,l in ipairs(H.chat)do assert(not l:find('evil',1,true),'no peer text in chat')end
+assert(Deliver(request28,'Liar','999.0.0'))
 s=Nexus.Updates.Status()
 assert(s.state=='reported' and s.candidate.verified==false and s.menu:find('unverified',1,true) and NexusDB.updateNotice==nil,'an arbitrary high peer version is only an unverified report')
 assert(s.url=='https://github.com/Viscerals/Better-Nexus/releases','the link is the local one')
@@ -210,7 +225,24 @@ local toggle=assert(Entry('Disable Update Notices'));toggle.func();button:Click(
 assert(Entry('Update notices off - open Releases page') and not Entry('Update notices off').disabled,'opt-out keeps the manual link in the menu')
 print('PASS HUD menu entries, preference switch, opt-out, manual link')
 
--- 11. Old peers. The published test.9027 decoder rule is the same ValidVersion: prove it accepts the new announcement.
+-- 11. Review F3 / F11: a peer that raises its number in every request cannot fill the chat or the saved data;
+-- an earlier dismissal survives a later one.
+Boot(PUBLIC27);Ready()
+for i=1,200 do assert(Deliver(request28,'Climber','1.20.0-beta.1+test.'..(9100+i)))end
+assert(Chat('A newer Nexus test build was reported')==3,'at most three update chat lines per session: '..Chat('A newer Nexus test build was reported'))
+assert(NexusDB.updateAdvisory.testBuild.test==9108,'at most eight stored advisory changes per session: '..tostring(NexusDB.updateAdvisory.testBuild.test))
+Nexus.Panel.ShowUpdateStatus()
+db=NexusDB;Boot(PUBLIC27,db);Ready()
+assert(Deliver(request28,'Climber2','1.20.0-beta.1+test.9300'));Nexus.Panel.ShowUpdateStatus()
+assert(#NexusDB.updateDismissed==2,'both seen targets are remembered')
+db=NexusDB;db.updateAdvisory.testBuild.test=9108
+Boot(PUBLIC27,db);T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
+assert(Chat('test.9108')==0,'a target dismissed earlier is not announced again after a later dismissal')
+Boot({label='test.007-abcdef0',channel='public-test'})
+assert(Nexus.ReleaseIdentity().test==nil and Nexus.ReleaseIdentity().channel=='internal','a padded label states no test number, as in the tools')
+print('PASS bounded notices and state changes, dismissal set, padded label')
+
+-- 12. Old peers. The published test.9027 decoder rule is the same ValidVersion: prove it accepts the new announcement.
 Boot(PUBLIC27);Ready()
 assert(Nexus.SyncInternals and Deliver(request28,'OldPeerCheck'),'request with +test metadata is a valid request')
 assert(Nexus.Sync.Stats().malformedRejected==0)
