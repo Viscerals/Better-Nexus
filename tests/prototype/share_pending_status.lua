@@ -131,3 +131,71 @@ state,text=Nexus.CommunityBuilds.ShareStatusText(id)
 assert((state=='queued' or state=='sent') and text:find('"'..NAME..'"',1,true),'the retried Share is still named: '..tostring(text))
 assert(H.putCalls[id]==1,'a retry sends the saved record; it writes no second record')
 print('PASS stopped and retried Share: truthful and build-specific')
+
+-- 6. Review F1/F2: an earlier Share of the session was sent. Sync answers an unknown ID
+-- with its latest Share of any build; that must never describe a later build.
+H,C=S.Boot()
+first=S.Post('EARLIER-SENT');local earlier=first.id
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(earlier).sendCompleted end,8000)
+S.Incoming(H,C)
+first,p=S.Post('LATER-REFUSED');id=first.id
+assert(id~=earlier and first.localPending,'the new request keeps its own identity while an earlier Share exists')
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert(state=='preparing' and text:find('"LATER-REFUSED"',1,true),'pending sentence is the new build: '..tostring(text))
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).localStage=='saving' end)
+C.CancelRootAdmission()
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert(state=='refused' and text:find('Not shared: "LATER-REFUSED" — CANCELLED',1,true),'the actual refusal reason, not the earlier build: '..tostring(text))
+local merged=Nexus.CommunityBuilds.ShareStatus(id)
+assert(merged.id==id and not merged.sendCompleted and not merged.sent and merged.queueReason=='CANCELLED','no field of the earlier Share is laid over this one')
+-- The same earlier Share, then a later Share that commits after the player changed: never "Sent".
+H,C=S.Boot()
+first=S.Post('EARLIER-SENT-2');earlier=first.id
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(earlier).sendCompleted end,8000)
+local handoffs=#H.shareCalls
+S.Incoming(H,C);first=S.Post('LATER-OWNER-CHANGED');id=first.id
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).localStage=='saving' end)
+local realUnitName=UnitName
+UnitName=function()return 'DifferentPlayer','Ebonhold' end
+T.Until(H,function()return not Nexus.CommunityBuilds.ShareStatus(id).localPending end)
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert(#H.shareCalls==handoffs,'fixture: zero transport hand-offs for the later Share')
+assert(state=='saved' and text:find('not queued: Share stopped: the player or catalog changed.',1,true) and not text:find('Sent',1,true) and not text:find('..',1,true),'a Share with no hand-off is never stated as sent: '..tostring(text))
+UnitName=realUnitName
+print('PASS an earlier Share never describes a later one')
+
+-- 7. Review F14: a Share stopped for a player change gives no draft to the other player.
+H,C=S.Boot();S.Incoming(H,C);first,p=S.Post();id=first.id
+UnitName=function()return 'DifferentPlayer','Ebonhold' end
+Nexus.CommunityBuilds.PumpPendingShare()
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert(state=='refused' and text:find('player or catalog changed. Nothing was saved or sent.',1,true) and not text:find('form keeps',1,true),'no doubled full stop and no draft claim: '..tostring(text))
+Nexus.CommunityBuilds.ShowPostBuild();if not p:IsShown()then Nexus.CommunityBuilds.ShowPostBuild()end
+assert(p._postDescBox:_NexusRawText()=='','the earlier player\'s draft is not offered')
+UnitName=realUnitName
+print('PASS no draft crosses a player change')
+
+-- 8. Review F5: an explicit Retry Share of an older build does not take the sentence of a retained Share.
+H,C=S.Boot();H.combat=true
+first=S.Post('OLDER-STOPPED');local older=first.id
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(older).localSaved end)
+H.Advance(121,.05);H.combat=false
+T.Until(H,function()return C.ManualPreparationStatus().ready end)
+assert(Nexus.CommunityBuilds.CanRetryShare(older)==true,'fixture: the older Share is retryable')
+state,text=Nexus.CommunityBuilds.ShareStatusText(older)
+assert(state=='stopped' and text:find('Open the build to use Retry Share.',1,true),'Retry is named only when the existing owner offers it: '..tostring(text))
+S.Incoming(H,C);first,p=S.Post('RETAINED-A');id=first.id
+assert(first.localPending and id~=older)
+assert(Nexus.CommunityBuilds.RetryShare(older)==true,'the retry itself starts')
+state,text=Nexus.CommunityBuilds.ShareStatusText()
+assert(state=='preparing' and text:find('"RETAINED-A"',1,true),'the retained Share keeps its sentence: '..tostring(text))
+Nexus.CommunityBuilds.ShowPostBuild();if not p:IsShown()then Nexus.CommunityBuilds.ShowPostBuild()end
+lines=Captured(function()p._postGoBtn:Click()end)
+assert(#lines==1 and lines[1]:find('Preparing "RETAINED-A"',1,true),'a repeat click restates the retained Share, not the retried build: '..tostring(lines[1]))
+
+-- 9. Review F4: the open form follows its Share when that settles, with the Community window closed.
+assert(p:IsShown() and p._shareStatus:GetText():find('Preparing "RETAINED-A"',1,true))
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).localSaved end)
+assert(not p._shareStatus:GetText():find('Preparing',1,true) and p._shareStatus:GetText():find('"RETAINED-A"',1,true),'the form no longer says Preparing after the save settled: '..p._shareStatus:GetText())
+assert(H.putCalls[id]==1,'one record')
+print('PASS retry beside a retained Share; open form follows the settlement')

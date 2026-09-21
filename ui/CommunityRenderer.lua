@@ -682,7 +682,7 @@ local function WishlistLabel(wl)
     local count,permanent=0,0
     for _,e in ipairs((wl and wl.echoes) or {}) do
         local copies=tonumber(e.stacks or e.count) or 1
-        if e.locked==true then permanent=permanent+copies else count=count+copies end
+        if e.locked==true or e.locked==1 then permanent=permanent+copies else count=count+copies end
     end
     if permanent==0 then
         for _,e in ipairs((wl and type(wl.lockedEchoes)=="table" and wl.lockedEchoes) or {}) do permanent=permanent+(tonumber(e.stacks or e.count) or 1) end
@@ -2675,6 +2675,11 @@ end
 ------------------------------------------------------------------------
 
 function M.Refresh()
+    -- An open Share form follows its Share when that settles, also when the
+    -- Community window is closed.
+    if postPopup and postPopup:IsShown() and postPopup._shareStatus then
+        postPopup._shareStatus:SetText(ShareStatusLine() or "")
+    end
     if not frame or not frame:IsShown() then return end
     M.ApplyResponsiveLayout(false)
 
