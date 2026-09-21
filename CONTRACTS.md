@@ -1,6 +1,67 @@
-# Nexus — internal module contracts (v1.19.4)
+# Nexus — internal module contracts
 
-Binding interface spec for all modules. Authored from `WISHLIST_REALIZER_BUILD_PROMPT.md`
+## Status of this document
+
+This file has two parts.
+
+1. **Current rolling and Orb contract** (next section). It is authoritative. It
+   describes the production path of the current source. Where any later section
+   conflicts with it, the current contract wins.
+2. **Historical v1.19.4 module contracts** (all sections after it). They were
+   written as the binding interface spec for v1.19.4. They are kept as history.
+   Sections marked **HISTORICAL** describe the obsolete predicted-guarantee
+   model. No production path uses that model. Do not implement from those
+   sections, and do not restore guarantees to satisfy them.
+
+## Current rolling and Orb contract (authoritative)
+
+- **No inferred guarantee.** There are no guaranteed future Echo rolls. A saved
+  or verified build is evidence of identity, contents and ownership only. It
+  predicts no future offer. `isGuaranteed` on a board card is an observed flag of
+  the current offer: that card cannot be banished or frozen. It implies nothing
+  about a later board.
+- **`Ratchet.PredictQueue()`** always returns `{ entries = {}, inferred = false }`.
+  The old model exists only as `Ratchet.HistoricalGuaranteeQueue` for historical
+  fixtures. The production state (`core/AutomationRuntime.lua`) supplies an empty
+  queue.
+- **`Policy.Decide(state)`** returns a wait when `state.ordinaryBoardAllowed ==
+  false`. Otherwise every ordinary board goes to
+  `WishlistPilot.DecideNexus(state)`. `state.snapshotVerified`, `state.queue` and
+  `state.flags` select no planner and change no decision. The scoring rules in
+  the historical `logic/Policy.lua` section below are reachable only when
+  WishlistPilot is not loaded, which the production TOC never allows, and then
+  only with an empty queue.
+- **`WishlistPilot.Decide(input)`** is the pure ordinary planner. Without
+  `input.policy` it follows the named reference strategy (LoadoutPilot 1.3.6 /
+  patch 103). `DecideNexus` passes `WishlistPilot.NEXUS_POLICY`, whose options
+  are deliberate, documented differences (`docs/ROLLING_ORB_REVIEW_EADFF8A.md`).
+  Exact `plan.requestedCounts` per spell ID, rolled plus permanent ownership,
+  actual charges and the per-action permissions are its inputs. Actions:
+  `take`, `freeze`, `banish`, `reroll`, `wait`. Action `index` is 1-based.
+- **Ordinary-board gate.** `GameAdapter.OrdinaryBoardAllowed()` guards `Take`,
+  `Banish`, `Reroll`, `Freeze` and automatic rolling. It blocks while Orb mode
+  owns or has an unresolved action. When an `OrbService` exists it also requires
+  the known, not-pending state from `OrbAdapter.ServiceState()`. An absent
+  `OrbService` is an explicit legacy capability that keeps ordinary rolling.
+- **Orb mode** is specified in `docs/ORB_MEMORY_MODE.md`. All Orb mutation sits
+  behind `GameAdapter.Orbs`. An unresolved Orb action is never retried, refunded
+  or erased. Recovery after reload is passive.
+- **Version.** The release identity lives in `data/Release.lua` and `Nexus.toc`,
+  not in this file.
+- **Tests.** The maintained offline suite is `tools/run_prototype_tests.py` with
+  `tests/prototype/`. No-guarantee behaviour: `rolling_no_guarantee`,
+  `rolling_no_guarantee_runtime`, `policy_compare`, through the maintained
+  adapter `tests/prototype/policy_adapter.lua`.
+
+# Historical v1.19.4 module contracts
+
+Everything below is the v1.19.4 text. It is unchanged except for the
+**HISTORICAL** markers. Data shapes that the current code still produces (catalog,
+wishlist, owned, board, charges, slots) remain a useful description. Version
+strings, the `flags` and `queue` shapes, `Ratchet.PredictQueue`, the
+`Policy.Decide` rules and the `tests (mine)` section are historical.
+
+Binding interface spec for all modules (as of v1.19.4). Authored from `WISHLIST_REALIZER_BUILD_PROMPT.md`
 + `WISHLIST_REALIZER_SPEC_ADDENDUM.md` + `WISHLIST_REALIZER_DESIGN.md` (the addendum wins
 conflicts). Every `logic/*` and `data/*` file: plain Lua 5.1, NO WoW API, NO
 SavedVariables, NO `ProjectEbonhold.*` — loadable under bare LuaJIT. All cross-module
@@ -56,11 +117,13 @@ slots = nil | {              -- nil => SS 540 not arrived
   activeSlot = n,            -- 0 = none
 }
 
+-- HISTORICAL: these flags belong to the obsolete guarantee model. The current
+-- planner reads neither of them.
 flags = { DISABLE_SUPPRESSES_GUARANTEE = true|false,  -- true (user-confirmed) unless runtime-demoted
           REROLL_HOLDS_GUARANTEED = true|false|nil }  -- nil = conservative
 
 plan = Strategy.Compile output (below).
-queue = Ratchet.PredictQueue output (below).
+queue = Ratchet.PredictQueue output (below).  -- HISTORICAL: now always empty, inferred=false
 ```
 
 ## logic/Model.lua — `Nexus.Model`
@@ -110,6 +173,10 @@ Fork from EchoOptimizer/logic/Model.lua VERBATIM: `NormName`, `StripRaritySuffix
 
 ## logic/Ratchet.lua — `Nexus.Ratchet`
 
+> **HISTORICAL (PredictQueue, RunsEstimate queue input).** The predicted queue
+> below is the obsolete guarantee model. The current `Ratchet.PredictQueue()`
+> takes no meaningful input and returns an empty queue. See the current contract.
+
 - `Ratchet.PredictQueue(activeEchoes, owned, plan, flags, disabledLevers, catalog)` →
   `{ entries = { { spellId, family, wanted=bool }, ... } }` in given order, skipping
   entries whose FAMILY is owned (family-aware subtraction, addendum §B2), and — iff
@@ -127,6 +194,11 @@ Fork from EchoOptimizer/logic/Model.lua VERBATIM: `NormName`, `StripRaritySuffix
   (rate unmeasured)"; never fabricate a number labeled as fact.
 
 ## logic/Policy.lua — `Nexus.Policy`
+
+> **HISTORICAL.** Rules 1-7 below describe the guarantee-based scoring of
+> v1.19.4 (guaranteed card, `wantedInQueue`, "guarantee already exhausted").
+> Production routes every ordinary board to `WishlistPilot.DecideNexus`. See the
+> current contract. Do not reintroduce these rules.
 
 - `Policy.Decide(state)` where `state = { board, owned, charges, plan, queue, flags,
   level, horizon, support, params }` → action:
@@ -158,6 +230,10 @@ Fork from EchoOptimizer/logic/Model.lua VERBATIM: `NormName`, `StripRaritySuffix
   Pure function; same input → same output.
 
 ## data/DefaultProfile.lua — `Nexus.DefaultProfile`
+
+> **HISTORICAL in part.** `defaultFlags` and the reroll scoring params belong to
+> the obsolete guarantee model. The current planner reads the per-action
+> permissions (`autoBanish`, `autoReroll`, `autoFreeze`) and no guarantee flag.
 
 Pure table: `params` (coverage=100, qualityBonus=2, anchorUnlock=150, diversity=5,
 duplicate=-5, filler=-15, rerollCost=8, rerollHoldThreshold=25), `defaultSettings`
@@ -201,7 +277,13 @@ run-boundary, self-check demotion hook).
   (presentation-layer exception, documented) but NEVER PerkService — all data through
   the provider callback.
 
-## Post-review amendments (binding, from the pre-deploy adversarial pass)
+## Post-review amendments (from the v1.19.4 pre-deploy adversarial pass)
+
+> The index-base, signature, latch-watchdog and run-boundary items still describe
+> the current adapter. The `DISABLE_SUPPRESSES_GUARANTEE` self-check item is
+> **HISTORICAL**: that flag belongs to the obsolete guarantee model and changes
+> no current decision. The undemote command still exists and only clears those
+> legacy flag demotions.
 
 - **Index bases:** `Policy` `action.index` is **1-based** into `board.cards`;
   `GameAdapter.Banish(index0)` takes the client's **0-based** perk index. `Main`
@@ -230,6 +312,9 @@ run-boundary, self-check demotion hook).
 - `Panel.Toggle()` exists. `/wr undemote` clears flag demotions.
 
 ## tests (mine)
+
+> **HISTORICAL.** `tests/harness.lua` and `tests/run_integration.lua` are not the
+> maintained suite. See "Tests" in the current contract.
 
 `tests/harness.lua` (stub extensions per design §10) + `tests/run_integration.lua`
 (scenario asserts). Run: `luajit tests/run_integration.lua` from the addon root; exits
