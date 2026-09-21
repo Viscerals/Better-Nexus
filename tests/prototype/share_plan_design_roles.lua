@@ -309,6 +309,19 @@ Click(p,'PLAN-NO-SERVER-COPY')
 Accepted('saved plan without a server copy',1,1)
 print('PASS saved plan without a server copy shares its permanent row')
 
+-- 14. Review M1: the same slot-less plan with a design that cannot be read is refused,
+-- not shared with 0 permanent copies.
+Boot()
+Create('PLAN-NO-COPY-DAMAGED',1,1)
+assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(s)
+ s.firstRunWishlist.designRows={{spellId='not-a-number',stacks=1}}
+end),'fixture: damaged saved design')
+H.Notify();Nexus.GameAdapter.Poll();H.Advance(.5)
+p=Open('PLAN-NO-COPY-DAMAGED')
+Click(p,'PLAN-NO-COPY-DAMAGED')
+Refused('slot-less plan with an unreadable design',p,'cannot be read','save its permanent targets again','Nothing was shared')
+print('PASS slot-less plan with an unreadable design is refused')
+
 -- 11. Review F2: the >79 path (84 all-false rows, roles confirmed in the adapter).
 -- The preview lists 78 ordinary and 6 permanent rows, none twice.
 local rows84={};for i=1,84 do rows84[i]={spellId=200000+i,stacks=1,locked=false}end

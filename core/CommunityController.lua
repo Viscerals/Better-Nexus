@@ -822,12 +822,18 @@ function Controller.New(options)
                 if not seen[tostring(candidate.slot)]
                     and type(candidate.echoes) == "table"
                     and #candidate.echoes > 0 then
-                    out[#out + 1] = {
+                    local entry = {
                         slot=candidate.slot,name=candidate.name,
                         count=candidate.count,echoes=candidate.echoes,
                         active=candidate.active,sourceKind="Wishlist",
-                        designTargets=candidate.slot == nil and candidate.designTargets or nil,
                     }
+                    -- A plan without a server slot is its own source. Its
+                    -- design is copied as it is: false (cannot be read) must
+                    -- stay false so that the Share refuses it.
+                    if candidate.slot == nil and candidate.designTargets ~= nil then
+                        entry.designTargets = candidate.designTargets
+                    end
+                    out[#out + 1] = entry
                 end
             end
         end
