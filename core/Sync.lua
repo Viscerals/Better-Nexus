@@ -959,8 +959,10 @@ end
 -- the join succeeds. The join retry runs only inside the full Sync turn and
 -- needs JOIN_RETRY_INTERVAL of full-turn time, and every hold and yield of the
 -- deferred admission owner requires IsConnected. On a client whose catalog is
--- kept busy by inbound records that retry never ran, so the client stayed
--- unconnected for the whole session while channel traffic kept arriving.
+-- kept busy by inbound records that retry never ran: in the offline probe the
+-- client stayed unconnected for the whole 600-second observation while channel
+-- traffic kept arriving. (A native report showed connected=false at one reading;
+-- the rest of that session was not observed.)
 -- Channel traffic is itself proof of membership. This reads the channel list
 -- and records the slot the game reports, exactly like the "already in" branch
 -- of EnsureChannel. It never joins, sends, pumps or touches the catalog, it
@@ -3996,7 +3998,8 @@ Session = SessionFactory.New({
 })
 
 function Sync.HandleIncoming(text, sender)
-    Sync.NoteChannelTraffic()
+    -- Isolated: a failure of this passive read must never cost the message.
+    pcall(Sync.NoteChannelTraffic)
     local accepted,reason=Inbound.HandleIncoming(text,sender)
     if accepted and Nexus.SyncWire then Nexus.SyncWire.ObservePeer(sender) end
     return accepted,reason

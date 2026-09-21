@@ -2,7 +2,8 @@
 -- listed a moment after the addon's join call. The join retry runs only in the
 -- full Sync turn, and every hold and yield of the deferred admission owner
 -- requires IsConnected. Under inbound traffic the catalog stays busy, no full
--- turn accumulates, and the client stayed unconnected for the whole session.
+-- turn accumulates, and in the offline probe the client stayed unconnected for
+-- the whole 600-second observation.
 -- Channel traffic now reconciles the channel index passively. This restores
 -- connection, hold and yield eligibility only; it does not change the cost of
 -- one inbound record. Real TOC, lifecycle, adapter, Sync, session, catalog and
@@ -69,13 +70,15 @@ assert(GetChannelList()==1 and not Nexus.Sync.IsConnected(),'fixture: joined in 
 local before={joins=joinCalls,ensures=ensureCalls,turns=turns,sent=#H.sent}
 Arrive()
 assert(Nexus.Sync.IsConnected() and Nexus.Sync.ChannelIndex()==1,'the first channel message reconciles the channel index the game lists')
-assert(joinCalls==before.joins and ensureCalls==before.ensures and turns==before.turns and #H.sent==before.sent,'passive: no join call, no EnsureChannel, no full turn and no send came from the reconciliation')
+-- The connection exists before any further frame runs, so no full turn was needed for it.
+assert(joinCalls==before.joins and ensureCalls==before.ensures and #H.sent==before.sent,'passive: no join call, no EnsureChannel and no send came from the reconciliation')
+assert(turns==before.turns,'fixture: no frame ran between the message and the connection')
 assert(handled==1,'fixture: the message went through the real lifecycle route')
 -- One valid record every second keeps the catalog busy. The client stays connected.
 for i=1,1200 do if i%20==0 then Arrive()end;H.Advance(.05,.05)end
 assert(Nexus.Sync.IsConnected() and joinCalls==before.joins,'sustained traffic: still connected, still no further join call')
 assert(Nexus.Sync.Stats().malformedRejected==0,'valid items stay valid')
-print(string.format('PASS async join under traffic: connected by the first channel message with %d joins, %d sends and %d full turns from it',joinCalls-before.joins,0,0))
+print(string.format('PASS async join under traffic: connected by the first channel message; join calls since then %d, still connected after 60 s of 1 record/s',joinCalls-before.joins))
 
 -- 3. Holds apply when work is owed. They require IsConnected, so on an
 -- unconnected client the next arrival took the catalog instead.
@@ -105,11 +108,14 @@ print('PASS wrong-channel isolation')
 
 -- 5. Moved or stale slot. The reconciliation never rewrites a known index;
 -- every send still resolves its slot at send time and never goes to the old one.
-local real=SendChatMessage
+-- The wire calls SendChatMessage inside its own pcall, so an assertion here would be
+-- swallowed. Each channel send is recorded with the slot listed at that moment and
+-- checked afterwards.
+local real,channelSends=SendChatMessage,{}
 SendChatMessage=function(message,kind,language,target)
  if kind=='CHANNEL' then
   local listed;for i=1,#listing,2 do if listing[i+1]=='wrbuildssync' then listed=listing[i] end end
-  assert(target==listed,'a channel send goes to the slot the game lists at that moment: '..tostring(target)..' vs '..tostring(listed))
+  channelSends[#channelSends+1]={target=target,listed=listed}
  end
  return real(message,kind,language,target)
 end
@@ -121,6 +127,20 @@ local sends=ChannelSends()
 SlashCmdList.NEXUS('sync')
 T.Until(H,function()return ChannelSends()>sends end,8000)
 assert(Nexus.Sync.ChannelIndex()==5,'the send resolved the moved slot')
-for _,p in ipairs(H.sent)do assert(p.kind~='CHANNEL' or p.target~=1 and p.target~=2,'nothing was sent to General or Trade')end
+assert(#channelSends>=1,'fixture: at least one channel send was observed at its send call')
+for _,s in ipairs(channelSends)do assert(s.target==s.listed and s.target==5,'every channel send went to the slot the game listed at that moment, never to the stale slot 3, General or Trade: '..tostring(s.target)..' vs '..tostring(s.listed))end
 assert(#H.actions==0,'zero gameplay mutation')
 print('PASS moved slot: send-time resolution unchanged, nothing sent to another channel')
+
+-- 6. A client without the channel-list API never errors and never claims a connection,
+-- and a failure inside the passive read never costs the inbound message.
+Boot(5,true)
+H.Advance(.6,.05)
+GetChannelList=nil
+Arrive()
+assert(not Nexus.Sync.IsConnected() and handled==1,'no channel-list API: no error, no connection claimed')
+GetChannelList=function()error('isolated channel list failure')end
+local lateId=Arrive()                                  -- this message meets the failing read
+assert(not Nexus.Sync.IsConnected() and handled==2,'a failing channel list is isolated')
+T.Until(H,function()return Nexus.BuildCatalog.Get(lateId)~=nil end,8000)
+print('PASS missing or failing channel-list API: isolated, message still processed')
