@@ -33,6 +33,7 @@ NAMES += ['rolling_no_guarantee','rolling_no_guarantee_runtime','policy_compare'
 NAMES += ['diagnostics_gate_status']
 NAMES += ['sync_channel_late_join']
 NAMES += ['update_notices']
+NAMES += ['update_peer_provenance']
 NAMES += ['share_role_preservation']
 NAMES += ['share_pending_status']
 NAMES += ['share_plan_design_roles']

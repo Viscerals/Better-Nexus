@@ -1,6 +1,8 @@
 -- Prerelease update notices, end to end: declared release identity -> the real
 -- Sync request producer -> the real inbound decoder -> the update observer ->
--- chat notice, menu status, popup and /nexus update.
+-- chat notice, menu status, popup and /nexus update. Since 2026-09-21 only
+-- release evidence bundled in the package produces a notice; a peer version is
+-- a bounded diagnostic observation (sections 3-10).
 -- test.9027 compared against baseVersion 1.19.5, accepted only a bundled
 -- availableVersion that no package had, excluded every prerelease, and stored a
 -- peer version without showing anything. A test build never learned about a
@@ -77,190 +79,180 @@ assert(popup and popup.which=='NEXUS_UPDATE_RELEASES' and popup.url=='https://gi
 assert(Chat('Releases page: https://github.com/Viscerals/Better-Nexus/releases')==1)
 print('PASS unknown status and manual link before catalog completion')
 
--- 3. The real path: test.9027 receives the real test.9028 request. One unverified advisory.
+-- 3. The real path: test.9027 receives the real test.9028 request. Since 2026-09-21 a peer
+-- version is a diagnostic observation only: no chat, no popup text, no menu state, no badge,
+-- nothing saved (native report: a peer stating 1.96.6 was announced as a newer release).
 Ready()
-assert(Chat('newer Nexus')==0)
+local function NoNotice(why)
+ local s=Nexus.Updates.Status()
+ assert(s.state=='unknown' and s.candidate==nil,why..': status stays unknown: '..s.detail)
+ assert(Nexus.Updates.GetVisibleNotice()==nil and Nexus.Updates.GetCandidate()==nil,why..': no visible notice, no candidate')
+ assert(Chat('newer Nexus')==0 and Chat('was reported')==0 and Chat('available:')==0,why..': no update chat line')
+ assert(NexusDB.updateAdvisory==nil and NexusDB.updateNotice==nil,why..': nothing is saved as an advisory or a notice')
+ return s
+end
+local function Observed(source)
+ for _,row in ipairs(Nexus.Updates.PeerObservations())do if row.source==source or row.source:sub(1,#source+1)==source..'-' then return row end end
+end
 assert(Deliver(request28,'TesterB'),'the inbound decoder accepts the request')
-status=Nexus.Updates.Status()
-assert(status.state=='reported' and status.candidate.display=='1.20.0-beta.1 test.9028' and status.candidate.verified==false and status.candidate.authority=='peer-advisory','a newer test build of the same series is reported: '..status.detail)
-local line=assert(LastChat('A newer Nexus test build was reported: 1.20.0-beta.1 test.9028. You have 1.20.0-beta.1 test.9027.'),'the chat notice states both builds')
-assert(line:find('Check GitHub Releases before updating',1,true) and line:find('not verified',1,true) and not line:find('available',1,true),'a peer report is never worded as a confirmed publication: '..line)
-assert(status.menu=='Newer build reported (unverified): 1.20.0-beta.1 test.9028')
-local notice=Nexus.Updates.GetVisibleNotice();assert(notice and notice.verified==false)
--- Repeated peers, repeated traffic, the same target: one notice.
+status=NoNotice('same-series test.9028 from one peer')
+local row=assert(Observed('TesterB'),'the peer version is kept as a bounded diagnostic observation')
+assert(row.version=='1.20.0-beta.1+test.9028' and row.authority=='peer-observation' and row.reported=='test','the observation states what the peer said and its shape, not release evidence')
+assert(status.detail:find('not release information',1,true) and status.detail:find('not proof that this build is the latest',1,true)
+ and not status.detail:lower():find('up to date',1,true),'unknown is honest: neither available nor latest: '..status.detail)
 for i=1,12 do assert(Deliver(request28,'Crowd'..i))end
-assert(Chat('A newer Nexus test build was reported')==1,'many agreeing peers neither repeat the notice nor add authority')
-assert(Nexus.Updates.Status().candidate.verified==false and #Nexus.Updates.PeerObservations()>=13)
--- The stored state holds no peer name, text or link.
-local root=NexusDB.updateAdvisory;local stored=root.testBuild
-assert(root.authority=='peer-advisory' and root.stableRelease==nil and stored.version=='1.20.0-beta.1' and stored.test==9028)
-for k in pairs(root)do assert(k=='authority' or k=='testBuild' or k=='stableRelease','no other stored field: '..k)end
-for k,v in pairs(stored)do assert(k=='version' or k=='test' or k=='observedAt','no other stored field: '..k);assert(type(v)~='string' or not v:find('TesterB',1,true))end
-assert(NexusDB.updateNotice==nil,'a peer report never becomes release authority')
+NoNotice('many agreeing peers')
+assert(#Nexus.Updates.PeerObservations()>=13,'every peer is still observed')
 Nexus.Panel.ShowUpdateStatus()
-assert(popup.url=='https://github.com/Viscerals/Better-Nexus/releases' and popup.text:find('not verified',1,true) and popup.text:find('test.9028',1,true),'popup: both builds, provenance, local link')
-assert(#H.actions==0,'opening the notice is read-only')
-print('PASS same-series test.9027 -> test.9028 advisory through producer, decoder, observer, chat, menu and popup')
+assert(popup.url=='https://github.com/Viscerals/Better-Nexus/releases' and popup.text:find('no release information',1,true)
+ and not popup.text:find('test.9028',1,true),'the popup: installed build, honest unknown, local link; no peer version')
+assert(#H.actions==0,'opening the status is read-only')
+print('PASS same-series peer version is a diagnostic observation only')
 
--- 4. Dismissal and reload. Seen in the popup: no repeat in a later session. A newer target is announced once.
-local db=NexusDB
-Boot(PUBLIC27,db);Ready()
-assert(Nexus.Updates.Status().state=='reported' and Chat('A newer Nexus test build was reported')==0,'after reload the status persists and a seen target is not announced again')
-assert(Deliver(request28,'TesterB') and Chat('A newer Nexus test build was reported')==0)
-assert(Deliver(request28,'TesterC','1.20.0-beta.1+test.9030') and Chat('test.9030')==1,'a newer target is announced once')
-db=NexusDB;Boot(PUBLIC27,db)
--- Local initialization is enough. The Community catalog is still preparing when the reminder appears.
-T.Until(H,function()return Chat('test.9030')>0 or Nexus.StartupStatus().state=='ready' end)
-assert(Chat('test.9030')==1 and Nexus.StartupStatus().state~='ready','not seen in the popup: one reminder in the new session, shown while shared data still prepares')
-Ready();assert(Deliver(request28,'TesterC','1.20.0-beta.1+test.9030') and Chat('test.9030')==1,'and not more than one')
-db=NexusDB;assert(db.updateAdvisory.testBuild.test==9030)
-Boot({label='test.9030-0123abc',channel='public-test'},db)
-assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateAdvisory.testBuild==nil,'after the manual update the advisory is gone: no self-update prompt')
-print('PASS dismissal, reload, bounded repeats, no self-update prompt')
-
--- 5. Numeric order, same/older, commit suffix, other build metadata.
-local function Reported(installed,version)
- Boot(installed);Ready()
- assert(Deliver(request28,'Numeric',version),'decoder accepts '..version)
- local s=Nexus.Updates.Status();return s.state=='reported' and s.candidate.display or nil,s
+-- 4. Fresh peer reports that must never create authority: the reported 1.96.6, an arbitrary
+-- high number, a forged public test number, another release line.
+for _,version in ipairs({'1.96.6','999.0.0','1.20.0-beta.1+test.99999','2.0.0-beta.1+test.1','1.20.0','1.21.0'})do
+ Boot(PUBLIC27);Ready()
+ assert(Deliver(request28,'Reporter',version),'fixture: the decoder accepts '..version)
+ NoNotice('peer '..version)
+ assert(Observed('Reporter').version==version,'observed as stated: '..version)
+ local items;EasyMenu=function(list)items=list end
+ NexusPanel._menuBtn:Click();H.Advance(1,.05)
+ local found=false
+ for _,item in ipairs(items or {})do
+  if type(item.text)=='string' then
+   assert(not item.text:find(version:match('^[%d%.]+'),1,true) or item.text:find('Installed',1,true),'no menu entry names the peer version '..version..': '..item.text)
+   if item.text=='Update status unknown - open Releases page' then found=not item.disabled end
+  end
+ end
+ assert(found,'the menu keeps the enabled manual Releases entry')
+ assert(NexusPanel._menuBtn:GetText()~='!','no HUD badge for a peer version '..version)
 end
-assert(Reported({label='test.9-abcdef0',channel='public-test'},'1.20.0-beta.1+test.10')=='1.20.0-beta.1 test.10','test.9 -> test.10 is numeric, not lexical')
-assert(Reported({label='test.10-abcdef0',channel='public-test'},'1.20.0-beta.1+test.9')==nil,'test.10 is not told to go to test.9')
-assert(Reported({label='test.9999-abcdef0',channel='public-test'},'1.20.0-beta.1+test.10000')=='1.20.0-beta.1 test.10000','test.9999 -> test.10000')
-assert(Reported(PUBLIC27,'1.20.0-beta.1+test.9027')==nil,'same test: suppressed')
-assert(Reported(PUBLIC27,'1.20.0-beta.1+test.9026')==nil,'older test: suppressed')
-assert(Reported(PUBLIC27,'1.20.0-beta.1')==nil,'a peer without a test number (test.9027 itself, internal, source) reports nothing')
-assert(Reported(PUBLIC27,'1.20.0-beta.1+ffffff0')==nil and Reported(PUBLIC27,'1.20.0-beta.1+test.9028.ffffff0')==nil and Reported(PUBLIC27,'1.20.0-beta.1+zzz.99999')==nil,'a commit or other build metadata never orders builds')
-assert(Reported(PUBLIC27,'1.20.0-beta.1+test.09999')==nil,'a padded number is not a test number')
-print('PASS numeric boundaries, same/older suppression, no commit-suffix precedence')
+print('PASS fresh 1.96.6, 999.0.0, forged test number, other lineage, peer stable claims: no notice, menu, badge or saved state')
 
--- 6. Release series, stable successor, no downgrade, preferences.
-assert(Reported(PUBLIC27,'1.20.0-beta.2+test.1')=='1.20.0-beta.2 test.1','a newer release series wins even with a lower test number')
-assert(Reported(PUBLIC27,'1.20.0')=='1.20.0','the stable successor of the beta line is reported')
-assert(Reported(PUBLIC27,'1.19.5')==nil and Reported(PUBLIC27,'1.19.9')==nil,'the old stable line is never an upgrade from a newer beta')
-local _,s=Reported(PUBLIC27,'1.20.0');assert(LastChat('A newer Nexus release was reported: 1.20.0.'),'stable wording')
-Boot(PUBLIC27);Ready();Nexus.Updates.SetPreference('stable')
-assert(Deliver(request28,'P1') and Nexus.Updates.Status().state=='unknown' and Chat('reported')==0,'stable-only: no test build is suggested')
-assert(Deliver(request28,'P2','1.20.0') and Nexus.Updates.Status().candidate.display=='1.20.0','stable-only still learns the stable successor')
-Boot({version='1.19.5',channel='stable'});Ready()
-assert(Nexus.Updates.Preference()=='stable' and Nexus.ReleaseIdentity().channel=='stable')
-assert(Deliver(request28,'P3') and Nexus.Updates.Status().state=='unknown','a stable installation is not pushed into a beta by default')
+-- 5. A peer advisory saved by an earlier build (as test.9028 stored "1.96.6") does not return at
+-- login or reload. It is moved once into a bounded diagnostic record; nothing else changes.
+local d=T.Profile(3,0)
+d.updateAdvisory={authority='peer-advisory',stableRelease={version='1.96.6',observedAt=1790016000},testBuild={version='1.20.0-beta.1',test=9030,observedAt=1790016000}}
+d.updateDismissed={'1.20.0-beta.1#9020'}
+d.settings.updateNotifications=true
+local before={builds=T.Count(d.communityBuilds),dismissed=d.updateDismissed[1],autoPick=d.settings.autoPick}
+Boot(PUBLIC27,d)
+T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
+NoNotice('saved 1.96.6 advisory at login')
+assert(NexusDB.updateAdvisoryQuarantine and NexusDB.updateAdvisoryQuarantine.stableRelease.version=='1.96.6'
+ and NexusDB.updateAdvisoryQuarantine.testBuild.test==9030 and NexusDB.updateAdvisoryQuarantine.reason=='peer report is not release evidence','kept as a bounded diagnostic record')
+assert(T.Count(NexusDB.communityBuilds)==before.builds and NexusDB.updateDismissed[1]==before.dismissed
+ and NexusDB.settings.autoPick==before.autoPick and NexusDB.settings.updateNotifications==true,'settings, dismissals and builds are unchanged')
+db=NexusDB;Boot(PUBLIC27,db);Ready()
+NoNotice('reload after the quarantine')
+assert(NexusDB.updateAdvisoryQuarantine.stableRelease.version=='1.96.6','idempotent: the diagnostic record stays once')
+-- A malformed saved advisory is handled the same way.
+d=T.Profile(3,0);d.updateAdvisory='9.9.9'
+Boot(PUBLIC27,d);NoNotice('malformed saved advisory')
+print('PASS saved peer advisory: no notice at login or reload, quarantined once, nothing else touched')
+
+-- 6. Trusted bundled evidence keeps its notice, its wording and its place; a higher peer
+-- version cannot replace or hide it.
+Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9029'});Ready()
+s=Nexus.Updates.Status()
+assert(s.state=='available' and s.candidate.verified==true and s.candidate.authority=='bundled-release' and s.menu=='Update available: 1.20.0-beta.1 test.9029','bundled evidence is compared with the installed build: '..s.detail)
+assert(Chat('New Nexus test build available: 1.20.0-beta.1 test.9029. You have 1.20.0-beta.1 test.9027.')==1,'one trusted chat notice')
+for _,version in ipairs({'1.96.6','1.20.0-beta.1+test.9031','999.0.0'})do
+ assert(Deliver(request28,'Masker',version))
+ s=Nexus.Updates.Status()
+ assert(s.candidate.display=='1.20.0-beta.1 test.9029' and s.candidate.verified==true,'a peer '..version..' does not replace or hide trusted evidence')
+end
+assert(Chat('available:')==1 and Chat('reported')==0,'no further chat line')
+local items;EasyMenu=function(list)items=list end
+NexusPanel._menuBtn:Click();H.Advance(1,.05)
+local entry
+for _,item in ipairs(items or {})do if item.text=='Update available: 1.20.0-beta.1 test.9029' then entry=item end end
+assert(entry and not entry.disabled and NexusPanel._menuBtn:GetText()=='!','menu entry and HUD badge for trusted evidence')
+popup=nil;entry.func()
+assert(popup and popup.url=='https://github.com/Viscerals/Better-Nexus/releases' and popup.text:find('New Nexus test build available: 1.20.0-beta.1 test.9029',1,true))
+print('PASS trusted bundled notice kept; peer versions cannot replace or hide it')
+
+-- 7. Bundled same, older and newer builds; stable successor; channels.
+Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9027'})
+assert(Nexus.Updates.Status().state=='unknown','bundled same build: unknown, never available')
+Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9026'})
+assert(Nexus.Updates.Status().state=='unknown','bundled older test build: unknown')
+Boot({label='test.9027-3f1cd20',channel='public-test',available='1.19.5'})
+assert(Nexus.Updates.Status().state=='unknown','bundled old stable is not an upgrade')
+Boot({label='test.9-abcdef0',channel='public-test',available='1.20.0-beta.1+test.10'})
+assert(Nexus.Updates.Status().candidate.display=='1.20.0-beta.1 test.10','test.9 -> test.10 is numeric, not lexical')
+Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0'});Ready()
+s=Nexus.Updates.Status()
+assert(s.state=='available' and s.candidate.kind=='stable' and LastChat('New Nexus release available: 1.20.0.'),'stable wording for a stable successor')
+Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9028.ffffff0'})
+assert(Nexus.Updates.Status().state=='unknown','a commit suffix never orders builds')
+-- Internal and development installations are not placed in a public series by a peer.
+local shown,st=nil,nil
+Boot({label='test.9029-2d576cf',channel='internal'});Ready()
+assert(Deliver(request28,'ToInternal','1.20.0-beta.1+test.9030'))
+st=Nexus.Updates.Status();assert(st.state=='unknown' and st.channelLabel=='internal test package' and st.installed=='1.20.0-beta.1 test.9029','an internal package gets no peer-derived notice: '..st.detail)
+Boot(nil);Ready()
+assert(Deliver(request28,'ToSource','1.20.0-beta.1+test.9030'))
+st=Nexus.Updates.Status();assert(st.state=='unknown' and st.channel=='development','a source checkout gets no peer-derived notice')
+-- An internal or development package stated by a peer is not a published update either.
+Boot(PUBLIC27);Ready()
+for _,raised in ipairs({'1.21.0+internal','1.20.0-beta.2+dev','2.0.0-beta.1+internal'})do
+ assert(Deliver(request28,'Raised',raised));NoNotice('peer '..raised)
+ assert(Observed('Raised').reported==nil,'an internal or development version is not even a release shape: '..raised)
+end
+print('PASS bundled same/older/newer, stable successor, commit suffix, internal and development identities')
+
+-- 8. Preferences, opt-out, dismissal and reload with trusted evidence.
+Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9029'});Ready()
+Nexus.Updates.SetPreference('stable')
+assert(Nexus.Updates.Status().state=='unknown' and Nexus.Updates.Preference()=='stable','stable-only hides a bundled test build')
 Nexus.Updates.SetPreference('test')
-assert(Nexus.Updates.Status().state=='reported' and Nexus.Updates.Status().candidate.display=='1.20.0-beta.1 test.9028','the explicit test-inclusive preference applies to the stored report')
-Boot(PUBLIC27);Ready();Nexus.Updates.SetEnabled(false)
-assert(Deliver(request28,'P4') and Chat('reported')==0 and Nexus.Updates.GetVisibleNotice()==nil,'notices disabled: no chat, no notice')
-s=Nexus.Updates.Status();assert(s.state=='disabled' and s.url=='https://github.com/Viscerals/Better-Nexus/releases' and s.installed=='1.20.0-beta.1 test.9027','opt-out keeps the installed label and the manual link')
--- Review F2: older published lines state a higher SemVer prerelease in the same field. They are not upgrades.
-for _,old in ipairs({'1.20.0-beta.3.community-off','1.20.0-beta.2.community-off','1.20.0-beta.2','1.21.0-beta.1','1.20.0-rc.1'})do
- assert(Reported(PUBLIC27,old)==nil,'a prerelease without a public test number is never reported: '..old)
-end
--- Review F4: a development checkout or internal package with a raised version reports nothing.
-for _,raised in ipairs({'1.20.0-beta.2+dev','1.21.0+dev','1.21.0+internal','2.0.0-beta.1+internal','1.21.0+test.5'})do
- assert(Reported(PUBLIC27,raised)==nil,'a marked development or internal version is never reported: '..raised)
-end
-assert(Reported(PUBLIC27,'1.20.0-rc.1+test.3')=='1.20.0-rc.1 test.3','a later fixed-form series with a public test number is reported')
-print('PASS release series, stable successor, no downgrade, stable-only / test-inclusive / opt-out')
+assert(Nexus.Updates.Status().state=='available','the test-inclusive preference shows it again')
+Nexus.Updates.SetEnabled(false)
+s=Nexus.Updates.Status()
+assert(s.state=='disabled' and Nexus.Updates.GetVisibleNotice()==nil and s.url=='https://github.com/Viscerals/Better-Nexus/releases','opt-out: no notice, manual link kept')
+Nexus.Updates.SetEnabled(true)
+Nexus.Panel.ShowUpdateStatus()
+db=NexusDB;local chatBefore=Chat('available:')
+Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9029'},db);Ready()
+assert(Nexus.Updates.Status().state=='available' and Chat('available:')==0,'a dismissed trusted target is not announced again after reload; the status stays')
+db=NexusDB;Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9030'},db);Ready()
+assert(Chat('New Nexus test build available: 1.20.0-beta.1 test.9030.')==1,'a newer trusted target is announced once')
+Boot({version='1.19.5',channel='stable',available='1.20.0-beta.1+test.9029'})
+assert(Nexus.Updates.Preference()=='stable' and Nexus.Updates.Status().state=='unknown','a stable installation is not pushed into a beta by default')
+print('PASS preferences, opt-out, dismissal and reload with trusted evidence')
 
--- 7. Development source and internal packages: useful label, nothing claimed, nothing placed in a series.
-local shown,st=Reported(nil,'1.20.0-beta.1+test.9028')
-assert(shown==nil and st.state=='unknown' and st.channel=='development' and st.installed=='1.20.0-beta.1','a source checkout has no test number to compare; status unknown with a useful label')
-shown,st=Reported({label='test.9027-3f1cd20',channel='internal'},'1.20.0-beta.1+test.9028')
-assert(shown=='1.20.0-beta.1 test.9028' and st.channelLabel=='internal test package','an internal package still learns about a public test build')
-print('PASS development and internal identities')
-
--- 8. Hostile and malformed input: refused by the decoder or ignored; never text, link or authority.
+-- 9. Hostile input and the local link. A notice stored by an older client with peer authority stays quarantined.
 Boot(PUBLIC27);Ready()
 local rejected=0
 for _,bad in ipairs({'1.20.0-beta.1+test.9028 http://x.example','http://evil.example/Nexus.zip','1.20.0-beta.1+test.9028|cffff0000','1.20.0-beta.1+test.99999999999999999999','9'..string.rep('9',40),'1.20.0-beta.1+test.9028+x','1.20.0-beta.1+test..9028',''})do
  if not Deliver(request28,'Hostile',bad)then rejected=rejected+1 end
 end
-assert(Nexus.Updates.Status().state=='unknown' and Chat('reported')==0,'hostile or oversized versions produce no advisory ('..rejected..' refused by the decoder)')
--- Review F1: free-form prerelease text is valid SemVer and passes the decoder. It is never shown or stored.
-for _,text in ipairs({'9.9.9-www.evil.example.zip','9.9.9-get-it-at.evil-nexus.com','9.9.9-beta.1.evil','9.9.9-BETA.1+test.5','9.9.9-beta.99999+test.5'})do
+for _,text in ipairs({'9.9.9-www.evil.example.zip','9.9.9-get-it-at.evil-nexus.com','9.9.9-beta.1.evil'})do
  assert(Deliver(request28,'Texter',text),'fixture: the decoder accepts '..text)
- assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateAdvisory==nil,'peer text never becomes an advisory: '..text)
 end
+NoNotice('hostile and free-form versions ('..rejected..' refused by the decoder)')
 for _,l in ipairs(H.chat)do assert(not l:find('evil',1,true),'no peer text in chat')end
-assert(Deliver(request28,'Liar','999.0.0'))
-s=Nexus.Updates.Status()
-assert(s.state=='reported' and s.candidate.verified==false and s.menu:find('unverified',1,true) and NexusDB.updateNotice==nil,'an arbitrary high peer version is only an unverified report')
-assert(s.url=='https://github.com/Viscerals/Better-Nexus/releases','the link is the local one')
 Nexus.Release.releasesUrl='http://evil.example/x';assert(Nexus.Updates.ReleaseUrl()=='https://github.com/Viscerals/Better-Nexus/releases','a malformed local link falls back to the fixed page')
--- A false report from an earlier session does not hide what peers state in this session.
-db=NexusDB;Boot(PUBLIC27,db);Ready()
-assert(Nexus.Updates.Status().candidate.display:find('999.0.0',1,true))
-assert(Deliver(request28,'Honest') and Nexus.Updates.Status().candidate.display=='1.20.0-beta.1 test.9028','this session\'s report replaces the kept one')
-print('PASS hostile input, no peer link, no authority from a high number')
-
--- 9. Trusted bundled metadata keeps its own wording and wins over an equal or older report.
-Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9029'});Ready()
-s=Nexus.Updates.Status()
-assert(s.state=='available' and s.candidate.verified==true and s.menu=='Update available: 1.20.0-beta.1 test.9029','bundled metadata is compared against the installed build, prerelease included: '..s.detail)
-assert(LastChat('New Nexus test build available: 1.20.0-beta.1 test.9029. You have 1.20.0-beta.1 test.9027.'))
-assert(Deliver(request28,'T1') and Nexus.Updates.Status().candidate.verified==true,'an older report does not replace trusted evidence')
-assert(Deliver(request28,'T2','1.20.0-beta.1+test.9031') and Nexus.Updates.Status().candidate.verified==false and Nexus.Updates.Status().candidate.display=='1.20.0-beta.1 test.9031','a strictly newer report is shown, still unverified')
-Boot({label='test.9027-3f1cd20',channel='public-test',available='1.19.5'})
-assert(Nexus.Updates.Status().state=='unknown','bundled old stable is not an upgrade')
--- A notice stored by an older client with peer authority stays quarantined.
-Boot(PUBLIC27,(function()local d=T.Profile(3,0);d.updateNotice={version='9.9.9',authority='peer'};return d end)())
+Boot(PUBLIC27,(function()local x=T.Profile(3,0);x.updateNotice={version='9.9.9',authority='peer'};return x end)())
 assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateNotice==nil and NexusDB.updateNoticeQuarantine.version=='9.9.9','a peer-authority notice kept by an older client is quarantined, not shown')
-print('PASS trusted bundled path and legacy quarantine')
+print('PASS hostile input, local link only, legacy notice quarantine')
 
--- 10. The real HUD menu: the update entry is never disabled, states the provenance, opens the local link;
--- the channel entry switches the preference. The HUD button marks a visible notice.
+-- 10. Sync peer handling is unchanged: the request is accepted, the peer is observed, nothing is refused.
 Boot(PUBLIC27);Ready()
-local items;EasyMenu=function(list)items=list end
-local function Entry(pattern)for _,item in ipairs(items or {})do if type(item.text)=='string' and item.text:find(pattern,1,true)then return item end end end
-local button=assert(NexusPanel and NexusPanel._menuBtn,'the real HUD menu button')
-button:Click();local entry=assert(Entry('Update status unknown - open Releases page'),'menu entry without any report')
-assert(not entry.disabled,'the manual link is available with no report');popup=nil;entry.func()
-assert(popup and popup.url=='https://github.com/Viscerals/Better-Nexus/releases' and popup.text:find('Installed: 1.20.0-beta.1 test.9027',1,true))
-assert(Deliver(request28,'MenuPeer'));H.Advance(1,.05)
-button:Click();entry=assert(Entry('Newer build reported (unverified): 1.20.0-beta.1 test.9028'),'menu entry states an unverified report')
-assert(button:GetText()=='!','the HUD button marks the visible notice')
-local channel=assert(Entry('Update notices: stable + test builds'));channel.func()
-assert(Nexus.Updates.Preference()=='stable');button:Click()
-assert(Entry('Update status unknown') and Entry('Update notices: stable only'),'stable-only hides the test report in the menu');H.Advance(1,.05)
-assert(button:GetText()~='!','and on the HUD button')
-Entry('Update notices: stable only').func();button:Click()
-assert(Entry('Newer build reported (unverified): 1.20.0-beta.1 test.9028'),'the kept report returns with the test-inclusive preference')
-local toggle=assert(Entry('Disable Update Notices'));toggle.func();button:Click()
-assert(Entry('Update notices off - open Releases page') and not Entry('Update notices off').disabled,'opt-out keeps the manual link in the menu')
-print('PASS HUD menu entries, preference switch, opt-out, manual link')
+local rejectedBefore=Nexus.Sync.Stats().malformedRejected or 0
+assert(Deliver(request28,'SyncPeer','1.96.6') and (Nexus.Sync.Stats().malformedRejected or 0)==rejectedBefore,'a peer with any valid version is still accepted for Sync')
+assert(Observed('SyncPeer') and Observed('SyncPeer').reported=='stable','and observed for diagnostics')
+for i=1,40 do assert(Deliver(request28,'Many'..i,'1.20.0-beta.1+test.'..(9100+i)))end
+assert(#Nexus.Updates.PeerObservations()<=32,'the diagnostic list stays bounded')
+NoNotice('a flood of rising peer numbers')
+print('PASS Sync peer acceptance and bounded diagnostics unchanged')
 
--- 11. Review F3 / F11: a peer that raises its number in every request cannot fill the chat or the saved data;
--- an earlier dismissal survives a later one.
-Boot(PUBLIC27);Ready()
-for i=1,200 do assert(Deliver(request28,'Climber','1.20.0-beta.1+test.'..(9100+i)))end
-assert(Chat('A newer Nexus test build was reported')==3,'at most three update chat lines per session: '..Chat('A newer Nexus test build was reported'))
-assert(NexusDB.updateAdvisory.testBuild.test==9108,'eight quick stored changes, then a slow rate: '..tostring(NexusDB.updateAdvisory.testBuild.test))
--- Review N1: the bound is per kind and never a full stop.
-assert(Deliver(request28,'StableVoice','1.20.0') and NexusDB.updateAdvisory.stableRelease and NexusDB.updateAdvisory.stableRelease.version=='1.20.0','false test reports do not stop a stable report in the same session')
-H.Advance(301,1)
-assert(Deliver(request28,'Honest','1.20.0-beta.1+test.9500') and NexusDB.updateAdvisory.testBuild.test==9500,'an honest later report is still recorded in the same session')
-assert(Nexus.Updates.Status().state=='reported','the status stays truthful after the chat bound')
-Nexus.Panel.ShowUpdateStatus()
-db=NexusDB;Boot(PUBLIC27,db);Ready()
-assert(Deliver(request28,'Climber2','1.20.0-beta.1+test.9300'));Nexus.Panel.ShowUpdateStatus()
-assert(#NexusDB.updateDismissed==2,'both seen targets are remembered')
-db=NexusDB;db.updateAdvisory.testBuild.test=9108
-Boot(PUBLIC27,db);T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
-assert(Chat('test.9108')==0,'a target dismissed earlier is not announced again after a later dismissal')
--- Review N3 / N6: a slot written by an earlier head or by hand is read strictly and dropped when it does not fit.
-for _,bad in ipairs({{version='9.9.9-www.evil.example.zip'},{version='1.20.0-beta.1',test='0x2400'},{version='1.20.0-beta.1',test=9100.5},{version='1.20.0-beta.1+test.9100',test=9100}})do
- local d=T.Profile(3,0);d.updateAdvisory={authority='peer-advisory',testBuild=bad}
- Boot(PUBLIC27,d)
- assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateAdvisory.testBuild==nil,'a malformed stored test slot is dropped: '..tostring(bad.version)..' '..tostring(bad.test))
-end
-local d=T.Profile(3,0);d.updateAdvisory={authority='peer-advisory',stableRelease={version='9.9.9',test=7}}
-Boot(PUBLIC27,d);assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateAdvisory.stableRelease==nil,'a stable slot with a test number is dropped')
-d=T.Profile(3,0);d.updateAdvisory={authority='peer-advisory',testBuild={version='1.20.0-beta.1',test=9100}};d.updateDismissed={}
-for i=1,12 do d.updateDismissed[i]='1.20.0-beta.1#'..(9088+i)end
-Boot(PUBLIC27,d);T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
-assert(Chat('test.9100')==0,'the dismissal list is read where it is written (last eight)')
+-- 11. Review of the earlier padded-label rule stays.
 Boot({label='test.007-abcdef0',channel='public-test'})
 assert(Nexus.ReleaseIdentity().test==nil and Nexus.ReleaseIdentity().channel=='internal','a padded label states no test number, as in the tools')
-print('PASS bounded notices and state changes, dismissal set, padded label')
+print('PASS padded label')
 
 -- 12. Old peers. The published test.9027 decoder rule is the same ValidVersion: prove it accepts the new announcement.
 Boot(PUBLIC27);Ready()

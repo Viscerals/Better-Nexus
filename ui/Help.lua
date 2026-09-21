@@ -90,7 +90,7 @@ Useful commands:
 
 Prepare full diagnostic report builds a paged report. Select this page and copy pages in order; it does not put every page on the clipboard. Large reports may take a moment. Report build label, exact action, expected/actual outcome, and a small error screenshot first.
 
-Update notices: Nexus compares your installed build with builds that other Nexus clients state during Sync. A reported newer build is not verified; check GitHub Releases yourself. No report does not mean your build is the latest. Nexus never downloads or installs.
+Update notices: Nexus shows an update notice only from release information shipped inside this package. It does not check GitHub. Versions that other players' clients state during Sync are not release information and never produce a notice. /nexus update and the menu always open the Releases page. No notice does not mean your build is the latest. Nexus never downloads or installs.
 
 Do not delete saved data or run advanced reset commands on guesswork. Keep a matching addon/WTF backup for rollback with WoW closed. Native timing and recovery are not established by offline tests.]]},
  {id="about",title="About and advanced details",text=[[Ordinary rolling is independently implemented from the supplied LoadoutPilot 1.3.6 / P103 reference. Orb decisions use its MemoryMode source/target/fallback behavior with Nexus-specific exact-quality, permanent-role, approval, budget, and confirmation safeguards.

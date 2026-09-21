@@ -981,8 +981,8 @@ local function EnsureFrame()
         local notice = M._lastModel and M._lastModel.updateNotice
         if notice then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine((notice.verified and "Update available: "
-                or "Newer build reported (unverified): ")
+            -- Only bundled release evidence reaches here (core/Updates.lua).
+            GameTooltip:AddLine("Update available: "
                 .. tostring(notice.display or notice.version), 1, 0.82, 0, true)
             GameTooltip:AddLine("Open this menu for the manual Releases-page link.", 0.8, 0.8, 0.8, true)
         end
