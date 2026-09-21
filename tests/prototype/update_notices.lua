@@ -207,7 +207,7 @@ print('PASS bundled same/older/newer, stable successor, commit suffix, internal 
 Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+test.9029'});Ready()
 Nexus.Updates.SetPreference('stable')
 assert(Nexus.Updates.Status().state=='unknown' and Nexus.Updates.Preference()=='stable','stable-only hides a bundled test build')
-assert(Nexus.Updates.Status().detail:find('A newer test build (1.20.0-beta.1 test.9029) is not shown because notices are set to stable releases only.',1,true),'the hidden trusted build is named truthfully: '..Nexus.Updates.Status().detail)
+assert(Nexus.Updates.Status().detail:find('A newer test build (1.20.0-beta.1 test.9029) is not announced because notices are set to stable releases only.',1,true),'the hidden trusted build is named truthfully: '..Nexus.Updates.Status().detail)
 Nexus.Updates.SetPreference('test')
 assert(Nexus.Updates.Status().state=='available','the test-inclusive preference shows it again')
 Nexus.Updates.SetEnabled(false)

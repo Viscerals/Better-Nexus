@@ -402,7 +402,7 @@ function Updates.Status()
         -- Bundled evidence that only the stable-only preference hides is named.
         local hidden = Updates.Preference() == "stable" and BundledCandidate(true) or nil
         status.detail = have .. (hidden
-            and (" A newer test build (" .. hidden.display .. ") is not shown because notices are set to stable releases only.")
+            and (" A newer test build (" .. hidden.display .. ") is not announced because notices are set to stable releases only.")
             or " This client has no release information about a newer build.")
             .. " Nexus does not check GitHub, and versions stated by other players' clients are not release information."
             .. " That is not proof that this build is the latest: check the Releases page."

@@ -61,7 +61,7 @@ No tool writes the `stable` channel yet. A stable release needs that one declare
 
 Trusted evidence is only release metadata shipped inside the package (`Release.availableVersion`, optional `availableTest`). It keeps the wording "New Nexus test build available: …". A peer version never becomes that: not by a high number, not by many agreeing peers, not by `+test.N` metadata, not by a peer's own `published` flag. Since 2026-09-21 a peer version is not stored and produces no notice at all (correction section above); the only saved peer state is the one-time quarantine record of an advisory saved by an earlier build. It holds no peer name, no peer text and no link. The only link ever shown is `Release.releasesUrl`, checked against the fixed GitHub Releases form.
 
-Preferences: update notices on/off (unchanged setting), and stable + test builds (default on any beta or test installation) or stable only (default on a stable installation). Stable-only users are never shown a test build. Nobody is shown the old stable line as an upgrade from a newer beta.
+Preferences: update notices on/off (unchanged setting), and stable + test builds (default on any beta or test installation) or stable only (default on a stable installation). Stable-only users are never notified about a test build (no chat line, menu entry or badge); `/nexus update` names a newer bundled test build that the preference holds back. Nobody is shown the old stable line as an upgrade from a newer beta.
 
 ## Limits — what this cannot do
 
