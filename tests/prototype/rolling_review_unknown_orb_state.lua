@@ -105,12 +105,33 @@ permits('no OrbService',nil)
 H.Board(CARDS);H.Notify();H.Advance(.3)
 local n=#H.actions;local ok,why=A.Reroll()
 check(ok==true and #H.actions==n+1,'no OrbService: ordinary Reroll still works ('..tostring(why)..')');settle()
--- Explicit legacy capability: an older pending-only OrbService without any
--- IsStateKnown member (retained contract from tests/prototype/automation.lua).
+-- R1 as the user states it (corrected 2026-09-21): an EXISTING OrbService that
+-- cannot say whether its state is known is a missing capability and blocks, even
+-- when its pending answer is false. Only a genuinely absent OrbService is the
+-- legacy exception (tested above). Until then this case was permitted as
+-- "PENDING_ONLY"; that permit is removed.
+blocked('existing service without IsStateKnown, not pending',{IsOfferPending=function()return false end},'orb state capability missing')
+blocked('existing service without IsStateKnown, pending',{IsOfferPending=function()return true end},'orb state capability missing')
 ProjectEbonhold.OrbService={IsOfferPending=function()return false end}
-check(A.OrbCapability()=='PENDING_ONLY','pending-only OrbService is reported as its own explicit capability')
-permits('pending-only service, not pending',ProjectEbonhold.OrbService)
-blocked('pending-only service, pending',{IsOfferPending=function()return true end},'Orb offer active -- manual action required')
+check(A.OrbCapability()=='MISSING_STATE','an existing service without IsStateKnown is reported as a missing capability, not as a permit')
+check(T.Message('orb state capability missing'):find('does not report whether its state is known',1,true)~=nil,'the missing capability has a truthful visible reason')
+-- Automatic rolling submits nothing for that service either.
+ProjectEbonhold.OrbService={IsOfferPending=function()return false end}
+local beforeAuto=#H.actions
+SlashCmdList.NEXUS('auto');H.Advance(2)
+check(Nexus.Panel._lastModel and Nexus.Panel._lastModel.auto==true,'fixture: automation is on')
+check(#H.actions==beforeAuto,'automatic rolling submits nothing for a service without IsStateKnown')
+SlashCmdList.NEXUS('auto');H.Advance(.2)
+-- Reading the service itself throws: blocked as malformed, never as absent.
+do
+ local throwing=setmetatable({},{__index=function(_,k)if k=='OrbService' then error('synthetic read failure')end end})
+ local saved=ProjectEbonhold
+ for k,v in pairs(saved)do rawset(throwing,k,v)end;rawset(throwing,'OrbService',nil)
+ ProjectEbonhold=throwing
+ local ok,why=A.OrdinaryBoardAllowed()
+ ProjectEbonhold=saved
+ check(ok==false and why=='orb state unavailable','reading OrbService throws: blocked as malformed, never as absent ('..tostring(why)..')')
+end
 ProjectEbonhold.OrbService=service(true,false)
 check(A.OrbCapability()=='STATE_AWARE','full OrbService is reported as state-aware')
 print('PASS rolling review R1 unknown Orb state checks='..checks)

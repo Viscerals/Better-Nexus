@@ -74,24 +74,36 @@ end
 -- Single owner of the OrbService known/pending classification for callers that
 -- are not Orb mode (the ordinary-board gate). Read-only. Returns
 -- capability, status, reason:
---   NO_ORB_SERVICE / ABSENT   explicit legacy client: no OrbService member at all
---   PENDING_ONLY              explicit legacy service: IsOfferPending, no IsStateKnown member
+--   NO_ORB_SERVICE / ABSENT   explicit legacy capability: the client has no OrbService
+--                             at all (no ProjectEbonhold table, or its OrbService is nil)
+--   MISSING_STATE             an OrbService exists but has no IsStateKnown member: it
+--                             cannot say whether its pending answer is authoritative
 --   STATE_AWARE               the supported service: IsStateKnown and IsOfferPending
---   MALFORMED                 a present member has the wrong type, or IsOfferPending is missing
--- status IDLE is the only answer that permits ordinary mutation. UNKNOWN is
--- never folded into not-pending: a service that does not know its state cannot
--- vouch for its pending flag.
+--   MALFORMED                 the OrbService value or one of its members has the wrong
+--                             type, IsOfferPending is missing, or reading it throws
+-- status IDLE (known AND not pending) is the only answer of an existing service
+-- that permits ordinary mutation. UNKNOWN is never folded into not-pending: a
+-- service that does not know its state, or cannot say so, cannot vouch for its
+-- pending flag. (Until 2026-09-21 a service without IsStateKnown was permitted
+-- as "PENDING_ONLY"; the user's R1 requirement names only a genuinely absent
+-- OrbService as the legacy exception, so that permit was removed.)
 function O.ServiceState()
     local pe=_G.ProjectEbonhold;local orb=nil
-    if type(pe)=="table" then orb=pe.OrbService end
+    if type(pe)=="table" then
+        local okRead,value=pcall(function()return pe.OrbService end)
+        if not okRead then return "MALFORMED","UNAVAILABLE","orb state unavailable" end
+        orb=value
+    end
     if orb==nil then return "NO_ORB_SERVICE","ABSENT" end
-    if type(orb)~="table" or type(orb.IsOfferPending)~="function"
-        or (orb.IsStateKnown~=nil and type(orb.IsStateKnown)~="function") then
+    if type(orb)~="table" then return "MALFORMED","UNAVAILABLE","orb state unavailable" end
+    local okM,isKnown,isPending=pcall(function()return orb.IsStateKnown,orb.IsOfferPending end)
+    if not okM or type(isPending)~="function"
+        or (isKnown~=nil and type(isKnown)~="function") then
         return "MALFORMED","UNAVAILABLE","orb state unavailable"
     end
-    local capability="PENDING_ONLY"
-    if orb.IsStateKnown~=nil then
-        capability="STATE_AWARE"
+    if isKnown==nil then return "MISSING_STATE","UNAVAILABLE","orb state capability missing" end
+    local capability="STATE_AWARE"
+    do
         local okK,known=call(orb,"IsStateKnown")
         if not okK or type(known)~="boolean" then return capability,"INVALID","orb state unknown" end
         if not known then return capability,"UNKNOWN","orb state not yet known" end

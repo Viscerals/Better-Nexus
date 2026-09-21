@@ -25,10 +25,10 @@ classification for callers outside Orb mode. `OrdinaryBoardAllowed()` uses it.
 
 | Capability case | Condition | Ordinary mutation |
 |---|---|---|
-| `NO_ORB_SERVICE` | `ProjectEbonhold.OrbService` is nil | Allowed. Explicit legacy capability. |
-| `PENDING_ONLY` | `IsOfferPending` is a function and no `IsStateKnown` member exists | Allowed only when `IsOfferPending()` returns boolean false. Explicit legacy capability. |
+| `NO_ORB_SERVICE` | There is no `ProjectEbonhold` table, or its `OrbService` is nil | Allowed. The only explicit legacy capability. |
+| `MISSING_STATE` | An `OrbService` exists, `IsOfferPending` is a function, and no `IsStateKnown` member exists | Blocked: `orb state capability missing`. The service cannot say whether its pending answer is authoritative. |
 | `STATE_AWARE` | `IsStateKnown` and `IsOfferPending` are functions | Allowed only when `IsStateKnown()` returns boolean true and `IsOfferPending()` returns boolean false. |
-| `MALFORMED` | OrbService is not a table, `IsOfferPending` is not a function, or `IsStateKnown` exists and is not a function | Blocked: `orb state unavailable`. |
+| `MALFORMED` | OrbService is not a table, `IsOfferPending` is not a function, `IsStateKnown` exists and is not a function, or reading the service or a member throws | Blocked: `orb state unavailable`. |
 
 | State answer | Reason code | Visible text |
 |---|---|---|
@@ -67,15 +67,23 @@ same bounded trigger that an automation toggle uses. It invalidates no static
 state and submits nothing itself. Test:
 `tests/prototype/rolling_review_orb_state_recompute.lua`.
 
-### Retained legacy decision
+### Correction of 2026-09-21: no permit for a service without `IsStateKnown`
 
-The existing test `tests/prototype/automation.lua` requires that a service
-with `IsOfferPending` and no `IsStateKnown` member permits ordinary rolling.
-R1 keeps that behaviour as the named `PENDING_ONLY` capability case. Orb mode
-itself stays unavailable on such a client, because `OrbAdapter.Read()` requires
-`IsStateKnown`.
+Until 2026-09-21 a service with `IsOfferPending` and no `IsStateKnown` member
+permitted ordinary rolling as the named `PENDING_ONLY` case, because the older
+test `tests/prototype/automation.lua` asserted it with a minimal mock. The user
+ruled that this contradicts R1: an existing OrbService must give an
+authoritative known-not-pending answer, and only a genuinely absent OrbService
+is the legacy exception. The case is now `MISSING_STATE` and blocks. The two
+mocks in `tests/prototype/automation.lua` were updated to what they stand for, a
+client that reports a known state (`IsStateKnown` returns true); none of its
+assertions changed. A throwing read of `ProjectEbonhold.OrbService` or of a
+member is now classified `MALFORMED` (blocked) instead of raising an error.
 
-Test: `tests/prototype/rolling_review_unknown_orb_state.lua`.
+Tests: `tests/prototype/rolling_review_unknown_orb_state.lua` (the real
+`Take`, `Banish`, `Reroll`, `Freeze` and automatic rolling; red on `90b8e58`),
+`tests/prototype/rolling_review_automatic_paths_orb_state.lua` (automatic lever
+and save paths).
 
 ## R2 - Passive recovery after reload
 
@@ -403,29 +411,39 @@ Options:
   slow retry with a fixed maximum). Its effect on `IsStateKnown()` is unproven
   until a native session shows it.
 
-### D2 (review F6) - The `PENDING_ONLY` permit
+### D2 (review F6) - The `PENDING_ONLY` permit: resolved 2026-09-21
 
-Facts:
-
-- A service with `IsOfferPending` and no `IsStateKnown` member permits ordinary
-  rolling when `IsOfferPending()` returns boolean false. The user's request
-  names only the absent-OrbService legacy mode as a permit.
-- It fails open by construction: if a state-aware service lost its
-  `IsStateKnown` member, unknown state would be invisible. The review found no
-  realistic route to that: a thrown callback is `INVALID` (blocked), an empty
-  table is `MALFORMED` (blocked), a non-table service is blocked.
-- The only evidence for such a client is the minimal mock in
-  `tests/prototype/automation.lua` line 26, which asserts the permit. That file
-  is outside this branch's ownership.
-- `CONTRACTS.md` now names this permit.
-
-Options:
-
-- Keep the permit (current behaviour, now documented).
-- Block it. This needs the owner of `tests/prototype/automation.lua` to change
-  line 26, then a one-line change in `OrbAdapter.ServiceState()`.
+The user ruled that this was a requirement discrepancy, not a product choice.
+The permit is removed; see "Correction of 2026-09-21" in the R1 section. The
+earlier text of this item offered "keep" or "block"; it is kept here only as a
+record that the question existed.
 
 ### D3 (review N1) - Non-board mutators while Orb state is unknown
+
+Scope check (2026-09-21). R1 covers ordinary mutation by Nexus. Every
+automatic caller of a GameAdapter mutator passes `AutoAllowed()`, which asks the
+ordinary-board gate, so every automatic path is blocked while Orb state is
+unknown, pending or not reportable:
+
+| Mutator | Automatic caller (file:line in `core/AutomationRuntime.lua`) | Guard on the automatic path | Manual callers |
+|---|---|---|---|
+| `Take`, `Banish`, `Freeze`, `Reroll` | `StepRun`, 2433 / 2445 / 2463 / 2477 | `AutoAllowed()` and the mutator's own `OrdinaryBoardAllowed()` | none outside automation |
+| `ToggleLever` | `StepArm`, 812 (disable) and 831 (re-enable) | `AutoAllowed()` (both inside the `automationAllowed` branch) | none found |
+| `Save` | `StepSave`, 2562 and 2673 | `AutoAllowed()` at the entry of `StepSave` | Saved Build controls of the game UI (not Nexus) |
+| `LockPerk`, `UnlockPerk` | automatic permanent-slot handling, 1891 / 1776 | `AutoAllowed()` checked again immediately before each send | Wishlist Editor lock switches reconcile through the same automatic handler |
+| `UploadWishlist` | none | - | `core/WishlistController.lua` 1111 (Wishlist Editor save), `core/CommunityController.lua` 3024 (copy a shared build) |
+| `Activate` | none | - | none in Nexus code |
+
+Test: `tests/prototype/rolling_review_automatic_paths_orb_state.lua` sends the
+automatic lever and save steps once with a known state (control) and zero times
+with an unknown state or a service without `IsStateKnown`. A mutant whose
+`AutoAllowed()` ignores the gate is red at the save step. The lever step stays
+at zero under that mutant too, because another existing guard also stops it; the
+lock and unlock paths are covered by reading (`AutoAllowed()` immediately
+before the send), not by a dedicated test.
+
+Manual user controls (`UploadWishlist` from the editor or a shared build) are
+not ordinary automation and were deliberately not gated.
 
 Facts:
 

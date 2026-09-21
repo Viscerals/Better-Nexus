@@ -14,6 +14,7 @@ local reasons={
     ["orb state not yet known"]="Ordinary rolling paused: the server's Orb state is not confirmed yet",
     ["orb state unknown"]="Ordinary rolling paused: the game's Orb state could not be read",
     ["orb state unavailable"]="Ordinary rolling paused: the game's Orb service does not expose its pending-offer state",
+    ["orb state capability missing"]="Ordinary rolling paused: the game's Orb service does not report whether its state is known, so Nexus cannot confirm that no Orb choice is open",
     ["Orb offer active -- manual action required"]="An Orb offer is active; use Orb mode or resolve it in the game",
     ["Take wanted Echo (Pilot)"]="Take a needed Echo",
     ["Take available Echo (Pilot)"]="Take an available Echo",
