@@ -826,6 +826,7 @@ function Controller.New(options)
                         slot=candidate.slot,name=candidate.name,
                         count=candidate.count,echoes=candidate.echoes,
                         active=candidate.active,sourceKind="Wishlist",
+                        designTargets=candidate.slot == nil and candidate.designTargets or nil,
                     }
                 end
             end
@@ -1821,18 +1822,28 @@ function Controller.New(options)
             if not split or #split ~= #rows then return false end
             return split
         end
+        local UNREADABLE = "has a saved permanent-target plan that cannot be read. "
+            .. "Open the Wishlist in the Wishlist Editor and save its permanent targets again."
         local function PlanDesign()
+            if wl.sourceKind == "Saved Build" then return nil end
             local slot = tonumber(wl.slot)
-            if not slot or wl.sourceKind == "Saved Build" or not Adapter
-                or type(Adapter.GetWishlistCandidates) ~= "function" then
-                return nil
+            if not slot then
+                -- A saved plan listed without a server Wishlist (its server
+                -- copy is gone or renamed): the plan is the source itself, so
+                -- its own design supplies the permanent rows.
+                if wl.designTargets == nil then return nil end
+                local rows = DesignRows(wl.designTargets)
+                if rows == false then return false, UNREADABLE, "saved plan design unreadable" end
+                return rows
             end
+            if not Adapter or type(Adapter.GetWishlistCandidates) ~= "function" then return nil end
             local okRead, known = pcall(Adapter.GetWishlistCandidates)
             if not okRead or type(known) ~= "table" then
-                return false, "has a saved permanent-target plan that cannot be read.",
-                    "saved plan design unreadable"
+                return false, UNREADABLE, "saved plan design unreadable"
             end
-            local design, unbound, boundSeen = nil, false, false
+            -- boundKey: the permanent population of the first design bound to
+            -- this slot ("" for an empty design). Every bound design must agree.
+            local design, unbound, boundSeen, boundKey = nil, false, false, nil
             for _, c in ipairs(known) do
                 if type(c) == "table" and c.designTargets ~= nil then
                     local bound = tonumber(c.slot) == slot and c.mirrorUnavailable ~= true
@@ -1848,8 +1859,16 @@ function Controller.New(options)
                     if related then
                         local rows = DesignRows(c.designTargets)
                         if rows == false then
-                            return false, "has a saved permanent-target plan that cannot be read.",
-                                "saved plan design unreadable"
+                            return false, UNREADABLE, "saved plan design unreadable"
+                        end
+                        if bound then
+                            local key = rows and Population(rows) or ""
+                            if boundKey ~= nil and boundKey ~= key then
+                                return false, "has two saved permanent-target plans that do not agree. "
+                                    .. "Open the Wishlist in the Wishlist Editor for each loadout that uses it and save the same permanent targets.",
+                                    "saved plan designs disagree"
+                            end
+                            boundKey = key
                         end
                         if rows and not bound then
                             unbound = true
@@ -1859,10 +1878,6 @@ function Controller.New(options)
                                 return false, "changed after its saved permanent-target plan was made, so the plan does not match it. "
                                     .. "Open the Wishlist in the Wishlist Editor and save it again.",
                                     "saved plan design does not match the source rows"
-                            end
-                            if design and Population(design) ~= Population(rows) then
-                                return false, "has two saved permanent-target plans that do not agree.",
-                                    "saved plan designs disagree"
                             end
                             design = rows
                         end

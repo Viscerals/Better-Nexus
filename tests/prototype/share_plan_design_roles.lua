@@ -283,6 +283,32 @@ Click(p,'PLAN-DISAGREE')
 Refused('two designs that disagree',p,'two saved permanent-target plans that do not agree','Nothing was shared')
 print('PASS disagreeing saved designs are refused')
 
+-- 12. Review N1 (P1): an EMPTY design next to a non-empty one for the same slot is
+-- also a disagreement (the permanent target was removed for one loadout only).
+Boot()
+uploaded=Create('PLAN-EMPTY-VS-ONE',1,1)
+Publish(102,'PLAN-EMPTY-VS-ONE',Mirror(uploaded))
+assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(s)
+ local copy=H.Clone(s.firstRunWishlist);copy.assignmentId=tostring(copy.assignmentId)..'-second'
+ copy.designRows={}
+ s.loadoutWishlists=s.loadoutWishlists or {};s.loadoutWishlists[1]=copy
+end),'fixture: second assignment of the same plan without its permanent target')
+p=Open('PLAN-EMPTY-VS-ONE')
+Click(p,'PLAN-EMPTY-VS-ONE')
+Refused('empty design beside a non-empty design',p,'two saved permanent-target plans that do not agree','save the same permanent targets','Nothing was shared')
+print('PASS an empty and a non-empty design for one slot are refused')
+
+-- 13. Review N2: a saved plan listed without a server Wishlist (its server copy is
+-- gone) is its own source; its design supplies the permanent rows.
+Boot()
+Create('PLAN-NO-SERVER-COPY',1,1)
+H.Notify();Nexus.GameAdapter.Poll();H.Advance(.5)
+p,label=Open('PLAN-NO-SERVER-COPY')
+assert(label:find('1 / 79 + 1 / 6 permanent',1,true),'slot-less plan entry states both role counts: '..label)
+Click(p,'PLAN-NO-SERVER-COPY')
+Accepted('saved plan without a server copy',1,1)
+print('PASS saved plan without a server copy shares its permanent row')
+
 -- 11. Review F2: the >79 path (84 all-false rows, roles confirmed in the adapter).
 -- The preview lists 78 ordinary and 6 permanent rows, none twice.
 local rows84={};for i=1,84 do rows84[i]={spellId=200000+i,stacks=1,locked=false}end
