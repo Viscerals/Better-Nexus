@@ -224,7 +224,10 @@ assert(refusal:find('86 ordinary and 0 permanent',1,true) and lines[1]:find('86 
 -- Ordinary refreshes of every kind: explicit refresh, window open/close, frames, an incoming catalog commit.
 Nexus.CommunityBuilds.Refresh();Nexus.CommunityBuilds.Show();Nexus.CommunityBuilds.Hide();Nexus.CommunityBuilds.Refresh()
 local ticket=S.Incoming(H,C);T.Until(H,function()return ticket.committed end)
-for i=1,40 do H.Advance(.05,.05)end;Nexus.CommunityBuilds.Refresh()
+for i=1,40 do H.Advance(.05,.05)end
+-- The form's own status poll ran during these frames. It must keep the held refusal (no explicit Refresh before this read).
+assert(p:IsShown() and p._shareStatus:GetText()==refusal,'the status poll of the open form keeps the held refusal: '..tostring(p._shareStatus:GetText()))
+Nexus.CommunityBuilds.Refresh()
 assert(p:IsShown() and p._shareStatus:GetText()==refusal,'the refusal survives ordinary refreshes and is not replaced by the earlier Share: '..tostring(p._shareStatus:GetText()))
 assert(not p._shareStatus:GetText():find('EARLIER-SENT-3',1,true))
 -- Legitimate replacement 1: the user chooses another source.
