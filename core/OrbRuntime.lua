@@ -7,6 +7,10 @@ local config,run,approval,frame,configOwner
 local advancing=false
 local passiveDepth=0
 local OFFER_TIMEOUT,RESULT_TIMEOUT=10,12
+-- Passive recovery after a reload reads at the normal cadence while evidence can
+-- still arrive soon, then at a slow cadence. It never submits anything.
+local RECOVERY_FAST_WINDOW,RECOVERY_SLOW_INTERVAL=60,5
+local ensureFrame
 local function copy(t)
     if type(t)~="table" then return t end
     local r={};for k,v in pairs(t) do r[k]=copy(v) end;return r
@@ -40,9 +44,14 @@ local function init()
     run={state="IDLE",reason="Choose a maximum, then Start to use safe surplus copies for the assigned Wishlist.",running=false,spent=0,reserved=0,limit=0,recent={}}
     if type(config.pending)=="table" then
         run.pending=copy(config.pending);run.pending.restored=true;run.pending.since=now()
-        run.pending.refreshRequested=false;run.pending.baselineStamp=nil
-        run.state="RECOVERY";run.reason="An earlier Orb action is unresolved. Nothing will restart. Recheck and resolve any native offer manually."
+        run.pending.refreshRequested=false;run.pending.baselineStamp=nil;run.pending.recoverySerial=nil;run.pending.recoveryMatched=nil
+        run.state="RECOVERY";run.reason="An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open."
+        run.recovery={kind="CHECKING",observing=false}
         run.spent=run.pending.spent or 0;run.reserved=run.pending.spendConfirmed and 0 or 1;run.limit=run.pending.limit or config.maxOrbs
+        -- Start the read-only recovery pump now. A manual choice made before the
+        -- player opens the Orb window can then still be observed.
+        run.recoveryFastUntil=now()+RECOVERY_FAST_WINDOW
+        if ensureFrame then pcall(ensureFrame) end
     end
 end
 local function fingerprint(entries)
@@ -59,10 +68,17 @@ end
 local function editable()
     init();return not run.running and not run.pending and run.state~="PAUSED" and run.state~="LIMIT"
 end
+-- Refusal text while a restored receipt blocks Orb mode: say what can be done.
+local function busyReason(subject,default)
+    if run and run.pending and run.pending.restored and not run.running and M.BlockReason then
+        return M.BlockReason(subject) or default
+    end
+    return default
+end
 local function savePending()
     if run.pending then
         local p=copy(run.pending);p.context=nil;p.beforeSnapshot=nil;p.token=nil
-        p.spent=run.spent;p.limit=run.limit;p.since=nil;p.baselineStamp=nil
+        p.spent=run.spent;p.limit=run.limit;p.since=nil;p.baselineStamp=nil;p.recoverySerial=nil;p.recoveryMatched=nil
         config.pending=p
     else config.pending=nil end
     return write(config)
@@ -71,7 +87,7 @@ local function release()
     if run.token then B.Release(run.token);run.token=nil end
 end
 local function pause(reason)
-    run.running=false;setState("PAUSED",reason)
+    run.running=false;run.pauseSerial=(run.pauseSerial or 0)+1;setState("PAUSED",reason)
 end
 local function terminal(state,reason)
     run.running=false;setState(state,reason)
@@ -95,7 +111,7 @@ function M.SelectWishlist(candidate)
     return nil,"Orb mode uses the assigned Wishlist. Change its assignment through My Builds or the Wishlist Editor."
 end
 function M.UseAssignedWishlist()
-    if not editable() then return nil,"Stop and settle the current Orb operation before changing targets." end
+    if not editable() then return nil,busyReason("A change of Orb targets","Stop and settle the current Orb operation before changing targets.") end
     local a=Nexus.GameAdapter.AssignedWishlist()
     if a.state~="ready" then return nil,a.note or "Assign a resolved Wishlist through My Builds or the Wishlist Editor." end
     local targets,err=P.Normalize(a.entries);if not targets then return nil,err end
@@ -174,7 +190,7 @@ function M.ClearExclusions()
     config.excluded={};return changedConfig()
 end
 function M.SuggestSources()
-    if not editable() then return nil,"Stop and settle the current run first." end
+    if not editable() then return nil,busyReason("A change of Orb sources","Stop and settle the current run first.") end
     local s,err=B.Read();if not s then return nil,err end
     local targets,e=P.Normalize(config.entries);if not targets then return nil,e end
     local proposed={};for _,r in ipairs(P.Sources(targets,s,config.excluded)) do proposed[r.key]=r.excess end
@@ -217,7 +233,7 @@ local function preflight(automatic)
     m.permitted=permitted;m.capacity=capacity;return m
 end
 function M.Prepare(mode)
-    init();if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,"An Orb run is already active or unresolved. Stop/settle it before starting another." end
+    init();if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,busyReason("A new Orb run","An Orb run is already active or unresolved. Stop/settle it before starting another.") end
     local automatic=mode=="assigned"
     local m,err=preflight(automatic);if not m then return nil,err end
     local limit=mode=="single" and 1 or config.maxOrbs
@@ -241,19 +257,25 @@ local function turnAutoOff()
     return true
 end
 
-local function ensureFrame()
+ensureFrame=function()
     if frame then frame:Show();return end
     frame=CreateFrame("Frame","NexusOrbRuntime",UIParent)
     frame:RegisterEvent("PLAYER_LOGOUT");frame:RegisterEvent("PLAYER_LEAVING_WORLD");frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:SetScript("OnEvent",function()
-        init();if run.running or run.pending then
+        init()
+        -- A restored receipt is already passive. Keep its recovery explanation.
+        if run.pending and run.pending.restored and not run.running then return end
+        if run.running or run.pending then
             run.running=false;setState("PAUSED","Session interrupted. Orb spending will not restart automatically.")
             if run.pending then savePending() else release() end
         end
     end)
     local elapsed=0
     frame:SetScript("OnUpdate",function(_,dt)
-        elapsed=elapsed+(dt or 0);if elapsed<.2 then return end;elapsed=0
+        elapsed=elapsed+(dt or 0)
+        local slow=run and run.pending and run.pending.restored and not run.running
+            and now()>=(run.recoveryFastUntil or 0)
+        if elapsed<(slow and RECOVERY_SLOW_INTERVAL or .2) then return end;elapsed=0
         local ok,err=pcall(M.Pump)
         if not ok then pause("Orb mode stopped after an internal error. Check diagnostics; no automatic repeat will be sent.")
             if Nexus.Errors and Nexus.Errors.Record then pcall(Nexus.Errors.Record,"OrbRuntime",tostring(err)) end
@@ -323,7 +345,10 @@ local function finishResult(s,p)
     while #run.recent>5 do table.remove(run.recent,1) end
     run.pending=nil
     local ok,err=savePending();if not ok then run.pending=p;pause(err);return false end
-    if p.restored then terminal("STOPPED","Previous result confirmed. No spending restarted; review a new run explicitly.");return true end
+    if p.restored then
+        run.recovery=nil;if type(B.Unwatch)=="function" then B.Unwatch() end
+        terminal("STOPPED","Previous result confirmed. No spending restarted; review a new run explicitly.");return true
+    end
     if run.targetChanged then
         setState(run.state=="STOPPED" and "STOPPED" or "PAUSED","Original replacement confirmed. Review the new assigned Wishlist, then Resume; usage is unchanged.")
         if run.state=="STOPPED" then release() end
@@ -357,9 +382,15 @@ local function observeLifecycle(s,p)
         end
     end
     local sel=s.selection
-    if sel and sel.serial>(p.beforeSelectionSerial or 0) and sel.boardKey==p.offerKey then
+    -- The adapter's observation serial restarts with each addon load. A restored
+    -- receipt therefore uses the serial read at its first recovery observation.
+    local floor=p.beforeSelectionSerial or 0
+    if p.restored then floor=p.recoverySerial or math.huge end
+    if sel and sel.serial>floor and sel.boardKey==p.offerKey then
         if p.selectedKey and p.selectedKey~=sel.key then
-            pause("A different choice was submitted during the pending operation. Resolve it manually.");return false
+            pause(p.selectionRefused and not p.choiceMayHaveBeenSent
+                and "A different Echo was chosen than the one Nexus had proposed for this Orb action. Nexus can confirm only the proposed Echo, so it cannot confirm this action. The record and its spending exposure are kept. No exit from this block exists yet; a settlement path is only a proposal and is not built."
+                or "A different choice was submitted during the pending Orb action. Nexus cannot confirm this action. The record and its spending exposure are kept. No exit from this block exists yet; a settlement path is only a proposal and is not built.");return false
         end
         if not p.selectionAttempted then
             p.selectionAttempted=true;p.selectedKey=sel.key;p.selectionStamp=sel.grantStamp;changed=true
@@ -369,19 +400,192 @@ local function observeLifecycle(s,p)
     if changed then local ok,e=savePending();if not ok then pause(e);return false end end
     return true
 end
+-- Passive recovery after a reload ------------------------------------------
+-- The restored receipt owns no action token. This path only reads, installs the
+-- adapter's read-only choice observer, and records evidence. It never spends,
+-- selects, retries, refunds, or erases. Settlement stays in finishResult and
+-- keeps every requirement of the live path: the offer, a choice observed or
+-- sent within that offer, one Orb, closed offer/host state, the exact ownership
+-- delta, and a fresh ownership response.
+local function sameCounts(a,b)
+    for k,n in pairs(a) do if n~=0 and (b[k] or 0)~=n then return false end end
+    for k,n in pairs(b) do if n~=0 and (a[k] or 0)~=n then return false end end
+    return true
+end
+local function ownershipMatchesReceipt(s,p)
+    if type(p.before)~="table" or type(p.removed)~="string" then return false end
+    if sameCounts(s.granted,p.before) then return true end
+    local after={};for k,n in pairs(p.before) do after[k]=n end
+    if (after[p.removed] or 0)<1 then return false end
+    after[p.removed]=after[p.removed]-1
+    return sameCounts(s.granted,after)
+end
+local function hasChoiceEvidence(p)
+    return p.offerKey~=nil and p.selectionAttempted==true and p.selectedKey~=nil
+        and (p.choiceMayHaveBeenSent==true or p.choiceObserved==true)
+        and type(p.offeredKeys)=="table" and p.offeredKeys[p.selectedKey]==true
+end
+local function exactResultOwnership(s,p)
+    local gained,status=P.SingleGain(p.before,p.removed,s.granted)
+    return status=="CONFIRMED" and gained~=nil
+end
+local recoveryChoiceEvent=false
+local function onRecoveryChoice()
+    -- Called by the adapter's read-only SelectPerk observer at the moment of a
+    -- manual choice. One passive pump records the offer and the choice now, so
+    -- the observation does not depend on the timed recovery reads.
+    if not run or not run.pending or not run.pending.restored or run.running then return end
+    run.recoveryFastUntil=now()+RECOVERY_FAST_WINDOW
+    recoveryChoiceEvent=true
+    pcall(M.Pump,true)
+    recoveryChoiceEvent=false
+end
+local function recoverObserve(s,p)
+    if p.recoverySerial==nil then p.recoverySerial=s.selectionSerial or 0 end
+    -- finishResult owns the loadout-boundary pause. Nothing is observed or
+    -- recorded across it: the watcher is bound to the original loadout only, as
+    -- the live owner's context is.
+    if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+        if type(B.Unwatch)=="function" then B.Unwatch() end
+        return "LOADOUT",false
+    end
+    local observing=type(B.Watch)=="function" and B.Watch(s,onRecoveryChoice)==true
+    if s.lockedKey~=p.lockedKey then return "PERMANENT_CHANGED",observing end
+    if s.offerPending and #s.board==3 then
+        run.recoveryFastUntil=now()+RECOVERY_FAST_WINDOW
+        local firstSeen=not p.offerKey
+        local sameOffer=not firstSeen and p.offerKey==s.boardKey
+        local oneOrb=s.charges==p.chargesBefore-1
+        -- Order of events: the exact result ownership can arrive while the game
+        -- still flags the offer as pending. A choice that the observer recorded
+        -- on the offer that this session already matched is consumed first, as
+        -- the live path does. It needs the same offer, the same one-Orb balance,
+        -- and ownership that is either the receipt or its exact single gain.
+        if sameOffer and p.recoveryMatched and oneOrb
+            and (ownershipMatchesReceipt(s,p) or exactResultOwnership(s,p)) then
+            if not observeLifecycle(s,p) then return "PAUSED",observing end
+        end
+        -- Recorded choice evidence is never discarded by a later classification.
+        if sameOffer and oneOrb and hasChoiceEvidence(p) then return "WAIT_RESULT",observing end
+        -- Tie an open offer to the saved action only on exact evidence: one Orb
+        -- less than the receipt and ownership equal to the receipt, with or
+        -- without the named source. A recorded offer must also be the same offer.
+        if not oneOrb or not ownershipMatchesReceipt(s,p) or (firstSeen and p.selectionAttempted) then
+            -- A choice made on an unmatched offer is never evidence for this action.
+            p.recoveryMatched=nil;p.recoverySerial=math.max(p.recoverySerial,s.selectionSerial or 0)
+            return "OFFER_UNMATCHED",observing
+        end
+        if firstSeen and s.hostPending then
+            -- An offer first seen with a host action in flight is adopted only
+            -- when that action is the choice the observer reports right now:
+            -- same board, newer than every discarded observation, and the single
+            -- host action. Any other host action waits.
+            local sel=s.selection
+            if not (recoveryChoiceEvent and sel and sel.onlyAction==true
+                and sel.serial>p.recoverySerial and sel.boardKey==s.boardKey) then
+                -- Not adopted. An observation made in this state is discarded.
+                p.recoverySerial=math.max(p.recoverySerial,s.selectionSerial or 0)
+                return "CHECKING",observing
+            end
+        end
+        if not observeLifecycle(s,p) then return "PAUSED",observing end
+        p.recoveryMatched=true
+        if firstSeen and p.offerKey then
+            p.offerSeenAfterReload=true
+            if not p.spendConfirmed then p.spendConfirmed=true;run.spent=run.spent+1;run.reserved=0 end
+            local ok,e=savePending();if not ok then pause(e);return "PAUSED",observing end
+        end
+        if hasChoiceEvidence(p) then return "WAIT_RESULT",observing end
+        -- A proposed key that the adapter rejected before SelectPerk stays in the
+        -- receipt. Only a manual choice of that same Echo can be confirmed.
+        -- The kind stays OFFER_OPEN; `proposed` selects the truthful instruction.
+        return "OFFER_OPEN",observing,(p.selectedKey~=nil and not p.choiceObserved and not p.choiceMayHaveBeenSent)
+    end
+    -- The matched offer can close between two reads. A choice that the observer
+    -- recorded on that exact offer in this session is still consumed; any other
+    -- unconsumed observation is discarded.
+    if p.recoveryMatched and p.offerKey then
+        if not observeLifecycle(s,p) then return "PAUSED",observing end
+    end
+    p.recoverySerial=math.max(p.recoverySerial,s.selectionSerial or 0)
+    if hasChoiceEvidence(p) then return "WAIT_RESULT",observing end
+    if s.offerPending or #s.board>0 or s.hostPending then return "CHECKING",observing end
+    if (s.charges==p.chargesBefore or s.charges==p.chargesBefore-1) and ownershipMatchesReceipt(s,p) then
+        return "WAIT_OFFER",observing
+    end
+    return "UNOBSERVABLE",observing
+end
+local NO_EXIT=" No exit from this block exists yet; a settlement path is only a proposal and is not built."
+local KEPT=" The record and its spending exposure are kept."
+local RECOVERY_TEXT={
+    CHECKING="An earlier Orb action is unresolved. Another game action or an incomplete offer is visible. Nexus is waiting, read-only. Nothing will be sent.",
+    OFFER_OPEN="The earlier Orb offer is still open. Choose an Echo in the game's offer window. Nexus will record that choice and wait for the matching result. Nexus will not choose or spend.",
+    OFFER_OPEN_BLIND="The earlier Orb offer is still open, but this client cannot observe a manual choice. If you choose in the game, Nexus cannot confirm the earlier action afterwards."..KEPT..NO_EXIT,
+    OFFER_OPEN_PROPOSED="The earlier Orb offer is still open. Before the reload Nexus proposed %s for it, and that call was refused before it reached the game. Nexus can confirm this action only if you choose that same Echo in the game's offer window. If you choose a different Echo, Nexus cannot confirm the action."..KEPT..NO_EXIT.." Nexus will not choose or spend.",
+    OFFER_UNMATCHED="An Orb offer is open, but the Orb balance or rolled Echoes do not match the saved record of the earlier action. Nexus cannot confirm the earlier action from this offer. Resolve the offer in the game."..KEPT..NO_EXIT,
+    WAIT_RESULT="A choice for the earlier Orb action is recorded. Nexus is waiting for a fresh ownership response that matches it exactly. Recheck requests one. Nothing will be sent.",
+    WAIT_OFFER="The earlier Orb action is unresolved and no Orb offer is open. If the game opens an offer that matches the saved record and you choose in the game's offer window, Nexus records that choice at the moment you make it, unless another game action is in flight at that moment. Nexus cannot tell whether the game refused the spend."..KEPT,
+    WAIT_OFFER_BLIND="The earlier Orb action is unresolved and no Orb offer is open. This client cannot observe a manual choice, so Nexus cannot confirm the earlier action if its offer opens later."..KEPT..NO_EXIT,
+    PERMANENT_CHANGED="Permanent Echoes changed since the earlier Orb action. Nexus cannot confirm that action."..KEPT..NO_EXIT,
+    LOADOUT="The original loadout of the earlier Orb action cannot be verified. Nexus cannot confirm that action."..KEPT..NO_EXIT,
+    UNOBSERVABLE="The earlier Orb action ended while Nexus could not observe it. The game gives no record of which choice belonged to it, so Nexus cannot confirm it, and Recheck cannot settle it. The record, its spending exposure, and the block on new Orb runs and ordinary rolling are kept. Nothing is retried, refunded or deleted."..NO_EXIT,
+}
+local function recoveryReason(kind,observing,s,p,proposed)
+    if not observing and kind=="OFFER_OPEN" then return RECOVERY_TEXT.OFFER_OPEN_BLIND end
+    if not observing and kind=="WAIT_OFFER" then return RECOVERY_TEXT.WAIT_OFFER_BLIND end
+    if kind=="OFFER_OPEN" and proposed then
+        local id=p and tonumber(tostring(p.selectedKey):match("^(%d+):"))
+        local row=id and s and s.catalog and s.catalog[id]
+        return RECOVERY_TEXT.OFFER_OPEN_PROPOSED:format(row and row.name or ("Echo "..tostring(p and p.selectedKey)))
+    end
+    return RECOVERY_TEXT[kind] or RECOVERY_TEXT.CHECKING
+end
+-- Truthful reason for callers that Orb mode blocks (ordinary rolling, build-slot
+-- and permanent-slot changes). subject: what is blocked, e.g. "Ordinary rolling".
+-- Text only: it changes no block.
+local CAN_PROGRESS={CHECKING=true,UNREADABLE=true,WAIT_RESULT=true}
+local CAN_PROGRESS_OBSERVING={OFFER_OPEN=true,WAIT_OFFER=true}
+function M.BlockReason(subject)
+    subject=type(subject)=="string" and subject or "This action"
+    if not run then return nil end
+    local p=run.pending
+    if p and p.restored and not run.running then
+        local r=run.recovery or {}
+        if CAN_PROGRESS[r.kind] or (CAN_PROGRESS_OBSERVING[r.kind] and r.observing) then
+            return subject.." is blocked: an earlier Orb action is unresolved after a reload. Nexus only observes it and sends nothing. The block ends only when that action is confirmed. Open /nexus orbs for the current instruction."
+        end
+        return subject.." is blocked: an earlier Orb action cannot be confirmed. Nexus has no way to clear this block yet; a settlement path is only a proposal and is not built. Open /nexus orbs for details."
+    end
+    if run.running then return subject.." is paused: Orb refinement owns the current action." end
+    if p then return subject.." is blocked: a submitted Orb action is unresolved. Finish its offer in the game; Nexus confirms it only from the matching result. If it cannot be confirmed, no exit from this block exists yet." end
+    if run.state=="PAUSED" or run.state=="LIMIT" then return subject.." is blocked: an Orb run is paused. Press Stop in /nexus orbs to end that run." end
+    return nil
+end
 function M.Pump(passive)
     init();if advancing or (not run.running and not run.pending) then return end
     passive=passive==true or passiveDepth>0
     advancing=true
     local function step()
-        local s,err=B.Read();if not s then pause(err);return end
+        local s,err=B.Read()
         local p=run.pending
+        if not s and p and p.restored and not run.running then
+            -- Passive recovery reads from addon load onward. A read that is not
+            -- ready yet is not a pause reason that should outlive the loading.
+            run.recovery={kind="UNREADABLE",observing=false}
+            setState("RECOVERY","An earlier Orb action is unresolved. The current game state cannot be read yet: "..tostring(err).." Nothing will be sent. The record and its spending exposure are kept.")
+            return
+        end
+        if not s then pause(err);return end
         if p and p.restored then
             if p.guid~=s.context.guid then pause("The earlier Orb action belongs to another character.");return end
             if not p.baselineStamp then p.baselineStamp=s.grantStamp end
+            local mark=run.pauseSerial
+            local kind,observing,proposed=recoverObserve(s,p)
+            if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
             if finishResult(s,p) then return end
-            if run.state=="PAUSED" then return end
-            setState("RECOVERY","An earlier action remains unresolved. Resolve the native offer, then Recheck; no new spend is allowed.")
+            if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
+            run.recovery={kind=kind,observing=observing,proposed=proposed==true or nil}
+            setState("RECOVERY",recoveryReason(kind,observing,s,p,proposed))
             return
         end
         if run.context and not B.SameOwner(run.context,s.context) then pause("Character, run, or service changed. The pending operation will not be replayed.");return end
@@ -554,6 +758,7 @@ end
 function M.Recheck()
     init();if run.lastRecheck and now()-run.lastRecheck<3 then return nil,"Please wait before requesting another refresh." end
     run.lastRecheck=now()
+    if run.pending and run.pending.restored then run.recoveryFastUntil=now()+RECOVERY_FAST_WINDOW end
     if run.pending and run.pending.restored and not run.pending.baselineStamp then
         local s=B.Read();if s then run.pending.baselineStamp=s.grantStamp end
     end
@@ -582,7 +787,8 @@ function M.Status()
     init();local a=assigned();local m,err=inspect()
     local r={state=run.state,reason=run.reason,error=err,running=run.running,pending=run.pending~=nil,
         spent=run.spent,reserved=run.reserved,limit=run.limit,config=copy(config),recent=copy(run.recent),
-        assignment=copy(a),targetChanged=run.targetChanged,operationName=run.name}
+        assignment=copy(a),targetChanged=run.targetChanged,operationName=run.name,
+        recovery=run.pending and run.pending.restored and copy(run.recovery) or nil}
     r.config.name=a.name or "No assigned Wishlist";r.config.entries=copy(a.entries or {})
     r.config.pending=nil
     r.charges,r.balanceState,r.balanceReason=B.Balance()

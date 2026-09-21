@@ -71,6 +71,36 @@ local function hostPending(pe)
         or p.pendingFreezeIndex~=nil or p.pendingReroll==true
         or p.pendingLockSpellId~=nil or p.pendingUnlockSpellId~=nil
 end
+-- Single owner of the OrbService known/pending classification for callers that
+-- are not Orb mode (the ordinary-board gate). Read-only. Returns
+-- capability, status, reason:
+--   NO_ORB_SERVICE / ABSENT   explicit legacy client: no OrbService member at all
+--   PENDING_ONLY              explicit legacy service: IsOfferPending, no IsStateKnown member
+--   STATE_AWARE               the supported service: IsStateKnown and IsOfferPending
+--   MALFORMED                 a present member has the wrong type, or IsOfferPending is missing
+-- status IDLE is the only answer that permits ordinary mutation. UNKNOWN is
+-- never folded into not-pending: a service that does not know its state cannot
+-- vouch for its pending flag.
+function O.ServiceState()
+    local pe=_G.ProjectEbonhold;local orb=nil
+    if type(pe)=="table" then orb=pe.OrbService end
+    if orb==nil then return "NO_ORB_SERVICE","ABSENT" end
+    if type(orb)~="table" or type(orb.IsOfferPending)~="function"
+        or (orb.IsStateKnown~=nil and type(orb.IsStateKnown)~="function") then
+        return "MALFORMED","UNAVAILABLE","orb state unavailable"
+    end
+    local capability="PENDING_ONLY"
+    if orb.IsStateKnown~=nil then
+        capability="STATE_AWARE"
+        local okK,known=call(orb,"IsStateKnown")
+        if not okK or type(known)~="boolean" then return capability,"INVALID","orb state unknown" end
+        if not known then return capability,"UNKNOWN","orb state not yet known" end
+    end
+    local okP,pending=call(orb,"IsOfferPending")
+    if not okP or type(pending)~="boolean" then return capability,"INVALID","orb state unknown" end
+    if pending then return capability,"PENDING","Orb offer active -- manual action required" end
+    return capability,"IDLE"
+end
 function O.Balance()
     local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService
     if type(orb)~="table" or type(orb.IsStateKnown)~="function" or type(orb.GetCharges)~="function" then
@@ -193,6 +223,57 @@ function O.Rebind(token,expected)
     end
     ownerContext=fresh.context;return true
 end
+-- Observe native manual settlement without replacing any game handler.
+-- The pending ID and exact visible offer tie this observation to a choice.
+-- The observer is read-only. It serves the action owner, or, after a reload,
+-- a passive recovery watcher that holds no action token and cannot mutate.
+local watcherContext,watcherNotify
+local function watchChoices(svc)
+    if watched[svc] then return true end
+    if type(hooksecurefunc)~="function" or type(svc)~="table" or type(svc.SelectPerk)~="function" then return false end
+    local ok=pcall(hooksecurefunc,svc,"SelectPerk",function(id)
+        local c=ownerContext or watcherContext
+        if not c or c.svc~=svc then return end
+        local s=O.Read()
+        if not s or not same(c,s.context) or not s.offerPending or #s.board~=3
+            or type(c.pe.Perks)~="table" or c.pe.Perks.pendingSelectSpellId~=id then return end
+        local chosen
+        for _,card in ipairs(s.board) do if card.spellId==id then
+            local k=id..":"..card.quality
+            if chosen and chosen~=k then return end
+            chosen=k
+        end end
+        if chosen then
+            selectionSerial=selectionSerial+1
+            -- onlyAction: the observed SelectPerk is the single host action in
+            -- flight, so "host pending" at this moment is this very choice.
+            local perks=c.pe.Perks
+            local only=perks.pendingBanishIndex==nil and perks.pendingFreezeIndex==nil
+                and perks.pendingReroll~=true and perks.pendingLockSpellId==nil and perks.pendingUnlockSpellId==nil
+            selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp,onlyAction=only}
+            -- Event-driven recovery observation: tell the passive watcher now,
+            -- so that it does not depend on its next timed read. Read-only
+            -- listener; an error in it never reaches the game's call.
+            if not owner and watcherNotify then pcall(watcherNotify) end
+        end
+    end)
+    if ok then watched[svc]=true end
+    return ok
+end
+-- Passive recovery watcher. It takes a snapshot that the caller just read, keeps
+-- only its context, and installs the read-only choice observer. It never sets
+-- the action owner, so Spend/Select/Rebind stay unavailable to the caller.
+function O.Watch(s,notify)
+    if type(s)~="table" or type(s.context)~="table" or type(s.context.svc)~="table" then
+        return nil,"The current game state is unavailable."
+    end
+    if not watchChoices(s.context.svc) then
+        watcherContext=nil;watcherNotify=nil
+        return nil,"This client cannot observe a manual Echo choice."
+    end
+    watcherContext=s.context;watcherNotify=type(notify)=="function" and notify or nil;return true
+end
+function O.Unwatch() watcherContext=nil;watcherNotify=nil end
 function O.IsOwned() return owner~=nil end
 function O.Acquire(s)
     if owner then return nil,"Orb mode already owns an operation." end
@@ -203,28 +284,7 @@ function O.Acquire(s)
     if fresh.autoAccept then return nil,"Turn off the game's automatic Echo acceptance before starting Orb mode." end
     if A.RivalDetected and A.RivalDetected() then return nil,"Disable the other Echo automation addon before using Orb mode." end
     owner={};ownerContext=fresh.context;selection=nil
-    local svc=ownerContext.svc
-    if not watched[svc] and type(hooksecurefunc)=="function" then
-        -- Observe native manual settlement without replacing any game handler.
-        -- The pending ID and exact visible offer tie this observation to a choice.
-        local ok=pcall(hooksecurefunc,svc,"SelectPerk",function(id)
-            if not owner or ownerContext.svc~=svc then return end
-            local s=O.Read()
-            if not s or not same(ownerContext,s.context) or not s.offerPending or #s.board~=3
-                or ownerContext.pe.Perks.pendingSelectSpellId~=id then return end
-            local chosen
-            for _,c in ipairs(s.board) do if c.spellId==id then
-                local k=id..":"..c.quality
-                if chosen and chosen~=k then return end
-                chosen=k
-            end end
-            if chosen then
-                selectionSerial=selectionSerial+1
-                selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp}
-            end
-        end)
-        if ok then watched[svc]=true end
-    end
+    watchChoices(ownerContext.svc)
     return owner,fresh
 end
 function O.Release(token)

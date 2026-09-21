@@ -36,6 +36,17 @@ NAMES += ['update_notices']
 NAMES += ['share_role_preservation']
 NAMES += ['share_pending_status']
 NAMES += ['advisor_attachment']
+NAMES += ['rolling_review_unknown_orb_state']
+NAMES += ['orb_review_reload_unobservable','orb_review_reload_manual_choice','orb_review_reload_offer_after_reload']
+NAMES += ['orb_review_reload_offer_mismatch','orb_review_reload_no_observer','orb_review_reload_rejected_selection']
+NAMES += ['rolling_review_reroll_outstanding']
+NAMES += ['rolling_review_freeze_surplus']
+NAMES += ['orb_review_reload_other_loadout','orb_review_reload_choice_between_reads']
+NAMES += ['rolling_review_orb_state_recompute']
+NAMES += ['orb_review_reload_early_ownership','orb_review_reload_early_ownership_inexact','orb_review_reload_slow_cadence']
+NAMES += ['orb_review_reload_choice_event_guards','orb_review_reload_truthful_blocks']
+NAMES += ['rolling_review_policy_flags']
+NAMES += ['orb_review_reload_refused_first_choice','orb_review_reload_balance_guard']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
