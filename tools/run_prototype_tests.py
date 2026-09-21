@@ -44,6 +44,7 @@ NAMES += ['orb_review_reload_early_ownership','orb_review_reload_early_ownership
 NAMES += ['orb_review_reload_choice_event_guards','orb_review_reload_truthful_blocks']
 NAMES += ['rolling_review_policy_flags']
 NAMES += ['orb_review_reload_refused_first_choice','orb_review_reload_balance_guard']
+NAMES += ['rolling_review_automatic_paths_orb_state']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
