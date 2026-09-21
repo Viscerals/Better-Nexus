@@ -230,7 +230,12 @@ print('PASS HUD menu entries, preference switch, opt-out, manual link')
 Boot(PUBLIC27);Ready()
 for i=1,200 do assert(Deliver(request28,'Climber','1.20.0-beta.1+test.'..(9100+i)))end
 assert(Chat('A newer Nexus test build was reported')==3,'at most three update chat lines per session: '..Chat('A newer Nexus test build was reported'))
-assert(NexusDB.updateAdvisory.testBuild.test==9108,'at most eight stored advisory changes per session: '..tostring(NexusDB.updateAdvisory.testBuild.test))
+assert(NexusDB.updateAdvisory.testBuild.test==9108,'eight quick stored changes, then a slow rate: '..tostring(NexusDB.updateAdvisory.testBuild.test))
+-- Review N1: the bound is per kind and never a full stop.
+assert(Deliver(request28,'StableVoice','1.20.0') and NexusDB.updateAdvisory.stableRelease and NexusDB.updateAdvisory.stableRelease.version=='1.20.0','false test reports do not stop a stable report in the same session')
+H.Advance(301,1)
+assert(Deliver(request28,'Honest','1.20.0-beta.1+test.9500') and NexusDB.updateAdvisory.testBuild.test==9500,'an honest later report is still recorded in the same session')
+assert(Nexus.Updates.Status().state=='reported','the status stays truthful after the chat bound')
 Nexus.Panel.ShowUpdateStatus()
 db=NexusDB;Boot(PUBLIC27,db);Ready()
 assert(Deliver(request28,'Climber2','1.20.0-beta.1+test.9300'));Nexus.Panel.ShowUpdateStatus()
@@ -238,6 +243,18 @@ assert(#NexusDB.updateDismissed==2,'both seen targets are remembered')
 db=NexusDB;db.updateAdvisory.testBuild.test=9108
 Boot(PUBLIC27,db);T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
 assert(Chat('test.9108')==0,'a target dismissed earlier is not announced again after a later dismissal')
+-- Review N3 / N6: a slot written by an earlier head or by hand is read strictly and dropped when it does not fit.
+for _,bad in ipairs({{version='9.9.9-www.evil.example.zip'},{version='1.20.0-beta.1',test='0x2400'},{version='1.20.0-beta.1',test=9100.5},{version='1.20.0-beta.1+test.9100',test=9100}})do
+ local d=T.Profile(3,0);d.updateAdvisory={authority='peer-advisory',testBuild=bad}
+ Boot(PUBLIC27,d)
+ assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateAdvisory.testBuild==nil,'a malformed stored test slot is dropped: '..tostring(bad.version)..' '..tostring(bad.test))
+end
+local d=T.Profile(3,0);d.updateAdvisory={authority='peer-advisory',stableRelease={version='9.9.9',test=7}}
+Boot(PUBLIC27,d);assert(Nexus.Updates.Status().state=='unknown' and NexusDB.updateAdvisory.stableRelease==nil,'a stable slot with a test number is dropped')
+d=T.Profile(3,0);d.updateAdvisory={authority='peer-advisory',testBuild={version='1.20.0-beta.1',test=9100}};d.updateDismissed={}
+for i=1,12 do d.updateDismissed[i]='1.20.0-beta.1#'..(9088+i)end
+Boot(PUBLIC27,d);T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
+assert(Chat('test.9100')==0,'the dismissal list is read where it is written (last eight)')
 Boot({label='test.007-abcdef0',channel='public-test'})
 assert(Nexus.ReleaseIdentity().test==nil and Nexus.ReleaseIdentity().channel=='internal','a padded label states no test number, as in the tools')
 print('PASS bounded notices and state changes, dismissal set, padded label')

@@ -90,6 +90,8 @@ def main() -> int:
             problems.append('--require-newer: this clone has no tags at all; fetch tags first (git fetch --tags)')
         tags = subprocess.check_output(['git', 'tag', '--list', f'v{version}-test.*'], cwd=ROOT, text=True).split()
         numbers = [int(t.rsplit('.', 1)[1]) for t in tags if t.rsplit('.', 1)[1].isdigit()]
+        print(f'--require-newer: compared with {len(numbers)} existing tag(s) of series v{version}-test.*'
+              + ('' if numbers else ' (none found: nothing was compared; other release lines are not visible to this check)'))
         if numbers and identity['test'] <= max(numbers):
             problems.append(f'test number {identity["test"]} is not above the newest existing tag test.{max(numbers)}; clients would not see it as newer')
 

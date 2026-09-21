@@ -48,9 +48,10 @@ function Nexus.ReleaseIdentity()
     end
     local channel = installedChannel
     -- Only a public test package states a test number. A development or
-    -- internal copy marks its version, so a raised version in a checkout can
-    -- never be read by a peer as a published release. A stable release states
-    -- the plain version.
+    -- internal copy marks its version, so a raised version in a checkout is
+    -- not read by a peer as a published release. (The mark is dropped only
+    -- when the result would exceed the 32-byte field; release versions are far
+    -- shorter.) A stable release states the plain version.
     local announce = version
     local mark = channel == "public-test" and ("+test." .. tostring(test))
         or channel == "development" and "+dev" or channel == "internal" and "+internal" or ""

@@ -23,9 +23,11 @@ local sessionBest = {}                -- best peer report of this session, per k
 local peerObservations, peerObservationOrder = {}, {}
 local MAX_PEER_OBSERVATIONS = 32
 local MAX_SESSION_NOTICES = 3         -- chat lines about updates per session
-local MAX_SESSION_ADVISORIES = 8      -- stored peer-advisory changes per session
+local MAX_SESSION_ADVISORIES = 8      -- quick stored changes per kind and session
+local ADVISORY_SLOW_SECONDS = 300     -- after that: one change per kind in this time
 local MAX_DISMISSED = 8
-local sessionNotices, sessionAdvisories = 0, 0
+local sessionNotices = 0
+local sessionAdvisories, lastAdvisoryAt = {}, {}
 local MAX_TEST = 2147483647
 local BUNDLED_AUTHORITY = "bundled-release"
 local BUNDLED_UNAVAILABLE = "bundled-release-unavailable"
@@ -236,8 +238,9 @@ local function StoredSlot(kind, anyChannel)
     if stored == nil then return nil end
     local parsed = type(stored) == "table" and type(stored.version) == "string"
         and Parse(stored.version) or nil
-    local test = type(stored) == "table" and tonumber(stored.test) or nil
-    if test and (test < 1 or test > MAX_TEST or test ~= math.floor(test)) then parsed = nil end
+    local test = type(stored) == "table" and stored.test or nil
+    if test ~= nil and (type(test) ~= "number" or test < 1 or test > MAX_TEST
+        or test ~= math.floor(test) or kind == "stable") then parsed = nil end
     local reportable = parsed and not parsed.build and Series(parsed) ~= nil
         and (parsed.prerelease == nil or test ~= nil)
     local candidate = reportable
@@ -291,7 +294,7 @@ local function Dismissed(key)
     local list = NexusDB.updateDismissed
     if type(list) == "string" then list = {list}; NexusDB.updateDismissed = list end
     if type(list) ~= "table" then return false end
-    for i = 1, math.min(#list, MAX_DISMISSED) do
+    for i = math.max(1, #list - MAX_DISMISSED + 1), #list do
         if list[i] == key then return true end
     end
     return false
@@ -321,7 +324,7 @@ end
 function Updates.Init(nextCallbacks)
     callbacks = type(nextCallbacks) == "table" and nextCallbacks or {}
     notifiedTargets, sessionBest = {}, {}
-    sessionNotices, sessionAdvisories = 0, 0
+    sessionNotices, sessionAdvisories, lastAdvisoryAt = 0, {}, {}
     peerObservations, peerObservationOrder = {}, {}
     local settings = Settings()
     if settings.updateNotifications == nil then settings.updateNotifications = true end
@@ -363,10 +366,17 @@ function Updates.Observe(version, source)
     if best and not Better(candidate, best) then
         return true, "peer observation"
     end
-    if sessionAdvisories >= MAX_SESSION_ADVISORIES then
-        return true, "peer observation"          -- bounded: no further state change this session
+    -- Bounded per kind, so false test reports cannot stop a stable report.
+    -- After the quick changes the rate is slow, never zero: a peer that raises
+    -- its number in every request cannot fill the saved data, and an honest
+    -- later report is still recorded in the same session.
+    local kind, now = candidate.kind, (GetTime and GetTime()) or 0
+    local used = sessionAdvisories[kind] or 0
+    if used >= MAX_SESSION_ADVISORIES
+        and now - (lastAdvisoryAt[kind] or -math.huge) < ADVISORY_SLOW_SECONDS then
+        return true, "peer observation"
     end
-    sessionAdvisories = sessionAdvisories + 1
+    sessionAdvisories[kind], lastAdvisoryAt[kind] = used + 1, now
     sessionBest[candidate.kind] = candidate
     NexusDB = NexusDB or {}
     local root = type(NexusDB.updateAdvisory) == "table"
