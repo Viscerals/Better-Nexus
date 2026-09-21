@@ -2585,6 +2585,7 @@ function Controller.New(options)
             end
         end
         outcome.id = id
+        outcome.title = type(record.title) == "string" and record.title or nil
         outcome.class = record.class or "UNKNOWN"
         outcome.echoCount = record.echoCount or #(record.echoes or {})
         outcome.buildRevision = BuildRevision()
