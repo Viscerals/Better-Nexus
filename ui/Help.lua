@@ -70,7 +70,9 @@ Real-resource Orb testing remains unavailable pending a separate user decision a
 
 If the active loadout changes during a pending operation, ownership responses cannot identify the original loadout. That action stays unresolved even after returning to the old loadout. Recheck, Resume and reload cannot remove this uncertainty or restore its allowance.
 
-Resume retains confirmed usage and unresolved exposure. Login, reconnect, new resources, or reload never automatically restart spending. An unresolved earlier action must settle before a new run. Missing confirmation can prevent further Orb use indefinitely; Resume, Recheck and reload are not guaranteed fixes.]]},
+Resume retains confirmed usage and unresolved exposure. Login, reconnect, new resources, or reload never automatically restart spending. An unresolved earlier action must settle before a new run. Missing confirmation can prevent further Orb use indefinitely; Resume, Recheck and reload are not guaranteed fixes.
+
+After a reload with an unresolved Orb action, Nexus only reads. If the offer of that action is still open and matches the saved record, choose in the game's offer window: Nexus records that choice and confirms the action only from the exact matching result. If the action ended while Nexus could not observe it, the game gives no record of which choice belonged to it. Nexus then cannot confirm it, and Recheck cannot settle it. The record, its spending exposure, and the block on new Orb runs and ordinary rolling stay. Nexus never retries, refunds, or deletes such a record.]]},
  {id="troubleshooting",title="Loading and troubleshooting",text=[[The loading panel shows the current step, work where measurable, and elapsed time. A percentage applies only to that step, never a guessed whole-startup total. /nexus loading reopens it.
 
 Wishlist tools and ordinary rolling can be available after local validation while shared builds still prepare. Rolling also needs its own fresh ownership/board/resource state. Gray Build Library/Leaderboard tabs mean those shared views are not ready.

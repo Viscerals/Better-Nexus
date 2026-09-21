@@ -34,6 +34,8 @@ NAMES += ['diagnostics_gate_status']
 NAMES += ['sync_channel_late_join']
 NAMES += ['update_notices']
 NAMES += ['rolling_review_unknown_orb_state']
+NAMES += ['orb_review_reload_unobservable','orb_review_reload_manual_choice','orb_review_reload_offer_after_reload']
+NAMES += ['orb_review_reload_offer_mismatch','orb_review_reload_no_observer','orb_review_reload_rejected_selection']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

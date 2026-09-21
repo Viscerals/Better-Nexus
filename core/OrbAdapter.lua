@@ -223,6 +223,48 @@ function O.Rebind(token,expected)
     end
     ownerContext=fresh.context;return true
 end
+-- Observe native manual settlement without replacing any game handler.
+-- The pending ID and exact visible offer tie this observation to a choice.
+-- The observer is read-only. It serves the action owner, or, after a reload,
+-- a passive recovery watcher that holds no action token and cannot mutate.
+local watcherContext
+local function watchChoices(svc)
+    if watched[svc] then return true end
+    if type(hooksecurefunc)~="function" or type(svc)~="table" or type(svc.SelectPerk)~="function" then return false end
+    local ok=pcall(hooksecurefunc,svc,"SelectPerk",function(id)
+        local c=ownerContext or watcherContext
+        if not c or c.svc~=svc then return end
+        local s=O.Read()
+        if not s or not same(c,s.context) or not s.offerPending or #s.board~=3
+            or type(c.pe.Perks)~="table" or c.pe.Perks.pendingSelectSpellId~=id then return end
+        local chosen
+        for _,card in ipairs(s.board) do if card.spellId==id then
+            local k=id..":"..card.quality
+            if chosen and chosen~=k then return end
+            chosen=k
+        end end
+        if chosen then
+            selectionSerial=selectionSerial+1
+            selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp}
+        end
+    end)
+    if ok then watched[svc]=true end
+    return ok
+end
+-- Passive recovery watcher. It takes a snapshot that the caller just read, keeps
+-- only its context, and installs the read-only choice observer. It never sets
+-- the action owner, so Spend/Select/Rebind stay unavailable to the caller.
+function O.Watch(s)
+    if type(s)~="table" or type(s.context)~="table" or type(s.context.svc)~="table" then
+        return nil,"The current game state is unavailable."
+    end
+    if not watchChoices(s.context.svc) then
+        watcherContext=nil
+        return nil,"This client cannot observe a manual Echo choice."
+    end
+    watcherContext=s.context;return true
+end
+function O.Unwatch() watcherContext=nil end
 function O.IsOwned() return owner~=nil end
 function O.Acquire(s)
     if owner then return nil,"Orb mode already owns an operation." end
@@ -233,28 +275,7 @@ function O.Acquire(s)
     if fresh.autoAccept then return nil,"Turn off the game's automatic Echo acceptance before starting Orb mode." end
     if A.RivalDetected and A.RivalDetected() then return nil,"Disable the other Echo automation addon before using Orb mode." end
     owner={};ownerContext=fresh.context;selection=nil
-    local svc=ownerContext.svc
-    if not watched[svc] and type(hooksecurefunc)=="function" then
-        -- Observe native manual settlement without replacing any game handler.
-        -- The pending ID and exact visible offer tie this observation to a choice.
-        local ok=pcall(hooksecurefunc,svc,"SelectPerk",function(id)
-            if not owner or ownerContext.svc~=svc then return end
-            local s=O.Read()
-            if not s or not same(ownerContext,s.context) or not s.offerPending or #s.board~=3
-                or ownerContext.pe.Perks.pendingSelectSpellId~=id then return end
-            local chosen
-            for _,c in ipairs(s.board) do if c.spellId==id then
-                local k=id..":"..c.quality
-                if chosen and chosen~=k then return end
-                chosen=k
-            end end
-            if chosen then
-                selectionSerial=selectionSerial+1
-                selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp}
-            end
-        end)
-        if ok then watched[svc]=true end
-    end
+    watchChoices(ownerContext.svc)
     return owner,fresh
 end
 function O.Release(token)

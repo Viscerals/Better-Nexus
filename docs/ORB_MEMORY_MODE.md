@@ -13,7 +13,9 @@ The frame advances at most one transaction step per 0.2-second update; it does n
 loop through a run synchronously. The ordinary WishlistPilot planner is not called
 on Orb boards. All mutation calls sit behind GameAdapter.Orbs. Ordinary Take,
 Freeze, Banish, Reroll and permanent-slot/activation/upload actions stay guarded
-while an Orb operation owns state. Sync and Community transport are not repurposed
+while an Orb operation owns state. When an OrbService exists, ordinary Take,
+Freeze, Banish and Reroll also require its known, not-pending state
+(`OrbAdapter.ServiceState`). Sync and Community transport are not repurposed
 as an Orb API.
 
 ## Targets and source selection
@@ -63,6 +65,15 @@ are stored per character through the existing Store authority owner. No live
 function/object, mutation callback, raw server owner, or automatic-resume flag is
 persisted. Reload starts RECOVERY, not running. A fresh baseline plus a later
 read-only response can settle the old result; it cannot launch another Orb.
+
+Recovery after reload is passive (see `docs/ROLLING_ORB_REVIEW_EADFF8A.md`, R2).
+It holds no action owner. It installs only the read-only `SelectPerk` observer.
+An offer that is still open is tied to the saved action only on exact evidence:
+one Orb less than the receipt, ownership equal to the receipt with or without
+the named source, unchanged permanent Echoes, and the original loadout. A manual
+choice observed in that offer, then the exact fresh ownership delta, settles the
+action. An action that ended while unobserved stays unresolved; the visible
+text says that it cannot be confirmed and that Recheck cannot settle it.
 
 Character/run/service/loadout change pauses the run. Resume rechecks the original
 context, targets, owner, and budget. A budget increase needs a new approval token
