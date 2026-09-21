@@ -220,3 +220,27 @@ The `policy_compare` battery has no duplicate-offer board: 0 of 864 decisions
 change. No general efficiency gain is claimed.
 
 Test: `tests/prototype/rolling_review_freeze_surplus.lua`.
+
+## R4 - Reroll ration and reserve fields: trace only, no behavioural change
+
+| Item | Location | Fact |
+|---|---|---|
+| Counters `fillerFishState` (`guaranteedId`, `consecutive`, `bracket`, `bracketSpent`) | `core/AutomationRuntime.lua` | Session-local. Reset at each level-bracket change (`RerollBracket`: 1-34, 35-63, 64-69, 70-77, 78+), at a change of the guaranteed spell, and at each run boundary. Not saved. |
+| `state.rerollBudget` (`consecutive`, `consecutiveLimit` 3, or 2 at level 10 or lower; `bracketSpent`, `bracketLimit` 4, or 2 at level 10 or lower; `reserve` 5, or 0 from level 78) | `core/AutomationRuntime.lua` StepRun | Built for every decision. |
+| The only reader | `logic/Policy.lua`, historical branch "bracket fishing: reroll filler guarantee" | It rations Rerolls of an unwanted *guaranteed* Echo. Production never reaches it: `Policy.Decide` routes every ordinary board to `WishlistPilot.DecideNexus`. |
+| The active planner | `logic/WishlistPilot.lua` | Does not read `rerollBudget`. Its Reroll limits are: permission `allowReroll`, trusted charges, Reroll charges above 0, not pending, fewer than two frozen offers, no still-needed Echo on the board. |
+| Counter increment | `core/AutomationRuntime.lua`, after a confirmed `Adapter.Reroll()` | Keyed to the reason string `bracket fishing: reroll filler guarantee`. The Pilot never returns that reason, so `bracketSpent` stays 0 and `consecutive` is set to 0. |
+| User setting | `data/DefaultProfile.lua` `autoReroll`, commands `/nexus reroll on|off` | Effective: it becomes `allowReroll` and `searchRefused.reroll`, and the action executor checks it again. There is no setting for a count, a bracket limit or a reserve. |
+| Current user-facing text | `ui/Help.lua` "Rolling and settings", `README.md`, in-game changelog | No limit or reserve is promised. Help says: "Reroll asks for new choices when enabled." |
+| Historical text | `CHANGELOG.md`, 1.19.2 Dev Test 13 | "maximum 3 consecutive rerolls against the same unwanted guaranteed Echo and 4 rerolls per level bracket", "Preserves 5 rerolls for later brackets until level 78". This describes the guarantee-based bracket fishing. |
+| `core/UserText.lua` | mapping for the old reason string | Display only. |
+| Test adapter | `tests/prototype/policy_adapter.lua` | Passes a fixed `rerollBudget`, as the runtime does. No test asserts that the ration limits a Pilot Reroll. |
+
+Conclusion: no current setting or text promises a Reroll ration. The ration was
+part of the guarantee-based model. The intended resource policy for the current
+planner cannot be determined from current decisions. R4 therefore changes no
+behaviour. The fields stay as they are. The open question is in the delivery
+report: retain (enforce in one action-eligibility boundary, count confirmed
+Rerolls, state the limits in Help) or retire (remove the dead fields and
+counters; the permission and the server charge count stay the only limits).
+R3 makes this question more relevant, because R3 spends Rerolls in more states.
