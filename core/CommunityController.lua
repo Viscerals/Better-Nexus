@@ -45,6 +45,9 @@ function Controller.New(options)
     local savedImportJob
     local lastShareOutcome
     local pendingShare
+    -- Approved title, description and source of a Share whose local save
+    -- failed. Session-only; the Share form offers it back unchanged.
+    local failedShareDraft
     -- Explicit Stop Sharing approvals waiting for catalog admission. Bounded,
     -- session-only, one entry per exact ID.
     local pendingRemovals, MAX_PENDING_REMOVALS = {}, 8
@@ -2191,7 +2194,9 @@ function Controller.New(options)
     function M.PostCurrentWishlist(title, description, selectedWishlist, selectedClass)
         if not (Adapter and Adapter.Wishlist) then return false, "adapter not ready" end
         if pendingShare then
-            return false, "A Share is already waiting for local saving.", lastShareOutcome
+            -- The one retained request keeps its identity; nothing is added.
+            local _, text = M.ShareStatusText()
+            return false, text or "A Share is already waiting for local saving.", lastShareOutcome
         end
         PeerRecord("share_confirmed", {outcome="button confirmed"})
 
@@ -2310,9 +2315,15 @@ function Controller.New(options)
                 outcome.queueReason = not committed and (why or "local save failed")
                     or "Share stopped: the player or catalog changed."
                 lastShareOutcome = outcome
-                if operation.notify then notify("Share not sent: " .. tostring(outcome.queueReason)) end
+                -- The approved text and source stay available to the form.
+                failedShareDraft = not committed and {id=id,title=title,
+                    description=description,wishlist=selectedWishlist,
+                    class=selectedClass} or nil
+                if operation.notify then notify("Nexus: " .. tostring(select(2, M.ShareStatusText(id)))) end
+                refreshView()
                 return false
             end
+            failedShareDraft = nil
             local admitted, queueWhy, syncStatus = BroadcastIfPossible(record, true)
             for key, value in pairs(type(syncStatus) == "table"
                 and syncStatus or {}) do
@@ -2342,11 +2353,8 @@ function Controller.New(options)
             if D and D.BroadcastBestForBuild then
                 pcall(D.BroadcastBestForBuild, id)
             end
-            if operation.notify then
-                notify(outcome.queueAdmitted
-                    and "Share saved locally and queued. Peer storage confirmation is unavailable."
-                    or ("Share saved locally; not queued: " .. tostring(outcome.queueReason)))
-            end
+            if operation.notify then notify("Nexus: " .. tostring(select(2, M.ShareStatusText(id)))) end
+            refreshView()
             return true
         end
         operation.complete = CompleteLocalSave
@@ -2469,6 +2477,60 @@ function Controller.New(options)
         copy.peerStored = nil
         copy.confirmation = "unavailable"
         return copy
+    end
+
+    -- One truthful sentence for the latest Share, read from the existing
+    -- outcome and the existing Sync operation status. It states no timing and
+    -- no percentage, and never calls retained work failed. Returns state, text.
+    function M.ShareStatusText(id)
+        local s = M.ShareStatus(id)
+        if not s then return nil end
+        local name = type(s.title) == "string" and s.title ~= ""
+            and ("\"" .. s.title .. "\"") or "this build"
+        if s.localPending then
+            -- Two different waits: the record is not yet submitted, or the one
+            -- submitted local write is not yet settled. Neither can be cancelled
+            -- safely from here, and neither needs a second Share.
+            return "preparing", "Preparing " .. name .. " to share — not sent yet. "
+                .. (s.localStage == "saving"
+                    and "The local save is submitted; the catalog has not finished it. "
+                    or "The local catalog is finishing earlier work first. ")
+                .. "The same request continues by itself. Do not share it again."
+        end
+        if s.localSaved ~= true then
+            local why = tostring(s.queueReason or "local save failed")
+            if why == "SEMANTIC_ENVELOPE" then
+                why = string.format("the local catalog refused %d ordinary and %d permanent Echo copies; "
+                    .. "a Share holds at most 79 ordinary, 6 permanent and 85 total",
+                    tonumber(s.ordinaryCopies) or 0, tonumber(s.permanentCopies) or 0)
+            end
+            return "refused", "Not shared: " .. name .. " — " .. why
+                .. ". Nothing was saved or sent. The Share form keeps the title, description and source."
+        end
+        if s.sendCompleted == true then
+            return "sent", "Sent " .. name .. " — peer receipt not confirmed."
+        end
+        if s.terminal == true then
+            return "stopped", "Saved " .. name .. " locally — not sent: "
+                .. tostring(s.outcome or s.queueReason or "stopped")
+                .. ". Open the build to see if Retry Share is available."
+        end
+        if s.retryPending == true then
+            return "queued", "Saved " .. name .. " locally — the Sync queue is full. One bounded retry is pending."
+        end
+        if s.queueAdmitted == true then
+            return "queued", "Saved " .. name .. " locally — queued for sharing."
+        end
+        return "saved", "Saved " .. name .. " locally — not queued: "
+            .. tostring(s.queueReason or "Sync unavailable") .. "."
+    end
+
+    -- The approved draft of a Share whose local save failed, for the form.
+    function M.FailedShareDraft()
+        local draft = failedShareDraft
+        if not draft or type(lastShareOutcome) ~= "table"
+            or lastShareOutcome.id ~= draft.id then return nil end
+        return draft.title, draft.description, draft.wishlist, draft.class
     end
 
     function M.CanRetryShare(id)
