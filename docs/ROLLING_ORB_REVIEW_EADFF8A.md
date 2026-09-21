@@ -120,7 +120,7 @@ that offer closes between two recovery reads.
 | `OFFER_UNMATCHED` | An open offer does not match the receipt | Nexus cannot confirm the earlier action from this offer; the record is kept. |
 | `WAIT_RESULT` | A choice is recorded | Waiting for the exact fresh ownership response; Recheck requests one. |
 | `OFFER_OPEN` with `proposed` | A proposed key was refused before `SelectPerk` | Only a choice of that same Echo can be confirmed; a different choice cannot; the record is kept; no exit exists yet. |
-| `WAIT_OFFER`, observing | No offer, state still equals the receipt | If a matching offer opens, a choice is recorded at the moment it is made; Nexus cannot tell whether the spend was refused; the record is kept. |
+| `WAIT_OFFER`, observing | No offer, state still equals the receipt | If a matching offer opens, a choice is recorded at the moment it is made, unless another game action is in flight at that moment: then it is not recorded (intended fail-closed result); Nexus cannot tell whether the spend was refused; the record is kept. |
 | `WAIT_OFFER`, not observing | Same, without the observer | The action cannot be confirmed if its offer opens later; no exit exists yet. |
 | `UNOBSERVABLE` | The action ended while unobserved | Nexus cannot confirm it; Recheck cannot settle it; record, exposure and blocks are kept; nothing is retried, refunded or deleted. |
 
@@ -143,6 +143,19 @@ mode blocks.
 Tests: `orb_review_reload_early_ownership`,
 `orb_review_reload_early_ownership_inexact`, `orb_review_reload_slow_cadence`,
 `orb_review_reload_choice_event_guards`, `orb_review_reload_truthful_blocks`.
+
+Second review of `578c77e..08a3caa` (G1, G4): the event-driven tests counted
+accepted `take` actions only, and the mock refuses a second `SelectPerk` while
+the player's select is pending, so a selection issued by the event path was
+invisible. `orb_review_reload_slow_cadence`, `orb_review_reload_manual_choice`,
+`orb_review_reload_early_ownership` and `orb_review_reload_choice_event_guards`
+now wrap the mocked `SelectPerk` and `ConfirmSpend` entry points after the
+reload and count every call, refused calls included: total `SelectPerk` calls
+equal the scripted player calls, and `ConfirmSpend` calls are 0. Two more
+tests pin rules that no test pinned: `orb_review_reload_refused_first_choice`
+(an observation on an unadopted offer with another host action in flight is
+discarded) and `orb_review_reload_balance_guard` (a choice at a wrong Orb
+balance is never recorded, also on an offer that was matched before).
 
 ### Not changed
 
@@ -373,10 +386,13 @@ Facts:
   the Orb feature, or a state that the server sends only on request), ordinary
   rolling is blocked for that whole session. Nexus has no remedy for it.
 - The one state request call that the repository already uses is
-  `OrbService.RequestCharges()`. `OrbAdapter.RequestRefresh()` calls it, and
-  only the Orb window's Recheck calls that. The repository holds no evidence
-  that `RequestCharges()` makes `IsStateKnown()` true. No other state request
-  call exists in the repository. None was invented.
+  `OrbService.RequestCharges()`. Only `OrbAdapter.RequestRefresh()` calls it.
+  `RequestRefresh()` has two callers, both inside Orb mode: the Orb window's
+  Recheck, and the live pending path of a Nexus-owned Orb action, once per
+  offer or result timeout (`core/OrbRuntime.lua`, `B.RequestRefresh()` in
+  `Pump`). The ordinary rolling path never calls it. The repository holds no
+  evidence that `RequestCharges()` makes `IsStateKnown()` true. No other state
+  request call exists in the repository. None was invented.
 
 Options:
 

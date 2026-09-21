@@ -19,6 +19,21 @@ H.Fire('PLAYER_LOGOUT')
 if NexusOrbRuntime then NexusOrbRuntime:SetScript('OnUpdate',nil);NexusOrbRuntime:Hide() end
 assert(loadfile('core/OrbAdapter.lua'))('Nexus',{})
 assert(loadfile('core/OrbRuntime.lua'))('Nexus',{})
+-- Review 2 finding G1: count every CALL to the mocked entry points after the
+-- reload, refused calls included. H.Count('take') sees accepted calls only, and
+-- the mock refuses a second SelectPerk while the player's select is pending.
+local calls={select=0,spend=0,player=0}
+do
+ local rawSelect=H.service.SelectPerk
+ H.service.SelectPerk=function(...)calls.select=calls.select+1;return rawSelect(...)end
+ local orb=ProjectEbonhold.OrbService;local rawSpend=orb.ConfirmSpend
+ orb.ConfirmSpend=function(...)calls.spend=calls.spend+1;return rawSpend(...)end
+end
+local function playerSelect(id)calls.player=calls.player+1;return H.service.SelectPerk(id)end
+local function checkCalls(where)
+ check(calls.select==calls.player,where..': every SelectPerk call after the reload is a scripted player call (calls='..calls.select..', player='..calls.player..')')
+ check(calls.spend==0,where..': no ConfirmSpend call after the reload (calls='..calls.spend..')')
+end
 M=Nexus.OrbRuntime
 check(M.Status().state=='RECOVERY' and M.Status().pending,'reload starts passive recovery')
 check(not A.Orbs.IsOwned(),'recovery does not acquire Orb action ownership')
@@ -31,9 +46,10 @@ check(s.reason:find('game',1,true)~=nil and s.reason:find('will not choose',1,tr
 -- Ownership delta alone, before any observed choice, must not settle.
 check(not M.Resume() and not M.Prepare(),'no resume and no new run during recovery')
 -- The player chooses in the game's own offer window.
-check(H.service.SelectPerk(410002)==true,'manual native choice accepted by the game')
+check(playerSelect(410002)==true,'manual native choice accepted by the game')
 H.Advance(.5)
 receipt=Nexus.Store.State().orbRefinement.pending
+checkCalls('after the choice')
 check(receipt and receipt.choiceObserved and receipt.selectedKey=='410002:2' and receipt.offerKey==offerKey,
  'the manual choice is recorded against the original offer')
 check(M.Status().pending and M.Status().spent+M.Status().reserved==1,'choice alone does not settle; exposure retained')
@@ -50,4 +66,5 @@ check(H.Count('orb-spend')==1 and H.Count('take')==1,'only the original spend an
 check(not Nexus.Store.State().orbRefinement.pending,'settled receipt cleared only after confirmation')
 check(not M.Resume(),'a settled recovered run never resumes; a new run needs a new review')
 check(not M.BlocksOrdinary(),'ordinary actions resume only after the confirmed settlement')
+checkCalls('end')
 print('PASS R2 manual choice after reload is observed passively and settles on exact evidence checks='..checks)
