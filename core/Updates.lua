@@ -171,7 +171,7 @@ local function Candidate(parsed, test, authority, observedAt, anyChannel)
     }
 end
 
-local function BundledCandidate()
+local function BundledCandidate(anyChannel)
     local release = Release()
     local parsed = Parse(release.availableVersion)
     if not parsed then return nil end
@@ -179,7 +179,7 @@ local function BundledCandidate()
     local stated = tonumber(release.availableTest)
     if not test and stated and stated >= 1 and stated <= MAX_TEST
         and stated == math.floor(stated) then test = stated end
-    return Candidate(parsed, test, BUNDLED_AUTHORITY, release.availableObservedAt)
+    return Candidate(parsed, test, BUNDLED_AUTHORITY, release.availableObservedAt, anyChannel)
 end
 
 -- A stored notice from an older client that took a peer version as release
@@ -239,6 +239,12 @@ local function QuarantineStoredAdvisory()
                     observedAt=Bounded(row.observedAt)}
             end
         end
+    end
+    -- One earlier record is kept (one level), as SanitizeStoredNotice does.
+    local previous = NexusDB.updateAdvisoryQuarantine
+    if type(previous) == "table" then
+        previous.previousQuarantine = nil
+        record.previousQuarantine = previous
     end
     NexusDB.updateAdvisoryQuarantine = record
     NexusDB.updateAdvisory = nil
@@ -393,7 +399,11 @@ function Updates.Status()
         status.detail = have .. " Update notices are off."
     elseif not candidate then
         status.state, status.menu = "unknown", "Update status unknown - open Releases page"
-        status.detail = have .. " This client has no release information about a newer build."
+        -- Bundled evidence that only the stable-only preference hides is named.
+        local hidden = Updates.Preference() == "stable" and BundledCandidate(true) or nil
+        status.detail = have .. (hidden
+            and (" A newer test build (" .. hidden.display .. ") is not shown because notices are set to stable releases only.")
+            or " This client has no release information about a newer build.")
             .. " Nexus does not check GitHub, and versions stated by other players' clients are not release information."
             .. " That is not proof that this build is the latest: check the Releases page."
     else

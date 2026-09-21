@@ -43,6 +43,12 @@ Load({updateAdvisory={authority='peer-advisory',stableRelease={version='1.96.6',
 Unknown('saved 1.96.6 at initialization')
 assert(NexusDB.updateAdvisoryQuarantine.stableRelease.version=='1.96.6','moved to a bounded diagnostic record')
 assert(NexusDB.updateDismissed[1]=='1.19.9#0' and NexusDB.settings.updateChannel=='test' and NexusDB.settings.other==7,'dismissals and settings are unchanged')
+-- A second saved advisory (for example after a downgrade and re-upgrade) keeps the earlier record, one level.
+Load({updateAdvisory={authority='peer-advisory',stableRelease={version='1.97.0'}},
+ updateAdvisoryQuarantine={reason='peer report is not release evidence',stableRelease={version='1.96.6'},previousQuarantine={reason='older'}}})
+Unknown('second saved advisory')
+local q=NexusDB.updateAdvisoryQuarantine
+assert(q.stableRelease.version=='1.97.0' and q.previousQuarantine.stableRelease.version=='1.96.6' and q.previousQuarantine.previousQuarantine==nil,'one earlier record kept, bounded to one level')
 Load();assert(Nexus.Updates.Observe('1.19.5','SyntheticPeer-Realm'));Unknown('older release')
 Load();assert(Nexus.Updates.Observe('1.20.0-beta.1+test.9028','SyntheticPeer-Realm'));Unknown('older same-series test build')
 Load();assert(Nexus.Updates.Observe('999.0.0','SyntheticPeer-Realm'));Unknown('arbitrary 999.0.0')
