@@ -39,6 +39,7 @@ NAMES += ['orb_review_reload_offer_mismatch','orb_review_reload_no_observer','or
 NAMES += ['rolling_review_reroll_outstanding']
 NAMES += ['rolling_review_freeze_surplus']
 NAMES += ['orb_review_reload_other_loadout','orb_review_reload_choice_between_reads']
+NAMES += ['rolling_review_orb_state_recompute']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

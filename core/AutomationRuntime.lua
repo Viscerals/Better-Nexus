@@ -3374,6 +3374,27 @@ end
                 RecordError("GameAdapter.ConsumeDirty", board)
             end
         end
+        -- The ordinary-board gate (Orb state known/pending, Orb ownership)
+        -- can change with no board, slot or ownership change, and the game
+        -- sends no event for it. One scalar comparison per poll (POLL cadence,
+        -- not per frame) turns such a change into one coalesced decision
+        -- evaluation, the same bounded trigger that an authorization change
+        -- uses. It reads the gate only, invalidates no static state and
+        -- submits nothing itself. State lives in recomputeStats because this
+        -- chunk is at Lua's local-variable limit.
+        if type(Adapter.OrdinaryBoardAllowed) == "function" then
+            local okGate, gateAllowed, gateWhy = pcall(Adapter.OrdinaryBoardAllowed)
+            local gateKey = not okGate and "error"
+                or (gateAllowed and "allowed" or ("blocked:" .. tostring(gateWhy)))
+            if gateKey ~= recomputeStats.ordinaryGateKey then
+                if recomputeStats.ordinaryGateKey ~= nil then
+                    recomputeStats.ordinaryGateChanges =
+                        (recomputeStats.ordinaryGateChanges or 0) + 1
+                    authorizationStepPending = true
+                end
+                recomputeStats.ordinaryGateKey = gateKey
+            end
+        end
         local now = GetTime()
         local boundaryDirty = type(runBoundaryGeneration) == "number"
             and runBoundaryGeneration > lastRunBoundaryGeneration
