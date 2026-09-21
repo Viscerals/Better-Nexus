@@ -30,6 +30,9 @@ Pilot.NEXUS_POLICY = {
     -- R3: a requested Echo whose exact count is already met does not stop a
     -- permitted Reroll. Only an Echo that is still needed does.
     rerollIgnoresSatisfiedTargets = true,
+    -- R5: do not Freeze a copy that the next selection makes surplus: another
+    -- selectable copy of the same Echo is on the board and one copy is needed.
+    freezeMustStayNeeded = true,
 }
 
 -- Normalized pure policy. Its action order and tie breakers intentionally match
@@ -145,7 +148,14 @@ function Pilot.Decide(input)
         return Result("SELECT",frozen,"SELECT_OUTSTANDING_WISHLIST")
     end
     if best then
-        if pressure == "HIGH" and total >= 2 and left >= 2 and canFreeze
+        -- After a Freeze of `best`, the next observation selects the next
+        -- unfrozen wanted offer (wanted[2]). With the explicit R5 option, skip
+        -- the Freeze when that selection is the same Echo and exhausts its need:
+        -- the held copy would then be surplus and would occupy an offer slot.
+        local following = wanted[2]
+        local surplusAfterNext = policy.freezeMustStayNeeded == true and following ~= nil
+            and following.echoID == best.echoID and best.need <= 1
+        if pressure == "HIGH" and total >= 2 and left >= 2 and canFreeze and not surplusAfterNext
             and Count(resources.freezesRemaining)>0 and best.freezeEligible and banish then
             return Result("FREEZE",best,"FREEZE_OUTSTANDING_FOR_HIGH_PRESSURE_SEARCH")
         end

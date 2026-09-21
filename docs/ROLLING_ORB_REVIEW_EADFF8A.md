@@ -184,3 +184,39 @@ spends a Banish. When the needed Echo does not appear, those Rerolls are gone
 and the final pick is the same. No universal or optimal gain is claimed.
 
 Test: `tests/prototype/rolling_review_reroll_outstanding.lua`.
+
+## R5 - Freeze of a duplicate that the next selection makes surplus
+
+Status: deliberate policy difference from the named reference strategy. It is a
+proposed strategy change, not a correction of a proven bug. It is one separate
+commit and can be reverted alone.
+
+Reference rule: under high pressure, with a Freeze and a Banish available, the
+best still-needed offer is frozen before the search.
+
+Nexus rule (option `freezeMustStayNeeded` in `WishlistPilot.NEXUS_POLICY`): the
+Freeze is skipped when the next selection is another selectable copy of the same
+Echo and exactly one copy is needed. The planner takes the Echo at once.
+`Pilot.Decide` without the option keeps the reference decision;
+`planner_reference` is unchanged and passes.
+
+Kept: the Freeze preference, Freeze and Banish charges, trusted resource state,
+pending guards, the ordinary-board gate, exact copy counts, permanent ownership,
+observed frozen offers, and the reference Freeze wherever the held copy stays
+needed (two different needed Echoes, two needed copies, or no selectable
+duplicate).
+
+Demonstrated on the F3 fixture only (need 101 x1 and 102 x1, board 101 / 101 /
+filler, 2 picks, 1 Freeze, 1 Banish):
+
+| | Reference rule | R5 rule |
+|---|---|---|
+| Step 1 | Freeze 101 (index 1) | Take 101 (index 1) |
+| Step 2 | Take the other 101 | - |
+| Freeze charges used | 1 | 0 |
+| Next board | held surplus 101 plus two fresh offers | three fresh offers |
+
+The `policy_compare` battery has no duplicate-offer board: 0 of 864 decisions
+change. No general efficiency gain is claimed.
+
+Test: `tests/prototype/rolling_review_freeze_surplus.lua`.
