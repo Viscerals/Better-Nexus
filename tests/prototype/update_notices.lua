@@ -7,12 +7,15 @@
 -- newer test build. All versions here are synthetic. No network, no game client.
 local T=dofile('tests/prototype/startup_support.lua')
 local H,popup
--- identity: nil = repository source; else {label=,channel=,version=,available=}
+-- identity: nil = repository source (set explicitly below, so the test means the same
+-- thing when it runs on a packaged copy whose data/Release.lua carries a package label);
+-- else {label=,channel=,version=,available=}
 local function Boot(identity,db)
  Nexus=nil;NexusDB=db;WishlistRealizerDB=nil;SlashCmdList=nil
  H=dofile('tests/prototype/harness.lua')
  NexusDB=NexusDB or T.Profile(3,0)
  T.Load()
+ identity=identity or {label='source',channel='development'}
  if identity then
   Nexus.Release.buildLabel=identity.label or Nexus.Release.buildLabel
   Nexus.Release.channel=identity.channel or Nexus.Release.channel
