@@ -6,8 +6,11 @@ Python 3.9+ and git. Run from a clean checkout:
     python tools/build_package.py --label test.9999-abcdef0      # writes dist/Nexus-<label>.zip
     python tools/build_package.py --check                        # content checks only; writes nothing
 
-The archive is reproducible: it is built from the blobs of HEAD (not from working files, so
-the checkout's line-ending setting does not matter), in sorted order, with one fixed timestamp.
+The archive is built from the blobs of HEAD (not from working files, so the checkout's
+line-ending setting does not matter), in sorted order, with one fixed timestamp and one fixed
+host-system field. Two builds in the same environment give the same bytes. The compressed
+bytes can differ between zlib builds (for example Linux and Windows Python 3.14), so compare
+checksums only between builds from the same environment. File contents are always identical.
 Content rule, the same one the published test.9027 package used:
   * the six top-level files in TOP_LEVEL;
   * everything under core/, data/, logic/, third_party/, ui/;
@@ -64,6 +67,8 @@ def main() -> int:
         ap.error('give --label, or --check')
     if ns.label and not LABEL.match(ns.label):
         ap.error('label: letters, digits, dot, underscore and hyphen; at most 48 characters')
+    if ns.label and not re.match(r'^test\.\d+-[0-9a-f]{7,12}$', ns.label):
+        print('NOTE: the addon shows only labels of the form test.<number>-<7 to 12 hex digits>; this label will display as "source".')
 
     files = committed_files()
     problems = check(files)
@@ -90,6 +95,7 @@ def main() -> int:
                 data = data.replace(SOURCE_LABEL, f'buildLabel = "{ns.label}"'.encode())
             info = zipfile.ZipInfo('Nexus/' + name, (2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3   # same header on every platform
             info.external_attr = 0o100644 << 16
             z.writestr(info, data)
     print(f'{out.relative_to(ROOT)}  {out.stat().st_size} bytes  sha256 {hashlib.sha256(out.read_bytes()).hexdigest()}')

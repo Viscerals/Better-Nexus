@@ -85,7 +85,8 @@ def main() -> int:
     rows = {r['test']: r for r in report['results']}
     expected = ns.only.split(',') if ns.only else names
     unexecuted = [n for n in expected if n not in rows]
-    failed = [n for n, r in rows.items() if r['status'] in ('FAIL', 'TIMEOUT')]
+    # Anything that is not an explicit PASS or NOT_RUN counts as failed, including an unknown status.
+    failed = [n for n, r in rows.items() if r['status'] not in ('PASS', 'NOT_RUN')]
     not_run = [n for n, r in rows.items() if r['status'] == 'NOT_RUN']
     passed = [n for n, r in rows.items() if r['status'] == 'PASS']
     for n in failed:

@@ -11,9 +11,9 @@ declare the beta stable, and it does not claim that any open bug is fixed.
 |---|---|
 | `main` before consolidation | `8cf798dd3af8adfc786c58f6707bc743745181a6` |
 | Adopted prototype source | commit `6fac3893bd5db9e0fdceeab102991a382869b6b7`, tree `ec4c85125796c288e2ba2d4bfeb1005e161a3e29` |
-| Why this commit | Newest commit of the prototype line whose independent review passed (`1600d88`, PASS) together with its reviewed follow-up (`6fac389`). Complete offline suite on the exact export: 113 listed, 113 pass (local LuaJIT 2.1, reference archive present). |
+| Why this commit | `1600d88` has an independent review PASS. `6fac389` has no stand-alone verdict: the later review of `d80375f` (FAIL because of later commits) confirmed in its question 7 that `6fac389` answers all five open items of the `1600d88` review. Complete offline suite on the exact export: 113 listed, 113 pass (local LuaJIT 2.1, reference archive present). |
 | Public beta (unchanged) | `test.9027-3f1cd20`: commit `3f1cd20bc1b5f83fe2d25d8c398117332b2c374b`, tree `47857c3a25d6c03e2bc64553d8ccc66f9a841ede`, tag `v1.20.0-beta.1-test.9027`, ZIP SHA-256 `8f8295404d7fce2833e4af054d335610fe9b74323a4abd7b667594dcb75e2727`. `main` adopts a commit that is 2 commits newer on the same prototype line. `main` is source, not a published build. |
-| Excluded, unfinished | Prototype commits `f808ca6..60aa206` (Share role preservation, persistent Share status, Advisor tab attachment). Two independent reviews returned FAIL (last: two P2 items open). Preserved as `archive/prototype-history-60aa206` and carried forward as a short-lived branch on the new `main`. |
+| Excluded, unfinished | Prototype commits `f808ca6..60aa206` (Share role preservation, persistent Share status, Advisor tab attachment). Two independent reviews returned FAIL (last: two P2 items open). Preserved on the remote as `archive/prototype-history-60aa206`. Plan: continue it as a short-lived branch from the new `main` after the merge. |
 | Installed client build | Not inspected for this task. |
 
 The prototype line and old `main` have no common Git ancestor. `main` was not
@@ -29,7 +29,7 @@ under the references in section 4.
 |---|---|---|
 | `Nexus.toc`, `core/`, `data/`, `logic/`, `ui/`, `third_party/` | adopted commit | Runtime. Byte-identical Git blobs (verified per file). `logic/Relay.lua` of old `main` is removed; the adopted `Nexus.toc` does not load it. |
 | `tests/prototype/` | adopted commit | Current offline suite and harness. |
-| `tests/harness.lua`, `tests/run_*.lua` (76 files) | removed | 1.19-era suite for the replaced runtime. It cannot run against the adopted runtime. It stays in history (`archive/main-pre-consolidation-8cf798d`, and the newer stack suite under `archive/pr-stack-test19-tip-eb190c5`). |
+| `tests/harness.lua`, `tests/run_*.lua` (75 files) | removed | 1.19-era suite for the replaced runtime. It cannot run against the adopted runtime. It stays in history (`archive/main-pre-consolidation-8cf798d`, and the newer stack suite under `archive/pr-stack-test19-tip-eb190c5`). |
 | `tools/run_prototype_tests.py`, `tools/prototype_lua54.py`, `tools/prepare_pilot_reference.py` | adopted commit | Maintained test tools. |
 | `docs/` (35 files), `README-PROTOTYPE.md`, `THIRD_PARTY.md` | adopted commit | Historical prototype documents are kept as history. Three files (`README-PROTOTYPE.md`, `docs/P1_5_1_TERMINOLOGY_STATUS.json`, `docs/P1_5_1_TERMINOLOGY_STATUS.md`) were stored with CRLF on the prototype line; `.gitattributes` of `main` stores them with LF. They are equal after that normalization. No other adopted file differs. |
 | `AI_POLICY.md`, `LICENSE.md`, `UPSTREAM.md` | both | Byte-identical on both lines. |
@@ -50,7 +50,10 @@ extracts, or local machine paths.
   they are printed as NOT RUN and are never counted as passed.
 - `python tools/build_package.py --check` / `--label <label>`: package content
   rule of the published test.9027 package (84 files there), TOC compatibility,
-  reproducible archive. It never publishes.
+  and an archive that is reproducible on one platform and zlib build. The
+  compressed bytes differ between zlib builds (for example Linux CI and Windows
+  Python 3.14), so compare checksums only between builds from the same
+  environment. It never publishes.
 - `.github/workflows/ci.yml` runs both on pull requests and on pushes to `main`
   only. It has no tag, release or schedule trigger and retains no archive.
 - Not carried over: the PowerShell/Node quality gate of the old stack
@@ -80,7 +83,7 @@ not moved.
 | `bugfix/test19-wp2-canonical-authority` | `7c95911a7d8584d46a62f2aca20268affef4cfcf` | #53 | Same. |
 | `bugfix/test19-wp3-realm-persistence` | `e674f033cc51494a382191b987c9a99cb6827f4a` | #54 | Same. |
 | `bugfix/test19-wp4-exact-wishlist-evidence` | `e70de8a7582d0146cc6746677084b3f4a270290b` | #57 | Same. |
-| `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari` | `8f5d28008935cef2d973b800167695ab50e0f70b` | #58 | Superseded by #61, as #58 itself states. |
+| `bugfix/test19-wp5-historical-dps-authority-and-real-paired-summari` | `8f5d28008935cef2d973b800167695ab50e0f70b` | #58 | Superseded by #61, as the body of #61 states. |
 | `bugfix/test19-wp5-…-replacement-a79f32507697` | `b758ca053da6feea764c5948fcebf4fb6b23ee98` | #61 | Superseded; in the stack under `eb190c5`. |
 | `bugfix/test19-wp6-build-hash-buckets-erase-build-id-type-and-can-r` | `5e1a6e20eba497d5950fd4faa4de83f52daf97f3` | #59 | Old ancestry not merged. Its typed-ID hash material is present in `main` (`core/BuildHashCache.lua`, `core/SyncCompatibility.lua`). The current suite covers it offline with `typed_hash`. The old stack's own two regression files are not carried. Issue #40 is reconciled separately, with that evidence. |
 | `bugfix/test19-wp7-hud-progress-labels-quality-4-as-q4-instead-of-l` | `9a538a102e62d523954e38b9c03ba84baf67e60a` | #60 | Old ancestry not merged. Its fix is NOT in `main`: `core/MainViewModel.lua` still has no `[4]="Legendary"`. Issue #38 stays open. |
