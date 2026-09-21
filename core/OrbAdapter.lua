@@ -71,6 +71,36 @@ local function hostPending(pe)
         or p.pendingFreezeIndex~=nil or p.pendingReroll==true
         or p.pendingLockSpellId~=nil or p.pendingUnlockSpellId~=nil
 end
+-- Single owner of the OrbService known/pending classification for callers that
+-- are not Orb mode (the ordinary-board gate). Read-only. Returns
+-- capability, status, reason:
+--   NO_ORB_SERVICE / ABSENT   explicit legacy client: no OrbService member at all
+--   PENDING_ONLY              explicit legacy service: IsOfferPending, no IsStateKnown member
+--   STATE_AWARE               the supported service: IsStateKnown and IsOfferPending
+--   MALFORMED                 a present member has the wrong type, or IsOfferPending is missing
+-- status IDLE is the only answer that permits ordinary mutation. UNKNOWN is
+-- never folded into not-pending: a service that does not know its state cannot
+-- vouch for its pending flag.
+function O.ServiceState()
+    local pe=_G.ProjectEbonhold;local orb=nil
+    if type(pe)=="table" then orb=pe.OrbService end
+    if orb==nil then return "NO_ORB_SERVICE","ABSENT" end
+    if type(orb)~="table" or type(orb.IsOfferPending)~="function"
+        or (orb.IsStateKnown~=nil and type(orb.IsStateKnown)~="function") then
+        return "MALFORMED","UNAVAILABLE","orb state unavailable"
+    end
+    local capability="PENDING_ONLY"
+    if orb.IsStateKnown~=nil then
+        capability="STATE_AWARE"
+        local okK,known=call(orb,"IsStateKnown")
+        if not okK or type(known)~="boolean" then return capability,"INVALID","orb state unknown" end
+        if not known then return capability,"UNKNOWN","orb state not yet known" end
+    end
+    local okP,pending=call(orb,"IsOfferPending")
+    if not okP or type(pending)~="boolean" then return capability,"INVALID","orb state unknown" end
+    if pending then return capability,"PENDING","Orb offer active -- manual action required" end
+    return capability,"IDLE"
+end
 function O.Balance()
     local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService
     if type(orb)~="table" or type(orb.IsStateKnown)~="function" or type(orb.GetCharges)~="function" then

@@ -2617,14 +2617,27 @@ function A.OrdinaryBoardAllowed()
     if (A.Orbs and A.Orbs.IsOwned()) or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary()) then
         return false, "Orb refinement owns the current action; ordinary rolling is paused"
     end
-    local pe = PE()
-    local orb = pe and pe.OrbService
-    if type(orb) ~= "table" then return true end
-    if type(orb.IsOfferPending) ~= "function" then return false, "orb state unavailable" end
-    local ok, pending = pcall(orb.IsOfferPending)
-    if not ok or type(pending) ~= "boolean" then return false, "orb state unknown" end
-    if pending then return false, "Orb offer active -- manual action required" end
-    return true
+    -- OrbAdapter owns the OrbService state classification (ServiceState). An
+    -- absent OrbService is the explicit legacy capability and keeps ordinary
+    -- rolling. When an OrbService exists, only an authoritative idle answer
+    -- permits ordinary mutation: unknown, pending, missing capability, invalid
+    -- return and thrown callback all block.
+    local orbs = A.Orbs
+    if not (orbs and type(orbs.ServiceState) == "function") then
+        local pe = PE()
+        if type(pe) ~= "table" or pe.OrbService == nil then return true end
+        return false, "orb state unavailable"
+    end
+    local _, status, reason = orbs.ServiceState()
+    if status == "ABSENT" or status == "IDLE" then return true end
+    return false, reason or "orb state unknown"
+end
+
+-- Read-only: which OrbService capability case the ordinary gate is using.
+function A.OrbCapability()
+    local orbs = A.Orbs
+    if not (orbs and type(orbs.ServiceState) == "function") then return "UNAVAILABLE" end
+    return (orbs.ServiceState())
 end
 
 function A.Take(spellId)
