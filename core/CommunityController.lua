@@ -1786,6 +1786,41 @@ function Controller.New(options)
             end
             return true
         end
+        -- The permanent rows of one saved design. nil: the design has no
+        -- permanent target (the editor saves an empty design for every plan
+        -- without one). false: the design cannot be read.
+        local model, catalog, catalogRead
+        local function DesignRows(design)
+            if type(design) ~= "table" then return false end
+            if next(design) == nil then return nil end
+            if not catalogRead then
+                catalogRead = true
+                model = Nexus and Nexus.WishlistModel
+                    and type(Nexus.WishlistModel.New) == "function" and Nexus.WishlistModel.New() or nil
+                catalog = Adapter.Catalog and Adapter.Catalog() or nil
+            end
+            local entries = model and type(model.TargetMapEntries) == "function"
+                and model.TargetMapEntries(design, catalog) or nil
+            if not entries then return false end
+            local rows = {}
+            for _, target in ipairs(entries) do
+                local source = type(target.value) == "table" and type(target.value.rows) == "table"
+                    and target.value.rows or nil
+                if source then
+                    for _, row in ipairs(source) do
+                        rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
+                            stacks=row.stacks, locked=true}
+                    end
+                else
+                    rows[#rows + 1] = {spellId=target.spellId,
+                        quality=target.row and target.row.quality, stacks=target.copies, locked=true}
+                end
+            end
+            if #rows == 0 then return nil end
+            local _, split = Split(rows)
+            if not split or #split ~= #rows then return false end
+            return split
+        end
         local function PlanDesign()
             local slot = tonumber(wl.slot)
             if not slot or wl.sourceKind == "Saved Build" or not Adapter
@@ -1797,69 +1832,49 @@ function Controller.New(options)
                 return false, "has a saved permanent-target plan that cannot be read.",
                     "saved plan design unreadable"
             end
-            local model = Nexus and Nexus.WishlistModel
-                and type(Nexus.WishlistModel.New) == "function" and Nexus.WishlistModel.New() or nil
-            local catalog = Adapter.Catalog and Adapter.Catalog() or nil
-            local found, unbound = {}, false
+            local design, unbound, boundSeen = nil, false, false
             for _, c in ipairs(known) do
                 if type(c) == "table" and c.designTargets ~= nil then
-                    if tonumber(c.slot) == slot and c.mirrorUnavailable ~= true then
-                        found[#found + 1] = c
-                    elseif c.slot == nil and type(c.echoes) == "table"
-                        and tostring(c.name or "") == tostring(wl.name or "")
-                        and IdCopies(c.echoes) == IdCopies(ordinary) then
-                        -- The same plan rows and name, but the adapter cannot
-                        -- tell which server Wishlist this design belongs to.
-                        unbound = true
+                    local bound = tonumber(c.slot) == slot and c.mirrorUnavailable ~= true
+                    local related = bound
+                    if bound then boundSeen = true end
+                    if not bound and (c.slot == nil or c.mirrorUnavailable == true) then
+                        -- A design that no longer binds to one server Wishlist
+                        -- (renamed, changed or copied) but has this name or
+                        -- these rows may be this source's design.
+                        related = tostring(c.name or "") == tostring(wl.name or "")
+                            or (type(c.echoes) == "table" and IdCopies(c.echoes) == IdCopies(ordinary))
                     end
-                end
-            end
-            if #found == 0 then
-                if unbound then
-                    return false, "matches a saved permanent-target plan, but Nexus cannot tell which server Wishlist that plan belongs to. "
-                        .. "Open the Wishlist in the Wishlist Editor and save it again.",
-                        "saved plan design not bound to one server Wishlist"
-                end
-                return nil
-            end
-            local design
-            for _, c in ipairs(found) do
-                if type(c.echoes) ~= "table" or IdCopies(c.echoes) ~= IdCopies(ordinary)
-                    or not QualitiesAgree(c.echoes, ordinary) then
-                    return false, "changed after its saved permanent-target plan was made, so the plan does not match it. "
-                        .. "Open the Wishlist in the Wishlist Editor and save it again.",
-                        "saved plan design does not match the source rows"
-                end
-                local entries = model and type(model.TargetMapEntries) == "function"
-                    and model.TargetMapEntries(c.designTargets, catalog) or nil
-                if not entries then
-                    return false, "has a saved permanent-target plan that cannot be read.",
-                        "saved plan design unreadable"
-                end
-                local rows = {}
-                for _, target in ipairs(entries) do
-                    local source = type(target.value) == "table" and type(target.value.rows) == "table"
-                        and target.value.rows or nil
-                    if source then
-                        for _, row in ipairs(source) do
-                            rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
-                                stacks=row.stacks, locked=true}
+                    if related then
+                        local rows = DesignRows(c.designTargets)
+                        if rows == false then
+                            return false, "has a saved permanent-target plan that cannot be read.",
+                                "saved plan design unreadable"
                         end
-                    else
-                        rows[#rows + 1] = {spellId=target.spellId,
-                            quality=target.row and target.row.quality, stacks=target.copies, locked=true}
+                        if rows and not bound then
+                            unbound = true
+                        elseif rows then
+                            if type(c.echoes) ~= "table" or IdCopies(c.echoes) ~= IdCopies(ordinary)
+                                or not QualitiesAgree(c.echoes, ordinary) then
+                                return false, "changed after its saved permanent-target plan was made, so the plan does not match it. "
+                                    .. "Open the Wishlist in the Wishlist Editor and save it again.",
+                                    "saved plan design does not match the source rows"
+                            end
+                            if design and Population(design) ~= Population(rows) then
+                                return false, "has two saved permanent-target plans that do not agree.",
+                                    "saved plan designs disagree"
+                            end
+                            design = rows
+                        end
                     end
                 end
-                local _, split = Split(rows)
-                if not split or #split == 0 then
-                    return false, "has a saved permanent-target plan that cannot be read.",
-                        "saved plan design unreadable"
-                end
-                if design and (Population(design) ~= Population(split)) then
-                    return false, "has two saved permanent-target plans that do not agree.",
-                        "saved plan designs disagree"
-                end
-                design = split
+            end
+            -- A design bound to this exact slot (even an empty one) decides.
+            if unbound and not boundSeen then
+                return false, "matches a saved permanent-target plan, but Nexus cannot tell which server Wishlist that plan belongs to "
+                    .. "(it was renamed, changed or copied), so its permanent Echoes are not known. "
+                    .. "Open the Wishlist in the Wishlist Editor and save it again.",
+                    "saved plan design not bound to one server Wishlist"
             end
             return design
         end
@@ -2007,7 +2022,8 @@ function Controller.New(options)
 
     -- Read-only: the role counts that a Share of this source would carry, from
     -- the same role reading as the Share itself. Nothing is saved or sent.
-    -- Returns {ordinary, permanent, lockedEchoes}; or nil and the message.
+    -- Returns {ordinary, permanent, ordinaryEchoes, lockedEchoes}; or nil and
+    -- the message.
     function M.ShareSourceRoles(wl)
         if type(wl) ~= "table" then return nil, "no source selected" end
         local rows = WishlistEchoes(wl)
@@ -2015,7 +2031,8 @@ function Controller.New(options)
         local ok, ordinary, locked, counts = pcall(ShareRoles, wl, rows)
         if not ok then return nil, "Echo roles cannot be read" end
         if not ordinary then return nil, locked end
-        return {ordinary=counts.ordinary, permanent=counts.locked, lockedEchoes=locked}
+        return {ordinary=counts.ordinary, permanent=counts.locked,
+            ordinaryEchoes=ordinary, lockedEchoes=locked}
     end
 
     local function CanonicalFingerprintHash(text)

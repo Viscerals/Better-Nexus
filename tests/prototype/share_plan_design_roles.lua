@@ -73,6 +73,8 @@ local function MenuButton(text)
  end
 end
 local function Open(sourceName)
+ -- ShowPostBuild toggles; a refusal leaves the form open.
+ if NexusPostPopup and NexusPostPopup:IsShown() then Nexus.CommunityBuilds.ShowPostBuild() end
  Nexus.CommunityBuilds.ShowPostBuild()
  local p=assert(NexusPostPopup);assert(p:IsVisible(),'actual Share form opens')
  p._postWishlistBtn:Click()
@@ -217,4 +219,84 @@ assert(ok,'the same permanent row stated twice is counted once: '..tostring(mess
 Accepted('agreeing statements',1,1)
 print('PASS conflict: a different permanent statement is refused; the same one is counted once')
 assert(#H.actions==0 or (function()for _,a in ipairs(H.actions)do if a[1]~='upload' then return false end end;return true end)(),'no game action other than the editor uploads')
+
+-- 7. Review F1 (P1): an editor plan WITHOUT permanent targets saves an empty design.
+-- It is shared exactly as before: ordinary only, no refusal.
+Boot()
+uploaded=Create('PLAN-1-0',1,0)
+Publish(102,'PLAN-1-0',Mirror(uploaded))
+p,label=Open('PLAN-1-0')
+assert(label:find('1 / 79',1,true) and not label:find('permanent',1,true),label)
+Click(p,'PLAN-1-0')
+Accepted('editor plan without permanent targets',1,0)
+print('PASS 1+0 editor Wishlist: the empty saved design is not a refusal')
+
+-- 8. Review F3: a design that no longer binds to one server Wishlist is refused
+-- when the source has its name or its rows, instead of being dropped.
+Boot()
+uploaded=Create('PLAN-RENAMED',1,1)
+Publish(102,'PLAN-RENAMED-ON-SERVER',Mirror(uploaded))
+p=Open('PLAN-RENAMED-ON-SERVER')
+Click(p,'PLAN-RENAMED')
+Refused('renamed server copy',p,'renamed, changed or copied','Nothing was shared')
+Boot()
+uploaded=Create('PLAN-CHANGED',1,1)
+Publish(102,'PLAN-CHANGED',{{spellId=200001,stacks=1,locked=false},{spellId=200002,stacks=1,locked=false}})
+p=Open('PLAN-CHANGED')
+Click(p,'PLAN-CHANGED')
+Refused('changed server copy, selected again',p,'renamed, changed or copied','Nothing was shared')
+-- A different Wishlist (other name, other rows) is not affected by that design.
+Publish(103,'OTHER-LIST',{{spellId=200010,stacks=2,locked=false}})
+p=Open('OTHER-LIST');printed={}
+Click(p,'OTHER-LIST')
+do
+ local status=assert(Nexus.CommunityBuilds.ShareStatus(),'unrelated Wishlist: accepted: '..tostring(printed[#printed]))
+ T.Until(H,function()local s=Nexus.CommunityBuilds.ShareStatus(status.id);return s and s.localPending==false end,30000)
+ local record=assert(C.Get(status.id),'unrelated Wishlist: stored')
+ assert(Population(record.echoes)=='200010:2' and Copies(record.lockedEchoes)==0,'unrelated Wishlist: shared exactly as its source, ordinary only')
+end
+print('PASS unbound design: refused for its own renamed or changed copy; unrelated Wishlists unchanged')
+
+-- 9. A saved design that cannot be read is refused, not treated as no design.
+Boot()
+uploaded=Create('PLAN-UNREADABLE',1,1)
+Publish(102,'PLAN-UNREADABLE',Mirror(uploaded))
+assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(s)
+ s.firstRunWishlist.designRows={{spellId='not-a-number',stacks=1}}
+end),'fixture: damaged saved design')
+p=Open('PLAN-UNREADABLE')
+Click(p,'PLAN-UNREADABLE')
+Refused('unreadable saved design',p,'cannot be read','Nothing was shared')
+print('PASS unreadable saved design is refused')
+
+-- 10. Two saved assignments bound to the same server Wishlist with different designs.
+Boot()
+uploaded=Create('PLAN-DISAGREE',1,1)
+Publish(102,'PLAN-DISAGREE',Mirror(uploaded))
+assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(s)
+ local copy=H.Clone(s.firstRunWishlist);copy.assignmentId=tostring(copy.assignmentId)..'-second'
+ copy.designRows={{spellId=200089,quality=1,stacks=1}}
+ s.loadoutWishlists=s.loadoutWishlists or {};s.loadoutWishlists[1]=copy
+end),'fixture: second assignment with another design')
+p=Open('PLAN-DISAGREE')
+Click(p,'PLAN-DISAGREE')
+Refused('two designs that disagree',p,'two saved permanent-target plans that do not agree','Nothing was shared')
+print('PASS disagreeing saved designs are refused')
+
+-- 11. Review F2: the >79 path (84 all-false rows, roles confirmed in the adapter).
+-- The preview lists 78 ordinary and 6 permanent rows, none twice.
+local rows84={};for i=1,84 do rows84[i]={spellId=200000+i,stacks=1,locked=false}end
+Boot({[102]={name='PLAN-84',verified=false,echoes=rows84}})
+local A=Nexus.GameAdapter;candidate=nil
+for _,c in ipairs(A.GetWishlistCandidates())do if c.slot==102 then candidate=c end end
+assert(candidate,'fixture: the adapter lists the 84-copy mirror')
+local chosen={};for i,e in ipairs(candidate.echoes)do chosen[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks,locked=i>78}end
+assert(A.ConfirmWishlistRoles(candidate,chosen,'user-confirmed'),'fixture: real role confirmation')
+p,label=Open('PLAN-84')
+assert(label:find('78 / 79 + 6 / 6 permanent',1,true),label)
+assert(p._previewSummary:GetText():find('Shares 78 ordinary + 6 permanent Echo copies',1,true),tostring(p._previewSummary:GetText()))
+local shown=PreviewRows(p);local marked=0
+for _,text in ipairs(shown)do if text:find('(permanent)',1,true) then marked=marked+1 end end
+assert(#shown==84 and marked==6,'preview lists each copy once: '..#shown..' rows, '..marked..' permanent')
+print('PASS >79 preview: 78 + 6 rows, none twice')
 print('PASS share_plan_design_roles')

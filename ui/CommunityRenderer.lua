@@ -897,8 +897,12 @@ RefreshPostPopupPreview = function()
     if roles then
         postPopup._previewSummary:SetText(string.format("|cff888888Shares %d ordinary + %d permanent Echo copies|r",
             roles.ordinary, roles.permanent))
+        -- The settled lists, not the raw source rows: on the >79 path the
+        -- source rows also contain the copies that become permanent.
         local shown = {}
-        for _, e in ipairs(echoes) do if not (e.locked == true or e.locked == 1) then shown[#shown + 1] = e end end
+        for _, e in ipairs(roles.ordinaryEchoes or {}) do
+            shown[#shown + 1] = {spellId=e.spellId, stacks=e.stacks}
+        end
         for _, e in ipairs(roles.lockedEchoes or {}) do
             shown[#shown + 1] = {spellId=e.spellId, stacks=e.stacks, locked=true}
         end
