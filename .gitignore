@@ -25,3 +25,7 @@ Nexus-backup-*/
 # Dependency caches
 node_modules/
 .pnpm-store/
+
+# Python caches
+__pycache__/
+*.pyc
