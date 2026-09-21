@@ -1822,8 +1822,9 @@ function Controller.New(options)
                     stated[e.spellId] = e.quality
                 end
             end
+            local mixedUnmatched = false
             if settled and mixed and Population(combined) ~= Population(ordinary) then
-                settled = false
+                settled, mixedUnmatched = false, true
                 why = "the source states two qualities for one Echo, and the saved role evidence does not match that exact content"
             end
             if not settled then
@@ -1832,13 +1833,23 @@ function Controller.New(options)
                 local marks = unstated == 0
                     and "The server copy marks all of them as ordinary, which is not role information: "
                     or "It does not say which copies are permanent: "
+                -- Only the ways that exist for this source. A Saved Build slot has
+                -- no role choice in the Wishlist Editor; a mixed-quality source is
+                -- not resolved by either way.
+                local way
+                if mixedUnmatched then
+                    way = "Nexus cannot tell which quality the permanent copies have. Change the source so that each Echo has one quality, then share again. "
+                elseif wl.sourceKind == "Saved Build" then
+                    way = "To resolve it, make this Saved Build your active loadout so that Nexus can read its permanent Echoes. Then share again. "
+                else
+                    way = "To resolve it, open this Wishlist in the Wishlist Editor and choose its permanent Echoes, "
+                        .. "or make the matching Saved Build your active loadout so that Nexus can read its permanent Echoes. Then share again. "
+                end
                 return nil, string.format("%s has %d Echo copies. %sa Share holds at most %d ordinary copies, "
                     .. "so up to %d of them must be permanent Echoes, and Nexus must know which. Missing evidence: %s. "
-                    .. "To resolve it, open this Wishlist in the Wishlist Editor and choose its permanent Echoes, "
-                    .. "or make the matching Saved Build your active loadout so that Nexus can read its permanent Echoes. Then share again. "
-                    .. "Nothing was shared and the source is unchanged.",
+                    .. "%sNothing was shared and the source is unchanged.",
                     label, counts.total, marks, limits.ordinary, limits.locked,
-                    tostring(why or "no role choice is saved for this exact content")),
+                    tostring(why or "no role choice is saved for this exact content"), way),
                     string.format("roles unresolved (ordinary=%d permanent=%d total=%d): %s",
                         counts.ordinary, counts.locked, counts.total,
                         tostring(why or state or "no role evidence"))

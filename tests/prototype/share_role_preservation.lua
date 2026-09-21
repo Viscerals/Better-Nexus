@@ -230,6 +230,15 @@ p._postGoBtn:Click()
 expected={};for i,e in ipairs(rows)do expected[i]={spellId=e.spellId,quality=e.quality,stacks=1,locked=i>78 or nil}end
 Accepted('all-false mirror with confirmed roles',expected,78,6)
 print('PASS all-false mirror: refused unconfirmed, shared 78/6 when the adapter has the confirmed roles')
+-- Review S2: a Saved Build slot has no role choice in the Wishlist Editor. Its message names only the active-loadout way.
+rows=Rows(84,0)
+Boot({[3]={name='ROLES-SAVED-BUILD',verified=true,echoes=rows}});before=H.Clone(H.perks.serverBuildSlots)
+local _,savedLabel
+p,savedLabel=Share('ROLES-SAVED-BUILD','ROLES-SAVED-BUILD')
+assert(savedLabel:find('[Saved Build]',1,true),'fixture: listed as a Saved Build: '..tostring(savedLabel))
+local savedLine=Refused('84 copies in a Saved Build',p,before,'has 84 Echo copies','Missing evidence:','make this Saved Build your active loadout')
+assert(not savedLine:find('Wishlist Editor',1,true),'the Wishlist Editor way is not offered for a Saved Build: '..savedLine)
+print('PASS Saved Build source: only the supported way is named')
 
 -- 10. Review m10: confirmed roles of OTHER content on the same slot never apply to a stale selection.
 rows=Rows(84,0)
@@ -286,6 +295,8 @@ print('PASS row validation before acceptance')
 Boot(Slot('UNUSED',Rows(3,0)))
 local holed={[0]={spellId=200050,quality=0,stacks=1},[1]={spellId=200001,quality=1,stacks=1},[3]={spellId=200003,quality=3,stacks=1,locked=true}}
 Direct('ROLES-ZERO-KEY',{name='ROLES-ZERO-KEY',echoes=holed},'cannot be read')
+local hidden={{spellId=200001,quality=1,stacks=1},nil,{spellId=200003,quality=3,stacks=1,locked=true}};hidden[0]={spellId=200050,quality=0,stacks=1}
+Direct('ROLES-ZERO-KEY-HIDES-HOLE',{name='ROLES-ZERO-KEY-HIDES-HOLE',echoes=hidden},'cannot be read')
 bad=Rows(10,0);bad[2.5]={spellId=200040,quality=0,stacks=1}
 Direct('ROLES-FRACTION-KEY',{name='ROLES-FRACTION-KEY',echoes=bad},'cannot be read')
 Direct('ROLES-LIST-IS-TEXT',{name='ROLES-LIST-IS-TEXT',echoes=Rows(10,0),lockedEchoes='200011'},'form that cannot be read')

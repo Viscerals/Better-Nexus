@@ -836,6 +836,20 @@ local function EnsurePostPopup()
         print("Nexus: "..(ShareStatusLine() or "Share accepted."))
         ClearPostDescriptionFocus(); p:Hide(); M.Refresh()
     end)
+    -- The open form follows its Share by itself: queued -> sent, a retry, a
+    -- terminal stop. A passive read twice a second, only while the form is
+    -- shown; it does not depend on the Community window, a view refresh, Sync
+    -- housekeeping or a receive window.
+    local statusElapsed=0
+    p:SetScript("OnUpdate",function(_,elapsed)
+        statusElapsed=statusElapsed+(tonumber(elapsed) or 0)
+        if statusElapsed<0.5 then return end
+        statusElapsed=0
+        if p._shareStatus then
+            local text=PostStatusText()
+            if p._shareStatus:GetText()~=text then p._shareStatus:SetText(text) end
+        end
+    end)
     local shareStatus=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); shareStatus:SetPoint("TOPLEFT",16,-396); shareStatus:SetSize(334,96); shareStatus:SetJustifyH("LEFT"); shareStatus:SetJustifyV("TOP"); p._shareStatus=shareStatus
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.ApplyFontTree then
         Nexus.LayoutMetrics.ApplyFontTree(p,"normal")

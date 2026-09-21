@@ -200,8 +200,9 @@ assert(not p._shareStatus:GetText():find('Preparing',1,true) and p._shareStatus:
 assert(H.putCalls[id]==1,'one record')
 -- Review N5: the open form also follows the send, not only the local save.
 T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).sendCompleted end,8000)
-T.Until(H,function()return p._shareStatus:GetText():find('Sent "RETAINED-A"',1,true)~=nil end,400)
-assert(not p._shareStatus:GetText():find('queued for sharing',1,true),'the open form does not keep saying queued after the send')
+Nexus.CommunityBuilds.Hide()                              -- the Community window is closed: no view refresh reaches the form
+for i=1,20 do H.Advance(.05,.05)end                       -- one second of frames
+assert(p:IsShown() and p._shareStatus:GetText():find('Sent "RETAINED-A"',1,true) and not p._shareStatus:GetText():find('queued for sharing',1,true),'within one second the open form says Sent, with the Community window closed: '..p._shareStatus:GetText())
 print('PASS retry beside a retained Share; open form follows the settlement')
 
 -- 10. Review N1 (P2): the refusal of the user's own click stays in the form through ordinary refreshes,

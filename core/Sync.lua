@@ -718,18 +718,8 @@ end
 
 function Operation.MarkApiReturned(status, fields)
     if type(status) ~= "table" or status.terminal == true then return end
-    local firstSend = status.sendCompleted ~= true
     status.sent, status.sendCompleted = true, true
     status.sendState, status.sentAt = "attempted", Now()
-    -- One coalesced view refresh when a Share goes from queued to sent, so an
-    -- open Share form or status line does not keep saying "queued".
-    if firstSend and status.kind == "share" and type(Sync.RequestDataViewRefresh) == "function" then
-        if Operation.housekeeping then
-            Operation.housekeepingRefreshPending = true
-        else
-            pcall(Sync.RequestDataViewRefresh)
-        end
-    end
     if type(fields) == "table" and tonumber(fields.attempts) then
         status.retryAttempts = math.max(status.retryAttempts or 0,
             tonumber(fields.attempts) or 0)
