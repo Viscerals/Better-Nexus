@@ -1642,6 +1642,158 @@ function Controller.New(options)
         return nil
     end
 
+    -- One role reading for every Share source. A copy is permanent only when
+    -- the source states it: an inline locked flag or the separate lockedEchoes
+    -- list. Nothing is read from order, name, totals or current ownership.
+    -- Returns ordinary, locked, counts; or nil, message, diagnostic reason.
+    local function ShareRoles(wl, rows)
+        local evidence = Nexus and Nexus.LoadoutEvidence
+        if not (evidence and type(evidence.SemanticEnvelope) == "function"
+            and type(evidence.SemanticLimits) == "function") then
+            return nil, "Echo role validation is unavailable", "role validator unavailable"
+        end
+        local label = tostring(wl and wl.name ~= "" and wl.name or "This source")
+        local function Split(list)
+            local ordinary, locked, unstated = {}, {}, 0
+            for _, e in ipairs(list) do
+                if type(e) ~= "table" then return nil end
+                local copy = {spellId=e.spellId or e.id, quality=e.quality,
+                    stacks=e.stacks or e.count or 1}
+                if e.locked == true or e.locked == 1 then
+                    copy.locked = true
+                    locked[#locked + 1] = copy
+                elseif e.locked == nil or e.locked == false then
+                    if e.locked == nil then unstated = unstated + 1 end
+                    ordinary[#ordinary + 1] = copy
+                else
+                    return nil
+                end
+            end
+            return ordinary, locked, unstated
+        end
+        local function Population(list)
+            local totals, parts = {}, {}
+            for _, e in ipairs(list) do
+                local k = tostring(e.spellId) .. ":" .. tostring(e.quality or 0)
+                totals[k] = (totals[k] or 0) + (tonumber(e.stacks) or 0)
+            end
+            for k, copies in pairs(totals) do
+                parts[#parts + 1] = k .. ":" .. tostring(copies)
+            end
+            table.sort(parts)
+            return table.concat(parts, ",")
+        end
+        local ordinary, locked, unstated = Split(rows)
+        if not ordinary then
+            return nil, label .. " contains an Echo row that cannot be read. Nothing was shared.",
+                "malformed source row"
+        end
+        if type(wl.lockedEchoes) == "table" and #wl.lockedEchoes > 0 then
+            local separate = {}
+            for _, e in ipairs(wl.lockedEchoes) do
+                if type(e) ~= "table" then
+                    return nil, label .. " contains a permanent Echo row that cannot be read. Nothing was shared.",
+                        "malformed permanent row"
+                end
+                separate[#separate + 1] = {spellId=e.spellId or e.id,
+                    quality=e.quality, stacks=e.stacks or e.count or 1, locked=true}
+            end
+            -- The same permanent population stated twice is counted once. Two
+            -- different statements give no exact answer; nothing is guessed.
+            if #locked == 0 then
+                locked = separate
+            elseif Population(locked) ~= Population(separate) then
+                return nil, label .. " states its permanent Echoes in two lists that do not agree. "
+                    .. "Nothing was shared. Save the source again, then share it.",
+                    "permanent roles stated twice with different contents"
+            end
+        end
+        local limits = evidence.SemanticLimits()
+        local function Counts()
+            local o = evidence.SemanticEnvelope(ordinary)
+            local l = evidence.SemanticEnvelope(locked, {forceLocked=true})
+            if o.reason == "malformed" or l.reason == "malformed" then return nil end
+            return {ordinary=o.ordinary, locked=l.locked, total=o.ordinary + l.locked}
+        end
+        local counts = Counts()
+        if not counts then
+            return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
+                "malformed copy count"
+        end
+        if #locked == 0 and unstated > 0 and counts.total > limits.ordinary then
+            -- No role is stated and the copies cannot all be ordinary. Only the
+            -- adapter's own read-only evidence (a content-matched role choice or
+            -- the exact verified active loadout) may supply the roles.
+            local candidate = {slot=wl.slot, name=wl.name, count=#ordinary,
+                echoes=ordinary, active=wl.active}
+            local resolved, state, _, why
+            -- The source menu lists the raw slot mirror. The adapter's candidate
+            -- for that same slot already carries the resolved roles, if any.
+            local known = wl.slot ~= nil and Adapter
+                and type(Adapter.GetWishlistCandidates) == "function"
+                and Adapter.GetWishlistCandidates() or {}
+            for _, c in ipairs(type(known) == "table" and known or {}) do
+                if type(c) == "table" and tonumber(c.slot) == tonumber(wl.slot) then
+                    why = c.lockEvidenceReason
+                    if type(Adapter.WishlistEvidenceState) == "function"
+                        and Adapter.WishlistEvidenceState(c) == "actionable" then
+                        resolved, state = c, "actionable"
+                    end
+                    break
+                end
+            end
+            if not resolved and Adapter
+                and type(Adapter.ResolveWishlistEvidence) == "function" then
+                local reason
+                resolved, state, _, reason = Adapter.ResolveWishlistEvidence(candidate)
+                why = reason or why
+            end
+            local resolvedOrdinary, resolvedLocked, stillUnstated
+            if state == "actionable" and type(resolved) == "table"
+                and resolved.lockEvidenceStatus == "authoritative" then
+                resolvedOrdinary, resolvedLocked, stillUnstated = Split(resolved.echoes)
+            end
+            local function Ids(list)
+                local all = {}
+                for _, e in ipairs(list) do all[#all + 1] = {spellId=e.spellId, quality=0, stacks=e.stacks} end
+                return Population(all)
+            end
+            local combined = {}
+            for _, e in ipairs(resolvedOrdinary or {}) do combined[#combined + 1] = e end
+            for _, e in ipairs(resolvedLocked or {}) do combined[#combined + 1] = e end
+            if not resolvedOrdinary or stillUnstated ~= 0 or #resolvedLocked == 0
+                or Ids(combined) ~= Ids(ordinary) then
+                return nil, string.format("%s has %d Echo copies and no permanent-Echo roles. "
+                    .. "A Share holds at most %d ordinary and %d permanent copies, so the roles are needed. Missing evidence: %s. "
+                    .. "Choose the permanent Echoes in the Wishlist Editor, then share again. "
+                    .. "Nothing was shared and the source is unchanged.",
+                    label, counts.total, limits.ordinary, limits.locked,
+                    tostring(why or "no role choice is saved for this exact content")),
+                    "roles unresolved: " .. tostring(why or state or "no role evidence")
+            end
+            ordinary, locked = resolvedOrdinary, resolvedLocked
+            counts = Counts()
+            if not counts then
+                return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
+                    "malformed copy count"
+            end
+        end
+        if #ordinary == 0 then
+            return nil, label .. " has no ordinary Echoes to share.", "no ordinary Echoes"
+        end
+        if counts.ordinary > limits.ordinary or counts.locked > limits.locked
+            or counts.total > limits.total then
+            return nil, string.format("%s has %d ordinary and %d permanent Echo copies (%d total). "
+                .. "A Share holds at most %d ordinary, %d permanent and %d total. "
+                .. "Nothing was shared and the source is unchanged.",
+                label, counts.ordinary, counts.locked, counts.total,
+                limits.ordinary, limits.locked, limits.total),
+                string.format("SEMANTIC_ENVELOPE ordinary=%d permanent=%d total=%d",
+                    counts.ordinary, counts.locked, counts.total)
+        end
+        return ordinary, locked, counts
+    end
+
     local function CanonicalFingerprintHash(text)
         if type(text) ~= "string" or text == "" then return nil end
         local h = 5381
@@ -2086,9 +2238,14 @@ function Controller.New(options)
         if not Identity.ValidDisplayText(description, 2000, true, true) then
             return false, "description contains unsafe text"
         end
-        local echoes = {}
-        for _, e in ipairs(sourceEchoes) do
-            echoes[#echoes+1] = { spellId=e.spellId, quality=e.quality, stacks=e.stacks or 1 }
+        -- Roles are settled and the 79/6/85 envelope is checked here, before
+        -- anything is accepted or retained. The catalog still validates the
+        -- record again when the local write runs.
+        local echoes, lockedEchoes, roleCounts = ShareRoles(wl, sourceEchoes)
+        if not echoes then
+            local message, diagnostic = lockedEchoes, roleCounts
+            PeerRecord("share_source", {outcome="rejected", reason=diagnostic})
+            return false, message
         end
         local stamp = NextStamp(0)
         local id = string.format("mine-%d-%d", stamp, math.random(100000,999999))
@@ -2102,6 +2259,7 @@ function Controller.New(options)
             echoes=echoes, postedAt=stamp, lastModified=stamp,
             isMine=localOwner ~= nil,
         }
+        if #lockedEchoes > 0 then record.lockedEchoes = lockedEchoes end
         local identityOk, identityErr = RefreshBuildIdentity(record)
         if not identityOk then return false, identityErr end
         PeerRecord("share_created", {id=id,class=record.class or "UNKNOWN",
@@ -2109,6 +2267,8 @@ function Controller.New(options)
         local outcome = {
             id=id,class=record.class or "UNKNOWN",
             echoCount=record.echoCount or #echoes,
+            title=title,ordinaryCopies=roleCounts.ordinary,
+            permanentCopies=roleCounts.locked,
             buildRevision=BuildRevision(),localSaved=false,
             queueAdmitted=false,queueReason=nil,retryPending=false,
             sent=false,sendCompleted=false,peerStored=nil,

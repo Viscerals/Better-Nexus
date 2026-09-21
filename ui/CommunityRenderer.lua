@@ -678,8 +678,18 @@ local function WishlistLabel(wl)
         (wl and wl.sourceKind) or "Wishlist", 128, false) or "Wishlist"
     local name = wl and DisplayRemoteText(wl.name, 1024, false) or nil
     if not name then name = "Unnamed " .. kind end
-    local count=0
-    for _,e in ipairs((wl and wl.echoes) or {}) do count=count+(tonumber(e.stacks or e.count) or 1) end
+    -- Stated permanent copies are not part of the 79 ordinary copies.
+    local count,permanent=0,0
+    for _,e in ipairs((wl and wl.echoes) or {}) do
+        local copies=tonumber(e.stacks or e.count) or 1
+        if e.locked==true then permanent=permanent+copies else count=count+copies end
+    end
+    if permanent==0 then
+        for _,e in ipairs((wl and type(wl.lockedEchoes)=="table" and wl.lockedEchoes) or {}) do permanent=permanent+(tonumber(e.stacks or e.count) or 1) end
+    end
+    if permanent>0 then
+        return string.format("[%s] %s  —  %d / 79 + %d / 6 permanent", kind, name, count, permanent)
+    end
     return string.format("[%s] %s  —  %d / 79", kind, name, count)
 end
 
