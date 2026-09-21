@@ -56,6 +56,17 @@ The second and third groups do not act on the three-card board. R1 did not
 extend the Orb-state gate to them. The `BlocksOrdinary()` guard on the second
 group still holds while an Orb operation is unresolved.
 
+### Re-evaluation when the gate changes (review finding F1)
+
+The game sends no event when the Orb state changes from unknown to known. The
+automation loop is change-driven, so it did not evaluate again on an unchanged
+board, and the status text stayed stale. `core/AutomationRuntime.lua` now
+compares one scalar gate key (allowed, or blocked with its reason) at each
+existing 0.2 s poll. A change requests one coalesced decision evaluation, the
+same bounded trigger that an automation toggle uses. It invalidates no static
+state and submits nothing itself. Test:
+`tests/prototype/rolling_review_orb_state_recompute.lua`.
+
 ### Retained legacy decision
 
 The existing test `tests/prototype/automation.lua` requires that a service
@@ -108,18 +119,38 @@ that offer closes between two recovery reads.
 | `OFFER_OPEN`, not observing | No `hooksecurefunc` observer | A manual choice cannot be observed; the action cannot be confirmed afterwards; the record is kept. |
 | `OFFER_UNMATCHED` | An open offer does not match the receipt | Nexus cannot confirm the earlier action from this offer; the record is kept. |
 | `WAIT_RESULT` | A choice is recorded | Waiting for the exact fresh ownership response; Recheck requests one. |
-| `WAIT_OFFER` | No offer, state still equals the receipt | The offer may still open; Nexus cannot tell whether the spend was refused; the record is kept. |
+| `OFFER_OPEN` with `proposed` | A proposed key was refused before `SelectPerk` | Only a choice of that same Echo can be confirmed; a different choice cannot; the record is kept; no exit exists yet. |
+| `WAIT_OFFER`, observing | No offer, state still equals the receipt | If a matching offer opens, a choice is recorded at the moment it is made; Nexus cannot tell whether the spend was refused; the record is kept. |
+| `WAIT_OFFER`, not observing | Same, without the observer | The action cannot be confirmed if its offer opens later; no exit exists yet. |
 | `UNOBSERVABLE` | The action ended while unobserved | Nexus cannot confirm it; Recheck cannot settle it; record, exposure and blocks are kept; nothing is retried, refunded or deleted. |
 
 Recovery never spends, never selects, never retries, never refunds allowance,
 never erases the receipt, and never accepts an ownership delta alone.
 
+### Corrections after the independent review of `eadff8a..578c77e`
+
+| Finding | Correction |
+|---|---|
+| F3: exact result ownership can arrive while the game still flags the offer as pending. The read classified `OFFER_UNMATCHED` and discarded an observed choice. | A choice that the observer recorded on the offer this session already matched is consumed first, as the live path does. It needs the same offer identity, the one-Orb balance, and ownership that is the receipt or its exact single gain. Recorded choice evidence is never discarded by a later classification. Inexact ownership is still discarded. `finishResult` is unchanged. |
+| F4: after 60 s the pump reads every 5 s. An offer that opened and was answered between two slow reads was never matched. | Chosen option: event-driven observation. The read-only `SelectPerk` observer notifies the passive watcher at the moment of a manual choice. One passive pump then records the offer and the choice with the same exact-evidence rules as a timed read, and reopens the 60 s fast window. An offer first seen at that moment is adopted only when the observed choice is the single host action in flight. The timed reads stay as they were. The `WAIT_OFFER` text now says that the choice is recorded at the moment it is made, and has a separate text when the client cannot observe choices. |
+| F7: with a proposed key that was refused before `SelectPerk`, the text invited any manual choice. | The kind stays `OFFER_OPEN`; `Status().recovery.proposed` is true. The text names the proposed Echo and says that only that same Echo can be confirmed. After a different choice the pause text says that Nexus cannot confirm the action, that the record is kept, and that no exit exists yet. The rule itself is unchanged. |
+| N2: blocked reasons said "owns the current action" and "Stop and settle". | `OrbRuntime.BlockReason(subject)` owns the reason. `GameAdapter.OrdinaryBoardAllowed` and the five build-slot and permanent-slot mutators use it. For a restored receipt it says either that Nexus only observes and the block ends when the action is confirmed, or that the action cannot be confirmed, that Nexus has no way to clear the block yet, and that the settlement path is only a proposal and is not built. The refusals of `Prepare`, `UseAssignedWishlist` and `SuggestSources` use the same text. No block changed. |
+
+Not covered, because `core/Main.lua` is outside this branch's ownership: its
+chat line "Stop and settle that operation first." for `/nexus auto` while Orb
+mode blocks.
+
+Tests: `orb_review_reload_early_ownership`,
+`orb_review_reload_early_ownership_inexact`, `orb_review_reload_slow_cadence`,
+`orb_review_reload_choice_event_guards`, `orb_review_reload_truthful_blocks`.
+
 ### Not changed
 
 - The live-path rule that a manual choice different from a recorded proposed
-  key pauses the operation. This also applies after a reload.
+  key pauses the operation. This also applies after a reload. Only its text
+  changed (F7).
 - `UNOBSERVABLE` receipts still block new Orb runs and ordinary rolling
-  indefinitely. See the proposal below.
+  indefinitely. No exit exists. See the proposal below.
 
 ### Proposal only, not implemented: acknowledged settlement of unobservable history
 
@@ -156,7 +187,13 @@ Tests: `orb_review_reload_unobservable`, `orb_review_reload_manual_choice`,
 
 Status: deliberate policy difference from the named reference strategy
 (LoadoutPilot 1.3.6 / patch 103). It is a proposed strategy change, not a
-correction of a proven bug. It is one separate commit and can be reverted alone.
+correction of a proven bug. It is one separate commit. `git revert` of that commit is NOT a supported way to
+switch it off: on the current branch it conflicts (this document, the test
+runner, and for R3 also `logic/WishlistPilot.lua`), and the R5 code uses the
+`local policy` that the R3 commit added. The supported way is the flag: set
+`rerollIgnoresSatisfiedTargets = false` in `WishlistPilot.NEXUS_POLICY`. That flag alone
+restores the reference decision and leaves the other change active
+(`tests/prototype/rolling_review_policy_flags.lua`).
 
 Reference rule: a permitted Reroll is skipped when any Echo of the original
 Wishlist is on the board, also when its exact count is already met.
@@ -189,13 +226,30 @@ Trade-off: R3 spends Rerolls in states where the reference spends none or
 spends a Banish. When the needed Echo does not appear, those Rerolls are gone
 and the final pick is the same. No universal or optimal gain is claimed.
 
+Risk, stated plainly (review note N4): R3 only adds Rerolls; it removes none. No
+Reroll ration is enforced (see R4). Boards that hold an already-met target
+become more common as a Wishlist fills, so the extra spending grows late in a
+run. At low pressure (30 picks left) R3 also rerolls where the reference takes
+a filler. The limits that remain are the `autoReroll` permission, the server's
+Reroll charges and the two-frozen rule.
+
+`policy_compare.lua` pins no decision fingerprint, so it cannot show this
+change. `tests/prototype/rolling_review_policy_flags.lua` pins it on the same
+battery: R3 changes 16 of 864 decisions (12 Banish to Reroll, 4 take to
+Reroll), R5 changes 0.
+
 Test: `tests/prototype/rolling_review_reroll_outstanding.lua`.
 
 ## R5 - Freeze of a duplicate that the next selection makes surplus
 
 Status: deliberate policy difference from the named reference strategy. It is a
-proposed strategy change, not a correction of a proven bug. It is one separate
-commit and can be reverted alone.
+proposed strategy change, not a correction of a proven bug. It is one separate commit. `git revert` of that commit is NOT a supported way to
+switch it off: on the current branch it conflicts (this document, the test
+runner, and for R3 also `logic/WishlistPilot.lua`), and the R5 code uses the
+`local policy` that the R3 commit added. The supported way is the flag: set
+`freezeMustStayNeeded = false` in `WishlistPilot.NEXUS_POLICY`. That flag alone
+restores the reference decision and leaves the other change active
+(`tests/prototype/rolling_review_policy_flags.lua`).
 
 Reference rule: under high pressure, with a Freeze and a Banish available, the
 best still-needed offer is frozen before the search.
@@ -242,14 +296,30 @@ Test: `tests/prototype/rolling_review_freeze_surplus.lua`.
 | `core/UserText.lua` | mapping for the old reason string | Display only. |
 | Test adapter | `tests/prototype/policy_adapter.lua` | Passes a fixed `rerollBudget`, as the runtime does. No test asserts that the ration limits a Pilot Reroll. |
 
-Conclusion: no current setting or text promises a Reroll ration. The ration was
-part of the guarantee-based model. The intended resource policy for the current
-planner cannot be determined from current decisions. R4 therefore changes no
-behaviour. The fields stay as they are. The open question is in the delivery
-report: retain (enforce in one action-eligibility boundary, count confirmed
-Rerolls, state the limits in Help) or retire (remove the dead fields and
-counters; the permission and the server charge count stay the only limits).
-R3 makes this question more relevant, because R3 spends Rerolls in more states.
+Conclusion: no current setting or text promises a Reroll ration. R4 changes no
+behaviour. The fields stay as they are.
+
+The exact question for the user:
+
+- Fact 1. The historical ration applied to one thing only: Rerolls of an
+  *unwanted guaranteed Echo* ("bracket fishing"). Guaranteed future Echoes no
+  longer exist in the current contract, so that object no longer exists. There
+  is no existing behaviour left to keep.
+- Fact 2. "Retain" would therefore mean a NEW general Reroll budget for the
+  current planner. It would not be the revival of a behaviour that exists. It
+  would need new decisions: which Rerolls count, the limits and the reserve,
+  one enforcement boundary, counters keyed to confirmed Rerolls (not to reason
+  strings), and Help text that states the limits.
+- Fact 3. "Retire" means: remove the unread fields and counters
+  (`fillerFishState`, `state.rerollBudget`, the reason-string increment). The
+  `autoReroll` permission and the server's Reroll charges stay the only limits.
+- Fact 4 (risk). R3 spends more Rerolls than the reference, and no ration is
+  enforced today. With "retire", that stays so. If the user wants a limit on
+  Reroll spending, it must be the new budget of Fact 2, or R3 must be switched
+  off with its flag.
+
+Question: introduce a new general Reroll budget (and with which limits), or
+retire the unread ration fields?
 
 ## Orb-offer redraw: investigation only
 
@@ -283,3 +353,81 @@ Until a supported client supplies items 1-3, Nexus keeps the current behaviour:
 an offer change during a pending operation is ambiguity, not a redraw. No test
 for a redraw action was prepared, because no established interface exists to
 test against. This investigation does not block R1 or R2.
+
+## Decisions for the user
+
+These items were found by the independent review of `eadff8a..578c77e`. No
+behaviour was changed for them. Each needs a user decision.
+
+### D1 (review F2) - When does `OrbService.IsStateKnown()` become true?
+
+Facts:
+
+- Nothing in the repository defines when `IsStateKnown()` becomes true.
+  `THIRD_PARTY.md` lists the call only. The supplied reference
+  `Memory/MemoryMode.lua` does not contain it.
+- The ordinary rolling path never requests Orb state.
+- With R1, ordinary `Take`, `Banish`, `Reroll`, `Freeze` and automatic rolling
+  are blocked while an existing OrbService reports `false`. If a legitimate
+  client reports `false` for a whole session (for example a character without
+  the Orb feature, or a state that the server sends only on request), ordinary
+  rolling is blocked for that whole session. Nexus has no remedy for it.
+- The one state request call that the repository already uses is
+  `OrbService.RequestCharges()`. `OrbAdapter.RequestRefresh()` calls it, and
+  only the Orb window's Recheck calls that. The repository holds no evidence
+  that `RequestCharges()` makes `IsStateKnown()` true. No other state request
+  call exists in the repository. None was invented.
+
+Options:
+
+- (a) Keep fail-closed as it is. Verify the `IsStateKnown()` lifecycle in the
+  next authorized native session before release.
+- (b) Add a bounded, read-only `OrbService.RequestCharges()` request on the
+  ordinary path while the state is unknown (for example one request, then a
+  slow retry with a fixed maximum). Its effect on `IsStateKnown()` is unproven
+  until a native session shows it.
+
+### D2 (review F6) - The `PENDING_ONLY` permit
+
+Facts:
+
+- A service with `IsOfferPending` and no `IsStateKnown` member permits ordinary
+  rolling when `IsOfferPending()` returns boolean false. The user's request
+  names only the absent-OrbService legacy mode as a permit.
+- It fails open by construction: if a state-aware service lost its
+  `IsStateKnown` member, unknown state would be invisible. The review found no
+  realistic route to that: a thrown callback is `INVALID` (blocked), an empty
+  table is `MALFORMED` (blocked), a non-table service is blocked.
+- The only evidence for such a client is the minimal mock in
+  `tests/prototype/automation.lua` line 26, which asserts the permit. That file
+  is outside this branch's ownership.
+- `CONTRACTS.md` now names this permit.
+
+Options:
+
+- Keep the permit (current behaviour, now documented).
+- Block it. This needs the owner of `tests/prototype/automation.lua` to change
+  line 26, then a one-line change in `OrbAdapter.ServiceState()`.
+
+### D3 (review N1) - Non-board mutators while Orb state is unknown
+
+Facts:
+
+- `Activate`, `Save`, `UploadWishlist`, `LockPerk` and `UnlockPerk` use
+  `OrbRuntime.BlocksOrdinary()` only. `ToggleLever` has no Orb guard. All six
+  still send their call while an existing OrbService reports unknown state.
+- They do not act on the three-card board. Every Nexus-owned or restored Orb
+  action blocks the first five through `BlocksOrdinary()`. The automatic lever,
+  lock and save paths are stopped while the state is unknown, because they use
+  `AutoAllowed()`.
+- The review found no concrete harmful scenario.
+- One edge exists that does not depend on Orb state: `BlocksOrdinary()` returns
+  false while `Store.State()` is nil, so a manual `Activate` in that window could
+  cross the loadout boundary of a saved receipt.
+
+Options:
+
+- Keep as it is.
+- Extend the known-Orb-state requirement to these mutators. This would also
+  block manual build-slot and permanent-slot changes for a whole session in the
+  D1 case.

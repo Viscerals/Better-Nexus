@@ -41,8 +41,16 @@ This file has two parts.
 - **Ordinary-board gate.** `GameAdapter.OrdinaryBoardAllowed()` guards `Take`,
   `Banish`, `Reroll`, `Freeze` and automatic rolling. It blocks while Orb mode
   owns or has an unresolved action. When an `OrbService` exists it also requires
-  the known, not-pending state from `OrbAdapter.ServiceState()`. An absent
-  `OrbService` is an explicit legacy capability that keeps ordinary rolling.
+  the known, not-pending state from `OrbAdapter.ServiceState()`. Two explicit
+  legacy capability cases keep ordinary rolling: `NO_ORB_SERVICE` (no
+  `OrbService` member at all) and `PENDING_ONLY` (an `OrbService` with an
+  `IsOfferPending` function and no `IsStateKnown` member, while
+  `IsOfferPending()` returns boolean false). `PENDING_ONLY` cannot express
+  unknown state; whether to keep it is an open user decision
+  (`docs/ROLLING_ORB_REVIEW_EADFF8A.md`, D2). Every other case blocks: unknown
+  state, a pending offer, a missing or malformed capability, a non-boolean
+  return, a thrown callback. The automation loop evaluates again when this gate
+  changes.
 - **Orb mode** is specified in `docs/ORB_MEMORY_MODE.md`. All Orb mutation sits
   behind `GameAdapter.Orbs`. An unresolved Orb action is never retried, refunded
   or erased. Recovery after reload is passive.
