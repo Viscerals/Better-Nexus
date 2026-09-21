@@ -1,0 +1,16 @@
+[
+  {
+    "test": "current_locks",
+    "baseline": "provided P1.3 archive",
+    "exit": 1,
+    "stdout": "",
+    "stderr": "tests/prototype/current_locks.lua:19: EXPECTED RED: matching current locks avoid the modal entirely\n"
+  },
+  {
+    "test": "loading_status",
+    "baseline": "provided P1.3 archive",
+    "exit": 1,
+    "stdout": "",
+    "stderr": "tests/prototype/loading_status.lua:18: EXPECTED RED: read-only loading panel available before core readiness\n"
+  }
+]

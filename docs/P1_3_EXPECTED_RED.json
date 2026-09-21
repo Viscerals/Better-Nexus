@@ -1,0 +1,10 @@
+{
+  "reference": "supplied P1.2 source archive, unchanged",
+  "reference_archive_sha256": "41b86aeffe8b9bb3f7bc0d56bb7400eedfc055ed5b070b0224f5978144d9f5ca",
+  "test": "role_selection.lua",
+  "expected_failure": "unresolved legacy build opens explicit locked-target choice",
+  "runtime": "Lua 5.4 compatibility harness, not WoW",
+  "exit": 1,
+  "stdout": "|cffff9040Nexus:|r wishlist does not exactly match the verified active loadout; locked roles remain unknown.\n",
+  "stderr": "...exus-prototype-source/tests/prototype/role_selection.lua:25: EXPECTED RED: unresolved legacy build opens explicit locked-target choice\n"
+}

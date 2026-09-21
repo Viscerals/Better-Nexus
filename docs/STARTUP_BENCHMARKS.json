@@ -1,0 +1,110 @@
+{
+  "runtime": "Lua 5.4 with test-only compatibility shims",
+  "timings": "Process CPU seconds; simulated updates spaced at .05 seconds. Not native WoW or wall-clock guarantees.",
+  "runs": [
+    {
+      "version": "P1.1",
+      "trial": 1,
+      "rows": 100,
+      "pool": 5000,
+      "core_turns": 1126,
+      "core_cpu": 3.038603,
+      "shared_turns": 1126,
+      "shared_cpu": 3.038604,
+      "evidence_calls": 2827,
+      "evidence_cpu": 0.719216,
+      "semantic_hash": 171529068
+    },
+    {
+      "version": "P1.1",
+      "trial": 2,
+      "rows": 100,
+      "pool": 5000,
+      "core_turns": 1109,
+      "core_cpu": 2.945502,
+      "shared_turns": 1109,
+      "shared_cpu": 2.945503,
+      "evidence_calls": 2827,
+      "evidence_cpu": 0.720124,
+      "semantic_hash": 171529068
+    },
+    {
+      "version": "P1.1",
+      "trial": 1,
+      "rows": 400,
+      "pool": 0,
+      "core_turns": 3509,
+      "core_cpu": 10.459534,
+      "shared_turns": 3509,
+      "shared_cpu": 10.459535,
+      "evidence_calls": 11010,
+      "evidence_cpu": 0.024622,
+      "semantic_hash": 184652663
+    },
+    {
+      "version": "P1.1",
+      "trial": 2,
+      "rows": 400,
+      "pool": 0,
+      "core_turns": 3466,
+      "core_cpu": 9.933428,
+      "shared_turns": 3466,
+      "shared_cpu": 9.933429,
+      "evidence_calls": 11009,
+      "evidence_cpu": 0.023461,
+      "semantic_hash": 184652663
+    },
+    {
+      "version": "P1.2",
+      "trial": 1,
+      "rows": 100,
+      "pool": 5000,
+      "core_turns": 287,
+      "core_cpu": 0.682929,
+      "shared_turns": 830,
+      "shared_cpu": 2.280813,
+      "evidence_calls": 1,
+      "evidence_cpu": 0.000331,
+      "semantic_hash": 171529068
+    },
+    {
+      "version": "P1.2",
+      "trial": 2,
+      "rows": 100,
+      "pool": 5000,
+      "core_turns": 296,
+      "core_cpu": 0.711853,
+      "shared_turns": 844,
+      "shared_cpu": 2.302337,
+      "evidence_calls": 1,
+      "evidence_cpu": 0.000436,
+      "semantic_hash": 171529068
+    },
+    {
+      "version": "P1.2",
+      "trial": 1,
+      "rows": 400,
+      "pool": 0,
+      "core_turns": 1168,
+      "core_cpu": 2.903937,
+      "shared_turns": 3487,
+      "shared_cpu": 10.431184,
+      "evidence_calls": 1,
+      "evidence_cpu": 5e-06,
+      "semantic_hash": 184652663
+    },
+    {
+      "version": "P1.2",
+      "trial": 2,
+      "rows": 400,
+      "pool": 0,
+      "core_turns": 1186,
+      "core_cpu": 3.041098,
+      "shared_turns": 3498,
+      "shared_cpu": 10.647832,
+      "evidence_calls": 1,
+      "evidence_cpu": 5e-06,
+      "semantic_hash": 184652663
+    }
+  ]
+}

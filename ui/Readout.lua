@@ -33,11 +33,11 @@ function M.Status(model)
     if type(model) ~= "table" then return "" end
     local main
     if model.text ~= nil then
-        main = tostring(model.text)
+        main = Nexus.UserText and Nexus.UserText.Message(model.text) or tostring(model.text)
     elseif model.advisorOnly then
-        main = "no wishlist set - advisor only"
+        main = "No Wishlist assigned - recommendations only"
     elseif model.synced == false then
-        main = "waiting for owned-echo sync"
+        main = "Waiting for current Echo data - automatic choices paused"
     else
         main = "idle"
     end
@@ -46,11 +46,11 @@ function M.Status(model)
     end
     local c = model.charges
     if type(c) == "table" then
-        local s = string.format("B:%d R:%d F:%d",
+        local s = string.format("Banish:%d Reroll:%d Freeze:%d",
             Round(tonumber(c.banish) or 0),
             Round(tonumber(c.reroll) or 0),
             Round(tonumber(c.freeze) or 0))
-        if c.trustworthy == false then s = s .. " (approx)" end
+        if c.trustworthy == false then s = s .. " (estimated)" end
         main = main .. " | " .. s
     end
     return main
@@ -61,15 +61,13 @@ end
 function M.CardLine(card, annotation, delta)
     if type(card) ~= "table" then return "" end
     local parts = {}
-    if card.isGuaranteed then parts[#parts + 1] = "[G]" end
+    if card.isGuaranteed then parts[#parts + 1] = "[Guaranteed offer]" end
     parts[#parts + 1] = NameOf(card)
     local q = QUALITY_NAMES[card.quality]
     if q then parts[#parts + 1] = "(" .. q .. ")" end
-    if type(delta) == "number" then
-        parts[#parts + 1] = string.format("%+d", Round(delta))
-    end
+    -- Scores remain available in diagnostics; they are priorities, not DPS.
     if annotation ~= nil and annotation ~= "" then
-        parts[#parts + 1] = tostring(annotation)
+        parts[#parts + 1] = Nexus.UserText and Nexus.UserText.Annotation(annotation) or tostring(annotation)
     end
     return table.concat(parts, " ")
 end

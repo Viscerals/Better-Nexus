@@ -1,0 +1,18 @@
+local H=dofile('tests/prototype/orbs_support.lua');local M,O=H.M,H.O
+H.OrbPlan({{spellId=410002,quality=2,stacks=2}});local f=Nexus.OrbPanel.Show()
+O.charges=0;Nexus.OrbPanel.Refresh()
+assert(f.balance:GetText()=='Confirmed Orb balance: 0' and not f.start:IsEnabled())
+assert(not M.Start() and #H.actions==0,'zero resources block without a test spend')
+O.known=false;Nexus.OrbPanel.Refresh()
+assert(f.balance:GetText():find('loading',1,true) and not f.balance:GetText():find('balance: 0',1,true) and not f.start:IsEnabled())
+O.known=true;O.charges=10;local svc=ProjectEbonhold.OrbService;ProjectEbonhold.OrbService=nil;Nexus.OrbPanel.Refresh()
+assert(f.balance:GetText():find('unsupported',1,true) and not f.start:IsEnabled() and not M.BlocksOrdinary())
+ProjectEbonhold.OrbService=svc;Nexus.OrbPanel.Refresh()
+assert(M.Start(2));H.Offer({{spellId=410001,quality=1},{spellId=410004,quality=3},{spellId=410008,quality=1}})
+assert(H.Count('take')==1);H.Result(410001,1);M.Pump()
+assert(O.source==410001 and H.Count('orb-spend')==2,'confirmed unwanted safe result is automatically recycled')
+H.Offer();H.Result(410002,2);M.Pump()
+assert(M.Status().state=='LIMIT' and M.Status().spent==2,'recycling consumes the same finite maximum')
+O.charges=100;H.Notify();for i=1,4 do M.Pump()end
+assert(H.Count('orb-spend')==2 and not M.Status().running,'more resources cannot restart a limited run')
+print('PASS explicit zero/loading/unsupported balance, automatic recycling and finite non-restarting maximum')

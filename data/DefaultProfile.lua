@@ -35,6 +35,8 @@ DefaultProfile.defaultSettings = {
     autoDisable = true,
     autoSave = true,
     autoBanish = true,
+    autoReroll = true, -- preserve Nexus's existing reroll preference on upgrade
+    autoFreeze = true,
     -- Separate opt-IN from the other auto-* switches, defaulting OFF: a
     -- fresh capability (LockPerk/UnlockPerk, confirmed live 2026-08-01)
     -- that permanently changes a real character choice deserves its own
@@ -42,6 +44,20 @@ DefaultProfile.defaultSettings = {
     -- fully on. Existing saves simply lack this key (nil), which is
     -- exactly as falsy as `false` -- no SETTINGS_VERSION bump needed.
     autoLockEchoes = false,
+    updateNotifications = true, -- chat + persistent panel notice; manual install only
+    -- Community persistence is a local cache over the immutable bundled
+    -- catalog. Ranked pruning is opt-in; when disabled, build and DPS content
+    -- is retained without count limits. The values below remain the saved
+    -- policy used if ranked retention is enabled later.
+    communityRetentionEnabled = false,
+    communityRetentionTopPerCategory = 100,
+    communityRetentionMinPerClassPerCategory = 15,
+    communityRetentionTopAverage = 50,
+    communityRetentionMinAveragePerClass = 10,
+    communityRetentionOtherRemoteBuilds = 75,
+    communityRetentionMaxPerAuthor = 12,
+    communityRetentionPersonalFingerprints = 128,
+    communityRetentionBuildFingerprints = 128,
     anchorSpellId = nil, -- explicit override; honored only when on the wishlist
     -- Diversity-anchor auto-detection: if no explicit anchorSpellId, the
     -- anchor is the wishlist echo whose name matches one of these. Adaptive

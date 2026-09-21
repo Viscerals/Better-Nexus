@@ -1,0 +1,12 @@
+local H=dofile('tests/prototype/orbs_support.lua')
+local sentence='Closing the window does not stop an approved run. Use Pause or Stop.'
+local f=Nexus.OrbPanel.Show()
+assert(f.closeNotice:GetText()==sentence,'I2 panel disclosure')
+H.OrbPlan();Nexus.OrbPanel.Refresh()
+assert(f.approval:GetText():find('Start approves this maximum',1,true),'replacement one-click approval is explicit beside the real Start control')
+Nexus.Help.Show('orbs')
+assert(NexusHelpWindow.body:GetText():find(sentence,1,true),'I2 Help disclosure')
+local file=assert(io.open('README-PROTOTYPE.md','rb'));local guide=file:read('*a');file:close()
+assert(guide:find(sentence,1,true),'I2 packaged instructions disclosure')
+assert(H.Count('orb-spend')==0 and H.Count('take')==0,'reading all disclosures submits nothing')
+print('PASS Close disclosure in actual panel, explicit Start consent, Help and packaged guide')

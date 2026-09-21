@@ -26,7 +26,7 @@ local function EnsureFrame()
     if frame then return frame end
 
     frame = CreateFrame("Frame", "NexusQuickStart", UIParent)
-    frame:SetSize(420, 292)
+    frame:SetSize(420, 332)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 55)
     frame:SetFrameStrata("DIALOG")
     frame:EnableMouse(true)
@@ -52,7 +52,7 @@ local function EnsureFrame()
     local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     subtitle:SetPoint("TOP", 0, -37)
     subtitle:SetTextColor(0.7, 0.7, 0.7)
-    subtitle:SetText("Choose the path that matches where your character is now.")
+    subtitle:SetText("Plan your Echoes, then choose what to automate.")
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.body = body
@@ -61,14 +61,14 @@ local function EnsureFrame()
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
     body:SetText(
-        "Already have a finished build? Assign its ideal wishlist, then hit a training dummy to establish your personal record.\n" ..
-        "Starting fresh? Import a wishlist string or copy a proven community build."
+        "Already have a Saved Build? Assign the Wishlist you want it to follow.\n" ..
+        "Starting fresh? Import a Wishlist code or copy a Community build into an editable draft."
     )
 
     local current = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     current:SetSize(174, 26)
     current:SetPoint("TOPLEFT", 24, -132)
-    current:SetText("Use Current Build")
+    current:SetText("Set up current build")
     current:SetScript("OnClick", function()
         Finish()
         CloseOtherSetupWindows()
@@ -88,7 +88,7 @@ local function EnsureFrame()
     local builds = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     builds:SetSize(174, 26)
     builds:SetPoint("TOPLEFT", current, "BOTTOMLEFT", 0, -10)
-    builds:SetText("Browse Proven Builds")
+    builds:SetText("Browse Community builds")
     builds:SetScript("OnClick", function()
         Finish()
         CloseOtherSetupWindows()
@@ -105,11 +105,17 @@ local function EnsureFrame()
         if Nexus.Leaderboard then Nexus.Leaderboard.Show() end
     end)
 
+    local help = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    help:SetSize(174,26);help:SetPoint("TOPLEFT",24,-206);help:SetText("Help / Getting Started")
+    help:SetScript("OnClick",function() Finish();if Nexus.Help then Nexus.Help.Show("start") end end)
+    local orbs = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-206);orbs:SetText("Orbs / Lost Memories")
+    orbs:SetScript("OnClick",function() Finish();if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end)
     local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("BOTTOMLEFT", 24, 22)
     hint:SetSize(290, 30)
     hint:SetJustifyH("LEFT")
-    hint:SetText("You can return to every option from the Nexus HUD. Auto mode never changes your saved build unless a run improves it.")
+    hint:SetText("Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls.")
 
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(74, 24)
@@ -119,6 +125,8 @@ local function EnsureFrame()
 
     return frame
 end
+
+function M.Show() EnsureFrame():Show() end
 
 function M.ShowIfFirstTime()
     NexusDB = NexusDB or {}
