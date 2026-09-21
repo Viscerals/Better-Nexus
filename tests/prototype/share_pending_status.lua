@@ -114,3 +114,20 @@ Nexus.CommunityBuilds.ShowPostBuild();Nexus.CommunityBuilds.ShowPostBuild()
 assert(p._postDescBox:_NexusRawText()=='','after a saved Share the old failed draft is not offered again')
 assert(#H.actions==0,'no gameplay action')
 print('PASS refusal: actual reason, persistent, draft kept, no misleading Retry')
+
+-- 5. Saved but never sent (the unchanged 120-second expiry under a blocked wire):
+-- stated as stopped, not as sent; the explicit Retry Share keeps the build name.
+H,C=S.Boot();H.combat=true;first=S.Post();id=first.id
+T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).localSaved end)
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert(state=='queued' and text=='Saved "'..NAME..'" locally — queued for sharing.','queued and unsent: '..tostring(text))
+H.Advance(121,.05)
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert(state=='stopped' and text:find('Saved "'..NAME..'" locally — not sent: expired',1,true) and not text:find('Sent',1,true),'expiry is not a send: '..tostring(text))
+H.combat=false
+assert(Nexus.CommunityBuilds.CanRetryShare(id)==true,'fixture: the existing owner offers Retry Share')
+assert(Nexus.CommunityBuilds.RetryShare(id)==true,'explicit retry starts')
+state,text=Nexus.CommunityBuilds.ShareStatusText(id)
+assert((state=='queued' or state=='sent') and text:find('"'..NAME..'"',1,true),'the retried Share is still named: '..tostring(text))
+assert(H.putCalls[id]==1,'a retry sends the saved record; it writes no second record')
+print('PASS stopped and retried Share: truthful and build-specific')
