@@ -3959,6 +3959,13 @@ Session = SessionFactory.New({
         return UnitLevel and UnitLevel("player") or 0
     end,
     requestVersion=function()
+        -- The one declared release identity. No field is added to the packet.
+        if Nexus and type(Nexus.ReleaseIdentity) == "function" then
+            local ok, identity = pcall(Nexus.ReleaseIdentity)
+            if ok and type(identity) == "table" and ValidVersion(identity.announce) then
+                return identity.announce
+            end
+        end
         return (Nexus and Nexus.VERSION) or "0.0.0-dev"
     end,
     statusVersion=function()
