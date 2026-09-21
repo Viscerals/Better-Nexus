@@ -21,6 +21,17 @@ local function Frozen(c)
         or c.justFrozen == true
 end
 
+-- Deliberate Nexus differences from the named reference strategy. Each one is
+-- an explicit input option of Pilot.Decide. Without the option, Pilot.Decide
+-- keeps the reference decision (tests/prototype/planner_reference.lua compares
+-- exactly that). DecideNexus passes this table. See
+-- docs/ROLLING_ORB_REVIEW_EADFF8A.md for the fixtures and the trade-offs.
+Pilot.NEXUS_POLICY = {
+    -- R3: a requested Echo whose exact count is already met does not stop a
+    -- permitted Reroll. Only an Echo that is still needed does.
+    rerollIgnoresSatisfiedTargets = true,
+}
+
 -- Normalized pure policy. Its action order and tie breakers intentionally match
 -- the supplied reference. Runtime-specific safety differences belong in the
 -- adapter below, never in hidden re-scoring after this function returns.
@@ -54,6 +65,8 @@ function Pilot.Decide(input)
         and board.twoFrozenRerollProhibited ~= true and not special and not pending
     local legal, wanted, held, disposable = {}, {}, {}, {}
     local anyRequested, forbiddenSelectable = false, false
+    local anyOutstanding = false
+    local policy = type(input.policy) == "table" and input.policy or {}
     for i = 1, 3 do
         local raw = board.choices[i]
         if type(raw) ~= "table" then return Block("INVALID_BOARD") end
@@ -68,6 +81,7 @@ function Pilot.Decide(input)
         c.need = Count(obj.outstandingCounts[id])
         local requested = Count(obj.requestedCounts[id]) > 0
         anyRequested = anyRequested or requested
+        anyOutstanding = anyOutstanding or c.need > 0
         c.forbidden = not requested and type(obj.banlistedEchoes)=="table" and obj.banlistedEchoes[id] == true
         c.legal = c.selectable and canSelect and not c.forbidden
         if c.selectable and canSelect and c.forbidden then forbiddenSelectable = true end
@@ -118,8 +132,12 @@ function Pilot.Decide(input)
         return Result("SELECT",best or legal[1],best and "SPECIAL_BOARD_SELECT" or "SPECIAL_BOARD_FALLBACK")
     end
     if total == 0 then return Result("SELECT",legal[1],"OBJECTIVE_COMPLETE_FALLBACK") end
-    if canReroll and Count(resources.rerollsRemaining)>0 and not anyRequested then
-        return Result("REROLL",nil,"REROLL_COMMON_UNWANTED_BOARD")
+    -- Reference rule: any Echo of the original Wishlist on the board stops the
+    -- Reroll. With the explicit R3 option, only a still-needed Echo stops it.
+    local keepBoard = anyRequested
+    if policy.rerollIgnoresSatisfiedTargets == true then keepBoard = anyOutstanding end
+    if canReroll and Count(resources.rerollsRemaining)>0 and not keepBoard then
+        return Result("REROLL",nil,anyRequested and "REROLL_NO_OUTSTANDING_ON_BOARD" or "REROLL_COMMON_UNWANTED_BOARD")
     end
     if frozen then
         if best and not best.frozen then return Result("SELECT",best,"SELECT_OUTSTANDING_WISHLIST") end
@@ -145,6 +163,7 @@ local LABELS = {
     FREEZE_OUTSTANDING_FOR_HIGH_PRESSURE_SEARCH="Freeze wanted Echo before search (Pilot)",
     BANISH_FOR_WISHLIST_SEARCH="Banish to find Wishlist targets (Pilot)",
     REROLL_COMMON_UNWANTED_BOARD="Reroll: no requested Echo on board (Pilot)",
+    REROLL_NO_OUTSTANDING_ON_BOARD="Reroll: no needed Echo on board (Pilot)",
     LOW_PRESSURE_FALLBACK="Take available filler (Pilot)",
     RESOURCE_EXHAUSTED_FALLBACK="Take filler; search unavailable (Pilot)",
     OBJECTIVE_COMPLETE_FALLBACK="Wishlist complete; take filler (Pilot)",
@@ -199,7 +218,8 @@ function Pilot.DecideNexus(state)
                 canFreeze=trusted and state.canFreeze~=false and state.allowFreeze~=false,
                 canReroll=trusted and state.allowReroll~=false and not refused.reroll}},
         resources={banishesRemaining=charges.banish,freezesRemaining=charges.freeze,rerollsRemaining=charges.reroll},
-        commonBoardRerollEnabled=state.allowReroll~=false})
+        commonBoardRerollEnabled=state.allowReroll~=false,
+        policy=Pilot.NEXUS_POLICY})
     local kinds={SELECT="take",FREEZE="freeze",BANISH="banish",REROLL="reroll",BLOCKED="wait"}
     return {type=kinds[decision.action] or "wait",spellId=decision.echoID,index=decision.index,
         reason=LABELS[decision.reasonCode] or decision.reasonCode,reasonCode=decision.reasonCode,

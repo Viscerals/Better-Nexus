@@ -145,3 +145,42 @@ It also needs a panel control in `ui/OrbPanel.lua` and a Store field.
 Tests: `orb_review_reload_unobservable`, `orb_review_reload_manual_choice`,
 `orb_review_reload_offer_after_reload`, `orb_review_reload_offer_mismatch`,
 `orb_review_reload_no_observer`, `orb_review_reload_rejected_selection`.
+
+## R3 - Reroll: outstanding need versus original Wishlist membership
+
+Status: deliberate policy difference from the named reference strategy
+(LoadoutPilot 1.3.6 / patch 103). It is a proposed strategy change, not a
+correction of a proven bug. It is one separate commit and can be reverted alone.
+
+Reference rule: a permitted Reroll is skipped when any Echo of the original
+Wishlist is on the board, also when its exact count is already met.
+
+Nexus rule (option `rerollIgnoresSatisfiedTargets` in
+`WishlistPilot.NEXUS_POLICY`, passed by `DecideNexus`): only an Echo that is
+still needed stops the Reroll. `Pilot.Decide` without the option keeps the
+reference decision, so `tests/prototype/planner_reference.lua` still compares
+10,000 random inputs with the reference, unchanged.
+
+Kept: the Reroll preference (`allowReroll`), the Reroll charge count, trusted
+resource state, the pending guards, the ordinary-board gate, the two-frozen
+Reroll prohibition, exact copy counts, permanent ownership, and every
+still-needed or frozen still-needed offer (taken, never rerolled away).
+
+New reason code `REROLL_NO_OUTSTANDING_ON_BOARD`, text "Reroll: no Echo on this
+board is still needed". The old text "no requested Echo on board" would be
+false for such a board.
+
+Demonstrated on fixtures only (no draw odds are modelled):
+
+| Fixture | Reference rule | R3 rule |
+|---|---|---|
+| F1: need 102, board 101 (met) / 901 / 902, 1 pick, 5 Rerolls | Take surplus 101, 0 Rerolls, 102 missing | Reroll |
+| Replay A: the third scripted board holds 102 | 101 taken, 0 Rerolls, incomplete | 102 taken after 2 Rerolls |
+| Replay B: 102 never appears | 101 taken, 0 Rerolls | 101 taken after all 5 Rerolls |
+| `policy_compare` battery, 864 decisions | - | 16 decisions differ (8 states, each verified/unverified): with Banish and Reroll both available, 12 change from Banish of the met target to Reroll, and 4 (30 picks left, low pressure) change from a low-pressure fallback take to Reroll |
+
+Trade-off: R3 spends Rerolls in states where the reference spends none or
+spends a Banish. When the needed Echo does not appear, those Rerolls are gone
+and the final pick is the same. No universal or optimal gain is claimed.
+
+Test: `tests/prototype/rolling_review_reroll_outstanding.lua`.

@@ -20,6 +20,7 @@ local reasons={
     ["Freeze wanted Echo before search (Pilot)"]="Freeze a needed Echo before searching for another target",
     ["Banish to find Wishlist targets (Pilot)"]="Banish to find Wishlist targets",
     ["Reroll: no requested Echo on board (Pilot)"]="Reroll: no requested Echo on board",
+    ["Reroll: no needed Echo on board (Pilot)"]="Reroll: no Echo on this board is still needed",
     ["Take available filler (Pilot)"]="Take an available Echo outside the Wishlist",
     ["Take filler; search unavailable (Pilot)"]="Take an Echo outside the Wishlist; no permitted Banish or Reroll action",
     ["Wishlist complete; take filler (Pilot)"]="Wishlist complete; take an Echo outside the Wishlist",
