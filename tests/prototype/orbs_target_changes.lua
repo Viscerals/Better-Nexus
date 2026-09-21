@@ -1,0 +1,21 @@
+local H=dofile('tests/prototype/orbs_support.lua');local M,A=H.M,H.A
+local original={{spellId=410002,quality=2,stacks=3}}
+H.OrbPlan(original);assert(M.Start(3));H.Offer();assert(H.Count('take')==1)
+assert(A.SetFirstLoadoutWishlistIdentity('Changed target',{{spellId=410004,quality=3,stacks=2}}))
+M.Pump();assert(M.Status().state=='PAUSED' and M.Status().pending,'target change pauses the original submitted operation')
+assert(M.Status().config.name=='Changed target' and M.Status().operationName=='Orb test','new displayed assignment and original operation stay distinct')
+assert(not M.Resume() and not M.Start(),'no target-change restart before original settlement')
+H.Result(410002,2);assert(not M.Status().pending and not M.Status().running)
+assert(M.Status().spent==1 and M.Status().limit==3,'target change retains approved exposure')
+assert(M.Resume());assert(H.Count('orb-spend')==2 and M.Status().spent==1 and M.Status().reserved==1)
+-- Changing targets before selection cannot choose from the old offer for the new plan.
+assert(A.SetFirstLoadoutWishlistIdentity('Third target',{{spellId=410002,quality=2,stacks=3}}))
+M.Pump();H.Offer({{spellId=410004,quality=3},{spellId=410002,quality=2},{spellId=410008,quality=1}})
+assert(H.Count('take')==1 and not M.Resume(),'pending old offer requires passive/manual settlement after target change')
+H.service.SelectPerk(410004);H.Result(410004,3)
+assert(M.Status().spent==2 and not M.Status().pending);assert(M.Resume())
+assert(H.Count('orb-spend')==3 and M.Status().limit==3)
+H.Offer();H.Result(410002,2);M.Pump()
+assert(M.Status().state=='LIMIT' and M.Status().spent==3 and H.Count('orb-spend')==3)
+assert(not M.Resume() and not M.Start(),'repeated clicks cannot reset the same approved run')
+print('PASS target changes before/after choice, original settlement and Resume preserve one finite budget')

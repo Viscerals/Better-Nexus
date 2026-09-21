@@ -1,0 +1,67 @@
+name: CI
+
+# Pull requests and main only. No tag, release or schedule trigger: this workflow
+# never builds a retained archive, never publishes and never deploys.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: better-nexus-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-suite:
+    name: offline-suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install LuaJIT
+        run: sudo apt-get update && sudo apt-get install --yes luajit
+      - name: Inventory check and complete offline suite
+        # Reference-dependent tests need a third-party archive that is not redistributed.
+        # They are printed as NOT RUN. They are never counted as passed.
+        shell: bash   # explicit bash runs with pipefail, so a failed suite fails this step
+        run: python3 tools/ci_check.py | tee ci-summary.txt
+      - name: Summary
+        if: always()
+        run: |
+          echo '### Offline suite' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 12 ci-summary.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  package-content:
+    name: package-content
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Package content and TOC compatibility checks
+        run: python3 tools/build_package.py --check
+      - name: Reproducible archive, then discard it
+        run: |
+          python3 tools/build_package.py --label ci-check
+          first=$(sha256sum dist/Nexus-ci-check.zip | cut -d' ' -f1)
+          rm dist/Nexus-ci-check.zip
+          python3 tools/build_package.py --label ci-check
+          second=$(sha256sum dist/Nexus-ci-check.zip | cut -d' ' -f1)
+          rm -r dist
+          test "$first" = "$second"
+      - name: No private or generated files are tracked
+        run: |
+          if git ls-files | grep -Ei '(^|/)(WTF|SavedVariables)(/|$)|\.(zip|bundle|log|bak)$'; then
+            echo 'Tracked file that must not be in the repository.'; exit 1
+          fi

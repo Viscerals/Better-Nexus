@@ -39,20 +39,11 @@ local function OrdinalSuffix(n)
     else return tostring(n) .. "th" end
 end
 
-local function NormalizeName(name)
-    name = tostring(name or "")
-    return (name:match("^([^%-]+)") or name):lower()
-end
-
 local function IsCommunityAuthor(name)
     if not name or name == "" then return false end
-    local builds = NexusDB and NexusDB.communityBuilds
-    if not builds then return false end
-    local lname = NormalizeName(name)
-    for _, build in pairs(builds) do
-        if NormalizeName(build.author) == lname then return true end
-    end
-    return false
+    local catalog = Nexus and Nexus.BuildCatalog
+    return catalog and type(catalog.IsAuthor) == "function"
+        and catalog.IsAuthor(name) == true or false
 end
 
 ------------------------------------------------------------------------
@@ -103,7 +94,18 @@ local function AugmentUnitTooltip(tooltip)
         local rankStr  = OrdinalSuffix(info.rank)
         local dpsStr   = FmtDps(info.dps) or "?"
         local catStr   = info.category == "lk" and "LK" or "Dummy"
-        local buildStr = info.title and ("|cff888888" .. info.title:sub(1, 28) .. "|r  ") or ""
+        local rawTitle = info.title and tostring(info.title) or nil
+        local truncate = Nexus and Nexus.LayoutMetrics
+            and Nexus.LayoutMetrics.Truncate
+        if rawTitle then
+            rawTitle = truncate and truncate(rawTitle, 28)
+                or rawTitle:sub(1, 28)
+        end
+        local displayText = Nexus and Nexus.Identity
+            and Nexus.Identity.DisplaySafeText
+        local safeTitle = rawTitle and displayText
+            and displayText(rawTitle, 120, false) or nil
+        local buildStr = safeTitle and ("|cff888888" .. safeTitle .. "|r  ") or ""
         tooltip:AddLine(
             string.format("%s|cffffd200%s|r on leaderboard  |cff4dff80%s|r  %s",
                 buildStr, rankStr, dpsStr, catStr),
@@ -111,7 +113,7 @@ local function AugmentUnitTooltip(tooltip)
     elseif isAuthor then
         tooltip:AddLine("|cff888888Community build author|r", 1, 1, 1)
     elseif peerInfo then
-        tooltip:AddLine("|cff888888Connected to the Nexus sync mesh|r", 1, 1, 1)
+        tooltip:AddLine("|cff888888Nexus user seen on the build-sharing network|r", 1, 1, 1)
     end
 
     -- Required: AddLine alone doesn't resize the tooltip on 3.3.5

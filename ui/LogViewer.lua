@@ -10,22 +10,104 @@ local M = {}
 Nexus.LogViewer = M
 
 local TABS = {
-    { key = "boards",   label = "Boards" },
-    { key = "mismatch", label = "Mismatch" },
+    { key = "boards",   label = "Recent choices" },
+    { key = "mismatch", label = "Manual overrides" },
     { key = "wishlist", label = "Wishlist" },
-    { key = "locked",   label = "Locked" },
-    { key = "state",    label = "State" },
+    { key = "locked",   label = "Permanent Echoes" },
+    { key = "state",    label = "Status" },
     { key = "sync",     label = "Sync" },
     { key = "dps",      label = "DPS" },
-    { key = "autolock", label = "AutoLock" },
+    { key = "autolock", label = "Slot actions" },
+    { key = "perf",     label = "Performance" },
+    { key = "errors",   label = "Errors" },
+    { key = "peer",     label = "Advanced peer" },
 }
 
 local frame, editBox, scroll, tabButtons, statusFS, exportButton
-local exportRunner, exportJob, exportGeneration = nil, nil, 0
+local peerLabel, peerEdit, peerStart, peerStop
+local repaintRunner, exportRunner, exportFinisher, clearResetRunner
+local exportJob, exportGeneration = nil, 0
 local provider, clearProvider
 local activeTab = "state"
 local repaintPending = false
+local clearResetButton, clearResetGeneration = nil, 0
+local peerRefreshElapsed, peerRefreshActive = 0, false
 local MAX_TEXT_CHARS = 60000
+local COPY_PAGE_BYTES = 16000
+local copyText, copyPage, copyPages = "", 1, 1
+local copyRanges={{1,0}}
+local pagePrevious, pageNext
+
+local function InertCopyText(value, maxBytes)
+    value = tostring(value or "")
+    local displayText = Nexus and Nexus.Identity
+        and Nexus.Identity.DisplaySafeText
+    return displayText and displayText(
+        value, tonumber(maxBytes) or #value, true, true) or ""
+end
+
+local function RenderCopyPage()
+    if not editBox then return end
+    local range=copyRanges[copyPage]
+    local chunk = copyText:sub(range[1],range[2])
+    editBox:SetText(InertCopyText(chunk,#chunk))
+    editBox:SetCursorPosition(0)
+    if pagePrevious then if copyPage>1 then pagePrevious:Enable() else pagePrevious:Disable() end end
+    if pageNext then if copyPage<copyPages then pageNext:Enable() else pageNext:Disable() end end
+    if statusFS then statusFS:SetText(string.format("Page %d/%d | %d total bytes | copy pages in order (no inserted separators)",copyPage,copyPages,#copyText)) end
+end
+
+local function SetCopyText(text)
+    copyText=tostring(text or "")
+    copyPage,copyRanges=1,{}
+    local first=1
+    while first<=#copyText do
+        local last=math.min(#copyText,first+COPY_PAGE_BYTES-1)
+        -- Do not split a multibyte character between individually validated
+        -- pages. Escaping pipes is compositional, so concatenating pages is
+        -- lossless and does not create executable rich-text sequences.
+        while last<#copyText do
+            local following=copyText:byte(last+1)
+            if following<128 or following>=192 then break end
+            last=last-1
+            if last<first then last=math.min(#copyText,first+COPY_PAGE_BYTES-1);break end
+        end
+        copyRanges[#copyRanges+1]={first,last};first=last+1
+    end
+    if #copyRanges==0 then copyRanges={{1,0}} end
+    copyPages=#copyRanges
+    RenderCopyPage()
+end
+
+function M.PageInfo()
+    return {page=copyPage,pages=copyPages,bytes=#copyText,pageBytes=COPY_PAGE_BYTES}
+end
+function M.SetPage(index)
+    index=tonumber(index)
+    if not index or index~=math.floor(index) or index<1 or index>copyPages then return false end
+    copyPage=index;RenderCopyPage();return true
+end
+
+local function SyncPeerRefreshState()
+    peerRefreshElapsed, peerRefreshActive = 0, false
+    if activeTab ~= "peer" then return false end
+    local debugOwner = Nexus and Nexus.PeerDebug
+    if not (debugOwner and type(debugOwner.IsEnabled) == "function") then
+        return false
+    end
+    local ok, active = pcall(debugOwner.IsEnabled)
+    peerRefreshActive = ok and active == true
+    return peerRefreshActive
+end
+
+local function UpdatePeerControls()
+    local shown = activeTab == "peer"
+    for _, control in ipairs({peerLabel,peerEdit,peerStart,peerStop}) do
+        if control then
+            if shown then control:Show() else control:Hide() end
+        end
+    end
+end
 
 local function Repaint()
     repaintPending = false
@@ -35,26 +117,13 @@ local function Repaint()
         local ok, result = pcall(provider, activeTab)
         text = ok and tostring(result or "") or ("provider error: " .. tostring(result))
     end
-    local originalLen = #text
-    local limit = MAX_TEXT_CHARS
-    if activeTab ~= "ai_export" and originalLen > limit then
-        text = "EXPORT TOO LARGE FOR A SAFE SINGLE COPY (" .. originalLen .. " chars).\n"
-            .. "Press Clear Log after saving the current export, then collect a fresh run.\n"
-            .. "No partial/truncated export is shown because that would be misleading."
-    end
-    editBox:SetText(text)
-    editBox:SetCursorPosition(0)
-    if statusFS then
-        local suffix = (activeTab ~= "ai_export" and originalLen > limit) and " (safe-limit exceeded)" or ""
-        if activeTab == "ai_export" then
-            statusFS:SetText(string.format("%d chars%s -- full retained decision + mismatch log", originalLen, suffix))
-        else
-            statusFS:SetText(string.format("%d chars%s -- Select All, Ctrl-C", originalLen, suffix))
-        end
-    end
+    -- Preserve the complete diagnostic. The visible EditBox is paged; no
+    -- silent truncation and no hundreds-of-kilobytes SetText/focus operation.
+    SetCopyText(text)
     for _, b in ipairs(tabButtons or {}) do
         if b.tabKey == activeTab then b:LockHighlight() else b:UnlockHighlight() end
     end
+    UpdatePeerControls()
     if activeTab == "ai_export" and editBox then
         editBox:SetFocus()
         editBox:HighlightText()
@@ -64,12 +133,17 @@ end
 local function ScheduleRepaint()
     if repaintPending then return end
     repaintPending = true
-    local waiter = CreateFrame("Frame")
+    if not repaintRunner then
+        repaintRunner = CreateFrame("Frame")
+        repaintRunner:Hide()
+    end
     local elapsed = 0
-    waiter:SetScript("OnUpdate", function(self, dt)
+    repaintRunner:Show()
+    repaintRunner:SetScript("OnUpdate", function(self, dt)
         elapsed = elapsed + (tonumber(dt) or 0)
         if elapsed < 0.05 then return end
         self:SetScript("OnUpdate", nil)
+        self:Hide()
         Repaint()
     end)
 end
@@ -81,25 +155,25 @@ local function StopExport()
         exportRunner:SetScript("OnUpdate", nil)
         exportRunner:Hide()
     end
+    if exportFinisher then
+        exportFinisher:SetScript("OnUpdate", nil)
+        exportFinisher:Hide()
+    end
 end
 
 local function FinishExport(text)
     exportJob = nil
     if exportRunner then exportRunner:SetScript("OnUpdate", nil); exportRunner:Hide() end
-    text = tostring(text or "")
-    local n = #text
-    editBox:SetText(text)
-    editBox:SetCursorPosition(0)
+    SetCopyText(text)
     editBox:SetFocus()
     editBox:HighlightText()
-    statusFS:SetText(n .. " chars -- complete log selected; Ctrl-C")
 end
 
 local function StartExport()
     StopExport()
     activeTab = "ai_export"
     for _, b in ipairs(tabButtons or {}) do b:UnlockHighlight() end
-    editBox:SetText("Preparing full diagnostic log...\n\nNexus is building this over multiple frames so gameplay stays responsive.")
+    editBox:SetText("Preparing the diagnostic report in steps.\n\nLarge reports may take a moment. You can cancel preparation.")
     statusFS:SetText("Preparing export...")
     local factory = Nexus and Nexus.NewAIExportCoroutine
     if type(factory) ~= "function" then
@@ -137,18 +211,24 @@ local function StartExport()
                 self:SetScript("OnUpdate", nil)
                 self:Hide()
                 local finalText = value
-                local finisher = CreateFrame("Frame")
+                if not exportFinisher then
+                    exportFinisher = CreateFrame("Frame")
+                    exportFinisher:Hide()
+                end
                 local waited = false
-                finisher:SetScript("OnUpdate", function(f)
+                exportFinisher:Show()
+                exportFinisher:SetScript("OnUpdate", function(f)
                     if not waited then waited = true; return end
                     f:SetScript("OnUpdate", nil)
+                    f:Hide()
+                    if myGeneration ~= exportGeneration then return end
                     FinishExport(finalText)
                     finalText = nil
                 end)
                 return
             end
             if updateElapsed >= 0.12 then
-                statusFS:SetText(tostring(value or "Building full diagnostic log...") .. " -- you may keep playing")
+                statusFS:SetText(tostring(value or "Building full diagnostic log...") .. " -- large reports may take a moment")
                 updateElapsed = 0
             end
         end
@@ -170,7 +250,23 @@ local function EnsureFrame()
     frame:SetScript("OnDragStart", function(self) self:StartMoving() end)
     frame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     frame:SetFrameStrata("DIALOG")
-    frame:SetScript("OnHide", StopExport)
+    frame:SetScript("OnHide", function()
+        StopExport()
+        repaintPending = false
+        if repaintRunner then
+            repaintRunner:SetScript("OnUpdate", nil)
+            repaintRunner:Hide()
+        end
+        clearResetGeneration = clearResetGeneration + 1
+        if clearResetRunner then
+            clearResetRunner:SetScript("OnUpdate", nil)
+            clearResetRunner:Hide()
+        end
+        if clearResetButton then
+            clearResetButton:SetText("Clear Log")
+            clearResetButton = nil
+        end
+    end)
     frame:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -190,8 +286,10 @@ local function EnsureFrame()
     local prev
     for i, tab in ipairs(TABS) do
         local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-        b:SetSize(76, 22)
-        if prev then
+        b:SetSize(math.max(56, #tab.label * 6 + 18), 22)
+        if i == 6 then
+            b:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -56)
+        elseif prev then
             b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else
             b:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -30)
@@ -201,6 +299,7 @@ local function EnsureFrame()
         b:SetScript("OnClick", function(self)
             StopExport()
             activeTab = self.tabKey
+            SyncPeerRefreshState()
             ScheduleRepaint()
         end)
         tabButtons[i] = b
@@ -208,9 +307,9 @@ local function EnsureFrame()
     end
 
     local selectAll = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    selectAll:SetSize(84, 22)
-    selectAll:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -30, -30)
-    selectAll:SetText("Select All")
+    selectAll:SetSize(116, 22)
+    selectAll:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -30, -82)
+    selectAll:SetText("Select this page")
     selectAll:SetScript("OnClick", function()
         if editBox then
             editBox:SetFocus()
@@ -226,15 +325,66 @@ local function EnsureFrame()
         if activeTab == "ai_export" then StartExport() else ScheduleRepaint() end
     end)
 
+    pagePrevious=CreateFrame("Button", "NexusLogPreviousPage", frame, "UIPanelButtonTemplate")
+    pagePrevious:SetSize(48,22)
+    pagePrevious:SetPoint("RIGHT",refresh,"LEFT",-4,0)
+    pagePrevious:SetText("< Page")
+    pagePrevious:SetScript("OnClick",function() M.SetPage(copyPage-1) end)
+    pageNext=CreateFrame("Button", "NexusLogNextPage", frame, "UIPanelButtonTemplate")
+    pageNext:SetSize(48,22)
+    pageNext:SetPoint("RIGHT",pagePrevious,"LEFT",-4,0)
+    pageNext:SetText("Page >")
+    pageNext:SetScript("OnClick",function() M.SetPage(copyPage+1) end)
+
+    peerLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    peerLabel:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 42)
+    peerLabel:SetText("Peer event filter (optional)")
+
+    peerEdit = CreateFrame("EditBox", "NexusPeerTestTarget", frame,
+        "InputBoxTemplate")
+    peerEdit:SetSize(118, 22)
+    peerEdit:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 150, 36)
+    peerEdit:SetAutoFocus(false)
+    peerEdit:SetMaxLetters(40)
+    peerEdit:SetText("")
+
+    peerStart = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    peerStart:SetSize(62, 22)
+    peerStart:SetPoint("LEFT", peerEdit, "RIGHT", 4, 0)
+    peerStart:SetText("Start")
+    peerStart:SetScript("OnClick", function()
+        local debugOwner = Nexus and Nexus.PeerDebug
+        if debugOwner and type(debugOwner.Start) == "function" then
+            local ok, started = pcall(debugOwner.Start, peerEdit:GetText())
+            peerRefreshActive = ok and started ~= false
+            peerRefreshElapsed = 0
+        end
+        ScheduleRepaint()
+    end)
+
+    peerStop = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    peerStop:SetSize(62, 22)
+    peerStop:SetPoint("LEFT", peerStart, "RIGHT", 4, 0)
+    peerStop:SetText("Stop")
+    peerStop:SetScript("OnClick", function()
+        local debugOwner = Nexus and Nexus.PeerDebug
+        if debugOwner and type(debugOwner.Stop) == "function" then
+            pcall(debugOwner.Stop)
+        end
+        peerRefreshActive, peerRefreshElapsed = false, 0
+        ScheduleRepaint()
+    end)
+    UpdatePeerControls()
+
     exportButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    exportButton:SetSize(148, 22)
+    exportButton:SetSize(220, 22)
     exportButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 7)
-    exportButton:SetText("Copy Full Diagnostic Log")
+    exportButton:SetText("Prepare full diagnostic report")
     exportButton:SetScript("OnClick", StartExport)
     exportButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Copy every retained decision and mismatch")
-        GameTooltip:AddLine("Creates one compact diagnostic block and selects it for Ctrl-C. The normal tabs stay shortened to prevent freezes.", 1, 1, 1, true)
+        GameTooltip:SetText("Prepare the retained diagnostic report")
+        GameTooltip:AddLine("The report is displayed in pages. Use Select this page and Ctrl-C, then copy each page in order without adding separators. Normal tabs show shorter views.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     exportButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -245,40 +395,56 @@ local function EnsureFrame()
     clearButton:SetText("Clear Log")
     clearButton:SetScript("OnClick", function(self)
         StopExport()
+        local errorsOnly = activeTab == "errors"
         local ok, result = false, nil
         if type(clearProvider) == "function" then
-            ok, result = pcall(clearProvider)
+            ok, result = pcall(clearProvider, activeTab)
         end
-        activeTab = "state"
+        if activeTab ~= "errors" and activeTab ~= "peer" then
+            activeTab = "state"
+        end
         if ok and result ~= false then
             self:SetText("Cleared")
-            if statusFS then statusFS:SetText("Diagnostic history cleared") end
+            if statusFS then
+                statusFS:SetText(errorsOnly and "Error history cleared"
+                    or "Diagnostic history cleared")
+            end
         else
             self:SetText("Clear Failed")
             if statusFS then statusFS:SetText("Could not clear diagnostic history") end
         end
         ScheduleRepaint()
-        local resetter = CreateFrame("Frame")
+        clearResetGeneration = clearResetGeneration + 1
+        local myResetGeneration = clearResetGeneration
+        clearResetButton = self
+        if not clearResetRunner then
+            clearResetRunner = CreateFrame("Frame")
+            clearResetRunner:Hide()
+        end
         local elapsed = 0
-        resetter:SetScript("OnUpdate", function(f, dt)
+        clearResetRunner:Show()
+        clearResetRunner:SetScript("OnUpdate", function(f, dt)
             elapsed = elapsed + (tonumber(dt) or 0)
             if elapsed < 1.2 then return end
             f:SetScript("OnUpdate", nil)
+            f:Hide()
+            if myResetGeneration ~= clearResetGeneration then return end
             if self then self:SetText("Clear Log") end
+            clearResetButton = nil
         end)
     end)
     clearButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:SetText("Clear diagnostic history")
-        GameTooltip:AddLine("Clears retained boards, save/guarantee audits, UI probes, sync events, and DPS debug lines in one click. This does not change settings, builds, or automation.", 1, 1, 1, true)
+        GameTooltip:AddLine("On Errors, clears only retained errors. On Advanced peer diagnostics, clears only that session. Other tabs clear retained boards, audits, UI probes, sync events, DPS debug lines, and errors. Settings, builds, and automation are unchanged.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     clearButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     scroll = CreateFrame("ScrollFrame", "NexusLogScroll", frame,
         "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -58)
-    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, 36)
+    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -112)
+    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, 64)
 
     editBox = CreateFrame("EditBox", nil, scroll)
     editBox:SetMultiLine(true)
@@ -295,6 +461,24 @@ local function EnsureFrame()
     statusFS:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 10)
     statusFS:SetJustifyH("LEFT")
 
+    -- Active Peer Test age/counters repaint once per second only while this
+    -- visible tab is selected. Hidden, stopped, and disabled diagnostics do
+    -- no recurring provider work.
+    frame:SetScript("OnUpdate", function(self, elapsed)
+        if not self:IsShown() or activeTab ~= "peer"
+            or not peerRefreshActive then
+            peerRefreshElapsed = 0
+            return
+        end
+        peerRefreshElapsed = peerRefreshElapsed + (tonumber(elapsed) or 0)
+        if peerRefreshElapsed < 1 then return end
+        peerRefreshElapsed = 0
+        local debugOwner = Nexus and Nexus.PeerDebug
+        local ok, active = pcall(debugOwner.IsEnabled)
+        if not ok or active ~= true then peerRefreshActive = false end
+        Repaint()
+    end)
+
     frame:Hide()
     return frame
 end
@@ -309,8 +493,8 @@ function M.Show(tabKey)
     if Nexus.Panel and Nexus.Panel.AttachMenuFrame then Nexus.Panel.AttachMenuFrame(frame) end
     if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame, 0.96) end
     if Nexus.Panel and Nexus.Panel.CloseOtherWindows then Nexus.Panel.CloseOtherWindows("NexusLogViewer") end
-    if Nexus.Panel and Nexus.Panel.CloseOtherWindows then Nexus.Panel.CloseOtherWindows("NexusLogViewer") end
     if tabKey then activeTab = tabKey end
+    SyncPeerRefreshState()
     frame:Show()
     if editBox then editBox:SetText("Loading " .. tostring(activeTab) .. " log...") end
     ScheduleRepaint()

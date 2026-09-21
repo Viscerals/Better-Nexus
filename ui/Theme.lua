@@ -3,6 +3,17 @@
 Nexus = Nexus or {}
 Nexus.Theme = Nexus.Theme or {}
 local T = Nexus.Theme
+local stats = {
+    treeWalks=0, skippedTrees=0, nodesVisited=0,
+    buttonsStyled=0, virtualRows=0, hooks=0, textures=0,
+    windowsStyled=0,
+}
+
+local function CopyStats()
+    local out = {}
+    for key, value in pairs(stats) do out[key] = value end
+    return out
+end
 
 local function TextRegion(button)
     if button.GetFontString then return button:GetFontString() end
@@ -15,6 +26,7 @@ function T.StyleButton(button, compact)
     local text = TextRegion(button)
     if not text then return button end
     button._nexusDarkStyled = true
+    stats.buttonsStyled = stats.buttonsStyled + 1
 
     pcall(button.SetNormalTexture, button, nil)
     pcall(button.SetPushedTexture, button, nil)
@@ -33,6 +45,7 @@ function T.StyleButton(button, compact)
     pcall(function() text:SetTextColor(0.92, 0.84, 0.62) end)
 
     local hover = button:CreateTexture(nil, "HIGHLIGHT")
+    stats.textures = stats.textures + 1
     hover:SetTexture("Interface\\Buttons\\WHITE8X8")
     hover:SetAllPoints()
     hover:SetVertexColor(0.16, 0.24, 0.29, 0.38)
@@ -54,6 +67,7 @@ function T.StyleButton(button, compact)
         if fs then fs:SetTextColor(0.48, 0.50, 0.52) end
         pcall(self.SetBackdropBorderColor, self, 0.13, 0.15, 0.18, 0.8)
     end)
+    stats.hooks = stats.hooks + 4
     if button.IsEnabled and not button:IsEnabled() then
         text:SetTextColor(0.48, 0.50, 0.52)
     end
@@ -63,6 +77,7 @@ end
 function T.StyleWindow(window, alpha)
     if not window or window._nexusWindowStyled then return window end
     window._nexusWindowStyled = true
+    stats.windowsStyled = stats.windowsStyled + 1
     pcall(function()
         window:SetBackdrop({
             bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -74,6 +89,7 @@ function T.StyleWindow(window, alpha)
         window:SetBackdropBorderColor(0.20, 0.23, 0.28, 0.95)
     end)
     local shade = window:CreateTexture(nil, "BACKGROUND")
+    stats.textures = stats.textures + 1
     shade:SetTexture("Interface\\Buttons\\WHITE8X8")
     shade:SetPoint("TOPLEFT", 5, -5)
     shade:SetPoint("BOTTOMRIGHT", -5, 5)
@@ -84,12 +100,38 @@ end
 
 function T.StyleTree(root)
     if not root or not root.GetChildren then return end
+    if root._nexusDarkTreeStyled then
+        stats.skippedTrees = stats.skippedTrees + 1
+        return root
+    end
+    stats.treeWalks = stats.treeWalks + 1
     local children = { root:GetChildren() }
     for i = 1, #children do
         local child = children[i]
+        stats.nodesVisited = stats.nodesVisited + 1
         if child and child.GetObjectType and child:GetObjectType() == "Button" then
             T.StyleButton(child, (child.GetHeight and child:GetHeight() or 24) <= 20)
         end
         T.StyleTree(child)
     end
+    root._nexusDarkTreeStyled = true
+    return root
+end
+
+-- Virtual rows already own their purpose-built backdrop and hover behavior.
+-- This applies the shared border accent once without adding textures or hooks,
+-- and lets marked static trees stay closed to later recursive walks.
+function T.StyleVirtualRow(row, controls)
+    if not row or row._nexusVirtualRowStyled then return row end
+    row._nexusVirtualRowStyled = true
+    stats.virtualRows = stats.virtualRows + 1
+    pcall(function() row:SetBackdropBorderColor(0.25,0.29,0.34,0.95) end)
+    if type(controls) == "table" then
+        for _, control in ipairs(controls) do T.StyleButton(control) end
+    end
+    return row
+end
+
+function T.Stats()
+    return CopyStats()
 end

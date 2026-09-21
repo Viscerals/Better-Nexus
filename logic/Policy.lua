@@ -122,7 +122,7 @@ local function IsWanted(model, card, delta, plan, owned, catalog)
         if type(model.QualityOfferNeeded) == "function" then
             return model.QualityOfferNeeded(
                 plan, catalog, card.family,
-                tonumber(card.quality) or 0, owned)
+                tonumber(card.quality) or 0, owned, card.spellId)
         end
         local bySpell = type(owned) == "table" and owned.bySpell or nil
         local required = type(model.EffectiveWishedQuality) == "function"
@@ -144,7 +144,7 @@ local function IsOneShot(model, card, plan, owned, catalog)
         and (type(model.QualityOfferNeeded) ~= "function"
             or model.QualityOfferNeeded(
                 plan, catalog, card.family,
-                tonumber(card.quality) or 0, owned))
+                tonumber(card.quality) or 0, owned, card.spellId))
 end
 
 local function WantedTier(model, card, plan, owned, catalog)
@@ -187,7 +187,8 @@ local function QueueCanDeliverWanted(model, state, card, plan, owned, catalog)
                 and tonumber(row.quality) or tonumber(entry.quality)
             if quality and type(model.QualityOfferNeeded) == "function"
                 and model.QualityOfferNeeded(
-                    plan, catalog, card.family, quality, owned) then
+                    plan, catalog, card.family, quality, owned,
+                    entry.spellId) then
                 return true
             end
         end
@@ -314,6 +315,27 @@ end
 --   deltas = { [cardIndex] = n } }
 -- Pure: same input, same output; malformed input degrades to "wait".
 function Policy.Decide(state)
+    if type(state) == "table" and state.ordinaryBoardAllowed == false then
+        return {type="wait", reason="Orb state active or unknown", annotations={}, deltas={}}
+    end
+    -- Current-game contract: there are no guaranteed future Echo rolls. Saved
+    -- verification is identity, contents and ownership evidence; it selects no
+    -- planner. Every ordinary board uses the one planner that holds no
+    -- future-offer assumption, and that planner keeps its own incomplete-state
+    -- refusals. `snapshotVerified` is deliberately not read here.
+    if type(state) == "table" and Nexus.WishlistPilot then
+        return Nexus.WishlistPilot.DecideNexus(state)
+    end
+    -- Reached only when the ordinary planner is not loaded, which the
+    -- production TOC never allows. The historical scoring below must then see
+    -- no inferred queue, so an old flag or a prefilled state cannot restore a
+    -- guarantee-based decision.
+    if type(state) == "table" then
+        local view = {}
+        for key, value in pairs(state) do view[key] = value end
+        view.queue, view.snapshotVerified = { entries = {} }, nil
+        state = view
+    end
     local annotations = {}
     if type(state) ~= "table" then
         return { type = "wait", reason = "no board", annotations = annotations }
@@ -382,15 +404,20 @@ function Policy.Decide(state)
     -- every downstream read (Annotation, Model.Delta, the precious-catch and
     -- BANK checks, OwnedFam) sees it consistently.
     local ownedSafe = owned or {}
-    if type(state.locked) == "table"
-        and (type(state.locked.bySpell) == "table" or type(state.locked.byFamily) == "table") then
+    local function TrustedLocked(value)
+        local projection = type(GetModel().LockedProjection) == "function"
+            and GetModel().LockedProjection(value, catalog, 6) or nil
+        return projection or false
+    end
+    local trustedLocked = TrustedLocked(state.locked)
+    if trustedLocked then
         local merged = { synced = ownedSafe.synced, bySpell = {}, byFamily = {} }
         for id, n in pairs(ownedSafe.bySpell or {}) do merged.bySpell[id] = n end
         for fam, n in pairs(ownedSafe.byFamily or {}) do merged.byFamily[fam] = n end
-        for id, n in pairs(state.locked.bySpell or {}) do
+        for id, n in pairs(trustedLocked.bySpell) do
             merged.bySpell[id] = (merged.bySpell[id] or 0) + (tonumber(n) or 0)
         end
-        for fam, n in pairs(state.locked.byFamily or {}) do
+        for fam, n in pairs(trustedLocked.byFamily) do
             merged.byFamily[fam] = (merged.byFamily[fam] or 0) + (tonumber(n) or 0)
         end
         ownedSafe = merged

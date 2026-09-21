@@ -1,5 +1,5 @@
 -- Nexus: ui/JournalTab.lua
--- An "Optimizer" tab inside ProjectEbonhold's Echo Journal, rendering
+-- An "Nexus Advisor" tab inside ProjectEbonhold's Echo Journal, rendering
 -- plain text sections supplied by an injected dataProvider callback.
 -- Structures relied on (captured live against this exact client):
 --   frame  ProjectEbonholdEchoJournal
@@ -48,8 +48,8 @@ local function SafeGetScript(frame, scriptName)
 end
 
 local ASSET = "Interface\\AddOns\\ProjectEbonhold\\assets\\"
-local NOTE1 = "Targets the wishlist associated with the ACTIVE saved loadout."
-local NOTE2 = "|cff8a8a8aSet associations on the game's My Builds screen; loadout activation remains server-controlled and level-1-only.|r"
+local NOTE1 = "Compares the assigned Wishlist with the ACTIVE Saved Build."
+local NOTE2 = "|cff8a8a8aSet associations in My Builds. Saved Build activation requires the server's supported level and state.|r"
 
 ------------------------------------------------------------------------
 -- Text lines
@@ -82,6 +82,7 @@ local function DoRefresh()
     local cy = -6
 
     local function AddLine(text, font, indent)
+        text=Nexus.UserText and Nexus.UserText.Message(text) or text
         indent = indent or 0
         local fs = AcquireLine()
         fs:SetFontObject(font or "GameFontHighlightSmall")
@@ -620,7 +621,9 @@ local function FindWishlistEditControl(row)
     -- First prefer explicit children/siblings named Edit or Design.
     local explicit, fallback
     local frame = EnumerateFrames and EnumerateFrames() or nil
-    while frame do
+    local visited = 0
+    while frame and visited < 2500 do
+        visited = visited + 1
         if IsLikelyEditControl(frame, row) then
             local text = string.lower(PlainText(FrameText(frame)))
             local name = frame.GetName and string.lower(tostring(frame:GetName() or "")) or ""
@@ -633,7 +636,7 @@ local function FindWishlistEditControl(row)
         end
         frame = EnumerateFrames and EnumerateFrames(frame) or nil
     end
-    return explicit or fallback
+    return explicit -- a nearby icon without an Edit/Design identity is not authority
 end
 
 local function ProbeAdd(event, detail)
@@ -777,7 +780,9 @@ local function FindMoreActionsControl(row)
     local ry = (rb + rt) * 0.5
     local best
     local frame = EnumerateFrames and EnumerateFrames() or nil
-    while frame do
+    local visited = 0
+    while frame and visited < 2500 do
+        visited = visited + 1
         if frame ~= row and not IsDescendantOf(frame, associationPanel)
             and (not frame.IsShown or frame:IsShown())
             and frame.GetObjectType and frame:GetObjectType() == "Button" then
@@ -795,7 +800,9 @@ local function FindMoreActionsControl(row)
                         or name:find("option", 1, true) or name:find("menu", 1, true) then
                         score = score + 60
                     end
-                    if not best or score > best.score then best = { frame = frame, score = score } end
+                    if score > 10 and (not best or score > best.score) then
+                        best = { frame = frame, score = score }
+                    end
                 end
             end
         end
@@ -984,8 +991,8 @@ local function EnsureAssociationPanel(journal)
 
         associationPanel.design:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Design associated wishlist", 0.35, 0.8, 1)
-            GameTooltip:AddLine("Open this associated wishlist in the Nexus editor.", 0.82, 0.82, 0.82, true)
+            GameTooltip:AddLine("Edit assigned Wishlist", 0.35, 0.8, 1)
+            GameTooltip:AddLine("Open the Wishlist assigned to this Saved Build. This does not activate another build.", 0.82, 0.82, 0.82, true)
             GameTooltip:Show()
         end)
         associationPanel.design:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1028,7 +1035,9 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
     if not wishlistPicker then
         wishlistPicker = CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
         wishlistPicker:SetFrameStrata("TOOLTIP")
-        wishlistPicker:SetFrameLevel(500)
+        -- Native high-level rendering put this opaque parent above Unassign.
+        -- TOOLTIP supplies the overlay order; keep its child levels low.
+        wishlistPicker:SetFrameLevel(50)
         wishlistPicker:SetToplevel(true)
         wishlistPicker:SetClampedToScreen(true)
         wishlistPicker:EnableMouse(true)
@@ -1103,15 +1112,46 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 wishlistPickerRows[i] = row
             end
             row:ClearAllPoints(); row:SetPoint("TOPLEFT", 6, -24 - (i-1)*rowH)
-            local selected = linked and linked.key and cKey and linked.key == cKey
-            row.nameButton.text:SetText((selected and "|cff55ff55[Selected] |r" or "") .. ((cName ~= "" and cName) or "Unnamed Wishlist"))
+            local selected = linked and ((linked.assignmentId and c.assignmentId
+                and linked.assignmentId==c.assignmentId) or (not linked.assignmentId
+                and not c.assignmentId and linked.key and cKey and linked.key==cKey))
+            local editor=Nexus.WishlistEditor
+            local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose locked targets"
+            local evidenceSuffix = c.lockEvidenceStatus == "unavailable"
+                and ("  |cffff9040("..hint..")|r") or ""
+            row.nameButton.text:SetText((selected and "|cff55ff55[Selected] |r" or "")
+                .. ((cName ~= "" and cName) or "Unnamed Wishlist")
+                .. evidenceSuffix)
             local cEchoes = c.echoes
+            local cSnapshot = {
+                slot=cSlot, name=cName, key=cKey,
+                lockEvidenceVersion=c.lockEvidenceVersion,
+                lockEvidenceStatus=c.lockEvidenceStatus,
+                evidenceSource=c.evidenceSource,
+                assignmentId=c.assignmentId,designTargets=c.designTargets,
+                echoes={},
+            }
+            for echoIndex = 1, #(cEchoes or {}) do
+                local echo = cEchoes[echoIndex]
+                cSnapshot.echoes[echoIndex] = {
+                    spellId=echo.spellId, quality=echo.quality,
+                    stacks=echo.stacks, locked=echo.locked,
+                }
+            end
             local function AssociateWishlistOnly()
+                if cSnapshot.lockEvidenceStatus=="unavailable" and Nexus.WishlistEditor
+                    and Nexus.WishlistEditor.ResolveAndAssignWishlist then
+                    HideWishlistPicker()
+                    Nexus.WishlistEditor.ResolveAndAssignWishlist(cSnapshot,tonumber(active) or 0)
+                    return
+                end
                 local ok, err
                 if tonumber(active) and tonumber(active) > 0 then
-                    ok, err = A.SetLoadoutWishlist(active, cSlot)
+                    ok, err = A.SetLoadoutWishlist(active, cSlot, cSnapshot)
+                elseif type(A.SetFirstRunWishlist) == "function" then
+                    ok, err = A.SetFirstRunWishlist(cSlot, cSnapshot)
                 else
-                    ok, err = A.SetFirstRunWishlist and A.SetFirstRunWishlist(cSlot)
+                    ok, err = false, "first-run association unavailable"
                 end
                 if not ok then
                     print("|cffff6060Nexus:|r " .. tostring(err or "could not select wishlist"))
@@ -1130,6 +1170,10 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                         name = cName,
                         key = cKey,
                         echoes = cEchoes,
+                        lockEvidenceVersion = c.lockEvidenceVersion,
+                        lockEvidenceStatus = c.lockEvidenceStatus,
+                        evidenceSource=c.evidenceSource,
+                        assignmentId=c.assignmentId,designTargets=c.designTargets,
                         loadoutName = loadoutName,
                     }, (tonumber(active) and tonumber(active) > 0) and active or nil)
                 else
@@ -1148,10 +1192,18 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             row = CreateFrame("Button", nil, wishlistPicker)
             row:SetHeight(20)
             row.text = row:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-            row.text:SetPoint("LEFT",6,0); row.text:SetText("Clear association")
+            row.text:SetPoint("LEFT",6,0); row.text:SetText("Unassign Wishlist")
+            row:SetScript("OnEnter",function(self)
+                GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
+                GameTooltip:AddLine("Unassign Wishlist",1,1,1)
+                GameTooltip:AddLine("Keeps the Wishlist; stops using it for this loadout.",.8,.8,.8,true)
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave",function()GameTooltip:Hide()end)
             row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
             wishlistPicker.clearRow = row
         end
+        row:SetFrameLevel(wishlistPicker:GetFrameLevel() + 2)
         row:ClearAllPoints(); row:SetPoint("TOPLEFT",6,-24-#wishes*rowH); row:SetPoint("RIGHT",-6,0)
         row:SetScript("OnClick", function()
             if tonumber(active) and tonumber(active) > 0 then A.ClearLoadoutWishlist(active)
@@ -1182,7 +1234,8 @@ local function RefreshAssociationRows()
     local wishes = A.GetWishlistCandidates and A.GetWishlistCandidates() or {}
     local linked = firstRun and (A.GetFirstRunWishlist and A.GetFirstRunWishlist())
         or (A.GetLoadoutWishlist and A.GetLoadoutWishlist(active))
-    local loadoutName = firstRun and "First Run" or tostring(activeRow.name or "")
+    local loadoutName = (active < 1 or active > maxSlots) and "No Saved Build selected"
+        or not populated and "Empty Saved Build slot" or tostring(activeRow.name or "")
     if not firstRun and loadoutName == "" then loadoutName = "Saved Build " .. tostring(active) end
     host.label:SetText("|cffffffff" .. ShortName(loadoutName, 21) .. ":|r")
 
@@ -1202,13 +1255,19 @@ local function RefreshAssociationRows()
             print("|cffff6060Nexus:|r Associate a wishlist first.")
         elseif editor and type(editor.OpenForWishlist) == "function" then
             HideWishlistPicker()
+            -- Zero/empty slots use the first-run assignment. Lua's
+            -- `firstRun and nil or active` would pass slot 0 as a loadout.
             editor.OpenForWishlist({
                 slot = linked.slot,
                 name = linked.name,
                 key = linked.key,
                 echoes = linked.echoes,
+                lockEvidenceVersion=linked.lockEvidenceVersion,
+                lockEvidenceStatus=linked.lockEvidenceStatus,
+                evidenceSource=linked.evidenceSource,
+                assignmentId=linked.assignmentId,designTargets=linked.designTargets,
                 loadoutName = loadoutName,
-            }, firstRun and nil or active)
+            }, not firstRun and active or nil)
         else
             print("|cffff6060Nexus:|r Nexus Wishlist Editor is unavailable.")
         end
@@ -1299,7 +1358,7 @@ local function Install()
 
     ourTab = CreateFrame("Button", "NexusJournalTab",
         journal, "CharacterFrameTabButtonTemplate")
-    ourTab:SetText("Optimizer")
+    ourTab:SetText("Nexus Advisor")
     -- Same row as their tabs, standard -16 overlap after the last one.
     ourTab:ClearAllPoints()
     ourTab:SetPoint("TOPLEFT", lastTab, "TOPRIGHT", -16, 0)

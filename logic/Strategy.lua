@@ -103,7 +103,19 @@ function M.Compile(catalog, wishlist, settings)
         end
     end
 
+    local requestedCounts = {}
+    for _, entry in ipairs(wishlist and wishlist.entries or {}) do
+        if type(entry) == "table" then
+            local id, count = tonumber(entry.spellId), tonumber(entry.stacks) or 1
+            if id and id > 0 and id == math.floor(id)
+                and count > 0 and count == math.floor(count) then
+                requestedCounts[id] = (requestedCounts[id] or 0) + count
+            end
+        end
+    end
+
     return {
+        requestedCounts = requestedCounts,
         targets = byFamily,
         wishedFamilies = wishedFamilies,
         anchorSpellId = anchor,

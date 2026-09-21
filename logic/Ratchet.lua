@@ -92,13 +92,27 @@ local function SortedNames(set, catalog)
 end
 
 ------------------------------------------------------------------------
--- Predicted guaranteed queue: activeEchoes in given (loadout-index)
--- order, expanded by exact saved stack count, minus exact copies already
--- owned this run, minus disabled-lever members when the
--- (user-confirmed, runtime-demotable) suppression flag holds.
+-- Current-game contract: there are no guaranteed future Echo rolls. Valid
+-- saved contents establish identity, contents and ownership. They do not
+-- establish any future random offer. PredictQueue therefore always answers
+-- an empty queue, whatever saved row, verification state or legacy flag the
+-- caller holds, so no consumer can receive an inferred arrival.
 ------------------------------------------------------------------------
 
-function M.PredictQueue(activeEchoes, owned, plan, flags, disabledLevers, catalog)
+function M.PredictQueue()
+    return { entries = {}, inferred = false }
+end
+
+------------------------------------------------------------------------
+-- HISTORICAL ONLY. The obsolete guarantee model: activeEchoes in given
+-- (loadout-index) order, expanded by exact saved stack count, minus exact
+-- copies already owned this run, minus disabled-lever members when the
+-- suppression flag holds. No production path calls this. It is kept under an
+-- explicit name for historical fixtures and must not feed current-game
+-- decisions, estimates or rankings.
+------------------------------------------------------------------------
+
+function M.HistoricalGuaranteeQueue(activeEchoes, owned, plan, flags, disabledLevers, catalog)
     local out = { entries = {} }
     if type(activeEchoes) ~= "table" then return out end
     local byFamily = (type(owned) == "table" and owned.byFamily) or {}
@@ -560,6 +574,8 @@ end
 -- Runs estimate. The free-slot draw rate (theta) is unmeasured in v1
 -- (measurement M4 open), so `support` cannot honestly yield a run
 -- count: unknown stays true and the text reports only what is known.
+-- The `queue` parameter keeps the call shape and is never read: no future
+-- offer is guaranteed, so none is counted toward completion.
 ------------------------------------------------------------------------
 
 function M.RunsEstimate(plan, owned, queue, support, catalog)
@@ -572,25 +588,13 @@ function M.RunsEstimate(plan, owned, queue, support, catalog)
         local have, want = TargetProgress(plan, catalog, fam, owned)
         if have < want then pending = pending + 1 end
     end
-    local queued, seen = 0, {}
-    local entries = type(queue) == "table" and queue.entries or nil
-    if type(entries) == "table" then
-        for i = 1, #entries do
-            local e = entries[i]
-            local fam = type(e) == "table" and e.family or nil
-            if fam ~= nil and e.wanted and not seen[fam] then
-                seen[fam] = true
-                queued = queued + 1
-            end
-        end
-    end
     local text
     if pending == 0 then
         text = "wishlist complete - 0 wanted echoes pending"
     else
         text = string.format(
-            "~%d wishlist echo%s pending, %d in guaranteed queue (rate unmeasured)",
-            pending, pending == 1 and "" or "es", queued)
+            "~%d wishlist echo%s pending; no future random roll is assumed (rate unmeasured)",
+            pending, pending == 1 and "" or "es")
     end
     return { text = text, unknown = true }
 end

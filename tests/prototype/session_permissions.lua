@@ -1,0 +1,11 @@
+local H=dofile('tests/prototype/orbs_support.lua');local M=H.M
+assert(not Nexus.RecomputeStats().autoEnabled and not M.Status().running,'startup permissions OFF')
+SlashCmdList.NEXUS('auto');assert(Nexus.RecomputeStats().autoEnabled,'explicit ordinary permission control')
+H.Fire('PLAYER_LEAVING_WORLD');assert(not Nexus.RecomputeStats().autoEnabled,'leaving world revokes ordinary permission')
+H.Fire('PLAYER_ENTERING_WORLD');assert(not Nexus.RecomputeStats().autoEnabled and H.Count('orb-spend')==0,'world entry cannot restart either mode')
+SlashCmdList.NEXUS('auto');H.Fire('PLAYER_ENTERING_WORLD')
+assert(not Nexus.RecomputeStats().autoEnabled,'reconnect without a leave notification is also OFF')
+H.OrbPlan();assert(M.Start(2));H.Fire('PLAYER_ENTERING_WORLD')
+assert(not M.Status().running and M.Status().pending,'interrupted Orb receipt remains passive')
+H.Offer();assert(H.Count('take')==0 and H.Count('orb-spend')==1)
+print('PASS session-only ordinary/Orb permissions revoked on exit and entry, pending exposure retained')

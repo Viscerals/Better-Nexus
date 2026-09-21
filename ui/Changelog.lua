@@ -4,20 +4,20 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.Changelog = M
 
-local VERSION = "1.19.5"
-local RELEASE_KEY = "1.19.5"
+local VERSION = "1.20.0-beta.1"
+local RELEASE_KEY = "prototype-P1.6-assigned-orbs"
 local frame
 local shownThisSession = false
 
 local function HasSeenRelease()
     if type(NexusDB) ~= "table" then return false end
-    if NexusDB.lastChangelogSeen == RELEASE_KEY or NexusDB.lastChangelogSeen == VERSION then return true end
-    if type(NexusDB.settings) == "table" and (NexusDB.settings.lastChangelogSeen == RELEASE_KEY or NexusDB.settings.lastChangelogSeen == VERSION) then return true end
+    if NexusDB.lastChangelogSeen == RELEASE_KEY then return true end
+    if type(NexusDB.settings) == "table" and (NexusDB.settings.lastChangelogSeen == RELEASE_KEY) then return true end
     return false
 end
 
 local function MarkReleaseSeen()
-    NexusDB = NexusDB or {}
+    if type(NexusDB) ~= "table" then return end
     NexusDB.lastChangelogSeen = RELEASE_KEY
     NexusDB.settings = NexusDB.settings or {}
     NexusDB.settings.lastChangelogSeen = RELEASE_KEY
@@ -43,22 +43,26 @@ local function Create()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
-    title:SetText("Nexus 1.19.5")
+    title:SetText("Nexus prototype P1.6")
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     body:SetPoint("TOPLEFT", 28, -52)
     body:SetPoint("RIGHT", -28, 0)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
-    body:SetText([[|cffffd200Wishlist editor|r
+    body:SetText([[|cffffd200Assigned Wishlist and visible Help|r
+- Orb mode uses the same assigned Wishlist as the main panel.
+- Enter a maximum and Start once to approve safe surplus copies and recycling.
+- Required rolled copies and future permanent targets remain protected.
+- Help retains seven topics with corrected text and navigation layering.
 
-- Wishlist now opens reliably for active Saved Builds that do not yet have an associated wishlist.
-- The Create New Wishlist editor starts clean and automatically targets the active Saved Build.
+|cffffd200Optional Orb refinement|r
+- Target changes pause the run. Resume retains its used and pending budget.
+- Close keeps an approved run active; main-panel Pause/Stop remain available.
+- Same-ID, same-quality results remain paused when completion cannot be proved.
 
-|cffffd200Sync reliability|r
-
-- Community builds, loadouts, deletions, and DPS records now survive full queues, reconnects, and delayed retries without losing pending work.
-- Stricter ownership and packet validation reject malformed or spoofed sync traffic.]])
+Experimental: native gameplay is not verified by offline tests.
+Real-resource Orb testing requires a separate user decision.]])
 
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(92, 24)
@@ -73,7 +77,7 @@ local function Create()
 end
 
 function M.ShowIfNeeded()
-    NexusDB = NexusDB or {}
+    if type(NexusDB) ~= "table" then return end
     if not NexusDB.hasSeenQuickStart then
         MarkReleaseSeen()
         return

@@ -11,11 +11,13 @@ Better Nexus is in public prerelease stabilization. Keep contributions focused, 
 
 ## Before opening a pull request
 
-1. Start from the current `main` branch.
-2. Keep the change narrowly scoped. Separate unrelated product, policy, and infrastructure work.
-3. Run the relevant focused and repository validation checks.
-4. Record what was tested offline and what was tested in the native game client. Do not claim live behavior from offline checks.
-5. Review the final diff for unrelated files, generated output, secrets, private data, and provenance concerns.
+1. Find or open the issue, and say in it that you are working on it. Link the issue in the pull request with `Refs #<number>`. Use a closing keyword only when the pull request verifiably fixes that issue.
+2. Create a short-lived branch from the current `main` branch (for example `fix/<issue>-<topic>`). `main` is the only maintained development line. Older stacked branches and pull requests are history; see `docs/REPOSITORY_CONSOLIDATION.md`.
+3. Keep the change narrowly scoped. Separate unrelated product, policy, and infrastructure work.
+4. Run `python tools/ci_check.py` (needs Python 3.9+ and `luajit`) and, for packaging or TOC changes, `python tools/build_package.py --check`. The README lists prerequisites and the two reference-dependent tests that are reported as NOT RUN without a third-party archive. A new test file must be added to `tools/run_prototype_tests.py`, or the inventory check fails.
+5. Open one focused pull request against `main`. Release tags are immutable; do not move or reuse them.
+6. Record what was tested offline and what was tested in the native game client. Do not claim live behavior from offline checks.
+7. Review the final diff for unrelated files, generated output, secrets, private data, and provenance concerns.
 
 Do not include:
 
