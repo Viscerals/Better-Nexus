@@ -34,6 +34,7 @@ NAMES += ['diagnostics_gate_status']
 NAMES += ['sync_channel_late_join']
 NAMES += ['share_role_preservation']
 NAMES += ['share_pending_status']
+NAMES += ['advisor_attachment']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

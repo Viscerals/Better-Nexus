@@ -1340,6 +1340,63 @@ end
 -- Install
 ------------------------------------------------------------------------
 
+-- Advisor tab attachment. The tab is always anchored to another frame, never
+-- to screen coordinates, so it moves with whatever window carries the journal.
+-- Client evidence (echo_journal.lua): the journal is reparented into
+-- CollectionsJournal on first embed, that reparenting resets its children's
+-- frame levels, and the hub hides the journal's own numbered tabs there. The
+-- hub's replacement navigation is not in the available client evidence, so no
+-- hub control is named or searched for here.
+local Attach = {mode = "none", hookedTabs = {}, hookedJournal = nil}
+
+-- The last numbered tab the client still shows, else the journal frame, which
+-- is the one host known to be on screen whenever the Advisor tab is.
+function Attach.Resolve(journal)
+    local last
+    for i = 1, theirTabCount do
+        local t = _G["ProjectEbonholdEchoJournalTab" .. i]
+        if t and t.IsShown and t:IsShown() then last = t end
+    end
+    if last then return last, "journal-tabs" end
+    return journal, "journal-frame"
+end
+
+-- Idempotent. Changes the anchor only when the resolved target changed, and
+-- reasserts the frame levels every time because a reparent resets them.
+function Attach.Apply()
+    local journal = _G["ProjectEbonholdEchoJournal"]
+    if not (journal and ourTab) then return false end
+    local target, mode = Attach.Resolve(journal)
+    if Attach.target ~= target or Attach.mode ~= mode then
+        ourTab:ClearAllPoints()
+        if mode == "journal-tabs" then
+            -- Same row as their tabs, standard -16 overlap after the last one.
+            ourTab:SetPoint("TOPLEFT", target, "TOPRIGHT", -16, 0)
+        else
+            -- Their tab row hangs 12 below the journal's bottom edge and starts
+            -- at its left. The right end of that same edge is used instead.
+            ourTab:SetPoint("RIGHT", journal, "BOTTOMRIGHT", -12, -12)
+        end
+        Attach.target, Attach.mode = target, mode
+    end
+    ourTab:SetFrameLevel(mode == "journal-tabs" and target:GetFrameLevel()
+        or journal:GetFrameLevel() + 2)
+    if panel then panel:SetFrameLevel(journal:GetFrameLevel() + 10) end
+    return true
+end
+
+-- For the diagnostic snapshot and the native drag/reopen check.
+function M.AttachmentStatus()
+    local journal = _G["ProjectEbonholdEchoJournal"]
+    local parent = journal and journal.GetParent and journal:GetParent() or nil
+    return {
+        installed = installed, mode = Attach.mode,
+        anchor = Attach.target and Attach.target.GetName and Attach.target:GetName() or "none",
+        journalParent = parent and parent.GetName and parent:GetName() or "none",
+        hubNavigation = "not in client evidence; not used",
+    }
+end
+
 local function Install()
     local journal = _G["ProjectEbonholdEchoJournal"]
     local jScroll = _G["ProjectEbonholdEchoJournalScroll"]
@@ -1354,15 +1411,13 @@ local function Install()
         n = n + 1
     end
     theirTabCount = n
-    local lastTab = _G["ProjectEbonholdEchoJournalTab" .. n]
 
-    ourTab = CreateFrame("Button", "NexusJournalTab",
+    -- A second Install after a partial failure reuses every frame and hook.
+    ourTab = ourTab or CreateFrame("Button", "NexusJournalTab",
         journal, "CharacterFrameTabButtonTemplate")
     ourTab:SetText("Nexus Advisor")
-    -- Same row as their tabs, standard -16 overlap after the last one.
-    ourTab:ClearAllPoints()
-    ourTab:SetPoint("TOPLEFT", lastTab, "TOPRIGHT", -16, 0)
-    ourTab:SetFrameLevel(lastTab:GetFrameLevel())
+    Attach.target, Attach.mode = nil, "none"
+    Attach.Apply()
     -- A fresh template tab shows BOTH texture sets until its state is
     -- set; without this it renders as a mangled sliver.
     pcall(function() PanelTemplates_TabResize(ourTab, 0) end)
@@ -1377,7 +1432,12 @@ local function Install()
         local t = _G["ProjectEbonholdEchoJournalTab" .. i]
         if t then
             stockTabs[#stockTabs + 1] = t
-            if t.HookScript then
+            if t.HookScript and not Attach.hookedTabs[t] then
+                Attach.hookedTabs[t] = true
+                -- The host hides or restores these tabs at its own time.
+                -- Event-driven: no scan and no per-frame work.
+                t:HookScript("OnHide", function() pcall(Attach.Apply) end)
+                t:HookScript("OnShow", function() pcall(Attach.Apply) end)
                 t:HookScript("OnClick", function()
                     pcall(function()
                         DeselectOurTab(false)
@@ -1391,9 +1451,13 @@ local function Install()
     -- Some client builds use bottom navigation buttons that are not named
     -- ProjectEbonholdEchoJournalTabN. The scanner determines visibility from
     -- actual loadout cards, so opening/rebuilding the journal remains safe.
-    if journal.HookScript then
+    if journal.HookScript and Attach.hookedJournal ~= journal then
+        Attach.hookedJournal = journal
         journal:HookScript("OnShow", function()
             pcall(function()
+                -- The host may have embedded the journal or hidden its tabs
+                -- since the last open.
+                Attach.Apply()
                 DeselectOurTab(false)
                 associationVisible = true
             end)
@@ -1405,22 +1469,26 @@ local function Install()
     -- title bar: the per-tab top sections belong to THEIR tabs and
     -- their switcher rightly ignores our tab -- so we occlude rather
     -- than fight their state. EnableMouse blocks click-through.
-    panel = CreateFrame("Frame", "NexusJournalPanel", journal)
-    panel:SetPoint("TOPLEFT", journal, "TOPLEFT", 10, -32)
-    panel:SetPoint("BOTTOMRIGHT", journal, "BOTTOMRIGHT", -8, 8)
+    if not panel then
+        panel = CreateFrame("Frame", "NexusJournalPanel", journal)
+        panel:SetPoint("TOPLEFT", journal, "TOPLEFT", 10, -32)
+        panel:SetPoint("BOTTOMRIGHT", journal, "BOTTOMRIGHT", -8, 8)
+        panel:EnableMouse(true)
+        local bg = panel:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetTexture(ASSET .. "UI-Background-Rock")
+    end
     panel:SetFrameLevel(journal:GetFrameLevel() + 10)
-    panel:EnableMouse(true)
-    local bg = panel:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetTexture(ASSET .. "UI-Background-Rock")
 
-    scroll = CreateFrame("ScrollFrame", "NexusJournalScroll",
-        panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -6)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 4)
-    child = CreateFrame("Frame", nil, scroll)
-    child:SetSize(292, 100)
-    scroll:SetScrollChild(child)
+    if not scroll then
+        scroll = CreateFrame("ScrollFrame", "NexusJournalScroll",
+            panel, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -6)
+        scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 4)
+        child = CreateFrame("Frame", nil, scroll)
+        child:SetSize(292, 100)
+        scroll:SetScrollChild(child)
+    end
 
     panel:Hide()
 end
@@ -1433,7 +1501,10 @@ local function OnJournalLifecycle()
         if not installed and pcall(Install) then
             installed = true
         end
-        if installed then DeselectOurTab(true) end
+        if installed then
+            Attach.Apply()
+            DeselectOurTab(true)
+        end
     end)
 end
 
@@ -1507,7 +1578,10 @@ function M.OpenBuilds()
     local function finish()
         pcall(function()
             if not installed and pcall(Install) then installed = true end
-            if installed then DeselectOurTab(false) end
+            if installed then
+                Attach.Apply()
+                DeselectOurTab(false)
+            end
             RefreshAssociationRows()
         end)
     end
@@ -1528,6 +1602,9 @@ function M.DebugSnapshot()
     local lines = {}
     lines[#lines + 1] = "journal=" .. tostring(journal ~= nil) .. " shown=" .. tostring(journal and journal:IsShown() or false)
     lines[#lines + 1] = "loadoutsVisible=" .. tostring(visible) .. " tab=" .. tostring(tabText)
+    local attachment = M.AttachmentStatus()
+    lines[#lines + 1] = "advisorTab mode=" .. tostring(attachment.mode) .. " anchor=" .. tostring(attachment.anchor)
+        .. " journalParent=" .. tostring(attachment.journalParent) .. " hubNavigation=" .. attachment.hubNavigation
     lines[#lines + 1] = "associationPanel=" .. tostring(associationPanel ~= nil)
         .. " shown=" .. tostring(associationPanel and associationPanel:IsShown() or false)
     if slots then
