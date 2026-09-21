@@ -244,3 +244,36 @@ report: retain (enforce in one action-eligibility boundary, count confirmed
 Rerolls, state the limits in Help) or retire (remove the dead fields and
 counters; the permission and the server charge count stay the only limits).
 R3 makes this question more relevant, because R3 spends Rerolls in more states.
+
+## Orb-offer redraw: investigation only
+
+Question: does the repository hold evidence of a supported action that redraws
+an open Orb offer, with its cost and its confirmation contract?
+
+| Source examined | Finding |
+|---|---|
+| `core/OrbAdapter.lua` capability probes | Required `OrbService` members: `IsStateKnown`, `GetCharges`, `IsOfferPending`, `ConfirmSpend`, `RequestCharges`. Required `PerkService` members: `GetGrantedPerks`, `GetLockedPerks`, `GetCurrentChoice`, `SelectPerk`, `RequestGrantedPerks`. Optional: `GetDiscoveredEchoes`, `IsTomeEchoDisabled`. No redraw member is probed or called. |
+| `core/OrbRuntime.lua` | One spend is `ConfirmSpend(sourceId, 1)`. A changed pending offer is treated as ambiguity ("The pending Orb offer changed unexpectedly") and pauses. |
+| `docs/ORB_MEMORY_MODE.md`, `docs/P1_5_1_CORRECTIONS.md` | Describe spend, offer, select, confirmation. No redraw action. |
+| `tests/prototype/orbs_support.lua` and the `orbs_*` tests | The mocked `OrbService` has the five members above only. |
+| Supplied third-party reference used by `orbs_policy` (`Memory/MemoryMode.lua`) | Its one use of the word "redraw" means a result with the same spell ID as the source. It has no offer-redraw call. |
+| `PerkService.RequestReroll` | This is the ordinary-board Reroll. The ordinary gate blocks it while an Orb offer is pending. It is not evidence of an Orb-offer redraw, and it must not be used as one. |
+
+Result: unavailable from the repository's evidence. Exact missing capability:
+
+1. The name and signature of the client call that redraws an open Orb offer
+   (service, function, arguments).
+2. Its cost contract: an authoritative one-Orb (or other) charge change that the
+   client reports for that call, and its refusal and failure answers.
+3. Its confirmation contract: evidence that a *new* offer generation replaced
+   the old one for the *same* owed operation (the current API exposes no offer
+   ID or generation; `boardKey` equality cannot tell a redraw from an unrelated
+   offer), with unchanged rolled and permanent ownership and an unchanged
+   owed-offer count.
+4. Whether any quality boost carries over to the redrawn offer. Nothing in the
+   repository supports an assumption either way.
+
+Until a supported client supplies items 1-3, Nexus keeps the current behaviour:
+an offer change during a pending operation is ambiguity, not a redraw. No test
+for a redraw action was prepared, because no established interface exists to
+test against. This investigation does not block R1 or R2.
