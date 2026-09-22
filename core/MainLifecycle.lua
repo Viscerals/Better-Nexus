@@ -103,13 +103,16 @@ function Lifecycle.New(options)
         if type(r) ~= "table" or r.state ~= "failed" then return nil end
         local function Token(value, limit)
             if value == nil then return nil end
-            local text = tostring(value):gsub("[%c|]", " ")
+            local okText, text = pcall(tostring, value)
+            if not okText or type(text) ~= "string" then text = "<unprintable>" end
+            text = text:gsub("[%c|]", " ")
             if #text > limit then text = text:sub(1, limit) .. "..." end
             return text
         end
         local facts = {stage=Token(r.stage, 48), cause=Token(r.cause, 48),
             detail=Token(r.detail, 48), owner=Token(r.owner, 64),
-            error=Token(r.error, 160), row=tonumber(r.row)}
+            error=Token(r.error, 160), row=tonumber(r.row),
+            legacyClass=Token(r.legacyClass, 32)}
         local internals = Nexus.MainInternals
         local classify = type(internals) == "table" and internals.SavedFormatClassV1
         if type(classify) == "function" then

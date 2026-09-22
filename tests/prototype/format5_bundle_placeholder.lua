@@ -56,7 +56,9 @@ F.Boot(bad)
 local b=Nexus.StartupStatus()
 check(b.state=='failed' and b.reason=='STORE_INVALID' and b.failure and b.failure.cause=='STORE_DATA_SCHEMA',
  'a non-empty invalid Store-data wrapper stays refused: '..tostring(b.failure and b.failure.cause))
--- An unverified format 5 with the placeholder stays read-only, not started as accepted.
+-- Control: an unverified format 5 carrying the placeholder stays read-only as
+-- before (it never reaches the Store-data wrapper step; the "known" guard
+-- itself is covered by startup_failure_causes case 2).
 local unverified=Fresh();unverified.settings.syncMode='auto'
 F.Boot(unverified)
 local u=Nexus.Store.StateWriteStatus()

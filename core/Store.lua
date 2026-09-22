@@ -1495,7 +1495,7 @@ function AuthorityBootstrap.New(options)
                 and catalog.BoundDatabase()~=self.database then
             self.automaticMaintenanceStarted=true
             self.state=SS.INVALID
-            self.result={state="failed",reason="STORE_INVALID",detail="SOURCE_DRIFT"}
+            self.result={state="failed",reason="STORE_INVALID",detail="SOURCE_DRIFT",stage=SS.READY}
             return self.result
         end
         local root=catalog and catalog.RootState and catalog.RootState()

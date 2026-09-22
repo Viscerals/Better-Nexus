@@ -25,7 +25,7 @@ test.9033 and earlier kept formats 3 to 5 read-only. In that state the Store bui
 
 From the build after test.9035:
 
-- **The empty placeholder is accepted as a first admission.** When the bundle holds exactly the empty placeholder and the saved format is an accepted 3 to 5, the Store builds its data wrapper as a first admission does. Start-up adds only the usual missing defaults; no saved value is changed or removed. Any other invalid wrapper still fails, and so does the placeholder for any other format.
+- **The empty placeholder is accepted as a first admission.** When the bundle holds exactly the empty placeholder and the saved format is an accepted 3 to 5, the Store builds its data wrapper as a first admission does. Start-up adds only the usual missing defaults; no saved value is changed or removed. Any other invalid wrapper still fails, and so does the placeholder for any other format. The placeholder stays in the saved bundle until a later catalog save replaces the bundle; until then each start-up builds the wrapper again in the same way, which changes nothing else.
 - **Start-up failures state their cause.** A failed start-up keeps its failure code (for example `STORE_INVALID`). `/nexus status` (and any command while start-up has failed) adds one line with the retained facts: stage, cause, detail, owner, a bounded one-line error, the selection row, and the saved-format verdict. These are session-only. Reading them binds, retries and writes nothing.
 
 ## Character rows

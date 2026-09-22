@@ -806,7 +806,7 @@ local function StartupFailureLine(status)
         if value ~= nil then parts[#parts + 1] = label .. "=" .. tostring(value) end
     end
     Add("stage", f.stage); Add("cause", f.cause); Add("detail", f.detail)
-    Add("owner", f.owner); Add("row", f.row); Add("error", f.error)
+    Add("owner", f.owner); Add("row", f.row); Add("legacy", f.legacyClass); Add("error", f.error)
     if f.formatClass then
         Add("saved format", tostring(f.formatClass)
             .. (f.formatVersion and (" " .. tostring(f.formatVersion)) or "")
