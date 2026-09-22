@@ -714,7 +714,12 @@ function Lifecycle.New(options)
         local catalog=Nexus.BuildCatalog
         local root=catalog and type(catalog.RootState)=="function" and catalog.RootState()
         if root and (root.state=="ROOT_ADMISSION_PENDING" or root.candidate)
-            and not (ticket and ticket.state~="pending") then return false end
+            and not (ticket and ticket.state~="pending") then
+            -- The catalog work may replace the root under the Community
+            -- cursor. Its last position is not shown again until Init reports.
+            startupTiming.communityProgressDone,startupTiming.communityProgressTotal=nil,nil
+            return false
+        end
         local before=StartupClock()
         if started and before and before>=started
             and before-started>=STARTUP_MS then return false end

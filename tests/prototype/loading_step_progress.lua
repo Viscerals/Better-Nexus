@@ -25,32 +25,43 @@ local function Fields(x)return tostring(x.status.step)..' '..tostring(x.status.s
 
 -- Passivity: repeated status and window reads at a pending point change no work.
 local catalog=Nexus.BuildCatalog
-local passiveChecked=false
-local function Passive()
- local prep=catalog.ManualPreparationStatus()
- local before={Nexus.startupTiming.slices,prep.totalPumps,prep.pumps,prep.row,prep.index,prep.phase,
-  Nexus.StartupStatus().coreReady,Nexus.StartupStatus().step,#H.sent}
+local passiveChecked,passiveScan=false,false
+local function Observed()
+ local prep,stats,s=catalog.ManualPreparationStatus(),catalog.DebugStats(),Nexus.StartupStatus()
+ return {Nexus.startupTiming.slices,prep.totalPumps,prep.pumps,prep.row,prep.index,prep.phase,
+  s.coreReady,s.step,s.stepDone,s.stepTotal,s.recordsSeen,stats.cursorsBegun,stats.cursorRowsInspected,
+  stats.rootAdmissions,stats.retainedRoots,#H.sent}
+end
+local function Passive(where)
+ local before=Observed()
  for i=1,40 do Nexus.StartupStatus();L.Update(nil,true);L.Progress(Nexus.StartupStatus())end
- local after=catalog.ManualPreparationStatus()
- local now={Nexus.startupTiming.slices,after.totalPumps,after.pumps,after.row,after.index,after.phase,
-  Nexus.StartupStatus().coreReady,Nexus.StartupStatus().step,#H.sent}
- for i=1,#before do check(before[i]==now[i],'status and window reads are passive, field '..i) end
- passiveChecked=true
+ local now=Observed()
+ for i=1,#before do check(before[i]==now[i],'status and window reads are passive at '..where..', field '..i) end
 end
 
+local clearChecks=0
 Sample()
 for i=1,20000 do
  H.Advance(.05,.05)
  local x=Sample()
  if not passiveChecked and x.status.step=='catalog-rows' and x.status.coreReady==false
-  and (x.status.stepDone or 0)>0 then Passive() end
+  and (x.status.stepDone or 0)>0 then Passive('local catalog rows');passiveChecked=true end
+ if not passiveScan and x.status.step=='scan' and (x.status.stepDone or 0)>0 then
+  Passive('Community scan');passiveScan=true
+ end
+ if x.status.coreReady and x.status.state=='pending' and x.status.step:sub(1,8)=='catalog-' then
+  clearChecks=clearChecks+1
+  check(Nexus.startupTiming.communityProgressDone==nil and Nexus.startupTiming.communityProgressTotal==nil,
+   'while catalog work holds Community back, its old position is cleared: '..Fields(x))
+ end
  if x.status.state=='ready' then break end
 end
+check(clearChecks>0,'catalog work during Community startup was observed: '..clearChecks)
 local last=samples[#samples]
 check(last.status.state=='ready','startup reaches readiness through its existing owner')
-check(passiveChecked,'a pending local catalog step was sampled for passivity')
+check(passiveChecked and passiveScan,'local catalog rows and the Community scan were sampled for passivity')
 
-local measuredLocal,measuredScan,unknown,cleared={}, {}, 0, 0
+local measuredLocal,measuredScan,unknown,cleared,firsts={}, {}, 0, 0, {}
 for i,x in ipairs(samples)do
  local s=x.status
  check(not x.text:find('not yet measurable',1,true) and not x.text:find('total startup',1,true),'no generic wording: '..Fields(x))
@@ -63,6 +74,12 @@ for i,x in ipairs(samples)do
    local want=string.format('Current step: %s; %d / %d (%d%%)',L.PhaseText(s),d,t,p)
    check(x.text:find(want,1,true),'exact step progress text: '..Fields(x))
    check(x.bar and x.value==p,'bar shows the same step percentage: '..Fields(x))
+   local prev=samples[i-1]
+   if prev and prev.status.step~=s.step then
+    firsts[#firsts+1]=s.step..' '..d..'/'..t
+    check(d<t and d*4<=t,'a new step starts near its own beginning, not with a carried count: '..Fields(x))
+   end
+   if s.step:sub(1,8)=='catalog-' then check(t>=150,'catalog walks count the catalog slots: '..Fields(x)) end
    if not s.coreReady and s.step=='catalog-rows' then measuredLocal[p]=true end
    if s.coreReady and s.step=='scan' then measuredScan[d]=true;check(t==150,'scan total is the root row count') end
   else
@@ -71,7 +88,11 @@ for i,x in ipairs(samples)do
    check(not x.text:find('%',1,true),'unknown size shows no percentage: '..Fields(x))
    check(x.text:find('(in progress)',1,true),'unknown size shows an in-progress indicator: '..Fields(x))
    check(L.PhaseText(s)~='Preparing Community data' or s.step=='community','a specific step description: '..Fields(x))
-   check(tostring(s.step):sub(1,8)~='catalog-' or L.PhaseText(s)~=L.PhaseText({state='pending',phase=s.phase}) or s.phase=='community','catalog work is not described as a Community step: '..Fields(x))
+   if tostring(s.step):sub(1,8)=='catalog-' then
+    for _,k in ipairs({'scan','legacy','identities','commit','source-changed','community'})do
+     check(L.PhaseText(s)~=L.PhaseText({state='pending',step=k}),'catalog work is not described as a Community step: '..Fields(x))
+    end
+   end
    local prev=samples[i-1]
    if prev and (prev.status.stepTotal or 0)>0 then cleared=cleared+1 end
   end
@@ -81,7 +102,8 @@ local function Count(t)local n=0;for _ in pairs(t)do n=n+1 end;return n end
 local steps={};for _,x in ipairs(samples)do local k=tostring(x.status.step)..(x.status.stepTotal and '#' or '');steps[k]=(steps[k] or 0)+1 end
 for k,n in pairs(steps)do print('step',k,n)end
 check(Count(measuredLocal)>=3,'local catalog rows show several changing percentages before local readiness: '..Count(measuredLocal))
-check(Count(measuredScan)>=2,'Community scan shows its own changing cursor position: '..Count(measuredScan))
+check(Count(measuredScan)>=2 and measuredScan[150],'Community scan shows its own changing cursor position up to all 150 rows: '..Count(measuredScan))
+print('first measured sample per step change: '..table.concat(firsts,', '))
 check(unknown>0,'unknown-size steps occur and are shown as in progress')
 check(cleared>0,'a measured step followed by an unknown-size step clears the old percentage')
 -- Saved-data checks before the catalog are named, not a generic line.
