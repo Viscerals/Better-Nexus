@@ -34,9 +34,11 @@ The copy does not change the original plain-name row, so the other addon can sti
 | Field (format 5 meaning) | In this build |
 |---|---|
 | `settingsVersion` = 5 | Kept as 5. |
-| `settings.syncMode`, `syncOnlyWhileResting`, `syncSuspendInCombat`, `syncSuspendedInstanceTypes`, `syncDirectExperimental` (Good Enough Nexus Sync controls) | Kept, but not read. Better Nexus Sync has its own behavior, so a Sync "off" or "manual" choice made there is **not applied** here. |
+| `settings.syncMode`, `syncOnlyWhileResting`, `syncSuspendInCombat`, `syncSuspendedInstanceTypes`, `syncDirectExperimental` (Good Enough Nexus Sync controls) | Stored and kept unchanged, but **not applied**. See "Sync: stored versus effective" below. |
 | `settings.autoSave` (default off there, on here) | The saved value is kept. |
-| `settings.autoFreeze`, `settings.autoReroll` (absent there) | Added with this build's defaults, as for every profile that lacks them. The Automation switch (`autoPick`) is not changed. |
+| `settings.autoPick` (stored Take preference; same meaning in both addons) | Kept as saved. It is not the Automation master switch. |
+| Automation master switch (`autoEnabled`) | Not a saved setting in either addon. It is a session-only switch that starts OFF in every session and turns on only through the panel button or `/nexus auto`. No saved data can turn it on. |
+| `settings.autoFreeze`, `settings.autoReroll` (absent there) | Added with this build's defaults, as for every profile that lacks them. |
 | `settings.communityRetention*` | The shared keys are read with this build's limits. `MaxTotal`, `MaxPerClass` and `CharacterBest` are kept and not read. |
 | `accountCharacters` (`name@realm` rows) | Same key format; kept. This build does not add or update ledger rows for these formats. |
 | `chars["Name"]` rows | Copied with established ownership as described above; otherwise kept unread. |
@@ -44,6 +46,17 @@ The copy does not change the original plain-name row, so the other addon can sti
 | `lockDesignTargetsBySlot[key]` = `{[spellId]=true or replaced spellId}` | Readable, with the same key caveat. |
 | `tomeTogglePending`, `flagDemotions`, `recordedPicks`, unknown fields | Carried unchanged. |
 | Account and DPS storage | The older account/DPS converter is not started for these formats. Its commit replaces those tables and keeps no archive. DPS storage is handled as in test.9033. |
+
+## Sync: stored versus effective
+
+| Good Enough Nexus setting (its meaning) | Stored in this build | Effective in this build |
+|---|---|---|
+| `syncMode` = `off` (no Sync traffic) | Kept | **Not honored.** Automatic login Sync passes run, peer requests are answered, and Share sends go out. |
+| `syncMode` = `manual` (traffic only during a Sync the user starts) | Kept | **Not honored.** Automatic passes and answers run as for `automatic`. |
+| `syncOnlyWhileResting` (default on: Sync only in rest areas) | Kept | **Not honored.** Sync runs anywhere. |
+| `syncSuspendedInstanceTypes` (default: party, raid, pvp, arena, scenario) | Kept | **Not honored.** Sync runs in instances. |
+| `syncSuspendInCombat` (default on) | Kept | Not read. This build's Sync sending always waits during combat, and that wait cannot be switched off. |
+| `syncDirectExperimental` | Kept | Not applicable: this build has no such transport. |
 
 ## Limits
 

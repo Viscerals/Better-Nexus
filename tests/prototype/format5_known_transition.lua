@@ -20,7 +20,8 @@ local write=S.StateWriteStatus()
 check(write.mode=='durable','verified format-5 data is writable durably: '..tostring(write.mode)..' '..tostring(write.reason))
 check(S.Settings()==NexusDB.settings,'settings are the saved settings, not temporary defaults')
 for k,v in pairs(settingsBefore)do check(F.Serialize(NexusDB.settings[k])==v,'setting kept unchanged: '..k)end
-check(NexusDB.settings.autoPick==false,'Automation stays OFF')
+check(NexusDB.settings.autoPick==false,'the stored Take preference (autoPick) is kept as saved')
+check(Nexus.RecomputeStats().autoEnabled==false,'the session Automation master switch (autoEnabled) is OFF')
 check(NexusDB.settingsVersion==5,'the saved marker is not lowered or rewritten')
 
 -- 2. The character's own name-keyed row is used; it is copied, never moved.
@@ -94,5 +95,6 @@ end
 local once=Durable()
 F.Reload(F.OrbService)
 check(Durable()==once,'a further start-up changes none of the carried, settings, ledger or archive data')
-check(NexusDB.settings.autoPick==false,'Automation is still OFF')
+check(NexusDB.settings.autoPick==false,'the stored Take preference (autoPick) is still as saved')
+check(Nexus.RecomputeStats().autoEnabled==false,'the session Automation master switch (autoEnabled) is still OFF')
 print('PASS format5_known_transition: durable Store, owned row carried once, Orb eligibility agrees, receipt kept, idempotent checks='..checks)
