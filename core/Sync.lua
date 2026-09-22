@@ -252,7 +252,8 @@ local function BindCatalogCompletion(ticket, callback)
         local committed = outcome.committed == true and outcome.state == "committed"
             and outcome.database == database and catalog.BoundDatabase() == database
             and rawget(database, "authorityBundle") == outcome.bundle
-        callback(committed, committed and outcome.storedAs or outcome.reason)
+        callback(committed, committed and outcome.storedAs or outcome.reason,
+            outcome.detail)
     end)
 end
 

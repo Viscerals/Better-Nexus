@@ -50,14 +50,17 @@ local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="
 local logFrame,logView,logPage=nil,"current",1
 local logCopy={key=nil,text=nil}
 local LOG_ROWS=10
-local function logRun()
-    local view=Nexus.OrbRuntime.RunLog()
-    return view and view[logView] or nil,view
+-- Only the rows this page will render are requested; the whole run is copied
+-- only for an explicit Copy.
+local function logPageView(page)
+    return Nexus.OrbRuntime.RunLog(logView,((page or 1)-1)*LOG_ROWS+1,LOG_ROWS)
 end
 local function logKey(run)
     if not run then return "none" end
-    return table.concat({tostring(run.runId),tostring(run.state),tostring(#(run.entries or {})),
-        tostring(run.spent),tostring(run.reason)},"|")
+    -- The revision changes on every recorded event, so a cached copy cannot
+    -- outlive the history it was made from.
+    return table.concat({tostring(run.which),tostring(run.runId),
+        tostring(run.revision),tostring(run.total)},"|")
 end
 local function logLine(entry)
     local parts={tostring(entry.ordinal)..".",
@@ -81,7 +84,7 @@ local function logLine(entry)
     return table.concat(parts,"; ")
 end
 local function logText(run)
-    if not run then return "No run has been started in this session." end
+    if not run or not run.runId then return "No run has been started in this session." end
     local lines={
         "Nexus Orb run log (this session only; it does not survive a reload).",
         "Build: "..tostring(run.build or "unknown")..
@@ -209,21 +212,22 @@ local function ensure()
 end
 local function refreshLog()
     if not logFrame or not logFrame:IsShown() then return end
-    local run=logRun()
+    local run=logPageView(logPage)
+    local total=run and run.total or 0
+    local pages=math.max(1,math.ceil(total/LOG_ROWS))
+    if logPage>pages then logPage=pages;run=logPageView(logPage) end
     local entries=run and run.entries or {}
-    local pages=math.max(1,math.ceil(#entries/LOG_ROWS))
-    logPage=math.max(1,math.min(logPage,pages))
-    logFrame.header:SetText(run and ("Run "..tostring(run.runId)..": "..name(run.wishlist or "none")
+    logFrame.header:SetText(run and run.runId and ("Run "..tostring(run.runId)..": "..name(run.wishlist or "none")
         .."\nBuild "..tostring(run.build or "unknown").."; character "..tostring(run.character or "unknown")
         .."\nApproved maximum "..tostring(run.limit)..tostring(run.spent and ("; confirmed usage "..run.spent) or "")
         ..tostring((run.reserved or 0)>0 and ("; unresolved exposure "..run.reserved) or "")
         .."\n"..tostring(run.state)..(run.reason and ("; "..run.reason) or ""))
         or "No run has been started in this session.")
     for index,row in ipairs(logFrame.rows) do
-        local entry=entries[(logPage-1)*LOG_ROWS+index]
+        local entry=entries[index]
         row:SetText(entry and logLine(entry) or "")
     end
-    logFrame.page:SetText("Operations "..#entries.."; page "..logPage.." / "..pages
+    logFrame.page:SetText("Operations "..total.."; page "..logPage.." / "..pages
         ..(run and run.truncated and " (bounded)" or ""))
     logFrame.selector:SetText(logView=="current" and "Show previous run" or "Show current run")
 end
@@ -252,9 +256,10 @@ local function ensureLog()
     logFrame.copyBox:SetFrameLevel(42);logFrame.copyBox:SetAutoFocus(false);logFrame.copyBox:Hide()
     logFrame.copyBox:SetScript("OnEscapePressed",function(self)self:ClearFocus();self:Hide()end)
     button(logFrame,200,-366,95,"Copy log",function()
-        local run=logRun()
+        -- The whole run is copied only here, for the text the player asked
+        -- for, and only when the history changed since the last copy.
+        local run=Nexus.OrbRuntime.RunLog(logView)
         local key=logKey(run)
-        -- Rebuilt only when the history changed or Copy is pressed again.
         if logCopy.key~=key or not logCopy.text then
             logCopy.key,logCopy.text=key,logText(run)
         end

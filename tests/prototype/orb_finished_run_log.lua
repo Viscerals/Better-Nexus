@@ -63,11 +63,15 @@ check(log:IsShown(),'the run log is shown')
 check(H.Count('orb-spend')==before,'opening the log spends nothing')
 local view=M.RunLog()
 check(view.sessionOnly==true,'the log is session-only')
-check(view.current and #view.current.entries==10,
- 'ten operations are recorded: '..tostring(view.current and #view.current.entries))
-check(view.current.limit==10 and view.current.spent==10,'the header carries the approved maximum and usage')
-check(view.current.state=='FINISHED','the header carries the final state')
-for index,entry in ipairs(view.current.entries)do
+check(view.total==10,'ten operations are recorded: '..tostring(view.total))
+check(#view.entries==10,'the full read returns them all: '..#view.entries)
+check(view.limit==10 and view.spent==10,'the header carries the approved maximum and usage: '
+ ..tostring(view.limit)..'/'..tostring(view.spent))
+check(view.state=='FINISHED','the header carries the final state: '..tostring(view.state))
+-- A bounded read returns only the rows the caller will render.
+local page=M.RunLog('current',1,3)
+check(#page.entries==3 and page.total==10,'a bounded read returns one page: '..#page.entries)
+for index,entry in ipairs(view.entries)do
  check(entry.ordinal==index,'operation '..index..' keeps its order')
  check(entry.state=='confirmed','operation '..index..' is recorded as confirmed once')
  check(entry.sourceKey~=nil and entry.sourceQuality~=nil,'operation '..index..' records its actual source')
@@ -91,10 +95,11 @@ button('Close',log):Click();check(not log:IsShown(),'the log closes')
 O.charges=10
 H.Approve(2,false,false)
 check(M.Status().spent==0 and M.Status().limit==2,'the new run starts its own counters')
-local after=M.RunLog()
-check(after.previous and #after.previous.entries==10,'the preceding run stays available')
-check(after.current and #after.current.entries<=1,'the new run logs only its own operations')
-check(after.previous.runId~=after.current.runId,'the two runs are not combined')
+local previous=M.RunLog('previous')
+local current=M.RunLog('current')
+check(previous.total==10,'the preceding run stays available: '..tostring(previous.total))
+check(current.total<=1,'the new run logs only its own operations: '..tostring(current.total))
+check(previous.runId~=current.runId,'the two runs are not combined')
 
 -- 6. An unsettled limit keeps the previous protections: it does not finish.
 replacement('new run 1')
@@ -104,4 +109,62 @@ local pendingStatus=M.Status()
 check(pendingStatus.pending==true,'the last operation is still unresolved')
 check(pendingStatus.state~='FINISHED','an unresolved operation does not finish the run: '..pendingStatus.state)
 check(M.BlocksOrdinary(),'the unresolved run still owns Orb actions')
+-- 7. A refused submission is recorded truthfully as an attempt that was never
+-- sent, and it never costs a later real operation its place in the log.
+-- The operation left unresolved by section 6 is settled first, as an operator
+-- would settle it, so the next fixture starts from a quiet runtime.
+H.Result(410002,2)
+M.Stop()
+check(not M.Status().pending,'the unresolved operation was settled before the next fixture')
+H.OrbPlan({{spellId=410002,quality=2,stacks=14}})
+H.granted={['Disposable A']={},['Disposable B']={}}
+for _=1,6 do
+ table.insert(H.granted['Disposable A'],{spellId=410001,quality=1})
+ table.insert(H.granted['Disposable B'],{spellId=410003,quality=0})
+end
+O.charges=20;H.Notify();A.Poll()
+local spendsBefore=H.Count('orb-spend')
+-- The service refuses this run's first submission.
+O.mode='refuse'
+H.Approve(2,false,false)
+check(H.Count('orb-spend')==spendsBefore+1,'the refused submission really reached the service')
+local refused=M.RunLog()
+local notSent=0
+for _,entry in ipairs(refused.entries)do if entry.state=='not sent' then notSent=notSent+1 end end
+check(notSent==1,'the refused attempt is recorded as never sent: '..notSent)
+check(M.Status().spent==0 and M.Status().reserved==0,'a refused attempt spends nothing')
+O.mode='accept'
+check(M.Resume(),'the run resumes after the refusal')
+replacement('after refusal 1')
+replacement('after refusal 2')
+local finished=M.RunLog()
+local confirmed=0
+for _,entry in ipairs(finished.entries)do if entry.state=='confirmed' then confirmed=confirmed+1 end end
+check(confirmed==2,'both real operations are recorded, not dropped: '..confirmed)
+check(M.Status().spent==2,'the run really spent its two Orbs')
+check(M.Status().state=='FINISHED','the run finished at its approved limit: '..M.Status().state)
+
+-- 8. The limit reached on a later turn, not inside a settlement, finishes the
+-- run through the same settled test.
+H.OrbPlan({{spellId=410002,quality=2,stacks=14}})
+H.granted={['Disposable A']={},['Disposable B']={}}
+for _=1,6 do
+ table.insert(H.granted['Disposable A'],{spellId=410001,quality=1})
+ table.insert(H.granted['Disposable B'],{spellId=410003,quality=0})
+end
+O.charges=20;H.Notify();A.Poll()
+H.Approve(1,false,false)
+for _=1,20 do if M.Status().state=='WAIT_OFFER' then break end M.Pump() end
+H.Offer({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410008,quality=1}})
+check(M.Pause(),'the run is paused before its result arrives')
+H.Result(410002,2)
+check(M.Status().spent==1 and not M.Status().pending,'the result settled while the run was paused')
+-- The approved maximum is reached and the result settled it, so there is
+-- nothing to resume: the run finishes rather than asking for an increase.
+check(M.Status().state=='FINISHED',
+ 'a settled result finishes the run even if the player had paused it: '..M.Status().state)
+check(not M.BlocksOrdinary(),'that path also releases ownership')
+local resumed,resumeWhy=M.Resume()
+check(not resumed,'a finished run still cannot be resumed: '..tostring(resumeWhy))
+
 print('PASS orb_finished_run_log: a settled limit finishes and releases ownership; the session-only log records ten operations once each and keeps the previous run checks='..checks)

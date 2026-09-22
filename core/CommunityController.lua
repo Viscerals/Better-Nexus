@@ -121,9 +121,30 @@ function Controller.New(options)
                 if outcome.committed == true then
                     refreshView()
                 elseif retained and retained.operation ~= "publish-imported" then
+                    local reason = tostring(outcome.reason or "unknown")
+                    local detail = outcome.detail
+                    -- A semantic refusal already counted the copies it
+                    -- refused: say them, and say which shape was counted.
+                    if reason == "SEMANTIC_ENVELOPE" and type(detail) == "table" then
+                        local evidence = Nexus and Nexus.LoadoutEvidence
+                        local limits = evidence
+                            and type(evidence.SemanticLimits) == "function"
+                            and evidence.SemanticLimits() or nil
+                        reason = string.format(
+                            "%s (%s record: %s ordinary, %s permanent, %s total Echo copies)",
+                            reason, tostring(detail.representation or "unknown"),
+                            tostring(detail.ordinary), tostring(detail.locked),
+                            tostring(detail.total))
+                        if limits then
+                            reason = reason .. string.format(
+                                "; at most %d ordinary, %d permanent, %d total are stored",
+                                limits.ordinary, limits.locked, limits.total)
+                        end
+                        reason = reason .. ". Nothing was saved and the source is unchanged"
+                    end
                     notify("Catalog " .. tostring(retained
                         and retained.operation or "mutation")
-                        .. " failed: " .. tostring(outcome.reason or "unknown"))
+                        .. " failed: " .. reason)
                 end
                 if retained and type(retained.onComplete) == "function" then
                     local completed, completeWhy = pcall(
@@ -214,12 +235,14 @@ function Controller.New(options)
         return firstFree, nil
     end
 
-    local function SaveBuild(build, onComplete)
+    -- Every caller names its own operation, so a refusal that reaches the
+    -- player identifies the action that produced it instead of a generic put.
+    local function SaveBuild(build, onComplete, operation)
         local catalog = Catalog()
         if not (catalog and catalog.Put) then
             return false, "build catalog unavailable"
         end
-        return RetainCatalogMutation(catalog, "put", onComplete,
+        return RetainCatalogMutation(catalog, operation or "put", onComplete,
             catalog.Put(build))
     end
 
@@ -2312,7 +2335,8 @@ function Controller.New(options)
                 explicitExisting.lastModified = NextStamp(
                     explicitExisting.lastModified or explicitExisting.postedAt or 0)
                 local saved, saveWhy = SaveBuild(explicitExisting,
-                    SavedCompletion(explicitId, explicitExisting, true))
+                    SavedCompletion(explicitId, explicitExisting, true),
+                    "saved-build update")
                 if not saved then return nil, nil, saveWhy end
                 if Identity.VerifiedOwnerKey(explicitExisting) then
                     BroadcastIfPossible(explicitExisting)
@@ -2322,7 +2346,8 @@ function Controller.New(options)
                     explicitExisting.lastModified
                         or explicitExisting.postedAt or 0)
                 local saved, saveWhy = SaveBuild(explicitExisting,
-                    SavedCompletion(explicitId, explicitExisting, true))
+                    SavedCompletion(explicitId, explicitExisting, true),
+                    "saved-build update")
                 if not saved then return nil, nil, saveWhy end
                 BroadcastIfPossible(explicitExisting)
             end
@@ -2400,7 +2425,8 @@ function Controller.New(options)
                 ownAutoBuild.lastModified = NextStamp(
                     ownAutoBuild.lastModified or ownAutoBuild.postedAt)
                 local saved, saveWhy = SaveBuild(ownAutoBuild,
-                    SavedCompletion(ownAutoId, ownAutoBuild, true))
+                    SavedCompletion(ownAutoId, ownAutoBuild, true),
+                    "automatic saved-build capture")
                 if not saved then return nil, nil, saveWhy end
                 if Identity.VerifiedOwnerKey(ownAutoBuild) then
                     BroadcastIfPossible(ownAutoBuild)
@@ -2444,7 +2470,7 @@ function Controller.New(options)
         end
         if not RefreshBuildIdentity(build) then return nil end
         local saved, saveWhy = SaveBuild(build,
-            SavedCompletion(id, build, true))
+            SavedCompletion(id, build, true), "saved-build capture")
         if not saved then return nil, nil, saveWhy end
         if Identity.VerifiedOwnerKey(build) then BroadcastIfPossible(build) end
         return id, build
@@ -2625,7 +2651,7 @@ function Controller.New(options)
             local saved, saveWhy = SaveBuild(record, function(ticket)
                 CompleteLocalSave(ticket.committed == true,
                     ticket.committed == true and ticket.storedAs or ticket.reason)
-            end)
+            end, "Share local save")
             if operation.finished then
                 return outcome.localSaved, outcome.localSaved and id or outcome.queueReason, outcome
             end
@@ -3061,7 +3087,7 @@ function Controller.New(options)
     end
 
     function M.RepairOverlayIdentities(candidate, onComplete)
-        return SaveBuild(candidate, onComplete)
+        return SaveBuild(candidate, onComplete, "overlay identity repair")
     end
 
     local function PublicationTarget(source, ownerKey)
@@ -3291,7 +3317,7 @@ function Controller.New(options)
         local saved, saveWhy, ticket = SaveBuild(b, function(terminal)
             Complete(terminal.committed == true, terminal.reason)
             if terminal.committed == true then notify(outcome.message) end
-        end)
+        end, "build details edit")
         if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
             -- Accepted and retained: the edit is one retained catalog
             -- mutation whose terminal ticket settles it; the reason lets a

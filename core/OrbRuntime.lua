@@ -134,33 +134,68 @@ local function setState(state,reason) run.state=state;run.reason=reason end
 -- bounded by the run's own approved maximum.
 local logs={current=nil,previous=nil}
 local LOG_HARD_MAX=10000
+-- Attempts that were never sent (a refused receipt write, an adapter refusal)
+-- are recorded too, but they must never consume the room reserved for the
+-- run's actual operations, or a later real spend would be dropped.
+local LOG_ATTEMPT_ALLOWANCE=20
 local function logNow() return now() end
+local function logOwned()
+    local log=logs.current
+    if not log then return nil end
+    if run and run.id ~= nil and log.runId ~= nil and log.runId ~= run.id then
+        return nil
+    end
+    return log
+end
+local function logTouch(log)
+    log.revision=(log.revision or 0)+1
+end
 local function logBegin(header)
     logs.previous=logs.current
     logs.current={runId=header.runId,startedAt=logNow(),build=header.build,
         character=header.character,wishlist=header.wishlist,limit=header.limit,
-        state="READY",reason=header.reason,entries={},truncated=false}
+        state="READY",reason=header.reason,entries={},truncated=false,
+        spent=0,reserved=0,revision=0}
 end
 local function logEntry(serial)
-    local log=logs.current
+    local log=logOwned()
     if not log or not serial then return nil end
     for _,entry in ipairs(log.entries) do if entry.serial==serial then return entry end end
+    local operations,attempts=0,0
+    for _,entry in ipairs(log.entries) do
+        if entry.state=="not sent" then attempts=attempts+1 else operations=operations+1 end
+    end
     local bound=math.min(tonumber(log.limit) or LOG_HARD_MAX,LOG_HARD_MAX)
-    if #log.entries>=bound then log.truncated=true;return nil end
+    if operations>=bound+LOG_ATTEMPT_ALLOWANCE then log.truncated=true;return nil end
+    if attempts>=LOG_ATTEMPT_ALLOWANCE and operations>=bound then
+        log.truncated=true;return nil
+    end
     local entry={serial=serial,ordinal=#log.entries+1,at=logNow(),state="submitted"}
     log.entries[#log.entries+1]=entry
+    logTouch(log)
     return entry
 end
 local function logUpdate(serial,fields)
     local entry=logEntry(serial)
     if not entry then return end
-    for key,value in pairs(fields) do entry[key]=value end
+    for key,value in pairs(fields) do
+        -- false clears a field: pairs() cannot carry a nil value.
+        if value==false then entry[key]=nil else entry[key]=value end
+    end
+    local log=logOwned()
+    if log then
+        log.spent=run and run.spent or log.spent
+        log.reserved=run and run.reserved or log.reserved
+        logTouch(log)
+    end
 end
 local function logRun(state,reason)
-    if not logs.current then return end
-    logs.current.state=state;logs.current.reason=reason
-    logs.current.spent=run and run.spent or logs.current.spent
-    logs.current.reserved=run and run.reserved or logs.current.reserved
+    local log=logOwned()
+    if not log then return end
+    log.state=state;log.reason=reason
+    log.spent=run and run.spent or log.spent
+    log.reserved=run and run.reserved or log.reserved
+    logTouch(log)
 end
 local function changedConfig(before)
     approval=nil
@@ -489,7 +524,7 @@ local function finishResult(s,p)
     -- One confirmed result per operation, recorded once even when the receipt
     -- write is retried afterwards.
     logUpdate(p.logSerial,{obtained=gained,state="confirmed",
-        confirmedAt=logNow(),reason=nil})
+        confirmedAt=logNow(),reason=false})
     run.pending=nil
     local ok,err=savePending();if not ok then run.pending=p;pause(err);return false end
     if p.restored then
@@ -509,6 +544,12 @@ local function finishResult(s,p)
     if progress.rolledMissing==0 then
         terminal(progress.permanentMissing==0 and "COMPLETE" or "ROLLED_COMPLETE",
             progress.permanentMissing==0 and "All selected targets are complete." or "Rolled targets are complete. Remaining permanent targets are unchanged; no more Orbs will be spent.")
+    elseif run.spent+run.reserved>=run.limit and run.state~="STOPPED"
+        and finishedLimit() then
+        -- The approved maximum is reached and this result settled it. There is
+        -- nothing left to resume, so a run the player had paused finishes here
+        -- too, instead of asking for an increase or a Stop.
+        reachedLimit()
     elseif not run.running then
         setState(run.state=="STOPPED" and "STOPPED" or "PAUSED","Last replacement confirmed; no next Orb will be spent until you explicitly continue.")
         if run.state=="STOPPED" then release() end
@@ -827,6 +868,9 @@ function M.Pump(passive)
                 pause("A required target is no longer available. "..(row and row.availabilityReason or "").." No next Orb will be spent.");return
             end
         end
+        -- Defensive duplicate: a settled limit is normally finished by the
+        -- settlement above, and Resume refuses at the limit, so this is the
+        -- last line rather than the usual path. It applies the same test.
         if run.spent+run.reserved>=run.limit then reachedLimit();return end
         if s.charges<1 then terminal("OUT_OF_ORBS","No Orbs remain. New resources will not restart this run automatically.");return end
         if s.offerPending or #s.board>0 or s.hostPending then pause("Another Echo action is active. Resolve it first.");return end
@@ -853,6 +897,8 @@ function M.Pump(passive)
             -- Nothing was sent. The unsaved receipt must not stay in the
             -- preferences, where a later successful write would persist it.
             config.pending=previousReceipt
+            logUpdate(run.opSerial,{state="not sent",
+                reason="The receipt could not be saved; no Orb was requested."})
             run.pending=nil;run.reserved=0;pause(e);return
         end
         if not recycle and not run.automatic then run.remaining[source.key]=math.max(0,(run.remaining[source.key] or 0)-1) end
@@ -864,8 +910,12 @@ function M.Pump(passive)
         if not accepted then
             if kind=="REJECTED" then
                 if not recycle and not run.automatic then run.remaining[source.key]=(run.remaining[source.key] or 0)+1 end
+                logUpdate(p.logSerial,{state="not sent",reason=reason})
                 run.pending=nil;run.reserved=0;savePending()
-            else p.ambiguous=true;savePending() end
+            else
+                p.ambiguous=true;savePending()
+                logUpdate(p.logSerial,{state="unknown",reason=reason})
+            end
             pause(reason);return
         end
         run.recycleKey=nil
@@ -886,13 +936,29 @@ function M.Stop()
     return true
 end
 
--- Read-only view of this session's run log: the current run and at most the
--- preceding one. It is a copy, it starts no work, and it is not evidence for
--- any action. The history is session-only and does not survive a reload.
-function M.RunLog()
+-- Read-only, bounded view. `which` selects the run, `from`/`count` select the
+-- rows the caller will actually render; without them the whole run is copied,
+-- which only the explicit Copy action needs. It starts no work and authorizes
+-- nothing. The history is session-only and does not survive a reload.
+function M.RunLog(which,from,count)
     init()
-    return {current=copy(logs.current),previous=copy(logs.previous),
-        sessionOnly=true}
+    local log=which=="previous" and logs.previous or logs.current
+    if not log then return {sessionOnly=true,which=which or "current"} end
+    local view={sessionOnly=true,which=which or "current",runId=log.runId,
+        startedAt=log.startedAt,build=log.build,character=log.character,
+        wishlist=log.wishlist,limit=log.limit,increased=log.increased,
+        state=log.state,reason=log.reason,spent=log.spent,reserved=log.reserved,
+        truncated=log.truncated,revision=log.revision,total=#log.entries,
+        entries={}}
+    local first=math.max(1,math.floor(tonumber(from) or 1))
+    local last=count and math.min(#log.entries,first+math.max(0,math.floor(count))-1)
+        or #log.entries
+    for index=first,last do
+        view.entries[#view.entries+1]=copy(log.entries[index])
+    end
+    view.hasPrevious=logs.previous~=nil
+    view.hasCurrent=logs.current~=nil
+    return view
 end
 function M.Resume()
     init();if run.state~="PAUSED" then return nil,"Only an explicitly paused run can resume." end
@@ -931,7 +997,9 @@ end
 function M.ConfirmLimit(token)
     init();local a=run.limitApproval
     if not a or token~=a.token or now()-a.at>60 or run.running or not run.token or (run.state~="PAUSED" and run.state~="LIMIT") then return nil,"Review the increased limit again." end
-    run.limit=a.value;run.limitApproval=nil
+    run.limit=a.value
+    local log=logOwned()
+    if log then log.limit=a.value;log.increased=true;logTouch(log) end;run.limitApproval=nil
     if run.pending then local ok,e=savePending();if not ok then return nil,e end end
     setState(run.pending and "PAUSED" or "PAUSED","Limit increased by confirmation. Press Resume explicitly; usage was not reset.")
     return true

@@ -859,7 +859,8 @@ local function WalkRow(walker, work)
         local grouped, reason, ordinary, locked, total = GroupTuples(walker)
         if not grouped then return RowFail(walker, reason) end
         walker.grouped = grouped
-        walker.semantic = {ordinary=ordinary, locked=locked, total=total}
+        walker.semantic = {ordinary=ordinary, locked=locked, total=total,
+            representation="inline"}
         if ordinary > BUDGET.ordinaryCopies or locked > BUDGET.lockedCopies
             or total > BUDGET.totalCopies then
             return RowFail(walker, "SEMANTIC_ENVELOPE")
@@ -1068,6 +1069,7 @@ local function BuildSnapshot(walker, slot, source, options)
         end
         if resolvedRows then
             local semantic = SemanticOf(canonical)
+            semantic.representation = "referenced"
             if semantic.ordinary > BUDGET.ordinaryCopies
                 or semantic.locked > BUDGET.lockedCopies
                 or semantic.total > BUDGET.totalCopies then
@@ -1684,6 +1686,7 @@ local function SettleMutationTicket(handle, state, committed, reason, deferCallb
             ticket.database, ticket.bundle = ST.db, ST.durableBundle
             ticket.storedAs = storedAs or handle.storedAs
         end
+        if not ticketCommitted then ticket.detail = handle.failureDetail end
         ST.mutationTickets[ticket] = nil
         local callback = ticket.completionCallback
         ticket.completionCallback = nil
@@ -5418,6 +5421,13 @@ function Candidate.PumpPutPreparation(handle, work)
             local verdict = FinishRowVerdict(put.walker, put.slot, "overlay",
                 put.options)
             if verdict.state ~= "ADMITTED" then
+                -- Scalar facts only, for the caller's own refusal message.
+                local semantic = verdict.semantic
+                if type(semantic) == "table" then
+                    handle.failureDetail = {ordinary=semantic.ordinary,
+                        locked=semantic.locked, total=semantic.total,
+                        representation=semantic.representation}
+                end
                 return Candidate.FinishPreparedPutWithoutCommit(handle, false,
                     verdict.reason)
             end
