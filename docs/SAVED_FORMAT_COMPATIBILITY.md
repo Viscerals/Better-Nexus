@@ -55,7 +55,7 @@ The copy does not change the original plain-name row, so the other addon can sti
 | `syncMode` = `manual` (traffic only during a Sync the user starts) | Kept | **Not honored.** Automatic passes and answers run as for `automatic`. |
 | `syncOnlyWhileResting` (default on: Sync only in rest areas) | Kept | **Not honored.** Sync runs anywhere. |
 | `syncSuspendedInstanceTypes` (default: party, raid, pvp, arena, scenario) | Kept | **Not honored.** Sync runs in instances. |
-| `syncSuspendInCombat` (default on) | Kept | Not read. This build's Sync sending always waits during combat, and that wait cannot be switched off. |
+| `syncSuspendInCombat` (default on) | Kept | Not read. This build's Sync channel and addon traffic always waits during combat, and that wait cannot be switched off. The manual `/nexus probe` whisper does not wait. |
 | `syncDirectExperimental` | Kept | Not applicable: this build has no such transport. |
 
 ## Limits
