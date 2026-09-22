@@ -128,6 +128,40 @@ local function fingerprint(entries)
     return table.concat(parts,",")
 end
 local function setState(state,reason) run.state=state;run.reason=reason end
+-- Session-only run log. It records what actually happened in this session's
+-- current run and at most the preceding one: no SavedVariables history, no
+-- reconstruction of older runs, and nothing here authorizes an action. It is
+-- bounded by the run's own approved maximum.
+local logs={current=nil,previous=nil}
+local LOG_HARD_MAX=10000
+local function logNow() return now() end
+local function logBegin(header)
+    logs.previous=logs.current
+    logs.current={runId=header.runId,startedAt=logNow(),build=header.build,
+        character=header.character,wishlist=header.wishlist,limit=header.limit,
+        state="READY",reason=header.reason,entries={},truncated=false}
+end
+local function logEntry(serial)
+    local log=logs.current
+    if not log or not serial then return nil end
+    for _,entry in ipairs(log.entries) do if entry.serial==serial then return entry end end
+    local bound=math.min(tonumber(log.limit) or LOG_HARD_MAX,LOG_HARD_MAX)
+    if #log.entries>=bound then log.truncated=true;return nil end
+    local entry={serial=serial,ordinal=#log.entries+1,at=logNow(),state="submitted"}
+    log.entries[#log.entries+1]=entry
+    return entry
+end
+local function logUpdate(serial,fields)
+    local entry=logEntry(serial)
+    if not entry then return end
+    for key,value in pairs(fields) do entry[key]=value end
+end
+local function logRun(state,reason)
+    if not logs.current then return end
+    logs.current.state=state;logs.current.reason=reason
+    logs.current.spent=run and run.spent or logs.current.spent
+    logs.current.reserved=run and run.reserved or logs.current.reserved
+end
 local function changedConfig(before)
     approval=nil
     local ok,err=write(config)
@@ -161,12 +195,35 @@ local function release()
 end
 local function pause(reason)
     run.running=false;run.pauseSerial=(run.pauseSerial or 0)+1;setState("PAUSED",reason)
+    if run.pending and run.pending.logSerial then
+        logUpdate(run.pending.logSerial,{state="paused",reason=reason})
+    end
+    logRun("PAUSED",reason)
 end
 local function terminal(state,reason)
     run.running=false;setState(state,reason)
     -- A spent-limit stop retains the paused run's ownership for an explicit
     -- increase + Resume. Stop releases it; no resource arrival resumes it.
+    -- A settled completion (FINISHED) is not that case: it releases too.
     if not run.pending and state~="LIMIT" then release() end
+    logRun(state,reason)
+end
+-- The approved maximum was reached AND the run is genuinely settled: the last
+-- replacement is confirmed, its durable receipt is cleared, and there is no
+-- pending action or spending exposure left. The run then ends through its own
+-- owner: ownership is released, Stop is no longer needed, and the completed
+-- usage and log stay visible. Anything unsettled keeps the previous LIMIT
+-- behaviour, which retains its protections.
+local function finishedLimit()
+    return not run.pending and (run.reserved or 0)==0 and not config.pending
+end
+local function reachedLimit(fallbackReason)
+    if finishedLimit() then
+        terminal("FINISHED","Finished - limit reached. The approved maximum of "
+            ..tostring(run.limit).." Orb(s) was used. Start a new run to continue.")
+    else
+        terminal("LIMIT",fallbackReason or "The approved Orb limit was reached.")
+    end
 end
 local function entriesStillMatch()
     if not config.selectedSlot then return true end
@@ -377,6 +434,13 @@ function M.Confirm(token)
         targets=copy(a.model.targets),entries=copy(config.entries),remaining=copy(a.sources),excluded=copy(a.excluded),
         recycle=a.recycle,automatic=a.automatic,binding=copy(a.binding),name=config.name,
         limit=a.limit,spent=0,reserved=0,recent={},context=live.context}
+    -- Counters and the log start only now, when a run is really authorized.
+    run.id=(logs.current and (tonumber(logs.current.runId) or 0) or 0)+1
+    local owner=writeStatus()
+    logBegin({runId=run.id,limit=a.limit,wishlist=config.name,
+        character=owner and owner.ownerKey or nil,
+        build=type(Nexus.RuntimeBuildLabel)=="function" and Nexus.RuntimeBuildLabel() or nil,
+        reason="Approved. Preparing one Orb replacement."})
     approval=nil;ensureFrame();M.Pump();return true
 end
 function M.Start(value)
@@ -422,6 +486,10 @@ local function finishResult(s,p)
     if not p.spendConfirmed then run.spent=run.spent+1;p.spendConfirmed=true;run.reserved=0 end
     run.recent[#run.recent+1]={removed=p.removed,obtained=gained,at=now()}
     while #run.recent>5 do table.remove(run.recent,1) end
+    -- One confirmed result per operation, recorded once even when the receipt
+    -- write is retried afterwards.
+    logUpdate(p.logSerial,{obtained=gained,state="confirmed",
+        confirmedAt=logNow(),reason=nil})
     run.pending=nil
     local ok,err=savePending();if not ok then run.pending=p;pause(err);return false end
     if p.restored then
@@ -444,7 +512,7 @@ local function finishResult(s,p)
     elseif not run.running then
         setState(run.state=="STOPPED" and "STOPPED" or "PAUSED","Last replacement confirmed; no next Orb will be spent until you explicitly continue.")
         if run.state=="STOPPED" then release() end
-    elseif run.spent+run.reserved>=run.limit then terminal("LIMIT","The approved Orb limit was reached.")
+    elseif run.spent+run.reserved>=run.limit then reachedLimit()
     else setState("READY","Replacement confirmed. Preparing the next approved Orb.") end
     return true
 end
@@ -456,7 +524,13 @@ local function observeLifecycle(s,p)
         end
         if not p.offerKey then
             p.offerKey=s.boardKey;p.offeredKeys={}
-            for _,c in ipairs(s.board) do p.offeredKeys[P.Key(c.spellId,c.quality)]=true end
+            local offered={}
+            for _,c in ipairs(s.board) do
+                p.offeredKeys[P.Key(c.spellId,c.quality)]=true
+                offered[#offered+1]={spellId=c.spellId,quality=c.quality,name=c.name}
+            end
+            logUpdate(p.logSerial,{offered=offered,state="offered",
+                reason="The actual offer was observed."})
             changed=true
         end
     end
@@ -711,6 +785,11 @@ function M.Pump(passive)
                 local decision,why=P.Decide(s.board,P.Progress(run.targets,decisionState),decisionState,run.recycle,run.excluded)
                 if not decision then pause(why);return end
                 p.selectionAttempted=true;p.selectedKey=decision.key;p.kind=decision.kind
+            logUpdate(p.logSerial,{selectedKey=decision.key,selectionKind=decision.kind,
+                selectionReason=decision.kind=="TARGET" and "needed target"
+                    or decision.kind=="RECYCLE" and "permitted recycle"
+                    or "permitted fallback",
+                state="selected"})
                 p.selectionStamp=s.grantStamp;p.since=now();p.refreshRequested=false
                 local saved,e=savePending();if not saved then p.selectionAttempted=false;pause(e);return end
                 local accepted,kind,reason=B.Select(run.token,decision.index,s.boardKey,decision.spellId,function()
@@ -748,7 +827,7 @@ function M.Pump(passive)
                 pause("A required target is no longer available. "..(row and row.availabilityReason or "").." No next Orb will be spent.");return
             end
         end
-        if run.spent+run.reserved>=run.limit then terminal("LIMIT","The approved Orb limit was reached.");return end
+        if run.spent+run.reserved>=run.limit then reachedLimit();return end
         if s.charges<1 then terminal("OUT_OF_ORBS","No Orbs remain. New resources will not restart this run automatically.");return end
         if s.offerPending or #s.board>0 or s.hostPending then pause("Another Echo action is active. Resolve it first.");return end
         if s.autoAccept then pause("Turn off the game's automatic Echo acceptance before continuing.");return end
@@ -759,9 +838,14 @@ function M.Pump(passive)
         if not source then for _,r in ipairs(safe) do if run.automatic or (run.remaining[r.key] or 0)>0 then source=r;break end end end
         if not source then terminal("NO_SOURCES","No safe surplus source copies remain. Required and permanent copies stay protected.");return end
         local recycle=source.key==run.recycleKey
+        run.opSerial=(run.opSerial or 0)+1
         p={before=copy(s.granted),lockedKey=s.lockedKey,removed=source.key,chargesBefore=s.charges,
-            originalSlot=s.context.slot,
+            originalSlot=s.context.slot,logSerial=run.opSerial,
             beforeStamp=s.grantStamp,beforeSelectionSerial=s.selectionSerial,since=now(),guid=s.context.guid,spendConfirmed=false}
+        logUpdate(run.opSerial,{sourceKey=source.key,sourceName=source.name,
+            sourceQuality=source.quality,sourceCopies=source.excess,
+            recycle=source.key==run.recycleKey,state="requested",
+            reason="One Orb requested for this source copy."})
         run.pending=p;run.reserved=1
         local previousReceipt=config.pending
         local ok,e=savePending()
@@ -797,7 +881,18 @@ function M.Pause()
 end
 function M.Stop()
     init();approval=nil;run.running=false;setState("STOPPED",run.pending and "Stopped. A submitted operation may still finish; resolve any pending offer manually." or "Stopped. No further Orb will be spent.")
-    if not run.pending then release() end;return true
+    if not run.pending then release() end
+    logRun("STOPPED",run.reason)
+    return true
+end
+
+-- Read-only view of this session's run log: the current run and at most the
+-- preceding one. It is a copy, it starts no work, and it is not evidence for
+-- any action. The history is session-only and does not survive a reload.
+function M.RunLog()
+    init()
+    return {current=copy(logs.current),previous=copy(logs.previous),
+        sessionOnly=true}
 end
 function M.Resume()
     init();if run.state~="PAUSED" then return nil,"Only an explicitly paused run can resume." end

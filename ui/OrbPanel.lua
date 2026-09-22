@@ -41,7 +41,62 @@ end
 local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="Waiting for the Orb offer",
     WAIT_RESULT="Waiting for result confirmation",PAUSED="Paused",STOPPED="Stopped",COMPLETE="Targets complete",
     ROLLED_COMPLETE="Rolled targets complete",LIMIT="Maximum reached",OUT_OF_ORBS="No Orbs remain",
-    NO_SOURCES="No safe surplus copies remain",RECOVERY="Previous result is unresolved"}
+    NO_SOURCES="No safe surplus copies remain",RECOVERY="Previous result is unresolved",
+    FINISHED="Finished - limit reached"}
+
+-- Read-only run log window. It renders only the rows it shows, rebuilds its
+-- copy text only when the history changed or Copy is pressed, and performs no
+-- Orb action: opening, paging and copying spend nothing and select nothing.
+local logFrame,logView,logPage=nil,"current",1
+local logCopy={key=nil,text=nil}
+local LOG_ROWS=10
+local function logRun()
+    local view=Nexus.OrbRuntime.RunLog()
+    return view and view[logView] or nil,view
+end
+local function logKey(run)
+    if not run then return "none" end
+    return table.concat({tostring(run.runId),tostring(run.state),tostring(#(run.entries or {})),
+        tostring(run.spent),tostring(run.reason)},"|")
+end
+local function logLine(entry)
+    local parts={tostring(entry.ordinal)..".",
+        entry.sourceName and (name(entry.sourceName).." (quality "..tostring(entry.sourceQuality)..")")
+            or ("source "..tostring(entry.sourceKey))}
+    if entry.sourceCopies then parts[#parts+1]="safe copies: "..tostring(entry.sourceCopies) end
+    if entry.offered then
+        local names={}
+        for _,c in ipairs(entry.offered) do
+            names[#names+1]=(c.name and name(c.name) or tostring(c.spellId)).."/q"..tostring(c.quality)
+        end
+        parts[#parts+1]="offered: "..table.concat(names,", ")
+    end
+    if entry.selectedKey then
+        parts[#parts+1]="selected "..tostring(entry.selectedKey)
+            ..(entry.selectionReason and (" ("..entry.selectionReason..")") or "")
+    end
+    parts[#parts+1]="state: "..tostring(entry.state)
+    if entry.obtained then parts[#parts+1]="confirmed result: "..tostring(entry.obtained) end
+    if entry.reason then parts[#parts+1]=entry.reason end
+    return table.concat(parts,"; ")
+end
+local function logText(run)
+    if not run then return "No run has been started in this session." end
+    local lines={
+        "Nexus Orb run log (this session only; it does not survive a reload).",
+        "Build: "..tostring(run.build or "unknown")..
+            "; run "..tostring(run.runId)..
+            "; character: "..tostring(run.character or "unknown"),
+        "Assigned Wishlist at start: "..name(run.wishlist or "none"),
+        "Approved maximum: "..tostring(run.limit)..
+            "; confirmed usage: "..tostring(run.spent or 0)..
+            "; unresolved exposure: "..tostring(run.reserved or 0),
+        "State: "..tostring(run.state)..(run.reason and ("; "..run.reason) or ""),
+    }
+    if run.truncated then lines[#lines+1]="Note: the log reached its bound; later operations are not listed." end
+    for _,entry in ipairs(run.entries or {}) do lines[#lines+1]=logLine(entry) end
+    return table.concat(lines,"\n")
+end
 local function refresh()
     if not frame or not frame:IsShown()then return end
     local ready=Nexus.StartupStatus and Nexus.StartupStatus()
@@ -64,7 +119,8 @@ local function refresh()
     frame.permanent:SetText(permanent and permanent>0 and (permanent.." permanent target copies remain. Orbs cannot change permanent slots.")or "")
     frame.balance:SetText(s.charges~=nil and ("Confirmed Orb balance: "..s.charges)
         or ("Orb balance: "..(s.balanceState or "unknown")..". "..(s.balanceReason or "")))
-    frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume" or "Start"))
+    frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume"
+        or (s.state=="FINISHED" and "Start new run" or "Start")))
     editLimit(not busy)
     if not frame.limit:HasFocus()then frame.limit:SetText(tostring(busy and s.limit or s.config.maxOrbs))end
     frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or s.config.maxOrbs)
@@ -127,6 +183,7 @@ local function ensure()
     frame.closeNotice=text(frame,20,-393,580,20,CLOSE_NOTICE)
     button(frame,20,-414,85,"Help",function()Nexus.Help.Show("orbs")end)
     button(frame,115,-414,95,"Advanced",function()advanced=not advanced;UI.Refresh()end)
+    button(frame,220,-414,95,"Run log",function()UI.ShowLog()end)
     button(frame,515,-414,85,"Close",function()frame:Hide()end)
     frame.advanced=CreateFrame("Frame",nil,frame);frame.advanced:Hide();frame.advanced:SetSize(590,205);frame.advanced:SetPoint("TOPLEFT",15,-446);frame.advanced:SetFrameLevel(31)
     local af=frame.advanced
@@ -149,6 +206,67 @@ local function ensure()
     frame:SetScript("OnHide",function()editLimit(false)end)
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
     frame:Hide();UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbPanel"
+end
+local function refreshLog()
+    if not logFrame or not logFrame:IsShown() then return end
+    local run=logRun()
+    local entries=run and run.entries or {}
+    local pages=math.max(1,math.ceil(#entries/LOG_ROWS))
+    logPage=math.max(1,math.min(logPage,pages))
+    logFrame.header:SetText(run and ("Run "..tostring(run.runId)..": "..name(run.wishlist or "none")
+        .."\nBuild "..tostring(run.build or "unknown").."; character "..tostring(run.character or "unknown")
+        .."\nApproved maximum "..tostring(run.limit)..tostring(run.spent and ("; confirmed usage "..run.spent) or "")
+        ..tostring((run.reserved or 0)>0 and ("; unresolved exposure "..run.reserved) or "")
+        .."\n"..tostring(run.state)..(run.reason and ("; "..run.reason) or ""))
+        or "No run has been started in this session.")
+    for index,row in ipairs(logFrame.rows) do
+        local entry=entries[(logPage-1)*LOG_ROWS+index]
+        row:SetText(entry and logLine(entry) or "")
+    end
+    logFrame.page:SetText("Operations "..#entries.."; page "..logPage.." / "..pages
+        ..(run and run.truncated and " (bounded)" or ""))
+    logFrame.selector:SetText(logView=="current" and "Show previous run" or "Show current run")
+end
+local function ensureLog()
+    if logFrame then return end
+    logFrame=CreateFrame("Frame","NexusOrbRunLog",UIParent);logFrame:Hide()
+    logFrame:SetSize(620,420);logFrame:SetPoint("CENTER",UIParent,"CENTER",40,-20)
+    logFrame:SetFrameStrata("DIALOG");logFrame:SetFrameLevel(40);logFrame:EnableMouse(true)
+    logFrame:SetMovable(true);logFrame:SetClampedToScreen(true);logFrame:RegisterForDrag("LeftButton")
+    logFrame:SetScript("OnDragStart",function(self)self:StartMoving()end)
+    logFrame:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
+    logFrame:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
+    logFrame:SetBackdropColor(.035,.04,.05,1)
+    text(logFrame,20,-16,560,24,"Orb run log")
+    logFrame.header=text(logFrame,20,-44,580,64)
+    logFrame.rows={}
+    for i=1,LOG_ROWS do logFrame.rows[i]=text(logFrame,20,-112-(i-1)*22,580,20) end
+    logFrame.page=text(logFrame,20,-338,320,22)
+    button(logFrame,330,-336,85,"Previous",function()logPage=math.max(1,logPage-1);refreshLog()end)
+    button(logFrame,420,-336,85,"Next",function()logPage=logPage+1;refreshLog()end)
+    logFrame.selector=button(logFrame,20,-366,170,"Show previous run",function()
+        logView=logView=="current" and "previous" or "current";logPage=1;refreshLog()
+    end)
+    logFrame.copyBox=CreateFrame("EditBox",nil,logFrame,"InputBoxTemplate")
+    logFrame.copyBox:SetSize(220,25);logFrame.copyBox:SetPoint("TOPLEFT",300,-364)
+    logFrame.copyBox:SetFrameLevel(42);logFrame.copyBox:SetAutoFocus(false);logFrame.copyBox:Hide()
+    logFrame.copyBox:SetScript("OnEscapePressed",function(self)self:ClearFocus();self:Hide()end)
+    button(logFrame,200,-366,95,"Copy log",function()
+        local run=logRun()
+        local key=logKey(run)
+        -- Rebuilt only when the history changed or Copy is pressed again.
+        if logCopy.key~=key or not logCopy.text then
+            logCopy.key,logCopy.text=key,logText(run)
+        end
+        logFrame.copyBox:Show();logFrame.copyBox:SetText(logCopy.text)
+        logFrame.copyBox:HighlightText()
+    end)
+    button(logFrame,515,-366,85,"Close",function()logFrame:Hide()end)
+    logFrame:SetScript("OnShow",function()refreshLog()end)
+    UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbRunLog"
+end
+function UI.ShowLog()
+    ensureLog();logFrame:Show();refreshLog();return logFrame
 end
 function UI.Show()ensure();frame:Show();UI.Refresh();return frame end
 function UI.Hide()if frame then frame:Hide()end end
