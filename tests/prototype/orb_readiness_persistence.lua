@@ -91,8 +91,28 @@ local chars=NexusDB.chars;NexusDB.chars=nil
 Nexus.OrbRuntime.Pump()
 s=Nexus.OrbRuntime.Status()
 assert(s.pending==true and s.reserved==1 and stats.mutations==mutationsBefore,'persistence lost: exposure retained, no further action')
+-- A real save attempt after the spend (Pause, then a confirmed limit increase saves the receipt) fails.
 NexusDB.chars=chars
-print('PASS persistence lost after a spend: unresolved exposure retained')
+assert(Nexus.OrbRuntime.Pause(),'fixture: pause the run')
+local plan=assert(Nexus.OrbRuntime.PrepareLimitIncrease(5))
+NexusDB.chars=nil
+local saved,why=Nexus.OrbRuntime.ConfirmLimit(plan.token)
+s=Nexus.OrbRuntime.Status()
+assert(not saved and tostring(why):find('no character container',1,true),'the save after the spend is refused: '..tostring(why))
+assert(s.pending==true and s.reserved==1 and stats.mutations==mutationsBefore,'the failed save keeps the unresolved exposure; nothing is sent')
+NexusDB.chars=chars
+print('PASS persistence lost after a spend: a failed save keeps the unresolved exposure')
+
+-- 2b. Review finding: a finished run on a character WITHOUT a row keeps its state once the first write creates the row.
+Fresh();name='ProbeTester';owner,realWrite=Services();f=Nexus.OrbPanel.Show()
+ProjectEbonhold.OrbService.ConfirmSpend=function()stats.mutations=stats.mutations+1;return false end -- the server refuses
+assert(NexusDB.chars[Key()]==nil,'fixture: no row')
+Nexus.OrbRuntime.Start()                            -- no limit value: the first write is the pre-spend receipt
+assert(type(NexusDB.chars[Key()])=='table','the receipt write created the row')
+assert(Nexus.OrbRuntime.Stop())
+s=Snapshot()
+assert(s.state=='STOPPED' and s.limit==10,'the stopped run stays shown after the row appeared: '..tostring(s.state)..' limit='..tostring(s.limit))
+print('PASS finished run keeps its state when its first write created the row')
 
 -- 3. Each unusable state: Start disabled with its reason; the click sends nothing and writes nothing.
 local function Refused(label,setup,teardown,expect)
@@ -145,4 +165,15 @@ Fresh();name='ProbeTester';owner,realWrite=Services();f=Nexus.OrbPanel.Show()
 stats.mutations=0;local w=stats.writes
 for i=1,3 do Nexus.OrbRuntime.Status();Nexus.OrbRuntime.Status(false) end
 assert(NexusDB.chars[Key()]==nil and stats.writes==w and stats.mutations==0,'Status reads write nothing and send nothing')
+-- 7. Store lifecycle (stand-in coordinator bound through Store.Init): loading is temporary, INVALID is unavailable.
+for _,case in ipairs({{'STORE_AUTHORITY_PENDING','still loading','loading'},{'STORE_INVALID','could not be verified','unavailable'}})do
+ Fresh();name='ProbeTester';owner,realWrite=Services();f=Nexus.OrbPanel.Show()
+ Nexus.Store.Init({State=function()return case[1] end,BindAuthorityDatabase=function()return {state='pending'} end})
+ stats.mutations=0;local w=stats.writes
+ s=Snapshot()
+ assert(s.persistence.mode==case[3] and s.canStart==false and tostring(s.startReason):find(case[2],1,true),case[1]..': '..tostring(s.startReason))
+ local ok,why=Nexus.OrbRuntime.Start(3)
+ assert(not ok and stats.mutations==0 and stats.writes==w and NexusDB.chars[Key()]==nil,case[1]..': refused, nothing written or sent: '..tostring(why))
+end
+print('PASS Store lifecycle loading (temporary) and invalid (unavailable) refuse with distinct reasons')
 print('PASS orb_readiness_persistence')

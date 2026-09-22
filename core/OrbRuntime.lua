@@ -75,6 +75,14 @@ local function init()
     local hasRow=key and type(NexusDB)=="table" and type(NexusDB.chars)=="table" and type(NexusDB.chars[key])=="table"
     local liveKey=key and (key..(hasRow and "#row" or "#none")) or false
     if config and (configOwner==liveKey or (run and (run.running or run.pending or run.token))) then return end
+    -- The same character's row was just created (by an Orb write or another
+    -- Store writer) and holds no other Orb data: the preferences and the
+    -- finished run shown stay. Stored Orb data that differs (for example a
+    -- receipt loaded from saved data) is loaded as before.
+    if config and key and hasRow and configOwner==key.."#none" then
+        local stored=NexusDB.chars[key].orbRefinement
+        if stored==nil or sameValue(stored,config) then configOwner=liveKey;return end
+    end
     configOwner=liveKey
     local state=Nexus.Store and Nexus.Store.State and Nexus.Store.State()
     local c=state and state.orbRefinement or {}
