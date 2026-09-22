@@ -42,15 +42,20 @@ check(s.state=='FINISHED','a settled run finishes at its limit: '..tostring(s.st
 check(s.spent==10 and s.limit==10 and not s.running,'the completed usage and approved limit stay visible: '
  ..s.spent..'/'..s.limit)
 check(not s.pending and s.reserved==0,'nothing is pending or exposed')
-check(not M.BlocksOrdinary(),'Orb-action ownership was released')
+check(not M.BlocksOrdinary(),'the finished run no longer blocks ordinary work')
+-- BlocksOrdinary reads state only, so ownership is asserted by what a
+-- released token allows: a fresh run can acquire the Orb action again.
+check(M.Status().canStart==true,'a released owner lets a new run be authorized')
 check(Nexus.RecomputeStats().autoEnabled==false,'ordinary Automation stays off')
 check(not M.Resume(),'a finished run cannot be resumed')
 
 -- 2. The panel shows the finished state, offers a new run and disables Stop.
 SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel)
 Nexus.OrbPanel.Refresh()
-check(f.status:GetText():find('Finished - limit reached',1,true),
- 'the panel states the finished run: '..f.status:GetText())
+ local label='Finished - limit reached'
+ local firstLine=f.status:GetText():sub(1,#label)
+check(firstLine==label,
+ 'the panel renders its own finished phase label: '..tostring(firstLine))
 check(f.start:GetText()=='Start new run','the primary control offers a new run')
 check(not f.stop:IsEnabled(),'Stop is disabled for a finished run')
 check(f.usage:GetText():find('10 / 10',1,true),'the completed usage stays visible: '..f.usage:GetText())
@@ -82,6 +87,20 @@ for index,entry in ipairs(view.entries)do
 end
 check(NexusDB==nil or NexusDB.orbRunLog==nil,'no run history is written to saved data')
 
+-- 3b. The header follows the run while it is still going, the confirmed
+-- entries really clear their progress note, and every recorded event moves
+-- the revision the copy cache keys on.
+do
+ local live=M.RunLog()
+ check(live.spent==M.Status().spent,'the header carries the confirmed usage: '
+  ..tostring(live.spent)..'/'..tostring(M.Status().spent))
+ check(live.reserved==M.Status().reserved,'and the unresolved exposure')
+ for index,entry in ipairs(live.entries)do
+  check(entry.reason==nil,'operation '..index..' cleared its progress note when it confirmed')
+ end
+ check(type(live.revision)=='number' and live.revision>0,'the log carries a revision: '..tostring(live.revision))
+end
+
 -- 4. Copy log produces the text on demand and changes nothing.
 button('Copy log',log):Click()
 check(log.copyBox:IsShown() and log.copyBox:GetText():find('Orb run log',1,true),
@@ -93,6 +112,13 @@ button('Close',log):Click();check(not log:IsShown(),'the log closes')
 
 -- 5. A new authorized run starts without Stop and keeps the previous log.
 O.charges=10
+-- Fresh safe surplus copies for this run and the increase that follows.
+H.granted={['Disposable A']={},['Disposable B']={}}
+for _=1,6 do
+ table.insert(H.granted['Disposable A'],{spellId=410001,quality=1})
+ table.insert(H.granted['Disposable B'],{spellId=410003,quality=0})
+end
+H.Notify();A.Poll()
 H.Approve(2,false,false)
 check(M.Status().spent==0 and M.Status().limit==2,'the new run starts its own counters')
 local previous=M.RunLog('previous')
@@ -100,6 +126,31 @@ local current=M.RunLog('current')
 check(previous.total==10,'the preceding run stays available: '..tostring(previous.total))
 check(current.total<=1,'the new run logs only its own operations: '..tostring(current.total))
 check(previous.runId~=current.runId,'the two runs are not combined')
+
+-- 5b. An approved increase raises the log's own bound, so the operations
+-- after it are recorded, and the recorded maximum follows the run.
+do
+ local H2=H
+ for _=1,20 do if M.Status().state=='WAIT_OFFER' then break end M.Pump() end
+ H.Offer({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410008,quality=1}})
+ H.Result(410002,2)
+ check(M.Status().spent==1,'the second run confirmed its first operation')
+ check(M.Pause(),'the run is paused to raise its maximum')
+ local approval,why=M.PrepareLimitIncrease(4)
+ check(approval~=nil,'an increase is offered: '..tostring(why))
+ check(M.ConfirmLimit(approval.token),'the increase is confirmed explicitly')
+ local raised=M.RunLog()
+ check(raised.limit==4,'the log records the raised maximum: '..tostring(raised.limit))
+ check(raised.increased==true,'and marks it as raised, not as the original approval')
+ check(M.Resume(),'the run resumes on its raised maximum')
+ local revisionBefore=M.RunLog().revision
+ replacement('after increase')
+ local after=M.RunLog()
+ check(after.total>=2,'the operation after the increase is recorded: '..after.total)
+ check(after.revision>revisionBefore,'every recorded event moves the revision: '
+  ..tostring(revisionBefore)..' -> '..tostring(after.revision))
+ H=H2
+end
 
 -- 6. An unsettled limit keeps the previous protections: it does not finish.
 replacement('new run 1')

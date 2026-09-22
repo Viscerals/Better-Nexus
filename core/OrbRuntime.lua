@@ -142,9 +142,11 @@ local function logNow() return now() end
 local function logOwned()
     local log=logs.current
     if not log then return nil end
-    if run and run.id ~= nil and log.runId ~= nil and log.runId ~= run.id then
-        return nil
-    end
+    -- A positive match only: a run rebuilt without an id (a lost saved row,
+    -- a fresh session state) must not be able to write a finished run's
+    -- header. M.Confirm assigns run.id before logBegin, so a live run always
+    -- matches its own log.
+    if not (run and run.id ~= nil and log.runId == run.id) then return nil end
     return log
 end
 local function logTouch(log)

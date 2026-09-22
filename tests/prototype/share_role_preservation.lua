@@ -75,6 +75,11 @@ local function Settle(id)
  -- A commit replaces the durable bundle, and the catalog re-admits its root
  -- from it. Nothing serves during that admission, so the stored record is
  -- read once it is served again, not inside that window.
+ -- Patience, not tolerance: the shared drive is bounded by real CPU time, so
+ -- a loaded machine needs more simulated frames for the commit and its root
+ -- re-admission. The budget is therefore large enough not to fail for load.
+ -- It is not a timing assertion: a real slowdown in this window is not what
+ -- this fixture measures.
  T.Until(H,function()return Nexus.BuildCatalog.Get(id)~=nil end,400000)
  return Nexus.CommunityBuilds.ShareStatus(id)
 end
