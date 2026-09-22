@@ -165,6 +165,27 @@ Fresh();name='ProbeTester';owner,realWrite=Services();f=Nexus.OrbPanel.Show()
 stats.mutations=0;local w=stats.writes
 for i=1,3 do Nexus.OrbRuntime.Status();Nexus.OrbRuntime.Status(false) end
 assert(NexusDB.chars[Key()]==nil and stats.writes==w and stats.mutations==0,'Status reads write nothing and send nothing')
+-- 6b. Review finding (P2, pre-existing): the pre-spend receipt write fails, so nothing is sent. That unsent
+-- receipt must not be saved later by a successful preference write (after /reload it would block rolling).
+Fresh();name='ProbeTester';owner,realWrite=Services();f=Nexus.OrbPanel.Show()
+assert(Nexus.OrbRuntime.SetLimit(2),'fixture: the row exists')
+owner.UpdateStateV1=function(mutator)
+ local probe={};mutator(probe)
+ if type(probe.orbRefinement)=='table' and probe.orbRefinement.pending then return nil end -- only the receipt write fails
+ return realWrite(mutator)
+end
+stats.mutations=0
+Nexus.OrbRuntime.Start()
+assert(stats.mutations==0 and Nexus.OrbRuntime.Status().pending==false,'the receipt write failed: nothing sent, nothing pending')
+owner.UpdateStateV1=realWrite
+assert(Nexus.OrbRuntime.Stop());assert(Nexus.OrbRuntime.SetLimit(4),'a later preference write succeeds')
+assert(NexusDB.chars[Key()].orbRefinement.maxOrbs==4 and NexusDB.chars[Key()].orbRefinement.pending==nil,'the unsent receipt was not saved')
+-- Reload on the same saved data: no recovery, ordinary rolling not blocked.
+local saved=NexusDB
+Nexus={};NexusDB=saved;dofile('core/Identity.lua');dofile('core/Store.lua');owner,realWrite=Services()
+assert(Nexus.OrbRuntime.Status().state~='RECOVERY' and Nexus.OrbRuntime.Status().reserved==0 and not Nexus.OrbRuntime.BlocksOrdinary(),'after reload: no stale recovery, ordinary rolling not blocked')
+print('PASS failed pre-spend receipt write: nothing sent, nothing saved later, no stale recovery after reload')
+
 -- 7. Store lifecycle (stand-in coordinator bound through Store.Init): loading is temporary, INVALID is unavailable.
 for _,case in ipairs({{'STORE_AUTHORITY_PENDING','still loading','loading'},{'STORE_INVALID','could not be verified','unavailable'}})do
  Fresh();name='ProbeTester';owner,realWrite=Services();f=Nexus.OrbPanel.Show()

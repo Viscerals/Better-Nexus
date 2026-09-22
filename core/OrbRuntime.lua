@@ -743,7 +743,14 @@ function M.Pump(passive)
             originalSlot=s.context.slot,
             beforeStamp=s.grantStamp,beforeSelectionSerial=s.selectionSerial,since=now(),guid=s.context.guid,spendConfirmed=false}
         run.pending=p;run.reserved=1
-        local ok,e=savePending();if not ok then run.pending=nil;run.reserved=0;pause(e);return end
+        local previousReceipt=config.pending
+        local ok,e=savePending()
+        if not ok then
+            -- Nothing was sent. The unsaved receipt must not stay in the
+            -- preferences, where a later successful write would persist it.
+            config.pending=previousReceipt
+            run.pending=nil;run.reserved=0;pause(e);return
+        end
         if not recycle and not run.automatic then run.remaining[source.key]=math.max(0,(run.remaining[source.key] or 0)-1) end
         local accepted,kind,reason=B.Spend(run.token,source.key,s,function(live)
             if not run.running or not entriesStillMatch() then return false end
