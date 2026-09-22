@@ -1980,6 +1980,23 @@ function Responder.Admission.Pump()
     end
 end
 
+-- Read-only view of the retained inbound items: one bounded row per queued
+-- entry, in queue order. It starts no work, submits nothing, settles nothing
+-- and changes no counter, so a diagnostic or a test can report exclusive
+-- queued/in-flight/terminal categories without driving admission.
+function Sync.AdmissionSnapshot()
+    local current, rows = Now(), {}
+    for index, entry in ipairs(Responder.Admission.order) do
+        rows[index] = {kind=entry.kind, id=entry.id, sender=entry.sender,
+            stamp=entry.stamp, direct=entry.direct,
+            enqueuedAt=entry.enqueuedAt, expiresAt=entry.expiresAt,
+            age=current - entry.enqueuedAt}
+    end
+    return {count=Responder.Admission.count, entries=rows,
+        maxTotal=Responder.Admission.maxTotal,
+        maxPerSender=Responder.Admission.maxPerSender}
+end
+
 function Responder.Admission.Reset()
     while Responder.Admission.order[1] do
         Responder.Admission.Fail(Responder.Admission.order[1], nil, "explicit reset")

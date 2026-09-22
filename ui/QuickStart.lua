@@ -16,8 +16,16 @@ local frame
 -- saved table must stay exactly as it is. Closing still works: the window is
 -- dismissed for the rest of that session and is offered again in a later
 -- session that can record it.
-local dismissedThisSession = false
+local dismissedThisSession, recordAttempts = false, 0
+local MAX_RECORD_ATTEMPTS = 10
 
+-- Unlike the release note in ui/Changelog.lua, this acknowledgement does not
+-- require the shared catalog. A start-up that refused an oversized catalog
+-- still runs its local tools with a durable saved-data owner (decision C), so
+-- the user's dismissal is recorded there exactly as in any healthy session.
+-- What is required is a real durable owner and completed local start-up: a
+-- read-only saved format, an unusable database and a start-up that never
+-- reached its local tools all keep the window unconsumed.
 local function CanRecordSeen()
     if type(NexusDB) ~= "table" then return false end
     local Store = Nexus.Store
@@ -31,7 +39,7 @@ local function CanRecordSeen()
     if type(Nexus.StartupStatus) == "function" then
         local okStatus, startup = pcall(Nexus.StartupStatus)
         if not okStatus or type(startup) ~= "table" then return false end
-        if not startup.coreReady or startup.state == "failed" then return false end
+        if not startup.coreReady then return false end
     end
     return true
 end
@@ -41,6 +49,17 @@ local function RecordSeen()
     if not CanRecordSeen() then return false end
     NexusDB.hasSeenQuickStart = true
     return true
+end
+
+-- True when nothing is left to do for this window in this session: either the
+-- acknowledgement is saved, or the window was never dismissed, or the bounded
+-- retries are used up. The caller uses it to stop asking.
+function M.Settled()
+    if type(NexusDB) == "table" and rawget(NexusDB, "hasSeenQuickStart") then
+        return true
+    end
+    if not dismissedThisSession then return false end
+    return recordAttempts >= MAX_RECORD_ATTEMPTS
 end
 
 local function CloseOtherSetupWindows()
@@ -163,16 +182,22 @@ end
 
 function M.Show() EnsureFrame():Show() end
 
+-- Returns true when this window needs no further attention in this session.
 function M.ShowIfFirstTime()
     if dismissedThisSession then
         -- Closed earlier in this session, possibly before the saved-data
-        -- owner was writable. Record it now if that is allowed by then.
-        RecordSeen()
-        return
+        -- owner was writable. Record it now if that is allowed by then. The
+        -- attempts are bounded, so a session that can never save stops.
+        if not M.Settled() then
+            recordAttempts = recordAttempts + 1
+            RecordSeen()
+        end
+        return M.Settled()
     end
     local db = NexusDB
-    if type(db) == "table" and rawget(db, "hasSeenQuickStart") then return end
+    if type(db) == "table" and rawget(db, "hasSeenQuickStart") then return true end
     EnsureFrame():Show()
+    return false
 end
 
 return M

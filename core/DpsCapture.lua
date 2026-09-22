@@ -177,7 +177,16 @@ function dbBinding.Select(payload)
     return payload
 end
 local function DB()
-    NexusDB = NexusDB or {}
+    if type(NexusDB) ~= "table" then
+        -- No saved table is loaded. A read must not create one: a fabricated
+        -- table can be saved over real data at logout. This session reads and
+        -- writes a transient store instead, and reports itself read-only.
+        dbPolicyReadOnly = true
+        if transientDbOwner ~= nil or type(transientDb) ~= "table" then
+            transientDbOwner, transientDb = nil, {}
+        end
+        return dbBinding.Select(transientDb)
+    end
     local bundle = rawget(NexusDB, "authorityBundle")
     -- Serving readiness can change without replacing the database or bundle
     -- (notably the startup seal). Do not retain its earlier read-only verdict.

@@ -2805,10 +2805,16 @@ end
 
 local function ShowQuickStartOnce(wishlist)
     if quickStartChecked then return end
-    quickStartChecked = true
-    if Nexus.QuickStart then
-        Nexus.QuickStart.ShowIfFirstTime(wishlist ~= nil)
+    local quickStart = Nexus.QuickStart
+    if not quickStart or type(quickStart.ShowIfFirstTime) ~= "function" then
+        quickStartChecked = true
+        return
     end
+    -- The window is offered once, but a dismissal that could not be saved yet
+    -- is retried on later turns. QuickStart reports when nothing is left to
+    -- do, and its own bounded attempt count ends the retries.
+    local okCall, settled = pcall(quickStart.ShowIfFirstTime, wishlist ~= nil)
+    quickStartChecked = not okCall or settled ~= false
 end
 
 local function RunAutoLockStep(work, owned, catalog, slots, wishlist,

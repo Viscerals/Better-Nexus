@@ -14,7 +14,11 @@ local function Button(text)
   if c.kind=='Button' and c:GetText()==text then return c end
  end
 end
-local function Flag() return type(NexusDB)=='table' and rawget(NexusDB,'hasSeenQuickStart') or nil end
+local function Flag()
+ if type(NexusDB)~='table' then return nil end
+ -- rawget, and no "or nil": a saved false must not read as an absent flag.
+ return rawget(NexusDB,'hasSeenQuickStart')
+end
 local function Record(id)
  return {id=id,title='Synthetic '..id,author='Other-Realm',class='MAGE',postedAt=1,lastModified=1,
   ordinaryComplete=true,loadoutAvailable=true,lockedEchoes={},lockedComplete=true,
@@ -109,8 +113,9 @@ Button('Later'):Click()
 check(Flag()==nil,'read-only: no acknowledgement is written')
 check(F.Serialize(NexusDB)==roBefore,'read-only: the saved data and the marker are unchanged')
 
--- 7. Capacity-refused shared catalog: local tools work, local Wishlist saves
--- approved by decision C still persist, and the acknowledgement is withheld.
+-- 7. Capacity-refused shared catalog: local tools run with a durable owner,
+-- so the dismissal is recorded exactly as in a healthy session, the shared
+-- data is untouched, and decision C's local Wishlist saves still work.
 local refused={settingsVersion=2,settings={autoPick=false},chars={},communityBuilds=Overlay(2049)}
 local H7=F.Boot(refused,function(H)
  H.perks.serverBuildSlots={[1]={name='Local plan',verified=true,echoes={{spellId=200001,quality=1,stacks=2}}}}
@@ -119,20 +124,28 @@ end)
 local c=Nexus.StartupStatus()
 check(c.state=='failed' and c.reason=='ROOT_SLOT_LIMIT' and c.coreReady==true,
  'capacity: the shared catalog is refused and local tools start: '..tostring(c.reason))
-local capacityBefore=F.Serialize(NexusDB)
+check(Nexus.Store.StateWriteStatus().mode=='durable','capacity: the local saved-data owner is writable')
+local communityBefore=F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB.settingsVersion})
 Nexus.QuickStart.ShowIfFirstTime()
 check(Shown(),'capacity: the window is shown')
+local capacityBefore=F.Serialize(NexusDB)
 Button('Later'):Click()
-check(Flag()==nil,'capacity: no acknowledgement is written')
-check(F.Serialize(NexusDB)==capacityBefore,'capacity: the saved data is unchanged by the window')
+check(Flag()==true,'capacity: the dismissal is recorded through the durable local owner')
+NexusDB.hasSeenQuickStart=nil
+check(F.Serialize(NexusDB)==capacityBefore,'capacity: the acknowledgement is the only change')
+NexusDB.hasSeenQuickStart=true
+check(F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB.settingsVersion})==communityBefore,
+ 'capacity: the refused Community data and the marker are unchanged')
+Nexus.QuickStart.ShowIfFirstTime()
+check(not Shown(),'capacity: the window is not offered again')
+-- The release note is reached again now that the first-run window is settled.
+check(Nexus.Changelog.CanRecordSeen()==false,'capacity: the release note still records nothing')
 -- Decision C persistence is untouched: a local Wishlist assignment is saved.
 local A=Nexus.GameAdapter
 check(A.SetFirstLoadoutWishlistIdentity('Local plan',{{spellId=200001,quality=1,stacks=2}}),
  'capacity: a local Wishlist assignment is accepted')
 H7.Notify();A.Poll();H7.Advance(1,.05)
 check(A.AssignedWishlist().state=='ready','capacity: the local assignment resolves')
-check(F.Serialize(NexusDB)~=capacityBefore,'capacity: the local assignment reached saved data')
-check(Flag()==nil,'capacity: the local save did not record the acknowledgement')
 local savedRows=0
 for _,row in pairs(NexusDB.chars or {})do
  if type(row)=='table' and type(row.loadoutWishlists)=='table' and next(row.loadoutWishlists)~=nil then
@@ -140,4 +153,51 @@ for _,row in pairs(NexusDB.chars or {})do
  end
 end
 check(savedRows==1,'capacity: exactly one saved character row holds the local Wishlist: '..savedRows)
-print('PASS quickstart_seen_guard: no database is created or repaired; the acknowledgement is saved only by a durable session; local saves are unaffected checks='..checks)
+check(F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB.settingsVersion})==communityBefore,
+ 'capacity: the local save changed no shared Community data')
+
+-- 8. Every entry button opens its own view without creating a saved table.
+local buttons={'Later','Set up current build','Import / Create Wishlist',
+ 'Browse Community builds','Open Leaderboard','Help / Getting Started','Orbs / Lost Memories'}
+for _,label in ipairs(buttons)do
+ F.Boot(F.Database())
+ Nexus.QuickStart.ShowIfFirstTime()
+ local kept=NexusDB
+ NexusDB=nil
+ local button=Button(label)
+ check(button~=nil,label..': the button exists')
+ pcall(function() button:Click() end)
+ check(NexusDB==nil,label..': it creates no saved table when none is loaded')
+ NexusDB=kept
+end
+
+-- 9. A dismissal that could not be saved yet is retried, and the retries are
+-- bounded. The window is dismissed before the saved-data owner is durable.
+local early=F.Database()
+local dismissed=false
+F.Boot(early,nil,function()
+ if Nexus.Store.StateWriteStatus().mode~='durable' then
+  Nexus.QuickStart.ShowIfFirstTime()
+  Button('Later'):Click()
+  dismissed=true
+ end
+end)
+if dismissed then
+ check(Flag()==nil,'retry: the early dismissal saved nothing')
+ check(Nexus.QuickStart.ShowIfFirstTime()==true,'retry: the later turn records it and settles')
+ check(Flag()==true,'retry: the acknowledgement is recorded once the owner is durable')
+else
+ check(Flag()==nil or Flag()==true,'retry: the owner was already durable at boot; nothing to retry')
+end
+-- A session that can never save stops asking after its bounded attempts.
+F.Boot(F.Database({mutate=function(db)db.settingsVersion={version=5} end}))
+Nexus.QuickStart.ShowIfFirstTime()
+Button('Later'):Click()
+local settledAfter=nil
+for attempt=1,20 do
+ if Nexus.QuickStart.ShowIfFirstTime()==true then settledAfter=attempt;break end
+end
+check(settledAfter~=nil and settledAfter<=10,
+ 'retry: a read-only session stops retrying within its bound: '..tostring(settledAfter))
+check(Flag()==nil,'retry: and it still writes nothing')
+print('PASS quickstart_seen_guard: no database is created or repaired by the window or its buttons; the acknowledgement is saved only through a durable owner; local saves are unaffected checks='..checks)
