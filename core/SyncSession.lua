@@ -577,7 +577,7 @@ function Session.New(options)
             log("SYNC", "sync request refused before sending: %d>%d bytes (%s version)",
                 length, requestLimit, form)
             return false, string.format("sync request too long (%d>%d bytes)",
-                length, requestLimit)
+                length, requestLimit), "oversize"
         end
         local queued, why = (options.enqueueControl or options.enqueue)(message, metadata)
         if not queued then
@@ -645,8 +645,8 @@ function Session.New(options)
     end
 
     local function BeginConvergencePass(mode, bypassCooldown)
-        local ok, why = RequestSyncOnce(bypassCooldown)
-        if ok ~= true then return ok, why end
+        local ok, why, refusal = RequestSyncOnce(bypassCooldown)
+        if ok ~= true then return ok, why, refusal end
         autoConverge.mode = mode or autoConverge.mode
         autoConverge.pass = autoConverge.pass + 1
         autoConverge.started = now()
@@ -791,8 +791,15 @@ function Session.New(options)
         autoConverge.peerProgress = false
         autoConverge.peerEquivalent = false
         autoConverge.absoluteUntil = now() + maxConvergenceAge
-        local ok, why = BeginConvergencePass("automatic", false)
-        if ok == false then
+        local ok, why, refusal = BeginConvergencePass("automatic", false)
+        if ok == false and refusal == "oversize" then
+            -- The same data gives the same size: no automatic retry loop. The
+            -- next login or a manual Sync Now builds the request again.
+            autoConverge.active = false
+            autoConverge.terminal = "request too long"
+            log("SYNC", "automatic login convergence stopped: %s",
+                tostring(why or "request too long"))
+        elseif ok == false then
             autoSyncPending = true
             autoSyncElapsed = autoSyncDelay - 1
             log("SYNC", "automatic login convergence deferred: %s",
@@ -836,7 +843,13 @@ function Session.New(options)
                 maxPasses)
             return
         end
-        local ok, why = BeginConvergencePass(autoConverge.mode, false)
+        local ok, why, refusal = BeginConvergencePass(autoConverge.mode, false)
+        if ok == false and refusal == "oversize" then
+            autoConverge.active = false
+            autoConverge.terminal = "request too long"
+            log("SYNC", "convergence stopped: %s", tostring(why or "request too long"))
+            return
+        end
         if not ok then
             autoConverge.started = current
             log("SYNC", "next convergence pass deferred: %s",

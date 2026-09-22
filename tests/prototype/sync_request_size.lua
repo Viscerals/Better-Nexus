@@ -81,6 +81,20 @@ local function Manual()
  return ok,why,state.calls[before+1],#state.calls-before
 end
 local function Outcome()return Nexus.Sync.Stats()end
+local function LogCount(text)
+ local n=0
+ for _,row in ipairs(Nexus.Sync.EventLog() or {})do if tostring(row.text or ''):find(text,1,true)then n=n+1 end end
+ return n
+end
+-- The request field that carries the build hash: delta buckets, then the hex catalog token.
+local function ExpectedBuild(delta)
+ local version=tostring(Nexus.BuildCatalog.CatalogVersion())
+ return delta..','..(version:gsub('.',function(c)return string.format('%02x',c:byte())end))
+end
+-- The full-form request, built independently from its parts.
+local function FullForm(name,build,dps,requestId)
+ return string.format('WLRQ|%s|%s|%s|%s|%s',name,build,dps,requestId,Nexus.ReleaseIdentity().announce)
+end
 
 -- The installed identity: full announced version and the plain release version.
 local PUBLIC={label='test.9032-abcdef0',channel='public-test'}
@@ -105,11 +119,11 @@ local id=Nexus.ReleaseIdentity()
 local fullText=string.format('WLRQ|Valentinew|%s|%s|%s|%s',Fields(call.payload)[3],Fields(call.payload)[4],call.requestId,id.announce)
 assert(id.announce=='1.20.0-beta.1+internal' and Esc(fullText)>LIMIT,'fixture: the full internal request is over the limit ('..Esc(fullText)..')')
 for _,c in ipairs({auto,call})do
- local f=Fields(c.payload)
- assert(#f==6 and f[1]=='WLRQ' and f[2]=='Valentinew' and f[6]=='1.20.0-beta.1','plain release version, prerelease kept: '..c.payload)
- assert(f[3]==fullBuild..','..Fields(fullText)[3]:match(',([0-9a-f]+)$') or f[3]:sub(1,#fullBuild)==fullBuild,'build hash buckets unchanged')
- assert(f[4]==Buckets(FULL) and f[5]==c.requestId,'DPS hash and request ID unchanged')
- assert(Esc(c.payload)<=LIMIT,'compact request fits: '..Esc(c.payload))
+ local full=FullForm('Valentinew',ExpectedBuild(fullBuild),Buckets(FULL),c.requestId)
+ assert(Esc(full)==256,'the independently built full form is 256 bytes: '..Esc(full))
+ -- Exactly the full form with only the version field replaced by the plain release version.
+ assert(c.payload==full:gsub('|1%.20%.0%-beta%.1%+internal$','|1.20.0-beta.1'),'only the version field differs: '..c.payload)
+ assert(Fields(c.payload)[6]=='1.20.0-beta.1' and Esc(c.payload)<=LIMIT,'plain release version, prerelease kept, fits')
 end
 assert(ok==true and count==1,'manual Sync: one admission ('..tostring(why)..')')
 local wire=Sent()
@@ -138,6 +152,13 @@ T.Until(H,function()return Nexus.StartupStatus().syncGate=='open' end,60000);H.A
 assert(#state.calls==0,'15-letter control, 11-digit clock: the automatic request never reached admission')
 local st=Outcome()
 assert(st.queueOutcome=='oversize' and st.requestLength==256 and st.requestVersionForm=='plain','measured refusal of the compact request: '..tostring(st.requestLength))
+-- Review P2: the automatic pass does not retry the same refusal every second.
+H.Advance(120,.5)
+assert(LogCount('refused before sending')==1 and LogCount('automatic login convergence stopped')==1,'one automatic attempt, then stopped: '..LogCount('refused before sending'))
+assert(#state.calls==0,'still nothing admitted')
+-- A manual click is one more attempt, refused the same way.
+local okManual,whyManual=Nexus.Sync.RequestSync();H.Advance(30,.5)
+assert(okManual==false and tostring(whyManual)=='sync request too long (256>255 bytes)' and LogCount('refused before sending')==2 and #state.calls==0,'manual: one measured refusal')
 print('PASS 15-letter control, 11-digit clock: compact 256 > 255 refused before admission')
 
 -- 3. Short requests keep the full advertised version (production-generated hashes of a small library).
@@ -146,7 +167,14 @@ local f=Fields(call.payload)
 assert(ok and f[6]=='1.20.0-beta.1+test.9032' and Outcome().requestVersionForm=='full','a request that fits keeps +test.9032: '..call.payload)
 auto,ok,why,call,count=Case('Valentinew',INTERNAL,nil,'full')
 assert(Fields(call.payload)[6]=='1.20.0-beta.1+internal','internal full version kept when it fits')
-print('PASS short requests keep the full version')
+-- Development source (+dev): the same rule. It keeps +dev when the request fits and uses the plain version when not.
+auto,ok,why,call,count=Case('Valentinew',{label='source',channel='development'},fullBuild,'full')
+local devFull=FullForm('Valentinew',ExpectedBuild(fullBuild),Buckets(FULL),call.requestId)
+assert(Nexus.ReleaseIdentity().announce=='1.20.0-beta.1+dev' and Esc(devFull)==251 and call.payload==devFull,'+dev at 251 bytes is kept: '..call.payload)
+auto,ok,why,call,count=Case('Abcdefghijkl',{label='source',channel='development'},fullBuild,'plain',{now=9999999.5})
+devFull=FullForm('Abcdefghijkl',ExpectedBuild(fullBuild),Buckets(FULL),call.requestId)
+assert(Esc(devFull)>LIMIT and call.payload==devFull:gsub('|1%.20%.0%-beta%.1%+dev$','|1.20.0-beta.1'),'+dev over the limit: plain form, other fields identical ('..Esc(devFull)..')')
+print('PASS short requests keep the full version; +dev follows the same rule')
 
 -- 4. Exact boundary: 255 escaped bytes keep the full version; 256 use the plain version.
 local function Boundary(target)
@@ -197,6 +225,9 @@ assert(#state.calls==before,'nothing reached queue admission')
 s=Outcome()
 assert(s.queueOutcome=='oversize' and s.terminalReason=='queue_rejected' and s.requestVersionForm=='plain' and s.requestLength>LIMIT and s.requestLimit==LIMIT,'diagnostics: oversize, not "full" or "dropped"')
 for _,w in ipairs(Sent())do assert(not w:find('^WLRQ'),'no request on the wire')end
+local refusals=LogCount('refused before sending')
+H.Advance(120,.5)
+assert(LogCount('refused before sending')==refusals,'no automatic retry of the refused request')
 print('PASS compact still too long: refused before admission ('..tostring(why)..')')
 
 -- 7. A full queue stays "full": one admission attempt per request, never a second form of the same request.
