@@ -7,6 +7,41 @@ local M = {}
 Nexus.QuickStart = M
 
 local frame
+-- The saved acknowledgement follows the policy of the release note in
+-- ui/Changelog.lua: hasSeenQuickStart is saved data, so it is written only
+-- when the saved-data owner reports a durable write for this character and
+-- local start-up completed. Deciding whether to show this window, showing it
+-- and closing it never create, replace or repair the database: a session that
+-- cannot save must not consume the one-time window, and an absent or invalid
+-- saved table must stay exactly as it is. Closing still works: the window is
+-- dismissed for the rest of that session and is offered again in a later
+-- session that can record it.
+local dismissedThisSession = false
+
+local function CanRecordSeen()
+    if type(NexusDB) ~= "table" then return false end
+    local Store = Nexus.Store
+    if type(Store) ~= "table" or type(Store.StateWriteStatus) ~= "function" then
+        return false
+    end
+    local ok, status = pcall(Store.StateWriteStatus)
+    if not ok or type(status) ~= "table" or status.mode ~= "durable" then
+        return false
+    end
+    if type(Nexus.StartupStatus) == "function" then
+        local okStatus, startup = pcall(Nexus.StartupStatus)
+        if not okStatus or type(startup) ~= "table" then return false end
+        if not startup.coreReady or startup.state == "failed" then return false end
+    end
+    return true
+end
+M.CanRecordSeen = CanRecordSeen
+
+local function RecordSeen()
+    if not CanRecordSeen() then return false end
+    NexusDB.hasSeenQuickStart = true
+    return true
+end
 
 local function CloseOtherSetupWindows()
     local names = { "NexusCommunityBuildsFrame", "NexusLeaderboardFrame", "NexusEditorFrame", "NexusLogViewer", "NexusChangelogPopup" }
@@ -17,8 +52,8 @@ local function CloseOtherSetupWindows()
 end
 
 local function Finish()
-    NexusDB = NexusDB or {}
-    NexusDB.hasSeenQuickStart = true
+    dismissedThisSession = true
+    RecordSeen()
     if frame then frame:Hide() end
 end
 
@@ -129,8 +164,14 @@ end
 function M.Show() EnsureFrame():Show() end
 
 function M.ShowIfFirstTime()
-    NexusDB = NexusDB or {}
-    if NexusDB.hasSeenQuickStart then return end
+    if dismissedThisSession then
+        -- Closed earlier in this session, possibly before the saved-data
+        -- owner was writable. Record it now if that is allowed by then.
+        RecordSeen()
+        return
+    end
+    local db = NexusDB
+    if type(db) == "table" and rawget(db, "hasSeenQuickStart") then return end
     EnsureFrame():Show()
 end
 

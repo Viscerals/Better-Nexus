@@ -61,6 +61,7 @@ NAMES += ['catalog_root_capacity']
 NAMES += ['catalog_capacity_local_ready']
 NAMES += ['changelog_seen_guard']
 NAMES += ['update_keys_read_only']
+NAMES += ['quickstart_seen_guard']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
