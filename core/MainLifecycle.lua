@@ -718,6 +718,7 @@ function Lifecycle.New(options)
             -- The catalog work may replace the root under the Community
             -- cursor. Its last position is not shown again until Init reports.
             startupTiming.communityProgressDone,startupTiming.communityProgressTotal=nil,nil
+            startupTiming.communityRecordsSeen=nil
             return false
         end
         local before=StartupClock()

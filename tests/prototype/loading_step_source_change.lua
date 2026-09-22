@@ -28,6 +28,9 @@ for i=1,20000 do
  if s.step:sub(1,8)=='catalog-' then
   catalogTurns=catalogTurns+1
   check(Nexus.startupTiming.communityProgressDone==nil,'the replaced scan position is cleared while catalog work runs')
+  -- A catalog step started by Community's own commit keeps that fresh report;
+  -- only a replaced scan loses its record count.
+  check(Nexus.startupTiming.communityPhase~='scan' or Nexus.startupTiming.communityRecordsSeen==nil,'the replaced scan record count is cleared while catalog work runs')
   check(not text:find(' / 80 ',1,true) or s.stepTotal==80,'no scan count is shown for catalog work: '..text)
  elseif s.step=='scan' and s.stepDone then
   afterReport=afterReport+1
