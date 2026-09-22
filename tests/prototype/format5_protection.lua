@@ -91,4 +91,50 @@ do
  assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.aloneProbe=true end))
  check(F.Serialize(NexusDB.chars)==before,'no coordinator: no copy and no durable write')
 end
+-- Unverified values the format-3 normalization never leaves behind.
+for _,bad in ipairs({1.5,0/0,'5',math.huge})do
+ Protected('retention value '..tostring(bad),F.Database({mutate=function(db)db.settings.communityRetentionTopAverage=bad end}),
+  {format='unverified',saved=5,field='settings.communityRetentionTopAverage',text='(field: settings.communityRetentionTopAverage)'})
+end
+Protected('format 4 without a ledger',F.Database({version=4,mutate=function(db)db.accountCharacters=nil end}),
+ {format='unverified',saved=4,field='accountCharacters',text='format 4 data'})
+
+-- Known formats 3 and 4 (format 3 has no ledger yet): durable, marker kept, no carry without a ledger.
+for _,case in ipairs({{3,false},{4,true}})do
+ local version,ledger=case[1],case[2]
+ local db=F.Database({version=version,mutate=function(d)if not ledger then d.accountCharacters=nil end end})
+ local nameRow=F.Serialize(db.chars[F.NAME])
+ F.Boot(db)
+ local status=Nexus.Store.StateWriteStatus()
+ check(status.mode=='durable' and NexusDB.settingsVersion==version,'format '..version..': durable, marker kept')
+ check((status.carriedFrom~=nil)==ledger,'format '..version..': carry only with an established ledger owner')
+ assert(Writer().UpdateStateV1(function(row)row.knownProbe=version end))
+ check(NexusDB.chars[F.OWNER].knownProbe==version and F.Serialize(NexusDB.chars[F.NAME])==nameRow,'format '..version..': write durable, original kept')
+ check(F.Serialize(NexusDB.accountCharacters)==F.Serialize(db.accountCharacters),'format '..version..': no ledger row added')
+end
+
+-- A real boot before the row checks ran: no copy and no durable write.
+do
+ local db=F.Database();local before=F.Serialize(db.chars)
+ local early
+ F.Boot(db,nil,function()
+  early={status=Nexus.Store.StateWriteStatus()}
+  assert(Writer().UpdateStateV1(function(row)row.earlyProbe=true end))
+  early.chars=F.Serialize(NexusDB.chars)
+ end)
+ check(early.status.mode~='durable','early boot: not reported durable: '..tostring(early.status.mode))
+ check(early.chars==before,'early boot: no copy and no durable write before the row checks')
+ check(Nexus.Store.StateWriteStatus().carriedFrom==F.NAME,'early boot: the copy becomes possible after admission')
+end
+
+-- A plain key with a realm suffix is never taken as this character's row.
+do
+ local db=F.Database({mutate=function(d)d.chars['PrototypeTester-OtherRealm']=d.chars[F.NAME];d.chars[F.NAME]=nil end})
+ local before=F.Serialize(db.chars)
+ F.Boot(db)
+ check(Nexus.Store.StateWriteStatus().carriedFrom==nil,'suffixed key: no carry')
+ assert(Writer().UpdateStateV1(function(row)row.suffixProbe=true end))
+ check(NexusDB.chars[F.OWNER].savedFormatCarry==nil and F.Serialize(NexusDB.chars['PrototypeTester-OtherRealm'])
+  ==F.Serialize(db.chars['PrototypeTester-OtherRealm']),'suffixed key: preserved, not carried')
+end
 print('PASS format5_protection: unverified and future formats read-only, format 2 unchanged, failed, interrupted and unadmitted paths keep originals checks='..checks)

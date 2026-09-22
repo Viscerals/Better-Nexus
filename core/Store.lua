@@ -259,6 +259,9 @@ end
 
 local function AccountWritesAllowed(database)
     if HasFutureSettingsOwner(database) then return false end
+    -- A known saved format 3-5 keeps its ledger exactly as that format wrote
+    -- it; this build does not register characters into it.
+    if SavedFormat.Classify(database) == "known" then return false end
     local migration = Nexus and Nexus.LegacyDataMigration
     if migration and type(migration.AccountWritesAllowed) == "function" then
         local ok, allowed = pcall(migration.AccountWritesAllowed, database)
@@ -1662,8 +1665,10 @@ function SavedFormat.OwnedNameRow(db, ownerKey)
     local name = ownerKey:match("^([^@]+)@")
     local foundKey, found
     for key, row in pairs(chars) do
+        -- A plain key only: no "@" and no "-Realm" suffix, which PlayerKey
+        -- would otherwise strip and so match a character of another realm.
         if type(key) == "string" and not key:find("@", 1, true)
-            and Identity.PlayerKey(key) == name then
+            and not key:find("-", 1, true) and Identity.PlayerKey(key) == name then
             if foundKey ~= nil then return nil, nil, "ambiguous-name-rows" end
             foundKey, found = key, row
         end

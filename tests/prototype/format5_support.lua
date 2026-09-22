@@ -48,7 +48,7 @@ function F.Serialize(v,parents)
  out[#out+1]='}';parents[v]=nil;return table.concat(out)
 end
 -- Real TOC boot with the given saved table; returns the harness.
-function F.Boot(db,before)
+function F.Boot(db,before,early)
  Nexus=nil;WishlistRealizerDB=nil;SlashCmdList=nil
  local H=dofile('tests/prototype/harness.lua')
  NexusDB=db
@@ -58,6 +58,7 @@ function F.Boot(db,before)
   if line~='' and not line:match('^#')then assert(loadfile((line:gsub('\\','/'))))('Nexus',{})end
  end
  H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
+ if early then early(H) end -- before any scheduler turn
  for i=1,20000 do
   H.Advance(.05,.05)
   local s=Nexus.StartupStatus()

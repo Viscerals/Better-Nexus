@@ -10,8 +10,8 @@ Format 5 is not newer. The earlier Better Nexus test line (archived commit `58b8
 
 | Step | Behavior |
 |---|---|
-| Classification | Saved format 3, 4 or 5 is accepted only when the data shows what those formats' migrations produce: `syncMode` is off, manual, automatic or absent; the community-retention numbers are whole numbers of 0 or more; the account ledger is a table (4 and up); and the ledger has no `name@unknown` rows (5). |
-| Accepted ("known") | Local reads and writes are durable. The saved marker stays at its value; it is not lowered or raised. |
+| Classification | Saved format 3, 4 or 5 is accepted only when the data shows what those formats' migrations produce: `syncMode` is off, manual, automatic or absent; the community-retention numbers are whole numbers of 0 or more; the account ledger is a table (4 and up); and the ledger has no `name@unknown` rows (5). This build also requires, for format 5, string ledger keys, table ledger rows and at most 4096 ledger rows. |
+| Accepted ("known") | Local reads and writes are durable. The saved marker stays at its value; it is not lowered or raised. As for every profile this build opens, start-up also adds missing default settings keys and missing empty character sub-tables, and writes its own storage-migration receipt (`nexusStoreMigrations`). Before this change, none of that happened for formats 3 to 5. |
 | Not accepted ("unverified") | The data stays unchanged and read-only. Messages name the saved format, the supported format and the first failing field. |
 | Format 6 and higher ("future") | Unchanged and read-only, as before. |
 | Format 2, 1 and unversioned | Unchanged behavior. |
@@ -23,11 +23,11 @@ The message "written by a newer Nexus version" is replaced by the real markers, 
 Formats 3 to 5 keep each character's row under the plain character name (`chars["Name"]`). This build uses `chars["name@realm"]`. The first write for a character copies the plain-name row to `name@realm` only when ownership is established:
 
 - the character has no `name@realm` row yet;
-- exactly one plain-name key matches the name (no case variants);
+- exactly one plain-name key matches the name (no case variants, and no key with a `-Realm` suffix);
 - the account ledger lists this exact `name@realm`, and no other realm, for that name;
 - start-up has admitted the rows (the bounded cycle, alias and size checks passed).
 
-The original plain-name row stays unchanged, so the other addon can still read it. An existing `name@realm` row is never merged or replaced. Any other case is ambiguous: the plain-name row stays unchanged and unread, and the character starts with a new row, as a missing row always did. The copy records its source in `savedFormatCarry`.
+The copy does not change the original plain-name row, so the other addon can still read it (start-up may add missing empty sub-tables to it, as it does to every row). An existing `name@realm` row is never merged or replaced. Any other case is ambiguous: the plain-name row stays unchanged and unread, and the character starts with a new row, as a missing row always did. The copy records its source in `savedFormatCarry`.
 
 ## Field comparison
 
@@ -47,5 +47,8 @@ The original plain-name row stays unchanged, so the other addon can still read i
 
 ## Limits
 
+- In formats 3 to 5 a plain-name row is shared by every character of that name on the account. A same-name character on another realm that used the row before the ledger existed (format 4), and has not logged in since, cannot be detected. The ledger then lists only this realm, and the copy goes ahead.
+- The format check result is kept for the session per saved table. A later change inside the settings or the ledger during the same session is not re-checked; this build writes neither the checked settings nor the ledger for these formats.
+- A saved marker that is not a whole number (for example 6.5) is still read as unversioned and stamped 2. This was already so before this change.
 - The check is offline, with synthetic data built from the reference layout. It has no native evidence and no tester profile behind it.
 - Returning to the other addon later is not tested. Changes made here go to the `name@realm` row, which that addon does not read.

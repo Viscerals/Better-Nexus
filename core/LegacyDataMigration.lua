@@ -885,6 +885,9 @@ function Migration.AccountWritesAllowed(database)
     local currentSettingsVersion = store
         and type(store.SettingsVersion) == "function"
         and tonumber(store.SettingsVersion()) or 2
+    -- Saved formats 3-5 read by Store (core/Store.lua SavedFormat) also stop
+    -- here, and Store refuses ledger writes for them on its own as well; this
+    -- converter is not started for them (Store's knownSavedFormat gate).
     if (tonumber(database.settingsVersion) or 0) > currentSettingsVersion then
         return false, "future settings schema is read-only"
     end
