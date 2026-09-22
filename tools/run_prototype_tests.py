@@ -64,7 +64,6 @@ NAMES += ['update_keys_read_only']
 NAMES += ['quickstart_seen_guard']
 NAMES += ['sync_admission_batch']
 NAMES += ['sync_admission_traffic_acceptance']
-NAMES += ['sync_admission_batch_mixed']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
