@@ -1963,10 +1963,13 @@ function Responder.Admission.Pump()
         return
     end
     local catalog = Catalog()
-    local preparation = catalog
-        and type(catalog.ManualPreparationStatus) == "function"
-        and catalog.ManualPreparationStatus() or nil
-    if preparation and preparation.ready ~= true then return end
+    local function Ready()
+        local preparation = catalog
+            and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        return preparation == nil or preparation.ready == true
+    end
+    if not Ready() then return end
     if Responder.Admission.inFlightCount > 0 then return end
     -- Frozen membership: the items waiting at this moment. An item that
     -- arrives while this batch runs waits for a later batch; it never
@@ -1975,23 +1978,53 @@ function Responder.Admission.Pump()
     for index, entry in ipairs(Responder.Admission.order) do frozen[index] = entry end
     local collected = {}
     Responder.Admission.collector = collected
-    for _, entry in ipairs(frozen) do
-        if Responder.Admission.byKey[entry.key] == entry then
-            -- Rechecked at the point of submission, after Expire above,
-            -- because a rebind can complete between turns.
-            if not Responder.Admission.SameScope(entry) then
-                Responder.Admission.Fail(entry, "admissionCancelled",
-                    "catalog scope changed")
-            else
-                local outcome = entry.run(entry)
-                if outcome == "busy" then break end
-                Responder.Admission.Remove(entry)
+    local ok = pcall(function()
+        for _, entry in ipairs(frozen) do
+            -- An item whose own submission took the catalog (a path that
+            -- does not join the batch) ends the collection at once.
+            if not Ready() then break end
+            if Responder.Admission.byKey[entry.key] == entry then
+                -- Rechecked at the point of submission, after Expire above,
+                -- because a rebind can complete between turns.
+                if not Responder.Admission.SameScope(entry) then
+                    Responder.Admission.Fail(entry, "admissionCancelled",
+                        "catalog scope changed")
+                else
+                    local outcome = entry.run(entry)
+                    if outcome == "busy" then break end
+                    Responder.Admission.Remove(entry)
+                end
             end
         end
-    end
+    end)
     Responder.Admission.collector = nil
     if #collected == 0 then return end
+    if not ok or not Ready() then
+        -- Nothing was submitted: the collected members go back to the queue
+        -- with their original deadlines and places, never settled here.
+        Responder.Admission.Restore(collected)
+        return
+    end
     Responder.Admission.SubmitBatch(collected)
+end
+
+-- Put collected members back at the front of the queue, in their original
+-- order and with their own unchanged deadlines. A member whose key was taken
+-- by a newer retained item in the meantime keeps that newer item and settles
+-- as the ordinary busy refusal.
+function Responder.Admission.Restore(collected)
+    for index = #collected, 1, -1 do
+        local member = collected[index]
+        local entry = member.entry
+        if type(entry) == "table" and Responder.Admission.byKey[entry.key] == nil then
+            Responder.Admission.byKey[entry.key] = entry
+            table.insert(Responder.Admission.order, 1, entry)
+            Responder.Admission.count = #Responder.Admission.order
+            stats.admissionRestored = (stats.admissionRestored or 0) + 1
+        else
+            member.complete(false, "ROOT_MUTATION_PENDING")
+        end
+    end
 end
 
 -- One catalog mutation for the whole frozen batch. Each member keeps its own
@@ -2010,9 +2043,10 @@ function Responder.Admission.SubmitBatch(collected)
     end
     if not (stored == nil and storedAs == "ROOT_MUTATION_PENDING"
         and type(tickets) == "table") then
-        for _, member in ipairs(collected) do
-            member.complete(false, storedAs or "ROOT_MUTATION_PENDING")
-        end
+        -- The catalog could not start this batch at all. Its members keep
+        -- their own deadlines and wait for a later turn; nothing is settled
+        -- as a storage failure here.
+        Responder.Admission.Restore(collected)
         return
     end
     stats.admissionBatches = (stats.admissionBatches or 0) + 1
@@ -2284,6 +2318,7 @@ local function StoreSummary(data, transportSender, context, onComplete,
                 record=record,
                 options={source="remote", sender=transportSender},
                 key=deferredEntry.key, sender=deferredEntry.sender,
+                entry=deferredEntry,
                 complete=function(ok, why)
                     if type(onComplete) == "function" then
                         onComplete(Complete(ok, why))
@@ -3410,7 +3445,7 @@ local function ShouldStore(id, lastMod, author, ownerKey, transportSender)
 end
 
 local function StoreReceivedBuild(payload, ownerVerified, relaySender,
-        matchedReplacement, canonicalFingerprint, onComplete)
+        matchedReplacement, canonicalFingerprint, onComplete, deferredEntry)
     local existing = CatalogGet(payload.id)
     -- A matching current summary makes an absent link authoritative. Legacy
     -- unsolicited full payloads retain the established local-link fallback.
@@ -3448,6 +3483,18 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
         stats.received = stats.received + 1
         RequestRetention("full build received")
         return true, storedAs
+    end
+    -- Inside a receiver batch this validated record joins the batch instead
+    -- of starting a mutation of its own. Every check above has already run.
+    local collector = Responder.Admission.collector
+    if collector and deferredEntry then
+        collector[#collector + 1] = {
+            record=record, options={source="remote", sender=relaySender},
+            key=deferredEntry.key, sender=deferredEntry.sender,
+            entry=deferredEntry,
+            complete=function(ok, why) onComplete(Complete(ok, why)) end,
+        }
+        return nil, "ROOT_MUTATION_PENDING"
     end
     local stored, storedAs, ticket = CatalogPut(record, {source="remote",
         sender=relaySender})
@@ -3622,7 +3669,7 @@ local function CommitReceivedBuild(payload, transportSender, context,
                 local accepted = Complete(completed, completedWhy)
                 if type(onComplete) == "function" then onComplete(accepted) end
                 return accepted
-            end)
+            end, deferredEntry)
     end
     local held = not deferredEntry and (Responder.Admission.RequestHold()
         or Responder.Admission.OwedHold())

@@ -3,6 +3,7 @@
 -- lifecycle readiness gate, transport pacing and catalog while valid inbound
 -- summaries wait for admission. Nothing here suppresses or fabricates traffic.
 local S=dofile('tests/prototype/sync_admission_support.lua');local T=S.T
+T.SingleSlicePacing()
 local function Deferred()return Nexus.Sync.WorkState().deferredAdmissions end
 local function Requests(H)
  local n=0

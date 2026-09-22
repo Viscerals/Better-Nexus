@@ -128,7 +128,13 @@ check(worstFrameSlices<=CAP+1,'no update exceeded the shared slice cap: '..worst
 check(batches>=1,'records were committed through the multi-record put: '..batches)
 check(largestBatch>1,'at least one batch carried several records: '..largestBatch)
 local timing=Nexus.manualSyncTiming
-check(type(timing)=='table' and timing.slices>0,'the shared timing record counted its slices')
+-- The drive keeps its own counters: a receiver-only session must not be
+-- reported as manual-Sync work.
+check(type(timing)=='table' and (timing.driveSlices or 0)>0,
+ 'the drive counted its own slices: '..tostring(timing.driveSlices))
+check((timing.updates or 0)==0 and (timing.slices or 0)==0,
+ 'no manual-Sync work was recorded in a receiver-only session: '
+ ..tostring(timing.updates)..'/'..tostring(timing.slices))
 -- Committing records transmits no build data. The only outbound packets are
 -- the ordinary requests that receiving a summary already produced before this
 -- correction: one loadout recovery request per summary and the reconciliation

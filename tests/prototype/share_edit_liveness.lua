@@ -1,4 +1,5 @@
 local E=dofile('tests/prototype/share_edit_support.lua');local T=E.T
+T.SingleSlicePacing()
 for _,kind in ipairs({'put','retention'})do
  local H,C,id,p,old=E.Begin();local restore=E.CapturePrint(H)
  local before=E.Submit(H,C,id,p,old);restore()

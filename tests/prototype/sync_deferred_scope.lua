@@ -17,6 +17,24 @@ C.Put=function(row,options,...)
  end
  return ok,why,ticket
 end
+-- A record committed inside a receiver batch is recorded exactly like a
+-- single put, so the counts below keep their meaning on both routes.
+local putBatch=C.PutBatch
+if type(putBatch)=='function' then
+ C.PutBatch=function(requests,...)
+  local ok,why,tickets=putBatch(requests,...)
+  for index,request in ipairs(requests or {})do
+   local row=type(request)=='table' and request.record or nil
+   if row and type(row.echoes)=='table' and #row.echoes>0 then
+    full.calls=full.calls+1
+    if type(tickets)=='table' and type(tickets[index])=='table' then
+     full.accepted=full.accepted+1
+    end
+   end
+  end
+  return ok,why,tickets
+ end
+end
 P.before=function(p,q,code)
  if q~=B or code~='WLRB' then return end
  chunks[#chunks+1]=p.H.sent[p.cursor].text

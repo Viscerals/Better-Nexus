@@ -735,14 +735,14 @@ function Lifecycle.New(options)
             started = started and preparationElapsed
                 and started-preparationElapsed or nil
             if preparationElapsed ~= nil then
-                manualTiming.maxBatchMs = math.max(manualTiming.maxBatchMs,
-                    preparationElapsed)
+                manualTiming.driveMaxBatchMs = math.max(
+                    manualTiming.driveMaxBatchMs or 0, preparationElapsed)
                 if preparationElapsed > MANUAL_MS then
-                    manualTiming.overshoots = manualTiming.overshoots + 1
+                    manualTiming.driveOvershoots = (manualTiming.driveOvershoots or 0) + 1
                 end
             end
         end
-        manualTiming.slices = manualTiming.slices + priorSlices
+        manualTiming.driveSlices = (manualTiming.driveSlices or 0) + priorSlices
         local catalogReady, spent = false, priorSlices
         for slice=1,MANUAL_SLICES do
             -- The cap counts every preparation slice this update has spent,
@@ -762,19 +762,20 @@ function Lifecycle.New(options)
                 observed.phase, observed.kind
             manualTiming.catalogPumps, manualTiming.catalogWork =
                 observed.pumps, observed.work
-            manualTiming.slices = manualTiming.slices + 1
+            manualTiming.driveSlices = (manualTiming.driveSlices or 0) + 1
             spent = math.max(spent + 1,
                 (observed.totalPumps or 0) - (preparationPumps or 0))
             local finished = StartupClock()
             timed = timed and finished ~= nil and finished >= before
             if timed then
-                manualTiming.maxBatchMs = math.max(manualTiming.maxBatchMs,
-                    finished-started)
+                manualTiming.driveMaxBatchMs = math.max(
+                    manualTiming.driveMaxBatchMs or 0, finished-started)
                 if finished-started > MANUAL_MS then
-                    manualTiming.overshoots = manualTiming.overshoots + 1
+                    manualTiming.driveOvershoots = (manualTiming.driveOvershoots or 0) + 1
                 end
             else
-                manualTiming.fallbackUpdates = manualTiming.fallbackUpdates + 1
+                manualTiming.driveFallbackUpdates =
+                    (manualTiming.driveFallbackUpdates or 0) + 1
             end
             if catalogReady or not progressed or not timed
                 or finished-started >= MANUAL_MS then break end

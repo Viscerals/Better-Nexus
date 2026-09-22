@@ -21,6 +21,18 @@ local function Boot(slots)
  puts,shares,printed={},{},{}
  local put=C.Put
  C.Put=function(record,...)puts[#puts+1]=H.Clone(record);return put(record,...)end
+ -- A record committed inside a receiver batch is recorded exactly like a
+ -- single put, so the counts below keep their meaning on both routes.
+ local putBatch=C.PutBatch
+ if type(putBatch)=='function' then
+  C.PutBatch=function(requests,...)
+   for _,request in ipairs(requests or {})do
+    local record=type(request)=='table' and request.record or nil
+    if record then puts[#puts+1]=H.Clone(record) end
+   end
+   return putBatch(requests,...)
+  end
+ end
  local broadcast=Nexus.Sync.BroadcastBuildSummary
  Nexus.Sync.BroadcastBuildSummary=function(record,...)shares[#shares+1]=H.Clone(record);return broadcast(record,...)end
 end

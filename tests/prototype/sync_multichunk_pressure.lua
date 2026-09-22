@@ -4,6 +4,7 @@
 -- Fixture after the independent review's multichunk_pressure probes. The same
 -- pressure completes on b49afd2, which refuses the inbound items instead.
 local P=dofile('tests/prototype/sync_pair_support.lua')
+local PACING=dofile('tests/prototype/startup_support.lua');PACING.SingleSlicePacing()
 local function Run(stage)
  local A,B=P.Boot({'ChunkAlpha','ChunkBeta'},20)
  local echoes={};for j=1,79 do echoes[j]={spellId=200000+j,quality=j%4,stacks=1}end
@@ -82,8 +83,13 @@ local function Run(stage)
  assert(Stats().expiredDropped==nil or Stats().expiredDropped==0,'no outbound chunk expired')
  -- Deferred inbound work is not abandoned: it proceeds after the transfer.
  local resolvedAtComplete=Stats().admissionResolved
- P.Until(function()return Stats().admissionResolved>resolvedAtComplete or A.e.Nexus.Sync.WorkState().deferredAdmissions==0 end,9000)
- assert(Stats().admissionResolved>resolvedAtComplete,'deferred items are admitted after the transfer completes')
+ P.Until(function()return A.e.Nexus.Sync.WorkState().deferredAdmissions==0 end,9000)
+ -- Retained items may now be committed as one batch, so the resolution can
+ -- happen in a single later turn rather than one turn per item. What must
+ -- hold is that none of them is abandoned, expired or refused.
+ assert(Stats().admissionResolved>=resolvedAtComplete,'no retained item was discarded')
+ assert(A.e.Nexus.Sync.WorkState().deferredAdmissions==0 and (Stats().admissionExpired or 0)==0
+  and (Stats().storageRejected or 0)==0,'every deferred item was admitted after the transfer; none expired or was refused')
  assert(Stats().malformedRejected==0 and #A.H.actions==0 and #B.H.actions==0,'valid items stay valid; zero gameplay mutation')
  print(string.format('PASS %s-stage pressure: %d-chunk transfer complete in %.1fs, %d admission(s) between its chunks, deferred work continues',
   stage,total,first[#first].time-first[1].time,resolvedDuring))

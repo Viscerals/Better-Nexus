@@ -7,6 +7,7 @@
 -- must never pump, initialize, submit, reconcile or create a transaction.
 -- Diagnostic only: no Sync behavior is changed or claimed. Synthetic data only.
 local S=dofile('tests/prototype/sync_admission_support.lua');local T=S.T
+T.SingleSlicePacing()
 local function Line(text,name)return ('\n'..text):match('\n('..name..' [^\n]*)') end
 -- Older report lines start with key=value instead of a line name.
 local function Keyed(text,key)return ('\n'..text):match('\n('..key..'=[^\n]*)') end

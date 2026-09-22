@@ -92,7 +92,15 @@ function StaticPopup_Hide() H.popup=nil end
 function H.AcceptPopup() local p=assert(H.popup);return StaticPopupDialogs[p.which].OnAccept(nil,p.data) end
 function GetTime() return H.now end
 function GetTimePreciseSec() return H.now end
-function debugprofilestop() return os.clock()*1000 end
+-- The client's millisecond profiler. A fixture that must observe long-running
+-- catalog work selects the supported no-clock pacing (one slice per update)
+-- through startup_support.SingleSlicePacing, which sets this flag before the
+-- runtime is loaded; every later boot in that test keeps the same pacing.
+if NEXUS_TEST_NO_PROFILE_CLOCK then
+ debugprofilestop=nil
+else
+ function debugprofilestop() return os.clock()*1000 end
+end
 function GetFramerate() return 60 end
 GetFrameRate=GetFramerate
 function UnitLevel() return H.playerLevel end

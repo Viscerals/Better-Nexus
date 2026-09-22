@@ -5373,7 +5373,9 @@ function Candidate.ReleasePreparedPutClaim(handle)
 end
 
 function Candidate.FinishPreparedPutWithoutCommit(handle, success, value)
-    EvidenceCancelCandidate()
+    -- A batch member refuses only itself: the candidate's staged evidence
+    -- belongs to the whole batch, and the batch cancels it if it fails.
+    if not handle.batchMember then EvidenceCancelCandidate() end
     local released, releaseWhy = Candidate.ReleasePreparedPutClaim(handle)
     if not released then return "failed", releaseWhy end
     handle.storedAs = handle.put and handle.put.storedAs or value
@@ -5675,6 +5677,7 @@ function Candidate.PumpBatchPutPreparation(handle, work)
             local sub, prepareWhy = Candidate.PreparePut(handle.originalRoot,
                 member.record, member.options, nil, handle.deferred)
             if sub then
+                sub.batchMember = true
                 member.sub = sub
             else
                 member.outcome = "failed"
@@ -5727,13 +5730,19 @@ function Catalog.PutBatch(requests)
     local root, why = MutationGate()
     if not root then return false, why end
     ST.debugStats.putCalls = ST.debugStats.putCalls + count
-    local members, tickets = {}, {}
+    local members, tickets, seen = {}, {}, {}
     for index = 1, count do
         local request = requests[index]
         local member = {ticket={state="pending", committed=false, pumps=0}}
+        local record = type(request) == "table" and request.record or nil
+        local typedKey = type(record) == "table" and record.id ~= nil
+            and TypedKey(record.id) or nil
         if type(request) ~= "table" then
             member.outcome, member.reason = "failed", "build id required"
+        elseif typedKey ~= nil and seen[typedKey] then
+            member.outcome, member.reason = "failed", "DUPLICATE_BATCH_MEMBER"
         else
+            if typedKey ~= nil then seen[typedKey] = true end
             member.record, member.options = request.record, request.options
         end
         ST.mutationTickets[member.ticket] = true

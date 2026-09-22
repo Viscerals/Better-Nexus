@@ -70,9 +70,26 @@ local function CloseOtherSetupWindows()
     end
 end
 
+local retryFrame
+local function StartRecordRetry()
+    if M.Settled() or retryFrame then return end
+    retryFrame = CreateFrame("Frame")
+    local elapsed = 0
+    retryFrame:SetScript("OnUpdate", function(_, dt)
+        elapsed = elapsed + (tonumber(dt) or 0)
+        if elapsed < 2 then return end
+        elapsed = 0
+        recordAttempts = recordAttempts + 1
+        RecordSeen()
+        -- Bounded: about twenty seconds, then this session stops trying and
+        -- the window is offered again in a later one.
+        if M.Settled() then retryFrame:SetScript("OnUpdate", nil) end
+    end)
+end
+
 local function Finish()
     dismissedThisSession = true
-    RecordSeen()
+    if not RecordSeen() then StartRecordRetry() end
     if frame then frame:Hide() end
 end
 

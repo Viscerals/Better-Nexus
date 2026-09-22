@@ -29,6 +29,18 @@ local function Boot(slots,active)
  puts,shares,printed={},{},{}
  local put=C.Put
  C.Put=function(record,...)puts[#puts+1]=H.Clone(record);return put(record,...)end
+ -- A record committed inside a receiver batch is recorded exactly like a
+ -- single put, so the counts below keep their meaning on both routes.
+ local putBatch=C.PutBatch
+ if type(putBatch)=='function' then
+  C.PutBatch=function(requests,...)
+   for _,request in ipairs(requests or {})do
+    local record=type(request)=='table' and request.record or nil
+    if record then puts[#puts+1]=H.Clone(record) end
+   end
+   return putBatch(requests,...)
+  end
+ end
  local broadcast=Nexus.Sync.BroadcastBuildSummary
  Nexus.Sync.BroadcastBuildSummary=function(record,...)shares[#shares+1]=H.Clone(record);return broadcast(record,...)end
 end
@@ -60,6 +72,10 @@ local function Share(title,sourceName)
 end
 local function Settle(id)
  T.Until(H,function()local s=Nexus.CommunityBuilds.ShareStatus(id);return s and s.localPending==false end,30000)
+ -- A commit replaces the durable bundle, and the catalog re-admits its root
+ -- from it. Nothing serves during that admission, so the stored record is
+ -- read once the catalog serves again, not inside that window.
+ T.Until(H,function()return Nexus.BuildCatalog.ManualPreparationStatus().ready end,30000)
  return Nexus.CommunityBuilds.ShareStatus(id)
 end
 local function Population(rows,wantLocked)

@@ -1,6 +1,7 @@
 -- NATIVE06: one actual Share must send during later ordinary catalog work.
 -- Synthetic data/clock; real popup, controller, catalog, lifecycle and wire.
 local S=dofile('tests/prototype/share_test_support.lua');local T=S.T
+T.SingleSlicePacing()
 for _,kind in ipairs({'put','retention'})do
 local H,C=S.Boot();S.Incoming(H,C)
 -- Hold the real wire guard during setup so frame timing cannot submit before

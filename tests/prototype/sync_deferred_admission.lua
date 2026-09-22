@@ -1,6 +1,7 @@
 -- Busy-receiver admission: a Catalog.Put refusal without a ticket is not an
 -- accepted operation and is not a verdict on a valid inbound summary.
 local A=dofile('tests/prototype/sync_admission_support.lua');local T=A.T
+T.SingleSlicePacing()
 local function Stats()return Nexus.Sync.Stats()end
 local function Deferred()return Nexus.Sync.WorkState().deferredAdmissions end
 
@@ -80,25 +81,55 @@ A.Settled(H,C)
 assert(C.Get(id)==nil and H.puts[id].accepted==0 and H.puts[id].calls==1,'expired item is never submitted or stored')
 print('PASS expired deferred item is a terminal storage failure')
 
--- 5b. The deadline is fixed per item. Continuing catalog work does not extend it.
+-- 5b. The deadline is fixed per item and is never extended by continuing
+-- catalog work. Since waiting items are now committed as one batch when the
+-- catalog frees, two items behind one transaction are both served; the
+-- starvation case of one-at-a-time submission no longer occurs at this size.
+-- What must stay exact is the lifetime itself: 300 seconds from each item's
+-- own arrival, unchanged while the catalog works, and 5a keeps the terminal
+-- expiry case.
 H,C=A.Boot(100);A.Hold(C)
 local firstId,lateId='deferred-summary-6a','deferred-summary-6b'
 A.Receive(firstId,'Peer',A.base+10,'Ahead in the queue')
-A.Receive(lateId,'PeerTwo',A.base+10,'Expires while the catalog works')
-assert(Deferred()==2,'fixture: two items wait behind long catalog work')
-local enqueued,pumps=H.now,C.ManualPreparationStatus().totalPumps
-T.Until(H,function()return H.now>=enqueued+299 end)
-assert(Deferred()>=1 and Stats().admissionExpired==0,'no item expires before its own fixed deadline')
-T.Until(H,function()return H.now>=enqueued+301 end)
+H.Advance(7,.05)
+A.Receive(lateId,'PeerTwo',A.base+10,'Arrives seven seconds later')
+assert(Deferred()==2,'fixture: two items wait behind real catalog work')
+local pumps=C.ManualPreparationStatus().totalPumps
+local function Retained()
+ local rows={}
+ for _,row in ipairs(Nexus.Sync.AdmissionSnapshot().entries)do rows[tostring(row.id)]=row end
+ return rows
+end
+local before=Retained()
+assert(before[firstId] and before[lateId],'fixture: both items are retained')
+assert(before[firstId].expiresAt-before[firstId].enqueuedAt==300
+ and before[lateId].expiresAt-before[lateId].enqueuedAt==300,'each lifetime is the fixed 300 seconds from its own arrival')
+assert(before[lateId].enqueuedAt>=before[firstId].enqueuedAt,'the later item did not arrive before the earlier one')
+T.Until(H,function()return H.now>=before[firstId].enqueuedAt+60 end)
+local during=Retained()
 local working=C.ManualPreparationStatus()
-assert(not working.ready and working.totalPumps>pumps+1000,'fixture: the catalog kept working through the whole wait')
-assert(C.Get(lateId)==nil and Stats().admissionExpired>=1 and Stats().storageRejected==Stats().admissionExpired,'an item whose turn did not come expires as a storage refusal while other catalog work continues')
+assert(working.totalPumps>pumps+1000,'fixture: the catalog kept working through the wait')
+for _,id in ipairs({firstId,lateId})do
+ if during[id] then
+  assert(during[id].expiresAt==before[id].expiresAt and during[id].enqueuedAt==before[id].enqueuedAt,
+   id..': its deadline was not extended or restarted by the continuing work')
+ else
+  assert(C.Get(id)~=nil,id..': it left the queue only by being committed')
+ end
+end
+assert(Stats().admissionExpired==0,'no item expired before its own deadline')
+T.Until(H,function()return C.Get(firstId)~=nil and C.Get(lateId)~=nil end,40000)
+-- An expired item is removed and never submitted, so a commit is itself the
+-- proof that each item was served inside its own unchanged lifetime.
+assert(Stats().admissionExpired==0,'neither item expired: both were served inside their own lifetimes')
 assert(Deferred()==0,'no retained item outlives its deadline')
 T.Until(H,function()return C.ManualPreparationStatus().ready end,40000);H.Advance(5,.05)
-assert(C.Get(lateId)==nil and H.puts[lateId].accepted==0,'expired item is never submitted or stored later')
-local firstRow=C.Get(firstId)
-assert((firstRow~=nil)==(H.puts[firstId].accepted==1),'the earlier item is stored only if its one submission was accepted before its deadline')
-print('PASS fixed per-item deadline expires during continuing catalog work (earlier item stored='..tostring(firstRow~=nil)..')')
+for _,id in ipairs({firstId,lateId})do
+ assert(C.Get(id)~=nil,id..': it was stored')
+ assert(H.puts[id].accepted==1,id..': exactly one accepted submission, on either route')
+end
+assert(Stats().storageRejected==0 and Stats().admissionExpired==0,'nothing was refused or expired')
+print('PASS fixed per-item deadline: two retained items keep their own unchanged lifetimes and are served inside them')
 
 -- 6. Explicit reset cancels retained items.
 H,C=A.Boot();A.Hold(C);id='deferred-summary-7'

@@ -13,6 +13,23 @@ for _,p in ipairs({A,B})do
    ok=ok,why=why,ticket=type(ticket)=='table'}
   return ok,why,ticket
  end
+ -- A record committed inside a receiver batch is recorded exactly like a
+ -- single put, so "submitted exactly once" keeps its meaning on both routes.
+ local originalBatch=p.e.Nexus.BuildCatalog.PutBatch
+ if type(originalBatch)=='function' then
+  p.e.Nexus.BuildCatalog.PutBatch=function(requests,...)
+   local ok,why,tickets=originalBatch(requests,...)
+   for index,request in ipairs(requests or {})do
+    local row=type(request)=='table' and request.record or nil
+    if row then
+     p.puts[#p.puts+1]={id=row.id,stamp=row.lastModified,
+      full=type(row.echoes)=='table' and #row.echoes>0,
+      ok=ok,why=why,ticket=type(tickets)=='table' and type(tickets[index])=='table'}
+    end
+   end
+   return ok,why,tickets
+  end
+ end
 end
 local function Idle(p)
  local work=p.e.Nexus.Sync.WorkState()

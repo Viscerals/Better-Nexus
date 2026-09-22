@@ -16,6 +16,18 @@ C.Put=function(record,...)
  puts[record.id]=(puts[record.id] or 0)+1
  return put(record,...)
 end
+-- A record committed inside a receiver batch is recorded exactly like a
+-- single put, so the counts below keep their meaning on both routes.
+local putBatch=C.PutBatch
+if type(putBatch)=='function' then
+ C.PutBatch=function(requests,...)
+  for _,request in ipairs(requests or {})do
+   local record=type(request)=='table' and request.record or nil
+   if record then puts[record.id]=(puts[record.id] or 0)+1 end
+  end
+  return putBatch(requests,...)
+ end
+end
 local broadcast=Nexus.Sync.BroadcastBuildSummary
 local shares={}
 Nexus.Sync.BroadcastBuildSummary=function(record,...)

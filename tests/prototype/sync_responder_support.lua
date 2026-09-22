@@ -60,7 +60,32 @@ function S.Scenario(o)
    run.requestId=Text(p.H.sent[p.cursor]):match('(c1%-[%w%-]+)')
    -- In flight: one valid summary takes the ready catalog just before the
    -- request is delivered in the same frame.
-   if o.inflight then run.holder=S.Summary(A,o.label..'-h',1);run.trafficOn=true end
+   if o.inflight then
+    -- A catalog transaction of the responder's own, started in this frame.
+    -- A received summary is not used here: when the responder already owes a
+    -- response it is retained instead of taking the catalog, which is the
+    -- correct receiver behaviour but not the case under test.
+    local C=A.e.Nexus.BuildCatalog
+    local row
+    for _,id in ipairs({run.id,'synthetic-startup-1','synthetic-startup-2'})do
+     if not row and id and C.Get(id) then row=A.H.Clone((C.Get(id))) end
+    end
+    assert(row,'fixture: a stored record to copy')
+    -- A separate synthetic id: no record the test verifies is touched.
+    row.id='inflight-holder-'..tostring(o.label)
+    row.title='In-flight transaction'
+    row.isMine=false;row.ownerVerified=true
+    row.postedAt=tonumber(row.postedAt) or 1
+    row.lastModified=(tonumber(row.lastModified) or 1)+1
+    -- A staged write: it takes the catalog transaction without publishing a
+    -- represented-data revision, so it adds no Share, no serialization and no
+    -- outbound traffic of its own.
+    local ok,why,ticket=C.PutDeferred(row)
+    assert(ok==nil and why=='ROOT_MUTATION_PENDING' and type(ticket)=='table',
+     'fixture: the responder catalog really took a transaction: '..tostring(why))
+    run.holder,run.holderTicket=row.id,ticket
+    run.trafficOn=true
+   end
    pendingInject=o.afterRequest~=nil
   elseif p==A and code=='WLRB' then
    local id,index,total=Text(p.H.sent[p.cursor]):match('^WLRB|[^|]+|([^|]+)|[^|]+|(%d+)/(%d+)|')

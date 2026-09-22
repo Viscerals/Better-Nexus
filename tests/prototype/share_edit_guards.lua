@@ -1,4 +1,5 @@
 local E=dofile('tests/prototype/share_edit_support.lua');local T=E.T
+T.SingleSlicePacing()
 for _,phase in ipairs({'saving','queued'})do
  for _,change in ipairs({'owner','database','binding'})do
   local H,C,id,p,old=E.Begin();local restore=E.CapturePrint(H)
