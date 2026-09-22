@@ -41,7 +41,7 @@ local s,H=Boot(big)
 Refused('legacy 2049',s,'overlay','map-keys','legacy')
 check(F.Serialize(NexusDB.communityBuilds)==before,'legacy 2049: the overlay is unchanged; retention could not act first')
 local c=#H.chat;SlashCmdList.NEXUS('status')
-check(table.concat(H.chat,'\n',c+1):find('count at refusal=2049 (limit 2048)',1,true),'legacy 2049: /nexus status states map, counter and count')
+check(table.concat(H.chat,'\n',c+1):find('count at refusal=2049 (limit 2048; counting stopped here)',1,true),'legacy 2049: /nexus status states map, counter and count')
 F.Reload()
 local r=Nexus.StartupStatus()
 Refused('legacy 2049 reload',r,'overlay','map-keys','legacy')
@@ -87,7 +87,7 @@ do
   for i=1,4000 do H7.Advance(.05,.05) if ticket.state~='pending' then break end end
   final=ticket.reason or ticket.state
  end
- check(ok~=true and (final=='ROOT_SLOT_LIMIT' or why=='ROOT_SLOT_LIMIT'),'runtime: the 2049th record is refused: '..tostring(ok)..' '..tostring(why)..' '..tostring(final))
+ check(ok~=true and final=='ROOT_SLOT_LIMIT','runtime: the 2049th record is refused: '..tostring(ok)..' '..tostring(why)..' '..tostring(final))
  local n=0;for _ in pairs(NexusDB.authorityBundle.communityBuilds)do n=n+1 end
  check(n==2048,'runtime: the saved overlay stays at 2048: '..n)
  local last=C.LastLimitSummary()

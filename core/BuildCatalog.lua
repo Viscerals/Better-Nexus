@@ -3004,7 +3004,7 @@ end
 -- moment of refusal (limit + 1; later keys are not counted), the limit, the
 -- phase and whether the saved bundle or the legacy table was the active
 -- source. Scalars only; no keys, names or record contents. Never saved.
-function Catalog.NoteLimit(handle, map, counter, count, limit, reason)
+function Candidate.NoteLimit(handle, map, counter, count, limit, reason)
     local counts = {}
     for _, name in ipairs(MAP_ORDER) do
         counts[name] = tonumber(handle.mapCounts and handle.mapCounts[name]) or 0
@@ -3054,7 +3054,7 @@ local function CollectRootMap(handle, work)
         local limitReason = name == "tombstone" and "TOMBSTONE_SET_LIMIT"
             or name == "barrier" and "BARRIER_SET_LIMIT" or "ROOT_SLOT_LIMIT"
         if handle.mapCounts[name] > BUDGET.rootMapKeys then
-            Catalog.NoteLimit(handle, name, "map-keys", handle.mapCounts[name],
+            Candidate.NoteLimit(handle, name, "map-keys", handle.mapCounts[name],
                 BUDGET.rootMapKeys, limitReason)
             return AdmissionFail(handle, limitReason)
         end
@@ -3064,7 +3064,7 @@ local function CollectRootMap(handle, work)
             handle.slots[typedKey] = slot
             handle.slotCount = handle.slotCount + 1
             if handle.slotCount > BUDGET.rows then
-                Catalog.NoteLimit(handle, name, "distinct-slots", handle.slotCount,
+                Candidate.NoteLimit(handle, name, "distinct-slots", handle.slotCount,
                     BUDGET.rows, limitReason)
                 return AdmissionFail(handle, limitReason)
             end

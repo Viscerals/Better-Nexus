@@ -110,7 +110,8 @@ function Lifecycle.New(options)
             if catalog and type(catalog.LastLimitSummary) == "function" then
                 ok, last = pcall(catalog.LastLimitSummary)
             end
-            if not ok or type(last) ~= "table" or last.reason ~= reason then
+            if not ok or type(last) ~= "table" or last.reason ~= reason
+                or last.mode ~= "admission" then
                 return {component="catalog"}
             end
             return {component="catalog", phase=last.phase, map=last.map,

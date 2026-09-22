@@ -807,7 +807,7 @@ local function StartupFailureLine(status)
     end
     Add("component", f.component); Add("phase", f.phase); Add("map", f.map)
     Add("counter", f.counter)
-    if f.count then Add("count at refusal", tostring(f.count) .. " (limit " .. tostring(f.limit) .. ")") end
+    if f.count then Add("count at refusal", tostring(f.count) .. " (limit " .. tostring(f.limit) .. "; counting stopped here)") end
     Add("source", f.source)
     Add("stage", f.stage); Add("cause", f.cause); Add("detail", f.detail)
     Add("owner", f.owner); Add("row", f.row); Add("legacy", f.legacyClass); Add("error", f.error)
