@@ -2999,6 +2999,32 @@ local function AdmissionFail(handle, reason)
     return "failed"
 end
 
+-- Session-only record of the last collection refusal: which map, which
+-- counter (keys in one map, or distinct keys across maps), the count at the
+-- moment of refusal (limit + 1; later keys are not counted), the limit, the
+-- phase and whether the saved bundle or the legacy table was the active
+-- source. Scalars only; no keys, names or record contents. Never saved.
+function Catalog.NoteLimit(handle, map, counter, count, limit, reason)
+    local counts = {}
+    for _, name in ipairs(MAP_ORDER) do
+        counts[name] = tonumber(handle.mapCounts and handle.mapCounts[name]) or 0
+    end
+    ST.lastLimit = {reason=reason, map=map, counter=counter, count=count,
+        limit=limit, phase="collect", mode=handle.mode,
+        source=handle.sourceKind or (handle.mode == "mutation" and "bundle") or "unknown",
+        overlay=counts.overlay, bundled=counts.bundled,
+        tombstone=counts.tombstone, barrier=counts.barrier}
+end
+
+-- Read-only copy of that record, or nil. Touches no root, cursor or gate.
+function Catalog.LastLimitSummary()
+    local last = ST.lastLimit
+    if type(last) ~= "table" then return nil end
+    local copy = {}
+    for key, value in pairs(last) do copy[key] = value end
+    return copy
+end
+
 local function CollectRootMap(handle, work)
     local name = MAP_ORDER[handle.mapIndex]
     local map = handle.maps[name]
@@ -3028,6 +3054,8 @@ local function CollectRootMap(handle, work)
         local limitReason = name == "tombstone" and "TOMBSTONE_SET_LIMIT"
             or name == "barrier" and "BARRIER_SET_LIMIT" or "ROOT_SLOT_LIMIT"
         if handle.mapCounts[name] > BUDGET.rootMapKeys then
+            Catalog.NoteLimit(handle, name, "map-keys", handle.mapCounts[name],
+                BUDGET.rootMapKeys, limitReason)
             return AdmissionFail(handle, limitReason)
         end
         local slot = handle.slots[typedKey]
@@ -3036,6 +3064,8 @@ local function CollectRootMap(handle, work)
             handle.slots[typedKey] = slot
             handle.slotCount = handle.slotCount + 1
             if handle.slotCount > BUDGET.rows then
+                Catalog.NoteLimit(handle, name, "distinct-slots", handle.slotCount,
+                    BUDGET.rows, limitReason)
                 return AdmissionFail(handle, limitReason)
             end
             handle.slotVector[handle.slotCount] = slot
@@ -3686,6 +3716,7 @@ local function PumpAdmission(handle)
         -- bundle's LEGACY_BUNDLE_MIGRATION_REQUIRED route (line 374).
         local source = bundleClass == "absent" and db or bundleRaw
         handle.source = source
+        handle.sourceKind = bundleClass == "absent" and "legacy" or "bundle"
         local classification, reason, _, version =
             ClassifyMetadata(rawget(source, "buildCatalog"))
         if classification == "invalid" then

@@ -100,7 +100,23 @@ function Lifecycle.New(options)
     -- pure classification only; never binds, pumps or retries.
     local function FailureFacts()
         local r = bootstrapTerminal
-        if type(r) ~= "table" or r.state ~= "failed" then return nil end
+        if type(r) ~= "table" or r.state ~= "failed" then
+            -- The catalog refused its root after the Store finished: the
+            -- catalog's own session-only refusal record, when it matches.
+            local reason = startupTiming.coreFailure
+            if reason == nil then return nil end
+            local catalog = Nexus.BuildCatalog
+            local ok, last = false, nil
+            if catalog and type(catalog.LastLimitSummary) == "function" then
+                ok, last = pcall(catalog.LastLimitSummary)
+            end
+            if not ok or type(last) ~= "table" or last.reason ~= reason then
+                return {component="catalog"}
+            end
+            return {component="catalog", phase=last.phase, map=last.map,
+                counter=last.counter, count=tonumber(last.count),
+                limit=tonumber(last.limit), source=last.source}
+        end
         local function Token(value, limit)
             if value == nil then return nil end
             local okText, text = pcall(tostring, value)
