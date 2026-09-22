@@ -162,7 +162,12 @@ local Responder = {state={hotBuildGeneration=0}, Work={}}
 -- Session-only owner of validated inbound items that the catalog refused
 -- without a ticket because another transaction owned admission. It is a field
 -- because this chunk is at the Lua limit of 200 local variables.
-Responder.Admission = {order={}, byKey={}, count=0, maxTotal=64, maxPerSender=16}
+-- order/byKey/count are the items still waiting. inFlight holds the members of
+-- the batch that is currently inside the catalog candidate: they have left the
+-- queue but are not settled, so they keep counting against the same bounds and
+-- no new arrival gains an unaccounted allowance while a batch runs.
+Responder.Admission = {order={}, byKey={}, count=0, maxTotal=64, maxPerSender=16,
+    inFlight={}, inFlightCount=0}
 local catalogMutationIdentity
 local PendingDeleteCount
 
@@ -1741,7 +1746,11 @@ function Responder.Admission.Defer(fields)
     for _, candidate in ipairs(Responder.Admission.order) do
         if candidate.sender == fields.sender then fromSender = fromSender + 1 end
     end
-    if Responder.Admission.count >= Responder.Admission.maxTotal
+    for _, member in ipairs(Responder.Admission.inFlight) do
+        if member.sender == fields.sender then fromSender = fromSender + 1 end
+    end
+    local held = Responder.Admission.count + Responder.Admission.inFlightCount
+    if held >= Responder.Admission.maxTotal
         or fromSender >= Responder.Admission.maxPerSender then
         stats.admissionOverflow = (stats.admissionOverflow or 0) + 1
         return "overflow"
@@ -1954,30 +1963,93 @@ function Responder.Admission.Pump()
         return
     end
     local catalog = Catalog()
-    while Responder.Admission.order[1] do
-        local preparation = catalog
-            and type(catalog.ManualPreparationStatus) == "function"
-            and catalog.ManualPreparationStatus() or nil
-        if preparation and preparation.ready ~= true then return end
-        local entry = Responder.Admission.order[1]
-        -- Rechecked at the point of submission, after Expire above, because
-        -- an earlier entry in this same turn can change nothing about scope
-        -- but a rebind can complete between turns.
-        if not Responder.Admission.SameScope(entry) then
-            Responder.Admission.Fail(entry, "admissionCancelled",
-                "catalog scope changed")
-        else
-            local outcome = entry.run(entry)
-            if outcome == "busy" then return end
-            if outcome == "ticket" then
-                -- One accepted submission per turn; the next one waits for a
-                -- whole transmitted unit while outbound work is owed.
-                Responder.Admission.unitsAtSubmission =
-                    Transport.OutboundProgress().unitsSent
+    local preparation = catalog
+        and type(catalog.ManualPreparationStatus) == "function"
+        and catalog.ManualPreparationStatus() or nil
+    if preparation and preparation.ready ~= true then return end
+    if Responder.Admission.inFlightCount > 0 then return end
+    -- Frozen membership: the items waiting at this moment. An item that
+    -- arrives while this batch runs waits for a later batch; it never
+    -- enlarges or restarts the candidate.
+    local frozen = {}
+    for index, entry in ipairs(Responder.Admission.order) do frozen[index] = entry end
+    local collected = {}
+    Responder.Admission.collector = collected
+    for _, entry in ipairs(frozen) do
+        if Responder.Admission.byKey[entry.key] == entry then
+            -- Rechecked at the point of submission, after Expire above,
+            -- because a rebind can complete between turns.
+            if not Responder.Admission.SameScope(entry) then
+                Responder.Admission.Fail(entry, "admissionCancelled",
+                    "catalog scope changed")
+            else
+                local outcome = entry.run(entry)
+                if outcome == "busy" then break end
+                Responder.Admission.Remove(entry)
             end
         end
-        Responder.Admission.Remove(entry)
     end
+    Responder.Admission.collector = nil
+    if #collected == 0 then return end
+    Responder.Admission.SubmitBatch(collected)
+end
+
+-- One catalog mutation for the whole frozen batch. Each member keeps its own
+-- ticket, storage answer and refusal reason, and is settled exactly once.
+function Responder.Admission.SubmitBatch(collected)
+    local catalog = Catalog()
+    local requests = {}
+    for index, member in ipairs(collected) do
+        requests[index] = {record=member.record, options=member.options}
+    end
+    local stored, storedAs, tickets
+    if catalog and type(catalog.PutBatch) == "function" then
+        stored, storedAs, tickets = catalog.PutBatch(requests)
+    else
+        stored, storedAs = false, "batch admission unavailable"
+    end
+    if not (stored == nil and storedAs == "ROOT_MUTATION_PENDING"
+        and type(tickets) == "table") then
+        for _, member in ipairs(collected) do
+            member.complete(false, storedAs or "ROOT_MUTATION_PENDING")
+        end
+        return
+    end
+    stats.admissionBatches = (stats.admissionBatches or 0) + 1
+    stats.admissionBatchMembers = (stats.admissionBatchMembers or 0) + #collected
+    if #collected > (stats.admissionBatchLargest or 0) then
+        stats.admissionBatchLargest = #collected
+    end
+    for index, member in ipairs(collected) do
+        local ticket = tickets[index]
+        local row = {key=member.key, sender=member.sender, settled=false}
+        Responder.Admission.inFlight[#Responder.Admission.inFlight + 1] = row
+        Responder.Admission.inFlightCount = #Responder.Admission.inFlight
+        local bound = ticket ~= nil and BindCatalogCompletion(ticket,
+            function(ok, why)
+                Responder.Admission.FinishInFlight(row)
+                member.complete(ok, why)
+            end)
+        if not bound then
+            Responder.Admission.FinishInFlight(row)
+            member.complete(false, "INVALID_MUTATION_TICKET")
+        end
+    end
+    -- One accepted submission per turn; the next batch waits for a whole
+    -- transmitted unit while outbound work is owed.
+    Responder.Admission.unitsAtSubmission = Transport.OutboundProgress().unitsSent
+end
+
+function Responder.Admission.FinishInFlight(row)
+    if row.settled then return end
+    row.settled = true
+    for index, candidate in ipairs(Responder.Admission.inFlight) do
+        if candidate == row then
+            table.remove(Responder.Admission.inFlight, index)
+            break
+        end
+    end
+    Responder.Admission.inFlightCount = #Responder.Admission.inFlight
 end
 
 -- Read-only view of the retained inbound items: one bounded row per queued
@@ -1992,7 +2064,12 @@ function Sync.AdmissionSnapshot()
             enqueuedAt=entry.enqueuedAt, expiresAt=entry.expiresAt,
             age=current - entry.enqueuedAt}
     end
+    local flying = {}
+    for index, member in ipairs(Responder.Admission.inFlight) do
+        flying[index] = {key=member.key, sender=member.sender}
+    end
     return {count=Responder.Admission.count, entries=rows,
+        inFlight=Responder.Admission.inFlightCount, inFlightEntries=flying,
         maxTotal=Responder.Admission.maxTotal,
         maxPerSender=Responder.Admission.maxPerSender}
 end
@@ -2002,6 +2079,7 @@ function Responder.Admission.Reset()
         Responder.Admission.Fail(Responder.Admission.order[1], nil, "explicit reset")
     end
     Responder.Admission.order, Responder.Admission.byKey, Responder.Admission.count = {}, {}, 0
+    Responder.Admission.inFlight, Responder.Admission.inFlightCount = {}, 0
     Responder.Admission.unitsAtSubmission = nil
     Responder.Admission.readySince, Responder.Admission.turnAt = nil, nil
     Responder.Admission.yieldSince = nil
@@ -2196,6 +2274,26 @@ local function StoreSummary(data, transportSender, context, onComplete,
         return true, true
     end
     local function Submit()
+        -- Inside a receiver batch the validated record joins the batch instead
+        -- of starting a catalog mutation of its own. Everything above this
+        -- point has already run for this item: schema, ownership, tombstone,
+        -- revision and freshness checks included.
+        local collector = Responder.Admission.collector
+        if collector and deferredEntry then
+            collector[#collector + 1] = {
+                record=record,
+                options={source="remote", sender=transportSender},
+                key=deferredEntry.key, sender=deferredEntry.sender,
+                complete=function(ok, why)
+                    if type(onComplete) == "function" then
+                        onComplete(Complete(ok, why))
+                    else
+                        Complete(ok, why)
+                    end
+                end,
+            }
+            return nil, "ROOT_MUTATION_PENDING"
+        end
         local stored, storedAs, ticket = CatalogPut(record, {source="remote",
             sender=transportSender})
         if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then

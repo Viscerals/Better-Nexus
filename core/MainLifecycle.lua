@@ -711,6 +711,77 @@ function Lifecycle.New(options)
         return ready, catalogReady
     end
 
+    -- The same shared allowance when no manual request owns it. An eligible
+    -- pending catalog mutation advances through several of the existing
+    -- bounded slices in one update, inside ONE soft time allowance and ONE
+    -- slice cap per update (MANUAL_MS / MANUAL_SLICES), counting the slices
+    -- this update's ordinary maintenance already spent. Per-slice limits are
+    -- unchanged, nothing else is accelerated, and a missing or invalid clock
+    -- keeps the previous single slice. The loop yields at the earliest of:
+    -- candidate completion or terminal failure, a binding or generation
+    -- change (ownership loss, cancellation or publication), the allowance,
+    -- the cap, and actual lack of progress reported by the catalog itself.
+    local function PumpCatalogAdmissionBatch(preparationElapsed, preparationPumps)
+        local catalog = Nexus.BuildCatalog
+        local describe = catalog and catalog.ManualPreparationStatus
+        if type(describe) ~= "function" then
+            return PumpCatalogRootAdmissionSlice()
+        end
+        local initial = describe()
+        local priorSlices = math.max(0,
+            (initial.totalPumps or 0) - (preparationPumps or 0))
+        local started = StartupClock()
+        if priorSlices > 0 then
+            started = started and preparationElapsed
+                and started-preparationElapsed or nil
+            if preparationElapsed ~= nil then
+                manualTiming.maxBatchMs = math.max(manualTiming.maxBatchMs,
+                    preparationElapsed)
+                if preparationElapsed > MANUAL_MS then
+                    manualTiming.overshoots = manualTiming.overshoots + 1
+                end
+            end
+        end
+        manualTiming.slices = manualTiming.slices + priorSlices
+        local catalogReady, spent = false, priorSlices
+        for slice=1,MANUAL_SLICES do
+            -- The cap counts every preparation slice this update has spent,
+            -- whoever drove it, so no caller receives a second allowance.
+            if spent >= MANUAL_SLICES then break end
+            local before = StartupClock()
+            local timed = started ~= nil and before ~= nil and before >= started
+            if timed and before-started >= MANUAL_MS then break end
+            if not timed and spent+1 > 1 then break end
+            local status = describe()
+            if status.binding ~= initial.binding
+                or status.generation ~= initial.generation then break end
+            local progressed
+            catalogReady, progressed = PumpCatalogRootAdmissionSlice()
+            local observed = describe()
+            manualTiming.catalogPhase, manualTiming.catalogKind =
+                observed.phase, observed.kind
+            manualTiming.catalogPumps, manualTiming.catalogWork =
+                observed.pumps, observed.work
+            manualTiming.slices = manualTiming.slices + 1
+            spent = math.max(spent + 1,
+                (observed.totalPumps or 0) - (preparationPumps or 0))
+            local finished = StartupClock()
+            timed = timed and finished ~= nil and finished >= before
+            if timed then
+                manualTiming.maxBatchMs = math.max(manualTiming.maxBatchMs,
+                    finished-started)
+                if finished-started > MANUAL_MS then
+                    manualTiming.overshoots = manualTiming.overshoots + 1
+                end
+            else
+                manualTiming.fallbackUpdates = manualTiming.fallbackUpdates + 1
+            end
+            if catalogReady or not progressed or not timed
+                or finished-started >= MANUAL_MS then break end
+        end
+        return catalogReady
+    end
+
     function CompleteWorldEntry(event)
         local Adapter = dependencies.Adapter
         local Store = dependencies.Store
@@ -1032,7 +1103,8 @@ function Lifecycle.New(options)
         if manualOwner then
             buildHashesReady, catalogReady = PumpManualPreparationBatch(manualOwner, preparationElapsed, preparationPumps)
         else
-            catalogReady = PumpCatalogRootAdmissionSlice()
+            catalogReady = PumpCatalogAdmissionBatch(preparationElapsed,
+                preparationPumps)
             if catalogReady then buildHashesReady = PumpBuildHashCacheSlice() end
         end
         -- Give one explicitly approved Share the next normal admission turn

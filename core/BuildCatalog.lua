@@ -1670,24 +1670,72 @@ local function ExactGeneration(value)
     return math.floor(value) == value
 end
 
+-- One candidate settles one ticket, except a receiver batch, which settles one
+-- ticket per member: a member refused while it was prepared keeps its own
+-- refusal, every other member takes the candidate's outcome, and each ticket
+-- is settled exactly once here.
 local function SettleMutationTicket(handle, state, committed, reason, deferCallback)
-    local ticket = handle.ticket or {}
-    ticket.state, ticket.committed = state, committed
-    ticket.reason, ticket.pumps = reason, handle.pumps
-    if committed then
-        ticket.generation = ST.generation
-        ticket.database, ticket.bundle = ST.db, ST.durableBundle
-        ticket.storedAs = handle.storedAs
+    local function SettleOneTicket(ticket, ticketState, ticketCommitted,
+                                   ticketReason, storedAs)
+        ticket.state, ticket.committed = ticketState, ticketCommitted
+        ticket.reason, ticket.pumps = ticketReason, handle.pumps
+        if ticketCommitted then
+            ticket.generation = ST.generation
+            ticket.database, ticket.bundle = ST.db, ST.durableBundle
+            ticket.storedAs = storedAs or handle.storedAs
+        end
+        ST.mutationTickets[ticket] = nil
+        local callback = ticket.completionCallback
+        ticket.completionCallback = nil
+        return callback
     end
-    ST.mutationTickets[ticket] = nil
-    local callback = ticket.completionCallback
-    ticket.completionCallback = nil
-    if deferCallback then return ticket, callback end
-    if callback and not pcall(callback, ticket) then
-        ST.debugStats.mutationCompletionFailures =
-            ST.debugStats.mutationCompletionFailures + 1
+    local function RunTicketCallback(ticket, callback)
+        if callback and not pcall(callback, ticket) then
+            ST.debugStats.mutationCompletionFailures =
+                ST.debugStats.mutationCompletionFailures + 1
+        end
     end
-    return ticket
+    local members = handle.batch and handle.batch.members
+    if not members then
+        local ticket = handle.ticket or {}
+        local callback = SettleOneTicket(ticket, state, committed, reason)
+        if deferCallback then return ticket, callback end
+        RunTicketCallback(ticket, callback)
+        return ticket
+    end
+    local settled = {}
+    for _, member in ipairs(members) do
+        local ticket = member.ticket
+        if ticket and ST.mutationTickets[ticket] ~= nil then
+            local memberState, memberCommitted, memberReason =
+                state, committed, reason
+            if member.outcome == "failed" then
+                memberState, memberCommitted, memberReason =
+                    "failed", false, member.reason
+            end
+            settled[#settled + 1] = {ticket=ticket,
+                callback=SettleOneTicket(ticket, memberState, memberCommitted,
+                    memberReason, member.storedAs)}
+        end
+    end
+    -- The candidate's own ticket carries no receiver callback; settling it
+    -- keeps the registry free of a ticket nobody can complete.
+    local own = handle.ticket
+    if own and ST.mutationTickets[own] ~= nil then
+        SettleOneTicket(own, state, committed, reason)
+    end
+    local first = own or (settled[1] and settled[1].ticket) or {}
+    if deferCallback then
+        return first, function()
+            for _, row in ipairs(settled) do
+                RunTicketCallback(row.ticket, row.callback)
+            end
+        end
+    end
+    for _, row in ipairs(settled) do
+        RunTicketCallback(row.ticket, row.callback)
+    end
+    return first
 end
 
 -- Latch the outer deny-only state. It publishes no candidate, permits no read
@@ -3554,6 +3602,13 @@ local function PublishRoot(handle)
         local released, releaseWhy = Candidate.ReleaseClaim(handle.claim, true)
         if not released then return AdmissionFail(handle, releaseWhy) end
     end
+    if handle.mode == "mutation" and handle.claims then
+        for _, claim in ipairs(handle.claims) do
+            local released, releaseWhy = Candidate.ReleaseClaim(claim, true)
+            if not released then return AdmissionFail(handle, releaseWhy) end
+        end
+        handle.claims = {}
+    end
     if handle.completion == "put" then
         ST.debugStats.putChanges = ST.debugStats.putChanges + 1
     elseif handle.completion == "maintenance" then
@@ -3573,6 +3628,20 @@ local function PumpAdmission(handle)
             handle, work)
         if prepared == "failed" then
             result = AdmissionFail(handle, prepareWhy)
+        elseif prepared == "pending" then
+            result = "pending"
+        else
+            result = "ok"
+        end
+    end
+    if handle.phase == "batch-prepare" then
+        local prepared, prepareWhy = Candidate.PumpBatchPutPreparation(handle,
+            work)
+        if prepared == "failed" then
+            result = AdmissionFail(handle, prepareWhy)
+        elseif prepared == "noop" then
+            ClosePump(work)
+            return "noop"
         elseif prepared == "pending" then
             result = "pending"
         else
@@ -4644,9 +4713,11 @@ function Candidate.BeginAdmissionFinalization(handle)
         {owner=ST, key="semanticGeneration", amount=1},
         {owner=ST, key="servingGeneration", amount=1},
     }
-    if handle.mode == "mutation" and handle.claim then
+    local claimCount = (handle.claim and 1 or 0)
+        + (handle.claims and #handle.claims or 0)
+    if handle.mode == "mutation" and claimCount > 0 then
         publishPlan[#publishPlan + 1] = {
-            owner=ST, key="reservationEpoch", amount=1,
+            owner=ST, key="reservationEpoch", amount=claimCount,
         }
     end
     if handle.bundleClass == "absent" or needsMigration then
@@ -5478,11 +5549,12 @@ function Candidate.PumpPutPreparation(handle, work)
     return "pending"
 end
 
-local function PutInternal(record, options, claim, deferred)
+-- Identity, slot, reservation and claim decisions for ONE record, exactly as
+-- a single put makes them. Every receiver batch member is prepared through
+-- this same function, so no record reaches the catalog through a shortcut
+-- that skips these checks.
+function Candidate.PreparePut(root, record, options, claim, deferred)
     local carriedUnknown
-    ST.debugStats.putCalls = ST.debugStats.putCalls + 1
-    local root, why = MutationGate()
-    if not root then return false, why end
     if type(record) ~= "table" or record.id == nil then
         return false, "build id required"
     end
@@ -5529,9 +5601,18 @@ local function PutInternal(record, options, claim, deferred)
         return false, "LOCAL_OWNER_REQUIRED"
     end
     local candidateSlot = {key=slot.key, id=slot.id, kind=slot.kind}
-    local handle = Candidate.NewPutPreparation(root, record, options, claim,
+    return Candidate.NewPutPreparation(root, record, options, claim,
         deferred,
         candidateSlot, existing, readmitTombstone, carriedUnknown)
+end
+
+local function PutInternal(record, options, claim, deferred)
+    ST.debugStats.putCalls = ST.debugStats.putCalls + 1
+    local root, why = MutationGate()
+    if not root then return false, why end
+    local handle, prepareWhy = Candidate.PreparePut(root, record, options,
+        claim, deferred)
+    if not handle then return false, prepareWhy end
     local work = NewWork(handle.counters)
     local prepared, prepareWhy = Candidate.PumpPutPreparation(handle, work)
     ClosePump(work)
@@ -5559,6 +5640,107 @@ local function PutInternal(record, options, claim, deferred)
     if not ok then return false, commitWhy end
     ST.debugStats.putChanges = ST.debugStats.putChanges + 1
     return true, put.storedAs
+end
+
+-- A finite, frozen batch of validated records published as ONE catalog
+-- mutation. Membership is fixed when the batch is created: a record that
+-- arrives later waits for a later batch instead of enlarging or restarting
+-- this candidate. Each member is prepared by PreparePutHandle and the ordinary
+-- row walk, keeps its own ticket, storage answer and refusal reason, and the
+-- admitted members are published together by the existing multi-item commit.
+-- The batch holds each member's allocation reservation until publication, in
+-- handle.claims; it is the only holder, because one candidate owns the
+-- mutation gate for its whole life.
+Candidate.BATCH_MAX_MEMBERS = 64
+
+function Candidate.NewBatchPutPreparation(root, members, deferred)
+    return {
+        mode="mutation", phase="batch-prepare", counters=NewCounters(), pumps=1,
+        preparationIdentity={}, failure=nil, token=root.token,
+        originalRoot=root, ticket=nil, reason="receiver batch",
+        deferred=deferred, notifyScope="all", completion="put",
+        storedAs="overlay", claims={},
+        batch={members=members, index=1, items={}, admitted=0, refused=0},
+    }
+end
+
+function Candidate.PumpBatchPutPreparation(handle, work)
+    local batch = handle.batch
+    while batch.index <= #batch.members do
+        if Exhausted(work.budget) then return "pending" end
+        local member = batch.members[batch.index]
+        if member.outcome then
+            batch.index = batch.index + 1
+        elseif not member.sub then
+            local sub, prepareWhy = Candidate.PreparePut(handle.originalRoot,
+                member.record, member.options, nil, handle.deferred)
+            if sub then
+                member.sub = sub
+            else
+                member.outcome = "failed"
+                member.reason = prepareWhy or "ROOT_CONSTRUCTION_FAILED"
+                batch.refused, batch.index = batch.refused + 1, batch.index + 1
+            end
+        else
+            local prepared, why = Candidate.PumpPutPreparation(member.sub, work)
+            if prepared == "pending" then return "pending" end
+            if prepared == "prepared" then
+                local put = member.sub.put
+                if put.claim then
+                    handle.claims[#handle.claims + 1] = put.claim
+                    if ST.activeClaim == put.claim then ST.activeClaim = nil end
+                    put.claim = nil
+                end
+                member.outcome, member.storedAs = "admitted", put.storedAs
+                batch.items[#batch.items + 1] = put.item
+                batch.admitted = batch.admitted + 1
+            elseif prepared == "noop" then
+                member.outcome, member.storedAs = "noop", why
+            else
+                member.outcome = "failed"
+                member.reason = why or "ROOT_CONSTRUCTION_FAILED"
+                batch.refused = batch.refused + 1
+            end
+            batch.index = batch.index + 1
+        end
+    end
+    if #batch.items == 0 then return "noop" end
+    local outcome, commitWhy = CommitBatch(handle.originalRoot, batch.items,
+        "receiver batch", handle.deferred, handle.notifyScope, handle)
+    if type(outcome) ~= "table" then
+        return "failed", commitWhy or "ROOT_CONSTRUCTION_FAILED"
+    end
+    return "ready"
+end
+
+-- Public: commit several validated records in one bounded catalog mutation.
+-- requests[i] = {record=<validated record>, options=<put options>}. The answer
+-- is one ticket per request, in the same order, or false and a reason when no
+-- candidate could be created at all.
+function Catalog.PutBatch(requests)
+    if type(requests) ~= "table" then return false, "batch required" end
+    local count = #requests
+    if count == 0 then return false, "empty batch" end
+    if count > Candidate.BATCH_MAX_MEMBERS then
+        return false, "BATCH_TOO_LARGE"
+    end
+    local root, why = MutationGate()
+    if not root then return false, why end
+    ST.debugStats.putCalls = ST.debugStats.putCalls + count
+    local members, tickets = {}, {}
+    for index = 1, count do
+        local request = requests[index]
+        local member = {ticket={state="pending", committed=false, pumps=0}}
+        if type(request) ~= "table" then
+            member.outcome, member.reason = "failed", "build id required"
+        else
+            member.record, member.options = request.record, request.options
+        end
+        ST.mutationTickets[member.ticket] = true
+        members[index], tickets[index] = member, member.ticket
+    end
+    ST.candidate = Candidate.NewBatchPutPreparation(root, members, false)
+    return nil, "ROOT_MUTATION_PENDING", tickets
 end
 
 function Catalog.Put(record, options)
