@@ -3971,6 +3971,21 @@ function Candidate.PreparationWork(handle)
     return amount
 end
 
+-- Passive current-step counters. Only the three row walks that already hold
+-- their own index against the fixed slot vector report a total; every other
+-- phase returns nil, so no caller can present a guessed or counted size.
+function Candidate.StepProgress(handle)
+    if not handle then return nil end
+    local total, done = handle.slotCount
+    if handle.phase == "rows" then done = (handle.rowIndex or 1) - 1
+    elseif handle.phase == "finalize-scan" then done = (handle.finalizeIndex or 1) - 1
+    elseif handle.phase == "index" then done = handle.indexIndex
+    else return nil end
+    if type(total) ~= "number" or type(done) ~= "number" or total < 1
+        or done < 0 or done > total then return nil end
+    return done, total
+end
+
 -- Scalar, read-only dependency description. The separate empty identity has
 -- no authority fields; editing it cannot change a candidate. Neither this
 -- query nor identity comparison admits, invalidates or advances any root.
@@ -3987,6 +4002,7 @@ function Catalog.ManualPreparationStatus()
         and handle.originalRoot == root and token == root.token
         and handle.preparationIdentity ~= nil
     local witness = handle and (handle.witnessHandle or handle.sourceVerifyHandle)
+    local stepDone, stepTotal = Candidate.StepProgress(handle)
     return {ready=agrees and ST.rootState == "ROOT_ADMITTED" and handle == nil or false,
         relevant=relevant or false, ownerAgrees=agrees or false,
         reason=not agrees and "OWNER_OR_GENERATION_MISMATCH"
@@ -3999,6 +4015,7 @@ function Catalog.ManualPreparationStatus()
         index=handle and handle.indexIndex or 0,
         witnessRoot=witness and witness.rootIndex or 0,
         witnessDepth=witness and #witness.frames or 0,
+        stepDone=stepDone, stepTotal=stepTotal,
         binding=ST.bindingGeneration, generation=ST.generation},
         relevant and handle.preparationIdentity or nil
 end
@@ -6316,6 +6333,21 @@ end
 
 function Catalog.BeginRecordCursor()
     return BeginCursor("record")
+end
+
+-- Passive position of a live record cursor: rows already passed and the
+-- fixed row count of the root it reads. No registry, drift or root change;
+-- a stale or foreign token simply has no position.
+function Catalog.RecordCursorProgress(token)
+    local state = type(token) == "table" and ST.cursorRegistry[token] or nil
+    local root = ServingCatalogRoot()
+    if not state or state.kind ~= "record" or not root or state.stale
+        or state.servingGeneration ~= ST.servingGeneration
+        or state.generation ~= ST.generation
+        or type(root.slotCount) ~= "number" or root.slotCount < 1 then
+        return nil
+    end
+    return math.min(root.slotCount, math.max(0, state.nextIndex - 1)), root.slotCount
 end
 
 function Catalog.RecordCursorNext(token)

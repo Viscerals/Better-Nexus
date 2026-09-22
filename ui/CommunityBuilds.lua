@@ -103,7 +103,7 @@ function M.WaitForStartup(view, resume)
                 startupText:SetText(StartupMessage(current))
                 if Nexus.LoadingStatus then
                     local percent,text=Nexus.LoadingStatus.Progress(current)
-                    startupBar:SetValue(percent or 0);startupProgress:SetText(text)
+                    if percent then startupBar:SetValue(percent);startupBar:Show() else startupBar:Hide() end;startupProgress:SetText(text)
                 end
                 if current.coreReady then startupLocal:Enable() else startupLocal:Disable() end
             end
@@ -114,7 +114,7 @@ function M.WaitForStartup(view, resume)
     startupText:SetText(StartupMessage(status))
     if Nexus.LoadingStatus then
         local percent,text=Nexus.LoadingStatus.Progress(status)
-        startupBar:SetValue(percent or 0);startupProgress:SetText(text)
+        if percent then startupBar:SetValue(percent);startupBar:Show() else startupBar:Hide() end;startupProgress:SetText(text)
     end
     if status.coreReady then startupLocal:Enable() else startupLocal:Disable() end
     if Nexus.Panel and Nexus.Panel.AttachMenuFrame then

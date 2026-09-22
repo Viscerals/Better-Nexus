@@ -6,8 +6,31 @@ Nexus.LoadingStatus = M
 local frame, lastSnapshot, startedAt, completedAt
 local lastUpdate, dismissed = -math.huge, false
 local buttons = setmetatable({}, {__mode="k"})
+-- One plain description per step reported by StartupStatus. Any step not
+-- listed falls back to a general description, never to a percentage.
 local phases = {
     ["store-validation"]="Reading your saved data",
+    ["store-characters"]="Checking saved character data",
+    ["store-finish"]="Finishing saved-data checks",
+    ["local-setup"]="Starting local Wishlist and Echo tools",
+    catalog="Preparing the build library",
+    ["catalog-collect"]="Collecting build library records",
+    ["catalog-sort"]="Sorting build library records",
+    ["catalog-rows"]="Checking build library records",
+    ["catalog-finalize-scan"]="Verifying checked build library records",
+    ["catalog-finalize-prune"]="Removing redundant build library copies",
+    ["catalog-index"]="Indexing build library records",
+    ["catalog-bundle"]="Preparing the build library save",
+    ["catalog-witness-capture"]="Verifying build library data",
+    ["catalog-witness-verify"]="Verifying build library data",
+    ["catalog-mutation-bundle"]="Preparing a build library update",
+    ["catalog-mutation"]="Preparing a build library update",
+    ["catalog-maintenance-prepare"]="Preparing a build library update",
+    ["catalog-put-prepare"]="Preparing a build library update",
+    ["catalog-mutation-session-writes"]="Applying a build library update",
+    ["catalog-mutation-session-tombstones"]="Applying a build library update",
+    ["catalog-mutation-session-barriers"]="Applying a build library update",
+    ["catalog-published"]="Finishing a build library update",
     scan="Reading Community builds",
     legacy="Reading older saved Community records",
     identities="Preparing shared build information",
@@ -38,34 +61,40 @@ function M.PhaseText(status)
         return (status.coreReady and "Shared data unavailable: " or "Startup stopped: ") .. Safe(status.reason)
     end
     if status.state=="ready" then return "Community builds and Leaderboard ready" end
+    local step=status.step or status.phase
+    if phases[step] then return phases[step] end
+    -- An unlisted catalog step is still catalog work, not Community reading.
+    if type(step)=="string" and step:sub(1,8)=="catalog-" then return phases.catalog end
     return phases[status.phase] or "Preparing Community data"
 end
+-- A percentage exists only for the current step, from that step's own
+-- completed/total pair in the same snapshot. Every other step is shown as
+-- in progress with no bar, so a previous step's value cannot remain.
 function M.Progress(status)
-    local done,total=tonumber(status.progressDone),tonumber(status.progressTotal)
+    local done,total=tonumber(status.stepDone),tonumber(status.stepTotal)
     if status.state=="ready" then return 100,"Ready" end
     if status.state=="failed" then return nil,"See /nexus status for the recorded reason" end
+    local step=M.PhaseText(status)
     if done and total and total>0 and total<math.huge and done>=0 and done<=total
         and done==math.floor(done) and total==math.floor(total) then
         local percent=math.floor(done*100/total)
-        return percent,string.format("This step: %d / %d (%d%%)",done,total,percent)
-    end
-    if status.coreReady==false and tonumber(status.coreSlices) then
-        return nil,"Checking saved data; total progress is not yet measurable"
+        return percent,string.format("Current step: %s; %d / %d (%d%%)",step,done,total,percent)
     end
     local scanned=tonumber(status.recordsSeen)
-    if status.phase=="scan" and scanned and scanned>=0 and scanned<math.huge then
-        return nil,string.format("%d records inspected; total work not yet known",scanned)
+    if (status.step or status.phase)=="scan" and scanned and scanned>0 and scanned<math.huge
+        and scanned==math.floor(scanned) then
+        return nil,string.format("Current step: %s; %d records read (in progress)",step,scanned)
     end
-    return nil,"Working... total progress is not yet measurable"
+    return nil,"Current step: "..step.." (in progress)"
 end
+-- Local availability only; the step line is shown once, next to its bar.
 function M.Detail(status)
-    local _,progress=M.Progress(status)
     if status.state=="failed" then
         return status.coreReady and "Local Wishlist tools and Echo controls remain available.\nShared views are unavailable; see status for the reason."
             or "Local controls wait until saved data is checked.\nSee /nexus status for details. Keep your saved-data backup."
     end
-    return (status.coreReady and "Wishlist tools are ready; shared builds are still loading.\n" or "Wishlist tools unlock after your saved data is checked.\n")
-        .. M.PhaseText(status) .. ".\n" .. progress .. "\nProgress is for this step, not total startup."
+    return status.coreReady and "Wishlist tools are ready; shared builds are still loading."
+        or "Wishlist tools unlock after your saved data is checked."
 end
 local function PaintButtons(status)
     for button,label in pairs(buttons) do
@@ -101,7 +130,7 @@ local function EnsureFrame()
     if frame then return frame end
     local f=CreateFrame("Frame","NexusLoadingStatusFrame",UIParent)
     frame=f
-    f:SetSize(430,118);f:SetPoint("BOTTOMRIGHT",UIParent,"BOTTOMRIGHT",-24,180)
+    f:SetSize(430,130);f:SetPoint("BOTTOMRIGHT",UIParent,"BOTTOMRIGHT",-24,180)
     f:SetFrameStrata("HIGH");f:SetFrameLevel(80);f:SetClampedToScreen(true)
     f:EnableMouse(false) -- no full-screen shield; other controls remain usable
     f:SetMovable(true)
@@ -117,16 +146,16 @@ local function EnsureFrame()
     f.title=f:CreateFontString(nil,"OVERLAY","GameFontNormal")
     f.title:SetPoint("TOPLEFT",12,-10);f.title:SetWidth(375);f.title:SetJustifyH("LEFT")
     f.detail=f:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    f.detail:SetPoint("TOPLEFT",12,-31);f.detail:SetSize(402,30);f.detail:SetJustifyH("LEFT")
+    f.detail:SetPoint("TOPLEFT",12,-31);f.detail:SetSize(402,42);f.detail:SetJustifyH("LEFT")
     f.bar=CreateFrame("StatusBar",nil,f)
-    f.bar:SetPoint("TOPLEFT",12,-64);f.bar:SetSize(402,10)
+    f.bar:SetPoint("TOPLEFT",12,-76);f.bar:SetSize(402,10)
     f.bar:SetFrameStrata("HIGH");f.bar:SetFrameLevel(81)
     f.bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     f.bar:SetStatusBarColor(.3,.65,.9,1);f.bar:SetMinMaxValues(0,100)
     local bg=f.bar:CreateTexture(nil,"BACKGROUND");bg:SetAllPoints(f.bar)
     bg:SetTexture("Interface\\Buttons\\WHITE8X8");bg:SetVertexColor(.10,.12,.15,1)
     f.progress=f:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    f.progress:SetPoint("TOPLEFT",12,-78);f.progress:SetSize(300,28);f.progress:SetJustifyH("LEFT")
+    f.progress:SetPoint("TOPLEFT",12,-92);f.progress:SetSize(300,28);f.progress:SetJustifyH("LEFT")
     f.localButton=CreateFrame("Button","NexusLoadingOpenWishlist",f,"UIPanelButtonTemplate")
     f.localButton:SetFrameStrata("HIGH");f.localButton:SetFrameLevel(82)
     f.localButton:SetPoint("BOTTOMRIGHT",-12,8);f.localButton:SetSize(96,23);f.localButton:SetText("Wishlists")
@@ -155,10 +184,12 @@ function M.Update(status,force)
     f.title:SetText(status.state=="ready" and "Nexus ready"
         or status.state=="failed" and "Nexus loading stopped" or "Nexus loading")
     local localText=status.coreReady and "Wishlist tools ready; shared builds may still be loading" or "Reading your local Wishlist and Echo data"
-    f.detail:SetText(localText.."\n"..M.PhaseText(status))
+    -- The full-width line carries the step; elapsed time never sets a percent.
+    f.detail:SetText(localText.."\n"..progress)
     local elapsed=math.max(0,math.floor(now-startedAt))
-    f.progress:SetText(progress .. (status.state=="ready" and "" or string.format("\nElapsed %d:%02d",math.floor(elapsed/60),elapsed%60)))
-    f.bar:SetValue(percent or 0) -- unknown is not an invented percentage
+    f.progress:SetText(status.state=="ready" and "" or string.format("Elapsed %d:%02d",math.floor(elapsed/60),elapsed%60))
+    -- Unknown size: no bar at all, rather than an empty one that looks stuck.
+    if percent then f.bar:SetValue(percent);f.bar:Show() else f.bar:Hide() end
     if status.coreReady then f.localButton:Enable() else f.localButton:Disable() end
     if status.state=="ready" then
         completedAt=completedAt or now

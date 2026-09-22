@@ -62,11 +62,44 @@ function Lifecycle.New(options)
     -- diagnostic report, "unknown" until the gate is first reached. No
     -- history, no counter, never read by any decision.
     local syncGate = {reason="unknown", owner="unknown"}
+    -- The step the existing owners are on now, with a completed/total pair
+    -- only when that owner already holds both. Reads scalar state only: no
+    -- pump, drift check, cursor advance or extra scan sizes a step.
+    local function CurrentStep()
+        local catalog=Nexus.BuildCatalog
+        if not initialized then
+            local okState,store=false,nil
+            if bootstrapCoordinator and type(bootstrapCoordinator.State)=="function" then
+                okState,store=pcall(bootstrapCoordinator.State,bootstrapCoordinator)
+            end
+            store=okState and store or nil
+            if store=="STORE_CHAR_MIGRATION_PENDING"
+                or store=="STORE_DURABLE_BUNDLE_ADMISSION_PENDING" then
+                return "store-characters"
+            elseif store=="STORE_COMPACTION_PENDING" or store=="STORE_FINAL_COMMIT_PENDING"
+                or store=="STORE_LEGACY_DISPOSITION_PENDING"
+                or store=="STORE_SERVING_PUBLICATION_PENDING" then
+                return "store-finish"
+            elseif store=="STORE_READY" then return "local-setup"
+            elseif store~="STORE_AUTHORITY_PENDING" then return "store-validation" end
+        elseif communityReady then return "complete" end
+        local okPrep,prep=false,nil
+        if catalog and type(catalog.ManualPreparationStatus)=="function" then
+            okPrep,prep=pcall(catalog.ManualPreparationStatus)
+        end
+        if okPrep and type(prep)=="table" and prep.phase~=nil then
+            return "catalog-"..tostring(prep.phase),prep.stepDone,prep.stepTotal
+        end
+        if not initialized then return "catalog" end
+        return startupTiming.communityPhase or "community",
+            startupTiming.communityProgressDone,startupTiming.communityProgressTotal
+    end
     -- Read-only scalar snapshot. This does not pump, admit or authorize data.
     Nexus.StartupStatus = function()
         local failure=startupTiming.coreFailure or communityFailure
             or (bootstrapTerminal and bootstrapTerminal.state=="failed"
                 and (bootstrapTerminal.detail or bootstrapTerminal.reason or "STORE_INVALID"))
+        local step,stepDone,stepTotal=CurrentStep()
         return {coreReady=initialized, state=failure and "failed"
             or communityReady and "ready" or "pending",
             phase=not initialized and "store-validation"
@@ -75,6 +108,7 @@ function Lifecycle.New(options)
             progressDone=startupTiming.communityProgressDone,
             progressTotal=startupTiming.communityProgressTotal,
             recordsSeen=startupTiming.communityRecordsSeen or 0,
+            step=step,stepDone=stepDone,stepTotal=stepTotal,
             coreSlices=startupTiming.slices or 0,
             syncGate=syncGate.reason, syncGateOwner=syncGate.owner,
             syncGateAdapterReady=syncGate.adapterReady,

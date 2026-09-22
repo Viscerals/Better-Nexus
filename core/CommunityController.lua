@@ -3652,10 +3652,16 @@ function Controller.New(options)
         local function Result(job)
             local phase=job.pending and "commit" or job.phase
             local list=phase=="legacy" and job.removals or phase=="identities" and job.repairs
+            local done,total
+            if list then done,total=math.min(#list,math.max(0,job.index-1)),#list
+            elseif phase=="scan" and job.cursor and catalog
+                and type(catalog.RecordCursorProgress)=="function" then
+                -- The cursor's own position; no second pass sizes the scan.
+                done,total=catalog.RecordCursorProgress(job.cursor)
+            end
             return {state=job.state,reason=job.reason,phase=phase,
                 mutationTicket=job.pending,recordsSeen=job.scanned or 0,
-                progressDone=list and math.min(#list,math.max(0,job.index-1)) or nil,
-                progressTotal=list and #list or nil}
+                progressDone=done,progressTotal=total}
         end
         if not (catalog and catalog.BeginRecordCursor and catalog.RootState) then
             return {state="failed",reason="COMMUNITY_CATALOG_UNAVAILABLE"}
