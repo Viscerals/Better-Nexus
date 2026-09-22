@@ -94,6 +94,34 @@ function Lifecycle.New(options)
         return startupTiming.communityPhase or "community",
             startupTiming.communityProgressDone,startupTiming.communityProgressTotal
     end
+    -- Read-only, session-only facts the failed Store result already holds:
+    -- stage, cause, detail, owner, a bounded one-line error, the selection
+    -- row, and the settings-format verdict. Reads the retained result and a
+    -- pure classification only; never binds, pumps or retries.
+    local function FailureFacts()
+        local r = bootstrapTerminal
+        if type(r) ~= "table" or r.state ~= "failed" then return nil end
+        local function Token(value, limit)
+            if value == nil then return nil end
+            local text = tostring(value):gsub("[%c|]", " ")
+            if #text > limit then text = text:sub(1, limit) .. "..." end
+            return text
+        end
+        local facts = {stage=Token(r.stage, 48), cause=Token(r.cause, 48),
+            detail=Token(r.detail, 48), owner=Token(r.owner, 64),
+            error=Token(r.error, 160), row=tonumber(r.row)}
+        local internals = Nexus.MainInternals
+        local classify = type(internals) == "table" and internals.SavedFormatClassV1
+        if type(classify) == "function" then
+            local ok, class, version, field = pcall(classify)
+            if ok then
+                facts.formatClass = Token(class, 16)
+                facts.formatVersion = tonumber(version)
+                facts.formatField = Token(field, 64)
+            end
+        end
+        return facts
+    end
     -- Read-only scalar snapshot. This does not pump, admit or authorize data.
     Nexus.StartupStatus = function()
         local failure=startupTiming.coreFailure or communityFailure
@@ -109,6 +137,7 @@ function Lifecycle.New(options)
             progressTotal=startupTiming.communityProgressTotal,
             recordsSeen=startupTiming.communityRecordsSeen or 0,
             step=step,stepDone=stepDone,stepTotal=stepTotal,
+            failure=FailureFacts(),
             coreSlices=startupTiming.slices or 0,
             syncGate=syncGate.reason, syncGateOwner=syncGate.owner,
             syncGateAdapterReady=syncGate.adapterReady,

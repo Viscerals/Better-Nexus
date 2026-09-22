@@ -281,6 +281,11 @@ end
 Nexus.MainInternals.SavedSyncModeV1 = function()
     return SavedFormat.SyncMode(NexusDB)
 end
+-- Read-only: the settings-format verdict (class, saved number, failing
+-- field) for startup diagnostics. Classification writes nothing.
+Nexus.MainInternals.SavedFormatClassV1 = function()
+    return SavedFormat.Classify(NexusDB)
+end
 
 -- Bounded, display-safe description of a malformed marker: its type and,
 -- for a number, boolean or short string, its value. Never a table's content.
@@ -727,34 +732,38 @@ function StoreData.Build(db, token)
         and type(counters.Preflight) == "function") then
         return nil, "GENERATION_EXHAUSTED"
     end
+    local bundle = token and token.bundleDeferred and type(db) == "table"
+        and rawget(db, "authorityBundle") or nil
+    local wrapper = PlainTable(bundle) and rawget(bundle, "storeData") or nil
     if token and token.bundleDeferred then
-        local bundle = type(db) == "table" and rawget(db, "authorityBundle")
-            or nil
-        local wrapper = PlainTable(bundle) and rawget(bundle, "storeData")
-            or nil
-        if not PlainTable(wrapper) or rawget(wrapper, "schemaVersion") ~= 1
-            or not PlainTable(rawget(wrapper, "settings"))
-            or not PlainTable(rawget(wrapper, "chars"))
-            or not PlainTable(rawget(wrapper, "accountCharacters"))
-            or not PlainTable(rawget(wrapper, "migrationMarker")) then
-            return nil, "STORE_INVALID"
+        -- The third value names the failed check (session diagnostics only);
+        -- the failure code itself stays STORE_INVALID.
+        if not PlainTable(wrapper) then return nil, "STORE_INVALID", "STORE_DATA_ABSENT" end
+        if next(wrapper) == nil then return nil, "STORE_INVALID", "STORE_DATA_EMPTY" end
+        if rawget(wrapper, "schemaVersion") ~= 1 then
+            return nil, "STORE_INVALID", "STORE_DATA_SCHEMA"
+        end
+        for _, field in ipairs({"settings", "chars", "accountCharacters", "migrationMarker"}) do
+            if not PlainTable(rawget(wrapper, field)) then
+                return nil, "STORE_INVALID", "STORE_DATA_FIELD:" .. field
+            end
         end
         local known = {schemaVersion=true, storeRevision=true,
             settingsRevision=true, accountRevision=true, settingsVersion=true,
             settings=true, chars=true, accountCharacters=true,
             migrationMarker=true}
         for key in pairs(wrapper) do
-            if not known[key] then return nil, "STORE_INVALID" end
+            if not known[key] then return nil, "STORE_INVALID", "STORE_DATA_UNKNOWN_KEY" end
         end
         local marker = rawget(wrapper, "migrationMarker")
         if rawget(marker, "version") ~= 1
             or type(rawget(marker, "completed")) ~= "boolean"
             or not DECISION[rawget(marker, "decision")] then
-            return nil, "STORE_INVALID"
+            return nil, "STORE_INVALID", "STORE_DATA_MARKER"
         end
         for key in pairs(marker) do
             if key ~= "version" and key ~= "completed" and key ~= "decision" then
-                return nil, "STORE_INVALID"
+                return nil, "STORE_INVALID", "STORE_DATA_MARKER"
             end
         end
         local highest = StoreData.revision
@@ -764,7 +773,7 @@ function StoreData.Build(db, token)
             local exact, why = counters.Preflight({
                 {owner=probe, key="value", amount=1},
             })
-            if not exact then return nil, why end
+            if not exact then return nil, why, "STORE_DATA_REVISION:" .. key end
             highest = math.max(highest, probe.value)
         end
         StoreData.revision = highest
@@ -950,8 +959,10 @@ local privateBootstrapHandle = nil
 local function OwnerCall(C, name, fn, a, b)
     local ok, value = pcall(fn, a, b)
     if ok then return true, value end
+    local stage = C.state
     C.state = SS.INVALID
-    C.result = {state="failed", reason="STORE_INVALID", owner=name, error=value}
+    C.result = {state="failed", reason="STORE_INVALID", owner=name, error=value,
+        stage=stage}
     return false
 end
 
@@ -959,7 +970,8 @@ local function BootstrapSlice(C)
     local state = C.state
     if state ~= SS.UNBOUND and NexusDB ~= C.database then
         C.state = SS.INVALID
-        C.result = {state="failed", reason="STORE_INVALID", detail="SOURCE_DRIFT"}
+        C.result = {state="failed", reason="STORE_INVALID", detail="SOURCE_DRIFT",
+            stage=state}
         return
     end
     if state == SS.UNBOUND then
@@ -967,7 +979,7 @@ local function BootstrapSlice(C)
         C.token = token
         if token.failure then
             C.state = token.failure
-            C.result = {state="failed", row=token.row,
+            C.result = {state="failed", row=token.row, stage=state,
                 reason=token.failure == SS.FUTURE_SCHEMA
                     and "FUTURE_SCHEMA" or "STORE_INVALID"}
             return
@@ -975,7 +987,7 @@ local function BootstrapSlice(C)
         if not BindSelectedDatabase(token) then
             C.state = SS.INVALID
             C.result = {state="failed", reason="STORE_INVALID",
-                detail="BIND_VERIFICATION"}
+                detail="BIND_VERIFICATION", stage=state}
             return
         end
         token.legacyClass = LegacyTerminalClass(token)
@@ -1022,7 +1034,7 @@ local function BootstrapSlice(C)
         if C.charWork.failure then
             C.state = SS.INVALID
             C.result = {state="failed", reason="STORE_INVALID",
-                detail=C.charWork.failure}
+                detail=C.charWork.failure, stage=state}
             return
         end
         -- Line 1346: the completed frontier yields ONE detached StoreDataV1.
@@ -1031,11 +1043,12 @@ local function BootstrapSlice(C)
         -- site is the guarded one in STORE_COMPACTION_PENDING. The wrapper
         -- references the map when it exists and a detached empty table when it
         -- does not, so building the candidate never writes to the database.
-        local storeData, storeDataWhy = StoreData.Build(db, C.token)
+        local storeData, storeDataWhy, storeDataCause = StoreData.Build(db, C.token)
         if not storeData then
             C.state = SS.INVALID
             C.result = {state="failed",
-                reason=storeDataWhy or "GENERATION_EXHAUSTED"}
+                reason=storeDataWhy or "GENERATION_EXHAUSTED",
+                stage=state, cause=storeDataCause}
             return
         end
         C.storeData = storeData
@@ -1225,7 +1238,7 @@ local function BootstrapSlice(C)
         local disposed, failure = DisposeLegacyBinding(C.token)
         if not disposed then
             C.state = failure
-            C.result = {state="failed", legacyClass=C.token.legacyClass,
+            C.result = {state="failed", legacyClass=C.token.legacyClass, stage=state,
                 reason=failure == SS.DISPOSITION_FAILED
                     and "LEGACY_DISPOSITION_FAILED"
                     or "LEGACY_DISPOSITION_REAUTH_REQUIRED"}

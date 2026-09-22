@@ -797,12 +797,33 @@ local function CommandFlags()
     end
 end
 
+-- One bounded line of the retained start-up failure facts, or nil.
+local function StartupFailureLine(status)
+    local f = type(status) == "table" and status.failure or nil
+    if type(f) ~= "table" then return nil end
+    local parts = {}
+    local function Add(label, value)
+        if value ~= nil then parts[#parts + 1] = label .. "=" .. tostring(value) end
+    end
+    Add("stage", f.stage); Add("cause", f.cause); Add("detail", f.detail)
+    Add("owner", f.owner); Add("row", f.row); Add("error", f.error)
+    if f.formatClass then
+        Add("saved format", tostring(f.formatClass)
+            .. (f.formatVersion and (" " .. tostring(f.formatVersion)) or "")
+            .. (f.formatField and (" (" .. tostring(f.formatField) .. ")") or ""))
+    end
+    if #parts == 0 then return nil end
+    return "Startup failure: " .. table.concat(parts, "; ")
+end
+
 local function CommandStatus()
     local startup=type(Nexus.StartupStatus)=="function" and Nexus.StartupStatus()
     if startup and startup.state~="ready" then
         Print(startup.state=="failed"
             and "Local controls ready; shared data preparation failed (see /nexus log errors)."
             or "Local controls ready; Community, Leaderboard and Sync are preparing in the background.")
+        local line = StartupFailureLine(startup)
+        if line then Print(line) end
     end
     local catalog = Adapter.Catalog()
     local wishlist = Adapter.Wishlist()
@@ -1018,6 +1039,8 @@ EnsureMainCommands = function()
             Print(status and status.state=="failed"
                 and ("Startup stopped: "..tostring(status.reason or "validation failed"))
                 or "Preparing local saved data; controls unlock after validation completes.")
+            local line = status and status.state=="failed" and StartupFailureLine(status)
+            if line then Print(line) end
         end,
         prepare=function() return Store.Settings() end,
         callbacks={
