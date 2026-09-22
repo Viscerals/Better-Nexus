@@ -55,6 +55,16 @@ local runtime = {
     restarts=0,failures=0,completed=0,pending=false,lastReason="none",
 }
 
+-- A present settings marker that is not a finite whole number of 0 or more
+-- (6.5, -1, NaN, inf, any string including "5", a boolean, a table) is
+-- malformed. Store keeps such data read-only; this converter agrees and never
+-- coerces it with tonumber.
+local function MalformedSettingsMarker(database)
+    local raw = rawget(database, "settingsVersion")
+    return raw ~= nil and not (type(raw) == "number" and raw == raw
+        and raw >= 0 and raw < math.huge and raw == math.floor(raw))
+end
+
 local function Finite(value)
     value = tonumber(value)
     return value ~= nil and value == value
@@ -839,6 +849,10 @@ function Migration.Init(database)
         return {complete=true,needed=true,reason="complete"}
     end
 
+    if MalformedSettingsMarker(database) then
+        return {complete=true,needed=false,skipped=true,readOnly=true,
+            reason="malformed settings format marker left untouched"}
+    end
     local settingsVersion = tonumber(database.settingsVersion) or 0
     if settingsVersion > LAST_KNOWN_LEGACY_SETTINGS_VERSION then
         -- Settings and DPS/catalog storage have separate schema owners.  This
@@ -881,6 +895,9 @@ function Migration.AccountWritesAllowed(database)
     database = type(database) == "table" and database
         or type(NexusDB) == "table" and NexusDB or nil
     if not database then return false, "database unavailable" end
+    if MalformedSettingsMarker(database) then
+        return false, "malformed settings format marker is read-only"
+    end
     local store = Nexus and Nexus.Store
     local currentSettingsVersion = store
         and type(store.SettingsVersion) == "function"

@@ -41,6 +41,12 @@ local function writeStatus()
 end
 -- The actual saved and supported markers, never a guess about who wrote them.
 local function savedFormatText(status)
+    if status.format=="malformed" then
+        return string.format("The saved data format marker is not a valid format number (%s%s). This build writes format %s. The data is kept unchanged and read-only.",
+            tostring(status.markerType or "unknown type"),
+            status.markerText and (" "..tostring(status.markerText)) or "",
+            tostring(tonumber(status.supportedFormat) or "?"))
+    end
     local saved,supported=tonumber(status.savedFormat),tonumber(status.supportedFormat)
     if not saved or not supported then return WRITE_REASON.lifecycle end
     if status.format=="unverified" then

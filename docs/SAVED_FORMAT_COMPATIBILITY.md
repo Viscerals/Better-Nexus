@@ -14,7 +14,8 @@ Format 5 is not newer. The earlier Better Nexus test line (archived commit `58b8
 | Accepted ("known") | Local reads and writes are durable. The saved marker stays at its value; it is not lowered or raised. As for every profile this build opens, start-up also adds missing default settings keys and missing empty character sub-tables, and writes its own storage-migration receipt (`nexusStoreMigrations`). Before this change, none of that happened for formats 3 to 5. |
 | Not accepted ("unverified") | The data stays unchanged and read-only. Messages name the saved format, the supported format and the first failing field. |
 | Format 6 and higher ("future") | Unchanged and read-only, as before. |
-| Format 2, 1 and unversioned | Unchanged behavior. |
+| Format 2, 1, 0 and unversioned (marker absent) | Unchanged behavior. |
+| Malformed marker | A marker that is present but not a finite whole number of 0 or more: fractions such as 6.5, negative values, NaN and infinities, every string (including a numeric string such as "5"), booleans, tables and other types. The data stays unchanged and read-only, like a future format: no default filling, stamping, conversion or character writes. The message names the marker's type and, for a number, boolean or short string, its value. This build and the older converter both refuse it. Treating numeric strings as malformed is an intentional tightening: test.9034 and earlier read "5" as 5. |
 
 The message "written by a newer Nexus version" is replaced by the real markers, for example: "Saved data format 6 is not supported. This build writes format 2 and reads formats 3 to 5 after a check. The data is kept unchanged and read-only."
 
@@ -62,6 +63,6 @@ The copy does not change the original plain-name row, so the other addon can sti
 
 - In formats 3 to 5 a plain-name row is shared by every character of that name on the account. A same-name character on another realm that used the row before the ledger existed (format 4), and has not logged in since, cannot be detected. The ledger then lists only this realm, and the copy goes ahead.
 - The format check result is kept for the session per saved table. A later change inside the settings or the ledger during the same session is not re-checked; this build writes neither the checked settings nor the ledger for these formats.
-- A saved marker that is not a whole number (for example 6.5) is still read as unversioned and stamped 2. This was already so before this change.
+- Up to test.9034, a malformed marker (for example 6.5) was read as unversioned and stamped 2. From the build after test.9034 it stays unchanged and read-only (see "Malformed marker").
 - The check is offline, with synthetic data built from the reference layout. It has no native evidence and no tester profile behind it.
 - Returning to the other addon later is not tested. Changes made here go to the `name@realm` row, which that addon does not read.

@@ -39,7 +39,12 @@ function F.Database(o)
 end
 function F.Serialize(v,parents)
  if type(v)=='string'then return string.format('%q',v)end
- if type(v)=='number'or type(v)=='boolean'or v==nil then return tostring(v)end
+ if type(v)=='number' then
+  -- Literal forms that also load back: NaN and infinities included.
+  if v~=v then return '(0/0)' elseif v==math.huge then return '(1/0)' elseif v==-math.huge then return '(-1/0)' end
+  return string.format('%.17g',v)
+ end
+ if type(v)=='boolean'or v==nil then return tostring(v)end
  assert(type(v)=='table','only serializable synthetic data')
  parents=parents or {};assert(not parents[v],'cycle cannot be saved');parents[v]=true
  local keys={};for k in pairs(v)do keys[#keys+1]=k end

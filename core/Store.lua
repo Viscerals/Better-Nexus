@@ -233,7 +233,16 @@ end
 -- database and top-level tables, so repeated reads do not walk the ledger.
 function SavedFormat.Classify(db)
     if type(db) ~= "table" then return "supported", 0 end
-    local version = NormalizeVersion(rawget(db, "settingsVersion"))
+    -- Only an ABSENT marker is an unversioned save. A present marker must be a
+    -- finite whole number of 0 or more; anything else (6.5, -1, NaN, inf, any
+    -- string including "5", a boolean or a table) is "malformed": kept
+    -- unchanged and read-only, never coerced to 0, stamped or lowered.
+    local raw = rawget(db, "settingsVersion")
+    if raw ~= nil and not (type(raw) == "number" and raw == raw and raw >= 0
+        and raw < math.huge and raw == math.floor(raw)) then
+        return "malformed", nil, nil
+    end
+    local version = NormalizeVersion(raw)
     if version <= SETTINGS_VERSION then return "supported", version end
     if version < SavedFormat.FIRST or version > SavedFormat.LAST then
         return "future", version
@@ -254,7 +263,26 @@ end
 
 local function HasFutureSettingsOwner(db)
     local class = SavedFormat.Classify(db)
-    return class == "future" or class == "unverified"
+    return class == "future" or class == "unverified" or class == "malformed"
+end
+
+-- Bounded, display-safe description of a malformed marker: its type and,
+-- for a number, boolean or short string, its value. Never a table's content.
+function SavedFormat.Describe(db)
+    local raw
+    if type(db) == "table" then raw = rawget(db, "settingsVersion") end
+    local kind = type(raw)
+    if kind == "number" then
+        local text = raw ~= raw and "NaN" or raw == math.huge and "inf"
+            or raw == -math.huge and "-inf" or string.format("%.6g", raw)
+        return kind, text
+    elseif kind == "boolean" then
+        return kind, tostring(raw)
+    elseif kind == "string" then
+        local text = raw:sub(1, 16):gsub("[^%w%.%-%+ ]", "?")
+        return kind, '"' .. text .. (#raw > 16 and '..."' or '"')
+    end
+    return kind, nil
 end
 
 local function AccountWritesAllowed(database)
@@ -1595,10 +1623,14 @@ function Store.StateWriteStatus()
     local db = NexusDB
     if type(db) ~= "table" then return {mode="unavailable", reason="database"} end
     local formatClass, savedFormat, field = SavedFormat.Classify(db)
-    if formatClass == "future" or formatClass == "unverified" then
+    if formatClass == "future" or formatClass == "unverified"
+        or formatClass == "malformed" then
+        local markerType, markerText
+        if formatClass == "malformed" then markerType, markerText = SavedFormat.Describe(db) end
         return {mode="unavailable", reason="saved-format", format=formatClass,
             savedFormat=savedFormat, supportedFormat=SETTINGS_VERSION,
-            knownFirst=SavedFormat.FIRST, knownLast=SavedFormat.LAST, field=field}
+            knownFirst=SavedFormat.FIRST, knownLast=SavedFormat.LAST, field=field,
+            markerType=markerType, markerText=markerText}
     end
     local C = boundCoordinator
     if type(C) == "table" and type(C.State) == "function" then
