@@ -55,9 +55,17 @@ local function Snapshot()
     if type(Nexus.StartupStatus)=="function" then return Nexus.StartupStatus() end
     return {state="pending",coreReady=false,phase="store-validation"}
 end
+-- Saved-capacity refusals of the shared catalog, stated plainly. The data is
+-- complete and unchanged; only the shared catalog cannot be opened.
+local capacity = {
+    ROOT_SLOT_LIMIT="Community data unavailable: your saved Community list holds more builds than this build opens (limit 2048). Nothing was changed or deleted.",
+    TOMBSTONE_SET_LIMIT="Community data unavailable: the saved removal markers exceed the limit (2048). Nothing was changed or deleted.",
+    BARRIER_SET_LIMIT="Community data unavailable: the saved retention markers exceed the limit (2048). Nothing was changed or deleted.",
+}
 function M.PhaseText(status)
     status=status or Snapshot()
     if status.state=="failed" then
+        if status.coreReady and capacity[status.reason] then return capacity[status.reason] end
         return (status.coreReady and "Shared data unavailable: " or "Startup stopped: ") .. Safe(status.reason)
     end
     if status.state=="ready" then return "Community builds and Leaderboard ready" end

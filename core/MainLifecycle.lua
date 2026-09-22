@@ -7,6 +7,13 @@ if type(Nexus.MainInternals) ~= "table" then Nexus.MainInternals = {} end
 local Lifecycle = {}
 Nexus.MainInternals.Lifecycle = Lifecycle
 
+-- Root refusals that are purely about saved capacity: the data is complete
+-- and untouched, and only the shared catalog cannot be admitted. Local tools
+-- continue; every other refusal keeps the previous all-or-nothing behavior.
+local CAPACITY_REFUSALS = {
+    ROOT_SLOT_LIMIT=true, TOMBSTONE_SET_LIMIT=true, BARRIER_SET_LIMIT=true,
+}
+
 function Lifecycle.New(options)
     options = options or {}
     local Nexus = assert(options.nexus, "MainLifecycle requires Nexus")
@@ -422,7 +429,16 @@ function Lifecycle.New(options)
         if root and root.state~="ROOT_ADMITTED" then
             startupTiming.coreFailure=root.reason or root.state
             RecordStoreError(startupTiming.coreFailure)
-            return false
+            -- A capacity refusal is a complete, deterministic verdict on data
+            -- this build leaves exactly as it found it: the saved maps hold
+            -- more keys than the root admits. Local Wishlist and Echo tools do
+            -- not need the shared catalog, so they continue; Community,
+            -- Leaderboard and Sync stay unavailable (their own owners refuse
+            -- against the same refused root), the failure and its reason stay
+            -- reported, and nothing is written, evicted or migrated.
+            if not CAPACITY_REFUSALS[startupTiming.coreFailure] then
+                return false
+            end
         end
         local db = Database()
         local automation = EnsureAutomation()

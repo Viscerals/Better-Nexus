@@ -58,6 +58,7 @@ NAMES += ['format_marker_malformed']
 NAMES += ['sync_saved_mode_off','sync_saved_mode_manual','sync_saved_mode_controls','sync_saved_mode_share_retry']
 NAMES += ['startup_failure_causes','format5_bundle_placeholder']
 NAMES += ['catalog_root_capacity']
+NAMES += ['catalog_capacity_local_ready']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

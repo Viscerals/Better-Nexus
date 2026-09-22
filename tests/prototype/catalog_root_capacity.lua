@@ -23,9 +23,10 @@ local function Boot(db,bundled)
  local H=F.Boot(db);F.fileHooks=nil
  return Nexus.StartupStatus(),H
 end
-local function Ready(label,s)check(s.coreReady and s.state~='failed',label..': starts: '..tostring(s.reason))end
+local function Ready(label,s)check(s.coreReady and s.state~='failed',label..': starts with the shared catalog admitted: '..tostring(s.reason))end
 local function Refused(label,s,map,counter,source)
- check(s.state=='failed' and s.reason=='ROOT_SLOT_LIMIT' and not s.coreReady,label..': refused with ROOT_SLOT_LIMIT: '..tostring(s.reason))
+ check(s.state=='failed' and s.reason=='ROOT_SLOT_LIMIT',label..': refused with ROOT_SLOT_LIMIT: '..tostring(s.reason))
+ check(s.coreReady==true,label..': local tools still start (the shared catalog stays refused)')
  local f=s.failure or {}
  check(f.component=='catalog' and f.phase=='collect' and f.map==map and f.counter==counter
   and f.count==2049 and f.limit==2048 and f.source==source,
