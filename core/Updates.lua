@@ -25,11 +25,13 @@ local callbacks = {}
 -- peer-advisory quarantine, the legacy dismissed-list conversion and a new
 -- dismissal) happens only when saved data may really be written. Two
 -- conditions must hold: the start-up that initialized this module stated that
--- its session may write, and the saved-data owner reports a durable write at
--- that moment. A refused shared catalog, a failed start-up and a read-only
--- saved format therefore keep every stored update key exactly as found, also
--- through /nexus update, which runs before start-up completes. The bundled
--- release notice is evaluated and shown in every case.
+-- its session may write, and the saved-data owner does not refuse writes at
+-- that moment. A refused shared catalog and a read-only saved format therefore
+-- keep every stored update key exactly as found, also through /nexus update,
+-- which answers before start-up completes. An owner that is merely still
+-- loading is an early state of a valid owner, not a refusal, so ordinary
+-- upkeep is unchanged there. The bundled release notice is evaluated and shown
+-- in every case.
 local sessionPersists = true
 local function CanPersist()
     if not sessionPersists then return false end
@@ -40,7 +42,7 @@ local function CanPersist()
     end
     local ok, status = pcall(Store.StateWriteStatus)
     if not ok or type(status) ~= "table" then return false end
-    return status.mode == "durable"
+    return status.mode ~= "unavailable"
 end
 local notifiedTargets = {}            -- session only: one chat notice per target
 local peerObservations, peerObservationOrder = {}, {}
@@ -456,6 +458,9 @@ function Updates.Dismiss()
     if not CanPersist() then return true end
     if not Dismissed(candidate.key) then
         local list = NexusDB.updateDismissed
+        -- Dismissed() has already converted a saved single-entry string when
+        -- the owner allows it. The branch stays as the local guarantee that
+        -- the older entry is carried over rather than replaced.
         if type(list) == "string" then list = {list} end
         if type(list) ~= "table" then list = {} end
         list[#list + 1] = candidate.key

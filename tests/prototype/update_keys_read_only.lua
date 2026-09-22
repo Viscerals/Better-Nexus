@@ -38,6 +38,22 @@ local status=Nexus.Updates.Status()
 check(type(status)=='table' and type(status.state)=='string','read-only: the update status is still available: '..tostring(status.state))
 check(Nexus.Updates.Dismiss()==true,'read-only: a dismissal is accepted for this session')
 check(Keys()==before,'read-only: the dismissal writes nothing and keeps the saved list')
+-- The dismissal that cannot be saved still holds for this session: the same
+-- target is not announced again after it. Notices are switched off first so
+-- that the session state comes from the dismissal, not from an earlier notice.
+local notices=0
+Nexus.Updates.SetEnabled(false)
+Nexus.Updates.Init({notify=function()notices=notices+1 end})
+check(notices==0,'read-only: with notices off nothing is announced')
+check(Nexus.Updates.Dismiss()==true,'read-only: the dismissal is accepted')
+Nexus.Updates.SetEnabled(true)
+check(notices==0,'read-only: the dismissed target stays quiet for the rest of the session')
+check(Keys()==before,'read-only: it still writes no update key')
+-- Positive control: without the dismissal the same target is announced once.
+Nexus.Updates.SetEnabled(false)
+Nexus.Updates.Init({notify=function()notices=notices+1 end})
+Nexus.Updates.SetEnabled(true)
+check(notices==1,'control: the target is announced when it was not dismissed: '..notices)
 
 -- 2. Positive control: a durable session maintains the same keys as before.
 local durable=Saved(F.Database())
