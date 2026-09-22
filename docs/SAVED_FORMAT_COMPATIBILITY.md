@@ -35,7 +35,7 @@ The copy does not change the original plain-name row, so the other addon can sti
 | Field (format 5 meaning) | In this build |
 |---|---|
 | `settingsVersion` = 5 | Kept as 5. |
-| `settings.syncMode`, `syncOnlyWhileResting`, `syncSuspendInCombat`, `syncSuspendedInstanceTypes`, `syncDirectExperimental` (Good Enough Nexus Sync controls) | Stored and kept unchanged, but **not applied**. See "Sync: stored versus effective" below. |
+| `settings.syncMode`, `syncOnlyWhileResting`, `syncSuspendInCombat`, `syncSuspendedInstanceTypes`, `syncDirectExperimental` (Good Enough Nexus Sync controls) | Stored and kept unchanged. From the build after test.9034, `syncMode` Off and Manual are honored; the other controls are still **not applied**. See "Sync: stored versus effective" below. |
 | `settings.autoSave` (default off there, on here) | The saved value is kept. |
 | `settings.autoPick` (stored Take preference; same meaning in both addons) | Kept as saved. It is not the Automation master switch. |
 | Automation master switch (`autoEnabled`) | Not a saved setting in either addon. It is a session-only switch that starts OFF in every session and turns on only through the panel button or `/nexus auto`. No saved data can turn it on. |
@@ -52,12 +52,15 @@ The copy does not change the original plain-name row, so the other addon can sti
 
 | Good Enough Nexus setting (its meaning) | Stored in this build | Effective in this build |
 |---|---|---|
-| `syncMode` = `off` (no Sync traffic) | Kept | **Not honored.** Automatic login Sync passes run, peer requests are answered, and Share sends go out. |
-| `syncMode` = `manual` (traffic only during a Sync the user starts) | Kept | **Not honored.** Automatic passes and answers run as for `automatic`. |
+| `syncMode` = `off` (no Sync traffic) | Kept | **Honored** from the build after test.9034 (test.9034 did not honor it). Nexus sends no Sync message of any kind: no requests, answers, Share sends, capability handshakes or `/nexus probe` whisper. Sync Now and Share say that the saved Sync mode is Off; a Share is saved locally and marked "not sent". Records already shared earlier are not withdrawn, and this is not network isolation: the client still receives. |
+| `syncMode` = `manual` (traffic only during a Sync the user starts) | Kept | **Honored** from the build after test.9034. Idle: no automatic login Sync, no answers to other players, no handshakes. Sync Now (`/nexus sync` or either Sync Now button) sends its own requests and follow-up fetches, only until that Sync ends, at its existing fixed lifetime (300 seconds at most); pending work does not extend it. A confirmed Share (also of an edited record) sends its summary without a separate Sync Now, and answers other players that fetch that record until the Share's own 120-second expiry. `/nexus probe` is allowed. Other queued work is not released. Because handshakes are not answered, directed traffic uses the channel route. |
+| `syncMode` = `automatic` or absent | Kept | Unchanged automatic behavior. |
 | `syncOnlyWhileResting` (default on: Sync only in rest areas) | Kept | **Not honored.** Sync runs anywhere. |
 | `syncSuspendedInstanceTypes` (default: party, raid, pvp, arena, scenario) | Kept | **Not honored.** Sync runs in instances. |
 | `syncSuspendInCombat` (default on) | Kept | Not read. This build's Sync channel and addon traffic always waits during combat, and that wait cannot be switched off. The manual `/nexus probe` whisper does not wait. |
 | `syncDirectExperimental` | Kept | Not applicable: this build has no such transport. |
+
+The Build Library status line states an Off or Manual mode. The saved value is never rewritten; this build has no control to change it. Profiles in format 2, unversioned profiles and read-only formats keep automatic behavior, even if they store a `syncMode` value.
 
 ## Limits
 

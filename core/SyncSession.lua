@@ -89,6 +89,29 @@ function Session.New(options)
     }
     local knownPeers = {}
     local M = {}
+    local manualGrantCounter = 0
+
+    -- The saved Sync mode (core/SyncModePolicy.lua through Sync); "automatic"
+    -- for every profile that does not carry an accepted Off/Manual choice.
+    local function SyncMode()
+        return type(options.syncMode) == "function" and options.syncMode()
+            or "automatic"
+    end
+    local function SyncModeText(mode)
+        return type(options.syncModeText) == "function"
+            and options.syncModeText(mode) or nil
+    end
+
+    -- The permission an explicit manual Sync Now holds: the grant string of
+    -- the active manual convergence, which ends at its existing fixed
+    -- absolute lifetime (never restarted by pending work).
+    local function ManualGrant()
+        if autoConverge.active == true and autoConverge.mode == "manual"
+            and now() < Number(autoConverge.absoluteUntil) then
+            return autoConverge.manualGrant
+        end
+        return nil
+    end
 
     local function OutcomeSnapshot()
         return {
@@ -461,7 +484,13 @@ function Session.New(options)
         local requestId = type(recovery) == "table" and recovery.requestId
             or nil
         local build = options.catalogGet(buildId)
-        if type(recovery) == "table" and recovery.replacement
+        local mode, grant = SyncMode(), ManualGrant()
+        if mode == "off" or (mode == "manual" and not grant) then
+            -- A follow-up the saved mode refuses is not queued behind the
+            -- refusal; it ends here like any unsendable recovery.
+            log("SYNC", "recovery for '%s' not requested: saved Sync mode %s",
+                tostring(buildId), mode)
+        elseif type(recovery) == "table" and recovery.replacement
             or not (build and type(build.echoes) == "table"
             and #build.echoes > 0) then
             local contextual = type(requestId) == "string"
@@ -479,6 +508,7 @@ function Session.New(options)
                     requestId=transportRequestId,
                     buildId=tostring(buildId),queueClass="request",
                     enqueuedAt=now(),expiresAt=now() + maxReceiveAge,
+                    manualGrant=grant,
                 })
             if not queued then
                 -- Queue pressure is transient; an invalid maximum-field wire is
@@ -540,6 +570,7 @@ function Session.New(options)
             requester=myName(),
             requestId=requestId,transferId=requestId,queueClass="request",
             enqueuedAt=current,expiresAt=expiresAt,attempts=0,
+            manualGrant=ManualGrant(),
         }
         -- One request, one representation, chosen BEFORE admission. The full
         -- advertised version (for example 1.20.0-beta.1+test.9032) is used when
@@ -731,8 +762,16 @@ function Session.New(options)
         end
     end
 
+    function M.ManualGrant() return ManualGrant() end
+
     function M.RequestSync()
         local current = now()
+        if SyncMode() == "off" then
+            -- The user's saved choice is not turned on silently.
+            log("SYNC", "sync request refused: saved Sync mode is Off")
+            return false, SyncModeText("off")
+                or "Sync is Off: your saved Sync mode is Off."
+        end
         if autoConverge.active
             and current >= Number(autoConverge.absoluteUntil) then
             autoConverge.active = false
@@ -765,6 +804,8 @@ function Session.New(options)
         autoConverge.stable = 0
         autoConverge.terminal = nil
         autoConverge.mode = "manual"
+        manualGrantCounter = manualGrantCounter + 1
+        autoConverge.manualGrant = "manual-" .. tostring(manualGrantCounter)
         autoConverge.peerProgress = false
         autoConverge.peerEquivalent = false
         autoConverge.absoluteUntil = current + maxConvergenceAge
@@ -778,6 +819,8 @@ function Session.New(options)
 
     function M.UpdateAutoSync(elapsed)
         if not autoSyncPending then return end
+        -- Saved Off or Manual: no automatic login Sync is started.
+        if SyncMode() ~= "automatic" then return end
         autoSyncElapsed = autoSyncElapsed + Number(elapsed)
         if autoSyncElapsed < autoSyncDelay or not options.isConnected() then
             return
@@ -809,6 +852,21 @@ function Session.New(options)
 
     function M.UpdateAutoConvergence()
         if not autoConverge.active then return end
+        local mode = SyncMode()
+        if mode == "off" or (mode == "manual" and autoConverge.mode ~= "manual") then
+            -- The saved mode no longer permits this convergence: end it with
+            -- the existing cancellation, truthfully; nothing is recalled.
+            local old = pendingRequest
+            autoConverge.active = false
+            autoConverge.terminal = "sync mode " .. mode
+            pendingRequest, pendingHashRequest = nil, nil
+            receiveWindowUntil, receiveAbsoluteUntil = 0, 0
+            if old then cancelRequest(old.id, myName()) end
+            SetQueueOutcome("dropped")
+            SetTerminal("sync_mode")
+            log("SYNC", "convergence stopped: saved Sync mode %s", mode)
+            return
+        end
         if ExpireActiveConvergence() then return end
         local current = now()
         if pendingHashRequest or pendingRequest or M.IsReceiving() then return end
@@ -970,6 +1028,7 @@ function Session.New(options)
 
     function M.SendStatusTo(target)
         if not target or target == "" then return false end
+        if SyncMode() == "off" then return false, SyncModeText("off") end
         local token = BuildStatusToken()
         if not token then return false end
         local message = "WLRQ|" .. myName() .. "|dev|" .. token

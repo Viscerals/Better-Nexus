@@ -91,6 +91,10 @@ function Reconciler.New(options)
         and options.isSelfRequest or isLocalPeer
     local transportOwnsOwner = type(options.transportOwnsOwner) == "function"
         and options.transportOwnsOwner or samePeer
+    -- The saved Sync mode (core/SyncModePolicy.lua): an answer it would refuse
+    -- is not scheduled at all, so no pending response waits behind the refusal.
+    local permitResponse = type(options.permitResponse) == "function"
+        and options.permitResponse or function() return true end
     local responseClaimSupported = type(options.publishResponseClaim)
         == "function"
     local publishResponseClaim = responseClaimSupported
@@ -224,6 +228,10 @@ function Reconciler.New(options)
             log("RX", "ignoring own request (no echo loop)")
             return true
         end
+        if not permitResponse(requester, nil) then
+            noteSyncStat("modeUnanswered", 1)
+            return true
+        end
         local peerBuildHash = description.peerBuildHash or "0"
         local peerDpsHash = description.peerDpsHash or "0"
         local requestId = description.requestId
@@ -297,6 +305,10 @@ function Reconciler.New(options)
         local requester = tostring(description and description.requester or "")
         local buildId = tostring(description and description.buildId or "")
         if isSelfRequest(requester) then return true end
+        if not permitResponse(requester, buildId) then
+            noteSyncStat("modeUnanswered", 1)
+            return true
+        end
         local key = requester .. ":" .. buildId
         local requestId = description and description.requestId
             or "loadout-" .. buildId

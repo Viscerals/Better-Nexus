@@ -4,7 +4,8 @@
 -- the other peer's real receive events. It models no loss or throttling, and
 -- no latency unless a test sets P.hold. It is not native evidence.
 local P={}
-function P.Boot(names,rows)
+-- configure(i,db), optional, adjusts peer i's synthetic profile before load.
+function P.Boot(names,rows,configure)
  local peers={}
  for i,name in ipairs(names) do
   local e={};for k,v in pairs(_G)do e[k]=v end;e._G=e
@@ -15,6 +16,7 @@ function P.Boot(names,rows)
   local T=e.dofile('tests/prototype/startup_support.lua')
   -- rows may be one size for both peers or one size per peer.
   e.NexusDB=T.Profile(type(rows)=='table' and rows[i] or rows or 5,0)
+  if configure then configure(i,e.NexusDB) end
   H.perks.serverBuildSlots={[102]={name='NEXUS-TEST-'..name,verified=false,echoes={{spellId=200001,quality=1,stacks=3}}}}
   T.Load();H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
   T.Until(H,function()return e.Nexus.StartupStatus().state=='ready' and e.Nexus.BuildCatalog.ManualPreparationStatus().ready end)

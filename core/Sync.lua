@@ -1047,6 +1047,13 @@ Transport = TransportFactory.New({
     resolveChannel=ResolveSendChannel,
     channelLabel=function() return channelIndex end,
     sendChat=function(...) return SendChatMessage(...) end,
+    -- The saved Sync mode (core/SyncModePolicy.lua): the same decision the
+    -- wire asks again at submission.
+    permit=function(metadata)
+        local policy=Nexus.SyncModePolicy
+        if not policy then return true end
+        return policy.Allows("packet",metadata)
+    end,
     canDispatch=function(payload,metadata)
         local wire=Nexus.SyncWire
         if not wire or wire.suspended then return false end
@@ -1171,6 +1178,11 @@ Reconciler = ReconcilerFactory.New({
                 buildId=tostring(entry.buildId),queueClass="claim",
                 enqueuedAt=Now(),expiresAt=Now() + PENDING_MAX_AGE,
             })
+    end,
+    permitResponse=function(requester, buildId)
+        local policy=Nexus.SyncModePolicy
+        if not policy then return true end
+        return policy.Allows("packet",{requester=requester,buildId=buildId})
     end,
     publishResponseClaim=function(entry)
         return Transport.EnqueueControl(string.format(
@@ -1505,6 +1517,11 @@ local function BroadcastSummary(build, options)
     if status then
         status.queueReason = "queued"
         Operation.Transition(status, "queued", "transport admitted")
+        -- Under a saved Manual mode, peers fetching this shared record are
+        -- answered until this Share's own expiry.
+        if Nexus.SyncModePolicy then
+            Nexus.SyncModePolicy.NoteExplicitShare(status.id, metadata.expiresAt)
+        end
     end
     LogEvent("TX","queuing summary '%s' (%d chars, no Echo list)", tostring(build.title), EscapedLen(msg))
     return true, "queued", Operation.Copy(status)
@@ -4014,7 +4031,22 @@ Session = SessionFactory.New({
     end,
     ensureChannel=function() return Sync.EnsureChannel() end,
     sendWhisper=function(message, target)
+        -- The diagnostic probe whisper bypasses the queue and the wire, so it
+        -- asks the saved Sync mode itself (refused under Off).
+        local policy=Nexus.SyncModePolicy
+        if policy then
+            local allowed, why = policy.Allows("whisper")
+            if not allowed then return false, why end
+        end
         return SendChatMessage(message, "WHISPER", nil, target)
+    end,
+    syncMode=function()
+        local policy=Nexus.SyncModePolicy
+        return policy and policy.Mode() or "automatic"
+    end,
+    syncModeText=function(mode)
+        local policy=Nexus.SyncModePolicy
+        return policy and policy.Text(mode) or nil
     end,
 })
 
@@ -4192,6 +4224,10 @@ function Sync.Init(codec, adapter)
     Session.Reset()
     Compatibility.Reset()
     Reconciler.Reset()
+    if Nexus.SyncModePolicy then
+        Nexus.SyncModePolicy.Reset()
+        Nexus.SyncModePolicy.Bind(Session.ManualGrant, MyName)
+    end
     preparedDpsProofs = setmetatable({}, {__mode="k"})
     hotBuilds = {}  -- clear on init
     Responder.state.hotBuildGeneration =

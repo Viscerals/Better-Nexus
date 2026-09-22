@@ -41,6 +41,7 @@ core\WishlistModel.lua
 core\WishlistController.lua
 core\SyncProtocol.lua
 third_party\ChatThrottleLib.lua
+core\SyncModePolicy.lua
 core\SyncWire.lua
 core\SyncTransport.lua
 core\SyncCompatibility.lua

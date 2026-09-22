@@ -9,7 +9,7 @@ local pending,pendingCount={},0
 local MAX_PEERS,MAX_HANDSHAKES=128,16
 local PEER_TTL,HANDSHAKE_COOLDOWN=900,60
 local lastHandshake=-math.huge
-local metrics={addonSent=0,legacySent=0,handshakeSent=0,rejected=0,bandwidthWait=0,combatWait=0}
+local metrics={addonSent=0,legacySent=0,handshakeSent=0,rejected=0,bandwidthWait=0,combatWait=0,modeRefused=0}
 local receiver,frame
 local function Now() return type(GetTime)=="function" and GetTime() or 0 end
 local function Combat()
@@ -70,7 +70,20 @@ local function Room(bytes)
     end
     return true,ctl
 end
+-- The saved Sync mode (core/SyncModePolicy.lua) is the same decision the
+-- queue admission uses. A mode refusal is not a combat, bandwidth or
+-- transport condition and never suspends the wire.
+local function ModeAllows(kind,metadata)
+    local policy=Nexus.SyncModePolicy
+    if not policy or type(policy.Allows)~="function" then return true end
+    return policy.Allows(kind,metadata)
+end
+local function DropHandshakes()
+    if pendingCount>0 then pending,pendingCount={},0 end
+end
 local function QueueHandshake(name,kind)
+    -- Never accumulate a handshake the saved mode would refuse to send.
+    if not ModeAllows("handshake") then DropHandshakes();return end
     if pending[name] then
         if kind=="ACK1" then pending[name]=kind end
         return
@@ -89,7 +102,11 @@ local function Route(payload,metadata)
     local target=type(metadata)=="table" and Name(metadata.requester)
     local p=target and peers[target]
     local escaped=payload:gsub("|","||")
+    -- The addon route needs this side's handshake reply. When the saved Sync
+    -- mode refuses handshakes, the peer never confirms this side and would
+    -- reject the whisper, so directed traffic keeps the legacy route.
     if p and p.addon and Now()-(p.confirmedAt or 0)<=PEER_TTL and HasAddonApi()
+        and ModeAllows("handshake")
         and #Wire.PREFIX+1+3+#escaped<=254 then
         return "addon",target,"P7:"..escaped
     end
@@ -101,6 +118,10 @@ end
 -- within ordinary send pacing.
 function Wire.Blocked()
     if Wire.suspended then return "transport suspended" end
+    local policy=Nexus.SyncModePolicy
+    if policy and type(policy.Mode)=="function" and policy.Mode()=="off" then
+        return policy.Text("off")
+    end
     if Combat() then return "combat" end
     if not Ctl() then return "CTL unavailable" end
     return nil
@@ -108,12 +129,17 @@ end
 function Wire.CanDispatch(payload,metadata)
     if Wire.suspended then return false,"transport suspended" end
     if type(payload)~="string" then return false,"invalid payload" end
+    local allowed,why=ModeAllows("packet",metadata)
+    if not allowed then return false,why end
     local route,_,text=Route(payload,metadata)
     return Room(#text+(route=="addon" and #Wire.PREFIX+1 or 0))
 end
 function Wire.SendPacket(payload,metadata,channel)
     if Wire.suspended then return false,"transport suspended" end
     if type(payload)~="string" then return false,"invalid payload" end
+    -- Checked again at the actual submission, not only at admission.
+    local allowed,why=ModeAllows("packet",metadata)
+    if not allowed then metrics.modeRefused=metrics.modeRefused+1;return false,why end
     local route,target,text=Route(payload,metadata)
     local ready,ctl=Room(#text+(route=="addon" and #Wire.PREFIX+1 or 0))
     if not ready then return false,ctl end
@@ -140,7 +166,9 @@ function Wire.SendPacket(payload,metadata,channel)
     return true,route
 end
 function Wire.PumpHandshake()
-    if Wire.suspended or Combat() or Now()-lastHandshake<1 then return end
+    if Wire.suspended then return end
+    if not ModeAllows("handshake") then DropHandshakes();return end
+    if Combat() or Now()-lastHandshake<1 then return end
     local name,kind=next(pending);if not name then return end
     local ready,ctl=Room(#Wire.PREFIX+1+#kind)
     if not ready or not HasAddonApi() then return end

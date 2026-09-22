@@ -266,6 +266,22 @@ local function HasFutureSettingsOwner(db)
     return class == "future" or class == "unverified" or class == "malformed"
 end
 
+-- Read-only: the saved Sync mode this build honors. Only an accepted saved
+-- format 3-5 carries one ("off" or "manual"); every other profile, and an
+-- absent or "automatic" value, keeps today's automatic behavior. The saved
+-- value is never normalized or rewritten here. Internals seam, not a Store
+-- export (the public Store inventory stays fixed).
+function SavedFormat.SyncMode(db)
+    if SavedFormat.Classify(db) ~= "known" then return "automatic" end
+    local settings = rawget(db, "settings")
+    local mode = type(settings) == "table" and rawget(settings, "syncMode") or nil
+    if mode == "off" or mode == "manual" then return mode end
+    return "automatic"
+end
+Nexus.MainInternals.SavedSyncModeV1 = function()
+    return SavedFormat.SyncMode(NexusDB)
+end
+
 -- Bounded, display-safe description of a malformed marker: its type and,
 -- for a number, boolean or short string, its value. Never a table's content.
 function SavedFormat.Describe(db)

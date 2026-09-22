@@ -1065,7 +1065,11 @@ EnsureMainCommands = function()
             end,
             probe=function(_, _, target)
                 if target ~= "" and Nexus.Sync and Nexus.Sync.SendStatusTo then
-                    pcall(Nexus.Sync.SendStatusTo, target)
+                    -- A saved Sync mode refusal is reported, never silent.
+                    local ok, first, second, third = pcall(Nexus.Sync.SendStatusTo, target)
+                    local why = ok and (first == false and second
+                        or first == true and second == false and third) or nil
+                    if why then Print(tostring(why)) end
                 end
             end,
             nameplate=function()

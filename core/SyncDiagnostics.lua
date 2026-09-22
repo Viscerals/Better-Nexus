@@ -49,6 +49,8 @@ local TERMINALS = {
     none=true,stable=true,expired=true,no_useful_progress=true,
     peer_state_unconfirmed=true,pass_limit=true,queue_rejected=true,
     send_dropped=true,disconnected=true,superseded=true,
+    -- A saved Sync mode (Off, or Manual without the user's operation) ended it.
+    sync_mode=true,
 }
 
 local QUEUE_OUTCOMES = {

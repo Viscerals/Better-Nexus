@@ -2650,6 +2650,12 @@ RenderSyncStatus = function(receiveCount)
     if shareLine then
         syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n" .. shareLine)
     end
+    -- A saved Off or Manual Sync mode is stated, with what it does.
+    local policy = Nexus.SyncModePolicy
+    local modeText = policy and type(policy.Text) == "function" and policy.Text() or nil
+    if modeText then
+        syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n|cffffd100" .. modeText .. "|r")
+    end
     if syncBtn then syncBtn:SetText(preparing and "Preparing..."
         or receiving and "Listening..." or "Sync Now") end
 end
