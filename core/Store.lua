@@ -177,9 +177,84 @@ local function NormalizeVersion(value)
     return value
 end
 
+-- Saved settings formats 3 to 5 are not newer than this build. The earlier
+-- Better Nexus test line (archived 58b815b) wrote them, and Good Enough Nexus
+-- up to 1.96.6 (SchmidtCode/Good-Enough-Nexus 7bd6b86, core/Store.lua blob
+-- f3f43e4), which forked from that line, still does. Their only migrations
+-- are: 3 normalizes syncMode and the community-retention numbers, 4 adds the
+-- accountCharacters ledger, 5 removes "name@unknown" ledger rows. The stored
+-- shapes stay readable here. Such a marker is accepted only when the data also
+-- shows those postconditions ("known"); otherwise it stays read-only
+-- ("unverified"). A marker above 5 stays "future". The saved marker is never
+-- lowered or rewritten, so the other version can still read the same data.
+-- If SETTINGS_VERSION is ever raised to 3 or more, this range must be revisited.
+local SavedFormat = {FIRST=3, LAST=5, cache=setmetatable({}, {__mode="k"}),
+    SYNC_MODES={off=true, manual=true, automatic=true},
+    RETENTION={"communityRetentionMaxTotal", "communityRetentionMaxPerClass",
+        "communityRetentionMaxPerAuthor", "communityRetentionCharacterBest",
+        "communityRetentionPersonalFingerprints",
+        "communityRetentionBuildFingerprints", "communityRetentionTopPerCategory",
+        "communityRetentionMinPerClassPerCategory", "communityRetentionTopAverage",
+        "communityRetentionMinAveragePerClass", "communityRetentionOtherRemoteBuilds"}}
+
+-- The first field that breaks a postcondition of the given format, or nil.
+function SavedFormat.Violation(db, version)
+    local settings, chars = rawget(db, "settings"), rawget(db, "chars")
+    if type(settings) ~= "table" or getmetatable(settings) ~= nil then return "settings" end
+    if type(chars) ~= "table" or getmetatable(chars) ~= nil then return "chars" end
+    local mode = rawget(settings, "syncMode")
+    if mode ~= nil and not SavedFormat.SYNC_MODES[mode] then return "settings.syncMode" end
+    for _, key in ipairs(SavedFormat.RETENTION) do
+        local value = rawget(settings, key)
+        if value ~= nil and not (type(value) == "number" and value == value
+            and value >= 0 and value < math.huge and value == math.floor(value)) then
+            return "settings." .. key
+        end
+    end
+    if version < 4 then return nil end
+    local ledger = rawget(db, "accountCharacters")
+    if type(ledger) ~= "table" or getmetatable(ledger) ~= nil then
+        return "accountCharacters"
+    end
+    if version < 5 then return nil end
+    local rows = 0
+    for key, row in pairs(ledger) do
+        rows = rows + 1
+        if rows > 4096 or type(key) ~= "string" or type(row) ~= "table"
+            or key:lower():match("@unknown$") then
+            return "accountCharacters"
+        end
+    end
+    return nil
+end
+
+-- Returns "supported" | "known" | "unverified" | "future", the saved version,
+-- and the failing field of an unverified format. The verdict is cached per
+-- database and top-level tables, so repeated reads do not walk the ledger.
+function SavedFormat.Classify(db)
+    if type(db) ~= "table" then return "supported", 0 end
+    local version = NormalizeVersion(rawget(db, "settingsVersion"))
+    if version <= SETTINGS_VERSION then return "supported", version end
+    if version < SavedFormat.FIRST or version > SavedFormat.LAST then
+        return "future", version
+    end
+    local settings, chars = rawget(db, "settings"), rawget(db, "chars")
+    local ledger = rawget(db, "accountCharacters")
+    local cached = SavedFormat.cache[db]
+    if cached and cached.version == version and cached.settings == settings
+        and cached.chars == chars and cached.ledger == ledger then
+        return cached.class, version, cached.field
+    end
+    local field = SavedFormat.Violation(db, version)
+    local class = field and "unverified" or "known"
+    SavedFormat.cache[db] = {version=version, settings=settings, chars=chars,
+        ledger=ledger, class=class, field=field}
+    return class, version, field
+end
+
 local function HasFutureSettingsOwner(db)
-    return type(db) == "table"
-        and NormalizeVersion(rawget(db, "settingsVersion")) > SETTINGS_VERSION
+    local class = SavedFormat.Classify(db)
+    return class == "future" or class == "unverified"
 end
 
 local function AccountWritesAllowed(database)
@@ -864,6 +939,7 @@ local function BootstrapSlice(C)
 
     if state == SS.LEGACY_BIND then
         C.futureSettingsOwner = HasFutureSettingsOwner(C.database)
+        C.knownSavedFormat = SavedFormat.Classify(C.database) == "known"
         C.state = C.token.bundleDeferred and SS.BUNDLE_ADMISSION
             or SS.CHAR_MIGRATION
         return
@@ -1060,7 +1136,11 @@ local function BootstrapSlice(C)
         -- reference and invoked by the coordinator with C in hand; no
         -- dependent drives another domain here.
         if migration and type(migration.Init) == "function"
-            and not C.futureSettingsOwner and not readOnly then
+            and not C.futureSettingsOwner and not C.knownSavedFormat
+            and not readOnly then
+            -- A known saved format 3-5 is not started through the older
+            -- account/DPS converter: its commit replaces those tables without
+            -- an archive. They stay as that format left them.
             local okRecovery, summary = OwnerCall(C, "LegacyDataMigration.Init",
                 migration.Init, db)
             if not okRecovery then return end
@@ -1500,20 +1580,28 @@ end
 -- identity, the database, its chars container or the schema is not usable, so
 -- a caller that must persist (for example an Orb recovery receipt) checks this
 -- first and verifies the row afterwards. Nothing is created or changed here.
--- Returns {mode="durable", ownerKey=, rowPresent=} or
--- {mode="loading"|"unavailable", reason="identity"|"database"|"future-schema"|
---  "container"|"row"|"lifecycle"}.
+-- Returns {mode="durable", ownerKey=, rowPresent=, carriedFrom=} or
+-- {mode="loading"|"unavailable", reason="identity"|"database"|"saved-format"|
+--  "migration-marker"|"container"|"row"|"lifecycle"}. "saved-format" also
+-- names format ("future"|"unverified"), savedFormat, supportedFormat and, for
+-- an unverified format, the first failing field. carriedFrom names the plain
+-- name-keyed row the first write will copy (known saved formats 3-5 only).
 function Store.StateWriteStatus()
     local ownerKey = CurrentIdentity()
     if not ownerKey then return {mode="loading", reason="identity"} end
     local db = NexusDB
     if type(db) ~= "table" then return {mode="unavailable", reason="database"} end
-    if HasFutureSettingsOwner(db) then return {mode="unavailable", reason="future-schema"} end
+    local formatClass, savedFormat, field = SavedFormat.Classify(db)
+    if formatClass == "future" or formatClass == "unverified" then
+        return {mode="unavailable", reason="saved-format", format=formatClass,
+            savedFormat=savedFormat, supportedFormat=SETTINGS_VERSION,
+            knownFirst=SavedFormat.FIRST, knownLast=SavedFormat.LAST, field=field}
+    end
     local C = boundCoordinator
     if type(C) == "table" and type(C.State) == "function" then
         local ok, state = pcall(C.State, C)
         if not ok then return {mode="unavailable", reason="lifecycle"} end
-        if state == SS.FUTURE_SCHEMA then return {mode="unavailable", reason="future-schema"} end
+        if state == SS.FUTURE_SCHEMA then return {mode="unavailable", reason="migration-marker"} end
         if state == SS.INVALID or state == SS.DISPOSITION_FAILED
             or state == SS.DISPOSITION_REAUTH then
             return {mode="unavailable", reason="lifecycle"}
@@ -1525,7 +1613,12 @@ function Store.StateWriteStatus()
     if type(db.chars) ~= "table" then return {mode="unavailable", reason="container"} end
     local row = db.chars[ownerKey]
     if row ~= nil and type(row) ~= "table" then return {mode="unavailable", reason="row"} end
-    return {mode="durable", ownerKey=ownerKey, rowPresent=row ~= nil}
+    local carriedFrom, carriedRow, why
+    if row == nil then carriedFrom, carriedRow, why = SavedFormat.OwnedNameRow(db, ownerKey) end
+    -- UpdateStateV1 writes only the temporary row until the copy may happen.
+    if why == "not-admitted" then return {mode="loading", reason="lifecycle"} end
+    return {mode="durable", ownerKey=ownerKey, rowPresent=row ~= nil,
+        carriedFrom=carriedFrom}
 end
 
 local function AccountRowMatchesCurrent(row, ownerKey, name)
@@ -1551,6 +1644,70 @@ local function AccountRowMatchesCurrent(row, ownerKey, name)
                 ~= ownerKey then return false end
     end
     return true
+end
+
+-- A known saved format 3-5 keeps per-character rows under the plain character
+-- name (db.chars[UnitName]), not name@realm. Such a row is this character's
+-- only when all of these hold: this character has no canonical row yet;
+-- exactly one plain-name key matches the name (no case variants); and the
+-- account ledger that format keeps names this exact name@realm and no other
+-- realm for that name. Anything else is ambiguous and stays where it is,
+-- unread, never merged or deleted. Returns the plain key and row, or nil,
+-- nil and a reason. Reads only.
+function SavedFormat.OwnedNameRow(db, ownerKey)
+    if type(db) ~= "table" or not ownerKey
+        or SavedFormat.Classify(db) ~= "known" then return nil end
+    local chars, ledger = rawget(db, "chars"), rawget(db, "accountCharacters")
+    if type(chars) ~= "table" or chars[ownerKey] ~= nil then return nil end
+    local name = ownerKey:match("^([^@]+)@")
+    local foundKey, found
+    for key, row in pairs(chars) do
+        if type(key) == "string" and not key:find("@", 1, true)
+            and Identity.PlayerKey(key) == name then
+            if foundKey ~= nil then return nil, nil, "ambiguous-name-rows" end
+            foundKey, found = key, row
+        end
+    end
+    if type(found) ~= "table" then return nil end
+    local owners = 0
+    for key, row in pairs(type(ledger) == "table" and ledger or {}) do
+        local canonical = Identity.CanonicalOwnerKey(key)
+        if canonical and canonical:match("^([^@]+)@") == name then
+            owners = owners + 1
+            if canonical ~= ownerKey or not AccountRowMatchesCurrent(row, ownerKey, name) then
+                return nil, nil, "ambiguous-owner"
+            end
+        end
+    end
+    if owners ~= 1 then return nil, nil, "unestablished-owner" end
+    -- The bounded character pass (cycle, alias and size checks) must have
+    -- admitted the rows before one is copied: only in a coordinator state
+    -- after that pass, never without a coordinator or after a failure.
+    local C = boundCoordinator
+    local okState, state = false, nil
+    if type(C) == "table" and type(C.State) == "function" then
+        okState, state = pcall(C.State, C)
+    end
+    if not okState or not (state == SS.AUTHORITY or state == SS.COMPACTION
+        or state == SS.FINAL_COMMIT or state == SS.LEGACY_DISPOSITION
+        or state == SS.SERVING_PUBLICATION or state == SS.READY
+        or state == SS.MUTATION_BUILD or state == SS.MUTATION_FINAL) then
+        return nil, nil, "not-admitted"
+    end
+    return foundKey, found
+end
+
+-- Alias-preserving copy of an admitted row; the original stays untouched.
+function SavedFormat.Copy(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local out = {}
+    seen[value] = out
+    for key, child in pairs(value) do
+        out[SavedFormat.Copy(key, seen)] = SavedFormat.Copy(child, seen)
+    end
+    return out
 end
 
 -- MASTER-RC-001. The account-row mutation is split into a candidate build and a
@@ -1701,7 +1858,23 @@ function StoreAuthorityOwner.UpdateStateV1(mutator)
         transientState = EnsureStateShape(transientState)
         return true, mutator(transientState)
     end
-    local state = EnsureStateShape(db.chars[ownerKey])
+    local state = db.chars[ownerKey]
+    if state == nil then
+        -- Known saved format 3-5: the first write creates this character's
+        -- row as a copy of its own plain-name row. The original stays.
+        local fromKey, from, why = SavedFormat.OwnedNameRow(db, ownerKey)
+        if from then
+            state = SavedFormat.Copy(from)
+            state.savedFormatCarry = {from=fromKey,
+                savedFormat=NormalizeVersion(rawget(db, "settingsVersion"))}
+        elseif why == "not-admitted" then
+            -- Not copied before the bounded row checks ran; never pre-empted
+            -- by an empty durable row either.
+            transientState = EnsureStateShape(transientState)
+            return true, mutator(transientState)
+        end
+    end
+    state = EnsureStateShape(state)
     db.chars[ownerKey] = state
     -- Any authorized write invalidates the read snapshot.
     -- MASTER-RC-001. Invalidate on a real CONTENT change, not merely because
@@ -1762,6 +1935,12 @@ function Store.State()
     -- to UpdateStateV1 under amendment 10 before this flip, so no write is
     -- silently discarded.
     local source = db.chars[ownerKey]
+    if source == nil then
+        -- Until the first write copies it, a known saved format shows this
+        -- character's own plain-name row (read only, detached below).
+        local _, from = SavedFormat.OwnedNameRow(db, ownerKey)
+        source = from
+    end
     if stateSnapshot ~= nil and stateSnapshotOwner == ownerKey
         and stateSnapshotDb == db and stateSnapshotRevision == stateRevision
         and stateSnapshotSource == source then

@@ -132,7 +132,7 @@ end
 Refused('unknown identity',function()name='Unknown'end,function()name='ProbeTester'end,'Your character identity is not known yet')
 Refused('no database',function()NexusDB=nil end,nil,'Local saved data is unavailable')
 Refused('no character container',function()NexusDB.chars=nil end,nil,'no character container')
-Refused('future schema',function()NexusDB.settingsVersion=99 end,nil,'newer Nexus version')
+Refused('unsupported saved format',function()NexusDB.settingsVersion=99 end,nil,'Saved data format 99 is not supported')
 Refused('row of another shape',function()NexusDB.chars[Key()]='corrupt' end,nil,'unsupported shape')
 assert(NexusDB.chars==nil or NexusDB.chars[Key()]=='corrupt' or true)
 print('PASS unknown identity, no database, no container, future schema, malformed row: disabled, refused, nothing written or sent')

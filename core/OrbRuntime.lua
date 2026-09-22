@@ -27,7 +27,7 @@ local WRITE_REASON={
     identity="Your character identity is not known yet. Wait a moment, then try again.",
     lifecycle_loading="Local saved data is still loading. Wait a moment, then try again.",
     database="Local saved data is unavailable. /reload may restore it.",
-    ["future-schema"]="Saved data was written by a newer Nexus version, so this version keeps it read-only.",
+    ["migration-marker"]="Saved data carries a storage migration marker this build does not support, so it is kept unchanged and read-only.",
     container="Local saved data is unavailable (no character container). /reload may restore it.",
     row="This character's saved data has an unsupported shape.",
     lifecycle="Local saved data could not be verified. /reload may restore it.",
@@ -39,8 +39,22 @@ local function writeStatus()
     if not ok or type(status)~="table" then return {mode="unavailable",reason="lifecycle"} end
     return status
 end
+-- The actual saved and supported markers, never a guess about who wrote them.
+local function savedFormatText(status)
+    local saved,supported=tonumber(status.savedFormat),tonumber(status.supportedFormat)
+    if not saved or not supported then return WRITE_REASON.lifecycle end
+    if status.format=="unverified" then
+        return string.format("Saved data format %d did not pass this build's check for format %d data (field: %s). This build writes format %d. The data is kept unchanged and read-only.",
+            saved,saved,tostring(status.field or "unknown"),supported)
+    end
+    return string.format("Saved data format %d is not supported. This build writes format %d and reads formats %d to %d after a check. The data is kept unchanged and read-only.",
+        saved,supported,tonumber(status.knownFirst) or 3,tonumber(status.knownLast) or 5)
+end
 local function writeRefusal(status)
     local key=status.reason
+    if key=="saved-format" then
+        return "Local character data is not ready: "..savedFormatText(status).." No Orb action will be sent."
+    end
     if status.mode=="loading" and key=="lifecycle" then key="lifecycle_loading" end
     return "Local character data is not ready: "..(WRITE_REASON[key] or WRITE_REASON.lifecycle).." No Orb action will be sent."
 end

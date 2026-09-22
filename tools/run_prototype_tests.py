@@ -53,6 +53,7 @@ NAMES += ['rolling_review_policy_flags']
 NAMES += ['orb_review_reload_refused_first_choice','orb_review_reload_balance_guard']
 NAMES += ['rolling_review_automatic_paths_orb_state']
 NAMES += ['loading_step_progress','loading_step_source_change']
+NAMES += ['format5_known_transition','format5_ownership','format5_protection']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
