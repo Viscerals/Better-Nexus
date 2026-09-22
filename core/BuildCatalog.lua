@@ -859,8 +859,10 @@ local function WalkRow(walker, work)
         local grouped, reason, ordinary, locked, total = GroupTuples(walker)
         if not grouped then return RowFail(walker, reason) end
         walker.grouped = grouped
-        walker.semantic = {ordinary=ordinary, locked=locked, total=total,
-            representation="inline"}
+        walker.semantic = {ordinary=ordinary, locked=locked, total=total}
+        -- Diagnostic only, never part of the published semantic record: the
+        -- shape these counts were taken from.
+        walker.semanticRepresentation = "inline"
         if ordinary > BUDGET.ordinaryCopies or locked > BUDGET.lockedCopies
             or total > BUDGET.totalCopies then
             return RowFail(walker, "SEMANTIC_ENVELOPE")
@@ -1069,7 +1071,7 @@ local function BuildSnapshot(walker, slot, source, options)
         end
         if resolvedRows then
             local semantic = SemanticOf(canonical)
-            semantic.representation = "referenced"
+            walker.semanticRepresentation = "referenced"
             if semantic.ordinary > BUDGET.ordinaryCopies
                 or semantic.locked > BUDGET.lockedCopies
                 or semantic.total > BUDGET.totalCopies then
@@ -5426,7 +5428,8 @@ function Candidate.PumpPutPreparation(handle, work)
                 if type(semantic) == "table" then
                     handle.failureDetail = {ordinary=semantic.ordinary,
                         locked=semantic.locked, total=semantic.total,
-                        representation=semantic.representation}
+                        representation=put.walker
+                            and put.walker.semanticRepresentation or nil}
                 end
                 return Candidate.FinishPreparedPutWithoutCommit(handle, false,
                     verdict.reason)

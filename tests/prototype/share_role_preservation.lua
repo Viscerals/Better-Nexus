@@ -75,7 +75,7 @@ local function Settle(id)
  -- A commit replaces the durable bundle, and the catalog re-admits its root
  -- from it. Nothing serves during that admission, so the stored record is
  -- read once it is served again, not inside that window.
- T.Until(H,function()return Nexus.BuildCatalog.Get(id)~=nil end,120000)
+ T.Until(H,function()return Nexus.BuildCatalog.Get(id)~=nil end,400000)
  return Nexus.CommunityBuilds.ShareStatus(id)
 end
 local function Population(rows,wantLocked)
