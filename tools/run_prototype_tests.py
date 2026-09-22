@@ -60,6 +60,7 @@ NAMES += ['startup_failure_causes','format5_bundle_placeholder']
 NAMES += ['catalog_root_capacity']
 NAMES += ['catalog_capacity_local_ready']
 NAMES += ['changelog_seen_guard']
+NAMES += ['update_keys_read_only']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

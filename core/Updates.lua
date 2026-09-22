@@ -21,14 +21,27 @@ local Updates = {}
 Nexus.Updates = Updates
 
 local callbacks = {}
--- Automatic saved-data maintenance of the update keys (notice sanitation, the
--- one-time peer-advisory quarantine and the legacy dismissed-list conversion)
--- runs only when the caller states that this session may rewrite saved data.
--- A start-up that refuses the shared catalog on saved capacity keeps every
--- saved key exactly as it found it, so it initializes this module read-only:
--- the bundled release notice is still evaluated and shown, and nothing stored
--- is rewritten, quarantined or removed. Explicit user actions are unaffected.
-local persist = true
+-- Saved-data maintenance of the update keys (notice sanitation, the one-time
+-- peer-advisory quarantine, the legacy dismissed-list conversion and a new
+-- dismissal) happens only when saved data may really be written. Two
+-- conditions must hold: the start-up that initialized this module stated that
+-- its session may write, and the saved-data owner reports a durable write at
+-- that moment. A refused shared catalog, a failed start-up and a read-only
+-- saved format therefore keep every stored update key exactly as found, also
+-- through /nexus update, which runs before start-up completes. The bundled
+-- release notice is evaluated and shown in every case.
+local sessionPersists = true
+local function CanPersist()
+    if not sessionPersists then return false end
+    local Store = Nexus.Store
+    -- No saved-data owner is loaded at all (standalone package checks).
+    if type(Store) ~= "table" or type(Store.StateWriteStatus) ~= "function" then
+        return true
+    end
+    local ok, status = pcall(Store.StateWriteStatus)
+    if not ok or type(status) ~= "table" then return false end
+    return status.mode == "durable"
+end
 local notifiedTargets = {}            -- session only: one chat notice per target
 local peerObservations, peerObservationOrder = {}, {}
 local MAX_PEER_OBSERVATIONS = 32
@@ -260,7 +273,7 @@ end
 
 local function Current()
     local bundled = BundledCandidate()
-    if persist then
+    if CanPersist() then
         SanitizeStoredNotice(bundled)
         QuarantineStoredAdvisory()
     end
@@ -282,7 +295,7 @@ local function Dismissed(key)
     local list = NexusDB.updateDismissed
     if type(list) == "string" then
         list = {list}
-        if persist then NexusDB.updateDismissed = list end
+        if CanPersist() then NexusDB.updateDismissed = list end
     end
     if type(list) ~= "table" then return false end
     for i = math.max(1, #list - MAX_DISMISSED + 1), #list do
@@ -314,7 +327,7 @@ end
 
 function Updates.Init(nextCallbacks)
     callbacks = type(nextCallbacks) == "table" and nextCallbacks or {}
-    persist = callbacks.persist ~= false
+    sessionPersists = callbacks.persist ~= false
     notifiedTargets = {}
     sessionNotices = 0
     peerObservations, peerObservationOrder = {}, {}
@@ -436,13 +449,19 @@ end
 function Updates.Dismiss()
     local candidate = Current()
     if not candidate then return false end
+    notifiedTargets[candidate.key] = true
+    -- Without a durable write the dismissal holds for this session only. The
+    -- saved list is never replaced by a partial copy of itself, so a dismissal
+    -- saved by an older client in the single-entry form is not dropped.
+    if not CanPersist() then return true end
     if not Dismissed(candidate.key) then
-        local list = type(NexusDB.updateDismissed) == "table" and NexusDB.updateDismissed or {}
+        local list = NexusDB.updateDismissed
+        if type(list) == "string" then list = {list} end
+        if type(list) ~= "table" then list = {} end
         list[#list + 1] = candidate.key
         while #list > MAX_DISMISSED do table.remove(list, 1) end
         NexusDB.updateDismissed = list
     end
-    notifiedTargets[candidate.key] = true
     return true
 end
 

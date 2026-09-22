@@ -120,6 +120,19 @@ for _,case in ipairs(capacityCases)do
  check(Nexus.BuildCatalog.RootState().state~='ROOT_ADMITTED',label..': the shared catalog stays refused')
 end
 
+-- The class itself is fixed: exactly these four saved-capacity refusals, each
+-- with its own sentence. Everything else keeps the previous behavior.
+local reasons=Nexus.MainInternals.CapacityRefusalReasonsV1()
+check(table.concat(reasons,',')=='BARRIER_SET_LIMIT,ROOT_MAP_LIMIT,ROOT_SLOT_LIMIT,TOMBSTONE_SET_LIMIT',
+ 'the capacity class holds exactly the four saved-capacity refusals: '..table.concat(reasons,','))
+for _,reason in ipairs(reasons)do
+ local text=Nexus.LoadingStatus.CapacityText({state='failed',coreReady=true,reason=reason})
+ check(type(text)=='string' and text:find('Community data unavailable',1,true)
+  and text:find('Nothing was changed or deleted',1,true),reason..': it has its own plain sentence: '..tostring(text))
+ check(Nexus.LoadingStatus.CapacityText({state='failed',coreReady=false,reason=reason})==nil,
+  reason..': no capacity sentence before local tools are ready')
+end
+
 -- 6. Non-capacity root refusals keep the previous behavior: local tools wait,
 -- and no capacity sentence is offered for them.
 local nonCapacity={

@@ -14,6 +14,14 @@ local CAPACITY_REFUSALS = {
     ROOT_SLOT_LIMIT=true, TOMBSTONE_SET_LIMIT=true, BARRIER_SET_LIMIT=true,
     ROOT_MAP_LIMIT=true,
 }
+-- Read-only view of that class. The table itself stays private; tests and
+-- diagnostics read the exact membership instead of guessing it from behavior.
+function Nexus.MainInternals.CapacityRefusalReasonsV1()
+    local out = {}
+    for reason in pairs(CAPACITY_REFUSALS) do out[#out + 1] = reason end
+    table.sort(out)
+    return out
+end
 
 function Lifecycle.New(options)
     options = options or {}
