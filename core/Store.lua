@@ -735,7 +735,15 @@ function StoreData.Build(db, token)
     local bundle = token and token.bundleDeferred and type(db) == "table"
         and rawget(db, "authorityBundle") or nil
     local wrapper = PlainTable(bundle) and rawget(bundle, "storeData") or nil
-    if token and token.bundleDeferred then
+    -- The empty placeholder the catalog bundle writer stores when the Store
+    -- built no wrapper in that session: a build kept the saved format
+    -- read-only (test.9033 and earlier treated formats 3-5 as newer). For a
+    -- format this build now accepts, nothing was ever admitted, so the wrapper
+    -- is built exactly as a first admission builds it (below). Every other
+    -- shape keeps the full validation.
+    local firstAdmission = token and token.bundleDeferred and PlainTable(wrapper)
+        and next(wrapper) == nil and SavedFormat.Classify(db) == "known"
+    if token and token.bundleDeferred and not firstAdmission then
         -- The third value names the failed check (session diagnostics only);
         -- the failure code itself stays STORE_INVALID.
         if not PlainTable(wrapper) then return nil, "STORE_INVALID", "STORE_DATA_ABSENT" end

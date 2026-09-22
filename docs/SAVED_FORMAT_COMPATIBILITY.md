@@ -19,6 +19,15 @@ Format 5 is not newer. The earlier Better Nexus test line (archived commit `58b8
 
 The message "written by a newer Nexus version" is replaced by the real markers, for example: "Saved data format 6 is not supported. This build writes format 2 and reads formats 3 to 5 after a check. The data is kept unchanged and read-only."
 
+## Upgrading from a build that kept the data read-only
+
+test.9033 and earlier kept formats 3 to 5 read-only. In that state the Store built no Store-data wrapper. The catalog still saved its data bundle, with an empty Store-data placeholder in it. test.9034 and test.9035 then refused that placeholder: start-up failed with `STORE_INVALID`, and the displayed reason had no further detail. This is reproduced on the exact sources: synthetic format-5 data started on test.9033 (`487eaa9`), then on test.9035 (`753e384`).
+
+From the build after test.9035:
+
+- **The empty placeholder is accepted as a first admission.** When the bundle holds exactly the empty placeholder and the saved format is an accepted 3 to 5, the Store builds its data wrapper as a first admission does. Start-up adds only the usual missing defaults; no saved value is changed or removed. Any other invalid wrapper still fails, and so does the placeholder for any other format.
+- **Start-up failures state their cause.** A failed start-up keeps its failure code (for example `STORE_INVALID`). `/nexus status` (and any command while start-up has failed) adds one line with the retained facts: stage, cause, detail, owner, a bounded one-line error, the selection row, and the saved-format verdict. These are session-only. Reading them binds, retries and writes nothing.
+
 ## Character rows
 
 Formats 3 to 5 keep each character's row under the plain character name (`chars["Name"]`). This build uses `chars["name@realm"]`. The first write for a character copies the plain-name row to `name@realm` only when ownership is established:
