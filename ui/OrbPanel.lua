@@ -53,7 +53,9 @@ local function refresh()
         inactiveControls()
         return
     end
-    local s=Nexus.OrbRuntime.Status();frame.snapshot=s
+    -- One display read per refresh; the source list is prepared only for Advanced.
+    -- The snapshot authorizes nothing: Start, Resume and every spend read again.
+    local s=Nexus.OrbRuntime.Status(advanced);frame.snapshot=s
     local a=s.assignment or {};local busy=s.running or s.pending or s.state=="PAUSED" or s.state=="LIMIT"
     frame.plan:SetText(a.state=="restoring" and "Restoring assigned Wishlist..." or ("Assigned Wishlist: "..name(a.name or "none")))
     frame.targets:SetText(s.progress and (s.progress.rolledMissing.." rolled target copies still missing")

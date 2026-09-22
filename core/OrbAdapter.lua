@@ -182,8 +182,11 @@ function O.Read()
     for k,n in pairs(granted) do if n>0 then observed[tonumber(k:match("^(%d+):"))]=true end end
     for k,n in pairs(locks) do if n>0 then observed[tonumber(k:match("^(%d+):"))]=true end end
     for _,c in ipairs(board) do observed[c.spellId]=true end
-    local rows={}
-    for id,row in pairs(cat.rows) do
+    -- Availability rows are built on first use, per read, for the IDs this read
+    -- is asked about (targets, owned copies, offered cards), not for the whole
+    -- catalog on every read. Each row uses exactly the rules below; nothing is
+    -- carried over from an earlier read, so every action still reads fresh.
+    local function buildRow(id,row)
         local raw=type(pe.PerkDatabase)=="table" and pe.PerkDatabase[id]
         -- The ordinary adapter deliberately retains its last complete catalog
         -- during source loss. Keep its group/requirement metadata, but require
@@ -209,12 +212,18 @@ function O.Read()
                 elseif d then disabled=true;reason="The server reports that this Echo is disabled." end
             end
         end
-        rows[id]={spellId=id,name=row.name or (GetSpellInfo and GetSpellInfo(id)) or ("Echo "..id),
+        return {spellId=id,name=row.name or (GetSpellInfo and GetSpellInfo(id)) or ("Echo "..id),
             quality=row.quality or 0,maxStack=tonumber(row.maxStack) or 1,
             group=integer(g,1) and ("g:"..g) or ("s:"..id),available=allowedClass and learned and not disabled and not reason,
             sourceAvailable=metadataKnown,
             availabilityReason=reason or (not allowedClass and "This Echo is unavailable to this class." or nil)}
     end
+    local catalogRows=cat.rows
+    local rows=setmetatable({},{__index=function(t,id)
+        local row=catalogRows[id]
+        if type(row)~="table" then return nil end
+        local built=buildRow(id,row);rawset(t,id,built);return built
+    end})
     local s={known=true,charges=charges,offerPending=pending,board=board,boardKey=table.concat(parts,","),
         granted=granted,locked=locks,grantStamp=observations.serial,grantedKey=sig,lockedKey=signature(locks),
         hostPending=host,autoAccept=auto,catalog=rows,context=ctx(pe,svc,orb),at=GetTime and GetTime() or 0,

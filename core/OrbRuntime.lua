@@ -20,20 +20,60 @@ local function integer(n,min,max) return type(n)=="number" and n==math.floor(n) 
 local function owner()
     return Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
 end
-local function write(data)
+-- Why the current character's saved row cannot be written durably now. The
+-- Store owner classifies it (Store.StateWriteStatus); nothing here creates or
+-- changes data. "loading" is temporary; "unavailable" needs the named action.
+local WRITE_REASON={
+    identity="Your character identity is not known yet. Wait a moment, then try again.",
+    lifecycle_loading="Local saved data is still loading. Wait a moment, then try again.",
+    database="Local saved data is unavailable. /reload may restore it.",
+    ["future-schema"]="Saved data was written by a newer Nexus version, so this version keeps it read-only.",
+    container="Local saved data is unavailable (no character container). /reload may restore it.",
+    row="This character's saved data has an unsupported shape.",
+    lifecycle="Local saved data could not be verified. /reload may restore it.",
+}
+local function writeStatus()
     local store=Nexus.Store
-    local key=store and store.CurrentOwnerKey and store.CurrentOwnerKey()
-    if not key or type(NexusDB)~="table" or type(NexusDB.chars)~="table" or not NexusDB.chars[key] then
-        return nil,"Local character data is not ready; no Orb action will be sent."
-    end
-    local o=owner();if not o or not o.UpdateStateV1 then return nil,"Local saved data is not ready." end
-    local ok,detail=o.UpdateStateV1(function(s) s.orbRefinement=copy(data) end)
+    if not (store and type(store.StateWriteStatus)=="function") then return {mode="unavailable",reason="lifecycle"} end
+    local ok,status=pcall(store.StateWriteStatus)
+    if not ok or type(status)~="table" then return {mode="unavailable",reason="lifecycle"} end
+    return status
+end
+local function writeRefusal(status)
+    local key=status.reason
+    if status.mode=="loading" and key=="lifecycle" then key="lifecycle_loading" end
+    return "Local character data is not ready: "..(WRITE_REASON[key] or WRITE_REASON.lifecycle).." No Orb action will be sent."
+end
+local function sameValue(a,b)
+    if type(a)~=type(b) then return false end
+    if type(a)~="table" then return a==b end
+    for k,v in pairs(a) do if not sameValue(v,b[k]) then return false end end
+    for k in pairs(b) do if a[k]==nil then return false end end
+    return true
+end
+local function write(data)
+    local status=writeStatus()
+    if status.mode~="durable" then return nil,writeRefusal(status) end
+    local o=owner();if not o or not o.UpdateStateV1 then return nil,"Local saved data is not ready. No Orb action will be sent." end
+    -- The authorized owner creates an absent row at this explicit write.
+    local ok=o.UpdateStateV1(function(s) s.orbRefinement=copy(data) end)
     if not ok then return nil,"Could not preserve Orb preferences/recovery state. No new action was sent." end
+    -- UpdateStateV1 also returns true for its transient fallback. Only the same
+    -- character's durable row holding exactly this data counts as preserved.
+    local key=Nexus.Store.CurrentOwnerKey and Nexus.Store.CurrentOwnerKey()
+    local row=key==status.ownerKey and type(NexusDB)=="table" and type(NexusDB.chars)=="table" and NexusDB.chars[key] or nil
+    if type(row)~="table" or not sameValue(row.orbRefinement,data) then
+        return nil,"Could not preserve Orb preferences/recovery state durably. No new action was sent."
+    end
     return true
 end
 local function init()
     local key=Nexus.Store and Nexus.Store.CurrentOwnerKey and Nexus.Store.CurrentOwnerKey()
-    local liveKey=key and type(NexusDB)=="table" and type(NexusDB.chars)=="table" and type(NexusDB.chars[key])=="table" and key or false
+    -- The preferences in memory belong to one character AND its row state. A
+    -- character without a row yet (created later by the owner at the first
+    -- Orb write) must never share another character's in-memory preferences.
+    local hasRow=key and type(NexusDB)=="table" and type(NexusDB.chars)=="table" and type(NexusDB.chars[key])=="table"
+    local liveKey=key and (key..(hasRow and "#row" or "#none")) or false
     if config and (configOwner==liveKey or (run and (run.running or run.pending or run.token))) then return end
     configOwner=liveKey
     local state=Nexus.Store and Nexus.Store.State and Nexus.Store.State()
@@ -60,9 +100,14 @@ local function fingerprint(entries)
     return table.concat(parts,",")
 end
 local function setState(state,reason) run.state=state;run.reason=reason end
-local function changedConfig()
+local function changedConfig(before)
     approval=nil
-    local ok,err=write(config);if not ok then return nil,err end
+    local ok,err=write(config)
+    if not ok then
+        -- Nothing was preserved, so the shown preferences must not change either.
+        if type(before)=="table" then config=before end
+        return nil,err
+    end
     return true
 end
 local function editable()
@@ -115,9 +160,10 @@ function M.UseAssignedWishlist()
     local a=Nexus.GameAdapter.AssignedWishlist()
     if a.state~="ready" then return nil,a.note or "Assign a resolved Wishlist through My Builds or the Wishlist Editor." end
     local targets,err=P.Normalize(a.entries);if not targets then return nil,err end
+    local before=copy(config)
     config.entries=copy(a.entries);config.name=a.name;config.fingerprint=fingerprint(config.entries)
     config.selectedSlot=nil;config.origin="assigned";config.sources={}
-    return changedConfig()
+    return changedConfig(before)
 end
 function M.MoveTarget(index,delta)
     return nil,"Target order follows the assigned Wishlist. Edit the Wishlist to change its targets."
@@ -153,8 +199,8 @@ local function assigned()
     end
     return a
 end
-entriesStillMatch=function()
-    local a=Nexus.GameAdapter.AssignedWishlist()
+entriesStillMatch=function(current)
+    local a=current or Nexus.GameAdapter.AssignedWishlist()
     if run.binding and (run.token or run.pending) then return matches(run.binding,a) end
     return a.state=="ready" and sameContent(config.entries,a.entries)
 end
@@ -162,11 +208,11 @@ function M.SetLimit(n)
     init();n=tonumber(n)
     if not integer(n,1,10000) then return nil,"Choose a whole-number Orb limit from 1 to 10,000." end
     if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,"Use Increase limit while paused, or finish this run first." end
-    config.maxOrbs=n;return changedConfig()
+    local before=copy(config);config.maxOrbs=n;return changedConfig(before)
 end
 function M.SetRecycle(enabled)
     if not editable() then return nil,"Recycling permission is fixed during this run." end
-    config.recycle=enabled==true;return changedConfig()
+    local before=copy(config);config.recycle=enabled==true;return changedConfig(before)
 end
 function M.SetSource(k,n)
     if not editable() then return nil,"Replaceable copies are fixed during this run." end
@@ -176,38 +222,43 @@ function M.SetSource(k,n)
     local available=0
     for _,r in ipairs(P.Sources(targets,s,config.excluded)) do if r.key==k then available=r.excess end end
     if n>available then return nil,"That would replace a protected or unavailable copy." end
-    config.sources[k]=n>0 and n or nil;return changedConfig()
+    local before=copy(config);config.sources[k]=n>0 and n or nil;return changedConfig(before)
 end
 function M.Exclude(k,enabled)
     if not editable() then return nil,"Exclusions are fixed during this run." end
     if type(k)~="string" or not k:match("^%d+:%d+$") then return nil,"Choose an Echo first." end
+    local before=copy(config)
     config.excluded[k]=enabled==true and true or nil
     if enabled then config.sources[k]=nil end
-    return changedConfig()
+    return changedConfig(before)
 end
 function M.ClearExclusions()
     if not editable() then return nil,"Exclusions are fixed during this run." end
-    config.excluded={};return changedConfig()
+    local before=copy(config);config.excluded={};return changedConfig(before)
 end
 function M.SuggestSources()
     if not editable() then return nil,busyReason("A change of Orb sources","Stop and settle the current run first.") end
     local s,err=B.Read();if not s then return nil,err end
     local targets,e=P.Normalize(config.entries);if not targets then return nil,e end
     local proposed={};for _,r in ipairs(P.Sources(targets,s,config.excluded)) do proposed[r.key]=r.excess end
-    config.sources=proposed;return changedConfig()
+    local before=copy(config);config.sources=proposed;return changedConfig(before)
 end
 local function inspect()
     local assignment=assigned()
-    if assignment.state~="ready" then return nil,assignment.note or "Assign a Wishlist before starting Orb mode." end
-    local targets,err=P.Normalize(config.entries);if not targets then return nil,err end
-    local s,e=B.Read();if not s then return nil,e end
+    if assignment.state~="ready" then return nil,assignment.note or "Assign a Wishlist before starting Orb mode.",assignment end
+    local targets,err=P.Normalize(config.entries);if not targets then return nil,err,assignment end
+    local s,e=B.Read();if not s then return nil,e,assignment end
     local prog=P.Progress(targets,s)
     local sources=P.Sources(targets,s,config.excluded)
     return {targets=targets,s=s,progress=prog,sources=sources,assignment=assignment}
 end
-local function preflight(automatic)
-    local m,err=inspect();if not m then return nil,err end
-    if not entriesStillMatch() then return nil,"The selected Wishlist changed or is unavailable. Choose it again before starting." end
+-- `m` may be the read that the same display refresh already made. Actions
+-- (Prepare, Confirm) always pass nothing and read fresh.
+local function preflight(automatic,m)
+    local status=writeStatus()
+    if status.mode~="durable" then return nil,writeRefusal(status) end
+    local err;if not m then m,err=inspect();if not m then return nil,err end end
+    if not entriesStillMatch(m.assignment) then return nil,"The selected Wishlist changed or is unavailable. Choose it again before starting." end
     if m.progress.rolledMissing==0 then
         return nil,m.progress.permanentMissing>0 and "Rolled targets are complete. Remaining permanent-slot targets cannot be changed by Orbs; no spend will start."
             or "All rolled targets are already complete. No Orbs are needed."
@@ -783,8 +834,10 @@ function M.BlocksOrdinary()
     end
     return run and (run.running or run.pending~=nil or (run.state=="PAUSED" or run.state=="LIMIT")) or false
 end
-function M.Status()
-    init();local a=assigned();local m,err=inspect()
+-- Display snapshot. One adapter read per call; it authorizes nothing (every
+-- action reads again). detail=true adds the source list for Advanced.
+function M.Status(detail)
+    init();local m,err,failed=inspect();local a=m and m.assignment or failed or assigned()
     local r={state=run.state,reason=run.reason,error=err,running=run.running,pending=run.pending~=nil,
         spent=run.spent,reserved=run.reserved,limit=run.limit,config=copy(config),recent=copy(run.recent),
         assignment=copy(a),targetChanged=run.targetChanged,operationName=run.name,
@@ -794,9 +847,19 @@ function M.Status()
     r.charges,r.balanceState,r.balanceReason=B.Balance()
     if m then
         r.charges=m.s.charges;r.progress=P.Progress(assert(P.Normalize(a.entries)),m.s)
-        r.sources=copy(m.sources);r.catalog=copy(m.s.catalog);run.displayProgress=copy(r.progress)
+        r.sourceCount=#m.sources
+        if detail~=false then r.sources=copy(m.sources) end
+        -- Read-only view of the same read's catalog rows, copied per row on access.
+        local rows=m.s.catalog
+        r.catalog=setmetatable({},{__index=function(_,id) return copy(rows[id]) end})
+        run.displayProgress=copy(r.progress)
     end
-    local can,why=preflight(true)
+    local status=writeStatus()
+    r.persistence={mode=status.mode,reason=status.reason,rowPresent=status.rowPresent}
+    local can,why
+    if status.mode~="durable" then why=writeRefusal(status)
+    elseif m then can,why=preflight(true,m)
+    else why=err end
     r.canStart=not run.running and not run.pending and run.state~="PAUSED" and run.state~="LIMIT" and can~=nil
     r.startReason=why
     r.canResume=run.state=="PAUSED" and not (run.pending and (run.targetChanged or run.pending.restored or run.pending.selectionAttempted))

@@ -1494,6 +1494,40 @@ function Store.CurrentOwnerKey()
     return CurrentIdentity()
 end
 
+-- Read-only. Can StoreAuthorityOwner.UpdateStateV1 write the current
+-- character's row DURABLY right now? UpdateStateV1 creates an absent row, but
+-- falls back to a transient, never-persisted row (and still returns true) when
+-- identity, the database, its chars container or the schema is not usable, so
+-- a caller that must persist (for example an Orb recovery receipt) checks this
+-- first and verifies the row afterwards. Nothing is created or changed here.
+-- Returns {mode="durable", ownerKey=, rowPresent=} or
+-- {mode="loading"|"unavailable", reason="identity"|"database"|"future-schema"|
+--  "container"|"row"|"lifecycle"}.
+function Store.StateWriteStatus()
+    local ownerKey = CurrentIdentity()
+    if not ownerKey then return {mode="loading", reason="identity"} end
+    local db = NexusDB
+    if type(db) ~= "table" then return {mode="unavailable", reason="database"} end
+    if HasFutureSettingsOwner(db) then return {mode="unavailable", reason="future-schema"} end
+    local C = boundCoordinator
+    if type(C) == "table" and type(C.State) == "function" then
+        local ok, state = pcall(C.State, C)
+        if not ok then return {mode="unavailable", reason="lifecycle"} end
+        if state == SS.FUTURE_SCHEMA then return {mode="unavailable", reason="future-schema"} end
+        if state == SS.INVALID or state == SS.DISPOSITION_FAILED
+            or state == SS.DISPOSITION_REAUTH then
+            return {mode="unavailable", reason="lifecycle"}
+        end
+        if state ~= SS.READY and state ~= SS.MUTATION_BUILD and state ~= SS.MUTATION_FINAL then
+            return {mode="loading", reason="lifecycle"}
+        end
+    end
+    if type(db.chars) ~= "table" then return {mode="unavailable", reason="container"} end
+    local row = db.chars[ownerKey]
+    if row ~= nil and type(row) ~= "table" then return {mode="unavailable", reason="row"} end
+    return {mode="durable", ownerKey=ownerKey, rowPresent=row ~= nil}
+end
+
 local function AccountRowMatchesCurrent(row, ownerKey, name)
     if row == nil then return true end
     if type(row) ~= "table" then return false end
