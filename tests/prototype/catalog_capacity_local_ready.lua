@@ -15,8 +15,15 @@ local function Record(id)
 end
 local function Overlay(n)local m={};for i=1,n do m['syn-'..i]=Record('syn-'..i) end;return m end
 local overlay=Overlay(2049)
+-- Saved update keys of an older client are part of the data this session must
+-- leave alone: a stored peer-authority notice, a stored peer advisory and a
+-- legacy dismissed entry would all be rewritten by ordinary start-up upkeep.
+local updateKeys={updateNotice={version='9.9.9',test=1,authority='peer-observation',source='Peer-Realm'},
+ updateAdvisory={testBuild={version='9.9.9',test=2,observedAt=1}},updateDismissed='9.9.9#1'}
 local db={settingsVersion=2,settings={autoPick=false,communityRetentionEnabled=true},chars={},
- communityBuilds=overlay,unknownTop={keep=true}}
+ communityBuilds=overlay,unknownTop={keep=true},
+ updateNotice=updateKeys.updateNotice,updateAdvisory=updateKeys.updateAdvisory,
+ updateDismissed=updateKeys.updateDismissed}
 local H=F.Boot(db,function(H)
  H.perks.serverBuildSlots={[1]={name='Local plan',verified=true,echoes={{spellId=200001,quality=1,stacks=2}}}}
  H.perks.serverActiveSlot=1
@@ -64,6 +71,14 @@ local function CommunityState()
   evictions=NexusDB.communityRetentionEvictions,unknown=NexusDB.unknownTop,marker=NexusDB.settingsVersion})
 end
 local communityBefore=F.Serialize({builds=overlay,tombstones=nil,evictions=nil,unknown={keep=true},marker=2})
+local function UpdateState()
+ return F.Serialize({notice=NexusDB.updateNotice,advisory=NexusDB.updateAdvisory,
+  dismissed=NexusDB.updateDismissed,noticeQuarantine=NexusDB.updateNoticeQuarantine,
+  advisoryQuarantine=NexusDB.updateAdvisoryQuarantine})
+end
+local updateBefore=F.Serialize({notice=updateKeys.updateNotice,advisory=updateKeys.updateAdvisory,
+ dismissed=updateKeys.updateDismissed,noticeQuarantine=nil,advisoryQuarantine=nil})
+check(UpdateState()==updateBefore,'the saved update keys are not rewritten, quarantined or removed')
 check(CommunityState()==communityBefore,'the Community list, markers and unknown data are unchanged after start-up and 60 seconds')
 for _,key in ipairs({'authorityBundle','dataRetention','dataCompaction','legacyDataMigration'})do
  check(NexusDB[key]==nil,'no '..key..' state is created while the shared catalog is refused')
@@ -76,12 +91,65 @@ check(CommunityState()==communityBefore,'the Community data is still unchanged a
 for _,key in ipairs({'authorityBundle','dataRetention','dataCompaction','legacyDataMigration'})do
  check(NexusDB[key]==nil,'reload creates no '..key..' state either')
 end
+check(UpdateState()==updateBefore,'the saved update keys are unchanged after reload as well')
 
--- 5. A non-capacity root refusal keeps the previous behavior: local tools wait.
-local bad={settingsVersion=2,settings={autoPick=false},chars={},communityBuilds={ok=Record('ok')},
- buildCatalog={schemaVersion=1,catalogVersion='x',sourceVersion='x',unexpected='field'}}
-F.Boot(bad)
-local b=Nexus.StartupStatus()
-check(b.state=='failed' and not b.coreReady and b.reason~='ROOT_SLOT_LIMIT',
- 'a non-capacity refusal still withholds local start-up: '..tostring(b.reason)..' coreReady='..tostring(b.coreReady))
-print('PASS catalog_capacity_local_ready: local tools ready on a capacity refusal; shared views and Sync withheld; saved data untouched; other refusals unchanged checks='..checks)
+-- 5. Every saved-capacity refusal behaves the same way and states its own
+-- sentence. Saved markers reserve keys in the same budget as the builds.
+local function Markers(prefix,from,to)
+ local m={};for i=from,to do m[prefix..i]={at=1} end;return m
+end
+local capacityCases={
+ {'removal markers','TOMBSTONE_SET_LIMIT','removal markers',function()
+   local d={settingsVersion=2,settings={},chars={},communityBuilds=Overlay(10)}
+   d.syncTombstones=Markers('tomb-',1,2039);return d
+  end},
+ {'retention markers','BARRIER_SET_LIMIT','retention markers',function()
+   local d={settingsVersion=2,settings={},chars={},communityBuilds=Overlay(10)}
+   d.communityRetentionEvictions=Markers('ev-',1,2039);return d
+  end},
+}
+for _,case in ipairs(capacityCases)do
+ local label,reason,words,build=case[1],case[2],case[3],case[4]
+ F.Boot(build())
+ local c=Nexus.StartupStatus()
+ check(c.state=='failed' and c.reason==reason and c.coreReady==true,
+  label..': the shared catalog is refused and local tools start: '..tostring(c.reason)..' coreReady='..tostring(c.coreReady))
+ local text=Nexus.LoadingStatus.CapacityText(c)
+ check(type(text)=='string' and text:find(words,1,true) and text:find('Nothing was changed or deleted',1,true),
+  label..': the refusal is stated plainly: '..tostring(text))
+ check(Nexus.BuildCatalog.RootState().state~='ROOT_ADMITTED',label..': the shared catalog stays refused')
+end
+
+-- 6. Non-capacity root refusals keep the previous behavior: local tools wait,
+-- and no capacity sentence is offered for them.
+local nonCapacity={
+ {'unknown catalog metadata field',{settingsVersion=2,settings={autoPick=false},chars={},
+   communityBuilds={ok=Record('ok')},
+   buildCatalog={schemaVersion=1,catalogVersion='x',sourceVersion='x',unexpected='field'}}},
+ {'a malformed saved map',{settingsVersion=2,settings={autoPick=false},chars={},
+   communityBuilds={ok=Record('ok')},syncTombstones='not a map'}},
+}
+for _,case in ipairs(nonCapacity)do
+ local label,bad=case[1],case[2]
+ F.Boot(bad)
+ local b=Nexus.StartupStatus()
+ check(b.state=='failed' and not b.coreReady,
+  label..': still withholds local start-up: '..tostring(b.reason)..' coreReady='..tostring(b.coreReady))
+ check(Nexus.LoadingStatus.CapacityText(b)==nil,label..': no capacity sentence is shown for it')
+end
+
+-- 7. Invalid local saved data stays blocked when an oversized catalog also
+-- exists: the malformed marker keeps saved data read-only, the shared catalog
+-- stays refused, and neither is altered.
+local both={settingsVersion={version=5},settings={autoPick=false},chars={},communityBuilds=Overlay(2049)}
+local bothBefore=F.Serialize({builds=both.communityBuilds,marker=both.settingsVersion})
+F.Boot(both)
+local w=Nexus.Store.StateWriteStatus()
+check(w.mode=='unavailable' and w.format=='malformed','invalid local data stays read-only next to an oversized catalog: '..tostring(w.mode))
+check(Nexus.BuildCatalog.RootState().state~='ROOT_ADMITTED','the oversized catalog stays refused as well')
+assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.probe=true end))
+local row=NexusDB.chars and NexusDB.chars['PrototypeTester']
+check(row==nil or row.probe==nil,'a local write reaches no saved character row')
+check(F.Serialize({builds=NexusDB.communityBuilds,marker=rawget(NexusDB,'settingsVersion')})==bothBefore,
+ 'the marker and the oversized Community list are both unchanged')
+print('PASS catalog_capacity_local_ready: local tools ready on every capacity refusal; shared views and Sync withheld; saved and update data untouched; other refusals and invalid local data unchanged checks='..checks)

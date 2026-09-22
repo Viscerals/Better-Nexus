@@ -21,6 +21,14 @@ local Updates = {}
 Nexus.Updates = Updates
 
 local callbacks = {}
+-- Automatic saved-data maintenance of the update keys (notice sanitation, the
+-- one-time peer-advisory quarantine and the legacy dismissed-list conversion)
+-- runs only when the caller states that this session may rewrite saved data.
+-- A start-up that refuses the shared catalog on saved capacity keeps every
+-- saved key exactly as it found it, so it initializes this module read-only:
+-- the bundled release notice is still evaluated and shown, and nothing stored
+-- is rewritten, quarantined or removed. Explicit user actions are unaffected.
+local persist = true
 local notifiedTargets = {}            -- session only: one chat notice per target
 local peerObservations, peerObservationOrder = {}, {}
 local MAX_PEER_OBSERVATIONS = 32
@@ -252,8 +260,10 @@ end
 
 local function Current()
     local bundled = BundledCandidate()
-    SanitizeStoredNotice(bundled)
-    QuarantineStoredAdvisory()
+    if persist then
+        SanitizeStoredNotice(bundled)
+        QuarantineStoredAdvisory()
+    end
     return bundled
 end
 
@@ -270,7 +280,10 @@ end
 local function Dismissed(key)
     NexusDB = NexusDB or {}
     local list = NexusDB.updateDismissed
-    if type(list) == "string" then list = {list}; NexusDB.updateDismissed = list end
+    if type(list) == "string" then
+        list = {list}
+        if persist then NexusDB.updateDismissed = list end
+    end
     if type(list) ~= "table" then return false end
     for i = math.max(1, #list - MAX_DISMISSED + 1), #list do
         if list[i] == key then return true end
@@ -301,6 +314,7 @@ end
 
 function Updates.Init(nextCallbacks)
     callbacks = type(nextCallbacks) == "table" and nextCallbacks or {}
+    persist = callbacks.persist ~= false
     notifiedTargets = {}
     sessionNotices = 0
     peerObservations, peerObservationOrder = {}, {}

@@ -3045,6 +3045,13 @@ local function CollectRootMap(handle, work)
         Charge(work, "rootMapEdges", 1)
         handle.rootMapEdges = handle.rootMapEdges + 1
         if handle.rootMapEdges > BUDGET.rootMapEdges then
+            -- The combined key budget of all four maps, charged per key read.
+            -- Each map has its own 2048-key limit and all four share one
+            -- 2048 distinct-key budget, so this total (8192) is a defensive
+            -- stop that those checks normally reach first. It is the same
+            -- kind of saved-capacity verdict, so it records the same facts.
+            Candidate.NoteLimit(handle, name, "root-map-edges", handle.rootMapEdges,
+                BUDGET.rootMapEdges, "ROOT_MAP_LIMIT")
             return AdmissionFail(handle, "ROOT_MAP_LIMIT")
         end
         local typedKey, kind = TypedKey(key)

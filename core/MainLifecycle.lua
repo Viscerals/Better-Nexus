@@ -12,6 +12,7 @@ Nexus.MainInternals.Lifecycle = Lifecycle
 -- continue; every other refusal keeps the previous all-or-nothing behavior.
 local CAPACITY_REFUSALS = {
     ROOT_SLOT_LIMIT=true, TOMBSTONE_SET_LIMIT=true, BARRIER_SET_LIMIT=true,
+    ROOT_MAP_LIMIT=true,
 }
 
 function Lifecycle.New(options)
@@ -471,6 +472,10 @@ function Lifecycle.New(options)
             end
             if Nexus.Updates and Nexus.Updates.Init then
                 Nexus.Updates.Init({
+                    -- A capacity-refused start-up leaves every saved key as it
+                    -- found it, so the update module reads its stored notice
+                    -- without rewriting, quarantining or removing it.
+                    persist=not CAPACITY_REFUSALS[startupTiming.coreFailure],
                     notify=function(version, _, message)
                         Print(type(message) == "string" and message
                             or ("Nexus build " .. tostring(version) .. ": see /nexus update. Installation is manual."))

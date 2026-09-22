@@ -826,10 +826,9 @@ local function CommandStatus()
         Print(startup.state=="failed"
             and "Local controls ready; shared data preparation failed (see /nexus log errors)."
             or "Local controls ready; Community, Leaderboard and Sync are preparing in the background.")
-        local capacity = Nexus.LoadingStatus and type(Nexus.LoadingStatus.PhaseText)=="function"
-            and startup.state=="failed" and startup.coreReady
-            and Nexus.LoadingStatus.PhaseText(startup) or nil
-        if capacity and capacity:find("Nothing was changed",1,true) then Print(capacity) end
+        local capacity = Nexus.LoadingStatus and type(Nexus.LoadingStatus.CapacityText)=="function"
+            and Nexus.LoadingStatus.CapacityText(startup) or nil
+        if capacity then Print(capacity) end
         local line = StartupFailureLine(startup)
         if line then Print(line) end
     end

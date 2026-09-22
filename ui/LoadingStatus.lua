@@ -61,11 +61,20 @@ local capacity = {
     ROOT_SLOT_LIMIT="Community data unavailable: your saved Community list holds more builds than this build opens (limit 2048). Nothing was changed or deleted.",
     TOMBSTONE_SET_LIMIT="Community data unavailable: the saved removal markers exceed the limit (2048). Nothing was changed or deleted.",
     BARRIER_SET_LIMIT="Community data unavailable: the saved retention markers exceed the limit (2048). Nothing was changed or deleted.",
+    ROOT_MAP_LIMIT="Community data unavailable: your saved Community records and markers together exceed the total this build opens (limit 8192). Nothing was changed or deleted.",
 }
+-- The one sentence for a saved-capacity refusal, or nil for every other
+-- state. Callers ask for it directly instead of matching message text.
+function M.CapacityText(status)
+    status=status or Snapshot()
+    if status.state=="failed" and status.coreReady then return capacity[status.reason] end
+    return nil
+end
 function M.PhaseText(status)
     status=status or Snapshot()
     if status.state=="failed" then
-        if status.coreReady and capacity[status.reason] then return capacity[status.reason] end
+        local text=M.CapacityText(status)
+        if text then return text end
         return (status.coreReady and "Shared data unavailable: " or "Startup stopped: ") .. Safe(status.reason)
     end
     if status.state=="ready" then return "Community builds and Leaderboard ready" end

@@ -59,6 +59,7 @@ NAMES += ['sync_saved_mode_off','sync_saved_mode_manual','sync_saved_mode_contro
 NAMES += ['startup_failure_causes','format5_bundle_placeholder']
 NAMES += ['catalog_root_capacity']
 NAMES += ['catalog_capacity_local_ready']
+NAMES += ['changelog_seen_guard']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

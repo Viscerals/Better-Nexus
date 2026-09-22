@@ -96,4 +96,46 @@ do
  F.Reload()
  Ready('runtime reload',Nexus.StartupStatus())
 end
-print('PASS catalog_root_capacity: 2047/2048/2049 boundaries, bundle vs stale legacy, bundled, overlap, disjoint union, invalid content, preservation and reload checks='..checks)
+-- 8. The removal and retention markers reserve keys in the same budget. All
+-- four maps share one distinct-key budget (2048 rows), so marker keys that the
+-- overlay does not already hold reduce the builds this build can open. Each
+-- refusal names its own map and keeps the saved data.
+local function Markers(prefix,from,to)
+ local m={};for i=from,to do m[prefix..i]={at=1} end;return m
+end
+local function RefusedAs(label,s,reason,map,counter,count,limit,source)
+ check(s.state=='failed' and s.reason==reason,label..': refused with '..reason..': '..tostring(s.reason))
+ check(s.coreReady==true,label..': local tools still start (the shared catalog stays refused)')
+ local f=s.failure or {}
+ check(f.component=='catalog' and f.phase=='collect' and f.map==map and f.counter==counter
+  and f.count==count and f.limit==limit and f.source==source,
+  label..': facts '..tostring(f.map)..'/'..tostring(f.counter)..'/'..tostring(f.count)..'/'..tostring(f.limit)..'/'..tostring(f.source))
+end
+do
+ -- Markers over ids the overlay already holds reserve no additional key.
+ local shared=Db(Map('syn-',1,2048))
+ shared.syncTombstones=Markers('syn-',1,2048)
+ shared.communityRetentionEvictions=Markers('syn-',1,2048)
+ Ready('2048 builds with the same 2048 removal and retention markers',Boot(shared))
+
+ -- Markers over other ids do reserve keys: 10 builds and 2039 unrelated
+ -- removal markers already exceed the shared budget.
+ local disjoint=Db(Map('syn-',1,10));disjoint.syncTombstones=Markers('tomb-',1,2039)
+ local beforeTombs=F.Serialize(disjoint.syncTombstones)
+ RefusedAs('10 builds and 2039 unrelated removal markers',Boot(disjoint),
+  'TOMBSTONE_SET_LIMIT','tombstone','distinct-slots',2049,2048,'legacy')
+ check(F.Serialize(NexusDB.syncTombstones)==beforeTombs,'removal markers: they are unchanged, and none was dropped to fit')
+
+ -- The same for a retention marker beyond the saved builds and removals.
+ local barOver=Db(Map('syn-',1,2048))
+ barOver.syncTombstones=Markers('syn-',1,2048)
+ barOver.communityRetentionEvictions=Markers('syn-',1,2048)
+ barOver.communityRetentionEvictions['syn-2049']={at=1}
+ local beforeAll=F.Serialize({builds=barOver.communityBuilds,tombstones=barOver.syncTombstones,
+  barriers=barOver.communityRetentionEvictions})
+ RefusedAs('one retention marker beyond the budget',Boot(barOver),
+  'BARRIER_SET_LIMIT','barrier','distinct-slots',2049,2048,'legacy')
+ check(F.Serialize({builds=NexusDB.communityBuilds,tombstones=NexusDB.syncTombstones,
+  barriers=NexusDB.communityRetentionEvictions})==beforeAll,'retention marker: all three saved maps are unchanged')
+end
+print('PASS catalog_root_capacity: 2047/2048/2049 boundaries, bundle vs stale legacy, bundled, overlap, disjoint union, invalid content, marker reservations, preservation and reload checks='..checks)

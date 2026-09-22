@@ -16,11 +16,42 @@ local function HasSeenRelease()
     return false
 end
 
+-- lastChangelogSeen is saved data. It is recorded only when the saved-data
+-- owner reports a durable write for this character and local start-up
+-- completed: a failed or read-only start-up must not consume the one-time
+-- note, because that acknowledgement would be lost with the rest of the
+-- session. The note stays viewable and closes normally without it, and it is
+-- offered again in a later session that can record it.
+local function CanRecordSeen()
+    if type(NexusDB) ~= "table" then return false end
+    local Store = Nexus.Store
+    if type(Store) ~= "table" or type(Store.StateWriteStatus) ~= "function" then
+        return false
+    end
+    local ok, status = pcall(Store.StateWriteStatus)
+    if not ok or type(status) ~= "table" or status.mode ~= "durable" then
+        return false
+    end
+    if type(Nexus.StartupStatus) == "function" then
+        local okStatus, startup = pcall(Nexus.StartupStatus)
+        if not okStatus or type(startup) ~= "table" then return false end
+        if not startup.coreReady or startup.state == "failed" then return false end
+    end
+    return true
+end
+M.CanRecordSeen = CanRecordSeen
+
 local function MarkReleaseSeen()
-    if type(NexusDB) ~= "table" then return end
+    if not CanRecordSeen() then return false end
     NexusDB.lastChangelogSeen = RELEASE_KEY
-    NexusDB.settings = NexusDB.settings or {}
-    NexusDB.settings.lastChangelogSeen = RELEASE_KEY
+    -- The settings table belongs to the Store owner when it is bound.
+    local settings = Nexus.Store and Nexus.Store.Settings and Nexus.Store.Settings()
+    if type(settings) ~= "table" then
+        NexusDB.settings = type(NexusDB.settings) == "table" and NexusDB.settings or {}
+        settings = NexusDB.settings
+    end
+    settings.lastChangelogSeen = RELEASE_KEY
+    return true
 end
 
 local function Create()
@@ -78,11 +109,18 @@ end
 
 function M.ShowIfNeeded()
     if type(NexusDB) ~= "table" then return end
+    if HasSeenRelease() then return end
+    if shownThisSession then
+        -- The note was displayed while the saved-data owner was still not
+        -- writable. Record the acknowledgement as soon as it is, without
+        -- showing the same note a second time in this session.
+        MarkReleaseSeen()
+        return
+    end
     if not NexusDB.hasSeenQuickStart then
         MarkReleaseSeen()
         return
     end
-    if shownThisSession or HasSeenRelease() then return end
     -- Mark it seen when displayed, not only when the button is clicked. This
     -- prevents reloads, disconnects, or another popup covering it from causing
     -- the same release note to appear on every login.
@@ -96,14 +134,19 @@ function M.ShowIfNeeded()
 end
 
 local ev = CreateFrame("Frame")
-local elapsed, armed = 0, false
+local elapsed, armed, attempts = 0, false, 0
+local MAX_ATTEMPTS = 10 -- bounded: about 20 seconds, then it stops for good
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
-ev:SetScript("OnEvent", function() armed = true; elapsed = 0 end)
+ev:SetScript("OnEvent", function() armed = true; elapsed = 0; attempts = 0 end)
 ev:SetScript("OnUpdate", function(_, dt)
     if not armed then return end
     elapsed = elapsed + (tonumber(dt) or 0)
-    if elapsed >= 2 then
-        armed = false
-        pcall(M.ShowIfNeeded)
-    end
+    if elapsed < 2 then return end
+    elapsed, attempts = 0, attempts + 1
+    pcall(M.ShowIfNeeded)
+    -- A start-up whose saved-data owner is not writable yet is retried a few
+    -- times, so a note displayed early is still recorded once the owner is
+    -- ready. A session that cannot record it at all simply stops trying.
+    local ok, seen = pcall(HasSeenRelease)
+    if attempts >= MAX_ATTEMPTS or (ok and seen) then armed = false end
 end)
