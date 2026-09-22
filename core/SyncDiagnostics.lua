@@ -52,7 +52,7 @@ local TERMINALS = {
 }
 
 local QUEUE_OUTCOMES = {
-    none=true,queued=true,sent=true,full=true,dropped=true,
+    none=true,queued=true,sent=true,full=true,dropped=true,oversize=true,
     requeued=true,retry=true,disconnected=true,superseded=true,
 }
 
@@ -114,6 +114,10 @@ function Diagnostics.New(options)
             TERMINALS, "none")
         stats.queueOutcome = BoundedToken(snapshot.queueOutcome,
             QUEUE_OUTCOMES, "none")
+        stats.requestLength = BoundedCount(snapshot.requestLength)
+        stats.requestLimit = BoundedCount(snapshot.requestLimit)
+        stats.requestVersionForm = (snapshot.requestVersionForm == "full"
+            or snapshot.requestVersionForm == "plain") and snapshot.requestVersionForm or "none"
         return stats
     end
 

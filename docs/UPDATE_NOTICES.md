@@ -39,6 +39,8 @@ Changing `published`, a label or a parser flag would not have fixed any of these
 | Announced to peers | `<version>+test.<N>`, at most 32 bytes, **public test packages only**. Development source states `<version>+dev`, an internal package `<version>+internal`, a stable release the plain version. | `1.20.0-beta.1+test.9028` |
 | Shown in game | `<version> test.<N>` | `1.20.0-beta.1 test.9028` |
 
+**Request size (2026-09-22).** The Sync request (`WLRQ`) must fit the 255-byte chat limit after escaping. With full-width build and DPS hashes and a longer character name the announced suffix pushed it over the limit, and the transport refused it before sending (`queue_rejected`, `queue=dropped`). The request builder now measures the escaped request before queue admission and, only when needed, sends the plain release version (`1.20.0-beta.1`, the form test.9027 sent) instead of `<version>+test.<N>`. Nothing else in the request changes. A request that still does not fit is refused with its measured length (`queue=oversize`). The installed identity, `/nexus status` and every local label are unchanged.
+
 `tools/build_package.py` makes two declared substitutions in `data/Release.lua`: the label, and the channel (`public-test` with `--public`, otherwise `internal`). `Nexus.ReleaseIdentity()` is the one function that the comparison, the announced version and every visible label read.
 
 | Channel | Meaning | Announces a test number |

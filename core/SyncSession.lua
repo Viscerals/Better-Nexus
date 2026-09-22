@@ -53,6 +53,11 @@ function Session.New(options)
         and options.cancelRequest or function() return false end
     local noteRequestOutcome = type(options.noteRequestOutcome) == "function"
         and options.noteRequestOutcome or function() end
+    -- Request size is decided before queue admission, with the transport's own
+    -- escaped-wire measure and limit (see RequestSyncOnce).
+    local escapedLen = type(options.escapedLen) == "function" and options.escapedLen
+        or function(text) return #text + select(2, text:gsub("|", "")) end
+    local requestLimit = tonumber(options.chatLimit) or 255
     local currentClaimBuildHash = type(options.currentClaimBuildHash) == "function"
         and options.currentClaimBuildHash or options.currentBuildHash
 
@@ -98,6 +103,9 @@ function Session.New(options)
             lastReason=requestOutcome.lastReason or "none",
             terminalReason=requestOutcome.terminalReason or "none",
             queueOutcome=requestOutcome.queueOutcome or "none",
+            requestLength=requestOutcome.requestLength,
+            requestLimit=requestOutcome.requestLimit,
+            requestVersionForm=requestOutcome.requestVersionForm,
         }
     end
 
@@ -533,10 +541,45 @@ function Session.New(options)
             requestId=requestId,transferId=requestId,queueClass="request",
             enqueuedAt=current,expiresAt=expiresAt,attempts=0,
         }
-        local queued, why = (options.enqueueControl or options.enqueue)(string.format(
-            "%s|%s|%s|%s|%s|%s", options.requestCode, myName(),
-            buildHash, dpsHash, requestId,
-            tostring(options.requestVersion())), metadata)
+        -- One request, one representation, chosen BEFORE admission. The full
+        -- advertised version (for example 1.20.0-beta.1+test.9032) is used when
+        -- the escaped request fits the transport limit. Otherwise the plain
+        -- release version (1.20.0-beta.1, prerelease kept, build metadata
+        -- removed) is used; peers parse both, and since the update-notice
+        -- correction the metadata is diagnostic only. Sender, hashes, request
+        -- ID, field order and separators never change. A request that still
+        -- does not fit is refused here with its measured length; it is never
+        -- truncated and never retried in another form.
+        local function Build(version)
+            return string.format("%s|%s|%s|%s|%s|%s", options.requestCode,
+                myName(), buildHash, dpsHash, requestId, tostring(version))
+        end
+        local fullVersion = tostring(options.requestVersion())
+        local message, form = Build(fullVersion), "full"
+        local length = escapedLen(message)
+        if length > requestLimit then
+            local plain = type(options.requestPlainVersion) == "function"
+                and options.requestPlainVersion() or nil
+            if type(plain) == "string" and plain ~= "" and plain ~= fullVersion then
+                local compact = Build(plain)
+                local compactLength = escapedLen(compact)
+                log("SYNC", "sync request %d>%d bytes with version %s; plain version %s gives %d",
+                    length, requestLimit, fullVersion, plain, compactLength)
+                message, form, length = compact, "plain", compactLength
+            end
+        end
+        requestOutcome.requestLength = length
+        requestOutcome.requestLimit = requestLimit
+        requestOutcome.requestVersionForm = form
+        if length > requestLimit then
+            SetQueueOutcome("oversize")
+            SetTerminal("queue_rejected")
+            log("SYNC", "sync request refused before sending: %d>%d bytes (%s version)",
+                length, requestLimit, form)
+            return false, string.format("sync request too long (%d>%d bytes)",
+                length, requestLimit)
+        end
+        local queued, why = (options.enqueueControl or options.enqueue)(message, metadata)
         if not queued then
             SetQueueOutcome(tostring(why or ""):find("full", 1, true)
                 and "full" or "dropped")

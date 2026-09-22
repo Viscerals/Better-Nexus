@@ -3932,6 +3932,7 @@ Session = SessionFactory.New({
     maxRecoveryQueue=MAX_RECOVERY_QUEUE,
     maxKnownPeers=MAX_KNOWN_PEERS,
     chatLimit=CHAT_LIMIT,
+    escapedLen=EscapedLen,
     requestCode=CODE_REQUEST,
     loadoutRequestCode=CODE_LOADOUT_REQ,
     now=Now,
@@ -3967,6 +3968,19 @@ Session = SessionFactory.New({
             end
         end
         return (Nexus and Nexus.VERSION) or "0.0.0-dev"
+    end,
+    requestPlainVersion=function()
+        -- The release version without build metadata (the form every peer
+        -- has always parsed, as test.9027 sent it). Used only when the full
+        -- request would exceed the transport limit.
+        if Nexus and type(Nexus.ReleaseIdentity) == "function" then
+            local ok, identity = pcall(Nexus.ReleaseIdentity)
+            if ok and type(identity) == "table" and ValidVersion(identity.version)
+                and not tostring(identity.version):find("+", 1, true) then
+                return identity.version
+            end
+        end
+        return nil
     end,
     statusVersion=function()
         return (Nexus and Nexus.VERSION) or "?"
