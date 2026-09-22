@@ -168,6 +168,8 @@ local Responder = {state={hotBuildGeneration=0}, Work={}}
 -- no new arrival gains an unaccounted allowance while a batch runs.
 Responder.Admission = {order={}, byKey={}, count=0, maxTotal=64, maxPerSender=16,
     inFlight={}, inFlightCount=0}
+-- An item whose own submission raises is retried once and then refused.
+local ADMISSION_ERROR_ATTEMPTS = 2
 local catalogMutationIdentity
 local PendingDeleteCount
 
@@ -1990,9 +1992,33 @@ function Responder.Admission.Pump()
                     Responder.Admission.Fail(entry, "admissionCancelled",
                         "catalog scope changed")
                 else
-                    local outcome = entry.run(entry)
-                    if outcome == "busy" then break end
-                    Responder.Admission.Remove(entry)
+                    -- One item's error is its own terminal outcome. Without
+                    -- this, a repeating error would be retained, restored
+                    -- and retried for ever, and the valid items behind it
+                    -- would expire waiting for a pass that never completes.
+                    local ranOk, outcome = pcall(entry.run, entry)
+                    if not ranOk then
+                        -- One item's error is its own problem. It is reported,
+                        -- retried once, and then refused with a counted
+                        -- outcome, so it can never become a poison item that
+                        -- starves the valid work behind it. Items collected
+                        -- before it in this pass are still submitted.
+                        LogEvent("RX", "ERROR admission item '%s': %s",
+                            tostring(entry.id), tostring(outcome))
+                        if Nexus.Errors and Nexus.Errors.Record then
+                            pcall(Nexus.Errors.Record, "Sync.Admission",
+                                tostring(outcome))
+                        end
+                        entry.errorCount = (entry.errorCount or 0) + 1
+                        if entry.errorCount >= ADMISSION_ERROR_ATTEMPTS then
+                            Responder.Admission.Fail(entry, "admissionError",
+                                "admission failed")
+                        end
+                        break
+                    else
+                        if outcome == "busy" then break end
+                        Responder.Admission.Remove(entry)
+                    end
                 end
             end
         end
@@ -2021,6 +2047,9 @@ function Responder.Admission.Restore(collected)
             table.insert(Responder.Admission.order, 1, entry)
             Responder.Admission.count = #Responder.Admission.order
             stats.admissionRestored = (stats.admissionRestored or 0) + 1
+            -- It was collected, not resolved: its run counted a resolution
+            -- that did not happen, so the counter keeps its meaning.
+            stats.admissionResolved = math.max(0, (stats.admissionResolved or 0) - 1)
         else
             member.complete(false, "ROOT_MUTATION_PENDING")
         end

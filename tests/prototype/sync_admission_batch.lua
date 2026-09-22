@@ -132,6 +132,45 @@ end
 debugprofilestop=realClock
 check(worst<=2,'a missing clock keeps the safe single slice per update: '..worst)
 
+-- 6b. One item whose own submission raises must not starve the valid items
+-- behind it: it is reported, retried once and then refused with a counted
+-- outcome, while every other retained item is still committed.
+local function ErrorRun(persistent)
+ local H,C=A.Boot(60)
+ A.Hold(C)
+ local ids={}
+ for i=1,5 do ids[#ids+1]='err-'..i;A.Receive('err-'..i,'PeerE'..i,A.base+10+i,'Error case '..i) end
+ check(Nexus.Sync.AdmissionSnapshot().count==5,'five items wait: '..Nexus.Sync.AdmissionSnapshot().count)
+ local raised,get=0,C.Get
+ C.Get=function(id,...)
+  if id=='err-3' and (persistent or raised==0) then
+   raised=raised+1
+   error('synthetic admission failure for '..tostring(id),0)
+  end
+  return get(id,...)
+ end
+ T.Until(H,function()return Nexus.Sync.AdmissionSnapshot().count==0
+  and (tonumber(Nexus.Sync.AdmissionSnapshot().inFlight) or 0)==0 end,40000)
+ H.Advance(5,.05)
+ C.Get=get
+ local committed=0
+ for _,id in ipairs(ids)do if C.Get(id)~=nil then committed=committed+1 end end
+ return committed,raised,Nexus.Sync.Stats()
+end
+do
+ local committed,raised,stats=ErrorRun(false)
+ check(raised>=1,'one-shot: the synthetic failure really happened')
+ check(committed==5,'one-shot: every retained item was still committed: '..committed..'/5')
+ check((stats.admissionExpired or 0)==0,'one-shot: nothing expired waiting behind it')
+end
+do
+ local committed,raised,stats=ErrorRun(true)
+ check(raised>=2,'persistent: the failure repeated: '..raised)
+ check(committed==4,'persistent: the four valid items were committed: '..committed..'/5')
+ check((stats.storageRejected or 0)>=1,'persistent: the failing item ended as a counted refusal')
+ check((stats.admissionExpired or 0)==0,'persistent: no valid item expired behind the failing one')
+end
+
 -- 7. The capacity limits are unchanged: a batch cannot pass the root limit.
 H,C=A.Boot(2048)
 A.Hold(C)

@@ -52,7 +52,6 @@ print(string.format('PASS aged-ready ordering: summary retained, first serializa
 P.Until(function()return P.Ready(A) and A.e.Nexus.Sync.WorkState().deferredAdmissions==0 end,4000)
 P.Advance(35)
 local n,nextAt,first,firstAt,later,admittedAt,resolvedBefore=0,0,nil,nil,nil,nil,0
-local overtaken=false
 local function Request()
  n=n+1;local name='AgedRequester'..n
  local text=run.requestText:gsub('^WLRQ|[^|]+|','WLRQ|'..name..'|'):gsub('c1%-[%w%-]+','c1-'..(7000+n)..'-'..(1000+n))
@@ -76,7 +75,6 @@ for step=1,2400 do
  -- A receiver batch may publish both in the same commit; it may not overtake.
  if later and A.e.Nexus.BuildCatalog.Get(later) then
   assert(A.e.Nexus.BuildCatalog.Get(first),'the later arrival never overtook the older one')
-  overtaken=false
  end
  if first and A.e.Nexus.BuildCatalog.Get(first) then break end
 end

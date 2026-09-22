@@ -728,6 +728,13 @@ function Lifecycle.New(options)
             return PumpCatalogRootAdmissionSlice()
         end
         local initial = describe()
+        -- Eligible means the pending product work and the admission that
+        -- must follow it before anything can be served again. Ordinary
+        -- maintenance is not accelerated: a retention or compaction walk
+        -- keeps its previous single slice per update.
+        if initial.kind == "maintenance" then
+            return PumpCatalogRootAdmissionSlice()
+        end
         local priorSlices = math.max(0,
             (initial.totalPumps or 0) - (preparationPumps or 0))
         local started = StartupClock()

@@ -84,14 +84,14 @@ local function Run(stage)
  -- Deferred inbound work is not abandoned: it proceeds after the transfer.
  local resolvedAtComplete=Stats().admissionResolved
  P.Until(function()return A.e.Nexus.Sync.WorkState().deferredAdmissions==0 end,9000)
- -- Retained items may now be committed as one batch, so the resolution can
- -- happen in a single later turn rather than one turn per item. What must
- -- hold is that none of them is abandoned, expired or refused.
- assert(Stats().admissionResolved>=resolvedAtComplete,'no retained item was discarded')
+ -- Retained items may now be committed as one batch, and that batch can run
+ -- before or after the transfer completes. What must hold is the end state:
+ -- every retained item is admitted, and none is abandoned, expired or
+ -- refused. The old per-turn resolution count no longer proves ordering.
  assert(A.e.Nexus.Sync.WorkState().deferredAdmissions==0 and (Stats().admissionExpired or 0)==0
-  and (Stats().storageRejected or 0)==0,'every deferred item was admitted after the transfer; none expired or was refused')
+  and (Stats().storageRejected or 0)==0,'every deferred item was admitted; none expired or was refused')
  assert(Stats().malformedRejected==0 and #A.H.actions==0 and #B.H.actions==0,'valid items stay valid; zero gameplay mutation')
- print(string.format('PASS %s-stage pressure: %d-chunk transfer complete in %.1fs, %d admission(s) between its chunks, deferred work continues',
+ print(string.format('PASS %s-stage pressure: %d-chunk transfer complete in %.1fs, %d admission(s) between its chunks, every retained item admitted',
   stage,total,first[#first].time-first[1].time,resolvedDuring))
 end
 Run('chunk')
