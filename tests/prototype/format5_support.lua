@@ -60,7 +60,11 @@ function F.Boot(db,before,early)
  if before then before(H) end
  for line in io.lines('Nexus.toc')do
   line=line:gsub('\r','')
-  if line~='' and not line:match('^#')then assert(loadfile((line:gsub('\\','/'))))('Nexus',{})end
+  if line~='' and not line:match('^#')then
+   assert(loadfile((line:gsub('\\','/'))))('Nexus',{})
+   -- Optional test hook right after one file loads (fault injection only).
+   if F.fileHooks and F.fileHooks[line] then F.fileHooks[line]() end
+  end
  end
  H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
  if early then early(H) end -- before any scheduler turn

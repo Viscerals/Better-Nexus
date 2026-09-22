@@ -2758,6 +2758,14 @@ function Controller.New(options)
                     and "The local save is submitted; the catalog has not finished it. "
                     or "The local catalog is finishing earlier work first. ")
                 .. "The same request continues by itself. Do not share it again."
+                .. (function()
+                    -- A saved Off mode is stated now, not only at the refusal.
+                    local policy = Nexus and Nexus.SyncModePolicy
+                    if policy and type(policy.Mode) == "function" and policy.Mode() == "off" then
+                        return " Your saved Sync mode is Off: it will be saved locally and not sent."
+                    end
+                    return ""
+                end)()
         end
         if s.localSaved ~= true then
             local why = tostring(s.queueReason or "local save failed")

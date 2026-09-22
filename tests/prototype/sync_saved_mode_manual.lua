@@ -36,6 +36,13 @@ local peerId=P.Post(B,'NEXUS-TEST-PEER-OWNED')
 for i=1,200 do B.H.Advance(.05,.05) end
 B.cursor=#B.H.sent
 check(A.e.Nexus.BuildCatalog.Get(peerId)==nil,'fixture: the Manual peer has not seen the record')
+-- This side also owns a record the other peer lacks (its Share packets are
+-- discarded, as if the other peer were away). Answering the other peer's
+-- request during this side's Sync Now would carry it: that must not happen.
+local hiddenId=P.Post(A,'NEXUS-TEST-MANUAL-HIDDEN')
+for i=1,240 do A.H.Advance(.05,.05) end
+A.cursor=#A.H.sent
+local sentBeforeSync=#A.H.sent
 local mark=#P.trace
 A.e.SlashCmdList.NEXUS('sync')
 check(A.e.Nexus.SyncModePolicy.ActiveManualGrant()~=nil,'Sync Now holds a manual grant')
@@ -44,6 +51,7 @@ P.Until(function()return P.Full(A,peerId)~=nil end,6000)
 local codes=FromA(mark)
 check(#codes>0,'Manual Sync Now sends')
 Only(codes,{WLRQ=true,WLLQ=true},'Manual Sync Now')
+check(B.e.Nexus.BuildCatalog.Get(hiddenId)==nil,'Manual Sync Now: unrelated answers stay unauthorized; the other peer did not get the record held by this side')
 check(P.Full(A,peerId)~=nil,'Manual Sync Now completes: the missing record is received with its Echo list')
 P.Until(function()return A.e.Nexus.SyncModePolicy.ActiveManualGrant()==nil end,12000)
 check(A.e.Nexus.SyncModePolicy.ActiveManualGrant()==nil,'the grant ends with the operation')
@@ -66,6 +74,20 @@ Only(codes,{WLBI=true,WLLC=true,WLRB=true},'Manual Share')
 local hasSummary=false;for _,c in ipairs(codes)do if c=='WLBI' then hasSummary=true end end
 check(hasSummary,'the Share summary is sent without a separate Sync Now')
 check(P.Full(B,id)~=nil,'the peer stores the shared record with its Echo list')
+local channel=A.e.Nexus.Sync.ChannelName()
+local function Fetch(buildId)
+ A.H.Fire('CHAT_MSG_CHANNEL','WLLQ|AutoPeer|'..buildId,'AutoPeer-Ebonhold',nil,'1. '..channel,nil,nil,nil,nil,channel)
+end
+local function SentAbout(buildId,since)
+ for k=since+1,#A.H.sent do if A.H.sent[k].text:find(buildId,1,true) then return true end end
+ return false
+end
+-- During the Share window a fetch for a different build is not answered.
+local since=#A.H.sent;Fetch(hiddenId);P.Advance(20)
+check(not SentAbout(hiddenId,since),'Manual: a fetch for another build during a Share window is not answered')
+-- After the Share's own 120-second expiry a fetch for the shared build is not answered.
+P.Advance(130);since=#A.H.sent;Fetch(id);P.Advance(20)
+check(not SentAbout(id,since),'Manual: after the Share expiry a fetch for that build is not answered')
 local kind=A.e.Nexus.CommunityBuilds.ShareStatusText(id)
 check(kind=='sent','the Share status is truthful (sent, peer receipt not claimed): '..tostring(kind))
 check(A.e.NexusDB.settings.syncMode=='manual' and A.e.NexusDB.settingsVersion==5,'the saved mode and marker are unchanged')
@@ -100,11 +122,23 @@ check(Ended()>endedBefore2,'Manual -> Off: the queued request ended through the 
 check(A.e.Nexus.Sync.Stats().terminalReason=='sync_mode','Manual -> Off: the operation ends with a truthful sync-mode terminal reason: '..tostring(A.e.Nexus.Sync.Stats().terminalReason))
 -- Off -> automatic: answers to the other peer resume; -> Off again: they stop.
 A.e.NexusDB.settings.syncMode='automatic';sent=#A.H.sent
+local droppedBefore=A.e.Nexus.Sync.Stats().modeDropped or 0
+-- The first chunk of a multi-chunk answer switches the saved mode to Off while
+-- the remaining chunk is already queued (this side's record the peer lacks).
+local switched=false
+P.before=function(p,q,code)
+ if not switched and p==A and code=='WLRB' then
+  local index,total=p.H.sent[p.cursor].text:gsub('||','|'):match('|(%d+)/(%d+)|')
+  if index and total and tonumber(index)<tonumber(total) then switched=true;A.e.NexusDB.settings.syncMode='off' end
+ end
+end
 B.e.Nexus.Sync.RequestSync()
-P.Until(function()return #A.H.sent>sent end,4000)
-check(#A.H.sent>sent,'automatic: the peer is answered again')
+P.Until(function()return switched end,4000)
+P.before=nil
+check(switched,'automatic: the peer is answered again')
 P.Advance(20)
-A.e.NexusDB.settings.syncMode='off';P.Advance(1);sent=#A.H.sent
+check((A.e.Nexus.Sync.Stats().modeDropped or 0)>droppedBefore,'automatic -> Off: queued answers are dropped at the pump with the mode reason, not held or released')
+sent=#A.H.sent
 P.Advance(20);B.e.Nexus.Sync.RequestSync();P.Advance(30)
 check(#A.H.sent==sent,'Off after a change: nothing more is sent: '..(#A.H.sent-sent))
 check(A.e.Nexus.SyncWire.Stats().suspended==false,'mode refusals never suspend the wire')

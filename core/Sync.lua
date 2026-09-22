@@ -1419,6 +1419,12 @@ local function PumpPendingShare(elapsed)
         status.queueReason = "queued after retry"
         status.retryOutcome = "admitted"
         Operation.Transition(status, "queued", "bounded retry admitted")
+        -- Same follow-up permission as a first-time admission, with the
+        -- Share's own (unchanged) expiry.
+        if Nexus.SyncModePolicy then
+            Nexus.SyncModePolicy.NoteExplicitShare(status.id,
+                pending.metadata and pending.metadata.expiresAt)
+        end
         pendingShare = nil
         PeerObserve("share_queue", {id=status.id,outcome="admitted",
             reason="bounded retry",queue=Transport.Snapshot().control})

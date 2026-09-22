@@ -55,7 +55,7 @@ NAMES += ['rolling_review_automatic_paths_orb_state']
 NAMES += ['loading_step_progress','loading_step_source_change']
 NAMES += ['format5_known_transition','format5_ownership','format5_protection']
 NAMES += ['format_marker_malformed']
-NAMES += ['sync_saved_mode_off','sync_saved_mode_manual','sync_saved_mode_controls']
+NAMES += ['sync_saved_mode_off','sync_saved_mode_manual','sync_saved_mode_controls','sync_saved_mode_share_retry']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

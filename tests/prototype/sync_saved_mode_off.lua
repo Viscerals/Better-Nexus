@@ -38,6 +38,9 @@ check(status and status:GetText():find('saved Sync mode is Off',1,true),'Off: th
 
 -- An explicit Share keeps the local record, is not labelled Sent and is not left preparing.
 local id=P.Post(A,'NEXUS-TEST-OFF-SHARE')
+local firstKind,firstText=A.e.Nexus.CommunityBuilds.ShareStatusText(id)
+check(firstKind=='preparing' and tostring(firstText):find('saved Sync mode is Off: it will be saved locally and not sent',1,true),
+ 'Off: while preparing, the Share already states it will not be sent: '..tostring(firstKind)..' '..tostring(firstText))
 P.Advance(10)
 local kind,text=A.e.Nexus.CommunityBuilds.ShareStatusText(id)
 check(kind=='stopped','Off: the Share ends stopped, not sent, queued or preparing: '..tostring(kind))
