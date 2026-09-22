@@ -12,7 +12,7 @@ assert(M.Start(2));H.Offer({{spellId=410001,quality=1},{spellId=410004,quality=3
 assert(H.Count('take')==1);H.Result(410001,1);M.Pump()
 assert(O.source==410001 and H.Count('orb-spend')==2,'confirmed unwanted safe result is automatically recycled')
 H.Offer();H.Result(410002,2);M.Pump()
-assert(M.Status().state=='LIMIT' and M.Status().spent==2,'recycling consumes the same finite maximum')
+assert(M.Status().state=='FINISHED' and M.Status().spent==2,'recycling consumes the same finite maximum')
 O.charges=100;H.Notify();for i=1,4 do M.Pump()end
 assert(H.Count('orb-spend')==2 and not M.Status().running,'more resources cannot restart a limited run')
 print('PASS explicit zero/loading/unsupported balance, automatic recycling and finite non-restarting maximum')

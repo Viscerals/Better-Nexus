@@ -16,6 +16,18 @@ H.service.SelectPerk(410004);H.Result(410004,3)
 assert(M.Status().spent==2 and not M.Status().pending);assert(M.Resume())
 assert(H.Count('orb-spend')==3 and M.Status().limit==3)
 H.Offer();H.Result(410002,2);M.Pump()
-assert(M.Status().state=='LIMIT' and M.Status().spent==3 and H.Count('orb-spend')==3)
-assert(not M.Resume() and not M.Start(),'repeated clicks cannot reset the same approved run')
+-- The settled maximum finishes this run: its usage stays, and no click can
+-- continue it. A later Start is a NEW authorized run, never a continuation.
+assert(M.Status().state=='FINISHED' and M.Status().spent==3 and H.Count('orb-spend')==3)
+assert(not M.Resume(),'a finished run cannot be resumed')
+local spendsBefore=H.Count('orb-spend')
+local started=M.Start()
+if started then
+ assert(M.Status().spent==0 and M.Status().limit>0,
+  'a new Start is a new run with its own counters, not a continuation: '..M.Status().spent)
+else
+ assert(M.Status().spent==3 and M.Status().state=='FINISHED',
+  'a refused Start leaves the finished run exactly as it was')
+ assert(H.Count('orb-spend')==spendsBefore,'a refused Start submits nothing')
+end
 print('PASS target changes before/after choice, original settlement and Resume preserve one finite budget')
