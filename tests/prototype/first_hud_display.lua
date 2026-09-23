@@ -71,6 +71,16 @@ end
 -- wanted by default, so a HUD that can render is on screen WITHOUT a click.
 local function Settle() H.Advance(2.5) end
 
+-- Real runtime steps, each forced through the product's own route and each
+-- followed by time to run. A window of plain elapsed time may contain no
+-- step at all -- the loop is change-driven -- and a claim about "runtime
+-- steps" checked over such a window cannot fail.
+local function ForcedSteps(count)
+ local before=Stats().calls
+ for _=1,count do Nexus.RequestRecompute();H.Advance(.4) end
+ return Stats().calls-before
+end
+
 -- The player's own interaction: left-click hides a HUD that is up and shows
 -- one that is down. Asserted both ways, because "left-click does not display
 -- the main HUD" is what was reported.
@@ -136,6 +146,24 @@ do
  check(#H.actions==0,'and nothing is taken while the count is unknown')
 end
 
+-- 3b. The same wait as the FIRST display. Section 3 relabels a HUD that
+-- start-up had already rendered; here the ownership request is unanswered
+-- from start-up itself, so no render exists until the wait makes one.
+do
+ Boot(80,nil,function(h) h.holdGrantedResponse=true end)
+ check(Nexus.GameAdapter.Owned().synced==false,
+  'fixture: ownership has never been answered this session')
+ -- At level 80 with unanswered ownership and no board, the unsynchronized
+ -- wait is the only branch that can render; the status line below is what
+ -- proves this render came from it.
+ Settle()
+ check(Stats().calls>0 and Stats().commits>0 and Facts().shown==true,
+  'an unsynchronized wait produces the first HUD by itself')
+ check(Status():lower():find('not synchronized',1,true)~=nil
+  and Status():find('/79',1,true)==nil,
+  'saying the count is not known yet: '..Status())
+end
+
 -- 4. A selection the server has not answered yet: the client's own latch.
 do
  -- The latch is in place before start-up's first step, so the in-flight
@@ -167,11 +195,10 @@ do
  check(Facts().shown==true,'fixture: the HUD is on screen')
  LeftClick()
  check(Facts().shown==false and Facts().wanted==false,'a left-click hides it')
- local before=Stats().commits
- H.Advance(4)
- check(Facts().shown==false,
-  'and further runtime steps render without showing it again')
- check(Stats().commits>=before,'(the HUD may keep rendering while hidden: '..Stats().commits..')')
+ local rendered=ForcedSteps(5)
+ check(rendered>0,'fixture: real runtime steps rendered while it was hidden: '..rendered)
+ check(Facts().shown==false and Facts().wanted==false,
+  'and those renders did not show it again or make it wanted again')
  LeftClick();H.Advance(.5)
  check(Facts().shown==true,'the next left-click shows it immediately')
 end
@@ -199,8 +226,10 @@ do
   'right-click shows the Wishlist editor for a Saved Build with no Wishlist')
  check(Facts().menuSuppressed==true and Facts().shown==false,
   'and the HUD steps aside for it')
- H.Advance(3)
- check(Facts().shown==false,'runtime steps do not push the HUD back over the editor')
+ local rendered=ForcedSteps(5)
+ check(rendered>0,'fixture: real runtime steps rendered while the editor was open: '..rendered)
+ check(Facts().menuSuppressed==true and Facts().shown==false,
+  'and those renders did not push the HUD back over the editor')
  editor:Hide();H.Advance(.5)
  check(Facts().menuSuppressed==false and Facts().shown==true,
   'closing the editor brings the HUD back')
@@ -208,10 +237,15 @@ end
 
 -- 8. The video's order: local tools ready while shared builds are still
 -- loading, the stock widget present, the loading view left open. At every
--- observation SOME Difficulty/Soul Ash display is on screen. Both may be up
--- for at most one scan while the stock widget stands aside -- replacement
--- first, original second is the order the handoff requires -- but never
--- neither.
+-- observation one of the two HUD FRAMES -- the stock widget or NexusPanel --
+-- is shown. Both may be up for at most one scan while the stock widget
+-- stands aside: replacement first, original second is the order the handoff
+-- requires. Never neither.
+--
+-- What this asserts is frame visibility. The synthetic stock frame carries no
+-- text, so the Difficulty / Soul Ash VALUES the Nexus HUD would mirror are not
+-- tested here; nor is it a proof on its own -- the stock-HUD handoff that
+-- makes the widget wait is covered by server_hud_handoff.
 do
  Boot(80,nil)
  local stock=CreateFrame('Frame','ProjectEbonholdPlayerRunFrame',UIParent)
@@ -224,7 +258,7 @@ do
   H.Advance(.25)
   if Facts().shown~=true and stock:IsShown()~=true then gaps=gaps+1 end
  end
- check(gaps==0,'at no observation was neither display on screen: '..gaps..' gaps')
+ check(gaps==0,'at no observation was neither HUD frame shown: '..gaps..' gaps')
  check(Facts().shown==true,'the Nexus HUD is on screen once it has rendered')
  check(stock:IsShown()==false,
   'and the stock widget has stood aside for it, because the replacement can display')
