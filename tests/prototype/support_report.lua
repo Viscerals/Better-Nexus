@@ -455,4 +455,136 @@ local caller={activeSlot=1}
 for i=1,40 do caller['k'..i]=i end
 record({committed=false,readiness=caller})
 check(caller['(omitted keys)']==nil,"the caller's own map is not written into")
+-- 13. This module does not trust its owners anywhere else, and it must not
+-- trust them here. Summary, IncidentLines and NewPreparation are public and
+-- take a caller's table, so a value carrying the marker byte followed by more
+-- control bytes must not put them into the report or forge a line.
+support.Clear()
+local injected={id=1,occurrences=1,committed=false,
+ kind='KIND'..string.char(1)..string.char(10)..'INJECTED',
+ reason='REASON'..string.char(1)..string.char(7)..'BELL'}
+local injectedSummary=builder.Summary(injected)
+local badByte=nil
+for index=1,#injectedSummary do
+ local byte=injectedSummary:byte(index)
+ if byte<32 and byte~=10 then badByte=byte end
+end
+check(badByte==nil,'no control byte from a caller value reaches the summary: '..tostring(badByte))
+check(injectedSummary:find('INJECTED',1,true)~=nil,'the text itself is still shown')
+local forged=nil
+for line in injectedSummary:gmatch('[^'..string.char(10)..']+') do
+ if line:find('^INJECTED') then forged=line end
+end
+check(forged==nil,'and it cannot forge a line of its own: '..tostring(forged))
+local injectedJob=builder.NewPreparation({incident=injected,extended=true})
+local injectedGuard=0
+while builder.Step(injectedJob)=='pending' and injectedGuard<400 do injectedGuard=injectedGuard+1 end
+local injectedText=table.concat(injectedJob.chunks or {},'')
+local badPayload=nil
+for index=1,#injectedText do
+ local byte=injectedText:byte(index)
+ if byte<32 and byte~=10 then badPayload=byte end
+end
+check(badPayload==nil,'nor the prepared payload: '..tostring(badPayload))
+
+-- 14. A hostile owner CONTAINER, not only a hostile field: a metatable on the
+-- owner table raises on the index itself.
+do
+ local realRelease,realEvidence=Nexus.Release,Nexus.LoadoutEvidence
+ local raising=setmetatable({},{__index=function() error('hostile owner') end})
+ Nexus.Release=raising
+ local okRelease=pcall(builder.Summary)
+ local okReleaseFile=pcall(builder.NewPreparation,{})
+ Nexus.Release=realRelease
+ Nexus.LoadoutEvidence=raising
+ local okEvidence=pcall(builder.Summary)
+ Nexus.LoadoutEvidence=realEvidence
+ check(okRelease and okReleaseFile,'a raising release owner takes neither route away')
+ check(okEvidence,'and neither does a raising evidence owner')
+end
+
+-- 15. The checksum detects order, and counts each chunk's position. Without
+-- the per-chunk term, two different chunk splits of the same bytes agree.
+check(builder.Checksum({'a','b'})~=builder.Checksum({'b','a'}),
+ 'the checksum is order sensitive')
+check(builder.Checksum({'ab'})~=builder.Checksum({'a','b'}),
+ 'and counts where each chunk ends')
+check(builder.Checksum({})==builder.Checksum({}),'and is stable for the same input')
+-- The VALUE is pinned, not only its properties: tools/decode_support_report.py
+-- recomputes this same function in Python, so a change here that nothing
+-- notices would make every prepared file unreadable by the decoder.
+check(builder.Checksum({'nexus'})=='08b90235',
+ 'the checksum is the one the data-only decoder computes: '..builder.Checksum({'nexus'}))
+check(builder.Checksum({'a','b'})=='025100c7',
+ 'for a split list too: '..builder.Checksum({'a','b'}))
+
+-- 15b. The Orb section prints owner labels. They are owner text like any
+-- other: bounded, and never a control byte in the payload.
+do
+ local realHistory=Nexus.OrbHistory
+ local realRuntime=Nexus.OrbRuntime and Nexus.OrbRuntime.RunLog
+ if type(realHistory)=='table' then
+  local realRows,realView=realHistory.Rows,realHistory.Report
+  realHistory.Rows=function()
+   return {{ordinal=1,
+    source={label='SRC'..string.char(1)..string.char(10)..'FORGED'},
+    replacement={label=string.rep('L',5000)},
+    result={label='RES'..string.char(7)}}}
+  end
+  if Nexus.OrbRuntime then
+   Nexus.OrbRuntime.RunLog=function() return {runId=1,state='FINISHED',entries={{}}} end
+  end
+  local orbJob=builder.NewPreparation({extended=true})
+  local orbGuard=0
+  while builder.Step(orbJob)=='pending' and orbGuard<400 do orbGuard=orbGuard+1 end
+  realHistory.Rows,realHistory.Report=realRows,realView
+  if Nexus.OrbRuntime then Nexus.OrbRuntime.RunLog=realRuntime end
+  local orbText=table.concat(orbJob.chunks or {},'')
+  local orbBad=nil
+  for index=1,#orbText do
+   local byte=orbText:byte(index)
+   if byte<32 and byte~=10 then orbBad=byte end
+  end
+  check(orbBad==nil,'no control byte from an Orb label reaches the payload: '..tostring(orbBad))
+  check(orbText:find(string.rep('L',200),1,true)==nil,
+   'and an unbounded label is bounded before it is written')
+ end
+end
+
+-- 16. The build label is bounded in the stored header, not only escaped.
+do
+ local realLabel=Nexus.Release.buildLabel
+ Nexus.Release.buildLabel=string.rep('X',5000)
+ local longJob=builder.NewPreparation({})
+ local longGuard=0
+ while builder.Step(longJob)=='pending' and longGuard<400 do longGuard=longGuard+1 end
+ Nexus.Release.buildLabel=realLabel
+ check(#tostring(longJob.report.meta.build)<=64,
+  'a 5000-byte build label is bounded in the header: '..#tostring(longJob.report.meta.build))
+end
+
+-- 17. More than one chunk. Every bound holds across the split, and the
+-- checksum still recomputes over the real chunk list.
+support.Clear()
+for index=1,20 do
+ support.Record('catalog-refusal',{reason='R'..index,producer=string.rep('P',200),
+  scope=string.rep('S',200),detail=string.rep('D',200),committed=false,
+  counts={ordinary=79,locked=6,total=85},limits={ordinary=79,locked=6,total=85}})
+end
+local bigJob=builder.NewPreparation({extended=true})
+local bigGuard=0
+while builder.Step(bigJob)=='pending' and bigGuard<2000 do bigGuard=bigGuard+1 end
+check(bigJob.report~=nil,'a large report completes')
+check(bigJob.report.meta.chunkCount>1,
+ 'across more than one chunk: '..bigJob.report.meta.chunkCount)
+local bigBytes=0
+for _,chunk in ipairs(bigJob.report.chunks) do
+ check(#chunk<=builder.CHUNK_BYTES,'each chunk stays within its bound: '..#chunk)
+ bigBytes=bigBytes+#chunk
+end
+check(bigJob.report.meta.bytes==bigBytes,
+ 'the header byte count is the real one: '..bigJob.report.meta.bytes..' vs '..bigBytes)
+check(bigJob.report.meta.checksum==builder.Checksum(bigJob.report.chunks),
+ 'and the checksum covers the real chunks in order')
+
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)

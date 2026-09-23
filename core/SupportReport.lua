@@ -97,8 +97,8 @@ local function retained(value, limit)
     if not marker then return plain(text, limit) end
     -- The marker is the only statement that this value was shortened at all,
     -- so it is the part that must survive this bound. The body yields to it.
-    local printable = "..." .. marker:sub(2)
-    if #printable >= limit then return plain(printable, limit) end
+    local printable = plain("..." .. marker:sub(2), limit)
+    if #printable >= limit then return printable end
     return plain(text:sub(1, #text - #marker), limit - #printable) .. printable
 end
 
@@ -130,9 +130,13 @@ end
 M.Checksum = checksum
 
 local function limits()
-    local evidence = Nexus and Nexus.LoadoutEvidence
-    if evidence and type(evidence.SemanticLimits) == "function" then
-        local ok, value = pcall(evidence.SemanticLimits)
+    local okOwner, evidence = pcall(function()
+        local owner = Nexus and Nexus.LoadoutEvidence
+        return type(owner) == "table" and type(owner.SemanticLimits) == "function"
+            and owner.SemanticLimits or nil
+    end)
+    if okOwner and evidence then
+        local ok, value = pcall(evidence)
         -- A partial answer is reported as far as it goes, never as "nil".
         if ok and type(value) == "table" then
             return {ordinary = value.ordinary or "not stated",
@@ -143,8 +147,11 @@ local function limits()
     return nil
 end
 
--- Anything going into a concatenation here comes through this: never nil,
--- never raising, always bounded, never carrying a control byte.
+-- The converter for a value going into a concatenation: never nil, never
+-- raising, always bounded, never carrying a control byte. `shown` and
+-- `retained` below give the same guarantees for their own cases. Any NEW
+-- concatenation in this file takes one of the three; a segment appended
+-- without one is how three separate reviews found the same defect.
 local function safeText(value, limit)
     local ok, text = pcall(tostring, value)
     if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
@@ -155,9 +162,13 @@ end
 -- copied summary, the payload and the stored header. It gets the same
 -- treatment, not an exception for being "ours".
 local function buildLabel()
-    local release = Nexus and Nexus.Release
-    local label = release and release.buildLabel
-    if label == nil or label == "" then return "unknown" end
+    -- The READ is protected, not only the value: a metatable on the owner
+    -- table can raise on the index itself.
+    local ok, label = pcall(function()
+        local release = Nexus and Nexus.Release
+        return release and release.buildLabel or nil
+    end)
+    if not ok or label == nil or label == "" then return "unknown" end
     return safeText(label, 64)
 end
 
@@ -170,8 +181,9 @@ local function counts(line, label, value, limit)
         .. safeText(value.locked or "?", 16) .. " locked, "
         .. safeText(value.total or "?", 16) .. " total"
     if type(limit) == "table" then
-        text = text .. " (limits " .. safeText(limit.ordinary, 16) .. "/"
-            .. safeText(limit.locked, 16) .. "/" .. safeText(limit.total, 16) .. ")"
+        text = text .. " (limits " .. safeText(limit.ordinary or "not stated", 16) .. "/"
+            .. safeText(limit.locked or "not stated", 16) .. "/"
+            .. safeText(limit.total or "not stated", 16) .. ")"
     end
     line[#line + 1] = text
 end
@@ -564,8 +576,9 @@ function M.Step(job)
                 if history and type(history.Rows) == "function" then
                     for _, row in ipairs(history.Rows(view, nil)) do
                         out[#out + 1] = "  " .. safeText(row.ordinal, 16) .. ". "
-                            .. row.source.label .. " -> " .. row.replacement.label
-                            .. " [" .. row.result.label .. "]"
+                            .. safeText(row.source.label, 64) .. " -> "
+                            .. safeText(row.replacement.label, 64)
+                            .. " [" .. safeText(row.result.label, 64) .. "]"
                     end
                 end
                 return out
