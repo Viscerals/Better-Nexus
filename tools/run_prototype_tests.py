@@ -76,6 +76,7 @@ NAMES += ['sync_admission_restore']
 NAMES += ['update_public_test_hints']
 NAMES += ['startup_attempt_key_width']
 NAMES += ['wishlist_switch_recovery']
+NAMES += ['server_hud_handoff']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

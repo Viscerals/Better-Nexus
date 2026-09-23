@@ -171,6 +171,47 @@ local function UsingNexusHud()
     return NexusDB.soulAshHudMode == "nexus"
 end
 
+-- The same answer WITHOUT normalizing the stored value. EnsureDefaultMode
+-- writes the default into the profile, which is right when this owner is
+-- applying the preference and wrong when something is merely reading it: a
+-- support report must not store a setting just by describing one.
+local function SavedModeIsNexus()
+    local saved = type(NexusDB) == "table" and NexusDB.soulAshHudMode or nil
+    return saved ~= "server"
+end
+
+-- Can the Nexus HUD actually display right now? Asked of the panel owner,
+-- which is the only place that knows whether a render has committed. A panel
+-- that is merely hidden -- by the player, or by an open dialog -- is still
+-- able to display and still counts as the replacement; a panel that has never
+-- committed, has failed, or was never loaded does not.
+--
+-- Protected, and false when unknown: if this owner cannot get an answer, the
+-- stock widget keeps its place rather than being hidden on an assumption.
+local function ReplacementAvailable()
+    local panel = Nexus and Nexus.Panel
+    if type(panel) ~= "table" then return false end
+    if type(panel.VisibilityFacts) ~= "function" then
+        -- An older or partially loaded panel: only its own visibility is
+        -- knowable, and that is enough to prove it is displaying.
+        if type(panel.IsShown) == "function" then
+            local ok, shown = pcall(panel.IsShown)
+            return ok and shown == true
+        end
+        return false
+    end
+    local ok, facts = pcall(panel.VisibilityFacts)
+    if not ok or type(facts) ~= "table" then return false end
+    return facts.ready == true
+end
+
+-- Whether the stock widget should be standing aside for the Nexus HUD. Both
+-- halves must hold: the player asked for the Nexus HUD, and that HUD can
+-- display. Nothing here is decided from the mode alone.
+local function ReplacingServerHud()
+    return UsingNexusHud() and ReplacementAvailable()
+end
+
 local function SetShown(frame, shown)
     if not frame then return end
     if shown then
@@ -184,17 +225,27 @@ end
 
 local function ApplyVisibility()
     if not rootFrame then return end
-    local hideServer = UsingNexusHud()
 
-    -- The confirmed Project Ebonhold root is the complete stock widget.
-    -- Hide/show it as one unit; never touch unrelated global addon frames.
-    SetShown(rootFrame, not hideServer)
+    -- Three states, not two. The stock widget is hidden only while a
+    -- replacement is really taking its place; it is shown only because the
+    -- player asked for it; and while the Nexus HUD cannot display, it is
+    -- LEFT EXACTLY AS IT IS. Forcing it to show every second would fight the
+    -- game and would override a player who closed it themselves.
+    if ReplacingServerHud() then
+        -- The confirmed Project Ebonhold root is the complete stock widget.
+        -- Hide/show it as one unit; never touch unrelated global addon frames.
+        SetShown(rootFrame, false)
+    elseif not UsingNexusHud() then
+        SetShown(rootFrame, true)
+    end
 
     local hookTarget = rootFrame
     if hookTarget and not hideHooked and type(hookTarget.HookScript) == "function" then
         hideHooked = true
         hookTarget:HookScript("OnShow", function(self)
-            if UsingNexusHud() then self:Hide() end
+            -- The same question as above: a widget that comes back while no
+            -- replacement can display is left where the game put it.
+            if ReplacingServerHud() then self:Hide() end
         end)
     end
 end
@@ -255,6 +306,33 @@ end
 
 function M.IsUsingNexusHud()
     return UsingNexusHud()
+end
+
+-- Whether the stock widget is currently standing aside, and why or why not.
+-- Read-only, bounded, and derived from owners that are already running: it
+-- starts nothing, rescans nothing and writes nothing.
+function M.VisibilityFacts()
+    local detected = rootFrame ~= nil
+    local shown = nil
+    if detected and type(rootFrame.IsShown) == "function" then
+        local ok, value = pcall(rootFrame.IsShown, rootFrame)
+        if ok then shown = value and true or false end
+    end
+    local alpha = nil
+    if detected and type(rootFrame.GetAlpha) == "function" then
+        local ok, value = pcall(rootFrame.GetAlpha, rootFrame)
+        if ok then alpha = tonumber(value) end
+    end
+    local nexusMode = SavedModeIsNexus()
+    local available = ReplacementAvailable()
+    return {
+        mode = nexusMode and "nexus" or "server",
+        detected = detected,
+        stockShown = shown,
+        stockAlpha = alpha,
+        replacementAvailable = available,
+        replacing = nexusMode and available or false,
+    }
 end
 
 function M.SetMode(mode)

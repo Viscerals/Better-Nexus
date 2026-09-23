@@ -1890,6 +1890,28 @@ function M.SetStatus(status)
     return true
 end
 function M.RenderStats() return DefensiveCopy(renderStats) end
+
+-- What this owner knows about its own visibility, as facts another owner can
+-- act on. Read-only: it creates no frame, requests no render and writes
+-- nothing. `ready` is the question the stock HUD needs answered before it
+-- steps aside -- can this panel display at all -- which is deliberately NOT
+-- the same as `shown`: a player who hid it and a dialog that suppresses it
+-- both leave a panel that is perfectly able to display.
+function M.VisibilityFacts()
+    return {
+        exists = frame ~= nil,
+        shown = frame ~= nil and frame:IsShown() and true or false,
+        wanted = panelWantedVisible and true or false,
+        menuSuppressed = menuSuppressed and true or false,
+        ready = frame ~= nil and renderState.committed == true
+            and renderState.applying ~= true,
+        committed = renderState.committed == true,
+        hadFailure = renderState.hadFailure == true,
+        hiddenUncommitted = renderStats.hiddenUncommitted,
+        commits = renderStats.commits,
+        failures = renderStats.failures,
+    }
+end
 function M.Show()
     panelWantedVisible = true
     EnsureFrame()

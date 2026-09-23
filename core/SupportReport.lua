@@ -626,6 +626,55 @@ function M.Step(job)
                 end
                 return out
             end},
+            -- Which HUD is actually on screen. "My panel disappeared" is
+            -- invisible to every other section here: hiding a frame on
+            -- purpose is not an error, not an incident, and not a failed
+            -- start-up. These are session facts read from the owners that
+            -- already hold them; nothing is stored and no frame tree is
+            -- walked.
+            {name = "hud", build = function()
+                local out = {"-- HUD (this session; nothing here is stored) --"}
+                local okServer, server = pcall(function()
+                    local owner = Nexus and Nexus.ServerStatus
+                    return owner and type(owner.VisibilityFacts) == "function"
+                        and owner.VisibilityFacts() or nil
+                end)
+                local okPanel, panel = pcall(function()
+                    local owner = Nexus and Nexus.Panel
+                    return owner and type(owner.VisibilityFacts) == "function"
+                        and owner.VisibilityFacts() or nil
+                end)
+                if not (okServer and type(server) == "table") then server = nil end
+                if not (okPanel and type(panel) == "table") then panel = nil end
+                if not server and not panel then
+                    out[#out + 1] = "not available"
+                    return out
+                end
+                if server then
+                    out[#out + 1] = "preference=" .. safeText(server.mode, 16)
+                        .. "; server widget=" .. (server.detected and "present" or "not found")
+                        .. (server.stockShown ~= nil
+                            and ("; shown=" .. safeText(server.stockShown, 8)) or "")
+                        .. (server.stockAlpha ~= nil
+                            and ("; alpha=" .. safeText(server.stockAlpha, 8)) or "")
+                        .. "; replaced by Nexus=" .. safeText(server.replacing, 8)
+                end
+                if panel then
+                    out[#out + 1] = "Nexus panel=" .. (panel.exists and "built" or "not built")
+                        .. "; shown=" .. safeText(panel.shown, 8)
+                        .. "; wanted=" .. safeText(panel.wanted, 8)
+                        .. "; menu suppressed=" .. safeText(panel.menuSuppressed, 8)
+                        .. "; render committed=" .. safeText(panel.committed, 8)
+                    out[#out + 1] = "  renders: commits=" .. safeText(panel.commits, 12)
+                        .. "; failures=" .. safeText(panel.failures, 12)
+                        .. "; hidden while uncommitted=" .. safeText(panel.hiddenUncommitted, 12)
+                end
+                if server and panel and server.mode == "nexus"
+                    and server.detected and not panel.ready then
+                    out[#out + 1] = "  the Nexus HUD cannot display yet, so the server widget keeps its place"
+                end
+                return out
+            end},
             {name = "errors", build = function()
                 local errors = Nexus.Errors
                 local history = errors and type(errors.History) == "function"
