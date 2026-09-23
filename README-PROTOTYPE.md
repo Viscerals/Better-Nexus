@@ -19,9 +19,22 @@ package merely because it has the same addon version number.
 ## Install and roll back
 
 Close WoW. Back up the old `Interface/AddOns/Nexus` folder and matching `WTF`
-folder outside the client. Replace only the addon folder; do not merge packages,
-reset SavedVariables, or delete unresolved Wishlists. The installed path is
-`Interface/AddOns/Nexus/Nexus.toc` (not a nested Nexus/Nexus folder).
+folder outside the client. Replace only the addon folders; do not merge packages,
+reset SavedVariables, or delete unresolved Wishlists.
+
+The ZIP contains TWO folders, and both go into `Interface/AddOns`:
+
+| Folder | Installed path | What it is |
+| --- | --- | --- |
+| `Nexus` | `Interface/AddOns/Nexus/Nexus.toc` | the addon (not a nested Nexus/Nexus folder) |
+| `NexusSupport` | `Interface/AddOns/NexusSupport/NexusSupport.toc` | storage only, so a support report can be written to its own file |
+
+`NexusSupport` has no gameplay logic and loads only when you ask for a report
+file. Nexus runs normally without it; the Copy summary route stays available.
+The report file it creates is
+`WTF/Account/<ACCOUNT>/SavedVariables/NexusSupport.lua`, which is NOT the
+`NexusSupport.lua` that ships inside the addon folder. A new component needs the
+normal closed-client installation and restart before WoW registers its file.
 
 Disable other Echo pickers, including a separate LoadoutPilot, before using Nexus
 automation. LoadoutPilot is a behavioral reference, not a runtime dependency.

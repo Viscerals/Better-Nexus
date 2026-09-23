@@ -645,10 +645,22 @@ local function SnapshotEchoes()
     local slots = Adapter.Slots and Adapter.Slots()
     local activeIdx = slots and tonumber(slots.activeSlot)
     local activeRow = activeIdx and activeIdx > 0 and slots.bySlot and slots.bySlot[activeIdx]
+    -- The active slot is a SAVED loadout and Owned is a THIS-RUN projection:
+    -- they describe different moments, so this merge can only be a best
+    -- effort. What it must not do is move a copy between roles. A slot row the
+    -- slot itself marks permanent is permanent evidence; merging it into the
+    -- ordinary pool left it there whenever the CURRENT permanent map no longer
+    -- carried that exact id - a replaced permanent, a stale slot, another
+    -- loadout - and an ordinary pool of 79 copies reached the catalog as 81.
+    -- A row whose role the slot does not state is still merged, and the count
+    -- of those rows is reported, so the capture boundary can refuse rather
+    -- than guess.
+    local roleUnknownRows = 0
     if activeRow and type(activeRow.echoes) == "table" then
         for _, e in ipairs(activeRow.echoes) do
             local eid = tonumber(e and e.spellId)
-            if eid then
+            if eid and e.locked ~= true then
+                if e.locked == nil then roleUnknownRows = roleUnknownRows + 1 end
                 local n = tonumber(e.stacks) or 1
                 if n > (tonumber(ownedBySpell[eid]) or 0) then ownedBySpell[eid] = n end
             end
@@ -674,8 +686,47 @@ local function SnapshotEchoes()
             source[#source + 1] = { spellId = spellId, count = tracked }
         end
     end
-    return NormalizeEchoes(source)
+    local snapshot = NormalizeEchoes(source)
+    return snapshot, {
+        roleUnknownRows = roleUnknownRows,
+        slotRows = activeRow and type(activeRow.echoes) == "table"
+            and #activeRow.echoes or 0,
+        permanentKnown = next(lockedBySpell) ~= nil,
+        activeSlot = activeIdx or nil,
+    }
 end
+
+-- The supported envelope is the only objective test available at this
+-- boundary. An ordinary pool above it is not a possible current loadout: it
+-- can only come from two sources that describe different moments, so the
+-- capture is deferred with its counts retained instead of writing a record
+-- the catalog must reject - and instead of replacing a valid earlier record
+-- with a derived one that cannot be true.
+local function CaptureEnvelopeVerdict(ordinary, locked)
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    local limits = evidence and type(evidence.SemanticLimits) == "function"
+        and evidence.SemanticLimits() or {ordinary=79, locked=6, total=85}
+    local ordinaryCopies, lockedCopies = 0, 0
+    for _, e in ipairs(type(ordinary) == "table" and ordinary or {}) do
+        ordinaryCopies = ordinaryCopies + (tonumber(e.count or e.stacks) or 1)
+    end
+    for _, e in ipairs(type(locked) == "table" and locked or {}) do
+        lockedCopies = lockedCopies + (tonumber(e.count or e.stacks) or 1)
+    end
+    local total = ordinaryCopies + lockedCopies
+    local counts = {ordinary=ordinaryCopies, locked=lockedCopies, total=total}
+    if ordinaryCopies > limits.ordinary then
+        return false, counts, limits, "ordinary copies above the supported envelope"
+    end
+    if lockedCopies > limits.locked then
+        return false, counts, limits, "permanent copies above the supported envelope"
+    end
+    if total > limits.total then
+        return false, counts, limits, "total copies above the supported envelope"
+    end
+    return true, counts, limits
+end
+DPS._CaptureEnvelopeVerdict = CaptureEnvelopeVerdict
 
 local function EchoKey(snap)
     if not snap or #snap == 0 then return nil end
@@ -2863,11 +2914,15 @@ function DPS.GetCurrentEchoCount()
 end
 
 function DPS.GetCurrentEchoKey()
-    return EchoKey(SnapshotEchoes())
+    -- One value: SnapshotEchoes also returns how the snapshot was derived, and
+    -- a bare call would pass that second value on as an argument.
+    local snap = SnapshotEchoes()
+    return EchoKey(snap)
 end
 
 function DPS.GetCurrentMatchingBuild()
-    return FindMatchingBuild(SnapshotEchoes())
+    local snap = SnapshotEchoes()
+    return FindMatchingBuild(snap)
 end
 
 function DPS.GetCurrentLeaderboard(category)
@@ -2962,7 +3017,7 @@ local function CommitSession(category)
         return
     end
 
-    local snap = SnapshotEchoes()
+    local snap, derivation = SnapshotEchoes()
     local key = EchoKey(snap)
     if not key then
         Nexus.lastDpsNote = "ignored: no owned Echo snapshot was available"
@@ -3004,6 +3059,38 @@ local function CommitSession(category)
                 table.sort(ls, function(a,b) return a.spellId < b.spellId end)
                 if #ls > 0 then lockedSnap = ls end
             end
+        end
+        -- Before anything is written: a derived snapshot that cannot be a
+        -- current loadout must not replace a valid earlier record, and must
+        -- not be submitted to a catalog that will only refuse it. The counts
+        -- are retained for support instead, and the previous record stands.
+        local coherent, captureCounts, captureLimits, captureWhy =
+            CaptureEnvelopeVerdict(snap, lockedSnap)
+        if not coherent then
+            local support = Nexus and Nexus.SupportIncidents
+            if support and type(support.Record) == "function" then
+                pcall(support.Record, "capture-deferred", {
+                    reason = "SEMANTIC_ENVELOPE",
+                    producer = "DPS record capture",
+                    origin = "local",
+                    operation = "personal record capture",
+                    category = category,
+                    build = Nexus.Release and Nexus.Release.buildLabel or nil,
+                    representation = "inline",
+                    counts = captureCounts, limits = captureLimits,
+                    readiness = derivation,
+                    affected = snap,
+                    committed = false,
+                    scope = "no personal, public or catalog write was made for this capture",
+                    detail = captureWhy,
+                })
+            end
+            Nexus.lastDpsNote = "deferred: " .. tostring(captureWhy)
+                .. " (" .. tostring(captureCounts.ordinary) .. " ordinary, "
+                .. tostring(captureCounts.locked) .. " permanent, "
+                .. tostring(captureCounts.total) .. " total); the previous record is unchanged"
+            Debug(Nexus.lastDpsNote)
+            return
         end
         local personalRow = {
             dps = dpsFloor, level = level, ts = stamp,

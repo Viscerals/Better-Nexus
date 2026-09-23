@@ -102,8 +102,23 @@ def main() -> int:
             with zipfile.ZipFile(ns.zip) as z:
                 names = [n for n in z.namelist() if not n.endswith('/')]
                 packaged = z.read('Nexus/data/Release.lua').decode('utf-8') if 'Nexus/data/Release.lua' in names else ''
-            if any(not n.startswith('Nexus/') for n in names):
-                problems.append('the package has entries outside Nexus/')
+            # Exactly two addon folders: the addon, and the storage-only
+            # support component that owns the report SavedVariables file.
+            stray = [n for n in names
+                     if not n.startswith('Nexus/') and not n.startswith('NexusSupport/')]
+            if stray:
+                problems.append('the package has entries outside Nexus/ and NexusSupport/: '
+                                + ', '.join(sorted(stray)[:4]))
+            companion = [n for n in names if n.startswith('NexusSupport/')]
+            if not companion:
+                problems.append('the package has no NexusSupport/ support component')
+            elif 'NexusSupport/NexusSupport.toc' not in companion:
+                problems.append('NexusSupport/ has no NexusSupport.toc')
+            else:
+                with zipfile.ZipFile(ns.zip) as z:
+                    ctoc = z.read('NexusSupport/NexusSupport.toc').decode('utf-8', 'replace')
+                if 'SavedVariables: NexusSupportDB' not in ctoc:
+                    problems.append('NexusSupport.toc must declare SavedVariables: NexusSupportDB')
             if field(packaged, 'version') != version:
                 problems.append(f'packaged version {field(packaged, "version")} differs from {version}')
             if field(packaged, 'buildLabel') != ns.label:

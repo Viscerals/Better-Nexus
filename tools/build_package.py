@@ -12,10 +12,15 @@ line-ending setting does not matter), in sorted order, with one fixed timestamp 
 host-system field. Two builds in the same environment give the same bytes. The compressed
 bytes can differ between zlib builds (for example Linux and Windows Python 3.14), so compare
 checksums only between builds from the same environment. File contents are always identical.
-Content rule, the same one the published test.9027 package used:
+Content rule, the same one the published test.9027 package used, plus the
+storage-only support component:
   * the six top-level files in TOP_LEVEL;
   * everything under core/, data/, logic/, third_party/, ui/;
+  * everything under companion/NexusSupport/, packaged as its own addon folder
+    so WoW creates a separate SavedVariables file for support reports;
   * nothing else: no tests, tools, docs, .github, SavedVariables, logs or archives.
+The archive therefore contains two addon directories: Nexus/ and NexusSupport/.
+The companion is storage only: Nexus runs normally without it.
 Two declared substitutions in data/Release.lua, nothing else:
   * buildLabel "source" -> the label;
   * channel "development" -> "public-test" with --public, else "internal".
@@ -30,6 +35,9 @@ import argparse, hashlib, pathlib, re, subprocess, sys, zipfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TOP_LEVEL = ['AI_POLICY.md', 'LICENSE.md', 'Nexus.toc', 'README-PROTOTYPE.md', 'THIRD_PARTY.md', 'UPSTREAM.md']
 RUNTIME_DIRS = ['core', 'data', 'logic', 'third_party', 'ui']
+# Packaged as its own addon folder, not inside Nexus/.
+COMPANION_DIR = 'companion/NexusSupport'
+COMPANION_ADDON = 'NexusSupport'
 ALLOWED_SUFFIXES = {'.lua', '.toc', '.md'}
 LABEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$')
 SOURCE_LABEL = b'buildLabel = "source"'
@@ -43,8 +51,14 @@ def git(*args: str) -> bytes:
 
 def committed_files() -> dict[str, bytes]:
     names = [n for n in git('ls-tree', '-r', '-z', '--name-only', 'HEAD').decode().split('\0') if n]
-    wanted = [n for n in names if n in TOP_LEVEL or n.split('/', 1)[0] in RUNTIME_DIRS]
+    wanted = [n for n in names if n in TOP_LEVEL or n.split('/', 1)[0] in RUNTIME_DIRS
+              or n.startswith(COMPANION_DIR + '/')]
     return {n: git('cat-file', 'blob', 'HEAD:' + n) for n in sorted(wanted)}
+
+
+def companion_files(files: dict[str, bytes]) -> dict[str, bytes]:
+    prefix = COMPANION_DIR + '/'
+    return {n[len(prefix):]: d for n, d in files.items() if n.startswith(prefix)}
 
 
 def check(files: dict[str, bytes]) -> list[str]:
@@ -52,12 +66,41 @@ def check(files: dict[str, bytes]) -> list[str]:
     for name in files:
         if pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES:
             problems.append(f'unexpected file type in package: {name}')
+
+    # The companion is its own addon: its TOC must load exactly its own files,
+    # it must declare its own SavedVariables, and it must not depend on Nexus.
+    companion = companion_files(files)
+    if not companion:
+        problems.append(f'missing the support component under {COMPANION_DIR}/')
+    else:
+        companion_toc_name = COMPANION_ADDON + '.toc'
+        if companion_toc_name not in companion:
+            problems.append(f'the support component has no {companion_toc_name}')
+        else:
+            ctoc = companion[companion_toc_name].decode('utf-8', 'replace')
+            clisted = [l.strip().replace('\\', '/') for l in ctoc.splitlines()
+                       if l.strip() and not l.lstrip().startswith('#')]
+            for entry in clisted:
+                if entry not in companion:
+                    problems.append(f'{companion_toc_name} loads a file that is not packaged: {entry}')
+            for name in companion:
+                if name.endswith('.lua') and name not in clisted:
+                    problems.append(f'packaged support file is not loaded by {companion_toc_name}: {name}')
+            if 'SavedVariables: NexusSupportDB' not in ctoc:
+                problems.append(f'{companion_toc_name} must declare SavedVariables: NexusSupportDB')
+            if 'NexusSupportDB' in ctoc and 'NexusDB' in ctoc.replace('NexusSupportDB', ''):
+                problems.append(f'{companion_toc_name} must not declare the main addon saved variables')
+            for forbidden in ('## Dependencies:', '## RequiredDeps:'):
+                if forbidden in ctoc:
+                    problems.append(f'{companion_toc_name} must not depend on another addon: {forbidden}')
+
     toc = files.get('Nexus.toc', b'').decode('utf-8', 'replace')
     listed = [l.strip().replace('\\', '/') for l in toc.splitlines() if l.strip() and not l.lstrip().startswith('#')]
     for entry in listed:
         if entry not in files:
             problems.append(f'Nexus.toc loads a file that is not packaged: {entry}')
-    unloaded = [n for n in files if n.endswith('.lua') and n not in listed]
+    unloaded = [n for n in files if n.endswith('.lua') and n not in listed
+                and not n.startswith(COMPANION_DIR + '/')]
     for name in unloaded:
         problems.append(f'packaged Lua file is not loaded by Nexus.toc: {name}')
     if files.get('data/Release.lua', b'').count(SOURCE_LABEL) != 1:
@@ -108,13 +151,19 @@ def main() -> int:
                 data = data.replace(SOURCE_LABEL, f'buildLabel = "{ns.label}"'.encode())
                 channel = 'public-test' if ns.public else 'internal'
                 data = data.replace(SOURCE_CHANNEL, f'channel = "{channel}"'.encode())
-            info = zipfile.ZipInfo('Nexus/' + name, (2026, 1, 1, 0, 0, 0))
+            if name.startswith(COMPANION_DIR + '/'):
+                archive_name = COMPANION_ADDON + '/' + name[len(COMPANION_DIR) + 1:]
+            else:
+                archive_name = 'Nexus/' + name
+            info = zipfile.ZipInfo(archive_name, (2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3   # same header on every platform
             info.external_attr = 0o100644 << 16
             z.writestr(info, data)
     print(f'{out.relative_to(ROOT)}  {out.stat().st_size} bytes  sha256 {hashlib.sha256(out.read_bytes()).hexdigest()}')
-    print('Install path: Interface/AddOns/Nexus/Nexus.toc. This tool did not publish or install anything.')
+    print('Install paths: Interface/AddOns/Nexus/Nexus.toc and '
+          'Interface/AddOns/NexusSupport/NexusSupport.toc (storage only for support reports; '
+          'Nexus runs without it). This tool did not publish or install anything.')
     return 0
 
 

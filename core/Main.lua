@@ -1052,6 +1052,9 @@ EnsureMainCommands = function()
         prepare=function() return Store.Settings() end,
         callbacks={
             orbs=function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end,
+            report=function()
+                if Nexus.SupportReportUI then Nexus.SupportReportUI.Show() end
+            end,
             loading=function()
                 if Nexus.LoadingStatus then Nexus.LoadingStatus.Show() end
             end,

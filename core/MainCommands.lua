@@ -46,6 +46,13 @@ function Commands.New(options)
             Invoke("update",nil,early)
             return
         end
+        -- Support reporting answers BEFORE the initialization gate: a player
+        -- whose startup failed is exactly the player who needs to send a
+        -- report, and reading one prepares no settings and creates no owner.
+        if early=="report" or early=="support" then
+            Invoke("report",nil,early)
+            return
+        end
         if not isInitialized() then
             if type(notInitialized) == "function" then notInitialized() end
             return

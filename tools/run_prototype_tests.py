@@ -69,6 +69,8 @@ NAMES += ['wishlist_import_paste_path']
 NAMES += ['wishlist_export_copy_field']
 NAMES += ['orb_finished_new_run_confirm']
 NAMES += ['orb_history_view']
+NAMES += ['dps_capture_envelope']
+NAMES += ['support_report']
 NAMES += ['sync_admission_restore']
 
 def main() -> int:

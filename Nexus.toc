@@ -30,6 +30,8 @@ core\DataRetention.lua
 core\BuildHashCache.lua
 core\Store.lua
 core\Errors.lua
+core\SupportIncidents.lua
+core\SupportReport.lua
 core\Scheduler.lua
 core\DiagnosticHistory.lua
 core\DiagnosticLogs.lua
@@ -64,6 +66,7 @@ ui\Theme.lua
 ui\Help.lua
 ui\OrbHistory.lua
 ui\OrbPanel.lua
+ui\SupportReport.lua
 ui\LayoutMetrics.lua
 ui\Readout.lua
 ui\ServerStatus.lua

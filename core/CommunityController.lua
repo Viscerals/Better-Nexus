@@ -102,14 +102,17 @@ function Controller.New(options)
         return Nexus and Nexus.BuildCatalog
     end
 
+    -- `origin` is carried only by callers that actually know whether the
+    -- record came from this player or from a received one. Everyone else
+    -- leaves it unknown rather than guessing.
     local function RetainCatalogMutation(catalog, operation, onComplete,
-                                         ok, why, ticket)
+                                         ok, why, ticket, origin)
         if ok ~= nil or why ~= "ROOT_MUTATION_PENDING"
             or type(ticket) ~= "table" then
             return ok, why
         end
         pendingCatalogMutations[ticket] = {
-            operation=operation,onComplete=onComplete,
+            operation=operation,onComplete=onComplete,origin=origin,
         }
         if type(catalog.BindMutationCompletion) ~= "function" then
             pendingCatalogMutations[ticket] = nil
@@ -142,9 +145,40 @@ function Controller.New(options)
                         end
                         reason = reason .. ". Nothing was saved and the source is unchanged"
                     end
-                    notify("Catalog " .. tostring(retained
+                    local label = tostring(retained
                         and retained.operation or "mutation")
-                        .. " failed: " .. reason)
+                    notify("Catalog " .. label .. " failed: " .. reason)
+                    -- A validation refusal is not a Lua exception, so the
+                    -- Errors page never sees it and a support report built
+                    -- from errors alone says "no errors recorded" while the
+                    -- player is reading this line. Retain the facts that were
+                    -- true at THIS boundary, session-only and bounded.
+                    local support = Nexus and Nexus.SupportIncidents
+                    if support and type(support.Record) == "function" then
+                        pcall(support.Record, "catalog-refusal", {
+                            reason = tostring(outcome.reason or "unknown"),
+                            producer = label,
+                            origin = retained and retained.origin or "unknown",
+                            operation = label,
+                            ticket = outcome.id or outcome.ticketId or nil,
+                            build = Nexus.Release and Nexus.Release.buildLabel or nil,
+                            representation = type(detail) == "table"
+                                and detail.representation or "unknown",
+                            counts = type(detail) == "table" and {
+                                ordinary=detail.ordinary, locked=detail.locked,
+                                total=detail.total} or nil,
+                            limits = (Nexus.LoadoutEvidence
+                                and type(Nexus.LoadoutEvidence.SemanticLimits) == "function")
+                                and Nexus.LoadoutEvidence.SemanticLimits() or nil,
+                            readiness = type(detail) == "table" and {
+                                generation=detail.generation,
+                                semanticGeneration=detail.semanticGeneration,
+                                slot=detail.slot} or nil,
+                            affected = type(detail) == "table" and detail.affected or nil,
+                            committed = false,
+                            scope = "this catalog write did not commit; earlier personal or public writes are not covered by this outcome",
+                        })
+                    end
                 end
                 if retained and type(retained.onComplete) == "function" then
                     local completed, completeWhy = pcall(
@@ -237,13 +271,14 @@ function Controller.New(options)
 
     -- Every caller names its own operation, so a refusal that reaches the
     -- player identifies the action that produced it instead of a generic put.
-    local function SaveBuild(build, onComplete, operation)
+    local function SaveBuild(build, onComplete, operation, origin)
         local catalog = Catalog()
         if not (catalog and catalog.Put) then
             return false, "build catalog unavailable"
         end
+        local ok, why, ticket = catalog.Put(build)
         return RetainCatalogMutation(catalog, operation or "put", onComplete,
-            catalog.Put(build))
+            ok, why, ticket, origin)
     end
 
     local function CatalogStats()
@@ -2470,7 +2505,8 @@ function Controller.New(options)
         end
         if not RefreshBuildIdentity(build) then return nil end
         local saved, saveWhy = SaveBuild(build,
-            SavedCompletion(id, build, true), "saved-build capture")
+            SavedCompletion(id, build, true), "saved-build capture",
+            playerIsLocal and "local" or (recordOwner and "received" or "unknown"))
         if not saved then return nil, nil, saveWhy end
         if Identity.VerifiedOwnerKey(build) then BroadcastIfPossible(build) end
         return id, build
