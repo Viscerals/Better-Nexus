@@ -166,6 +166,26 @@ capture()
 check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
  'a correct 79 + 6 loadout records once the locked list is there: '
  ..tostring(Nexus.lastDpsNote))
+-- 1f. The three envelope sentences are prose the player reads in /nexus dps,
+-- not diagnostic codes, so they state the one player-facing vocabulary.
+local verdict=assert(D._CaptureEnvelopeVerdict,'the envelope verdict is reachable')
+local function Why(count,locked)
+ local rows={}
+ for i=1,count do rows[#rows+1]={spellId=300000+i,quality=2,stacks=1} end
+ local lockedRows={}
+ for i=1,(locked or 0) do lockedRows[#lockedRows+1]={spellId=310000+i,quality=3,stacks=1} end
+ local _,_,_,why=verdict(rows,lockedRows)
+ return tostring(why)
+end
+check(Why(80,0):find('ordinary copies above the supported envelope',1,true)~=nil,
+ 'the ordinary sentence: '..Why(80,0))
+check(Why(1,7):find('locked copies above the supported envelope',1,true)~=nil,
+ 'the locked sentence says locked, not permanent: '..Why(1,7))
+for _,text in ipairs({Why(80,0),Why(1,7),Why(79,6)}) do
+ check(not tostring(text):lower():find('permanent',1,true),
+  'no envelope sentence still says permanent: '..tostring(text))
+end
+
 -- 1e. A character who holds NO permanent Echo at all. GetLockedPerks answers
 -- with an empty list, which is an answer: that emptiness must not be read as
 -- "the list has not arrived", because nothing further is ever going to arrive

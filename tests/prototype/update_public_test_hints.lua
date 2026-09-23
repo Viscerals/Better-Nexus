@@ -100,4 +100,21 @@ check(Nexus.Updates.PublicTestHint()==nil,'and a different release series is not
 check(Nexus.Updates.Observe(NEWER,'RealPeer-Realm'),'the qualifying announcement is accepted')
 check(Nexus.Updates.PublicTestHint()~=nil,'control: the qualifying shape does produce the hint')
 
+-- 4. Remembering is bounded too. A peer can raise the reported number as often
+-- as it likes, and a player can open the status every time: neither "already
+-- announced" nor "already seen" may grow this session's memory without end.
+Boot(nil,'auto')
+for i=1,400 do
+ assert(Nexus.Updates.Observe('1.20.0-beta.1+test.'..(9100+i),'Raiser'..i),
+  'fixture: raised announcement '..i)
+ Nexus.Updates.DismissHint()
+end
+local d=Nexus.Updates.HintDiagnostics()
+check(d.notified<=d.maxKeys and d.dismissed<=d.maxKeys,
+ 'the remembered hint keys stay bounded: '..d.notified..'/'..d.dismissed..' of '..d.maxKeys)
+check(d.notices<=d.maxNotices,'and the session chat bound holds: '..d.notices)
+check(Nexus.Updates.PublicTestHint().display=='1.20.0-beta.1 test.9500',
+ 'the one hint is still the highest reported: '..Nexus.Updates.PublicTestHint().display)
+check(Keys()=='nil|nil|nil|nil|nil|nil|nil','and four hundred raises wrote no update key: '..Keys())
+
 print('PASS update_public_test_hints: a hint is received, never fetched; session only; no write, no traffic, no action checks='..checks)

@@ -4389,7 +4389,8 @@ function Sync.PhaseStats()
     local stats = rawget(phases, "stats")
     for name, row in pairs(type(stats) == "table" and stats or {}) do
         if type(row) == "table" then
-            out.phases[name] = {count=row.count, maxMs=row.maxMs, lastMs=row.lastMs}
+            out.phases[name] = {count=rawget(row, "count"), maxMs=rawget(row, "maxMs"),
+                lastMs=rawget(row, "lastMs")}
         end
     end
     return out
@@ -4465,10 +4466,17 @@ function Sync.OnUpdate(elapsed)
         phases = nil
     end
     -- The steps ARE the update, so they are never taken from the measurement
-    -- table while the list built at load is intact: an emptied, replaced or
-    -- decoy step list there changes nothing. The copy on the measurement table
-    -- is used only if the load-time list itself was lost, so that the two
-    -- references are redundancy rather than an override.
+    -- table while the list built at load is intact: emptying, replacing or
+    -- decoying Sync._phases.steps changes nothing. The copy there is read only
+    -- if the load-time list itself was lost.
+    -- STATED LIMIT, not a protection claim: both references are fields of the
+    -- module table, so whichever is read first wins, and whatever replaces
+    -- Sync._defaultSteps replaces the work. The list cannot be held in an
+    -- upvalue instead: this chunk is AT the Lua 5.1 limit of 200 locals in one
+    -- function, and even a block-scoped local here fails to compile
+    -- ("core/Sync.lua: main function has more than 200 local variables").
+    -- What is closed is the measurement path; an addon that overwrites another
+    -- addon's module fields can stop that addon, and always could.
     local steps = Sync._defaultSteps
     if type(steps) ~= "table" or #steps == 0 then
         steps = phases and rawget(phases, "steps") or nil
@@ -4489,17 +4497,23 @@ function Sync.OnUpdate(elapsed)
         and updateStarted ~= nil
     for index = 1, steps and #steps or 0 do
         local entry = steps[index]
-        if type(entry) == "table" and type(entry.run) == "function" then
+        -- rawget for the same reason as the phase table: a step entry carrying
+        -- a metatable must not raise on the guard line and stop every step
+        -- after it. Its `run` is called directly, so a failing step is still a
+        -- real failure of that step and reaches the owner isolation.
+        local run = type(entry) == "table" and rawget(entry, "run") or nil
+        if type(run) == "function" then
             local skipped = false
-            if type(entry.skip) == "function" then
-                local okSkip, result = pcall(entry.skip)
+            local skip = rawget(entry, "skip")
+            if type(skip) == "function" then
+                local okSkip, result = pcall(skip)
                 skipped = okSkip and result and true or false
             end
             if not skipped then
                 local started = detail and readClock() or nil
-                entry.run(elapsed)
+                run(elapsed)
                 if started and phases then
-                    pcall(rawget(phases, "record"), entry.name, started)
+                    pcall(rawget(phases, "record"), rawget(entry, "name"), started)
                 end
             end
         end

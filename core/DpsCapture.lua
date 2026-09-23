@@ -783,7 +783,7 @@ local function CaptureEnvelopeVerdict(ordinary, locked)
         return false, counts, limits, "ordinary copies above the supported envelope"
     end
     if lockedCopies > limits.locked then
-        return false, counts, limits, "permanent copies above the supported envelope"
+        return false, counts, limits, "locked copies above the supported envelope"
     end
     if total > limits.total then
         return false, counts, limits, "total copies above the supported envelope"

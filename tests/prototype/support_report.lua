@@ -296,6 +296,11 @@ record({committed=false,readiness={permanentSource='x',y='z'}})
 check(support.Count()==2,
  'two readings that only look alike when joined are two incidents: '..support.Count())
 support.Clear()
+record({committed=false,readiness={permanentSource=1}})
+record({committed=false,readiness={permanentSource='1'}})
+check(support.Count()==2,
+ 'a reading of the number 1 is not a reading of the text "1": '..support.Count())
+support.Clear()
 record({committed=false,readiness={a='b=c'}})
 record({committed=false,readiness={['a=b']='c'}})
 check(support.Count()==2,'and so are two readings that differ only in where the key ends: '

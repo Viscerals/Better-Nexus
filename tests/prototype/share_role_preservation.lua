@@ -138,7 +138,8 @@ for _,case in ipairs({{78,6},{79,6},{41,6},{41,0},{1,1}})do
  local _,label=Share(name,name)
  Accepted(name,rows,case[1],case[2])
  if case[2]>0 then assert(label:find(case[1]..' / 79 + '..case[2]..' / 6 locked',1,true),'source menu states both role counts: '..label)
- else assert(label:find(case[1]..' / 79',1,true) and not label:find('permanent',1,true),label)end
+ else assert(label:find(case[1]..' / 79',1,true) and not label:find('locked',1,true)
+  and not label:find('/ 6',1,true),'no locked copies, no locked role in the label: '..label)end
  assert(T.Equal(before,H.perks.serverBuildSlots) and #H.actions==0,name..': source and game state untouched')
  print('PASS '..name..': roles preserved through the real form, catalog and transport hand-off')
 end

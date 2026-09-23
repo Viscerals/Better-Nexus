@@ -55,7 +55,8 @@ local function CanPersist()
 end
 local notifiedTargets = {}            -- session only: one chat notice per target
 local hintTarget = nil                -- session only: the highest reported public test
-local hintNotified, hintDismissed = {}, {}
+local hintNotified, hintNotifiedOrder = {}, {}
+local hintDismissed, hintDismissedOrder = {}, {}
 local hintNotices = 0
 local peerObservations, peerObservationOrder = {}, {}
 local MAX_PEER_OBSERVATIONS = 32
@@ -71,6 +72,11 @@ local BUNDLED_AUTHORITY = "bundled-release"
 -- a syntactically perfect announcement can still be false.
 local HINT_AUTHORITY = "peer-report-unverified"
 local MAX_HINT_NOTICES = 2            -- chat lines about hints per session
+-- Every other structure in this file is bounded, and so are these two: a peer
+-- can raise the reported number as often as it likes, and each raise is a new
+-- key. Only the newest keys are kept, which is all that "already seen" and
+-- "already announced" ever need - the hint they describe is the highest one.
+local MAX_HINT_KEYS = 8
 -- The status is read in a chat line and in a popup, so it is kept to short
 -- lines instead of one long sentence.
 local LINE = "\n"
@@ -354,7 +360,9 @@ function Updates.Init(nextCallbacks)
     sessionPersists = callbacks.persist ~= false
     notifiedTargets = {}
     sessionNotices = 0
-    hintTarget, hintNotified, hintDismissed, hintNotices = nil, {}, {}, 0
+    hintTarget, hintNotices = nil, 0
+    hintNotified, hintNotifiedOrder = {}, {}
+    hintDismissed, hintDismissedOrder = {}, {}
     peerObservations, peerObservationOrder = {}, {}
     local settings = Settings()
     if settings.updateNotifications == nil then settings.updateNotifications = true end
@@ -391,6 +399,18 @@ local function HintMessage(hint)
         .. " Check the Releases page yourself: /nexus update."
 end
 
+-- One bounded set of keys, newest last. Remembering that a hint was seen or
+-- announced must never be a way to grow this session's memory.
+local function Remember(set, order, key)
+    if set[key] then return end
+    set[key] = true
+    order[#order + 1] = key
+    while #order > MAX_HINT_KEYS do
+        local removed = table.remove(order, 1)
+        set[removed] = nil
+    end
+end
+
 -- Announced at most once per target and at most twice per session. A repeated
 -- report of the same target adds nothing and never revives a dismissal.
 local function MaybeHintNotice()
@@ -403,7 +423,7 @@ local function MaybeHintNotice()
             HintMessage(hintTarget))
         if not ok then return false end
     end
-    hintNotified[hintTarget.key] = true
+    Remember(hintNotified, hintNotifiedOrder, hintTarget.key)
     hintNotices = hintNotices + 1
     return true
 end
@@ -431,8 +451,8 @@ end
 function Updates.DismissHint()
     local hint = Updates.PublicTestHint()
     if not hint then return false end
-    hintDismissed[hint.key] = true
-    hintNotified[hint.key] = true
+    Remember(hintDismissed, hintDismissedOrder, hint.key)
+    Remember(hintNotified, hintNotifiedOrder, hint.key)
     return true
 end
 
@@ -487,6 +507,14 @@ function Updates.Observe(version, source)
         end
     end
     return true, "peer observation"
+end
+
+-- What this session is holding for hints. Diagnostic only: counts, no text,
+-- so that the bounds can be observed instead of assumed.
+function Updates.HintDiagnostics()
+    return {notices=hintNotices, notified=#hintNotifiedOrder,
+        dismissed=#hintDismissedOrder, maxKeys=MAX_HINT_KEYS,
+        maxNotices=MAX_HINT_NOTICES}
 end
 
 function Updates.PeerObservations()

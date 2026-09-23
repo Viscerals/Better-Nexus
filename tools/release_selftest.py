@@ -8,7 +8,7 @@ consistent input (must pass) and on inconsistent inputs (each must fail), then d
 It compares exit codes. It does not exercise --require-newer, because a CI checkout has no tags.
 """
 from __future__ import annotations
-import pathlib, re, shutil, subprocess, sys, zipfile
+import importlib.util, pathlib, re, shutil, subprocess, sys, tempfile, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PY = sys.executable
@@ -16,6 +16,63 @@ PY = sys.executable
 
 def run(*args: str) -> int:
     return subprocess.run([PY, *args], cwd=ROOT, capture_output=True, text=True).returncode
+
+
+def decoder_bytes_checks() -> list:
+    r"""The support-report decoder counts BYTES, so a byte the saved file
+    carries literally must verify exactly like the same byte written as a \ddd
+    escape. Reading the file with a lossy error handler turned an intact report
+    into an accusation of tampering, and no other check covers this tool."""
+    path = ROOT / 'tools' / 'decode_support_report.py'
+    spec = importlib.util.spec_from_file_location('decode_support_report', path)
+    decoder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(decoder)
+
+    # Multi-byte text, one high byte that is not valid UTF-8 on its own, and a
+    # NUL: every class the writer has to carry through unchanged.
+    body = 'café €'.encode('utf-8') + bytes([0xE9, 0x00]) + b' end'
+    chunk = body.decode('utf-8', 'surrogateescape')
+    declared_bytes, declared_sum = len(body), decoder.checksum([chunk])
+
+    def lua_literal(escape_high: bool) -> str:
+        out = []
+        for byte in body:
+            if byte in (0x5C, 0x22):
+                out.append('\\' + chr(byte))
+            elif byte < 32 or byte == 127:
+                out.append('\\%d' % byte)
+            elif byte >= 128:
+                # The \ddd escape WoW usually writes, or the byte itself,
+                # carried as a surrogate escape so that encoding the file with
+                # 'surrogateescape' puts exactly that byte on disk.
+                out.append('\\%d' % byte if escape_high else chr(0xDC00 + byte))
+            else:
+                out.append(chr(byte))
+        return ''.join(out)
+
+    problems = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        for name, escape_high in (('escaped', True), ('literal', False)):
+            saved = tmp / ('NexusSupport-%s.lua' % name)
+            decoded = tmp / ('report-%s.txt' % name)
+            saved.write_bytes((
+                'NexusSupportDB = {\n\t["report"] = {\n\t\t["meta"] = {\n'
+                '\t\t\t["format"] = 1,\n\t\t\t["id"] = "selftest",\n'
+                '\t\t\t["chunkCount"] = 1,\n'
+                '\t\t\t["bytes"] = %d,\n\t\t\t["checksum"] = "%s",\n\t\t},\n'
+                '\t\t["chunks"] = {\n\t\t\t[1] = "%s",\n\t\t},\n\t},\n}\n'
+                % (declared_bytes, declared_sum, lua_literal(escape_high))
+            ).encode('utf-8', 'surrogateescape'))
+            done = subprocess.run([PY, str(path), str(saved), '--out', str(decoded)],
+                                  cwd=ROOT, capture_output=True, text=True)
+            report = done.stdout + done.stderr
+            if done.returncode != 0 or 'integrity     : consistent' not in report:
+                problems.append('a %s byte is not read as the byte it is: %s'
+                                % (name, report.strip().replace('\n', ' | ')))
+            elif not decoded.exists() or decoded.read_bytes() != body:
+                problems.append('the %s report does not round-trip byte-exactly' % name)
+    return problems
 
 
 def main() -> int:
@@ -125,6 +182,7 @@ def main() -> int:
         with zipfile.ZipFile(internal) as z:
             if 'channel = "internal"' not in z.read('Nexus/data/Release.lua').decode():
                 failures.append('internal package is not marked internal')
+        failures.extend(decoder_bytes_checks())
     finally:
         shutil.rmtree(dist, ignore_errors=True)
     if failures:

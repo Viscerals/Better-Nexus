@@ -139,7 +139,9 @@ end
 -- text the failing boundary supplied.
 local function piece(key, entry)
     local k, v = tostring(key), tostring(entry)
-    return #k .. ":" .. k .. "=" .. #v .. ":" .. v
+    -- The TYPE is part of the value: a readiness field read as the number 1 is
+    -- not the same reading as the text "1", and tostring() alone erases that.
+    return #k .. ":" .. k .. "=" .. type(entry):sub(1, 1) .. #v .. ":" .. v
 end
 local function signature(value)
     if type(value) ~= "table" then return "-" end
