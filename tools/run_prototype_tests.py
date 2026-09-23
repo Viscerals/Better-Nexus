@@ -71,6 +71,7 @@ NAMES += ['orb_finished_new_run_confirm']
 NAMES += ['orb_history_view']
 NAMES += ['dps_capture_envelope']
 NAMES += ['support_report']
+NAMES += ['sync_phase_attribution']
 NAMES += ['sync_admission_restore']
 
 def main() -> int:

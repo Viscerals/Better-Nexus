@@ -4340,31 +4340,122 @@ function Sync.PumpPreparedShare(elapsed)
     if not ok then error(err, 0) end
 end
 
-function Sync.OnUpdate(elapsed)
-    Responder.Admission.NoteTurn()
-    Responder.Admission.Expire()
-    Inbound.CleanExpired()
-    ProcessPendingResponses(elapsed)
-    Session.PumpRecovery(elapsed)
-    Responder.Work.PumpBroadcastMine()
-    if not Sync._pendingDeleteScheduled then
-        PumpPendingDeletes(elapsed)
-        PumpPendingShare(elapsed)
+-- Attribution for a long update, at the owner that already has one.
+--
+-- The instrumented "sync.update" path wraps EVERY step below, so a large
+-- maximum says one update was long and nothing about which step was long: the
+-- admission drive's slice allowance covers only the preparation slices inside
+-- Responder.Admission.Pump, while transport preparation, serialization,
+-- inbound decoding and the view refresh sit outside it.
+--
+-- Measuring fourteen steps on every update would be its own cost, so the
+-- phases are timed only AFTER an update was actually slow, for a bounded
+-- window of updates. In the ordinary case this is two clock reads per update.
+-- These are scalars for a support report, not a profiler and not a claim about
+-- frames per second.
+-- Held on the module table, not in a local: this chunk is already at the Lua
+-- 5.1 limit for locals in one file.
+Sync._phases = {thresholdMs = 50, window = 20, stats = {},
+    armed = 0, slowUpdates = 0, lastTotal = nil, maxTotal = nil}
+
+function Sync._phases.clock()
+    if type(debugprofilestop) ~= "function" then return nil end
+    local ok, value = pcall(debugprofilestop)
+    if ok and type(value) == "number" then return value end
+    return nil
+end
+
+function Sync._phases.record(name, started)
+    if not started then return end
+    local finished = Sync._phases.clock()
+    if not finished then return end
+    local elapsed = finished - started
+    if elapsed < 0 then return end
+    local row = Sync._phases.stats[name]
+    if not row then row = {count=0, maxMs=0, lastMs=0}; Sync._phases.stats[name] = row end
+    row.count = row.count + 1
+    row.lastMs = elapsed
+    if elapsed > row.maxMs then row.maxMs = elapsed end
+end
+
+-- name -> the phase's own maximum and last measurement, plus how many updates
+-- crossed the slow threshold. Empty until an update was slow.
+function Sync.PhaseStats()
+    local out = {slowUpdates=Sync._phases.slowUpdates, armed=Sync._phases.armed,
+        thresholdMs=Sync._phases.thresholdMs, lastUpdateMs=Sync._phases.lastTotal,
+        maxUpdateMs=Sync._phases.maxTotal, phases={}}
+    for name, row in pairs(Sync._phases.stats) do
+        out.phases[name] = {count=row.count, maxMs=row.maxMs, lastMs=row.lastMs}
     end
-    Session.PrepareTransport()
-    if Nexus.SyncWire then Nexus.SyncWire.PumpHandshake() end
-    Transport.Pump(elapsed)
-    if Sync.FlushStatusReply then Sync.FlushStatusReply() end
-    Session.UpdateAutoSync(elapsed)
-    Session.UpdateAutoConvergence()
-    Session.UpdateJoinRetry(elapsed)
+    return out
+end
+
+function Sync.ResetPhaseStats()
+    Sync._phases.stats, Sync._phases.armed, Sync._phases.slowUpdates = {}, 0, 0
+    Sync._phases.lastTotal, Sync._phases.maxTotal = nil, nil
+    return true
+end
+
+function Sync.OnUpdate(elapsed)
+    local updateStarted = Sync._phases.clock()
+    local detail = Sync._phases.armed > 0 and updateStarted ~= nil
+    local function step(name, fn)
+        if not detail then return fn() end
+        local started = Sync._phases.clock()
+        local result = fn()
+        Sync._phases.record(name, started)
+        return result
+    end
+    step("admission.turn", function()
+        Responder.Admission.NoteTurn()
+        Responder.Admission.Expire()
+        Inbound.CleanExpired()
+    end)
+    step("responses", function() ProcessPendingResponses(elapsed) end)
+    step("recovery", function() Session.PumpRecovery(elapsed) end)
+    step("broadcast", function() Responder.Work.PumpBroadcastMine() end)
+    if not Sync._pendingDeleteScheduled then
+        step("deletes", function() PumpPendingDeletes(elapsed) end)
+        step("share", function() PumpPendingShare(elapsed) end)
+    end
+    step("transport.prepare", function() Session.PrepareTransport() end)
+    step("handshake", function()
+        if Nexus.SyncWire then Nexus.SyncWire.PumpHandshake() end
+    end)
+    step("transport.pump", function() Transport.Pump(elapsed) end)
+    step("status.reply", function()
+        if Sync.FlushStatusReply then Sync.FlushStatusReply() end
+    end)
+    step("auto.sync", function()
+        Session.UpdateAutoSync(elapsed)
+        Session.UpdateAutoConvergence()
+        Session.UpdateJoinRetry(elapsed)
+    end)
     -- After the request, response and transport turn above, never before it.
-    Responder.Admission.Pump()
+    step("admission.pump", function() Responder.Admission.Pump() end)
     -- A refresh can initiate legacy catalog repair. Release it only after
     -- the already-ready update, not before its transport validation work.
     if Operation.housekeepingRefreshPending then
         Operation.housekeepingRefreshPending = false
-        pcall(Sync.RequestDataViewRefresh)
+        step("view.refresh", function() pcall(Sync.RequestDataViewRefresh) end)
+    end
+    if updateStarted then
+        local finished = Sync._phases.clock()
+        if finished then
+            local total = finished - updateStarted
+            if total >= 0 then
+                Sync._phases.lastTotal = total
+                if not Sync._phases.maxTotal or total > Sync._phases.maxTotal then
+                    Sync._phases.maxTotal = total
+                end
+                if total >= Sync._phases.thresholdMs then
+                    Sync._phases.slowUpdates = Sync._phases.slowUpdates + 1
+                    Sync._phases.armed = Sync._phases.window
+                elseif Sync._phases.armed > 0 then
+                    Sync._phases.armed = Sync._phases.armed - 1
+                end
+            end
+        end
     end
 end
 

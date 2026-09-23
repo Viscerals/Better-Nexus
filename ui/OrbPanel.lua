@@ -55,6 +55,18 @@ local confirmNewRun=false
 -- and write nothing. All presentation lives in Nexus.OrbHistory, which reads
 -- recorded fields only.
 local LOG_ROWS=8
+-- One column layout for the header AND the body. A heading that keeps its own
+-- offsets drifts away from the values it labels the moment either side is
+-- touched, so both read these measurements and nothing else. ROW_X is where a
+-- row starts inside the window, so the header sits on the same origin.
+local LOG_ROW_X,LOG_ROW_W=20,720
+local LOG_COLUMNS={
+    {key="index",label="#",x=0,w=28},
+    {key="source",label="Replaced Echo",x=52,w=180,iconX=30},
+    {key="replacement",label="Replacement",x=260,w=190,iconX=238},
+    {key="reason",label="Why selected",x=456,w=150},
+    {key="result",label="Result",x=612,w=105},
+}
 local logFrame,logView,logPage=nil,"current",1
 local logSelection=nil
 local logCopyFrame=nil
@@ -430,12 +442,21 @@ local function ensureLog()
     end)
     logFrame.header=text(logFrame,280,-40,460,50)
     logFrame.warning=text(logFrame,20,-72,720,20)
-    logFrame.columns=text(logFrame,20,-96,720,18,
-        "#      Replaced Echo                 Replacement                    Why selected            Result")
+    -- The heading row is a frame on the row origin, and each heading is one
+    -- font string at its own column's x and width. Same numbers, one source.
+    logFrame.columns=CreateFrame("Frame",nil,logFrame)
+    logFrame.columns:SetSize(LOG_ROW_W,18)
+    logFrame.columns:SetPoint("TOPLEFT",LOG_ROW_X,-96)
+    logFrame.columnHeadings={}
+    for _,column in ipairs(LOG_COLUMNS) do
+        local heading=text(logFrame.columns,column.x,0,column.w,18,column.label)
+        heading:SetJustifyV("MIDDLE")
+        logFrame.columnHeadings[column.key]=heading
+    end
     logFrame.rows={}
     for i=1,LOG_ROWS do
         local row=CreateFrame("Button",nil,logFrame)
-        row:SetSize(720,40);row:SetPoint("TOPLEFT",20,-118-(i-1)*40)
+        row:SetSize(LOG_ROW_W,40);row:SetPoint("TOPLEFT",LOG_ROW_X,-118-(i-1)*40)
         row:SetFrameLevel(logFrame:GetFrameLevel()+1)
         row.highlight=row:CreateTexture(nil,"BACKGROUND")
         row.highlight:SetTexture("Interface\\Buttons\\WHITE8X8")
@@ -443,17 +464,19 @@ local function ensureLog()
         row.highlight:Hide()
         row.separator=row:CreateTexture(nil,"BACKGROUND")
         row.separator:SetTexture("Interface\\Buttons\\WHITE8X8")
-        row.separator:SetSize(720,1);row.separator:SetPoint("BOTTOMLEFT",0,0)
+        row.separator:SetSize(LOG_ROW_W,1);row.separator:SetPoint("BOTTOMLEFT",0,0)
         row.separator:SetVertexColor(.22,.24,.28,.55)
-        row.index=text(row,0,-4,28,18)
+        local columns={}
+        for _,column in ipairs(LOG_COLUMNS) do columns[column.key]=column end
+        row.index=text(row,columns.index.x,-4,columns.index.w,18)
         row.icon=row:CreateTexture(nil,"ARTWORK");row.icon:SetSize(18,18)
-        row.icon:SetPoint("TOPLEFT",30,-4)
-        row.source=text(row,52,-4,180,34)
+        row.icon:SetPoint("TOPLEFT",columns.source.iconX,-4)
+        row.source=text(row,columns.source.x,-4,columns.source.w,34)
         row.resultIcon=row:CreateTexture(nil,"ARTWORK");row.resultIcon:SetSize(18,18)
-        row.resultIcon:SetPoint("TOPLEFT",238,-4)
-        row.replacement=text(row,260,-4,190,34)
-        row.reason=text(row,456,-4,150,34)
-        row.result=text(row,612,-4,105,34)
+        row.resultIcon:SetPoint("TOPLEFT",columns.replacement.iconX,-4)
+        row.replacement=text(row,columns.replacement.x,-4,columns.replacement.w,34)
+        row.reason=text(row,columns.reason.x,-4,columns.reason.w,34)
+        row.result=text(row,columns.result.x,-4,columns.result.w,34)
         row:SetScript("OnClick",function(self)
             -- Reading only: this selects a row for display and nothing else.
             if logSelection==self.serial then logSelection=nil

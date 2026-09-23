@@ -203,6 +203,58 @@ check(log.page:GetText()=='Operations 1-8 of 400','a large history still pages e
 check(#H.frames-framesBefore==framesFor15,
  'four hundred operations allocate no extra frame: '..(#H.frames-framesBefore)..' vs '..framesFor15)
 
+-- 5b. The column headings label the body columns they sit above, and they
+-- take their position AND width from the same measurements the row cells use.
+-- A heading with its own offsets drifts the moment either side is touched.
+local headingOrder={'index','source','replacement','reason','result'}
+local headingLabels={index='#',source='Replaced Echo',replacement='Replacement',
+ reason='Why selected',result='Result'}
+local cellFor={index='index',source='source',replacement='replacement',
+ reason='reason',result='result'}
+-- SetPoint("TOPLEFT",x,y) stores three values, so the x offset is the second.
+local function originX(region)
+ local _,second,third,fourth=region:GetPoint(1)
+ if type(second)=='number' then return second end
+ return type(fourth)=='number' and fourth or third
+end
+local headings=assert(log.columnHeadings,'the window has one heading per column')
+local previousEdge=nil
+for _,key in ipairs(headingOrder) do
+ local heading=assert(headings[key],'heading exists: '..key)
+ check(heading:GetText()==headingLabels[key],
+  'the heading reads exactly "'..headingLabels[key]..'": '..heading:GetText())
+ local hx=originX(heading)
+ local cell=log.rows[1][cellFor[key]]
+ local cx=originX(cell)
+ check(hx==cx,'heading '..key..' starts where its body column starts: '..hx..' vs '..cx)
+ check(heading:GetWidth()==cell:GetWidth(),
+  'and is exactly as wide as its body column: '..heading:GetWidth()..' vs '..cell:GetWidth())
+ if previousEdge then
+  check(hx>=previousEdge,'heading '..key..' does not overlap the one before it: '
+   ..hx..' after '..previousEdge)
+ end
+ previousEdge=hx+heading:GetWidth()
+end
+check(previousEdge<=log.columns:GetWidth(),
+ 'the last heading ends inside the row width: '..previousEdge..' of '..log.columns:GetWidth())
+check(log.columns:GetHeight()<=20,'the heading row is one line high: '..log.columns:GetHeight())
+-- The headings share the row origin, so the two rows cannot drift apart.
+check(originX(log.columns)==originX(log.rows[1]),
+ 'the heading row starts on the same origin as a body row')
+-- One line, with room for the text, at the supported UI scales.
+for _,scale in ipairs({0.64,0.8,1.0,1.15}) do
+ log:SetScale(scale)
+ for _,key in ipairs(headingOrder) do
+  local heading=headings[key]
+  check(heading:GetStringWidth()<=heading:GetWidth(),
+   'at scale '..scale..' the heading "'..heading:GetText()..'" fits its column: '
+   ..heading:GetStringWidth()..' of '..heading:GetWidth())
+ end
+end
+log:SetScale(1)
+-- Offline geometry only: fonts and spacing in a running client are NOT
+-- verified by this, and the release notes say so.
+
 -- 6. Selecting a row opens its details, and paging clears them.
 stubEntries=stub(15)
 log:Hide();log=Nexus.OrbPanel.ShowLog()
