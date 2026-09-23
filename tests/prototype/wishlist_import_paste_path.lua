@@ -47,12 +47,22 @@ W.ImportEBH1String=function(text,chosen)
  return importer(text,chosen)
 end
 
+-- The pooled edit box already carries the client's own handler before any
+-- Nexus dialog opens. Claiming the field must restore that handler, not clear
+-- it: a cleared handler is a live-client regression that an empty harness box
+-- cannot show by itself.
+StaticPopup_Show('NEXUS_UPDATE_RELEASES','note')
+local pooled=assert(H.popup and H.popup.editBox,'the pooled edit box exists before any EBH1 dialog')
+local sentinel=function() end
+pooled:SetScript('OnTextChanged',sentinel)
+StaticPopup_Hide()
+
 -- The import-naming dialog runs first, exactly as it does after any earlier
 -- import, and configures the pooled edit box for a short safe name.
 StaticPopup_Show('NEXUS_NAME_IMPORTED_WISHLIST','Earlier import',nil,{name='Earlier import'})
 local named=assert(H.popup and H.popup.editBox,'the naming dialog uses the pooled edit box')
 check((named:GetMaxLetters() or 0)==96,'the naming dialog limits that box: '..tostring(named:GetMaxLetters()))
-check(named:GetScript('OnTextChanged')~=nil,'and installs its own display handler on it')
+check(named:GetScript('OnTextChanged')~=sentinel,'and installs its own display handler over the previous one')
 StaticPopup_Hide()
 
 -- Now the import dialog, on the same pooled box, and a real paste into it.
@@ -64,7 +74,8 @@ check(box==named,'it is the same pooled box the naming dialog configured')
 -- still loses the code.
 check((box:GetMaxLetters() or 0)>=#code,
  'the field can hold a whole code: limit '..tostring(box:GetMaxLetters())..' for '..#code..' bytes')
-check(box:GetScript('OnTextChanged')==nil,'the naming dialog handler no longer owns the field')
+check(box:GetScript('OnTextChanged')==sentinel,
+ 'the field carries the handler it had before, not the naming handler')
 box:SetText(code)
 check(box:GetText()==code,
  'the pasted code survives the field: kept '..#box:GetText()..' of '..#code..' bytes')

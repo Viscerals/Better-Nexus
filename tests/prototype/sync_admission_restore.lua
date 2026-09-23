@@ -36,8 +36,10 @@ C.PutBatch=function(requests,...)
  return realPutBatch(requests,...)
 end
 -- Bounded, and tolerant of not reaching three refusals: a member that was
--- wrongly settled must show up as an empty queue in the checks below, not as a
--- timeout with no explanation.
+-- wrongly settled shows up as an empty queue in the checks below instead of as
+-- a timeout with no explanation. A drive that stops offering batches empties
+-- the queue the same way, through expiry, so read the expiry counter below
+-- before concluding that a member was settled.
 pcall(T.Until,H,function()return refused>=3 end,20000)
 check(refused>=1,'the drive offered at least one batch and the catalog refused it: '..refused)
 check(Snapshot().count==5,'every collected member went back to the queue: '..Snapshot().count)
@@ -48,6 +50,9 @@ check((Stats().storageRejected or 0)==rejectedBefore,
 check((Stats().admissionRestored or 0)>=5,'the restore is counted: '..tostring(Stats().admissionRestored))
 for _,id in ipairs(ids)do check(C.Get(id)==nil,id..' is not committed while the catalog refuses the batch') end
 blocking=false
+-- The stub is removed as soon as it has done its work, so a later failure
+-- cannot leave it installed.
+C.PutBatch=realPutBatch
 
 -- A later batch commits all of them, inside their own unchanged lifetime.
 T.Until(H,function()return C.Get('restore-5')~=nil end)
@@ -58,5 +63,4 @@ end
 check((Stats().admissionExpired or 0)==expiredBefore,'no waiting record expired while it was restored')
 A.Settled(H,C)
 check(Snapshot().count==0 and Snapshot().inFlight==0,'the owner ends empty')
-C.PutBatch=realPutBatch
 print('PASS sync_admission_restore: a refused batch returns its members to the queue and they are committed later checks='..checks)

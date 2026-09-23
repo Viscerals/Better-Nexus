@@ -94,17 +94,31 @@ local function ConfigureImportEditBox(box)
     box:SetText("")
 end
 
+local function ValidWireValue(value)
+    local identity = Nexus and Nexus.Identity
+    return identity and type(identity.ValidWireText) == "function"
+        and identity.ValidWireText(value, #value, true, true) == true
+end
+
 local function SetExplicitCopyText(box, value)
-    -- EBH1 is an explicit copy/paste wire boundary. The selected bytes must be
-    -- retained exactly, but an EditBox is still a WoW rich-text surface. Keep
-    -- the exact wire value separate and select its reversible inert projection.
+    -- EBH1 is an explicit copy/paste wire boundary, and the player copies
+    -- whatever this field holds. A display projection doubles every literal
+    -- pipe, and a wishlist name may contain one, so a projected code imports
+    -- under a different name and gains another pipe on every round trip. A
+    -- value that is already a valid wire value is therefore shown exactly; only
+    -- a value that is not gets the inert projection, which stays readable
+    -- without pretending to be copyable bytes.
     -- The field is claimed first: a name limit inherited from the naming dialog
     -- would cut the code that the player is about to copy.
     if not box then return end
     ClaimWireEditBox(box)
-    box._nexusExplicitExportText = tostring(value or "")
-    box:SetText(DisplayUntrusted(box._nexusExplicitExportText,
-        #box._nexusExplicitExportText, true, true) or "")
+    local raw = tostring(value or "")
+    box._nexusExplicitExportText = raw
+    if ValidWireValue(raw) then
+        box:SetText(raw)
+    else
+        box:SetText(DisplayUntrusted(raw, #raw, true, true) or "")
+    end
 end
 
 local Model, Adapter
