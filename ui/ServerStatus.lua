@@ -10,11 +10,13 @@ local rootFrame
 local scanner
 local elapsed = 0
 local hideHooked = false
--- True only while THIS module is the reason the stock widget is hidden. It is
--- deliberately not cleared when the world changes: a widget we took away and
--- have not given back is still ours to give back, whatever happened in
--- between. It is cleared the moment the widget is shown again.
-local suppressedByUs = false
+-- The exact widget THIS module hid, or nil. Holding the frame rather than a
+-- flag answers both questions at once: whether we are the reason something is
+-- hidden, and WHICH something. It is deliberately not cleared when the world
+-- changes -- a widget we took away and have not given back is still ours to
+-- give back, and client frames survive a zone change -- but a different frame
+-- object is not the one we hid and is never given back on its behalf.
+local suppressedFrame = nil
 local cachedSummary = { mode = nil, tier = nil, ash = nil, gain = nil, intensity = nil, intensityLevel = nil, raw = "" }
 local cachedSignature = ""
 
@@ -196,22 +198,39 @@ end
 -- The READ is inside the protection, not only the call: another addon can
 -- replace this global with a table whose __index raises, and this runs on a
 -- timer, so an unprotected field access would raise once a second.
-local function ReplacementAvailable()
-    local ok, available = pcall(function()
+local function PanelFacts()
+    local ok, facts = pcall(function()
         local panel = Nexus and Nexus.Panel
-        if type(panel) ~= "table" then return false end
+        if type(panel) ~= "table" then return nil end
         if type(panel.VisibilityFacts) ~= "function" then
             -- An older or partially loaded panel: only its own visibility is
             -- knowable, and that is enough to prove it is displaying.
             if type(panel.IsShown) == "function" then
-                return panel.IsShown() == true
+                local shown = panel.IsShown() == true
+                return {ready = shown, committed = shown}
             end
-            return false
+            return nil
         end
         local facts = panel.VisibilityFacts()
-        return type(facts) == "table" and facts.ready == true
+        return type(facts) == "table" and facts or nil
     end)
-    return ok and available == true
+    if not ok then return nil end
+    return facts
+end
+
+local function ReplacementAvailable()
+    local facts = PanelFacts()
+    return facts ~= nil and facts.ready == true
+end
+
+-- Whether the replacement is positively GONE, which is a stronger statement
+-- than "not available right now". A panel part-way through applying a render
+-- is briefly unavailable while its committed model still stands; treating
+-- that instant as gone would hand the stock widget back and take it away
+-- again on the next scan.
+local function ReplacementGone()
+    local facts = PanelFacts()
+    return facts == nil or facts.committed ~= true
 end
 
 -- Whether the stock widget should be standing aside for the Nexus HUD. Both
@@ -221,15 +240,20 @@ local function ReplacingServerHud()
     return UsingNexusHud() and ReplacementAvailable()
 end
 
+-- Returns whether the frame really did what was asked. A widget with no Hide,
+-- or one whose Hide raises, has NOT been taken away by us, and claiming it
+-- would later "give back" something we never had.
 local function SetShown(frame, shown)
-    if not frame then return end
+    if not frame then return false end
     if shown then
-        if type(frame.Show) == "function" then pcall(frame.Show, frame) end
+        local done = false
+        if type(frame.Show) == "function" then done = pcall(frame.Show, frame) end
         if type(frame.SetAlpha) == "function" then pcall(frame.SetAlpha, frame, 1) end
         if type(frame.EnableMouse) == "function" then pcall(frame.EnableMouse, frame, true) end
-    else
-        if type(frame.Hide) == "function" then pcall(frame.Hide, frame) end
+        return done
     end
+    if type(frame.Hide) ~= "function" then return false end
+    return pcall(frame.Hide, frame)
 end
 
 local function ApplyVisibility()
@@ -244,18 +268,20 @@ local function ApplyVisibility()
     if ReplacingServerHud() then
         -- The confirmed Project Ebonhold root is the complete stock widget.
         -- Hide/show it as one unit; never touch unrelated global addon frames.
-        SetShown(rootFrame, false)
-        suppressedByUs = true
+        -- Only a hide that actually happened is remembered as ours.
+        suppressedFrame = SetShown(rootFrame, false) and rootFrame or nil
     elseif not UsingNexusHud() then
         SetShown(rootFrame, true)
-        suppressedByUs = false
-    elseif suppressedByUs then
-        -- We took this widget away for a replacement, and the replacement is
+        suppressedFrame = nil
+    elseif suppressedFrame == rootFrame and ReplacementGone() then
+        -- We took THIS widget away for a replacement, and the replacement is
         -- gone: a committed render failed, or the panel stopped being able to
         -- display. Give it back ONCE and stop claiming it, so nothing is
-        -- forced every second and a later hide is not fought.
+        -- forced every second and a later hide is not fought. A different
+        -- widget object -- after a zone change, or a rebuild by the game --
+        -- is not one we hid, so it is left alone.
         SetShown(rootFrame, true)
-        suppressedByUs = false
+        suppressedFrame = nil
     end
 
     local hookTarget = rootFrame

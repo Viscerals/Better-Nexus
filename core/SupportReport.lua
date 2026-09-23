@@ -675,6 +675,9 @@ function M.Step(job)
                 -- wrong thing in the one case where the player has no HUD at
                 -- all.
                 if server and panel and server.mode == "nexus"
+                    and not server.detected and not panel.ready then
+                    out[#out + 1] = "  NEITHER HUD is on screen: the Nexus HUD cannot display and no server widget was found"
+                elseif server and panel and server.mode == "nexus"
                     and server.detected and not panel.ready then
                     if server.stockShown == false then
                         out[#out + 1] = "  NEITHER HUD is on screen: the Nexus HUD cannot display and the server widget is hidden"

@@ -30,11 +30,19 @@ local function StockFrame()
  function root:IsShown() return self.shown end
  function root:SetAlpha(v) self.alpha=v end
  function root:EnableMouse(v) self.mouse=v end
- -- The client CHAINS hooks: installing twice runs both. Modelling that is
- -- what makes "installed once" a testable claim rather than a hope.
+ -- The client CHAINS hooks: installing twice runs both. Modelling that, and
+ -- COUNTING both installs and invocations, is what makes "installed once" a
+ -- testable claim rather than a hope.
+ root.hookInstalls=0
+ root.hookRuns=0
  function root:HookScript(event,fn)
+  self.hookInstalls=self.hookInstalls+1
   local previous=self.hooks[event]
-  self.hooks[event]=function(...) if previous then previous(...) end return fn(...) end
+  self.hooks[event]=function(...)
+   self.hookRuns=self.hookRuns+1
+   if previous then previous(...) end
+   return fn(...)
+  end
  end
  function root:GetRegions() return end
  function root:GetChildren() return end
@@ -131,6 +139,21 @@ do
   'a panel suppressed by an open dialog is still the replacement; the stock widget does not flicker in behind it')
 end
 
+-- 3b. The hook is installed once, however long the scanner runs. Without the
+-- guard the client would chain a new hide handler every second, for ever.
+do
+ local root,_,tick=Host(Panel({exists=true,shown=true,wanted=true,
+  ready=true,committed=true}),'nexus')
+ for _=1,25 do tick() end
+ check(root.hookInstalls==1,
+  'one OnShow hook after twenty-five scans, not one per scan: '..root.hookInstalls)
+ root.hookRuns=0
+ root:Show()
+ check(root.hookRuns==1,
+  'and showing the widget runs that hook exactly once: '..root.hookRuns)
+ check(root.shown==false,'while still keeping it replaced')
+end
+
 -- 4b. A replacement that WAS displaying and then fails. We hid the widget for
 -- it, so we give it back: leaving it hidden is the no-HUD state this whole
 -- correction exists to remove, reached from the other direction.
@@ -190,6 +213,62 @@ do
  -- and SetMode both reach Nexus.Panel.Refresh through a plain field lookup,
  -- which such a table raises on. Those lines predate this correction and
  -- hardening them is outside what this task authorises.
+end
+
+-- 4d2. A widget we could not hide is not one we later "give back". Claiming a
+-- hide that never happened would let this module show a frame it never took.
+do
+ local ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local panel={VisibilityFacts=function() return ready end}
+ local root,_,tick=Host(panel,'nexus')
+ root.Hide=function() error('this widget refuses to hide') end
+ tick()
+ check(root.shown==true,'fixture: the widget could not be hidden')
+ ready={exists=true,shown=false,wanted=true,ready=false,committed=false,hadFailure=true}
+ tick()
+ check(root.showCalls==0,
+  'and a hide that never happened is never given back')
+end
+
+-- 4d3. Mid-render the panel is briefly not ready while its committed model
+-- still stands. That instant must not hand the widget back and take it away
+-- again on the next scan.
+do
+ local facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local panel={VisibilityFacts=function() return facts end}
+ local root,_,tick=Host(panel,'nexus')
+ tick()
+ check(root.shown==false,'fixture: the widget is replaced')
+ -- The panel is applying a render: not ready, but its commit still stands.
+ facts={exists=true,shown=false,wanted=true,ready=false,committed=true}
+ tick()
+ check(root.shown==false and root.showCalls==0,
+  'a panel part-way through a render does not hand the widget back for one scan')
+ facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ tick()
+ check(root.shown==false,'and the widget stays replaced when that render commits')
+end
+
+-- 4e. After a zone change the client can hand us a DIFFERENT widget object.
+-- One we never hid is not one we give back, even though we are still holding
+-- the memory of the one we did hide.
+do
+ local ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local panel={VisibilityFacts=function() return ready end}
+ local root,status,tick=Host(panel,'nexus')
+ tick()
+ check(root.shown==false,'fixture: the first widget was hidden by us')
+ -- A new world, a new widget object, and a replacement that cannot display.
+ local replacement=StockFrame()
+ replacement:Hide()
+ local hiddenBefore=replacement.hideCalls
+ ProjectEbonholdPlayerRunFrame=replacement
+ ready={exists=true,shown=false,wanted=true,ready=false,committed=false,hadFailure=true}
+ status.Rescan()
+ check(replacement.showCalls==0,
+  'a widget this module never hid is not force-shown on the old one s behalf')
+ check(replacement.shown==false and replacement.hideCalls==hiddenBefore,
+  'and it is not touched at all')
 end
 
 -- 5. A panel that cannot answer. An owner that raises is unavailable, not
@@ -440,6 +519,24 @@ do
   'a hidden one is reported as leaving the player with nothing')
  check(unknown:find('not knowable here',1,true)~=nil,
   'and an unknowable one is not guessed at either way')
+end
+
+-- No widget found at all, and no Nexus HUD: that is a no-HUD state too, and
+-- the section said nothing about it until it was asked to.
+do
+ local realPanel,realStatus=Nexus.Panel,Nexus.ServerStatus
+ Nexus.Panel={VisibilityFacts=function()
+  return {exists=false,shown=false,wanted=true,ready=false,committed=false,
+   hiddenUncommitted=0,commits=0,failures=0}
+ end}
+ Nexus.ServerStatus={VisibilityFacts=function()
+  return {mode='nexus',detected=false,stockShown=nil,replacing=false}
+ end}
+ local ok,text=pcall(ReportText)
+ Nexus.Panel,Nexus.ServerStatus=realPanel,realStatus
+ check(ok,'the report is prepared with no widget at all: '..tostring(text))
+ check(text:find('no server widget was found',1,true)~=nil,
+  'and it states that neither HUD is on screen because there is nothing to show')
 end
 
 -- An owner that is absent or raises must not take the report away.
