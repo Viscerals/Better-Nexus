@@ -161,8 +161,13 @@ do
  local ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
  local panel={VisibilityFacts=function() return ready end}
  local root,status,tick=Host(panel,'nexus')
- tick()
+ -- Many scans, not one: the replacing branch runs every second, and a module
+ -- that re-decides ownership on each pass forgets its own hide a second after
+ -- making it. Every give-back case below runs long enough to catch that.
+ for _=1,12 do tick() end
  check(root.shown==false,'fixture: the Nexus HUD is displaying and the widget stood aside')
+ check(root.showCalls==0,
+  'and nothing put it back while the replacement was displaying: '..root.showCalls)
  -- A committed render fails: the panel owner reports it can no longer display.
  ready={exists=true,shown=false,wanted=true,ready=false,committed=false,
   hadFailure=true,failures=1}
@@ -237,7 +242,7 @@ do
  local facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
  local panel={VisibilityFacts=function() return facts end}
  local root,_,tick=Host(panel,'nexus')
- tick()
+ for _=1,5 do tick() end
  check(root.shown==false,'fixture: the widget is replaced')
  -- The panel is applying a render: not ready, but its commit still stands.
  facts={exists=true,shown=false,wanted=true,ready=false,committed=true}
@@ -279,7 +284,7 @@ do
  local ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
  local panel={VisibilityFacts=function() return ready end}
  local root,status,tick=Host(panel,'nexus')
- tick()
+ for _=1,8 do tick() end
  check(root.shown==false,'fixture: the widget was replaced while the facts were readable')
  panel.VisibilityFacts=function()
   return setmetatable({},{__index=function() error('facts table raises') end})
@@ -299,7 +304,7 @@ do
  local ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
  local panel={VisibilityFacts=function() return ready end}
  local root,_,tick=Host(panel,'nexus')
- tick()
+ for _=1,6 do tick() end
  check(root.shown==false,'fixture: we hid it while it was on screen')
  ready={exists=true,shown=false,wanted=true,ready=false,committed=false,hadFailure=true}
  tick()
@@ -582,6 +587,42 @@ do
  check(ok,'the report is prepared with no widget at all: '..tostring(text))
  check(text:find('no server widget was found',1,true)~=nil,
   'and it states that neither HUD is on screen because there is nothing to show')
+end
+
+-- The same state with the SERVER HUD preferred. Nothing was found to show and
+-- nothing can display instead, which is true whichever HUD the player wants.
+do
+ local realPanel,realStatus=Nexus.Panel,Nexus.ServerStatus
+ Nexus.Panel={VisibilityFacts=function()
+  return {exists=false,shown=false,wanted=true,ready=false,committed=false,
+   hiddenUncommitted=0,commits=0,failures=0}
+ end}
+ Nexus.ServerStatus={VisibilityFacts=function()
+  return {mode='server',detected=false,stockShown=nil,replacing=false}
+ end}
+ local ok,text=pcall(ReportText)
+ Nexus.Panel,Nexus.ServerStatus=realPanel,realStatus
+ check(ok,'the report is prepared in server mode with no widget: '..tostring(text))
+ check(text:find('preference=server',1,true)~=nil,'it names the server preference')
+ check(text:find('no server widget was found',1,true)~=nil,
+  'and says neither HUD is on screen in that mode too')
+end
+
+-- A fact table that raises on every read must not take this section away: it
+-- is the one section a player with a missing HUD is here to send.
+do
+ local realPanel=Nexus.Panel
+ Nexus.Panel={VisibilityFacts=function()
+  return setmetatable({},{__index=function() error('facts table raises') end})
+ end}
+ local ok,text=pcall(ReportText)
+ Nexus.Panel=realPanel
+ check(ok,'the report survives a raising facts table: '..tostring(text))
+ check(text:find('-- HUD',1,true)~=nil,'the HUD section is still present')
+ check(text:find('section hud was unavailable',1,true)==nil,
+  'and it was not dropped as unavailable')
+ check(text:find('preference=',1,true)~=nil,
+  'the owner that did answer is still reported')
 end
 
 -- An owner that is absent or raises must not take the report away.

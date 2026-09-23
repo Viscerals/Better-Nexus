@@ -278,13 +278,23 @@ local function ApplyVisibility()
         -- ours: hiding an already-hidden widget takes nothing, and claiming
         -- it would let a later give-back put back something the player -- or
         -- the game -- had closed for their own reasons.
-        local wasShown = nil
-        if type(rootFrame.IsShown) == "function" then
-            local okShown, value = pcall(rootFrame.IsShown, rootFrame)
-            if okShown then wasShown = value and true or false end
+        --
+        -- That question is asked ONCE, on the scan that takes the widget
+        -- away. This branch runs every second while the replacement is
+        -- displaying, and on every later scan the widget is hidden BECAUSE
+        -- WE HID IT; re-asking would make the module forget its own hide one
+        -- second after making it, and the give-back would never fire again.
+        if suppressedFrame ~= rootFrame then
+            local wasShown = nil
+            if type(rootFrame.IsShown) == "function" then
+                local okShown, value = pcall(rootFrame.IsShown, rootFrame)
+                if okShown then wasShown = value and true or false end
+            end
+            local hid = SetShown(rootFrame, false)
+            suppressedFrame = (hid and wasShown ~= false) and rootFrame or nil
+        else
+            SetShown(rootFrame, false)
         end
-        local hid = SetShown(rootFrame, false)
-        suppressedFrame = (hid and wasShown ~= false) and rootFrame or nil
     elseif not UsingNexusHud() then
         SetShown(rootFrame, true)
         suppressedFrame = nil

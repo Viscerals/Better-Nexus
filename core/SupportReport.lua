@@ -634,18 +634,32 @@ function M.Step(job)
             -- walked.
             {name = "hud", build = function()
                 local out = {"-- HUD (this session; nothing here is stored) --"}
-                local okServer, server = pcall(function()
-                    local owner = Nexus and Nexus.ServerStatus
-                    return owner and type(owner.VisibilityFacts) == "function"
-                        and owner.VisibilityFacts() or nil
-                end)
-                local okPanel, panel = pcall(function()
-                    local owner = Nexus and Nexus.Panel
-                    return owner and type(owner.VisibilityFacts) == "function"
-                        and owner.VisibilityFacts() or nil
-                end)
-                if not (okServer and type(server) == "table") then server = nil end
-                if not (okPanel and type(panel) == "table") then panel = nil end
+                -- The same boundary rule the visibility owner follows: what
+                -- another owner hands back never leaves the protection. Each
+                -- field is copied INSIDE the pcall, so a table that raises on
+                -- read cannot take this section away -- which is the one
+                -- section a player with a missing HUD is here to send.
+                local function facts(name, fields)
+                    local ok, copied = pcall(function()
+                        local owner = Nexus and Nexus[name]
+                        if type(owner) ~= "table"
+                            or type(owner.VisibilityFacts) ~= "function" then
+                            return nil
+                        end
+                        local raw = owner.VisibilityFacts()
+                        if type(raw) ~= "table" then return nil end
+                        local out = {}
+                        for _, field in ipairs(fields) do out[field] = raw[field] end
+                        return out
+                    end)
+                    if not ok or type(copied) ~= "table" then return nil end
+                    return copied
+                end
+                local server = facts("ServerStatus",
+                    {"mode", "detected", "stockShown", "stockAlpha", "replacing"})
+                local panel = facts("Panel",
+                    {"exists", "shown", "wanted", "menuSuppressed", "ready",
+                     "committed", "commits", "failures", "hiddenUncommitted"})
                 if not server and not panel then
                     out[#out + 1] = "not available"
                     return out
