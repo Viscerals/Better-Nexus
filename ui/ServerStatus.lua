@@ -10,6 +10,11 @@ local rootFrame
 local scanner
 local elapsed = 0
 local hideHooked = false
+-- True only while THIS module is the reason the stock widget is hidden. It is
+-- deliberately not cleared when the world changes: a widget we took away and
+-- have not given back is still ours to give back, whatever happened in
+-- between. It is cleared the moment the widget is shown again.
+local suppressedByUs = false
 local cachedSummary = { mode = nil, tier = nil, ash = nil, gain = nil, intensity = nil, intensityLevel = nil, raw = "" }
 local cachedSignature = ""
 
@@ -188,21 +193,25 @@ end
 --
 -- Protected, and false when unknown: if this owner cannot get an answer, the
 -- stock widget keeps its place rather than being hidden on an assumption.
+-- The READ is inside the protection, not only the call: another addon can
+-- replace this global with a table whose __index raises, and this runs on a
+-- timer, so an unprotected field access would raise once a second.
 local function ReplacementAvailable()
-    local panel = Nexus and Nexus.Panel
-    if type(panel) ~= "table" then return false end
-    if type(panel.VisibilityFacts) ~= "function" then
-        -- An older or partially loaded panel: only its own visibility is
-        -- knowable, and that is enough to prove it is displaying.
-        if type(panel.IsShown) == "function" then
-            local ok, shown = pcall(panel.IsShown)
-            return ok and shown == true
+    local ok, available = pcall(function()
+        local panel = Nexus and Nexus.Panel
+        if type(panel) ~= "table" then return false end
+        if type(panel.VisibilityFacts) ~= "function" then
+            -- An older or partially loaded panel: only its own visibility is
+            -- knowable, and that is enough to prove it is displaying.
+            if type(panel.IsShown) == "function" then
+                return panel.IsShown() == true
+            end
+            return false
         end
-        return false
-    end
-    local ok, facts = pcall(panel.VisibilityFacts)
-    if not ok or type(facts) ~= "table" then return false end
-    return facts.ready == true
+        local facts = panel.VisibilityFacts()
+        return type(facts) == "table" and facts.ready == true
+    end)
+    return ok and available == true
 end
 
 -- Whether the stock widget should be standing aside for the Nexus HUD. Both
@@ -226,17 +235,27 @@ end
 local function ApplyVisibility()
     if not rootFrame then return end
 
-    -- Three states, not two. The stock widget is hidden only while a
-    -- replacement is really taking its place; it is shown only because the
-    -- player asked for it; and while the Nexus HUD cannot display, it is
-    -- LEFT EXACTLY AS IT IS. Forcing it to show every second would fight the
-    -- game and would override a player who closed it themselves.
+    -- Four states. The stock widget is hidden only while a replacement is
+    -- really taking its place; it is shown because the player asked for it;
+    -- it is GIVEN BACK when this module hid it for a replacement that can no
+    -- longer display; and otherwise it is left exactly as it is. That last
+    -- case matters: forcing it to show every second would fight the game and
+    -- would override a player who closed it themselves.
     if ReplacingServerHud() then
         -- The confirmed Project Ebonhold root is the complete stock widget.
         -- Hide/show it as one unit; never touch unrelated global addon frames.
         SetShown(rootFrame, false)
+        suppressedByUs = true
     elseif not UsingNexusHud() then
         SetShown(rootFrame, true)
+        suppressedByUs = false
+    elseif suppressedByUs then
+        -- We took this widget away for a replacement, and the replacement is
+        -- gone: a committed render failed, or the panel stopped being able to
+        -- display. Give it back ONCE and stop claiming it, so nothing is
+        -- forced every second and a later hide is not fought.
+        SetShown(rootFrame, true)
+        suppressedByUs = false
     end
 
     local hookTarget = rootFrame

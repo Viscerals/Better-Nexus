@@ -30,7 +30,12 @@ local function StockFrame()
  function root:IsShown() return self.shown end
  function root:SetAlpha(v) self.alpha=v end
  function root:EnableMouse(v) self.mouse=v end
- function root:HookScript(event,fn) self.hooks[event]=fn end
+ -- The client CHAINS hooks: installing twice runs both. Modelling that is
+ -- what makes "installed once" a testable claim rather than a hope.
+ function root:HookScript(event,fn)
+  local previous=self.hooks[event]
+  self.hooks[event]=function(...) if previous then previous(...) end return fn(...) end
+ end
  function root:GetRegions() return end
  function root:GetChildren() return end
  return root
@@ -124,6 +129,67 @@ do
  tick()
  check(root.shown==false,
   'a panel suppressed by an open dialog is still the replacement; the stock widget does not flicker in behind it')
+end
+
+-- 4b. A replacement that WAS displaying and then fails. We hid the widget for
+-- it, so we give it back: leaving it hidden is the no-HUD state this whole
+-- correction exists to remove, reached from the other direction.
+do
+ local ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local panel={VisibilityFacts=function() return ready end}
+ local root,status,tick=Host(panel,'nexus')
+ tick()
+ check(root.shown==false,'fixture: the Nexus HUD is displaying and the widget stood aside')
+ -- A committed render fails: the panel owner reports it can no longer display.
+ ready={exists=true,shown=false,wanted=true,ready=false,committed=false,
+  hadFailure=true,failures=1}
+ tick()
+ check(root.shown==true,
+  'the widget we took away comes back when the replacement stops being able to display')
+ check(root.showCalls==1,'and it is given back once, not forced every second')
+ tick();tick()
+ check(root.showCalls==1,'still once after further scans')
+ -- The player closes it themselves: that is theirs to decide, not ours to undo.
+ root:Hide()
+ tick()
+ check(root.shown==false and root.showCalls==1,
+  'and once given back it is the player s again: we do not keep re-showing it')
+ -- When the replacement recovers, the widget stands aside again.
+ ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ tick()
+ check(root.shown==false,'a recovered replacement replaces it again')
+ check(status.VisibilityFacts().replacing==true,'and the state says so')
+end
+
+-- 4c. A widget this module never hid is not "given back" to a state the game
+-- did not ask for: only our own hide is undone.
+do
+ local root,_,tick=Host(Panel({exists=true,shown=false,wanted=true,
+  ready=false,committed=false}),'nexus')
+ root:Hide()
+ local hidden=root.hideCalls
+ tick();tick()
+ check(root.shown==false and root.showCalls==0 and root.hideCalls==hidden,
+  'a widget hidden by the game, while we were never replacing it, is left alone')
+end
+
+-- 4d. An owner whose table raises on ANY field read. This runs on a one-second
+-- timer, so a read outside the protection would raise once a second forever.
+do
+ local hostile=setmetatable({},{__index=function() error('hostile panel owner') end})
+ local root,status=Host(hostile,'nexus')
+ -- The visibility decision and the facts are what this correction owns, and
+ -- both must survive a table that raises on every field read.
+ local ok,err=pcall(status.Rescan)
+ check(ok,'deciding visibility does not raise on a hostile panel owner: '..tostring(err))
+ check(root.shown==true,'and the stock widget keeps its place')
+ local okFacts,facts=pcall(status.VisibilityFacts)
+ check(okFacts and facts.replacementAvailable==false,
+  'the facts report it unavailable rather than raising')
+ -- Disclosed, and deliberately NOT hardened here: the scanner's summary pass
+ -- and SetMode both reach Nexus.Panel.Refresh through a plain field lookup,
+ -- which such a table raises on. Those lines predate this correction and
+ -- hardening them is outside what this task authorises.
 end
 
 -- 5. A panel that cannot answer. An owner that raises is unavailable, not
@@ -261,6 +327,36 @@ H.Advance(1.2);replacementStock:Show()
 check(replacementStock:IsShown()==false,
  'the hook is installed once, not stacked on every scan')
 
+-- 12b. Mid-render, the panel is NOT a replacement: Render hides its own frame
+-- while applying, and a HUD that is halfway through being built cannot be
+-- shown to anyone. Observed from inside the real transaction, through the
+-- real panel, rather than asserted about it from outside.
+do
+ -- The transaction hides the panel's own frame while it applies, so that
+ -- frame's OnHide runs INSIDE the window. Observed there, through the real
+ -- frame, rather than asserted about it from outside.
+ local panelFrame=_G.NexusPanel
+ check(panelFrame~=nil,'fixture: the real panel frame exists')
+ Nexus.Panel.Show();H.Advance(.4)
+ check(panelFrame:IsShown()==true,'fixture: it is on screen before the render')
+ local seen={}
+ panelFrame:HookScript('OnHide',function()
+  seen[#seen+1]=Nexus.Panel.VisibilityFacts()
+ end)
+ Nexus.Panel.Refresh();H.Advance(.4)
+ check(#seen>0,'the observation point ran inside a real render transaction')
+ local applying=0
+ for _,facts in ipairs(seen) do
+  if facts.ready==false then applying=applying+1 end
+ end
+ check(applying>0,
+  'a panel part-way through applying a render is not offered as a replacement')
+ check(Nexus.Panel.VisibilityFacts().ready==true,
+  'and it is one again as soon as that render commits')
+ check(stock:IsShown()==false,
+  'the stock widget is not given back for that momentary state')
+end
+
 -- 13. Passive inspection writes nothing to the profile. The snapshot is
 -- taken here, after the deliberate preference changes above: those are
 -- writes the player asked for, and this section is about the ones nobody did.
@@ -312,8 +408,38 @@ do
  check(text:find('render committed=false',1,true)~=nil,
   'it states that no render has committed')
  check(text:find('failures=1',1,true)~=nil,'with the failure the owner counted')
- check(text:find('cannot display yet, so the server widget keeps its place',1,true)~=nil,
-  'and says in words why the stock widget is still there')
+ check(text:find('NEITHER HUD is on screen',1,true)~=nil,
+  'and says plainly that nothing is on screen, because this section reports the widget hidden too')
+end
+
+-- The sentence must follow the two facts above it, in each of its three
+-- cases. Both owners are swapped for ones that answer exactly, and restored
+-- immediately: this states what the report SAYS, which is the thing a
+-- supporter acts on.
+do
+ local realPanel,realStatus=Nexus.Panel,Nexus.ServerStatus
+ local stock
+ Nexus.Panel={VisibilityFacts=function()
+  return {exists=true,shown=false,wanted=true,ready=false,committed=false,
+   hiddenUncommitted=1,commits=0,failures=0}
+ end}
+ Nexus.ServerStatus={VisibilityFacts=function()
+  return {mode='nexus',detected=true,stockShown=stock,replacing=false}
+ end}
+ stock=true
+ local kept=ReportText()
+ stock=false
+ local neither=ReportText()
+ stock=nil
+ local unknown=ReportText()
+ Nexus.Panel,Nexus.ServerStatus=realPanel,realStatus
+ check(kept:find('the server widget keeps its place',1,true)~=nil
+  and kept:find('NEITHER HUD',1,true)==nil,
+  'a visible server widget is reported as keeping its place')
+ check(neither:find('NEITHER HUD is on screen',1,true)~=nil,
+  'a hidden one is reported as leaving the player with nothing')
+ check(unknown:find('not knowable here',1,true)~=nil,
+  'and an unknowable one is not guessed at either way')
 end
 
 -- An owner that is absent or raises must not take the report away.

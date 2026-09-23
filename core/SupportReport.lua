@@ -669,9 +669,20 @@ function M.Step(job)
                         .. "; failures=" .. safeText(panel.failures, 12)
                         .. "; hidden while uncommitted=" .. safeText(panel.hiddenUncommitted, 12)
                 end
+                -- The sentence has to match the two facts above it. Saying the
+                -- server widget "keeps its place" while this same section
+                -- reports it hidden would send a supporter looking for the
+                -- wrong thing in the one case where the player has no HUD at
+                -- all.
                 if server and panel and server.mode == "nexus"
                     and server.detected and not panel.ready then
-                    out[#out + 1] = "  the Nexus HUD cannot display yet, so the server widget keeps its place"
+                    if server.stockShown == false then
+                        out[#out + 1] = "  NEITHER HUD is on screen: the Nexus HUD cannot display and the server widget is hidden"
+                    elseif server.stockShown == true then
+                        out[#out + 1] = "  the Nexus HUD cannot display, so the server widget keeps its place"
+                    else
+                        out[#out + 1] = "  the Nexus HUD cannot display; whether the server widget is on screen is not knowable here"
+                    end
                 end
                 return out
             end},
