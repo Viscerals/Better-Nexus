@@ -55,8 +55,10 @@ local function CanPersist()
 end
 local notifiedTargets = {}            -- session only: one chat notice per target
 local hintTarget = nil                -- session only: the highest reported public test
-local hintNotified, hintNotifiedOrder = {}, {}
-local hintDismissed, hintDismissedOrder = {}, {}
+-- key -> the order it was remembered in. ONE structure per set, so nothing can
+-- report the bound of a list beside the map that actually holds the memory.
+local hintNotified, hintDismissed = {}, {}
+local hintSequence = 0
 local hintNotices = 0
 local peerObservations, peerObservationOrder = {}, {}
 local MAX_PEER_OBSERVATIONS = 32
@@ -360,9 +362,8 @@ function Updates.Init(nextCallbacks)
     sessionPersists = callbacks.persist ~= false
     notifiedTargets = {}
     sessionNotices = 0
-    hintTarget, hintNotices = nil, 0
-    hintNotified, hintNotifiedOrder = {}, {}
-    hintDismissed, hintDismissedOrder = {}, {}
+    hintTarget, hintNotices, hintSequence = nil, 0, 0
+    hintNotified, hintDismissed = {}, {}
     peerObservations, peerObservationOrder = {}, {}
     local settings = Settings()
     if settings.updateNotifications == nil then settings.updateNotifications = true end
@@ -399,16 +400,21 @@ local function HintMessage(hint)
         .. " Check the Releases page yourself: /nexus update."
 end
 
--- One bounded set of keys, newest last. Remembering that a hint was seen or
--- announced must never be a way to grow this session's memory.
-local function Remember(set, order, key)
+-- One bounded map of keys, each stamped with when it was remembered.
+-- Remembering that a hint was seen or announced must never be a way to grow
+-- this session's memory, so the oldest stamp is dropped once the map is full.
+local function Remember(set, key)
     if set[key] then return end
-    set[key] = true
-    order[#order + 1] = key
-    while #order > MAX_HINT_KEYS do
-        local removed = table.remove(order, 1)
-        set[removed] = nil
+    hintSequence = hintSequence + 1
+    set[key] = hintSequence
+    local count, oldestKey, oldestStamp = 0, nil, nil
+    for entry, stamp in pairs(set) do
+        count = count + 1
+        if oldestStamp == nil or stamp < oldestStamp then
+            oldestKey, oldestStamp = entry, stamp
+        end
     end
+    if count > MAX_HINT_KEYS and oldestKey ~= nil then set[oldestKey] = nil end
 end
 
 -- Announced at most once per target and at most twice per session. A repeated
@@ -416,14 +422,15 @@ end
 local function MaybeHintNotice()
     if not hintTarget or not Updates.IsEnabled() then return false end
     if Updates.Preference() == "stable" then return false end
-    if hintNotified[hintTarget.key] or hintDismissed[hintTarget.key] then return false end
+    if hintNotified[hintTarget.key] ~= nil
+        or hintDismissed[hintTarget.key] ~= nil then return false end
     if hintNotices >= MAX_HINT_NOTICES then return false end
     if type(callbacks.notify) == "function" then
         local ok = pcall(callbacks.notify, hintTarget.display, Updates.ReleaseUrl(),
             HintMessage(hintTarget))
         if not ok then return false end
     end
-    Remember(hintNotified, hintNotifiedOrder, hintTarget.key)
+    Remember(hintNotified, hintTarget.key)
     hintNotices = hintNotices + 1
     return true
 end
@@ -442,7 +449,7 @@ function Updates.PublicTestHint()
         display=hintTarget.display, key=hintTarget.key,
         reports=hintTarget.reports, observedAt=hintTarget.observedAt,
         source=hintTarget.source, authority=HINT_AUTHORITY, verified=false,
-        dismissed=hintDismissed[hintTarget.key] == true}
+        dismissed=hintDismissed[hintTarget.key] ~= nil}
 end
 
 -- Seen. No further chat line for this hint in this session. Nothing is saved:
@@ -451,8 +458,8 @@ end
 function Updates.DismissHint()
     local hint = Updates.PublicTestHint()
     if not hint then return false end
-    Remember(hintDismissed, hintDismissedOrder, hint.key)
-    Remember(hintNotified, hintNotifiedOrder, hint.key)
+    Remember(hintDismissed, hint.key)
+    Remember(hintNotified, hint.key)
     return true
 end
 
@@ -520,8 +527,7 @@ local function size(map)
 end
 function Updates.HintDiagnostics()
     return {notices=hintNotices, notified=size(hintNotified),
-        dismissed=size(hintDismissed), notifiedOrder=#hintNotifiedOrder,
-        dismissedOrder=#hintDismissedOrder, maxKeys=MAX_HINT_KEYS,
+        dismissed=size(hintDismissed), maxKeys=MAX_HINT_KEYS,
         maxNotices=MAX_HINT_NOTICES}
 end
 

@@ -70,7 +70,12 @@ local function text(value)
         return string.format("\\%03d", char:byte())
     end))
     if #converted > MAX_TEXT then
-        local marker = "...(" .. #converted .. "B#" .. sum32(converted) .. ")"
+        -- The marker opens with a RAW control byte. Every control character a
+        -- caller supplies was just escaped above, so no value this function
+        -- returns can carry one - which means a caller cannot hand over the
+        -- retained form of a longer value and be merged with it.
+        local marker = string.char(1) .. "(" .. #converted .. "B#"
+            .. sum32(converted) .. ")"
         converted = converted:sub(1, math.max(1, MAX_TEXT - #marker)) .. marker
     end
     return converted

@@ -62,7 +62,20 @@ M.Alias = alias
 
 local function plain(value, limit)
     if value == nil then return nil end
-    return (tostring(value):gsub("%c", " ")):sub(1, limit or 200)
+    -- tostring runs a caller-supplied __tostring, which can raise. A field of
+    -- a status table is not allowed to take this report away.
+    local ok, converted = pcall(tostring, value)
+    if not ok or type(converted) ~= "string" then
+        converted = "unreadable " .. type(value)
+    end
+    return (converted:gsub("%c", " ")):sub(1, limit or 200)
+end
+
+-- plain() for a value that is going into a concatenation: never nil.
+local function shown(value, limit)
+    local text = plain(value, limit)
+    if text == nil or text == "" then return "unknown" end
+    return text
 end
 
 -- The report is copied out of an edit box and pasted into a ticket, so a pipe
@@ -213,47 +226,47 @@ function M.StartupLines(status, extended)
     local failed = status.state == "failed"
     local out = {}
     out[#out + 1] = (failed and "STARTUP FAILED: state " or "Startup: state ")
-        .. plain(status.state, 32)
+        .. shown(status.state, 32)
         .. (status.coreReady ~= nil and ("; core ready " .. tostring(status.coreReady)) or "")
-        .. (status.phase ~= nil and ("; phase " .. plain(status.phase, 48)) or "")
+        .. (status.phase ~= nil and ("; phase " .. shown(status.phase, 48)) or "")
     if status.reason ~= nil then
-        out[#out + 1] = "  reason: " .. plain(status.reason, 96)
+        out[#out + 1] = "  reason: " .. shown(status.reason, 96)
     end
     local facts = type(status.failure) == "table" and status.failure or nil
     if facts then
         local row = {}
         for _, field in ipairs({"stage", "detail", "cause", "component", "owner"}) do
             if facts[field] ~= nil then
-                row[#row + 1] = field .. "=" .. plain(facts[field], 64)
+                row[#row + 1] = field .. "=" .. shown(facts[field], 64)
             end
         end
         if #row > 0 then out[#out + 1] = "  " .. table.concat(row, "; ") end
         if facts.formatClass ~= nil or facts.formatVersion ~= nil then
-            out[#out + 1] = "  saved format: " .. plain(facts.formatClass, 24)
+            out[#out + 1] = "  saved format: " .. shown(facts.formatClass, 24)
                 .. (facts.formatVersion ~= nil
                     and (" version " .. tostring(facts.formatVersion)) or "")
                 .. (extended and facts.formatField ~= nil
-                    and (" (" .. plain(facts.formatField, 64) .. ")") or "")
+                    and (" (" .. shown(facts.formatField, 64) .. ")") or "")
         end
         local width = type(facts.keyWidth) == "table" and facts.keyWidth or nil
         if width then
-            out[#out + 1] = "  refused key: " .. plain(width.path, 64)
+            out[#out + 1] = "  refused key: " .. shown(width.path, 64)
                 .. ", depth " .. tostring(width.depth)
-                .. ", " .. plain(width.keyType, 16) .. " key of "
+                .. ", " .. shown(width.keyType, 16) .. " key of "
                 .. tostring(width.keyBytes) .. " bytes, limit "
                 .. tostring(width.limit)
-                .. ", path exception " .. plain(width.exception, 24)
+                .. ", path exception " .. shown(width.exception, 24)
             out[#out + 1] = "  (the key, the character and the record contents are not included)"
         end
         if extended then
             if facts.error ~= nil then
-                out[#out + 1] = "  owner error: " .. plain(facts.error, 160)
+                out[#out + 1] = "  owner error: " .. shown(facts.error, 160)
             end
             if facts.row ~= nil then
                 out[#out + 1] = "  selection row: " .. tostring(facts.row)
             end
             if facts.legacyClass ~= nil then
-                out[#out + 1] = "  legacy class: " .. plain(facts.legacyClass, 32)
+                out[#out + 1] = "  legacy class: " .. shown(facts.legacyClass, 32)
             end
         end
     end
@@ -394,7 +407,12 @@ function M.NewPreparation(options)
     options = type(options) == "table" and options or {}
     reportSequence = reportSequence + 1
     local support = Nexus and Nexus.SupportIncidents
-    local incidents = support and support.History() or {}
+    -- Protected exactly like the summary route: an incident owner that raises
+    -- must not take the prepared file away as well.
+    local okIncidents, incidents = pcall(function()
+        return support and type(support.History) == "function" and support.History() or {}
+    end)
+    if not okIncidents or type(incidents) ~= "table" then incidents = {} end
     local incident = nil
     if type(options.incident) == "table" then incident = options.incident
     else incident = incidents[#incidents] end

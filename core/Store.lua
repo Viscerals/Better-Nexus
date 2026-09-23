@@ -571,6 +571,15 @@ end
 -- Line 1364: "One pump admits at most 8 rows, 64 edges, 64 nodes, 2,048 graph
 -- bytes, 64 cursor entries, 64 comparisons, or 2,048 compared bytes."
 --
+-- ONE stated exception to that byte ceiling, 2026-09-23: a single edge whose
+-- KEY alone is wider than the whole slice is charged in a pump of its own, so
+-- such a pump ends above 2,048 graph bytes by exactly that one edge. Without
+-- it the walk could never charge that edge at all - an empty slice has no more
+-- room than a full one - and start-up pumped forever without completing or
+-- failing. The alternative was to refuse a key the addon itself writes, which
+-- is the defect this exception exists to correct. Every other ceiling, and the
+-- complete source bounds in BOUNDS, are unchanged.
+--
 -- The character walk is now a resumable frontier. It never enumerates the whole
 -- map: Lua's next(map, cursor) resumes from the last key admitted, so a pump
 -- touches only the rows it charges. A pump ends at the FIRST cap reached, and
@@ -599,9 +608,13 @@ local CharMigration = {
     -- A derivation, not a literal. KeyPart(v) writes "<type>:<#text>:<text>",
     -- and AutoLockBaseKey joins KeyPart(wishlistKey), KeyPart(spellId),
     -- KeyPart(replacementToken) and, above one copy, KeyPart(copies) with "|":
-    --   wishlistKey      a key wider than WISHLIST_KEY_WIDTH cannot have a
-    --                    lock-design row this same walk accepts, so 2048 is
-    --                    the widest one that can reach this map at all
+    --   wishlistKey      bounded by the SAME supported width the lock-design
+    --                    map uses, 2048. That is itself far above what the
+    --                    producer emits: a full 79-Echo wishlist serializes to
+    --                    roughly 710 bytes (see WISHLIST_KEY_WIDTH above), so
+    --                    2048 is about three times the realistic maximum. A
+    --                    wishlist key wider than 2048 is out of support on
+    --                    both paths, not merely refused on the other one
     --   a number         Lua 5.1 prints any number in at most 21 bytes
     --   replacementToken at most MAX_LOCK_SLOTS ids joined by commas
     -- The whole compound key is therefore bounded by its own parts, not by the
@@ -629,28 +642,45 @@ local CharMigration = {
 -- A bounded, sanitized description of ONE refused key, built from the frame
 -- that refused it. It names no key, no character, no wishlist and no record
 -- content: only the schema path, the measured width and the rule that applied.
--- A schema field name is an identifier of at most 32 bytes; the keys a player's
--- data produces here (wishlist keys, attempt keys) are serialized blobs that
--- carry ":" and "|", so they never pass this shape test.
+-- An ALLOW-LIST of the field names this addon owns, not a shape test: a player
+-- can choose a key that looks exactly like an identifier (a character name, a
+-- realm, a wishlist title), and a shape test would print it into a support
+-- report. A name that is not on this list is reported as its depth alone.
+local SCHEMA_NAMES = {
+    autoLockAttempts=true, records=true, lockDesignTargetsBySlot=true,
+    tomeTogglePending=true, flagDemotions=true, recordedPicks=true,
+    loadoutWishlists=true, wishlistRoleChoices=true, firstRunWishlist=true,
+    priorAutoAccept=true,
+}
 local function SchemaName(value)
-    if type(value) ~= "string" or #value > 32 then return nil end
-    return value:match("^[%a_][%w_]*$")
+    if type(value) ~= "string" or not SCHEMA_NAMES[value] then return nil end
+    return value
 end
 
 function CharMigration.KeyWidthFacts(work, stack, frame, key, value, keyText, limit, exception)
-    local first = type(stack[1]) == "table" and SchemaName(stack[1].key) or nil
-    local second = type(stack[2]) == "table" and SchemaName(stack[2].key) or nil
     local path
     if not work.settingsCharged then
         path = "settings graph"
     elseif frame.depth == 1 then
         path = "character row"
-    elseif frame.depth == 2 and first then
-        path = "character." .. first
-    elseif frame.depth == 3 and first and second then
-        path = "character." .. first .. "." .. second
     else
-        path = "character graph"
+        -- As many LEADING names this addon owns as the path really has, then
+        -- stop. A segment that is not one of them is a key someone chose, so
+        -- it is counted rather than printed.
+        path = "character"
+        local named = 0
+        for index = 1, frame.depth - 1 do
+            local name = type(stack[index]) == "table"
+                and SchemaName(stack[index].key) or nil
+            if not name then break end
+            path = path .. "." .. name
+            named = named + 1
+        end
+        local unnamed = (frame.depth - 1) - named
+        if unnamed > 0 then
+            path = path .. " (+" .. unnamed .. " unnamed level"
+                .. (unnamed == 1 and "" or "s") .. ")"
+        end
     end
     return {
         path=path, depth=frame.depth,

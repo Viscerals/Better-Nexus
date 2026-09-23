@@ -233,4 +233,73 @@ do
  check(guarded:find('refused key:',1,true)~=nil,'or the measured refusal')
 end
 
+-- 8. The report route survives what it is FOR. It is the last route a player
+-- has when start-up is broken, so no owner, no missing field and no hostile
+-- value in a retained fact may take it away.
+do
+ Boot(function(db) db.chars[F.NAME].recordedPicks={[KeyOfWidth(595)]=1} end,'failed')
+ local report=Nexus.SupportReport
+ local realStatus=Nexus.StartupStatus
+ -- A status table that states no state at all.
+ Nexus.StartupStatus=function() return {coreReady=true} end
+ local ok,summary=pcall(report.Summary)
+ check(ok,'a status without a state does not take the summary away: '..tostring(summary))
+ check(type(summary)=='string' and summary:find('Startup: state unknown',1,true)~=nil,
+  'it says the state is unknown instead of raising')
+ local okJob,job=pcall(report.NewPreparation,{extended=true})
+ check(okJob,'and does not take the prepared file away either: '..tostring(job))
+ -- A retained fact whose __tostring raises.
+ Nexus.StartupStatus=function()
+  return {state='failed',coreReady=false,reason='SOURCE_KEY_WIDTH_EXCEEDED',
+   failure={stage=setmetatable({},{__tostring=function() error('hostile') end})}}
+ end
+ local okHostile,hostile=pcall(report.Summary)
+ check(okHostile,'a hostile value in a retained fact does not raise: '..tostring(hostile))
+ check(hostile:find('SOURCE_KEY_WIDTH_EXCEEDED',1,true)~=nil,
+  'and the reason beside it still reaches the report')
+ -- A missing owner entirely.
+ Nexus.StartupStatus=nil
+ check(pcall(report.Summary),'a missing start-up owner does not raise')
+ Nexus.StartupStatus=function() error('synthetic status failure') end
+ check(pcall(report.Summary),'and neither does a raising one')
+ Nexus.StartupStatus=realStatus
+ -- A raising incident owner takes NEITHER route away.
+ local realHistory=Nexus.SupportIncidents.History
+ Nexus.SupportIncidents.History=function() error('synthetic incident failure') end
+ local okSummary=pcall(report.Summary)
+ local okPrepare=pcall(report.NewPreparation,{})
+ Nexus.SupportIncidents.History=realHistory
+ check(okSummary,'a raising incident owner leaves the summary route')
+ check(okPrepare,'and the prepared-file route')
+end
+
+-- 9. The settings graph is not the character graph. The new width applies only
+-- once rows are being charged, and a settings map of the same two names gets
+-- the general rule.
+Boot(function(db)
+ db.settings.autoLockAttempts={records={[KeyOfWidth(ATTEMPT_KEY_WIDTH)]={}}}
+end,'failed')
+do
+ local H=Boot(function(db)
+  db.settings.autoLockAttempts={records={[KeyOfWidth(ATTEMPT_KEY_WIDTH)]={}}}
+ end,'failed')
+ local summary=Nexus.SupportReport.Summary()
+ check(summary:find('refused key: settings graph',1,true)~=nil,
+  'and the refusal says which graph it was in: '..summary:sub(1,400))
+ check(#H.actions==0,'no action followed any of it')
+end
+
+-- 10. A key a PLAYER chose never reaches the report, however much it looks
+-- like a field name this addon owns.
+do
+ Boot(function(db)
+  db.chars[F.NAME].lockDesignTargetsBySlot={Bloodhoof_Thrall={[KeyOfWidth(595)]='x'}}
+ end,'failed')
+ local summary=Nexus.SupportReport.Summary()
+ check(summary:find('Bloodhoof_Thrall',1,true)==nil,
+  'a name-shaped key is not printed: '..summary:sub(1,400))
+ check(summary:find('refused key: character.lockDesignTargetsBySlot',1,true)~=nil,
+  'the path stops at the last name this addon owns')
+end
+
 print('PASS startup_attempt_key_width: the reader accepts the compound attempt key its own producer writes, at a derived width, and refuses it everywhere else checks='..checks)

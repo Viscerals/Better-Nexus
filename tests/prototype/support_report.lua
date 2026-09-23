@@ -315,6 +315,15 @@ check(support.Count()==1 and support.Latest().occurrences==2,
  'while the same long reading twice is still one: '..support.Count())
 check(#tostring(support.Latest().readiness.note)<=240,
  'and what is retained is still bounded: '..#tostring(support.Latest().readiness.note))
+-- A caller that hands over the RETAINED form of a longer value must not be
+-- merged with it: the marker opens with a control byte, and every control
+-- byte a caller supplies is escaped, so the retained form cannot be forged.
+support.Clear()
+record({committed=false,readiness={note=string.rep('a',400)}})
+local retained=tostring(support.Latest().readiness.note)
+record({committed=false,readiness={note=retained}})
+check(support.Count()==2,
+ 'the retained form of a long reading is not the same reading: '..support.Count())
 support.Clear()
 record({committed=false,readiness={permanentSource=1}})
 record({committed=false,readiness={permanentSource='1'}})
