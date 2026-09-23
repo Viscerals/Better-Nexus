@@ -992,6 +992,17 @@ do
  local unknown=builder.StoredReport()
  check(unknown~=nil and unknown.matches==nil,
   'an unreadable stored copy claims neither: '..tostring(unknown.matches))
+ -- A Read that RAISES is not a mismatch: the error text is not a checksum.
+ _G.NexusSupportStorage={
+  Latest=function() return intact end,
+  Read=function() error('the component exploded') end,
+  Status=function() return {loaded=true,ready=true} end}
+ local raised=builder.StoredReport()
+ check(raised~=nil and raised.matches==nil,
+  'a component whose Read raises does not produce a mismatch verdict: '
+  ..tostring(raised.matches))
+ check(raised.recomputed==nil,'and no error text is kept as a checksum: '
+  ..tostring(raised.recomputed))
  _G.NexusSupportStorage=realStorage
  Nexus.SupportReportUI.Show()
 end
@@ -1044,5 +1055,111 @@ end
 -- 27. No heap address reaches a report.
 check(builder.Summary({kind={},reason=print,producer=coroutine.create(function() end)})
  :find('0x',1,true)==nil,'a table, function or coroutine is named, not addressed')
+
+-- 28. A component states why it refused. That reason is what the player is
+-- shown - the shipped component refuses that way in every failure it has.
+do
+ local realStorage=_G.NexusSupportStorage
+ _G.NexusSupportStorage={
+  Replace=function() return nil,'the saved data was written by a newer version (99)' end,
+  Status=function() return {loaded=true,ready=true} end}
+ local stored,why=builder.Store({chunks={'x'}})
+ check(stored==nil,'a refusing component does not report a stored report')
+ check(tostring(why):find('newer version (99)',1,true)~=nil,
+  'and its own words reach the caller: '..tostring(why))
+ Nexus.SupportReportUI.Show()
+ local prepared,pageWhy=Nexus.SupportReportUI.PrepareFile(false)
+ check(prepared==nil,'the page does not claim a file was prepared')
+ check(page.prepared:GetText():find('newer version (99)',1,true)~=nil,
+  'and says why, in the component words: '..page.prepared:GetText():sub(1,140))
+ -- A component that refuses with no words at all still gets a sentence.
+ _G.NexusSupportStorage={Replace=function() return nil end,
+  Status=function() return {loaded=true,ready=true} end}
+ local _,bare=builder.Store({chunks={'x'}})
+ check(type(bare)=='string' and #bare>0,'a silent refusal still states something: '..tostring(bare))
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 29. Every value the page displays is escaped ONCE: not zero times, which
+-- lets a component colour the page, and not twice, which corrupts the text.
+do
+ local realStorage=_G.NexusSupportStorage
+ local COLOUR='|cffff0000RED|r'
+ _G.NexusSupportStorage={
+  Replace=function() return true,{id=COLOUR,bytes=1,chunkCount=1,checksum='c'} end,
+  Status=function() return {loaded=true,ready=true,incompatible=false} end,
+  Latest=function() return {id=COLOUR,bytes=1,chunkCount=1,checksum='c'} end,
+  Read=function() return {chunks={'x'}} end}
+ Nexus.SupportReportUI.Show()
+ Nexus.SupportReportUI.PrepareFile(false)
+ local notice=page.prepared:GetText()
+ check(notice:find('||cffff0000',1,true)~=nil,
+  'the written notice escapes the component id once: '..notice:sub(1,120))
+ check(notice:find('||||c',1,true)==nil,'and not twice')
+ -- The incompatible sentence on the prepare path, which had none.
+ _G.NexusSupportStorage={
+  Replace=function() return true,{} end,
+  Status=function() return {loaded=true,ready=true,incompatible=COLOUR} end}
+ Nexus.SupportReportUI.Show()
+ Nexus.SupportReportUI.PrepareFile(false)
+ local refused=page.prepared:GetText()
+ check(refused:find('||cffff0000',1,true)~=nil,
+  'the prepare refusal escapes it too: '..refused:sub(1,140))
+ check(refused:find('||||c',1,true)==nil,'once, not twice')
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 30. "Loaded" means the same thing in the status, on the page and on the
+-- file route. A component that is there but not ready must not be called
+-- ready by the page.
+do
+ local realStorage=_G.NexusSupportStorage
+ local shapes={
+  {name='answers, not ready',component={Replace=function() return true,{} end,
+    Status=function() return {loaded=false,ready=false,reason='still loading'} end},
+   loaded=true,ready=false},
+  {name='answers with nonsense',component={Replace=function() return true,{} end,
+    Status=function() return 'fine' end},loaded=true,ready=false},
+  {name='status raises',component={Replace=function() return true,{} end,
+    Status=function() error('no') end},loaded=true,ready=false},
+  {name='no status entry',component={Replace=function() return true,{} end},
+   loaded=false,ready=false},
+  {name='absent',component=nil,loaded=false,ready=false},
+ }
+ for _,shape in ipairs(shapes) do
+  _G.NexusSupportStorage=shape.component
+  local status=builder.StorageStatus()
+  check(status.loaded==shape.loaded,shape.name..': loaded is '..tostring(shape.loaded)
+   ..', got '..tostring(status.loaded))
+  check(status.ready==shape.ready,shape.name..': ready is '..tostring(shape.ready)
+   ..', got '..tostring(status.ready))
+  Nexus.SupportReportUI.Show()
+  local line=page.storage:GetText()
+  if not status.ready then
+   check(line:find('ready; no report',1,true)==nil,
+    shape.name..': the page does not call it ready: '..line:sub(1,120))
+  end
+ end
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 31. The copied header is bounded too, not only the stored summary.
+do
+ local realStorage=_G.NexusSupportStorage
+ local LONG=string.rep('H',900)
+ _G.NexusSupportStorage={
+  Replace=function() return true,{id=LONG,build=LONG,topic=LONG,checksum=LONG,
+   omissions=LONG,bytes=1,chunkCount=1} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local _,meta=builder.Store({chunks={'x'}})
+ for _,field in ipairs({'id','build','topic','checksum','omissions'}) do
+  check(#tostring(meta[field])<=120,'the copied header bounds '..field..': '
+   ..#tostring(meta[field]))
+ end
+ _G.NexusSupportStorage=realStorage
+end
 
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)

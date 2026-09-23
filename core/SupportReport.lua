@@ -782,10 +782,10 @@ function M.Store(report)
     local ok, stored, why = pcall(function()
         local value, meta = storage.Replace(report)
         if type(meta) ~= "table" then
-            -- A component that answered with a note rather than a header:
-            -- the note is kept, converted, instead of being discarded.
-            if meta ~= nil then copied.note = safeText(meta, 240) end
-            return value, nil
+            -- A component that answered with a NOTE rather than a header -
+            -- which is how the shipped one states every refusal. Its words
+            -- are what the player needs, so they are carried out, converted.
+            return value, meta ~= nil and safeText(meta, 240) or nil
         end
         -- The header the component accepted, field by field, into a table
         -- this file owns. Numbers stay numbers; text is converted.
@@ -847,7 +847,9 @@ function M.StoredReport()
         end
         return checksum(chunks)
     end)
-    summary.recomputed = ok and recomputed or nil
+    -- Explicit, for the same reason as `matches` below: this must be able to
+    -- distinguish "not computed" from any value the computation returns.
+    if ok then summary.recomputed = recomputed end
     -- NOT `a and b or nil`: the answer that matters here is `false`, and that
     -- form collapses it to nil - which silently retired the mismatch warning.
     if summary.recomputed ~= nil then
@@ -859,6 +861,7 @@ end
 function M.StorageStatus()
     local storage = storageOwner("Status")
     if not storage then
+        -- Not there, or there without the entry: either way nothing answers.
         return {loaded = false, ready = false,
             reason = "the support component is not loaded"}
     end
@@ -882,7 +885,9 @@ function M.StorageStatus()
                 and safeText(reason, 240) or nil}
     end)
     if not ok or type(status) ~= "table" then
-        return {loaded = false, ready = false,
+        -- It IS there - the lookup found a function - but it did not answer
+        -- in a shape this addon can read. That is not "not loaded".
+        return {loaded = true, ready = false,
             reason = "the support component did not answer"}
     end
     return status

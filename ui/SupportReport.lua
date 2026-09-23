@@ -69,6 +69,11 @@ local function storageLine()
             .. " chunk(s), checksum " .. builder.Escape(latest.checksum)
             .. ". Preparing another one replaces it."
     end
+    if not status.ready then
+        return "Support storage: loaded, but it has not reported itself ready"
+            .. (status.reason and (" (" .. builder.Escape(status.reason) .. ")") or "")
+            .. "."
+    end
     return "Support storage: ready; no report has been prepared yet."
 end
 
@@ -227,7 +232,7 @@ function UI.PrepareFile(extended)
         -- Known before any work is done: do not build a report that cannot be
         -- stored, and leave the existing data exactly as it is.
         lastPrepared = "Not prepared: existing support data was left untouched ("
-            .. tostring(status.incompatible) .. "). Use Copy summary instead."
+            .. builder.Escape(status.incompatible) .. "). Use Copy summary instead."
         refresh()
         return nil, status.incompatible
     end
@@ -259,7 +264,7 @@ function UI.PrepareFile(extended)
         refresh()
         return nil, meta
     end
-    lastPrepared = builder.WrittenNotice(meta) .. "\nAfter that, attach "
+    lastPrepared = builder.Escape(builder.WrittenNotice(meta)) .. "\nAfter that, attach "
         .. builder.FilePathHint()
         .. " (the account folder is the one you played on)."
         .. (type(meta) == "table" and meta.partial
