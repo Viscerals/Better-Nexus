@@ -110,4 +110,21 @@ local again=Nexus.WishlistEditor.DebugDraftState()
 check(again.pending==79 and again.pendingLock==6,
  'the round trip keeps 79 ordinary and 6 permanent targets: '
  ..tostring(again.pending)..'/'..tostring(again.pendingLock))
+-- The naming dialog is not the only place a name is accepted. The editor's own
+-- name box feeds the same encoder through a different source, so the rule is
+-- asserted there too: typing the character must not put it in the copied code,
+-- and the exported name must be the name the plan is saved under.
+local nameBox=assert(_G.NexusWishlistNameInput,'the editor has its own name box')
+nameBox:_NexusSetRawText(TYPED)
+check(Nexus.WishlistEditor.DebugDraftState()~=nil,'the editor is open with a draft')
+StaticPopup_Show('NEXUS_EXPORT_WISHLIST')
+local typedBox=assert(H.popup and H.popup.editBox,'the export dialog opens for the typed name')
+local typedShown=typedBox:GetText()
+local typedParsed=assert(Nexus.Codec.DecodeEBH1(typedShown,true),'the code still decodes')
+check(typedParsed.name==EXPECTED,
+ 'a name typed into the editor is exported exactly as it is saved: '..tostring(typedParsed.name))
+check(typedParsed.name:find('|',1,true)==nil,
+ 'and the typed character never reaches the copied code: '..tostring(typedParsed.name))
+StaticPopup_Hide()
+
 print('PASS wishlist_export_copy_field: the copied EBH1 code is exact, and it imports again checks='..checks)

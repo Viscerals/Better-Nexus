@@ -1042,11 +1042,17 @@ function Controller.New(options)
             lockedBySpell, catalog, state.fulfilledDraftTargets)
     end
 
+    -- An exported code carries this name verbatim, and it is copied out of an
+    -- edit box, so it is normalised here as well as where a name is accepted.
+    -- The name box, an edit of an existing wishlist and the adapter record are
+    -- three separate sources; a rule applied to only one of them is not a rule.
     function M.ExportName(nameText)
-        if state.editingContext then return state.editingContext.name end
-        if nameText ~= nil then return nameText end
+        if state.editingContext then
+            return DraftModel.TrimName(state.editingContext.name)
+        end
+        if nameText ~= nil then return DraftModel.TrimName(nameText) end
         if Adapter and Adapter.Wishlist and Adapter.Wishlist() then
-            return Adapter.Wishlist().name
+            return DraftModel.TrimName(Adapter.Wishlist().name)
         end
         return "Nexus"
     end
@@ -1191,9 +1197,17 @@ function Controller.New(options)
         local slot = state.editingContext and tonumber(state.editingContext.slot) or 0
         local name
         if state.editingContext then
+            -- An existing wishlist keeps the name the game holds for it. This
+            -- path re-uploads that name, so normalising it here would rename
+            -- somebody's server wishlist as a side effect of saving echoes.
             name = tostring(state.editingContext.name or "Wishlist")
         else
-            name = DraftModel.TrimName(nameText)
+            local typed = tostring(nameText or "")
+            name = DraftModel.TrimName(typed)
+            if name ~= typed:gsub("^%s+", ""):gsub("%s+$", "") then
+                notify("|cffff6060Nexus:|r the | character is not kept in a "
+                    .. "wishlist name; this plan is saved as \"" .. name .. "\".")
+            end
             if name == "" then
                 notify("|cffff6060Nexus:|r Enter a wishlist name before saving.")
                 return nil, "name"

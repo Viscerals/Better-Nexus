@@ -659,10 +659,14 @@ StaticPopupDialogs["NEXUS_NAME_IMPORTED_WISHLIST"] = {
         self.editBox:HighlightText()
     end,
     OnAccept = function(self, parsed)
-        local name = TrimWishlistName(
-            self.editBox and self.editBox._NexusRawText
+        local typed = tostring(self.editBox and self.editBox._NexusRawText
                 and self.editBox:_NexusRawText()
-                or (self.editBox and self.editBox:GetText()))
+                or (self.editBox and self.editBox:GetText()) or "")
+        local name = TrimWishlistName(typed)
+        if name ~= "" and typed:find("|", 1, true) then
+            print("|cffff6060Nexus:|r the | character is not kept in a wishlist "
+                .. "name; this import is named \"" .. name .. "\".")
+        end
         if name == "" then
             print("|cffff6060Nexus:|r Enter a name for the imported wishlist.")
             return
