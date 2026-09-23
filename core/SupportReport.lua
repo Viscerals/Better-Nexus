@@ -46,7 +46,10 @@ end
 local function alias(value)
     if sessionSalt == nil then
         sessionSalt = 0
-        local seed = tostring(clock() or 0) .. tostring(GetTime and GetTime() or 0)
+        local okSeed, seed = pcall(function()
+            return tostring(clock() or 0) .. tostring(GetTime and GetTime() or 0)
+        end)
+        if not okSeed or type(seed) ~= "string" then seed = "session" end
         for index = 1, #seed do
             sessionSalt = (sessionSalt * 31 + seed:byte(index)) % 2147483647
         end
@@ -84,6 +87,9 @@ end
 -- reach a ticket, so it is read back here as the printable marker it stands
 -- for. Everything else goes through plain() exactly as before.
 local function retained(value, limit)
+    -- nil is "not retained", exactly as plain() reports it: the callers here
+    -- fall back on that, and "nil" is not a value anyone retained.
+    if value == nil then return nil end
     local ok, text = pcall(tostring, value)
     if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
     return plain((text:gsub(string.char(1), "...")), limit)
@@ -130,6 +136,13 @@ local function limits()
     return nil
 end
 
+-- Declared before buildLabel(), which is the first user of it.
+local function safeText(value, limit)
+    local ok, text = pcall(tostring, value)
+    if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
+    return (text:gsub("%c", " ")):sub(1, limit or 200)
+end
+
 local function buildLabel()
     local release = Nexus and Nexus.Release
     return release and release.buildLabel or "unknown"
@@ -140,12 +153,12 @@ local function counts(line, label, value, limit)
         line[#line + 1] = label .. ": not retained"
         return
     end
-    local text = label .. ": " .. tostring(value.ordinary or "?") .. " ordinary, "
-        .. tostring(value.locked or "?") .. " locked, "
-        .. tostring(value.total or "?") .. " total"
+    local text = label .. ": " .. safeText(value.ordinary or "?", 16) .. " ordinary, "
+        .. safeText(value.locked or "?", 16) .. " locked, "
+        .. safeText(value.total or "?", 16) .. " total"
     if type(limit) == "table" then
-        text = text .. " (limits " .. tostring(limit.ordinary) .. "/"
-            .. tostring(limit.locked) .. "/" .. tostring(limit.total) .. ")"
+        text = text .. " (limits " .. safeText(limit.ordinary, 16) .. "/"
+            .. safeText(limit.locked, 16) .. "/" .. safeText(limit.total, 16) .. ")"
     end
     line[#line + 1] = text
 end
@@ -159,17 +172,17 @@ function M.IncidentLines(incident, options)
         out[#out + 1] = "No incident was retained in this session."
         return out
     end
-    out[#out + 1] = "Incident: " .. (plain(incident.kind) or "not retained")
-        .. " / " .. (plain(incident.reason) or "not retained")
-    out[#out + 1] = "Producer: " .. (plain(incident.producer) or "not retained")
-        .. "; origin: " .. (plain(incident.origin) or "unknown")
+    out[#out + 1] = "Incident: " .. (retained(incident.kind, 240) or "not retained")
+        .. " / " .. (retained(incident.reason, 240) or "not retained")
+    out[#out + 1] = "Producer: " .. (retained(incident.producer, 240) or "not retained")
+        .. "; origin: " .. (retained(incident.origin, 64) or "unknown")
     if incident.operation or incident.ticket then
-        out[#out + 1] = "Operation: " .. (plain(incident.operation) or "not retained")
-            .. (incident.ticket and ("; ticket " .. plain(incident.ticket)) or "")
+        out[#out + 1] = "Operation: " .. (retained(incident.operation, 240) or "not retained")
+            .. (incident.ticket and ("; ticket " .. retained(incident.ticket, 240)) or "")
     end
-    out[#out + 1] = "Build at failure: " .. (plain(incident.build) or "not retained")
-        .. (incident.category and ("; category " .. plain(incident.category)) or "")
-    out[#out + 1] = "Representation: " .. (plain(incident.representation) or "unknown")
+    out[#out + 1] = "Build at failure: " .. (retained(incident.build, 240) or "not retained")
+        .. (incident.category and ("; category " .. retained(incident.category, 240)) or "")
+    out[#out + 1] = "Representation: " .. (retained(incident.representation, 64) or "unknown")
     counts(out, "Counted at refusal", incident.counts, incident.limits)
     if incident.readiness then
         local parts = {}
@@ -189,23 +202,23 @@ function M.IncidentLines(incident, options)
     else
         out[#out + 1] = "Result: not retained."
     end
-    if incident.scope then out[#out + 1] = "Scope: " .. plain(incident.scope, 240) end
-    if incident.detail then out[#out + 1] = "Detail: " .. plain(incident.detail, 240) end
-    out[#out + 1] = "Occurrences: " .. tostring(incident.occurrences or 1)
-        .. (incident.firstAt and (" (first " .. tostring(incident.firstAt)
-            .. ", last " .. tostring(incident.lastAt) .. ")") or "")
+    if incident.scope then out[#out + 1] = "Scope: " .. retained(incident.scope, 240) end
+    if incident.detail then out[#out + 1] = "Detail: " .. retained(incident.detail, 240) end
+    out[#out + 1] = "Occurrences: " .. safeText(incident.occurrences or 1, 16)
+        .. (incident.firstAt and (" (first " .. safeText(incident.firstAt, 24)
+            .. ", last " .. safeText(incident.lastAt, 24) .. ")") or "")
     if options.tuples ~= false and type(incident.affected) == "table"
         and #incident.affected > 0 then
         local rows = {}
         for _, tuple in ipairs(incident.affected) do
-            rows[#rows + 1] = tostring(tuple.spellId or "?")
-                .. "." .. tostring(tuple.quality or "?")
-                .. "x" .. tostring(tuple.stacks or 1)
+            rows[#rows + 1] = safeText(tuple.spellId or "?", 16)
+                .. "." .. safeText(tuple.quality or "?", 8)
+                .. "x" .. safeText(tuple.stacks or 1, 8)
                 .. (tuple.locked and "P" or "")
         end
         out[#out + 1] = "Affected copies retained at the boundary ("
             .. #rows .. (incident.affectedOmitted
-                and (" shown, " .. incident.affectedOmitted .. " omitted") or "")
+                and (" shown, " .. safeText(incident.affectedOmitted, 16) .. " omitted") or "")
             .. "): " .. table.concat(rows, " ")
     elseif options.tuples ~= false then
         out[#out + 1] = "Affected copies: not retained"
@@ -315,9 +328,9 @@ function M.Summary(selection)
         .. alias((UnitName and UnitName("player")) or "unknown"))
     local semantic = limits()
     if semantic then
-        add("Supported envelope: " .. tostring(semantic.ordinary) .. " ordinary, "
-            .. tostring(semantic.locked) .. " locked, "
-            .. tostring(semantic.total) .. " total copies")
+        add("Supported envelope: " .. safeText(semantic.ordinary, 16) .. " ordinary, "
+            .. safeText(semantic.locked, 16) .. " locked, "
+            .. safeText(semantic.total, 16) .. " total copies")
     end
     add("Session incidents retained: " .. #incidents)
     -- A failed start-up goes ABOVE the incident and inside the kept part of the
@@ -342,10 +355,11 @@ function M.Summary(selection)
     end
     for _, entry in ipairs(incidents) do
         if not incident or entry.id ~= incident.id then
-            context[#context + 1] = "  " .. tostring(entry.id) .. ". "
-                .. shown(entry.kind, 64) .. "/" .. shown(entry.reason, 96)
-                .. " from " .. (plain(entry.producer) or "unknown producer")
-                .. " x" .. tostring(entry.occurrences or 1)
+            context[#context + 1] = "  " .. safeText(entry.id, 16) .. ". "
+                .. shown(retained(entry.kind, 64), 64) .. "/"
+                .. shown(retained(entry.reason, 96), 96)
+                .. " from " .. (retained(entry.producer, 96) or "unknown producer")
+                .. " x" .. safeText(entry.occurrences or 1, 16)
         end
     end
     -- Every owner read here is protected: this summary is the route a player
@@ -438,7 +452,8 @@ function M.NewPreparation(options)
         incident = incident,
         incidents = incidents,
         cursor = 0,
-        topic = incident and (incident.kind .. "/" .. incident.reason)
+        topic = incident and (shown(retained(incident.kind, 64), 64) .. "/"
+                .. shown(retained(incident.reason, 96), 96))
             or "session report",
     }
     return job
@@ -456,8 +471,8 @@ function M.Step(job)
             "format=" .. FORMAT .. "; id=" .. job.id,
             "build=" .. buildLabel(),
             "topic=" .. job.topic,
-            "extended=" .. tostring(job.extended),
-            "captureStart=" .. tostring(job.startedAt),
+            "extended=" .. safeText(job.extended, 16),
+            "captureStart=" .. safeText(job.startedAt, 24),
             "characterAlias=" .. alias((UnitName and UnitName("player")) or "unknown"),
             "",
         })
@@ -479,7 +494,7 @@ function M.Step(job)
         while job.cursor < #job.incidents and done < 4 do
             job.cursor = job.cursor + 1
             local entry = job.incidents[job.cursor]
-            pushLines(job, {"[" .. tostring(entry.id) .. "]"})
+            pushLines(job, {"[" .. safeText(entry.id, 16) .. "]"})
             pushLines(job, M.IncidentLines(entry, {tuples = job.extended}))
             pushLines(job, {""})
             done = done + 1
@@ -499,7 +514,7 @@ function M.Step(job)
                 -- retained failure facts the copyable summary shows.
                 for _, key in ipairs({"state", "coreReady", "storeReady", "reason"}) do
                     if status[key] ~= nil then
-                        out[#out + 1] = key .. "=" .. tostring(status[key])
+                        out[#out + 1] = key .. "=" .. safeText(status[key], 96)
                     end
                 end
                 for _, line in ipairs(M.StartupLines(status, true)) do
@@ -513,7 +528,7 @@ function M.Step(job)
                     and errors.History() or {}
                 local out = {"-- recorded Lua errors (" .. #history .. ") --"}
                 for index = 1, math.min(#history, job.extended and 20 or 5) do
-                    out[#out + 1] = plain(history[index], 240)
+                    out[#out + 1] = safeText(history[index], 240)
                 end
                 return out
             end},
@@ -527,15 +542,15 @@ function M.Step(job)
                 if not view or not view.runId then
                     return {out[1], "no run in this session"}
                 end
-                out[#out + 1] = "run=" .. tostring(view.runId)
-                    .. "; state=" .. tostring(view.state)
-                    .. "; spent=" .. tostring(view.spent)
-                    .. "/" .. tostring(view.limit)
-                    .. "; operations=" .. tostring(view.total)
+                out[#out + 1] = "run=" .. safeText(view.runId, 24)
+                    .. "; state=" .. safeText(view.state, 32)
+                    .. "; spent=" .. safeText(view.spent, 16)
+                    .. "/" .. safeText(view.limit, 16)
+                    .. "; operations=" .. safeText(view.total, 16)
                 local history = Nexus.OrbHistory
                 if history and type(history.Rows) == "function" then
                     for _, row in ipairs(history.Rows(view, nil)) do
-                        out[#out + 1] = "  " .. tostring(row.ordinal) .. ". "
+                        out[#out + 1] = "  " .. safeText(row.ordinal, 16) .. ". "
                             .. row.source.label .. " -> " .. row.replacement.label
                             .. " [" .. row.result.label .. "]"
                     end
@@ -667,7 +682,7 @@ end
 -- what has and has not happened.
 function M.WrittenNotice(meta)
     local id = type(meta) == "table" and meta.id or "?"
-    return "Report " .. tostring(id) .. " is prepared in memory. WoW writes the "
+    return "Report " .. safeText(id, 48) .. " is prepared in memory. WoW writes the "
         .. "file when you reload, log out, or exit normally. It is not yet "
         .. "verified on disk."
 end

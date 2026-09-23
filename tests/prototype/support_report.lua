@@ -341,6 +341,57 @@ while builder.Step(markerJob)=='pending' and markerGuard<400 do markerGuard=mark
 local markerText=table.concat(markerJob.chunks or {},'')
 check(markerText:find(string.char(1),1,true)==nil,
  'and none reaches the prepared file either')
+-- The prepared-file route builds a topic from the incident. It must not raise
+-- on an incident that is missing fields, and the marker must not reach the
+-- payload, the stored header or the file the client writes.
+support.Clear()
+local bare=builder.NewPreparation({incident={id=1,occurrences=1}})
+check(type(bare)=='table','a preparation for an incident with no kind or reason is built')
+local bareGuard=0
+while builder.Step(bare)=='pending' and bareGuard<400 do bareGuard=bareGuard+1 end
+check(type(bare.report)=='table','and it completes: '..tostring(bare.report and 'yes'))
+support.Clear()
+record({committed=false,reason=string.rep('R',400)})
+local topicJob=builder.NewPreparation({extended=true})
+local topicGuard=0
+while builder.Step(topicJob)=='pending' and topicGuard<400 do topicGuard=topicGuard+1 end
+local topicText=table.concat(topicJob.chunks or {},'')
+check(topicText:find(string.char(1),1,true)==nil,
+ 'a long reason does not put a marker byte into the prepared payload')
+check(tostring(topicJob.report.meta.topic):find(string.char(1),1,true)==nil,
+ 'or into the stored header: '..tostring(topicJob.report.meta.topic):sub(1,60))
+check(#tostring(topicJob.report.meta.topic)<=200,
+ 'and the header topic stays bounded: '..#tostring(topicJob.report.meta.topic))
+-- The prepared file's own start-up scalars are converted like every other
+-- value: a hostile field must not omit the whole section.
+local realStartup=Nexus.StartupStatus
+Nexus.StartupStatus=function()
+ return {state='failed',coreReady=false,
+  reason=setmetatable({},{__tostring=function() error('hostile') end})}
+end
+local hostileJob=builder.NewPreparation({extended=true})
+local hostileGuard=0
+while builder.Step(hostileJob)=='pending' and hostileGuard<400 do hostileGuard=hostileGuard+1 end
+Nexus.StartupStatus=realStartup
+local hostileText=table.concat(hostileJob.chunks or {},'')
+check(hostileText:find('-- startup --',1,true)~=nil,
+ 'the start-up section is still written when one of its fields is hostile')
+check(hostileText:find('state=failed',1,true)~=nil,
+ 'with the fields that ARE readable: '..hostileText:sub(1,120))
+-- A retained KEY that had to be shortened says so, like a retained value.
+support.Clear()
+record({committed=false,readiness={[string.rep('k',60)..'1']='x'}})
+record({committed=false,readiness={[string.rep('k',60)..'2']='x'}})
+check(support.Count()==2,
+ 'two readings whose keys differ only past the cut are two readings: '..support.Count())
+-- The incident kind is retained text: escaped and bounded like the rest.
+support.Clear()
+record({committed=false,kind='catalog-refusal'})
+local longKind=support.Record(string.rep('K',400)..string.char(9),{committed=false})
+check(longKind~=nil and #tostring(longKind.kind)<=240,
+ 'a long kind is bounded when retained: '..#tostring(longKind and longKind.kind))
+check(tostring(longKind.kind):find(string.char(9),1,true)==nil,
+ 'and its control characters are escaped')
 support.Clear()
 record({committed=false,readiness={permanentSource=1}})
 record({committed=false,readiness={permanentSource='1'}})

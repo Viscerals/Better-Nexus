@@ -291,12 +291,20 @@ do
   local okWidth,text=pcall(report.Summary)
   check(okWidth,'a hostile keyWidth.'..field..' does not take the summary away: '..tostring(text))
  end
- -- An incident whose own fields are missing is not a nil concatenation either.
+ -- An incident whose own fields are missing is not a nil concatenation either,
+ -- on EITHER route, and not in the context list of OTHER incidents either -
+ -- that line is only reached for an incident that is not the selected one.
  local realIncidents=Nexus.SupportIncidents.History
- Nexus.SupportIncidents.History=function() return {{id=1,occurrences=1}} end
+ Nexus.SupportIncidents.History=function()
+  return {{id=1,occurrences=1},{id=2,kind='catalog-refusal',reason='SEMANTIC_ENVELOPE',occurrences=1}}
+ end
  local okBare,bare=pcall(report.Summary)
- Nexus.SupportIncidents.History=realIncidents
  check(okBare,'an incident with no kind or reason does not raise: '..tostring(bare))
+ check(bare:find('1. unknown/unknown',1,true)~=nil,
+  'and the context line says so instead of being filled in: '..tostring(bare):sub(1,400))
+ local okBareFile=pcall(report.NewPreparation,{extended=true})
+ check(okBareFile,'and the prepared-file route builds for it too')
+ Nexus.SupportIncidents.History=realIncidents
  -- A missing owner entirely.
  Nexus.StartupStatus=nil
  check(pcall(report.Summary),'a missing start-up owner does not raise')

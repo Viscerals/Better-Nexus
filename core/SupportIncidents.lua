@@ -23,6 +23,7 @@ Nexus.SupportIncidents = M
 local MAX_INCIDENTS = 20
 local MAX_TUPLES = 24
 local MAX_TEXT = 240
+local MAX_KEY_TEXT = 48
 
 local incidents = {}
 local sequence = 0
@@ -55,7 +56,7 @@ local function sum32(value)
     return string.format("%04x%04x", b, a)
 end
 
-local function text(value)
+local function text(value, limit)
     if value == nil then return nil end
     -- tostring runs a caller-supplied __tostring, which could raise or return
     -- anything. A retained field is never allowed to depend on that.
@@ -69,14 +70,15 @@ local function text(value)
     converted = (converted:gsub("%c", function(char)
         return string.format("\\%03d", char:byte())
     end))
-    if #converted > MAX_TEXT then
+    limit = tonumber(limit) or MAX_TEXT
+    if #converted > limit then
         -- The marker opens with a RAW control byte. Every control character a
         -- caller supplies was just escaped above, so no value this function
         -- returns can carry one - which means a caller cannot hand over the
         -- retained form of a longer value and be merged with it.
         local marker = string.char(1) .. "(" .. #converted .. "B#"
             .. sum32(converted) .. ")"
-        converted = converted:sub(1, math.max(1, MAX_TEXT - #marker)) .. marker
+        converted = converted:sub(1, math.max(1, limit - #marker)) .. marker
     end
     return converted
 end
@@ -143,8 +145,10 @@ local function generations(value)
             omitted = omitted + 1
         else
             -- Keys are bounded as well as values: a long key is as much
-            -- retained text as a long value.
-            local name = key:sub(1, 48)
+            -- retained text as a long value, and a key that had to be
+            -- shortened says so the same way - without it, two keys that
+            -- differ only past the cut were retained as one.
+            local name = text(key, MAX_KEY_TEXT)
             if type(entry) == "number" then out[name], any = count(entry), true
             elseif type(entry) == "boolean" then out[name], any = entry, true
             elseif type(entry) == "string" then out[name], any = text(entry), true
@@ -244,7 +248,7 @@ function M.Record(kind, fields)
     if fields.committed == true then committed = true
     elseif fields.committed == false then committed = false end
     local candidate = {
-        kind = kind,
+        kind = text(kind),
         reason = text(fields.reason) or "unspecified",
         producer = text(fields.producer),
         origin = text(fields.origin) or "unknown",
