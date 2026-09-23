@@ -333,8 +333,9 @@ check(copied:find(string.char(1),1,true)==nil,
  'no marker byte reaches the copied summary')
 check(copied:find('(400B#',1,true)~=nil,
  'while the shortening is still stated in the text the reader sees')
-check(copied:find('...(400B#',1,true)~=nil,
- 'and reads as a shortening, not as text running into a bracket')
+check(copied:match('%.%.%.%(400B#%x%x%x%x%x%x%x%x%)')~=nil,
+ 'and the marker is WHOLE - bracket, byte count and checksum: '
+ ..tostring(copied:match('%.%.%.%b()')))
 local markerJob=builder.NewPreparation({extended=true})
 local markerGuard=0
 while builder.Step(markerJob)=='pending' and markerGuard<400 do markerGuard=markerGuard+1 end
@@ -362,6 +363,53 @@ check(tostring(topicJob.report.meta.topic):find(string.char(1),1,true)==nil,
  'or into the stored header: '..tostring(topicJob.report.meta.topic):sub(1,60))
 check(#tostring(topicJob.report.meta.topic)<=200,
  'and the header topic stays bounded: '..#tostring(topicJob.report.meta.topic))
+-- A bound that is tighter than the value must not silently drop the statement
+-- that the value was cut. The header would otherwise claim a complete value.
+check(tostring(topicJob.report.meta.topic):match('%.%.%.%(400B#%x%x%x%x%x%x%x%x%)')~=nil,
+ 'the header topic keeps the WHOLE marker at its own tighter bound: '
+ ..tostring(topicJob.report.meta.topic))
+check(topicText:match('%.%.%.%(400B#%x%x%x%x%x%x%x%x%)')~=nil,
+ 'and so does the prepared payload')
+-- The same for the incident KIND, which is read back through the same
+-- converter and reaches both routes.
+support.Clear()
+support.Record(string.rep('K',400),{committed=false})
+local kindSummary=builder.Summary()
+check(kindSummary:find(string.char(1),1,true)==nil,
+ 'a long kind puts no marker byte into the copied summary')
+check(kindSummary:match('%.%.%.%(40[0-9]B#%x%x%x%x%x%x%x%x%)')~=nil,
+ 'and its shortening is stated whole: '..tostring(kindSummary:match('%.%.%.%b()')))
+local kindJob=builder.NewPreparation({extended=true})
+local kindGuard=0
+while builder.Step(kindJob)=='pending' and kindGuard<400 do kindGuard=kindGuard+1 end
+local kindText=table.concat(kindJob.chunks or {},'')
+check(kindText:find(string.char(1),1,true)==nil,
+ 'and none into the prepared payload')
+-- The build label is an owner field like the rest: hostile or not, neither
+-- route may be taken away and no control byte may reach the stored header.
+local realRelease=Nexus.Release.buildLabel
+Nexus.Release.buildLabel=setmetatable({},{__tostring=function() error('hostile') end})
+local okLabelSummary=pcall(builder.Summary)
+local okLabelFile,labelJob=pcall(builder.NewPreparation,{})
+Nexus.Release.buildLabel='pkg'..string.char(10)..'LINE'..string.char(1)..'MARK'
+local labelSummary=builder.Summary()
+local labelJob2=builder.NewPreparation({})
+local labelGuard=0
+while builder.Step(labelJob2)=='pending' and labelGuard<400 do labelGuard=labelGuard+1 end
+Nexus.Release.buildLabel=realRelease
+check(okLabelSummary,'a hostile build label does not take the summary away')
+check(okLabelFile,'or the prepared-file route')
+check(labelSummary:find(string.char(1),1,true)==nil,
+ 'and a build label carrying the marker byte reaches the summary without it')
+local labelLine
+for line in labelSummary:gmatch('[^'..string.char(10)..']+') do
+ if line:find('Build: ',1,true)==1 then labelLine=line end
+end
+check(labelLine~=nil and labelLine:find('pkg LINE MARK',1,true)~=nil,
+ 'its newline does not split the Build line in two: '..tostring(labelLine))
+check(tostring(labelJob2.report.meta.build):find(string.char(1),1,true)==nil
+ and tostring(labelJob2.report.meta.build):find(string.char(10),1,true)==nil,
+ 'or the stored header: '..tostring(labelJob2.report.meta.build))
 -- The prepared file's own start-up scalars are converted like every other
 -- value: a hostile field must not omit the whole section.
 local realStartup=Nexus.StartupStatus

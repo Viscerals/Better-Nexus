@@ -92,7 +92,14 @@ local function retained(value, limit)
     if value == nil then return nil end
     local ok, text = pcall(tostring, value)
     if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
-    return plain((text:gsub(string.char(1), "...")), limit)
+    limit = limit or 200
+    local marker = text:match(string.char(1) .. ".*$")
+    if not marker then return plain(text, limit) end
+    -- The marker is the only statement that this value was shortened at all,
+    -- so it is the part that must survive this bound. The body yields to it.
+    local printable = "..." .. marker:sub(2)
+    if #printable >= limit then return plain(printable, limit) end
+    return plain(text:sub(1, #text - #marker), limit - #printable) .. printable
 end
 
 -- The report is copied out of an edit box and pasted into a ticket, so a pipe
@@ -136,16 +143,22 @@ local function limits()
     return nil
 end
 
--- Declared before buildLabel(), which is the first user of it.
+-- Anything going into a concatenation here comes through this: never nil,
+-- never raising, always bounded, never carrying a control byte.
 local function safeText(value, limit)
     local ok, text = pcall(tostring, value)
     if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
     return (text:gsub("%c", " ")):sub(1, limit or 200)
 end
 
+-- The build label is an owner field like every other one, and it reaches the
+-- copied summary, the payload and the stored header. It gets the same
+-- treatment, not an exception for being "ours".
 local function buildLabel()
     local release = Nexus and Nexus.Release
-    return release and release.buildLabel or "unknown"
+    local label = release and release.buildLabel
+    if label == nil or label == "" then return "unknown" end
+    return safeText(label, 64)
 end
 
 local function counts(line, label, value, limit)
