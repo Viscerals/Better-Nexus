@@ -222,7 +222,7 @@ function UI.PrepareFile(extended)
     end
     local ok, why = ensureStorage()
     if not ok then
-        lastPrepared = "Not prepared: " .. tostring(why)
+        lastPrepared = "Not prepared: " .. builder.Escape(why)
             .. ". Use Copy summary instead; nothing was changed."
         refresh()
         return nil, why
@@ -246,7 +246,7 @@ function UI.PrepareFile(extended)
         return nil, snapshot
     end
     if not snapshot then
-        lastPrepared = "Not prepared: " .. tostring(failure)
+        lastPrepared = "Not prepared: " .. builder.Escape(failure)
             .. ". The previously stored report was kept."
         refresh()
         return nil, failure
@@ -259,7 +259,7 @@ function UI.PrepareFile(extended)
         return nil, stored
     end
     if not stored then
-        lastPrepared = "Not prepared: " .. tostring(meta)
+        lastPrepared = "Not prepared: " .. builder.Escape(meta)
             .. ". The previously stored report was kept."
         refresh()
         return nil, meta

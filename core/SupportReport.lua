@@ -354,7 +354,7 @@ function M.StartupLines(status, extended)
         .. shown(status.state, 32)
         .. (status.coreReady ~= nil and ("; core ready " .. shown(status.coreReady, 16)) or "")
         .. (status.phase ~= nil and ("; phase " .. shown(status.phase, 48)) or "")
-    if status.reason ~= nil then
+    if status.reason ~= nil and status.reason ~= false then
         out[#out + 1] = "  reason: " .. shown(status.reason, 96)
     end
     local facts = type(status.failure) == "table" and status.failure or nil
@@ -613,7 +613,11 @@ function M.Step(job)
                 -- The scalars this section has always carried, then the same
                 -- retained failure facts the copyable summary shows.
                 for _, key in ipairs({"state", "coreReady", "storeReady", "reason"}) do
-                    if status[key] ~= nil then
+                    -- A healthy start-up has no reason, and the owner states
+                    -- that as false rather than nil. coreReady = false is a
+                    -- real answer and is still written.
+                    if status[key] ~= nil
+                        and not (key == "reason" and status[key] == false) then
                         out[#out + 1] = key .. "=" .. safeText(status[key], 96)
                     end
                 end
@@ -783,8 +787,11 @@ function M.Store(report)
         local value, meta = storage.Replace(report)
         if type(meta) ~= "table" then
             -- A component that answered with a NOTE rather than a header -
-            -- which is how the shipped one states every refusal. Its words
-            -- are what the player needs, so they are carried out, converted.
+            -- which is how the shipped one states every REFUSAL. The note is
+            -- carried out as the second return value, so a refusal reaches the
+            -- player in the component's own words. On the success path no
+            -- caller reads it, so a note sent beside a successful store is not
+            -- displayed.
             return value, meta ~= nil and safeText(meta, 240) or nil
         end
         -- The header the component accepted, field by field, into a table

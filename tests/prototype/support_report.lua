@@ -1162,4 +1162,59 @@ do
  _G.NexusSupportStorage=realStorage
 end
 
+-- 32. A healthy start-up has NO reason, and the owner says so with the
+-- boolean false rather than nil. The report must omit the line, not print
+-- the word "false" - on both routes, in the very line this work added.
+do
+ local realStatus=Nexus.StartupStatus
+ Nexus.StartupStatus=function()
+  return {state='ready',coreReady=true,phase='complete',reason=false}
+ end
+ local healthy=builder.Summary()
+ check(healthy:find('reason: false',1,true)==nil,
+  'the copyable summary states no reason when there is none: '
+  ..tostring(healthy:match('[^'..string.char(10)..']*reason[^'..string.char(10)..']*')))
+ check(healthy:find('Startup: state ready',1,true)~=nil,'while the state is still stated')
+ local healthyJob=builder.NewPreparation({extended=true})
+ local healthyGuard=0
+ while builder.Step(healthyJob)=='pending' and healthyGuard<400 do healthyGuard=healthyGuard+1 end
+ local healthyText=table.concat(healthyJob.chunks or {},'')
+ check(healthyText:find('reason=false',1,true)==nil,
+  'and the prepared file does not either: '
+  ..tostring(healthyText:match('reason=[^'..string.char(10)..']*')))
+ check(healthyText:find('state=ready',1,true)~=nil,'while it still carries the state')
+ -- coreReady=false is a real answer and must survive the same guard.
+ Nexus.StartupStatus=function()
+  return {state='failed',coreReady=false,reason='SOURCE_KEY_WIDTH_EXCEEDED'}
+ end
+ local failedJob=builder.NewPreparation({extended=true})
+ local failedGuard=0
+ while builder.Step(failedJob)=='pending' and failedGuard<400 do failedGuard=failedGuard+1 end
+ local failedText=table.concat(failedJob.chunks or {},'')
+ check(failedText:find('coreReady=false',1,true)~=nil,
+  'core ready false is still written: '..failedText:sub(1,200))
+ check(failedText:find('reason=SOURCE_KEY_WIDTH_EXCEEDED',1,true)~=nil,
+  'and a real reason still reaches the file')
+ check(builder.Summary():find('reason: SOURCE_KEY_WIDTH_EXCEEDED',1,true)~=nil,
+  'and the summary')
+ Nexus.StartupStatus=realStatus
+end
+
+-- 33. Every "Not prepared" line the page writes is escaped, whatever supplied
+-- the words - the three of them, not two of the three.
+do
+ local realStorage=_G.NexusSupportStorage
+ _G.NexusSupportStorage={
+  Replace=function() return nil,'refused: |cffff0000RED|r' end,
+  Status=function() return {loaded=true,ready=true} end}
+ Nexus.SupportReportUI.Show()
+ Nexus.SupportReportUI.PrepareFile(false)
+ local refusal=page.prepared:GetText()
+ check(refusal:find('||cffff0000',1,true)~=nil,
+  'a component refusal is escaped on the page: '..refusal:sub(1,140))
+ check(refusal:find('||||c',1,true)==nil,'once, not twice')
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)
