@@ -58,7 +58,9 @@ local function storageLine()
         return "Support storage: left untouched (" .. tostring(status.incompatible)
             .. "). Use Copy summary instead."
     end
-    local latest = _G.NexusSupportStorage and _G.NexusSupportStorage.Latest()
+    -- Through the builder, which owns the shape: the page never reaches into
+    -- the storage component itself, whatever that component turns out to be.
+    local latest = type(builder.StoredSummary) == "function" and builder.StoredSummary() or nil
     if latest then
         return "Support storage: report " .. tostring(latest.id) .. ", "
             .. tostring(latest.bytes) .. " bytes in " .. tostring(latest.chunkCount)

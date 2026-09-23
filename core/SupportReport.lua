@@ -197,10 +197,53 @@ local function counts(line, label, value, limit)
     line[#line + 1] = text
 end
 
+-- A caller's incident, copied into the shape this file reads. Every field is
+-- taken inside one pcall, so a table whose own __index raises costs the
+-- incident, never the report. The owner's incidents are already plain tables;
+-- this exists because M.Summary and M.IncidentLines are public.
+local INCIDENT_FIELDS = {"id", "kind", "reason", "producer", "origin",
+    "operation", "ticket", "build", "category", "representation", "scope",
+    "detail", "occurrences", "firstAt", "lastAt", "committed", "affectedOmitted"}
+local COUNT_FIELDS = {"ordinary", "locked", "total"}
+local function incidentShape(value)
+    if type(value) ~= "table" then return nil end
+    local out = {}
+    local ok = pcall(function()
+        for _, field in ipairs(INCIDENT_FIELDS) do out[field] = value[field] end
+        for _, name in ipairs({"counts", "limits"}) do
+            local source = value[name]
+            if type(source) == "table" then
+                local copy = {}
+                for _, field in ipairs(COUNT_FIELDS) do copy[field] = source[field] end
+                out[name] = copy
+            end
+        end
+        if type(value.readiness) == "table" then
+            local copy = {}
+            -- pairs() uses next(), which no metamethod can reach in 5.1.
+            for key, entry in pairs(value.readiness) do copy[key] = entry end
+            out.readiness = copy
+        end
+        if type(value.affected) == "table" then
+            local copy = {}
+            for index, tuple in ipairs(value.affected) do
+                if type(tuple) == "table" then
+                    copy[index] = {spellId=tuple.spellId, quality=tuple.quality,
+                        stacks=tuple.stacks, locked=tuple.locked == true or nil}
+                end
+            end
+            out.affected = copy
+        end
+    end)
+    if not ok then return nil end
+    return out
+end
+
 -- One incident, said plainly, with the failure-time facts first. Anything the
 -- owner did not retain says so instead of being filled in.
 function M.IncidentLines(incident, options)
     options = type(options) == "table" and options or {}
+    incident = incidentShape(incident)
     local out = {}
     if type(incident) ~= "table" then
         out[#out + 1] = "No incident was retained in this session."
@@ -263,11 +306,19 @@ end
 -- The compact report. It is BUILT at this size: the incident and its context
 -- come first, and sections stop being added when the budget is reached. It is
 -- never a truncated copy of the extended report.
--- Every owner READ in this file is protected - the value, the field and the
--- container - because the report is the route a player uses when something
--- else is already broken: one failing owner must not take it away. That is a
--- property of this file, checked by a poison sweep in the prototype suite,
--- not an assumption about the owners.
+-- What is guaranteed, exactly: every CONTAINER read from Nexus or from the
+-- globals (the release identity, the evidence owner, the start-up owner, the
+-- error history, the incident history, the Orb owners, the storage component,
+-- UnitName) is reached through a pcall, and every value that enters a line
+-- goes through safeText, shown or retained. A poison sweep in the prototype
+-- suite checks both.
+-- What is NOT guaranteed: a table an owner RETURNS is read as an ordinary
+-- table. A status, a limits table, a start-up snapshot or an incident row
+-- whose own fields raise on __index is out of scope here, because the owners
+-- of those tables build them from scalars in this addon. The two exceptions
+-- are the storage component, which is a separate addon and whose returned
+-- tables ARE copied into a shape this file owns, and every value that reaches
+-- a line, which is converted whatever it is.
 function M.StartupSnapshot()
     local ok, status = pcall(function()
         return Nexus and Nexus.StartupStatus and Nexus.StartupStatus() or nil
@@ -347,7 +398,7 @@ function M.Summary(selection)
     end)
     if not okIncidents or type(incidents) ~= "table" then incidents = {} end
     local incident = nil
-    if type(selection) == "table" then incident = selection
+    if type(selection) == "table" then incident = incidentShape(selection)
     elseif type(selection) == "number" then
         for _, entry in ipairs(incidents) do
             if entry.id == selection then incident = entry end
@@ -474,7 +525,7 @@ function M.NewPreparation(options)
     end)
     if not okIncidents or type(incidents) ~= "table" then incidents = {} end
     local incident = nil
-    if type(options.incident) == "table" then incident = options.incident
+    if type(options.incident) == "table" then incident = incidentShape(options.incident)
     else incident = incidents[#incidents] end
     local job = {
         extended = options.extended == true,
@@ -709,7 +760,31 @@ function M.Store(report)
         or #report.chunks == 0 then
         return nil, "the report was not completed, so the previous one was kept"
     end
-    return storage.Replace(report)
+    -- The call too, not only the lookup: a component that raises inside
+    -- Replace must not raise out of the route that offered it.
+    local ok, stored, why = pcall(storage.Replace, report)
+    if not ok then
+        return nil, "the support component refused the report"
+    end
+    return stored, why
+end
+
+-- The LAST prepared report, as scalars this file owns. The component's own
+-- table is never handed to a caller, and never read outside this pcall.
+function M.StoredSummary()
+    local storage = storageOwner("Latest")
+    if not storage then return nil end
+    local ok, latest = pcall(storage.Latest)
+    if not ok or type(latest) ~= "table" then return nil end
+    local out = {}
+    local okFields = pcall(function()
+        out.id = safeText(latest.id, 48)
+        out.bytes = safeText(latest.bytes, 24)
+        out.chunkCount = safeText(latest.chunkCount, 16)
+        out.checksum = safeText(latest.checksum, 24)
+    end)
+    if not okFields then return nil end
+    return out
 end
 
 function M.StorageStatus()
@@ -718,7 +793,17 @@ function M.StorageStatus()
         return {loaded = false, ready = false,
             reason = "the support component is not loaded"}
     end
-    local ok, status = pcall(storage.Status)
+    local ok, status = pcall(function()
+        local value = storage.Status()
+        if type(value) ~= "table" then return nil end
+        -- Copied into a shape this file owns: a caller reading the result
+        -- never touches the component's table or its metamethods.
+        return {loaded = value.loaded ~= false,
+            ready = value.ready == true,
+            incompatible = value.incompatible ~= nil
+                and safeText(value.incompatible, 120) or nil,
+            reason = value.reason ~= nil and safeText(value.reason, 240) or nil}
+    end)
     if not ok or type(status) ~= "table" then
         return {loaded = false, ready = false,
             reason = "the support component did not answer"}

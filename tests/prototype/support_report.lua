@@ -593,7 +593,7 @@ check(bigJob.report.meta.checksum==builder.Checksum(bigJob.report.chunks),
 -- never carry an unbounded segment, and never be lost to a failing owner.
 do
  local POISON='SENTINEL'..string.char(1)..string.char(10)..string.char(7)
-  ..string.char(0)..string.rep('Z',5000)
+  ..string.char(0)..'|cffff0000|Hitem:1|h[pipe]|h|r'..string.rep('Z',600)
  local function hostile()
   return setmetatable({},{__tostring=function() error('hostile owner') end,
    __index=function() error('hostile index') end})
@@ -622,7 +622,7 @@ do
   return count
  end
  -- The same record and the same owners, with a control-byte-free value.
- local CLEAN='SENTINEL'..string.rep('Z',5000)
+ local CLEAN='SENTINEL'..string.rep('Z',600)
  local baselineSummaryLines,baselinePayloadLines
  local saved={
   Release=Nexus.Release,LoadoutEvidence=Nexus.LoadoutEvidence,
@@ -637,12 +637,18 @@ do
   'StartupStatus','Errors','Storage','UnitName','all','raising'}
  for _,owner in ipairs(owners) do
   support.Clear()
-  support.Record('catalog-refusal',{reason=POISON,producer=POISON,scope=POISON,
-   detail=POISON,operation=POISON,ticket=POISON,build=POISON,category=POISON,
-   representation=POISON,origin=POISON,committed=false,
-   readiness={[POISON]=POISON,generation=12},
-   counts={ordinary=81,locked=6,total=87},limits={ordinary=79,locked=6,total=85},
-   affected={{spellId=1,quality=2,stacks=3}}})
+  -- Enough incidents that the context list of OTHER incidents runs and the
+  -- summary reaches its byte backstop, and tuples whose fields are poisoned
+  -- rather than numeric.
+  for copy=1,12 do
+   support.Record(copy..POISON,{reason=copy..POISON,producer=POISON,scope=POISON,
+    detail=POISON,operation=POISON,ticket=POISON,build=POISON,category=POISON,
+    representation=POISON,origin=POISON,committed=false,
+    readiness={[POISON]=POISON,generation=12},
+    counts={ordinary=81,locked=6,total=87},limits={ordinary=79,locked=6,total=85},
+    affected={{spellId=POISON,quality=POISON,stacks=POISON,locked={}},
+     {spellId=1,quality=2,stacks=3,locked=true}}})
+  end
   -- Every owner is substituted in every pass, with the poisoned value for the
   -- one under test and a control-byte-free value for the rest, so a count that
   -- changes can only be a line a value added.
@@ -686,6 +692,27 @@ do
     end
    end
   end
+  -- A CALLER's incident: nothing sanitised it first, so the report-side
+  -- converters are the only thing between it and the page.
+  local callerIncident={id=POISON,kind=POISON,reason=POISON,producer=POISON,
+   origin=POISON,operation=POISON,ticket=POISON,build=POISON,category=POISON,
+   representation=POISON,scope=POISON,detail=POISON,occurrences=POISON,
+   firstAt=POISON,lastAt=POISON,affectedOmitted=POISON,committed=false,
+   counts={ordinary=POISON,locked=POISON,total=POISON},
+   limits={ordinary=POISON,locked=POISON,total=POISON},
+   readiness={[POISON]=POISON},
+   affected={{spellId=POISON,quality=POISON,stacks=POISON,locked=POISON}}}
+  local okCaller,callerText=pcall(builder.Summary,callerIncident)
+  check(okCaller,'poisoned '..owner..': a caller incident does not take the summary away: '
+   ..tostring(callerText))
+  clean(callerText,'poisoned '..owner..' caller summary')
+  local okCallerFile,callerJob=pcall(builder.NewPreparation,{incident=callerIncident,extended=true})
+  check(okCallerFile,'poisoned '..owner..': nor the prepared-file route')
+  if okCallerFile and type(callerJob)=='table' then
+   local callerGuard=0
+   while builder.Step(callerJob)=='pending' and callerGuard<800 do callerGuard=callerGuard+1 end
+   clean(table.concat(callerJob.chunks or {},''),'poisoned '..owner..' caller payload')
+  end
   local okSummary,summaryText=pcall(builder.Summary)
   local okStatus=pcall(builder.StorageStatus)
   local okNotice,noticeText=pcall(builder.WrittenNotice,{id=POISON})
@@ -710,6 +737,28 @@ do
   check(okJob,'poisoned '..owner..': the prepared-file route is not lost: '..tostring(job))
   check(type(summaryText)=='string' and #summaryText<=builder.SUMMARY_MAX_BYTES,
    'poisoned '..owner..': the summary still fits its bound: '..#tostring(summaryText))
+  -- The context list of OTHER incidents is what the fixture used to miss
+  -- entirely: with one incident the loop never ran, so the five converters in
+  -- it were asserted by nothing. The 8000-byte backstop below it cannot be
+  -- reached at all while the owner bounds every field to 240 and keeps at
+  -- most 20 incidents; that is stated in the commit rather than forced here.
+  check(summaryText:find('Other retained incidents this session',1,true)~=nil,
+   'poisoned '..owner..': the context list is in the summary')
+  local contextRows=0
+  for _ in summaryText:gmatch(string.char(10)..'  %d+%. ') do contextRows=contextRows+1 end
+  local omittedNote=summaryText:match('%[(%d+) context line%(s%) omitted')
+  check(contextRows>=1,
+   'poisoned '..owner..': and it really lists the other incidents: '..contextRows)
+  check(contextRows+(tonumber(omittedNote) or 0)>=11,
+   'poisoned '..owner..': every other incident is either listed or declared omitted: '
+   ..contextRows..'+'..tostring(omittedNote))
+  check(omittedNote==nil or summaryText:find('use Prepare report file',1,true)~=nil,
+   'poisoned '..owner..': and the omission says where the whole report is')
+  -- A retained tuple flag is a boolean, whatever the caller handed over.
+  local retainedTuple=support.Latest() and (support.Latest().affected or {})[1]
+  check(retainedTuple==nil or retainedTuple.locked==nil or retainedTuple.locked==true,
+   'poisoned '..owner..': a retained tuple flag is a boolean: '
+   ..type(retainedTuple and retainedTuple.locked))
   clean(summaryText,'poisoned '..owner..' summary')
   clean(payload,'poisoned '..owner..' payload')
   if owner=='baseline' then
@@ -733,6 +782,71 @@ do
    end
   end
  end
+end
+
+-- 19. The public entries accept a CALLER's incident. One whose own fields
+-- raise on __index, or whose sub-tables do, must cost that incident only.
+do
+ local hostileIncident=setmetatable({},{__index=function() error('hostile row') end})
+ local okHostileSummary,hostileText=pcall(builder.Summary,hostileIncident)
+ check(okHostileSummary,'a hostile caller incident does not take the summary away: '
+  ..tostring(hostileText))
+ local okHostileFile=pcall(builder.NewPreparation,{incident=hostileIncident})
+ check(okHostileFile,'or the prepared-file route')
+ local okHostileLines,hostileLines=pcall(builder.IncidentLines,hostileIncident)
+ check(okHostileLines and type(hostileLines)=='table','or the incident lines themselves')
+ local nested={id=1,kind='catalog-refusal',reason='R',occurrences=1,
+  counts=setmetatable({},{__index=function() error('hostile counts') end}),
+  affected={setmetatable({},{__index=function() error('hostile tuple') end})}}
+ local okNested,nestedText=pcall(builder.Summary,nested)
+ check(okNested,'and neither does a hostile sub-table: '..tostring(nestedText))
+end
+
+-- 20. The escape the page depends on, pinned: a recorded label must not be
+-- able to inject a colour or hyperlink sequence into a font string.
+check(builder.Escape('a|b')=='a||b','one pipe is escaped')
+check(builder.Escape('|cffff0000|Hitem:1|h[x]|h|r')=='||cffff0000||Hitem:1||h[x]||h||r',
+ 'and every pipe of an escape sequence is: '..builder.Escape('|cffff0000|Hitem:1|h[x]|h|r'))
+check(builder.Escape('plain')=='plain','while ordinary text is unchanged')
+
+-- 21. The page. It must not reach into the storage component for itself, and
+-- a component that answers some entries and not others must not take the page
+-- away - which is exactly the shape the sweep installs.
+do
+ local realStorage=_G.NexusSupportStorage
+ local PAGEPOISON='PAGE'..string.char(1)..string.char(10)..string.rep('Y',600)
+ for _,shape in ipairs({
+  -- An incompatible component: the page says so and stops there.
+  {Latest=function() return {} end,
+   Status=function() return {loaded=true,ready=true,incompatible=PAGEPOISON} end},
+  -- A working component whose stored report describes itself in poison: the
+  -- page reaches the stored summary, so every field of it is converted.
+  {Latest=function() return {id=PAGEPOISON,bytes=PAGEPOISON,
+    chunkCount=PAGEPOISON,checksum=PAGEPOISON} end,
+   Status=function() return {loaded=true,ready=true} end},
+  {Replace=function() return true end,Status=function() return {loaded=true,ready=true} end},
+  {Latest=function() error('hostile latest') end,
+   Status=function() return {loaded=true,ready=true} end},
+  {Status=function() return setmetatable({},{__index=function() error('hostile status') end}) end},
+  setmetatable({},{__index=function() error('hostile component') end}),
+  'not a table',
+ }) do
+  _G.NexusSupportStorage=shape
+  local okPage=pcall(function() Nexus.SupportReportUI.Show() end)
+  check(okPage,'a partial or hostile storage component does not take the page away')
+  local line=page.storage and page.storage:GetText() or ''
+  check(type(line)=='string' and #line>0,'and the page still says something about storage')
+  local pageBad
+  for index=1,#line do
+   local byte=line:byte(index)
+   if byte<32 and byte~=10 then pageBad=byte;break end
+  end
+  check(pageBad==nil,'the storage line carries no control byte: '..tostring(pageBad))
+  check(line:find(string.rep('Y',400),1,true)==nil,
+   'and nothing unbounded from the component reaches it')
+ end
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
 end
 
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)
