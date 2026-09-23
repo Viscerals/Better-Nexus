@@ -121,7 +121,9 @@ local function generations(value)
         end
     end
     if omitted > 0 then
-        out.omittedKeys, any = omitted, true
+        -- Recorded on the COPY, so a caller's own map is never modified and a
+        -- caller key of this name cannot be overwritten.
+        out["(omitted keys)"], any = omitted, true
     end
     return any and out or nil
 end
@@ -129,22 +131,49 @@ end
 -- Two occurrences are the SAME incident only when the same producer refused
 -- the same condition for the same operation with the same counts. Different
 -- failures are never merged by their reason code alone.
+-- A short, order-stable description of a retained sub-table, used only to tell
+-- two incidents apart. It is never shown to anyone.
+local function signature(value)
+    if type(value) ~= "table" then return "-" end
+    local parts = {}
+    for key, entry in pairs(value) do
+        if type(entry) == "table" then
+            local row = {}
+            for k, v in pairs(entry) do row[#row + 1] = tostring(k) .. "=" .. tostring(v) end
+            table.sort(row)
+            parts[#parts + 1] = tostring(key) .. "{" .. table.concat(row, ",") .. "}"
+        else
+            parts[#parts + 1] = tostring(key) .. "=" .. tostring(entry)
+        end
+    end
+    table.sort(parts)
+    return table.concat(parts, ";")
+end
+
+local function sameCounts(a, b)
+    if (a == nil) ~= (b == nil) then return false end
+    if a and b then
+        if a.ordinary ~= b.ordinary or a.locked ~= b.locked
+            or a.total ~= b.total then return false end
+    end
+    return true
+end
+
+-- Only a genuine repeat is one incident with a count. A write that did NOT
+-- commit is never folded into one that did, a deferral on one encounter is not
+-- a deferral on another, and two explanations, limits, source readings or
+-- affected lists that differ are two incidents.
 local function sameIncident(a, b)
     if a.kind ~= b.kind or a.reason ~= b.reason
         or a.producer ~= b.producer or a.operation ~= b.operation
         or a.origin ~= b.origin or a.ticket ~= b.ticket
-        -- A deferral on one encounter is not a deferral on another, and two
-        -- refusals with different explanations are two incidents even when
-        -- their copy counts happen to match.
         or a.category ~= b.category or a.detail ~= b.detail
         or a.build ~= b.build or a.representation ~= b.representation
-        or a.scope ~= b.scope then return false end
-    local ac, bc = a.counts, b.counts
-    if (ac == nil) ~= (bc == nil) then return false end
-    if ac and bc then
-        if ac.ordinary ~= bc.ordinary or ac.locked ~= bc.locked
-            or ac.total ~= bc.total then return false end
-    end
+        or a.scope ~= b.scope or a.committed ~= b.committed then return false end
+    if not sameCounts(a.counts, b.counts) then return false end
+    if not sameCounts(a.limits, b.limits) then return false end
+    if signature(a.readiness) ~= signature(b.readiness) then return false end
+    if signature(a.affected) ~= signature(b.affected) then return false end
     return true
 end
 

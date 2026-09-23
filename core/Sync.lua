@@ -4451,28 +4451,43 @@ function Sync.OnUpdate(elapsed)
     -- and skipped entirely if anything replaced it.
     local phases = Sync._phases
     if type(phases) ~= "table" or type(phases.clock) ~= "function"
-        or type(phases.record) ~= "function" or type(phases.steps) ~= "table" then
+        or type(phases.record) ~= "function" then
         phases = nil
     end
-    local steps = phases and phases.steps or Sync._defaultSteps
-    local updateStarted = phases and phases.clock() or nil
+    -- The steps are the update. A replaced or emptied step list falls back to
+    -- the list built at load, so measurement cannot remove the work.
+    local steps = phases and type(phases.steps) == "table"
+        and #phases.steps > 0 and phases.steps or Sync._defaultSteps
+    -- Every clock and record call goes through pcall: a raising clock is a
+    -- measurement failure, and a measurement failure must never be a sync
+    -- failure. One raise disables measurement for this update and no more.
+    local function readClock()
+        if not phases then return nil end
+        local ok, value = pcall(phases.clock)
+        if ok and type(value) == "number" then return value end
+        phases = nil
+        return nil
+    end
+    local updateStarted = readClock()
     local detail = phases and (tonumber(phases.armed) or 0) > 0
         and updateStarted ~= nil
     for index = 1, #steps do
         local entry = steps[index]
-        if type(entry) == "table" and type(entry.run) == "function"
-            and not (type(entry.skip) == "function" and entry.skip()) then
-            if detail then
-                local started = phases.clock()
+        if type(entry) == "table" and type(entry.run) == "function" then
+            local skipped = false
+            if type(entry.skip) == "function" then
+                local okSkip, result = pcall(entry.skip)
+                skipped = okSkip and result and true or false
+            end
+            if not skipped then
+                local started = detail and readClock() or nil
                 entry.run(elapsed)
-                phases.record(entry.name, started)
-            else
-                entry.run(elapsed)
+                if started and phases then pcall(phases.record, entry.name, started) end
             end
         end
     end
     if phases and updateStarted then
-        local finished = phases.clock()
+        local finished = readClock()
         if finished then
             local total = finished - updateStarted
             local threshold = tonumber(phases.thresholdMs) or 50

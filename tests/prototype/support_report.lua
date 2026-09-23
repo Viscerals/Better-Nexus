@@ -243,4 +243,51 @@ Nexus.Errors.History=function() error('isolated errors owner') end
 local okErrors=pcall(builder.Summary)
 Nexus.Errors.History=realErrors
 check(okErrors,'and neither does a failing Errors owner')
+
+-- 14. A write that did NOT commit is never folded into one that did, and two
+-- failures that differ in any retained field stay two incidents.
+support.Clear()
+local shared={reason='STORE_INVALID',producer='share',origin='local',
+ operation='share',counts={ordinary=1,locked=0,total=1}}
+local function record(extra)
+ local fields={}
+ for k,v in pairs(shared) do fields[k]=v end
+ for k,v in pairs(extra or {}) do fields[k]=v end
+ return support.Record('catalog-refusal',fields)
+end
+record({committed=false})
+record({committed=true})
+check(support.Count()==2,
+ 'a committed write and a refused one are two incidents: '..support.Count())
+local committedStates={}
+for _,entry in ipairs(support.History()) do
+ committedStates[tostring(entry.committed)]=true
+end
+check(committedStates['false'] and committedStates['true'],
+ 'and each keeps its own outcome')
+support.Clear()
+record({committed=false,category='dummy'})
+record({committed=false,category='lk'})
+check(support.Count()==2,'two encounters are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,limits={ordinary=79,locked=6,total=85}})
+record({committed=false,limits={ordinary=60,locked=6,total=85}})
+check(support.Count()==2,'two enforced envelopes are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,readiness={activeSlot=1}})
+record({committed=false,readiness={activeSlot=2}})
+check(support.Count()==2,'two source readings are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,affected={{spellId=1,quality=1,stacks=1}}})
+record({committed=false,affected={{spellId=2,quality=1,stacks=1}}})
+check(support.Count()==2,'two affected lists are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,readiness={activeSlot=1}})
+record({committed=false,readiness={activeSlot=1}})
+check(support.Count()==1 and support.Latest().occurrences==2,
+ 'while a true repeat is still one incident with a count: '..support.Count())
+local caller={activeSlot=1}
+for i=1,40 do caller['k'..i]=i end
+record({committed=false,readiness=caller})
+check(caller['(omitted keys)']==nil,"the caller's own map is not written into")
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)

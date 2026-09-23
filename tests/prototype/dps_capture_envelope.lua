@@ -137,10 +137,28 @@ applySlot(ordinary,permanent)
 local lateSnapshot=D.GetCurrentEchoCount()
 check(lateSnapshot==79,
  'a late permanent map does not inflate the ordinary pool: '..lateSnapshot)
+-- A pool derived from the saved loadout's own role marks is not RECORDED:
+-- those marks may be from an earlier loadout, and a record built on them
+-- would be filed under a fingerprint that may be missing a copy. The
+-- capture waits, and says what it is waiting for.
+support.Clear()
 combat.total=200000
 capture()
+check((Nexus.lastDpsNote or ''):find('PERMANENT_ROLES_UNVERIFIED',1,true)~=nil
+ or (Nexus.lastDpsNote or ''):find('has not arrived yet',1,true)~=nil,
+ 'an unconfirmed permanent list defers instead of recording a key it cannot trust: '
+ ..tostring(Nexus.lastDpsNote))
+check(support.Latest() and support.Latest().reason=='PERMANENT_ROLES_UNVERIFIED',
+ 'and the incident names that reason: '..tostring(support.Latest() and support.Latest().reason))
+check((Nexus.lastDpsNote or ''):find('kept until it does',1,true)~=nil,
+ 'and says it clears itself: '..tostring(Nexus.lastDpsNote))
+-- As soon as the permanent list arrives, the same loadout records.
+applyOwned(ordinary,permanent)
+applySlot(ordinary,permanent)
+combat.total=250000
+capture()
 check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
- 'and a correct 79 + 6 loadout still records while that map is arriving: '
+ 'a correct 79 + 6 loadout records once the permanent list is there: '
  ..tostring(Nexus.lastDpsNote))
 -- 1d. When the current permanent list is KNOWN and the saved loadout marks a
 -- copy permanent that the list does not carry, the two sources contradict each

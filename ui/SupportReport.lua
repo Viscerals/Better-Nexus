@@ -91,7 +91,10 @@ local function refresh()
         .. (incident and ("; showing #" .. tostring(incident.id)) or "; none to show"))
     local builder = report()
     local lines = builder and builder.IncidentLines(incident) or {"unavailable"}
-    frame.incident:SetText(table.concat(lines, "\n"))
+    -- A font string interprets pipe sequences, so a recorded label is escaped
+    -- HERE. The copyable text is never escaped: see core/SupportReport.lua.
+    frame.incident:SetText(builder and builder.Escape(table.concat(lines, "\n"))
+        or table.concat(lines, "\n"))
     frame.storage:SetText(storageLine())
     frame.prepared:SetText(lastPrepared or "")
     frame.previous:Enable(); frame.next:Enable()

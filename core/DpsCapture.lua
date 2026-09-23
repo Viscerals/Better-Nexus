@@ -3123,7 +3123,22 @@ local function CommitSession(category)
         local coherent, captureCounts, captureLimits, captureWhy =
             CaptureEnvelopeVerdict(snap, lockedSnap)
         local contested = derivation and tonumber(derivation.contestedPermanent) or 0
+        local permanentSource = derivation and derivation.permanentSource or "live"
         local captureReason = "SEMANTIC_ENVELOPE"
+        if coherent and permanentSource ~= "live" then
+            -- The permanent copies were separated from the ordinary ones using
+            -- the saved loadout's own marks, because the character's current
+            -- permanent list had not arrived. Those marks may be from an
+            -- earlier loadout, and a record built on them is filed under a
+            -- fingerprint that may be missing a copy - which nothing can match
+            -- later and nothing would show as wrong. The capture waits for the
+            -- permanent list instead, and clears itself when it arrives.
+            coherent = false
+            captureReason = "PERMANENT_ROLES_UNVERIFIED"
+            captureWhy = "this character's current permanent Echo list has not "
+                .. "arrived yet (" .. tostring(permanentSource)
+                .. " was used to read the roles); the capture is kept until it does"
+        end
         if coherent and contested > 0 then
             -- The counts fit, but the two sources disagree about the role of
             -- a copy. Writing either answer is a guess: one way the record
@@ -3148,6 +3163,7 @@ local function CommitSession(category)
                     representation = "inline",
                     counts = captureCounts, limits = captureLimits,
                     readiness = derivation,
+                    detail = captureWhy,
                     affected = snap,
                     committed = false,
                     scope = "no personal, public or catalog write was made for this capture",

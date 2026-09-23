@@ -96,7 +96,12 @@ local function limits()
     local evidence = Nexus and Nexus.LoadoutEvidence
     if evidence and type(evidence.SemanticLimits) == "function" then
         local ok, value = pcall(evidence.SemanticLimits)
-        if ok and type(value) == "table" then return value end
+        -- A partial answer is reported as far as it goes, never as "nil".
+        if ok and type(value) == "table" then
+            return {ordinary = value.ordinary or "not stated",
+                locked = value.locked or "not stated",
+                total = value.total or "not stated"}
+        end
     end
     return nil
 end
@@ -272,11 +277,10 @@ function M.Summary(selection)
     local cut = false
     while true do
         local text = table.concat(out, "\n")
-        if #text <= SUMMARY_MAX_BYTES or #out <= 3 then
-            if cut then
-                text = text .. "\n[summary shortened to stay under "
-                    .. SUMMARY_MAX_BYTES .. " bytes; use Prepare report file for everything retained]"
-            end
+        local note = "\n[summary shortened to stay under " .. SUMMARY_MAX_BYTES
+            .. " bytes; use Prepare report file for everything retained]"
+        if #text + (cut and #note or 0) <= SUMMARY_MAX_BYTES or #out <= 3 then
+            if cut then text = text .. note end
             return text, {bytes = #text, incidents = #incidents,
                 cut = cut or nil,
                 incidentId = incident and incident.id or nil}

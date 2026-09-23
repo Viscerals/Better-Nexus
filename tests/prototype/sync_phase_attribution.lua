@@ -78,7 +78,14 @@ check(next(S.PhaseStats().phases)==nil,
 -- to stop the update: every step still runs whatever is done to that table.
 local ranSteps=0
 local realPump=Nexus.Sync.RequestDataViewRefresh
-for _,broken in ipairs({'not a table',{},{clock=1},false}) do
+-- A raising clock or recorder is a MEASUREMENT failure. It must never be a
+-- sync failure, and an emptied step list must not silently remove the work.
+local raising={thresholdMs=50,window=20,stats={},armed=5,slowUpdates=0,
+ steps=Nexus.Sync._defaultSteps,
+ clock=function() error('measurement clock raised') end,
+ record=function() error('measurement recorder raised') end}
+for _,broken in ipairs({'not a table',{},{clock=1},false,raising,
+ {clock=function() return 1 end,record=function() end,steps={}}}) do
  Nexus.Sync._phases=broken
  local ok,err=pcall(Nexus.Sync.OnUpdate,0.05)
  check(ok,'a broken phase table does not stop the update ('..tostring(broken)..'): '..tostring(err))
@@ -93,7 +100,10 @@ Nexus.Sync._phases={thresholdMs=50,window=20,stats={},armed=0,slowUpdates=0,
  steps=Nexus.Sync._defaultSteps,
  clock=function() return debugprofilestop and debugprofilestop() or nil end,
  record=function() end}
-check(ranSteps==4,'every broken shape was exercised: '..ranSteps)
+check(ranSteps==6,'every broken shape was exercised: '..ranSteps)
+check(type(Nexus.Sync._defaultSteps)=='table' and #Nexus.Sync._defaultSteps>=13,
+ 'the step list built at load is what an emptied one falls back to: '
+ ..tostring(Nexus.Sync._defaultSteps and #Nexus.Sync._defaultSteps))
 
 -- No clock, no claims: the update still runs and nothing is invented.
 local saved=debugprofilestop

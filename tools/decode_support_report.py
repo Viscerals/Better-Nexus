@@ -128,8 +128,11 @@ class Reader:
                     value = int(digits)
                     if value > 255:
                         self.error(f'escape out of range: \\{digits}')
-                    out.append(chr(value) if value < 128
-                               else bytes([value]).decode('latin-1'))
+                    # A \ddd escape in a saved file is a BYTE. A byte above 127
+                    # is carried as a surrogate escape so that encoding the text
+                    # back with 'surrogateescape' reproduces exactly that byte -
+                    # which is what the addon's checksum was computed over.
+                    out.append(chr(value) if value < 128 else chr(0xDC00 + value))
                 else:
                     self.error(f'unsupported escape: \\{esc}')
             elif ch == quote:
@@ -284,7 +287,8 @@ def main() -> int:
     print('                authenticity, not proof of the producer, and not server evidence.')
     if ns.out:
         try:
-            pathlib.Path(ns.out).write_text(body, encoding='utf-8')
+            # The report is written back as the bytes it was stored as.
+            pathlib.Path(ns.out).write_bytes(body.encode('utf-8', 'surrogateescape'))
         except OSError as error:
             raise SystemExit(f'{ns.out}: cannot be written: {error}')
         print(f'written       : {ns.out}')
@@ -294,14 +298,18 @@ def main() -> int:
         # represent. Write the bytes and replace what the console cannot show,
         # instead of failing after the verification has already printed.
         encoding = getattr(sys.stdout, 'encoding', None) or 'utf-8'
+        # Back to the original bytes first, then to whatever the console can
+        # show, so a surrogate escape never reaches an encoder that rejects it.
+        raw_body = body.encode('utf-8', 'surrogateescape')
+        shown = raw_body.decode('utf-8', 'replace')
         sys.stdout.flush()
         buffer = getattr(sys.stdout, 'buffer', None)
         if buffer is not None:
-            buffer.write(body.encode(encoding, 'replace'))
+            buffer.write(shown.encode(encoding, 'replace'))
             buffer.write(b'\n')
             buffer.flush()
         else:
-            print(body.encode(encoding, 'replace').decode(encoding, 'replace'))
+            print(shown.encode(encoding, 'replace').decode(encoding, 'replace'))
     return 1 if problems else 0
 
 
