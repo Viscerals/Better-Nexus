@@ -43,6 +43,11 @@ local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="
     ROLLED_COMPLETE="Rolled targets complete",LIMIT="Maximum reached",OUT_OF_ORBS="No Orbs remain",
     NO_SOURCES="No safe surplus copies remain",RECOVERY="Previous result is unresolved",
     FINISHED="Finished - limit reached"}
+-- At FINISHED the primary control is the same button that was Pause while the
+-- run was going and Resume while it was paused, and the limit box has just
+-- been refilled with the configured maximum. One press there would start a new
+-- spending run. The first press only arms it; the second press starts it.
+local confirmNewRun=false
 
 -- Read-only run log window. It renders only the rows it shows, rebuilds its
 -- copy text only when the history changed or Copy is pressed, and performs no
@@ -122,14 +127,19 @@ local function refresh()
     frame.permanent:SetText(permanent and permanent>0 and (permanent.." permanent target copies remain. Orbs cannot change permanent slots.")or "")
     frame.balance:SetText(s.charges~=nil and ("Confirmed Orb balance: "..s.charges)
         or ("Orb balance: "..(s.balanceState or "unknown")..". "..(s.balanceReason or "")))
+    if s.state~="FINISHED" then confirmNewRun=false end
     frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume"
-        or (s.state=="FINISHED" and "Start new run" or "Start")))
+        or (s.state=="FINISHED" and (confirmNewRun and "Confirm new run" or "Start new run") or "Start")))
     editLimit(not busy)
     if not frame.limit:HasFocus()then frame.limit:SetText(tostring(busy and s.limit or s.config.maxOrbs))end
     frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or s.config.maxOrbs)
         ..(s.reserved>0 and ("; unresolved exposure: "..s.reserved)or ""))
     local reason=(s.running or s.pending or s.state=="PAUSED")and s.reason or (s.startReason or s.reason)
     frame.status:SetText((phases[s.state]or s.state).."\n"..(reason or s.error or ""))
+    if confirmNewRun and s.state=="FINISHED" then
+        frame.status:SetText(frame.status:GetText().."\nPress Confirm new run to start a new run of up to "
+            ..tostring(frame.limit:GetText()).." Orb(s). Close this window to cancel.")
+    end
     if s.targetChanged then frame.status:SetText(frame.status:GetText().."\nOriginal operation: "..name(s.operationName))end
     frame.assignmentNote:SetText(a.mirrorNote or "")
     if advanced then
@@ -179,7 +189,12 @@ local function ensure()
         local ok,err=Nexus.OrbRuntime.SetLimit(tonumber(self:GetText()));self:ClearFocus();notify(ok,err)
     end)
     frame.limit:SetScript("OnEscapePressed",function(self)self:ClearFocus();UI.Refresh()end)
-    frame.start=button(frame,326,-188,120,"Start",function()notify(primary(tonumber(frame.limit:GetText())))end)
+    frame.start=button(frame,326,-188,120,"Start",function()
+        if Nexus.OrbRuntime.Status().state=="FINISHED" and not confirmNewRun then
+            confirmNewRun=true;UI.Refresh();return
+        end
+        confirmNewRun=false;notify(primary(tonumber(frame.limit:GetText())))
+    end)
     frame.stop=button(frame,461,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
     frame.approval=text(frame,20,-221,580,37,"Start approves this maximum and automatic use of eligible surplus copies, including safe recycling. Ordinary Automation will turn OFF.")
     frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,580,24)
@@ -206,7 +221,7 @@ local function ensure()
     for _,r in ipairs(frame.sourceRows)do frame.mutations[#frame.mutations+1]=r.exclude end
     inactiveControls()
     frame:SetScript("OnShow",function()UI.Refresh()end)
-    frame:SetScript("OnHide",function()editLimit(false)end)
+    frame:SetScript("OnHide",function()editLimit(false);confirmNewRun=false end)
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
     frame:Hide();UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbPanel"
 end

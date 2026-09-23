@@ -66,6 +66,9 @@ NAMES += ['sync_admission_batch']
 NAMES += ['sync_admission_traffic_acceptance']
 NAMES += ['orb_finished_run_log']
 NAMES += ['wishlist_import_paste_path']
+NAMES += ['wishlist_export_copy_field']
+NAMES += ['orb_finished_new_run_confirm']
+NAMES += ['sync_admission_restore']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

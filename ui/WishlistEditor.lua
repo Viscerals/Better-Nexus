@@ -70,10 +70,11 @@ end
 
 -- StaticPopup frames and their edit boxes are pooled and reused, so a dialog
 -- that declares nothing inherits the limit and the handlers the previous
--- dialog left. The import dialog therefore claims its own field every time it
--- opens: the naming dialog's 96-letter limit and its display-sanitising
--- handler are removed, so the pasted bytes reach the importer unchanged.
-local function ConfigureImportEditBox(box)
+-- dialog left. Both EBH1 dialogs therefore claim the field every time they
+-- open: the naming dialog's 96-letter limit and its display-sanitising handler
+-- are removed, so a pasted code reaches the importer unchanged and an exported
+-- code is shown for copying in full.
+local function ClaimWireEditBox(box)
     if not box then return end
     if box._nexusSafeNameOwner then
         box:SetScript("OnTextChanged", box._nexusSafeNamePriorChanged)
@@ -85,6 +86,11 @@ local function ConfigureImportEditBox(box)
         box._nexusDisplayText = nil
     end
     box:SetMaxLetters(IMPORT_MAX_LETTERS)
+end
+
+local function ConfigureImportEditBox(box)
+    if not box then return end
+    ClaimWireEditBox(box)
     box:SetText("")
 end
 
@@ -92,7 +98,10 @@ local function SetExplicitCopyText(box, value)
     -- EBH1 is an explicit copy/paste wire boundary. The selected bytes must be
     -- retained exactly, but an EditBox is still a WoW rich-text surface. Keep
     -- the exact wire value separate and select its reversible inert projection.
+    -- The field is claimed first: a name limit inherited from the naming dialog
+    -- would cut the code that the player is about to copy.
     if not box then return end
+    ClaimWireEditBox(box)
     box._nexusExplicitExportText = tostring(value or "")
     box:SetText(DisplayUntrusted(box._nexusExplicitExportText,
         #box._nexusExplicitExportText, true, true) or "")
@@ -611,6 +620,7 @@ StaticPopupDialogs["NEXUS_EXPORT_WISHLIST"] = {
     button1 = "Close",
     hasEditBox = true,
     editBoxWidth = 350,
+    maxLetters = IMPORT_MAX_LETTERS,
     OnShow = function(self)
         SetExplicitCopyText(self.editBox, (ExportEBH1String()) or "")
         self.editBox:HighlightText()

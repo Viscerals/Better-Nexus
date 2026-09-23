@@ -24,18 +24,22 @@ function regionMethods:UnregisterEvent(e) self.events[e]=nil end
 function regionMethods:UnregisterAllEvents() self.events={} end
 function regionMethods:SetMaxLetters(n) self.maxLetters=tonumber(n) or 0 end
 function regionMethods:GetMaxLetters() return self.maxLetters or 0 end
-function regionMethods:SetText(t)
- local value=tostring(t or '')
- -- A WoW EditBox holds at most maxLetters characters; anything longer is cut
- -- when it is typed, pasted or set. 0 means no limit.
- local limit=tonumber(self.maxLetters) or 0
+-- A WoW EditBox holds at most maxLetters characters; anything longer is cut
+-- when it is typed, pasted or set. 0 means no limit. The count is characters,
+-- not bytes (bytes are SetMaxBytes, which is not modelled); the two are the
+-- same for the ASCII wire values these tests carry.
+local function editBoxText(box,value,userInput)
+ local limit=tonumber(box.maxLetters) or 0
  if limit>0 and #value>limit then value=value:sub(1,limit) end
- self.text=value
- local changed=self.scripts and self.scripts.OnTextChanged
- if changed then changed(self,true) end
+ box.text=value
+ local changed=box.scripts and box.scripts.OnTextChanged
+ -- The client passes isUserInput=false for a programmatic change.
+ if changed then changed(box,userInput==true) end
 end
+function regionMethods:SetText(t) editBoxText(self,tostring(t or ''),false) end
+function regionMethods:Insert(t) editBoxText(self,(self.text or '')..tostring(t or ''),true) end
 function regionMethods:GetText() return self.text end
-function regionMethods:SetFormattedText(fmt,...) self.text=string.format(fmt,...) end
+function regionMethods:SetFormattedText(fmt,...) editBoxText(self,string.format(fmt,...),false) end
 function regionMethods:Show() local change=not self.shown; self.shown=true;if change and self.scripts.OnShow then self.scripts.OnShow(self) end end
 function regionMethods:Hide() local change=self.shown;self.shown=false;if change and self.scripts.OnHide then self.scripts.OnHide(self) end end
 function regionMethods:IsShown() return self.shown end
