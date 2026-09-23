@@ -2209,7 +2209,7 @@ function A.AssignedWishlist()
         A._assignmentTargetModel=A._assignmentTargetModel or Nexus.WishlistModel.New()
         local rows=A._assignmentTargetModel.TargetMapEntries(targets,A.Catalog())
         if not rows then
-            result.state="unavailable";result.note="Assigned permanent targets are unavailable. Open the Wishlist Editor to inspect them."
+            result.state="unavailable";result.note="Assigned locked targets are unavailable. Open the Wishlist Editor to inspect them."
             return result
         end
         for _,e in ipairs(rows) do

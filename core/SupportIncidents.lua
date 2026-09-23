@@ -133,17 +133,27 @@ end
 -- failures are never merged by their reason code alone.
 -- A short, order-stable description of a retained sub-table, used only to tell
 -- two incidents apart. It is never shown to anyone.
+-- Every part carries its own byte length, so no separator, brace or equals
+-- sign inside a retained value can make two different tables describe
+-- themselves identically. A readiness value really can contain them: it is
+-- text the failing boundary supplied.
+local function piece(key, entry)
+    local k, v = tostring(key), tostring(entry)
+    return #k .. ":" .. k .. "=" .. #v .. ":" .. v
+end
 local function signature(value)
     if type(value) ~= "table" then return "-" end
     local parts = {}
     for key, entry in pairs(value) do
         if type(entry) == "table" then
             local row = {}
-            for k, v in pairs(entry) do row[#row + 1] = tostring(k) .. "=" .. tostring(v) end
+            for k, v in pairs(entry) do row[#row + 1] = piece(k, v) end
             table.sort(row)
-            parts[#parts + 1] = tostring(key) .. "{" .. table.concat(row, ",") .. "}"
+            local joined = table.concat(row, ",")
+            parts[#parts + 1] = #tostring(key) .. ":" .. tostring(key)
+                .. "{" .. #joined .. ":" .. joined .. "}"
         else
-            parts[#parts + 1] = tostring(key) .. "=" .. tostring(entry)
+            parts[#parts + 1] = piece(key, entry)
         end
     end
     table.sort(parts)

@@ -61,7 +61,7 @@ local refused={serial=4,ordinal=4,at=140,state='not sent',sourceKey='410003:0',
  sourceName='Disposable B',sourceQuality=0,
  reason='The receipt could not be saved; no Orb was requested.'}
 local unknown={serial=5,ordinal=5,at=150,state='unknown',sourceKey='410007:2',
- sourceName='Permanent',sourceQuality=2,reason='The spend outcome remains unknown.'}
+ sourceName='Locked',sourceQuality=2,reason='The spend outcome remains unknown.'}
 local bare={serial=6,ordinal=6,at=160,state='requested',sourceKey='999999:9'}
 local rows=V.Rows(view({confirmed,fallback,pending,refused,unknown,bare}),nil)
 check(#rows==6,'every recorded operation becomes one row: '..#rows)

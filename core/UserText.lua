@@ -67,10 +67,10 @@ function T.Message(value)
     if id then return availabilityName(id)..": "..detail:gsub("non%-conformant data","unsupported availability data") end
     if s:find("locked roles remain unknown",1,true) or s:find("awaiting authoritative lock evidence",1,true)
         or s:find("waiting for authoritative locked%-Echo evidence") then
-        return "Choose this Wishlist's permanent-slot targets in the editor. Your planned build does not have to match the equipped build. Details: "..s
+        return "Choose this Wishlist's locked Echo targets in the editor. Your planned build does not have to match the equipped build. Details: "..s
     end
     if s:find("waiting for synchronized permanent locked%-Echo evidence") then
-        return "Waiting for the server's current permanent Echo list. Details: "..s
+        return "Waiting for the server's current locked Echo list. Details: "..s
     end
     if s:find("waiting for the server mirror",1,true) then
         return "The saved Wishlist is not available from the server yet. Details: "..s
@@ -88,8 +88,6 @@ function T.Message(value)
     if s:match("^[A-Z][A-Z0-9_]+$") then return "This action is not available yet. Check the status or diagnostics. Details: "..s end
     s=s:gsub("Take wanted Echo %(Pilot%)","Take a needed Echo")
         :gsub("Wishlist identity found; ","")
-        :gsub("Choose locked targets","Choose permanent targets")
-        :gsub("locked targets in the Wishlist Editor","permanent targets in the Wishlist Editor")
         :gsub("TARGET:","WISHLIST:")
         :gsub("OWNED this run:","Rolled Echoes this run:")
         :gsub(" %(synced%)"," (server confirmed)")

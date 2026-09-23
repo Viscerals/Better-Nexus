@@ -68,6 +68,9 @@ function M.ShowUpdateStatus()
     local status = updates.Status()
     StaticPopup_Show("NEXUS_UPDATE_RELEASES", status.detail, status.url)
     if status.candidate and updates.Dismiss then updates.Dismiss() end
+    -- Seeing the unverified hint is enough: it is not announced again this
+    -- session. This dismissal is session state and writes no saved data.
+    if status.hint and updates.DismissHint then updates.DismissHint() end
     return true, status
 end
 
@@ -193,7 +196,7 @@ local function CreateToLockWidgets(f)
     local layout = Nexus.LayoutMetrics
     f.toLockLabel = f:CreateFontString(nil, "OVERLAY",
         layout and layout.FontObject("small") or "GameFontDisableSmall")
-    f.toLockLabel:SetText("PERMANENT TARGETS")
+    f.toLockLabel:SetText("LOCKED TARGETS")
     f.toLockLabel:SetTextColor(0.7, 0.45, 1)
     f.toLockText = f:CreateFontString(nil, "OVERLAY",
         layout and layout.FontObject("small") or "GameFontHighlightSmall")
@@ -204,11 +207,11 @@ local function CreateToLockWidgets(f)
     f.toLockHit:SetScript("OnEnter", function(self)
         if #toLockNamesCache == 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Permanent targets remaining", 1, 1, 1)
-        GameTooltip:AddLine("These targets are planned for your six permanent slots.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Locked targets remaining", 1, 1, 1)
+        GameTooltip:AddLine("These targets are planned for your six locked Echo slots.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine("Acquire the exact requested Echo and quality first.", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("Owned copies still need to be placed in permanent slots.", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("Current permanent slots and card Freeze are separate.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Owned copies still need to be placed in locked Echo slots.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Current locked Echo slots and card Freeze are separate.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Still need to acquire:", 0.85, 0.6, 1)
         for i, name in ipairs(toLockNamesCache) do
@@ -693,7 +696,7 @@ local function EnsureFrame()
         GameTooltip:AddLine("including unrequested or different-quality copies.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine("This is a comparison, not a delete action. A later run may reduce these extras.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Permanent copies protected by this Saved Build are", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine("Locked copies protected by this Saved Build are", 0.75, 0.75, 0.75, true)
         GameTooltip:AddLine("never listed here, even if off-wishlist.", 0.75, 0.75, 0.75, true)
         GameTooltip:AddLine(" ")
         for i, name in ipairs(shedNamesCache) do
@@ -817,7 +820,7 @@ local function EnsureFrame()
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Automation and enabled actions", 1, 1, 1)
         GameTooltip:AddLine("When ON: permits your enabled automatic actions. These may", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("consume charges or change saved-build state. Permanent-slot", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("consume charges or change saved-build state. Locked-Echo slot", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("management is a separate opt-in. Orb runs require separate approval.", 0.6, 1, 0.6, true)
         GameTooltip:AddLine("OFF keeps recommendations visible; it does not turn off Sync.", 0.75, 0.75, 0.75, true)

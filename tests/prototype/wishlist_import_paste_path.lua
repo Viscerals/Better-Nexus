@@ -34,7 +34,7 @@ for _,e in ipairs(entries)do
  if e.locked then locked=locked+e.stacks end
 end
 check(#entries==85 and copies==85 and locked==6,
- 'the synthetic plan carries 85 entries, 85 copies and 6 permanent: '..#entries..'/'..copies..'/'..locked)
+ 'the synthetic plan carries 85 entries, 85 copies and 6 locked: '..#entries..'/'..copies..'/'..locked)
 local name=string.rep('R',96)
 local code=assert(Nexus.Codec.EncodeEBH1(entries,'MAGE',name))
 check(#code>1024,'the encoded code is longer than the handler keeps: '..#code..' bytes')
@@ -91,7 +91,7 @@ if H.popup and H.popup.which=='NEXUS_NAME_IMPORTED_WISHLIST' then
 end
 local draft=W.DebugDraftState()
 check(draft.pending==79 and draft.pendingLock==6,
- 'the imported draft keeps 79 ordinary and 6 permanent targets: '
+ 'the imported draft keeps 79 ordinary and 6 locked targets: '
  ..tostring(draft.pending)..'/'..tostring(draft.pendingLock))
 W.ImportEBH1String=importer
 print('PASS wishlist_import_paste_path: a maximum import code survives the pooled popup field and reaches the importer whole checks='..checks)

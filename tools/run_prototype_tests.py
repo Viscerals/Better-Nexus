@@ -73,6 +73,7 @@ NAMES += ['dps_capture_envelope']
 NAMES += ['support_report']
 NAMES += ['sync_phase_attribution']
 NAMES += ['sync_admission_restore']
+NAMES += ['update_public_test_hints']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

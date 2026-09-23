@@ -3065,7 +3065,7 @@ local function JournalData()
         est = (e and e.text) or "estimate unavailable"
     end
     sections[#sections + 1] = { title = "Notes", lines = {
-        "Compares the assigned Wishlist with the active Saved Build; planned permanent targets are not proof of ownership.",
+        "Compares the assigned Wishlist with the active Saved Build; planned locked targets are not proof of ownership.",
         est,
     } }
     return { sections = sections, version = Nexus.VERSION }

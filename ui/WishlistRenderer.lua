@@ -271,7 +271,7 @@ local function CandidateEvidenceSuffix(candidate)
     if type(candidate) == "table"
         and candidate.lockEvidenceStatus == "unavailable" then
         local editor=Nexus.WishlistEditor
-        local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose permanent targets"
+        local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose locked targets"
         return "  |cffff9040("..hint..")|r"
     end
     return ""
@@ -980,7 +980,7 @@ local function EnsureFrame()
     -- place of a lock toggle scattered across every row of the pick list.
     lockedLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lockedLabel:SetPoint("TOPLEFT", 540, -130)
-    lockedLabel:SetText("Permanent:")
+    lockedLabel:SetText("Locked:")
     lockedLabel:Hide()
 
     lockedIcons = {}
@@ -999,18 +999,18 @@ local function EnsureFrame()
         btn:SetScript("OnEnter", function(self)
             if self.slotState == "empty" then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine("Empty permanent slot", 1, 1, 1)
+                GameTooltip:AddLine("Empty locked Echo slot", 1, 1, 1)
                 GameTooltip:AddLine("Click to choose an Echo to pursue for it.", 0.8, 0.8, 0.8, true)
                 GameTooltip:Show()
             elseif self.spellId then
                 ShowEchoTooltip(self, self.spellId, "ANCHOR_RIGHT")
                 if self.slotState == "designed" then
-                    GameTooltip:AddLine("Planned permanent target, not currently in this slot. Click to remove this target.", 1, 0.85, 0.3, true)
+                    GameTooltip:AddLine("Planned locked target, not currently in this slot. Click to remove this target.", 1, 0.85, 0.3, true)
                     GameTooltip:Show()
                 elseif self.slotState == "locked" then
                     if self.beingReplaced then
                         GameTooltip:AddLine("A replacement is planned for this slot (the gold icon). "
-                            .. "Automatic replacement needs both Automation and permanent-slot management ON; "
+                            .. "Automatic replacement needs both Automation and locked-Echo slot management ON; "
                             .. "otherwise change it manually when available. Remove the gold target to cancel.", 1, 0.6, 0.4, true)
                     else
                         GameTooltip:AddLine("Left-click: find in catalog", 0.8, 0.8, 0.8, true)
@@ -1096,7 +1096,7 @@ local function EnsureFrame()
     end)
     autoLockCheck:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Auto-manage permanent Echo slots", 1, 0.8, 0.3)
+        GameTooltip:AddLine("Auto-manage locked Echo slots", 1, 0.8, 0.3)
         GameTooltip:AddLine("With Automation ON and this option enabled, Nexus may lock acquired targets "
             .. "and replace planned slots only when the game and safety checks allow it.", 0.8, 0.8, 0.8, true)
         GameTooltip:AddLine("Selecting targets alone changes no owned Echoes. With this option OFF, place "
@@ -1107,7 +1107,7 @@ local function EnsureFrame()
 
     local autoLockLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     autoLockLabel:SetPoint("LEFT", autoLockCheck, "RIGHT", 2, 0)
-    autoLockLabel:SetText("Auto-manage permanent Echo slots")
+    autoLockLabel:SetText("Auto-manage locked Echo slots")
 
     -- Nexus-native EBH1 import/export. Closures deliberately reference only
     -- the global StaticPopup_Show and a string literal -- no module-level
@@ -1206,7 +1206,7 @@ local function EnsureFrame()
 
     local header = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     header:SetPoint("TOPLEFT", 34, -158)
-    header:SetText("Choose up to 79 rolled copies + 6 permanent-slot copies (85 total). + / - changes the requested copies.")
+    header:SetText("Choose up to 79 rolled copies + 6 locked Echo copies (85 total). + / - changes the requested copies.")
 
     -- Left: browsable catalog -----------------------------------------
     local leftArea = CreateFrame("Frame", nil, frame)
@@ -1412,7 +1412,7 @@ local function RefreshView(catalogRevision)
     local ownedBySpell = (owned and owned.bySpell) or {}
 
     -- Read once per refresh, reused by the strip below, the catalog row
-    -- loop further down (so an already-locked Echo shows "Permanent" instead
+    -- loop further down (so an already-locked Echo shows "Locked" instead
     -- of an addable status there too), and the footer count -- one live
     -- source of truth instead of the load-time-only lastLockedSkipped.
     local lockedBySpell = {}
@@ -1533,7 +1533,7 @@ local function RefreshView(catalogRevision)
         -- Always show all MAX_LOCK_SLOTS slots, not just however many are
         -- currently locked -- an account with 5/6 locked was rendering as
         -- "Locked (5):" with no visible hint a 6th slot even existed.
-        lockedLabel:SetText(string.format("Permanent (%d/%d):", lockedCount, MAX_LOCK_SLOTS))
+        lockedLabel:SetText(string.format("Locked (%d/%d):", lockedCount, MAX_LOCK_SLOTS))
         lockedLabel:Show()
         local fi = 1
         for i = 1, MAX_LOCK_SLOTS do
@@ -1801,7 +1801,7 @@ local function RefreshView(catalogRevision)
             if isLocked then
                 -- Permanently secured -- never needs a wishlist slot again.
                 -- Distinct from RollStatus's unrelated "locked" (tome-gated).
-                row.status:SetText("|cffb266ffPermanent|r")
+                row.status:SetText("|cffb266ffLocked|r")
             elseif chosen and tonumber(chosen.spellId) == tonumber(data.spellId) then
                 row.status:SetText("|cff4dff80Selected|r")
             elseif ownedCount > 0 then
@@ -1856,7 +1856,7 @@ local function RefreshView(catalogRevision)
     -- An entry designed to REPLACE a specific currently-real-locked Echo
     -- (.replaces -- see LoadPendingEchoes/ToggleDesignLock/
     -- AssignLockSlotFromData) got no visual pairing here at all before --
-    -- just an easy-to-miss "(current permanent slot)"/"(awaiting lock)" tag, with
+    -- just an easy-to-miss "(current locked Echo slot)"/"(awaiting lock)" tag, with
     -- nothing showing WHICH real slot it targets. Splice a read-only row for
     -- the Echo being replaced directly after it, mirroring the Locked strip
     -- above (which already stacks the replacement directly above the real
@@ -1968,10 +1968,10 @@ local function RefreshView(catalogRevision)
         end
     end
     local footerParts = {}
-    if lockedCount > 0 then footerParts[#footerParts + 1] = "Current permanent: " .. lockedCount .. "/6" end
+    if lockedCount > 0 then footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount .. "/6" end
     footerParts[#footerParts + 1] = "Rolled copies: " .. PendingTotal() .. "/79"
     local totalDesigned = designedCount + toLockCount
-    footerParts[#footerParts + 1] = "Permanent targets: " .. totalDesigned .. "/6"
+    footerParts[#footerParts + 1] = "Locked targets: " .. totalDesigned .. "/6"
     -- realEntryCount, not #list -- the spliced-in "replaces" ghost rows are
     -- a display aid, not separate wishlist entries, and shouldn't inflate
     -- this count.

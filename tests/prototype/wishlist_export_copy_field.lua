@@ -65,7 +65,7 @@ if H.popup and H.popup.which=='NEXUS_NAME_IMPORTED_WISHLIST' then
 end
 local draft=Nexus.WishlistEditor.DebugDraftState()
 check(draft.pending==79 and draft.pendingLock==6,
- 'the draft to be exported carries 79 ordinary and 6 permanent targets: '
+ 'the draft to be exported carries 79 ordinary and 6 locked targets: '
  ..tostring(draft.pending)..'/'..tostring(draft.pendingLock))
 
 StaticPopup_Show('NEXUS_EXPORT_WISHLIST')
@@ -93,7 +93,7 @@ for _,e in ipairs(parsed.entries)do
  seen=seen+1
  if e.locked then locked=locked+1 end
 end
-check(seen==85 and locked==6,'every target is present once, with six permanent: '..seen..'/'..locked)
+check(seen==85 and locked==6,'every target is present once, with six locked: '..seen..'/'..locked)
 StaticPopup_Hide()
 
 -- What was copied imports again, whole, on the other side of the transfer.
@@ -108,7 +108,7 @@ if H.popup and H.popup.which=='NEXUS_NAME_IMPORTED_WISHLIST' then
 end
 local again=Nexus.WishlistEditor.DebugDraftState()
 check(again.pending==79 and again.pendingLock==6,
- 'the round trip keeps 79 ordinary and 6 permanent targets: '
+ 'the round trip keeps 79 ordinary and 6 locked targets: '
  ..tostring(again.pending)..'/'..tostring(again.pendingLock))
 -- The naming dialog is not the only place a name is accepted. The editor's own
 -- name box feeds the same encoder through a different source, so the rule is

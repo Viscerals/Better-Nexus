@@ -13,7 +13,7 @@ local TABS = {
     { key = "boards",   label = "Recent choices" },
     { key = "mismatch", label = "Manual overrides" },
     { key = "wishlist", label = "Wishlist" },
-    { key = "locked",   label = "Permanent Echoes" },
+    { key = "locked",   label = "Locked Echoes" },
     { key = "state",    label = "Status" },
     { key = "sync",     label = "Sync" },
     { key = "dps",      label = "DPS" },

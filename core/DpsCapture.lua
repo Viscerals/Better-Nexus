@@ -684,9 +684,17 @@ local function SnapshotEchoes()
     local permanentKnown = false
     if Adapter.LockedOwned then
         local locked = Adapter.LockedOwned()
-        if locked and type(locked.bySpell) == "table" and next(locked.bySpell) then
-            lockedBySpell = locked.bySpell
-            permanentKnown = true
+        if locked and type(locked.bySpell) == "table" then
+            -- An EMPTY permanent map that the projection states is synchronized
+            -- is an answer, not a missing one: this character holds no permanent
+            -- Echo at all. Reading that emptiness as "has not arrived" deferred
+            -- every capture such a character ever made, forever, because nothing
+            -- was ever going to arrive. Without that flag a non-empty map is
+            -- still evidence about the copies it names.
+            if locked.synced == true or next(locked.bySpell) then
+                lockedBySpell = locked.bySpell
+                permanentKnown = true
+            end
         end
     end
     -- The live permanent map is the authority when it is there. When it has
@@ -3135,7 +3143,7 @@ local function CommitSession(category)
             -- permanent list instead, and clears itself when it arrives.
             coherent = false
             captureReason = "PERMANENT_ROLES_UNVERIFIED"
-            captureWhy = "this character's current permanent Echo list has not "
+            captureWhy = "this character's current locked Echo list has not "
                 .. "arrived yet (" .. tostring(permanentSource)
                 .. " was used to read the roles); the capture is kept until it does"
         end
@@ -3146,8 +3154,8 @@ local function CommitSession(category)
             -- silently drops one and is filed under a key nothing can match.
             coherent = false
             captureReason = "CONTESTED_PERMANENT_ROLE"
-            captureWhy = contested .. " copy(ies) are marked permanent by the saved "
-                .. "loadout but are not in this character's current permanent list; "
+            captureWhy = contested .. " copy(ies) are marked locked by the saved "
+                .. "loadout but are not in this character's current locked list; "
                 .. "save the loadout again to agree"
         end
         if not coherent then
@@ -3167,12 +3175,11 @@ local function CommitSession(category)
                     affected = snap,
                     committed = false,
                     scope = "no personal, public or catalog write was made for this capture",
-                    detail = captureWhy,
                 })
             end
             Nexus.lastDpsNote = "deferred: " .. tostring(captureWhy)
                 .. " (" .. tostring(captureCounts.ordinary) .. " ordinary, "
-                .. tostring(captureCounts.locked) .. " permanent, "
+                .. tostring(captureCounts.locked) .. " locked, "
                 .. tostring(captureCounts.total) .. " total); the previous record is unchanged"
             Debug(Nexus.lastDpsNote)
             return

@@ -20,7 +20,7 @@ function P.Normalize(entries)
         end
         if role=="permanent" then locks=locks+n else ordinary=ordinary+n end
     end
-    if ordinary>79 or locks>6 then return nil,"Targets exceed 79 rolled and 6 permanent copies. Confirm the permanent targets in the Wishlist editor." end
+    if ordinary>79 or locks>6 then return nil,"Targets exceed 79 rolled and 6 locked copies. Confirm the locked targets in the Wishlist editor." end
     return targets
 end
 function P.Progress(targets,s)

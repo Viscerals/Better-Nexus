@@ -34,7 +34,7 @@ check(ok and type(NexusDB.chars[F.OWNER])=='table' and NexusDB.chars[F.OWNER].fo
 local canonical=NexusDB.chars[F.OWNER]
 check(canonical.loadoutWishlists[1].name=='Gen plan' and canonical.loadoutWishlists[1].echoes[1].stacks==2
  and canonical.loadoutWishlists[1].echoes[2].stacks==3,'assignment and stacked copies are carried into the canonical row')
-check(canonical.lockDesignTargetsBySlot[F.Key(F.PLAN)][F.PERMANENT]==true,'the exact permanent-target design is carried')
+check(canonical.lockDesignTargetsBySlot[F.Key(F.PLAN)][F.PERMANENT]==true,'the exact locked-target design is carried')
 check(canonical.tomeTogglePending[7].want==true and canonical.recordedPicks[200001]==1,'other row state is carried')
 check(canonical~=NexusDB.chars[F.NAME],'the canonical row is a copy, not the same table')
 check(F.Serialize(NexusDB.chars[F.NAME])==nameRowBefore,'the original name-keyed row is unchanged')
@@ -48,7 +48,7 @@ local assigned=A.AssignedWishlist()
 check(assigned.state=='ready','the carried assignment resolves: '..tostring(assigned.state)..' '..tostring(assigned.note))
 local permanent=0
 for _,e in ipairs(assigned.entries or {})do if e.locked and e.spellId==F.PERMANENT then permanent=permanent+e.stacks end end
-check(permanent==1,'the carried design adds its permanent target')
+check(permanent==1,'the carried design adds its locked target')
 print('PASS format5_known_transition part 1: durable Store, owned row carried, originals kept checks='..checks)
 
 -- 4. Reload: the carried row is kept and not copied again; Orb Start and the

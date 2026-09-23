@@ -31,6 +31,6 @@ for _,e in ipairs(a.entries)do if e.locked then
  if e.spellId==200081 then hasB=true end
 end end
 print('NORMAL_JOURNAL_PICK_PLAN_B','name',a.name,'hasA',hasA,'hasB',hasB)
-assert(a.name=='Plan B' and hasB and not hasA,'normal Journal picker must assign exact Plan B permanent design')
+assert(a.name=='Plan B' and hasB and not hasA,'normal Journal picker must assign exact Plan B locked design')
 print('PASS normal Journal assignment preserves complete selected plan')
 

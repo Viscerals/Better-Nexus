@@ -147,13 +147,13 @@ function O.Read()
     local cat=A.Catalog and A.Catalog();if not cat or type(cat.rows)~="table" then return nil,"The local Echo catalog is not ready." end
     local trusted=A.Owned and A.Owned();local locked=A.LockedOwned and A.LockedOwned()
     if not trusted or not trusted.synced or not locked or not locked.synced then
-        return nil,"Waiting for current rolled and permanent Echo data from the server."
+        return nil,"Waiting for current rolled and locked Echo data from the server."
     end
     local okG,rawG=call(svc,"GetGrantedPerks");local okL,rawL=call(svc,"GetLockedPerks")
     if not okG or not okL then return nil,"Echo ownership could not be read." end
     local granted,err,totalG=readCounts(rawG,cat);if not granted then return nil,err end
     local locks,errL,totalL=readCounts(rawL,cat);if not locks then return nil,errL end
-    if totalG>79 or totalL>6 then return nil,"The current rolled/permanent Echo counts exceed the supported limits." end
+    if totalG>79 or totalL>6 then return nil,"The current rolled/locked Echo counts exceed the supported limits." end
     local sig=signature(granted)
     if observations.grantedRef~=rawG or observations.grantedSig~=sig then
         observations.serial=observations.serial+1;observations.grantedRef=rawG;observations.grantedSig=sig

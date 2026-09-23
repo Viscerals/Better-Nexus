@@ -1077,9 +1077,9 @@ EnsureMainCommands = function()
                 settings[key]=argument.value=="on"
                 RequestRecompute()
                 if argument.option=="currentlocks" then
-                    Print("Unmarked Wishlist permanent targets: " .. (argument.value=="on"
-                        and "suggest current matching permanent Echoes on opening/import."
-                        or "choose intended permanent targets manually.") .. " Existing confirmed plans are unchanged.")
+                    Print("Unmarked Wishlist locked targets: " .. (argument.value=="on"
+                        and "suggest current matching locked Echoes on opening/import."
+                        or "choose intended locked targets manually.") .. " Existing confirmed plans are unchanged.")
                 else Print(argument.option .. " permission: " .. argument.value .. ". The master Automation switch remains separate.") end
             end,
             prototype=function()

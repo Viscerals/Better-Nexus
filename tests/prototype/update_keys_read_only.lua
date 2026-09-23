@@ -69,4 +69,23 @@ local list=NexusDB.updateDismissed
 check(type(list)=='table' and list[1]=='1.96.6#0' and type(list[2])=='string' and #list==2,
  'durable: the older single dismissal is kept and the new one is added: '..F.Serialize(list))
 check(Nexus.Updates.Dismiss()==true and #NexusDB.updateDismissed==2,'durable: dismissing the same target twice adds nothing')
+-- 3. A public-test hint gains no exception. In the same read-only session it
+-- is shown, reaches the status and is dismissed, all from session state: a
+-- start-up that may not write is not made to write by an unverified hint.
+local hintDb=Saved(F.Database({mutate=function(db)db.settingsVersion={version=5} end}))
+local hintBefore=F.Serialize({notice=hintDb.updateNotice,advisory=hintDb.updateAdvisory,
+ dismissed=hintDb.updateDismissed,noticeQuarantine=nil,advisoryQuarantine=nil})
+F.fileHooks={[ [[data\Release.lua]] ]=function()
+ Nexus.Release.availableVersion=nil
+ Nexus.Release.buildLabel='test.9035-abcdef0';Nexus.Release.channel='public-test'
+end}
+F.Boot(hintDb);F.fileHooks=nil
+check(Nexus.Store.StateWriteStatus().mode=='unavailable','read-only hint: the owner still refuses writes')
+check(Nexus.ReleaseIdentity().channel=='public-test','fixture: a public test installation')
+check(Nexus.Updates.Observe('1.20.0-beta.1+test.9037','ReadOnlyPeer-Realm'),'read-only hint: the announcement is accepted')
+local hint=Nexus.Updates.PublicTestHint()
+check(hint and hint.display=='1.20.0-beta.1 test.9037','read-only hint: it is shown from session state')
+check(Nexus.Updates.Status().state=='hint','read-only hint: and reaches the status')
+check(Nexus.Updates.DismissHint()==true,'read-only hint: the dismissal is accepted')
+check(Keys()==hintBefore,'read-only hint: and none of it wrote an update key')
 print('PASS update_keys_read_only: update keys untouched in a read-only session; normal maintenance and dismissal kept checks='..checks)

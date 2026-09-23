@@ -47,7 +47,7 @@ for _,row in ipairs(picker.children)do
  if row.nameButton and row.nameButton.text:GetText():find('Desired target',1,true)then target=row end
 end
 check(target~=nil,'real Journal menu includes untagged 85-copy target')
-check(target.nameButton.text:GetText():find('choose permanent targets',1,true)~=nil,'actionable menu label replaces endless waiting')
+check(target.nameButton.text:GetText():find('choose locked targets',1,true)~=nil,'actionable menu label replaces endless waiting')
 target.nameButton:Click()
 check(NexusWishlistRolePicker:IsShown(),'real Journal assignment routes to role picker')
 for i=1,6 do _G['NexusWishlistRolePlus'..i]:Click()end

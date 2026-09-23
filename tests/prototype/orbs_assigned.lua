@@ -11,6 +11,6 @@ assert(H.Count('orb-spend')==1,'one explicit Start automatically approves a safe
 H.Offer();H.Result(410002,2);M.Pump()
 assert(H.Count('orb-spend')==2,'a confirmed result continues from one Start')
 H.Offer();H.Result(410002,2);M.Pump()
-assert(M.Status().state=='ROLLED_COMPLETE' and H.Count('orb-spend')==2,'stop at rolled completion with permanent limitation')
+assert(M.Status().state=='ROLLED_COMPLETE' and H.Count('orb-spend')==2,'stop at rolled completion with locked limitation')
 assert(M.Status().spent==2 and M.Status().reserved==0,'confirmed usage retained')
 print('PASS automatic assigned target, protected source approval, continuous attempts and rolled completion')

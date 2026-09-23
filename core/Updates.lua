@@ -7,10 +7,19 @@
 -- A version stated by a Sync peer is a bounded session DIAGNOSTIC only
 -- (Updates.PeerObservations). It never proves that a release exists, however
 -- high it is, however many peers repeat it and whatever metadata it carries,
--- so it never produces a chat notice, the popup text, the menu state or the
--- HUD badge, and it never replaces or hides bundled evidence (2026-09-21: a
--- peer stating "1.96.6" was announced as a newer release). Without bundled
--- evidence the state is "unknown" with the configured Releases page.
+-- so it never becomes a release candidate, never replaces or hides bundled
+-- evidence and is never saved (2026-09-21: a peer stating "1.96.6" was
+-- announced as a newer release). Without bundled evidence the state is
+-- "unknown" with the configured Releases page.
+--
+-- 2026-09-23, authorized narrowing of that rule for ONE labelled case: an
+-- announcement with the exact public test shape, in the series this public
+-- test installation is in, with a higher test number, is shown as a
+-- session-only UNVERIFIED HINT (Updates.PublicTestHint). A hint is not release
+-- evidence and says so: it never states that GitHub was checked, never asserts
+-- that the build exists or is safe, never carries a peer-supplied link, never
+-- raises the trusted HUD badge, never becomes the candidate, and is never
+-- written to saved data. Everything else a peer can say stays silent.
 -- The comparison is always against the actual installed identity
 -- (Nexus.ReleaseIdentity): release series by standard SemVer precedence, then
 -- the numeric test number inside one series. The commit suffix never orders.
@@ -45,6 +54,9 @@ local function CanPersist()
     return status.mode ~= "unavailable"
 end
 local notifiedTargets = {}            -- session only: one chat notice per target
+local hintTarget = nil                -- session only: the highest reported public test
+local hintNotified, hintDismissed = {}, {}
+local hintNotices = 0
 local peerObservations, peerObservationOrder = {}, {}
 local MAX_PEER_OBSERVATIONS = 32
 local MAX_SESSION_NOTICES = 3         -- chat lines about updates per session
@@ -52,6 +64,16 @@ local MAX_DISMISSED = 8
 local sessionNotices = 0
 local MAX_TEST = 2147483647
 local BUNDLED_AUTHORITY = "bundled-release"
+-- A public-test HINT is a peer report that has the exact public test shape and
+-- is newer than this installation inside the same release series. It is shown
+-- as an explicitly unverified hint, separately from bundled release
+-- information, and it is never stored, never a candidate and never authority:
+-- a syntactically perfect announcement can still be false.
+local HINT_AUTHORITY = "peer-report-unverified"
+local MAX_HINT_NOTICES = 2            -- chat lines about hints per session
+-- The status is read in a chat line and in a popup, so it is kept to short
+-- lines instead of one long sentence.
+local LINE = "\n"
 local BUNDLED_UNAVAILABLE = "bundled-release-unavailable"
 local DEFAULT_URL = "https://github.com/Viscerals/Better-Nexus/releases"
 
@@ -332,11 +354,88 @@ function Updates.Init(nextCallbacks)
     sessionPersists = callbacks.persist ~= false
     notifiedTargets = {}
     sessionNotices = 0
+    hintTarget, hintNotified, hintDismissed, hintNotices = nil, {}, {}, 0
     peerObservations, peerObservationOrder = {}, {}
     local settings = Settings()
     if settings.updateNotifications == nil then settings.updateNotifications = true end
     Updates.Reevaluate()
 end
+
+-- The one shape that can become a hint: a public test build, in the series
+-- this installation is in, with a higher test number than this installation.
+-- Everything else is excluded here rather than later: a plain version, an
+-- internal or development announcement, a malformed or out-of-range test
+-- identifier, an older or equal test, and any announcement received by an
+-- installation that is not itself a public test package - a development
+-- checkout and an internal package are not placed in a public series by a peer.
+-- The commit suffix never participates: the comparison is the release series by
+-- SemVer precedence, then the numeric test number.
+local function HintCandidate(parsed, test)
+    if not test or not PeerReportable(parsed, test) then return nil end
+    local series = Series(parsed)
+    if not series then return nil end
+    local installed = Installed()
+    if installed.channel ~= "public-test" then return nil end
+    if type(installed.test) ~= "number" then return nil end
+    if Nexus.Version.Compare(parsed, installed.version) ~= 0 then return nil end
+    if test <= installed.test then return nil end
+    return {version=series, test=test, display=Display(series, test),
+        key=TargetKey(series, test), authority=HINT_AUTHORITY, verified=false}
+end
+
+local function HintMessage(hint)
+    return "Another player's client reports a newer public test build: "
+        .. hint.display .. "."
+        .. " UNVERIFIED: Nexus did not check GitHub and cannot confirm that this"
+        .. " build exists or is safe."
+        .. " Check the Releases page yourself: /nexus update."
+end
+
+-- Announced at most once per target and at most twice per session. A repeated
+-- report of the same target adds nothing and never revives a dismissal.
+local function MaybeHintNotice()
+    if not hintTarget or not Updates.IsEnabled() then return false end
+    if Updates.Preference() == "stable" then return false end
+    if hintNotified[hintTarget.key] or hintDismissed[hintTarget.key] then return false end
+    if hintNotices >= MAX_HINT_NOTICES then return false end
+    if type(callbacks.notify) == "function" then
+        local ok = pcall(callbacks.notify, hintTarget.display, Updates.ReleaseUrl(),
+            HintMessage(hintTarget))
+        if not ok then return false end
+    end
+    hintNotified[hintTarget.key] = true
+    hintNotices = hintNotices + 1
+    return true
+end
+
+-- The hint as the status, the menu and the popup may show it, or nil. Read
+-- through the current preference and the current installed identity, so a
+-- stable-only user never receives a test hint and a hint that this
+-- installation has caught up with disappears by itself.
+function Updates.PublicTestHint()
+    if not hintTarget or not Updates.IsEnabled() then return nil end
+    if Updates.Preference() == "stable" then return nil end
+    local installed = Installed()
+    if installed.channel ~= "public-test" or type(installed.test) ~= "number"
+        or hintTarget.test <= installed.test then return nil end
+    return {version=hintTarget.version, test=hintTarget.test,
+        display=hintTarget.display, key=hintTarget.key,
+        reports=hintTarget.reports, observedAt=hintTarget.observedAt,
+        source=hintTarget.source, authority=HINT_AUTHORITY, verified=false,
+        dismissed=hintDismissed[hintTarget.key] == true}
+end
+
+-- Seen. No further chat line for this hint in this session. Nothing is saved:
+-- a hint is session state, so a read-only or failed start-up gains no write
+-- from dismissing one.
+function Updates.DismissHint()
+    local hint = Updates.PublicTestHint()
+    if not hint then return false end
+    hintDismissed[hint.key] = true
+    hintNotified[hint.key] = true
+    return true
+end
+
 
 -- One accepted Sync peer version. `version` is the parsed table or the wire
 -- text that the inbound validator already accepted; `source` is the sender and
@@ -365,13 +464,28 @@ function Updates.Observe(version, source)
         local candidate = Candidate(parsed, test, "peer-observation", 0, true)
         reported = candidate and candidate.kind or nil
     end
+    local observedAt = time and tonumber(time()) or 0
     peerObservations[source] = {
         version=parsed.normalized,
-        observedAt=time and tonumber(time()) or 0,
+        observedAt=observedAt,
         source=source,
         authority="peer-observation",
         reported=reported,
     }
+    -- Same intake, no extra traffic: the hint is derived from the observation
+    -- this client already accepted. Only the highest reported test is kept,
+    -- and a repeat of the one already held is counted, not re-announced.
+    local hint = HintCandidate(parsed, test)
+    if hint then
+        if not hintTarget or hint.test > hintTarget.test then
+            hint.reports, hint.observedAt, hint.source = 1, observedAt, source
+            hintTarget = hint
+            MaybeHintNotice()
+        elseif hint.key == hintTarget.key then
+            hintTarget.reports = math.min((hintTarget.reports or 1) + 1, 9999)
+            MaybeHintNotice()
+        end
+    end
     return true, "peer observation"
 end
 
@@ -414,18 +528,33 @@ function Updates.Status()
     local installed = Installed()
     local enabled = Updates.IsEnabled()
     local candidate = Updates.GetCandidate()
+    local hint = Updates.PublicTestHint()
     local status = {
         installed=installed.display, installedLabel=installed.label,
         channel=installed.channel,
         channelLabel=CHANNEL_LABEL[installed.channel] or installed.channel,
         preference=Updates.Preference(), enabled=enabled,
         url=Updates.ReleaseUrl(), candidate=enabled and candidate or nil,
+        hint=enabled and hint or nil,
     }
     local have = "Installed: " .. installed.display .. " (" .. status.channelLabel
         .. (installed.label ~= "source" and (", " .. installed.label) or "") .. ")."
+    -- Only an installation that can be placed in a public test series can
+    -- receive a hint at all, so only it is told that none arrived.
+    local listens = enabled and Updates.Preference() ~= "stable"
+        and installed.channel == "public-test" and type(installed.test) == "number"
     if not enabled then
         status.state, status.menu = "disabled", "Update notices off - open Releases page"
         status.detail = have .. " Update notices are off."
+    elseif not candidate and hint then
+        -- A hint is never trusted release information, so it never becomes the
+        -- candidate, never hides bundled evidence and says what it is.
+        status.state = "hint"
+        status.menu = "Newer public test reported: " .. hint.display .. " (unverified)"
+        status.detail = have
+            .. LINE .. "Newer public test reported: " .. hint.display .. "."
+            .. LINE .. "Reported by another client; not checked against GitHub."
+            .. LINE .. "Check the Better Nexus Releases page before updating."
     elseif not candidate then
         status.state, status.menu = "unknown", "Update status unknown - open Releases page"
         -- Bundled evidence that only the stable-only preference hides is named.
@@ -433,6 +562,7 @@ function Updates.Status()
         status.detail = have .. (hidden
             and (" A newer test build (" .. hidden.display .. ") is not announced because notices are set to stable releases only.")
             or " This client has no release information about a newer build.")
+            .. (listens and " No newer public-test announcement was received." or "")
             .. " Nexus does not check GitHub, and versions stated by other players' clients are not release information."
             .. " That is not proof that this build is the latest: check the Releases page."
     else
@@ -440,6 +570,13 @@ function Updates.Status()
         status.menu = "Update available: " .. candidate.display
         status.detail = have .. " " .. (candidate.kind == "stable" and "New Nexus release available: "
             or "New Nexus test build available: ") .. candidate.display .. "."
+        -- Trusted information is never replaced or hidden by a hint; a hint
+        -- that names something else is added after it, still unverified.
+        if hint and hint.key ~= candidate.key then
+            status.detail = status.detail
+                .. LINE .. "Another client also reports " .. hint.display
+                .. " (unverified, not checked against GitHub)."
+        end
     end
     status.detail = status.detail .. " Notices: "
         .. (status.preference == "stable" and "stable releases only." or "stable releases and public test builds.")

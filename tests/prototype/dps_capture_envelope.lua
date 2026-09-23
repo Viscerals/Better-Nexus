@@ -20,8 +20,8 @@ local ordinary,permanent={},{}
 for i=1,79 do ordinary[#ordinary+1]={spellId=300000+i,quality=2,stacks=1} end
 for i=1,6 do permanent[#permanent+1]={spellId=310000+i,quality=3,stacks=1} end
 for _,e in ipairs(ordinary) do H.AddEcho(e.spellId,'Echo '..e.spellId,e.quality,4,e.spellId) end
-for _,e in ipairs(permanent) do H.AddEcho(e.spellId,'Permanent '..e.spellId,e.quality,1,e.spellId) end
-for i=1,2 do H.AddEcho(319000+i,'Replaced permanent '..i,3,1,319000+i) end
+for _,e in ipairs(permanent) do H.AddEcho(e.spellId,'Locked '..e.spellId,e.quality,1,e.spellId) end
+for i=1,2 do H.AddEcho(319000+i,'Replaced locked '..i,3,1,319000+i) end
 for i=1,6 do H.AddEcho(320000+i,'Stale ordinary '..i,2,4,320000+i) end
 T.Load();H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
 T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
@@ -30,7 +30,7 @@ local support=assert(Nexus.SupportIncidents,'the incident owner is loaded')
 local Evidence=Nexus.LoadoutEvidence
 local limits=Evidence.SemanticLimits()
 check(limits.ordinary==79 and limits.locked==6 and limits.total==85,
- 'the supported envelope is 79 ordinary, 6 permanent, 85 total: '
+ 'the supported envelope is 79 ordinary, 6 locked, 85 total: '
  ..limits.ordinary..'/'..limits.locked..'/'..limits.total)
 
 -- A training dummy as the target, so the real capture path classifies the
@@ -60,11 +60,17 @@ local function applyOwned(rows,locked)
   for _=1,(e.stacks or 1) do granted[name][#granted[name]+1]={spellId=e.spellId,quality=e.quality} end
  end
  H.granted=granted
- local lockedRows={}
- for _,e in ipairs(locked or {}) do
-  lockedRows[#lockedRows+1]={spellId=e.spellId,stacks=e.stacks or 1}
+ -- nil = GetLockedPerks has not answered yet (LockedOwned().synced is false).
+ -- {} = it answered, and this character holds no permanent Echo at all.
+ if locked==nil then
+  H.locked=nil
+ else
+  local lockedRows={}
+  for _,e in ipairs(locked) do
+   lockedRows[#lockedRows+1]={spellId=e.spellId,stacks=e.stacks or 1}
+  end
+  H.locked=lockedRows
  end
- H.locked=lockedRows
  H.Notify();A.Poll()
 end
 -- The active saved slot carries BOTH roles, with the permanent rows marked as
@@ -105,7 +111,7 @@ check(snapshot==79,
 -- reported 81: the two stale permanent rows land in the ordinary pool.
 local inflated=0
 for _,e in ipairs(ordinary) do inflated=inflated+e.stacks end
-check(inflated+2==81,'the reported inflation is exactly the two stale permanent rows: '..(inflated+2))
+check(inflated+2==81,'the reported inflation is exactly the two stale locked rows: '..(inflated+2))
 
 -- 1b. A copy the player really holds is never lost. The permanent map is
 -- subtracted from the OWNED projection, which is the only pool that carries
@@ -122,7 +128,7 @@ local slotRows={}
 for _,e in ipairs(ordinary) do slotRows[#slotRows+1]=e end
 applySlot(slotRows,{{spellId=shared,quality=3,stacks=1}})
 local kept=D.GetCurrentEchoCount()
-check(kept==79,'an Echo held both ordinarily and permanently keeps its ordinary copy: '..kept)
+check(kept==79,'an Echo held both ordinarily and in a locked slot keeps its ordinary copy: '..kept)
 
 -- 1c. A correct 79 + 6 loadout stays recordable while the permanent map is
 -- still arriving: the saved slot's own permanent marks are used instead of
@@ -132,11 +138,11 @@ check(kept==79,'an Echo held both ordinarily and permanently keeps its ordinary 
 local grantedWithPermanent={}
 for _,e in ipairs(ordinary) do grantedWithPermanent[#grantedWithPermanent+1]=e end
 for _,e in ipairs(permanent) do grantedWithPermanent[#grantedWithPermanent+1]=e end
-applyOwned(grantedWithPermanent,{})
+applyOwned(grantedWithPermanent,nil)
 applySlot(ordinary,permanent)
 local lateSnapshot=D.GetCurrentEchoCount()
 check(lateSnapshot==79,
- 'a late permanent map does not inflate the ordinary pool: '..lateSnapshot)
+ 'a late locked map does not inflate the ordinary pool: '..lateSnapshot)
 -- A pool derived from the saved loadout's own role marks is not RECORDED:
 -- those marks may be from an earlier loadout, and a record built on them
 -- would be filed under a fingerprint that may be missing a copy. The
@@ -146,7 +152,7 @@ combat.total=200000
 capture()
 check((Nexus.lastDpsNote or ''):find('PERMANENT_ROLES_UNVERIFIED',1,true)~=nil
  or (Nexus.lastDpsNote or ''):find('has not arrived yet',1,true)~=nil,
- 'an unconfirmed permanent list defers instead of recording a key it cannot trust: '
+ 'an unconfirmed locked list defers instead of recording a key it cannot trust: '
  ..tostring(Nexus.lastDpsNote))
 check(support.Latest() and support.Latest().reason=='PERMANENT_ROLES_UNVERIFIED',
  'and the incident names that reason: '..tostring(support.Latest() and support.Latest().reason))
@@ -158,8 +164,32 @@ applySlot(ordinary,permanent)
 combat.total=250000
 capture()
 check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
- 'a correct 79 + 6 loadout records once the permanent list is there: '
+ 'a correct 79 + 6 loadout records once the locked list is there: '
  ..tostring(Nexus.lastDpsNote))
+-- 1e. A character who holds NO permanent Echo at all. GetLockedPerks answers
+-- with an empty list, which is an answer: that emptiness must not be read as
+-- "the list has not arrived", because nothing further is ever going to arrive
+-- and every session such a character runs would be discarded forever.
+support.Clear()
+applyOwned(ordinary,{})
+applySlot(ordinary,{})
+check(A.LockedOwned().synced==true and next(A.LockedOwned().bySpell)==nil,
+ 'fixture: the locked list is synchronized and empty')
+local noneSnapshot=D.GetCurrentEchoCount()
+check(noneSnapshot==79,'the ordinary pool is the 79 copies held: '..noneSnapshot)
+local bestBeforeNone=D.GetCurrentPersonalBest('dummy')
+combat.total=300000
+capture()
+check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
+ 'a character with zero locked Echoes records normally: '..tostring(Nexus.lastDpsNote))
+check(support.Latest()==nil or support.Latest().reason~='PERMANENT_ROLES_UNVERIFIED',
+ 'and is never told to wait for a list that already arrived: '
+ ..tostring(support.Latest() and support.Latest().reason))
+local afterNone=D.GetCurrentPersonalBest('dummy')
+check(afterNone and (afterNone.dps or 0)>(bestBeforeNone and bestBeforeNone.dps or 0),
+ 'the record is written: '..tostring(afterNone and afterNone.dps))
+check(#(afterNone.lockedEchoes or {})==0,'with no locked copies in it')
+
 -- 1d. When the current permanent list is KNOWN and the saved loadout marks a
 -- copy permanent that the list does not carry, the two sources contradict each
 -- other about that copy. Guessing either way is wrong in the other direction -
@@ -173,7 +203,7 @@ local bestBeforeContest=D.GetCurrentPersonalBest('dummy')
 combat.total=400000
 capture()
 check((Nexus.lastDpsNote or ''):find('deferred',1,true)~=nil,
- 'a contested permanent role defers the capture: '..tostring(Nexus.lastDpsNote))
+ 'a contested locked role defers the capture: '..tostring(Nexus.lastDpsNote))
 check((Nexus.lastDpsNote or ''):find('save the loadout again',1,true)~=nil,
  'and says how to resolve it: '..tostring(Nexus.lastDpsNote))
 local contestIncident=support.Latest()
@@ -199,7 +229,7 @@ local recordedOrdinary,recordedPermanent=0,0
 for _,e in ipairs(best.echoes or {}) do recordedOrdinary=recordedOrdinary+(e.count or e.stacks or 1) end
 for _,e in ipairs(best.lockedEchoes or {}) do recordedPermanent=recordedPermanent+(e.count or e.stacks or 1) end
 check(recordedOrdinary==79,'the recorded ordinary pool is 79: '..recordedOrdinary)
-check(recordedPermanent==6,'the recorded permanent pool is 6: '..recordedPermanent)
+check(recordedPermanent==6,'the recorded locked pool is 6: '..recordedPermanent)
 check(recordedOrdinary+recordedPermanent==85,
  'the whole record is the supported 85 copies, not 87: '..(recordedOrdinary+recordedPermanent))
 local verdict=Evidence.SemanticCounts and Evidence.SemanticCounts(best.echoes,best.lockedEchoes) or nil
@@ -242,7 +272,7 @@ check(incident.origin=='local','and the origin it came from: '..tostring(inciden
 check(incident.counts and incident.counts.ordinary==85,
  'the failure-time ordinary count is retained: '..tostring(incident.counts and incident.counts.ordinary))
 check(incident.counts.locked==6 and incident.counts.total==91,
- 'with the permanent and total counts: '..incident.counts.locked..'/'..incident.counts.total)
+ 'with the locked and total counts: '..incident.counts.locked..'/'..incident.counts.total)
 check(incident.limits.ordinary==79 and incident.limits.total==85,
  'and the limits that were enforced: '..incident.limits.ordinary..'/'..incident.limits.total)
 check(incident.committed==false,'it states that nothing committed')
@@ -272,4 +302,4 @@ check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
 local recovered=D.GetCurrentPersonalBest('dummy')
 check(recovered and recovered.dps>(before and before.dps or 0),
  'and the better result is recorded: '..tostring(recovered and recovered.dps))
-print('PASS dps_capture_envelope: the saved slot\'s permanent rows stay permanent, and an impossible snapshot defers instead of being refused checks='..checks)
+print('PASS dps_capture_envelope: the saved slot\'s locked rows stay locked, and an impossible snapshot defers instead of being refused checks='..checks)

@@ -134,13 +134,13 @@ function Controller.New(options)
                             and type(evidence.SemanticLimits) == "function"
                             and evidence.SemanticLimits() or nil
                         reason = string.format(
-                            "%s (%s record: %s ordinary, %s permanent, %s total Echo copies)",
+                            "%s (%s record: %s ordinary, %s locked, %s total Echo copies)",
                             reason, tostring(detail.representation or "unknown"),
                             tostring(detail.ordinary), tostring(detail.locked),
                             tostring(detail.total))
                         if limits then
                             reason = reason .. string.format(
-                                "; at most %d ordinary, %d permanent, %d total are stored",
+                                "; at most %d ordinary, %d locked, %d total are stored",
                                 limits.ordinary, limits.locked, limits.total)
                         end
                         reason = reason .. ". Nothing was saved and the source is unchanged"
@@ -1786,7 +1786,7 @@ function Controller.New(options)
                 "malformed source row"
         end
         if wl.lockedEchoes ~= nil and type(wl.lockedEchoes) ~= "table" then
-            return nil, label .. " states its permanent Echoes in a form that cannot be read. Nothing was shared.",
+            return nil, label .. " states its locked Echoes in a form that cannot be read. Nothing was shared.",
                 "malformed permanent list"
         end
         if type(wl.lockedEchoes) == "table" and next(wl.lockedEchoes) ~= nil then
@@ -1805,7 +1805,7 @@ function Controller.New(options)
             end
             local _, separate = Split(forced)
             if not separate then
-                return nil, label .. " contains a permanent Echo row that cannot be read. Nothing was shared.",
+                return nil, label .. " contains a locked Echo row that cannot be read. Nothing was shared.",
                     "malformed permanent row"
             end
             -- The same permanent population stated twice is counted once. Two
@@ -1813,7 +1813,7 @@ function Controller.New(options)
             if #locked == 0 then
                 locked = separate
             elseif Population(locked) ~= Population(separate) then
-                return nil, label .. " states its permanent Echoes in two lists that do not agree. "
+                return nil, label .. " states its locked Echoes in two lists that do not agree. "
                     .. "Nothing was shared. Save the source again, then share it.",
                     "permanent roles stated twice with different contents"
             end
@@ -1886,8 +1886,8 @@ function Controller.New(options)
             if not split or #split ~= #rows then return false end
             return split
         end
-        local UNREADABLE = "has a saved permanent-target plan that cannot be read. "
-            .. "Open the Wishlist in the Wishlist Editor and save its permanent targets again."
+        local UNREADABLE = "has a saved locked-target plan that cannot be read. "
+            .. "Open the Wishlist in the Wishlist Editor and save its locked targets again."
         local function PlanDesign()
             if wl.sourceKind == "Saved Build" then return nil end
             local slot = tonumber(wl.slot)
@@ -1928,8 +1928,8 @@ function Controller.New(options)
                         if bound then
                             local key = rows and Population(rows) or ""
                             if boundKey ~= nil and boundKey ~= key then
-                                return false, "has two saved permanent-target plans that do not agree. "
-                                    .. "Open the Wishlist in the Wishlist Editor for each loadout that uses it and save the same permanent targets.",
+                                return false, "has two saved locked-target plans that do not agree. "
+                                    .. "Open the Wishlist in the Wishlist Editor for each loadout that uses it and save the same locked targets.",
                                     "saved plan designs disagree"
                             end
                             boundKey = key
@@ -1939,7 +1939,7 @@ function Controller.New(options)
                         elseif rows then
                             if type(c.echoes) ~= "table" or IdCopies(c.echoes) ~= IdCopies(ordinary)
                                 or not QualitiesAgree(c.echoes, ordinary) then
-                                return false, "changed after its saved permanent-target plan was made, so the plan does not match it. "
+                                return false, "changed after its saved locked-target plan was made, so the plan does not match it. "
                                     .. "Open the Wishlist in the Wishlist Editor and save it again.",
                                     "saved plan design does not match the source rows"
                             end
@@ -1950,8 +1950,8 @@ function Controller.New(options)
             end
             -- A design bound to this exact slot (even an empty one) decides.
             if unbound and not boundSeen then
-                return false, "matches a saved permanent-target plan, but Nexus cannot tell which server Wishlist that plan belongs to "
-                    .. "(it was renamed, changed or copied), so its permanent Echoes are not known. "
+                return false, "matches a saved locked-target plan, but Nexus cannot tell which server Wishlist that plan belongs to "
+                    .. "(it was renamed, changed or copied), so its locked Echoes are not known. "
                     .. "Open the Wishlist in the Wishlist Editor and save it again.",
                     "saved plan design not bound to one server Wishlist"
             end
@@ -1965,7 +1965,7 @@ function Controller.New(options)
             if #locked == 0 then
                 locked = design
             elseif IdCopies(locked) ~= IdCopies(design) or not QualitiesAgree(locked, design) then
-                return nil, label .. " states permanent Echoes that differ from its saved permanent-target plan. "
+                return nil, label .. " states locked Echoes that differ from its saved locked-target plan. "
                     .. "Nothing was shared. Save the source again, then share it.",
                     "permanent roles differ from the saved plan"
             end
@@ -2049,21 +2049,21 @@ function Controller.New(options)
                 -- supply it. A count alone does not tell the user what to do.
                 local marks = unstated == 0
                     and "The server copy marks all of them as ordinary, which is not role information: "
-                    or "It does not say which copies are permanent: "
+                    or "It does not say which copies are locked: "
                 -- Only the ways that exist for this source. A Saved Build slot has
                 -- no role choice in the Wishlist Editor; a mixed-quality source is
                 -- not resolved by either way.
                 local way
                 if mixedUnmatched then
-                    way = "Nexus cannot tell which quality the permanent copies have. Change the source so that each Echo has one quality, then share again. "
+                    way = "Nexus cannot tell which quality the locked copies have. Change the source so that each Echo has one quality, then share again. "
                 elseif wl.sourceKind == "Saved Build" then
-                    way = "To resolve it, make this Saved Build your active loadout so that Nexus can read its permanent Echoes. Then share again. "
+                    way = "To resolve it, make this Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. "
                 else
-                    way = "To resolve it, open this Wishlist in the Wishlist Editor and choose its permanent Echoes, "
-                        .. "or make the matching Saved Build your active loadout so that Nexus can read its permanent Echoes. Then share again. "
+                    way = "To resolve it, open this Wishlist in the Wishlist Editor and choose its locked Echoes, "
+                        .. "or make the matching Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. "
                 end
                 return nil, string.format("%s has %d Echo copies. %sa Share holds at most %d ordinary copies, "
-                    .. "so up to %d of them must be permanent Echoes, and Nexus must know which. Missing evidence: %s. "
+                    .. "so up to %d of them must be locked Echoes, and Nexus must know which. Missing evidence: %s. "
                     .. "%sNothing was shared and the source is unchanged.",
                     label, counts.total, marks, limits.ordinary, limits.locked,
                     tostring(why or "no role choice is saved for this exact content"), way),
@@ -2088,8 +2088,8 @@ function Controller.New(options)
         end
         if counts.ordinary > limits.ordinary or counts.locked > limits.locked
             or counts.total > limits.total then
-            return nil, string.format("%s has %d ordinary and %d permanent Echo copies (%d total). "
-                .. "A Share holds at most %d ordinary, %d permanent and %d total. "
+            return nil, string.format("%s has %d ordinary and %d locked Echo copies (%d total). "
+                .. "A Share holds at most %d ordinary, %d locked and %d total. "
                 .. "Nothing was shared and the source is unchanged.",
                 label, counts.ordinary, counts.locked, counts.total,
                 limits.ordinary, limits.locked, limits.total),
@@ -2835,8 +2835,8 @@ function Controller.New(options)
             local limits = evidence and type(evidence.SemanticLimits) == "function"
                 and evidence.SemanticLimits() or nil
             if why == "SEMANTIC_ENVELOPE" and limits then
-                why = string.format("the local catalog refused %d ordinary and %d permanent Echo copies; "
-                    .. "a Share holds at most %d ordinary, %d permanent and %d total",
+                why = string.format("the local catalog refused %d ordinary and %d locked Echo copies; "
+                    .. "a Share holds at most %d ordinary, %d locked and %d total",
                     tonumber(s.ordinaryCopies) or 0, tonumber(s.permanentCopies) or 0,
                     limits.ordinary, limits.locked, limits.total)
             end

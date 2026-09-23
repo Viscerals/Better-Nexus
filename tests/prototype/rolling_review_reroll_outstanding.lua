@@ -50,7 +50,7 @@ local two=P.Plan(catalog,{{spellId=101,stacks=2},{spellId=102,stacks=1}})
 a=P.Decide(F1({plan=two}));check(a.type=='take' and a.spellId==101,'exact copy count: a partly met target is still taken')
 -- Permanent ownership counts, as in the production state.
 a=P.Decide(F1({owned=P.Owned(catalog,{}),locked=P.Owned(catalog,{[101]=1})}))
-check(a.type=='reroll','a target met by a permanent copy is satisfied too')
+check(a.type=='reroll','a target met by a locked copy is satisfied too')
 -- Wishlist complete: unchanged fallback, no Reroll.
 a=P.Decide(F1({owned=P.Owned(catalog,{[101]=1,[102]=1})}))
 check(a.type=='take' and a.reasonCode=='OBJECTIVE_COMPLETE_FALLBACK','complete Wishlist never rerolls')

@@ -693,7 +693,7 @@ local function WishlistLabel(wl)
     local roles=type(controller.ShareSourceRoles)=="function" and controller.ShareSourceRoles(wl) or nil
     if roles then count,permanent=roles.ordinary,roles.permanent end
     if permanent>0 then
-        return string.format("[%s] %s  —  %d / 79 + %d / 6 permanent", kind, name, count, permanent)
+        return string.format("[%s] %s  —  %d / 79 + %d / 6 locked", kind, name, count, permanent)
     end
     return string.format("[%s] %s  —  %d / 79", kind, name, count)
 end
@@ -708,7 +708,7 @@ local function ShareStatusLine()
     local okStatus, s = pcall(controller.ShareStatus)
     if state ~= "refused" and okStatus and type(s) == "table"
         and type(s.ordinaryCopies) == "number" and type(s.permanentCopies) == "number" then
-        text = text .. string.format(" Roles: %d ordinary + %d permanent Echo copies.",
+        text = text .. string.format(" Roles: %d ordinary + %d locked Echo copies.",
             s.ordinaryCopies, s.permanentCopies)
     end
     local colour = state == "refused" and "|cffff6060"
@@ -895,7 +895,7 @@ RefreshPostPopupPreview = function()
         roles, rolesWhy = ControllerInstance().ShareSourceRoles(wl)
     end
     if roles then
-        postPopup._previewSummary:SetText(string.format("|cff888888Shares %d ordinary + %d permanent Echo copies|r",
+        postPopup._previewSummary:SetText(string.format("|cff888888Shares %d ordinary + %d locked Echo copies|r",
             roles.ordinary, roles.permanent))
         -- The settled lists, not the raw source rows: on the >79 path the
         -- source rows also contain the copies that become permanent.
@@ -914,7 +914,7 @@ RefreshPostPopupPreview = function()
     local child=postPopup._previewChild
     for i,row in ipairs(postPopup._previewRows or {}) do
         local e=echoes[i]
-        if e then row:ClearAllPoints(); row:SetPoint("TOPLEFT",child,"TOPLEFT",0,-(i-1)*22); row.icon:SetTexture(SpellIcon(e.spellId)); local stacks=tonumber(e.stacks) or 1; local suffix=(stacks>1 and ("  x"..stacks) or "")..((e.locked==true or e.locked==1) and "  (permanent)" or ""); row.text:SetText(string.format("%02d. %s%s",i,EchoDisplayName(e.spellId),suffix)); row:Show() else row:Hide() end
+        if e then row:ClearAllPoints(); row:SetPoint("TOPLEFT",child,"TOPLEFT",0,-(i-1)*22); row.icon:SetTexture(SpellIcon(e.spellId)); local stacks=tonumber(e.stacks) or 1; local suffix=(stacks>1 and ("  x"..stacks) or "")..((e.locked==true or e.locked==1) and "  (locked)" or ""); row.text:SetText(string.format("%02d. %s%s",i,EchoDisplayName(e.spellId),suffix)); row:Show() else row:Hide() end
     end
     child:SetHeight(math.max(1,#echoes*22)); pcall(function() postPopup._previewScroll:SetVerticalScroll(0) end)
 end

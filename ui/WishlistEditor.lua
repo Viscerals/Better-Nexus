@@ -210,7 +210,7 @@ local function AcceptApply(data)
 end
 
 StaticPopupDialogs["WISHLISTREALIZER_UPDATE_WISHLIST"] = {
-    text = "Save %d/79 rolled copies to '%s'?\nUpdates this server Wishlist. Planned permanent targets are saved separately.",
+    text = "Save %d/79 rolled copies to '%s'?\nUpdates this server Wishlist. Planned locked targets are saved separately.",
     button1 = "Save Changes",
     button2 = "Cancel",
     OnCancel = function(_, data) wishlistController.CancelApply(data) end,
@@ -304,16 +304,16 @@ function RolePicker.Render()
     local total,locked=RolePicker.Count()
     local pages=math.max(1,math.ceil(#state.rows/RolePicker.visibleRows))
     state.page=math.max(1,math.min(pages,state.page or 1))
-    f.title:SetText("Choose permanent targets: " ..
+    f.title:SetText("Choose locked Echo targets: " ..
         (DisplayUntrusted(state.name,1024,false) or "Wishlist"))
-    f.count:SetText(string.format("Rolled copies %d/79  |  Permanent targets %d/6  |  %d total",total-locked,locked,total))
+    f.count:SetText(string.format("Rolled copies %d/79  |  Locked targets %d/6  |  %d total",total-locked,locked,total))
     f.pageLabel:SetText(string.format("Page %d / %d",state.page,pages))
     if state.page>1 then f.prev:Enable() else f.prev:Disable() end
     if state.page<pages then f.next:Enable() else f.next:Disable() end
     if total-locked<=79 and total-locked>0 and locked<=6 then
         f.confirm:Enable()
     else f.confirm:Disable() end
-    f.confirm:SetText(state.assign and "Confirm permanent targets & assign" or "Confirm permanent targets & edit")
+    f.confirm:SetText(state.assign and "Confirm locked targets & assign" or "Confirm locked targets & edit")
     local qualityNames={[0]="Common",[1]="Uncommon",[2]="Rare",[3]="Epic",[4]="Legendary"}
     for n,view in ipairs(f.rows) do
         local index=(state.page-1)*RolePicker.visibleRows+n
@@ -322,13 +322,13 @@ function RolePicker.Render()
         if row then
             view.label:SetText((DisplayUntrusted(row.name,256,false) or tostring(row.id))
                 .. " (" .. tostring(qualityNames[row.quality] or row.quality) .. ") x" .. row.copies)
-            view.count:SetText(tostring(row.selected) .. " permanent")
+            view.count:SetText(tostring(row.selected) .. " locked")
             if row.selected>0 then view.minus:Enable() else view.minus:Disable() end
             if row.selected<row.copies and locked<6 then view.plus:Enable() else view.plus:Disable() end
             view.frame:Show()
         else view.frame:Hide() end
     end
-    f.message:SetText(state.message or "Choose permanent targets. This changes the plan, not owned Echoes or resources.")
+    f.message:SetText(state.message or "Choose locked Echo targets. This changes the plan, not owned Echoes or resources.")
 end
 
 function RolePicker.Adjust(index,delta)
@@ -348,7 +348,7 @@ function RolePicker.UseOwned(automatic)
     if not state then return end
     local locked=wishlistController.LockedProjection()
     if not locked or locked.synced~=true or type(locked.bySpell)~="table" then
-        RolePicker.Message("Waiting for the server's current permanent Echo list. You can choose the intended targets manually.")
+        RolePicker.Message("Waiting for the server's current locked Echo list. You can choose the intended targets manually.")
         return
     end
     local catalog=wishlistController.CatalogProjection()
@@ -356,7 +356,7 @@ function RolePicker.UseOwned(automatic)
     for id,copies in pairs(locked.bySpell) do
         id=tonumber(id)
         if not id or id<1 or id~=math.floor(id) or type(copies)~="number" or copies<1 or copies~=math.floor(copies) or copies>6 then
-            RolePicker.Message("The current permanent Echo list is incomplete. Choose the intended targets manually.")
+            RolePicker.Message("The current locked Echo list is incomplete. Choose the intended targets manually.")
             return false
         end
         remaining[id]=(remaining[id] or 0)+copies
@@ -364,7 +364,7 @@ function RolePicker.UseOwned(automatic)
     local ownedTotal=0
     for _,copies in pairs(remaining) do ownedTotal=ownedTotal+copies end
     if ownedTotal>6 then
-        RolePicker.Message("The server reports more than six permanent copies. No targets were guessed.")
+        RolePicker.Message("The server reports more than six locked copies. No targets were guessed.")
         return false
     end
     local count=0
@@ -379,8 +379,8 @@ function RolePicker.UseOwned(automatic)
     for i,row in ipairs(state.rows) do row.selected=selected[i] end
     state.usedCurrentLocks=automatic==true
     state.message=automatic==true
-        and "Using matching current permanent Echoes. The plan must fit 79 rolled copies / 6 permanent targets."
-        or "Matching current permanent Echoes suggested as targets. Review them, then confirm your plan."
+        and "Using matching currently locked Echoes. The plan must fit 79 rolled copies / 6 locked targets."
+        or "Matching currently locked Echoes suggested as targets. Review them, then confirm your plan."
     RolePicker.Render()
     local total=RolePicker.Count()
     return count>0 and total-count>0 and total-count<=79 and count<=6
@@ -391,7 +391,7 @@ function RolePicker.Accept()
     if not state then return false end
     local total,locked=RolePicker.Count()
     if locked>6 or total-locked>79 or total-locked<1 then
-        RolePicker.Message("Select up to six permanent-slot copies so no more than 79 rolled copies remain.")
+        RolePicker.Message("Select up to six locked targets so no more than 79 rolled copies remain.")
         return false
     end
     local echoes,ordinary,lockedRows={},{},{}
@@ -442,8 +442,8 @@ function RolePicker.Accept()
     RolePicker.Hide()
     local opened=M.OpenForWishlist(resolved,loadoutSlot)
     if opened then
-        print("|cff4dff80Nexus:|r " .. (usedCurrentLocks and "Using matching current permanent Echoes for '" or "Permanent-slot targets confirmed for '") ..
-            (DisplayUntrusted(name,1024,false) or "Wishlist") .. "'. Permanent Echoes were not changed.")
+        print("|cff4dff80Nexus:|r " .. (usedCurrentLocks and "Using matching currently locked Echoes for '" or "Locked Echo targets confirmed for '") ..
+            (DisplayUntrusted(name,1024,false) or "Wishlist") .. "'. Locked Echoes were not changed.")
     end
     if Nexus.JournalTab and Nexus.JournalTab.RefreshAssociations then Nexus.JournalTab.RefreshAssociations() end
     if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
@@ -484,7 +484,7 @@ function RolePicker.Ensure()
     f.title=label("GameFontNormal",20,-18,570)
     local help=label("GameFontHighlightSmall",20,-44,570)
     help:SetHeight(40)
-    help:SetText("Choose which copies are planned for the six permanent slots.\nThis edits only the Wishlist plan; your character's Echoes are unchanged.")
+    help:SetText("Choose which copies are planned for the six locked Echo slots.\nThis edits only the Wishlist plan; your character's Echoes are unchanged.")
     f.count=label("GameFontNormal",20,-83,570)
     f.rows={}
     for n=1,RolePicker.visibleRows do
@@ -514,10 +514,10 @@ function RolePicker.Ensure()
     f.next=button("NexusWishlistRoleNext","Next",188,-394,70,function()
         if RolePicker.state then RolePicker.state.page=RolePicker.state.page+1;RolePicker.Render() end end)
     f.pageLabel=label("GameFontHighlightSmall",108,-401,78)
-    f.owned=button("NexusWishlistRoleUseOwned","Suggest matching permanent targets",318,-394,270,function() RolePicker.UseOwned(false) end)
+    f.owned=button("NexusWishlistRoleUseOwned","Suggest matching locked targets",318,-394,270,function() RolePicker.UseOwned(false) end)
     f.message=label("GameFontHighlightSmall",20,-430,570)
     f.message:SetHeight(30)
-    f.confirm=button("NexusWishlistRoleConfirm","Confirm permanent targets & edit",210,-470,278,RolePicker.Accept)
+    f.confirm=button("NexusWishlistRoleConfirm","Confirm locked targets & edit",210,-470,278,RolePicker.Accept)
     f.cancel=button("NexusWishlistRoleCancel","Cancel",498,-470,90,RolePicker.Hide)
     f:Hide()
     return f
@@ -588,7 +588,7 @@ end
 function M.UnresolvedRoleHint()
     local settings=Nexus.Store and Nexus.Store.Settings and Nexus.Store.Settings()
     return settings and settings.useCurrentLocksForUntagged==false
-        and "choose permanent targets" or "use current locks"
+        and "choose locked targets" or "use current locks"
 end
 
 function M.ResolveAndAssignWishlist(candidate, activeSlot)

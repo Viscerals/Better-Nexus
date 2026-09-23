@@ -4383,18 +4383,26 @@ end
 function Sync.PhaseStats()
     local phases = Sync._phases
     if type(phases) ~= "table" then return {phases={}} end
-    local out = {slowUpdates=phases.slowUpdates, armed=phases.armed,
-        thresholdMs=phases.thresholdMs, lastUpdateMs=phases.lastTotal,
-        maxUpdateMs=phases.maxTotal, phases={}}
-    for name, row in pairs(type(phases.stats) == "table" and phases.stats or {}) do
-        out.phases[name] = {count=row.count, maxMs=row.maxMs, lastMs=row.lastMs}
+    local out = {slowUpdates=rawget(phases, "slowUpdates"), armed=rawget(phases, "armed"),
+        thresholdMs=rawget(phases, "thresholdMs"), lastUpdateMs=rawget(phases, "lastTotal"),
+        maxUpdateMs=rawget(phases, "maxTotal"), phases={}}
+    local stats = rawget(phases, "stats")
+    for name, row in pairs(type(stats) == "table" and stats or {}) do
+        if type(row) == "table" then
+            out.phases[name] = {count=row.count, maxMs=row.maxMs, lastMs=row.lastMs}
+        end
     end
     return out
 end
 
 function Sync.ResetPhaseStats()
-    Sync._phases.stats, Sync._phases.armed, Sync._phases.slowUpdates = {}, 0, 0
-    Sync._phases.lastTotal, Sync._phases.maxTotal = nil, nil
+    local phases = Sync._phases
+    if type(phases) ~= "table" then return false end
+    rawset(phases, "stats", {})
+    rawset(phases, "armed", 0)
+    rawset(phases, "slowUpdates", 0)
+    rawset(phases, "lastTotal", nil)
+    rawset(phases, "maxTotal", nil)
     return true
 end
 
@@ -4449,29 +4457,37 @@ function Sync.OnUpdate(elapsed)
     -- Lua 5.1 local limit, which makes it writable from outside. Measurement
     -- must never be able to stop the update, so it is read defensively once
     -- and skipped entirely if anything replaced it.
+    -- Every field of that table is read with rawget and written with rawset,
+    -- so a metatable on it cannot raise on the guard line and stop all sync.
     local phases = Sync._phases
-    if type(phases) ~= "table" or type(phases.clock) ~= "function"
-        or type(phases.record) ~= "function" then
+    if type(phases) ~= "table" or type(rawget(phases, "clock")) ~= "function"
+        or type(rawget(phases, "record")) ~= "function" then
         phases = nil
     end
-    -- The steps are the update. A replaced or emptied step list falls back to
-    -- the list built at load, so measurement cannot remove the work.
-    local steps = phases and type(phases.steps) == "table"
-        and #phases.steps > 0 and phases.steps or Sync._defaultSteps
+    -- The steps ARE the update, so they are never taken from the measurement
+    -- table while the list built at load is intact: an emptied, replaced or
+    -- decoy step list there changes nothing. The copy on the measurement table
+    -- is used only if the load-time list itself was lost, so that the two
+    -- references are redundancy rather than an override.
+    local steps = Sync._defaultSteps
+    if type(steps) ~= "table" or #steps == 0 then
+        steps = phases and rawget(phases, "steps") or nil
+        if type(steps) ~= "table" then steps = nil end
+    end
     -- Every clock and record call goes through pcall: a raising clock is a
     -- measurement failure, and a measurement failure must never be a sync
     -- failure. One raise disables measurement for this update and no more.
     local function readClock()
         if not phases then return nil end
-        local ok, value = pcall(phases.clock)
+        local ok, value = pcall(rawget(phases, "clock"))
         if ok and type(value) == "number" then return value end
         phases = nil
         return nil
     end
     local updateStarted = readClock()
-    local detail = phases and (tonumber(phases.armed) or 0) > 0
+    local detail = phases and (tonumber(rawget(phases, "armed")) or 0) > 0
         and updateStarted ~= nil
-    for index = 1, #steps do
+    for index = 1, steps and #steps or 0 do
         local entry = steps[index]
         if type(entry) == "table" and type(entry.run) == "function" then
             local skipped = false
@@ -4482,7 +4498,9 @@ function Sync.OnUpdate(elapsed)
             if not skipped then
                 local started = detail and readClock() or nil
                 entry.run(elapsed)
-                if started and phases then pcall(phases.record, entry.name, started) end
+                if started and phases then
+                    pcall(rawget(phases, "record"), entry.name, started)
+                end
             end
         end
     end
@@ -4490,17 +4508,20 @@ function Sync.OnUpdate(elapsed)
         local finished = readClock()
         if finished then
             local total = finished - updateStarted
-            local threshold = tonumber(phases.thresholdMs) or 50
+            local threshold = tonumber(rawget(phases, "thresholdMs")) or 50
             if total >= 0 then
-                phases.lastTotal = total
-                if not phases.maxTotal or total > phases.maxTotal then
-                    phases.maxTotal = total
+                rawset(phases, "lastTotal", total)
+                local highest = tonumber(rawget(phases, "maxTotal"))
+                if not highest or total > highest then
+                    rawset(phases, "maxTotal", total)
                 end
                 if total >= threshold then
-                    phases.slowUpdates = (tonumber(phases.slowUpdates) or 0) + 1
-                    phases.armed = tonumber(phases.window) or 20
-                elseif (tonumber(phases.armed) or 0) > 0 then
-                    phases.armed = phases.armed - 1
+                    rawset(phases, "slowUpdates",
+                        (tonumber(rawget(phases, "slowUpdates")) or 0) + 1)
+                    rawset(phases, "armed", tonumber(rawget(phases, "window")) or 20)
+                else
+                    local armed = tonumber(rawget(phases, "armed")) or 0
+                    if armed > 0 then rawset(phases, "armed", armed - 1) end
                 end
             end
         end

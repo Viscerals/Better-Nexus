@@ -30,7 +30,7 @@ check(a.type=='freeze' and a.spellId==101,'exact copies: 101 x2 needed, two on b
 a=P.Decide(F3({plan=two,horizon=3,owned=P.Owned(catalog,{[101]=1})}))
 check(a.type=='take' and a.spellId==101,'exact copies: 101 x2 requested, one owned: the second board copy would be surplus, no Freeze')
 a=P.Decide(F3({plan=two,horizon=3,locked=P.Owned(catalog,{[101]=1})}))
-check(a.type=='take' and a.spellId==101,'a permanent copy counts too')
+check(a.type=='take' and a.spellId==101,'a locked copy counts too')
 -- Settings, resources and guards unchanged.
 a=P.Decide(F3({allowFreeze=false}));check(a.type=='take' and a.spellId==101,'Freeze preference OFF: take')
 a=P.Decide(F3({charges={trustworthy=true,banish=1,freeze=0,reroll=0}}));check(a.type=='take','no Freeze charge: take')

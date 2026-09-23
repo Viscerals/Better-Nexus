@@ -5,30 +5,30 @@ local frame,index= nil,1
 -- Keep the complete Help window above the Orb dialog's 30-33 layer band.
 local HELP_LEVEL=40
 local pages={
- {id="start",title="Getting started",text=[[Nexus helps you work toward an Echo build. Create or import a Wishlist, choose its planned permanent-slot targets, and assign it to a Saved Build. Follow the recommendations, or explicitly enable the actions you want automated. Shared builds and Leaderboards show records known to this client.
+ {id="start",title="Getting started",text=[[Nexus helps you work toward an Echo build. Create or import a Wishlist, choose its planned locked Echo targets, and assign it to a Saved Build. Follow the recommendations, or explicitly enable the actions you want automated. Shared builds and Leaderboards show records known to this client.
 
 1. Back up your Nexus folder and WTF with WoW closed before testing.
 2. Open Wishlists, or use /nexus editor. Create a plan or import a Wishlist code.
-3. Check exact qualities/copies and the planned permanent targets. Save it.
+3. Check exact qualities/copies and the planned locked targets. Save it.
 4. Assign that Wishlist to the intended loadout in My Builds.
 5. Review recommendations with Automation OFF first.
 
 A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Snapshot is the saved-run mode. A valid Saved Build proves its identity, contents and owner. Nexus treats no future random Echo roll as guaranteed, for a Snapshot or for a Designed Wishlist.
 
 This is an experimental build. Reading this guide never spends, assigns, activates, or sends a Sync request.]]},
- {id="wishlists",title="Wishlists and permanent targets",text=[[A complete plan can contain up to 79 rolled copies and 6 permanent-slot copies (85 total). Counts are copies, not unique names or list rows. Different qualities remain different targets.
+ {id="wishlists",title="Wishlists and locked targets",text=[[A complete plan can contain up to 79 rolled copies and 6 locked Echo copies (85 total). Counts are copies, not unique names or list rows. Different qualities remain different targets.
 
-Current permanent Echoes are what you actually have. Permanent-slot targets are what the plan wants. A Frozen offer is a temporary offered card kept by the game's Freeze action; it is not a permanent slot.
+Currently locked Echoes are what you actually have. Locked Echo targets are what the plan wants. A Frozen offer is a temporary offered card kept by the game's Freeze action; it is not a locked Echo slot.
 
-Untagged imports use your matching current permanent Echoes by default if that makes a valid 79+6 split. Existing confirmed plans are unchanged. When matching is insufficient, choose and confirm the intended permanent targets in the editor. You do not need to already own a desired plan.
+Untagged imports use your matching currently locked Echoes by default if that makes a valid 79+6 split. Existing confirmed plans are unchanged. When matching is insufficient, choose and confirm the intended locked targets in the editor. You do not need to already own a desired plan.
 
-Import opens a draft. Save writes the plan; assignment selects which Wishlist a loadout uses. Unassign keeps the Wishlist. Nexus-only permanent-role markers should be imported in Nexus, not assumed compatible with every native importer.
+Import opens a draft. Save writes the plan; assignment selects which Wishlist a loadout uses. Unassign keeps the Wishlist. Nexus-only locked-role markers should be imported in Nexus, not assumed compatible with every native importer.
 
 /nexus currentlocks off: choose future untagged plans manually.
-/nexus currentlocks on: use matching permanent targets by default.
+/nexus currentlocks on: use matching locked targets by default.
 
-Opening or confirming targets does not lock/unlock anything. Automatic permanent-slot changes require both Automation and their separate option, plus ownership and safety checks.]]},
- {id="rolling",title="Rolling and settings",text=[[Automation is a master permission, separate from per-action settings. OFF leaves recommendations available; it does not disable build sharing. Enabling automation can use permitted Banish/Reroll/Freeze charges and configured activation, save, or permanent-slot actions.
+Opening or confirming targets does not lock/unlock anything. Automatic locked-Echo slot changes require both Automation and their separate option, plus ownership and safety checks.]]},
+ {id="rolling",title="Rolling and settings",text=[[Automation is a master permission, separate from per-action settings. OFF leaves recommendations available; it does not disable build sharing. Enabling automation can use permitted Banish/Reroll/Freeze charges and configured activation, save, or locked-Echo slot actions.
 
 Take chooses a needed offer. Banish removes an eligible offer. Reroll asks for new choices when enabled. Freeze preserves an eligible offered card. The planner considers remaining needs and choices; it does not always Freeze whenever two wanted cards appear.
 
@@ -50,12 +50,12 @@ DPS capture depends on Details! and its supported events. A read-only Echo list 
 Sync Now checks for shared builds and records. Preparing, request sent, receiving updates, and finished are distinct. Sent does not prove peer convergence. Removing expired requests is bounded queue housekeeping.
 
 The addon uses its normal live sharing network. Do not flood it or test malformed traffic. Older PR #68 peers cannot fully converge on locked-bearing builds; new-peer success must be tested separately.]]},
- {id="orbs",title="Orbs / Lost Memories",text=[[Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace permanent slots. Once rolled targets are complete it stops, even if the plan still has unmet permanent targets.
+ {id="orbs",title="Orbs / Lost Memories",text=[[Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace locked Echo slots. Once rolled targets are complete it stops, even if the plan still has unmet locked targets.
 
 1. Open /nexus orbs. Its Wishlist is the same assignment shown in the main panel. Use My Builds or the Wishlist Editor if none is assigned.
-2. Check missing rolled copies, permanent-target limits, and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
+2. Check missing rolled copies, locked-target limits, and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
 3. Enter the maximum Orbs. Start explicitly approves that maximum and automatic use of eligible surplus copies, including safe recycling. Opening the window approves nothing.
-4. One Start continues after each confirmed result. It stops at target completion, the maximum, insufficient balance, no safe source, or uncertainty. Permanent and required copies stay protected. Advanced provides optional exclusions and read-only Recheck.
+4. One Start continues after each confirmed result. It stops at target completion, the maximum, insufficient balance, no safe source, or uncertainty. Locked and required copies stay protected. Advanced provides optional exclusions and read-only Recheck.
 5. Changing the active loadout, assignment or targets pauses new actions. An already-submitted operation remains bound to its original target. After it settles, explicit Resume adopts the new target and retains all usage against the same maximum.
 
 Starting disables ordinary Automation; it does not automatically re-enable it. The game and other addons' competing pickers must be off. Unknown capabilities disable only Orb mode.
@@ -93,7 +93,7 @@ Prepare full diagnostic report builds a paged report. Select this page and copy 
 Update notices: Nexus shows an update notice only from release information shipped inside this package. It does not check GitHub. Versions that other players' clients state during Sync are not release information and never produce a notice. /nexus update and the menu always open the Releases page. No notice does not mean your build is the latest. Nexus never downloads or installs.
 
 Do not delete saved data or run advanced reset commands on guesswork. Keep a matching addon/WTF backup for rollback with WoW closed. Native timing and recovery are not established by offline tests.]]},
- {id="about",title="About and advanced details",text=[[Ordinary rolling is independently implemented from the supplied LoadoutPilot 1.3.6 / P103 reference. Orb decisions use its MemoryMode source/target/fallback behavior with Nexus-specific exact-quality, permanent-role, approval, budget, and confirmation safeguards.
+ {id="about",title="About and advanced details",text=[[Ordinary rolling is independently implemented from the supplied LoadoutPilot 1.3.6 / P103 reference. Orb decisions use its MemoryMode source/target/fallback behavior with Nexus-specific exact-quality, locked-role, approval, budget, and confirmation safeguards.
 
 The reference archive is not a second runtime dependency. Source and reuse notices are in THIRD_PARTY.md. Neither algorithm is claimed mathematically optimal or universally safe without matching client evidence.
 

@@ -117,7 +117,7 @@ local function counts(line, label, value, limit)
         return
     end
     local text = label .. ": " .. tostring(value.ordinary or "?") .. " ordinary, "
-        .. tostring(value.locked or "?") .. " permanent, "
+        .. tostring(value.locked or "?") .. " locked, "
         .. tostring(value.total or "?") .. " total"
     if type(limit) == "table" then
         text = text .. " (limits " .. tostring(limit.ordinary) .. "/"
@@ -214,7 +214,7 @@ function M.Summary(selection)
     local semantic = limits()
     if semantic then
         add("Supported envelope: " .. tostring(semantic.ordinary) .. " ordinary, "
-            .. tostring(semantic.locked) .. " permanent, "
+            .. tostring(semantic.locked) .. " locked, "
             .. tostring(semantic.total) .. " total copies")
     end
     add("Session incidents retained: " .. #incidents)

@@ -284,14 +284,14 @@ function Controller.New(options)
         end
         if metrics.untrustedOverflowSkipped > 0 then
             notify(string.format(
-                "|cffff6060Nexus:|r This import exceeds %d rolled copies, and %d copies could not be assigned a permanent role. "
-                    .. "Keep the original build. Review and confirm the intended permanent targets before saving; do not delete the original to clear this message.",
+                "|cffff6060Nexus:|r This import exceeds %d rolled copies, and %d copies could not be assigned a locked role. "
+                    .. "Keep the original build. Review and confirm the intended locked targets before saving; do not delete the original to clear this message.",
                 MAX_WISHLIST_ECHOES, metrics.untrustedOverflowSkipped))
         end
         if metrics.swapPairs > 0 then
             notify(string.format(
-                "|cff4dff80Nexus:|r This plan has %d permanent target%s different from your current permanent Echoes (gold in the target strip). "
-                    .. "Choosing targets changes no owned Echoes. Review any replacement yourself, or use permanent-slot automation only with both Automation and that option enabled.",
+                "|cff4dff80Nexus:|r This plan has %d locked target%s different from your currently locked Echoes (gold in the target strip). "
+                    .. "Choosing targets changes no owned Echoes. Review any replacement yourself, or use locked-Echo slot automation only with both Automation and that option enabled.",
                 metrics.swapPairs, metrics.swapPairs == 1 and "" or "s"))
         end
         if metrics.lockDesignCollisions > 0 then
@@ -304,7 +304,7 @@ function Controller.New(options)
         if metrics.lockBudgetExceeded > 0 then
             notify(string.format(
                 "|cffff6060Nexus:|r this build asks for %d more locked-design Echoes than the account's "
-                    .. "%d permanent slots can ever hold -- they were left out entirely, not just queued.",
+                    .. "%d locked Echo slots can ever hold -- they were left out entirely, not just queued.",
                 metrics.lockBudgetExceeded, MAX_LOCK_SLOTS))
         end
     end
@@ -697,8 +697,8 @@ function Controller.New(options)
             state.assigningLockSlot = true
             state.replacingSpellId = spellId
             notify("|cff4dff80Nexus:|r click an Echo in either list to plan its "
-                .. "replacement. Your current one remains in its permanent slot. Automatic changes require "
-                .. "both Automation and permanent-slot management ON, plus the acquired target and safety checks.")
+                .. "replacement. Your current one remains in its locked Echo slot. Automatic changes require "
+                .. "both Automation and locked-Echo slot management ON, plus the acquired target and safety checks.")
         end
         TouchPresentation()
         return state.assigningLockSlot
@@ -1153,7 +1153,7 @@ function Controller.New(options)
             state.candidateContext = nil
             state.candidateApplyToken = nil
             notify("|cff4dff80Nexus:|r Wishlist saved ("
-                .. DraftModel.EchoListTotal(echoes) .. "/79 rolled copies; planned permanent targets are separate).")
+                .. DraftModel.EchoListTotal(echoes) .. "/79 rolled copies; planned locked targets are separate).")
             return true
         end
         if tostring(err) == "spacing" then

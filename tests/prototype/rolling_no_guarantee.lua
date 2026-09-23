@@ -85,12 +85,12 @@ end
 local one=Copies({[1001]=1},{})
 assert(one.type=='take' and one.spellId==1001 and one.outstanding==2,'one rolled copy of two leaves one copy and the other target outstanding')
 local both=Copies({[1001]=1},{[1001]=1})
-assert(both.outstanding==1 and both.annotations[1]=='target satisfied' and both.reasonCode~='SELECT_OUTSTANDING_WISHLIST','one rolled plus one permanent copy satisfies exactly two; the card is no longer a wanted Echo')
+assert(both.outstanding==1 and both.annotations[1]=='target satisfied' and both.reasonCode~='SELECT_OUTSTANDING_WISHLIST','one rolled plus one locked copy satisfies exactly two; the card is no longer a wanted Echo')
 local doubled=Copies({[1001]=2},{[1001]=2})
 assert(doubled.outstanding==1,'surplus copies never reduce another target')
 local sibling=Copies({[1011]=2},{},{{spellId=1011},{spellId=1003},{spellId=1004}})
 assert(sibling.outstanding==3 and sibling.annotations[1]=='filler','a different-quality sibling neither satisfies nor counts as the requested exact Echo')
-print('PASS exact copies and quality; rolled and permanent ownership each subtract once')
+print('PASS exact copies and quality; rolled and locked ownership each subtract once')
 
 -- 5. Observed board state is kept; it is not an inferred future roll.
 local held=P.Decide(Base({activeRow=saved,cards={{spellId=1001,isFrozen=true},{spellId=1002},{spellId=1003}}}))

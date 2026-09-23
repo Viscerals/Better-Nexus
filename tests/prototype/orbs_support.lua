@@ -5,7 +5,7 @@ H.AddEcho(410003,'Disposable B',0,4,4102)
 H.AddEcho(410004,'Desired B',3,2,4103)
 H.AddEcho(410005,'Protected low',0,3,4104)
 H.AddEcho(410006,'Excess high',3,3,4104)
-H.AddEcho(410007,'Permanent',2,1,4105)
+H.AddEcho(410007,'Locked',2,1,4105)
 H.AddEcho(410008,'Unsafe fallback',1,1,4106)
 H.granted={['Disposable A']={{spellId=410001,quality=1}},['Disposable B']={{spellId=410003,quality=0}}}
 H.orbs={charges=10,known=true,offer=false,mode='accept',requests=0}

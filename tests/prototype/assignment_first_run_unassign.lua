@@ -36,11 +36,11 @@ end
 assert(row,'actual catalog row');row:Click()
 local empty
 for _,f in ipairs(H.frames)do if f:IsVisible() and f.slotState=='empty' then empty=f;break end end
-assert(empty,'actual permanent-slot picker');empty:Click()
+assert(empty,'actual locked-Echo slot picker');empty:Click()
 for _,f in ipairs(H.frames)do
  if f.kind=='Button' and f:IsVisible() and f.status and f.data and f.data.spellId==200767 then row=f;break end
 end
-assert(row.data.spellId==200767,'actual permanent-target catalog row');row:Click()
+assert(row.data.spellId==200767,'actual locked-target catalog row');row:Click()
 NexusWishlistNameInput:SetText(NAME);button('Create Wishlist'):Click()
 assert(H.popup and H.popup.which=='WISHLISTREALIZER_CREATE_WISHLIST');H.AcceptPopup()
 assert(#H.actions==1 and H.actions[1][1]=='upload','actual create submits one source')
@@ -76,7 +76,7 @@ assert(a.state=='unassigned','explicit first-run Unassign must be unassigned, no
 assert(not state.firstRunWishlist and state.loadoutWishlists[1]==nil,'explicit Unassign removes only its own first-Saved-Build handoff')
 assert(#H.actions==1,'Unassign submits no upload or gameplay action')
 assert(T.Equal(slots,H.perks.serverBuildSlots),'Unassign preserves the server Wishlist')
-assert(T.Equal(original.lockDesignTargetsBySlot,state.lockDesignTargetsBySlot),'Unassign keeps the exact permanent-target design')
+assert(T.Equal(original.lockDesignTargetsBySlot,state.lockDesignTargetsBySlot),'Unassign keeps the exact locked-target design')
 unassigned('after click')
 local cleared=H.Clone(NexusDB)
 H=boot(H.Clone(cleared),H.Clone(slots));unassigned('reloaded')

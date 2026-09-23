@@ -373,7 +373,7 @@ function M.Refresh()
                     and (fallbackOwner.bySpell[e.spellId]
                         or fallbackOwner.bySpell[tostring(e.spellId)])) or 0
             local nm = e.name or ("spell " .. tostring(e.spellId))
-            if e.locked then nm = nm .. " |cffb266ff(permanent target)|r" end
+            if e.locked then nm = nm .. " |cffb266ff(locked target)|r" end
             local suffix = (want > 1 or e.locked)
                 and string.format(" (%d/%d)", math.min(have, want), want) or ""
             local text, red, green, blue

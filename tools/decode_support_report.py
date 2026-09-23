@@ -196,7 +196,10 @@ def load(path: pathlib.Path) -> dict:
         raise SystemExit(f'{path}: cannot be read: {error}')
     if len(raw) > MAX_BYTES:
         raise SystemExit(f'{path}: larger than the {MAX_BYTES} byte bound this reader accepts')
-    text = raw.decode('utf-8', 'replace')
+    # 'surrogateescape', not 'replace': a byte the file carries literally is
+    # kept as the byte it is, exactly as a \ddd escape is, so the checksum
+    # counts what WoW wrote instead of accusing the copy of tampering.
+    text = raw.decode('utf-8', 'surrogateescape')
     # The assignment must be a statement, not a mention. A copy of the text
     # inside a comment or inside another variable's string is not what Lua
     # would assign, so it is not what this tool reads either.

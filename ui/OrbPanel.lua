@@ -136,7 +136,7 @@ local function refresh()
     frame.targets:SetText(s.progress and (s.progress.rolledMissing.." rolled target copies still missing")
         or a.note or "Assign a Wishlist through My Builds to begin.")
     local permanent=s.progress and s.progress.permanentMissing
-    frame.permanent:SetText(permanent and permanent>0 and (permanent.." permanent target copies remain. Orbs cannot change permanent slots.")or "")
+    frame.permanent:SetText(permanent and permanent>0 and (permanent.." locked target copies remain. Orbs cannot change locked Echo slots.")or "")
     frame.balance:SetText(s.charges~=nil and ("Confirmed Orb balance: "..s.charges)
         or ("Orb balance: "..(s.balanceState or "unknown")..". "..(s.balanceReason or "")))
     if s.state~="FINISHED" then confirmNewRun=false end

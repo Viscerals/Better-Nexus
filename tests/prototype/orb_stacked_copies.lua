@@ -27,7 +27,7 @@ ordinary[1]={spellId=QUICK,quality=1,stacks=2};ordinary[2]={spellId=DOUBLE,quali
 for i=1,67 do ordinary[#ordinary+1]={spellId=200000+i,quality=i%4,stacks=1}end
 for i=1,6 do permanent[i]={spellId=200070+i,quality=(70+i)%4,stacks=1,locked=true}end
 local copies=0;for _,e in ipairs(ordinary)do copies=copies+e.stacks end
-assert(#ordinary==69 and copies==79 and #ordinary+#permanent==75,'fixture: 69 ordinary entries = 79 copies, +6 permanent = 75 entries')
+assert(#ordinary==69 and copies==79 and #ordinary+#permanent==75,'fixture: 69 ordinary entries = 79 copies, +6 locked = 75 entries')
 for _,e in ipairs(ordinary)do granted[H.names[e.spellId]]={{spellId=e.spellId,quality=e.quality,stacks=e.stacks}}end
 for _,e in ipairs(permanent)do locked[H.names[e.spellId]]={{spellId=e.spellId,quality=e.quality}}end
 H.granted=granted;H.locked=locked
@@ -53,14 +53,14 @@ local st=M.Status(true)
 local bySpell={};for _,r in ipairs(st.sources)do bySpell[r.spellId]=r end
 assert(bySpell[DOUBLE] and bySpell[DOUBLE].count==10 and bySpell[DOUBLE].excess==6,'the x10 stack is read as 10 copies with 6 safe: '..tostring(bySpell[DOUBLE] and bySpell[DOUBLE].excess))
 assert(bySpell[QUICK]==nil,'the x2 stack needed by the plan is protected')
-for _,e in ipairs(permanent)do assert(bySpell[e.spellId]==nil,'permanent copies are never sources')end
+for _,e in ipairs(permanent)do assert(bySpell[e.spellId]==nil,'locked copies are never sources')end
 assert(s.canStart==true,'Start is available with the stacked shape: '..tostring(s.startReason))
 assert(#H.actions==0,'opening and reading send nothing')
 -- One explicit Start: one fake spend of a safe copy; never the protected stack or a permanent copy.
 assert(M.SetLimit(1));assert(M.Start())
 assert(H.Count('orb-spend')==1,'one spend')
 assert(O.source~=QUICK,'the protected x2 stack is not spent')
-for _,e in ipairs(permanent)do assert(O.source~=e.spellId,'no permanent copy is spent')end
+for _,e in ipairs(permanent)do assert(O.source~=e.spellId,'no locked copy is spent')end
 assert(NexusDB.chars[Nexus.Store.CurrentOwnerKey()].orbRefinement.pending,'the receipt of that spend is durable')
 assert(s.persistence.mode=='durable' and s.persistence.rowPresent==true,'assignment already created the durable row')
-print('PASS orb_stacked_copies: 75 saved entries = 79 ordinary + 6 permanent copies; desired Wishlist separate; stacks counted as copies')
+print('PASS orb_stacked_copies: 75 saved entries = 79 ordinary + 6 locked copies; desired Wishlist separate; stacks counted as copies')

@@ -105,9 +105,9 @@ local function Accepted(name,source,ordinary,locked)
  local record=assert(C.Get(status.id),name..': stored record')
  assert(Copies(record.echoes)==ordinary and Copies(record.lockedEchoes)==locked,name..': exact role copy counts '..Copies(record.echoes)..'/'..Copies(record.lockedEchoes))
  assert(Population(record.echoes)==Population(source,false),name..': exact ordinary ID, quality and copies')
- assert(Population(record.lockedEchoes)==Population(source,true),name..': exact permanent ID, quality and copies')
- for _,e in ipairs(record.echoes)do assert(e.locked==nil or e.locked==false,name..': no permanent row in the ordinary identity list')end
- for _,e in ipairs(record.lockedEchoes or {})do assert(e.locked==true,name..': permanent rows stay marked')end
+ assert(Population(record.lockedEchoes)==Population(source,true),name..': exact locked ID, quality and copies')
+ for _,e in ipairs(record.echoes)do assert(e.locked==nil or e.locked==false,name..': no locked row in the ordinary identity list')end
+ for _,e in ipairs(record.lockedEchoes or {})do assert(e.locked==true,name..': locked rows stay marked')end
  assert(#puts==1 and #shares==1 and shares[1].id==status.id,name..': one local write, one transport hand-off')
  assert(Copies(shares[1].echoes)==ordinary and Copies(shares[1].lockedEchoes)==locked,name..': transport receives the same roles')
  assert(final.ordinaryCopies==ordinary and final.permanentCopies==locked,name..': status states the real role counts')
@@ -137,7 +137,7 @@ for _,case in ipairs({{78,6},{79,6},{41,6},{41,0},{1,1}})do
  local before=H.Clone(H.perks.serverBuildSlots)
  local _,label=Share(name,name)
  Accepted(name,rows,case[1],case[2])
- if case[2]>0 then assert(label:find(case[1]..' / 79 + '..case[2]..' / 6 permanent',1,true),'source menu states both role counts: '..label)
+ if case[2]>0 then assert(label:find(case[1]..' / 79 + '..case[2]..' / 6 locked',1,true),'source menu states both role counts: '..label)
  else assert(label:find(case[1]..' / 79',1,true) and not label:find('permanent',1,true),label)end
  assert(T.Equal(before,H.perks.serverBuildSlots) and #H.actions==0,name..': source and game state untouched')
  print('PASS '..name..': roles preserved through the real form, catalog and transport hand-off')
@@ -158,7 +158,7 @@ rows[22]={spellId=200120,quality=2,stacks=3,locked=true};rows[23]={spellId=20013
 Boot(Slot('ROLES-STACKS',rows));Share('ROLES-STACKS','ROLES-STACKS')
 local record=Accepted('counted stacks',rows,79,6)
 assert(#record.echoes==21 and #record.lockedEchoes==2,'rows are not expanded, merged across roles or trimmed')
-print('PASS counted stacks: 79 ordinary / 6 permanent copies exact')
+print('PASS counted stacks: 79 ordinary / 6 locked copies exact')
 
 -- 4. Separate-role source (the Saved Build shape), through the real public entry.
 local ordinary,permanent=Rows(78,0),Rows(0,6,nil,200500)
@@ -170,7 +170,7 @@ assert(ok,'separate-role source accepted')
 local all={};for _,e in ipairs(ordinary)do all[#all+1]=e end;for _,e in ipairs(permanent)do all[#all+1]=e end
 Accepted('separate lists',all,78,6)
 assert(T.Equal(source,baseline),'the selected source table is not modified')
-print('PASS separate permanent list')
+print('PASS separate locked list')
 
 -- 5. Duplicate representation. The same permanent population stated inline and
 -- separately is counted once. Two different statements are refused, not summed.
@@ -190,20 +190,20 @@ rows=Rows(86,0,true)
 Boot(Slot('ROLES-86-ORDINARY',rows));local before=H.Clone(H.perks.serverBuildSlots)
 assert(Nexus.PeerDebug.Start('')~=false)
 local p=Share('ROLES-86-ORDINARY','ROLES-86-ORDINARY')
-print('MESSAGE '..Refused('86 explicit ordinary: no role choice can help',p,before,'86 ordinary and 0 permanent','(86 total)','79 ordinary, 6 permanent and 85 total'))
+print('MESSAGE '..Refused('86 explicit ordinary: no role choice can help',p,before,'86 ordinary and 0 locked','(86 total)','79 ordinary, 6 locked and 85 total'))
 assert(Nexus.PeerDebug.Report():find('SEMANTIC_ENVELOPE ordinary=86 permanent=0 total=86',1,true),'the raw code and counts stay in the diagnostic report')
 rows=Rows(80,5)
 Boot(Slot('ROLES-80-5',rows));before=H.Clone(H.perks.serverBuildSlots)
 p=Share('ROLES-80-5','ROLES-80-5')
-Refused('80 ordinary / 5 permanent',p,before,'80 ordinary and 5 permanent')
+Refused('80 ordinary / 5 locked',p,before,'80 ordinary and 5 locked')
 Boot(Slot('UNUSED',Rows(3,0)));before=H.Clone(H.perks.serverBuildSlots)
 accepted,message=Nexus.CommunityBuilds.PostCurrentWishlist('ROLES-7','Synthetic',{name='ROLES-7',echoes=Rows(40,7)},'MAGE')
-assert(accepted==false and message:find('40 ordinary and 7 permanent',1,true) and #puts==0,'seven permanent copies are refused, none dropped: '..tostring(message))
+assert(accepted==false and message:find('40 ordinary and 7 locked',1,true) and #puts==0,'seven locked copies are refused, none dropped: '..tostring(message))
 -- 84 copies with no role stated anywhere: not 84 ordinary, not a guess.
 rows=Rows(84,0)
 Boot(Slot('ROLES-UNSTATED',rows));before=H.Clone(H.perks.serverBuildSlots)
 p=Share('ROLES-UNSTATED','ROLES-UNSTATED')
-local unresolved=Refused('84 unstated',p,before,'has 84 Echo copies','does not say which copies are permanent','at most 79 ordinary copies','Missing evidence:','Wishlist Editor and choose its permanent Echoes','active loadout','Nothing was shared')
+local unresolved=Refused('84 unstated',p,before,'has 84 Echo copies','does not say which copies are locked','at most 79 ordinary copies','Missing evidence:','Wishlist Editor and choose its locked Echoes','active loadout','Nothing was shared')
 print('MESSAGE '..unresolved)
 print('PASS refusals: before acceptance, real counts, draft and source kept')
 
@@ -240,8 +240,8 @@ rows=Rows(84,0,true)
 Boot(Slot('ROLES-ALL-FALSE',rows));before=H.Clone(H.perks.serverBuildSlots)
 p=Share('ROLES-ALL-FALSE','ROLES-ALL-FALSE')
 -- Review N2 (P2): not a counts-only refusal. It names the missing role information and the supported ways.
-local allFalse=Refused('84 explicit false, unconfirmed',p,before,'has 84 Echo copies','marks all of them as ordinary, which is not role information','up to 6 of them must be permanent Echoes','Missing evidence:','Wishlist Editor and choose its permanent Echoes','active loadout')
-assert(not allFalse:find('84 ordinary and 0 permanent',1,true),'not the counts-only message')
+local allFalse=Refused('84 explicit false, unconfirmed',p,before,'has 84 Echo copies','marks all of them as ordinary, which is not role information','up to 6 of them must be locked Echoes','Missing evidence:','Wishlist Editor and choose its locked Echoes','active loadout')
+assert(not allFalse:find('84 ordinary and 0 locked',1,true),'not the counts-only message')
 assert(Nexus.PeerDebug.Start('')~=false);p._postGoBtn:Click()
 assert(Nexus.PeerDebug.Report():find('roles unresolved (ordinary=84 permanent=0 total=84)',1,true),'the counts stay in the diagnostic record')
 A=Nexus.GameAdapter;candidate=nil
@@ -276,7 +276,7 @@ assert(candidate.echoes[1].spellId==200401 and A.ConfirmWishlistRoles(candidate,
 p._postTitleBox:_NexusSetRawText('ROLES-STALE');printed={}
 local real=print;print=function(...)local t={};for i=1,select('#',...)do t[#t+1]=tostring((select(i,...)))end;printed[#printed+1]=table.concat(t,' ')end
 p._postGoBtn:Click();print=real
-assert(Nexus.CommunityBuilds.ShareStatus()==nil and #puts==0 and printed[#printed]:find('does not say which copies are permanent',1,true),'roles of other content are not applied: '..tostring(printed[#printed]))
+assert(Nexus.CommunityBuilds.ShareStatus()==nil and #puts==0 and printed[#printed]:find('does not say which copies are locked',1,true),'roles of other content are not applied: '..tostring(printed[#printed]))
 print('PASS stale selection: roles of other content on the same slot are refused')
 
 -- 11. Review F6: the adapter omitted an unreadable server row. The rest is not the complete source.
@@ -284,7 +284,7 @@ rows=Rows(40,6);rows[46].spellId='not-a-number'
 Boot(Slot('ROLES-INCOMPLETE',rows));before=H.Clone(H.perks.serverBuildSlots)
 p=Share('ROLES-INCOMPLETE','ROLES-INCOMPLETE')
 Refused('unreadable server row',p,before,'cannot be read','not complete')
-print('PASS incomplete mirror is refused; no permanent row is dropped silently')
+print('PASS incomplete mirror is refused; no locked row is dropped silently')
 
 -- 12. Review F7/F8/F12: every row is checked before acceptance; a hole hides nothing.
 Boot(Slot('UNUSED',Rows(3,0)))
@@ -306,7 +306,7 @@ bad=Rows(10,0);bad[6].locked='yes'
 Direct('ROLES-TEXT-FLAG',{name='ROLES-TEXT-FLAG',echoes=bad},'cannot be read')
 bad=Rows(10,0);bad[12]={spellId=200012,quality=0,stacks=1}                       -- hole at 11
 Direct('ROLES-SPARSE',{name='ROLES-SPARSE',echoes=bad},'cannot be read')
-Direct('ROLES-BAD-PERMANENT',{name='ROLES-BAD-PERMANENT',echoes=Rows(10,0),lockedEchoes={{spellId=-4,stacks=1}}},'permanent Echo row that cannot be read')
+Direct('ROLES-BAD-PERMANENT',{name='ROLES-BAD-PERMANENT',echoes=Rows(10,0),lockedEchoes={{spellId=-4,stacks=1}}},'locked Echo row that cannot be read')
 -- locked=1 is the second spelling the catalog's own envelope reads as permanent.
 local one=Rows(10,0);one[11]={spellId=200011,quality=1,stacks=2,locked=1}
 assert(Nexus.CommunityBuilds.PostCurrentWishlist('ROLES-ONE','Synthetic',{name='ROLES-ONE',echoes=one},'MAGE'))
@@ -325,7 +325,7 @@ Direct('ROLES-FRACTION-KEY',{name='ROLES-FRACTION-KEY',echoes=bad},'cannot be re
 Direct('ROLES-LIST-IS-TEXT',{name='ROLES-LIST-IS-TEXT',echoes=Rows(10,0),lockedEchoes='200011'},'form that cannot be read')
 bad=Rows(10,0);bad[4].stacks=false
 Direct('ROLES-FALSE-COPIES',{name='ROLES-FALSE-COPIES',echoes=bad},'cannot be read')
-Direct('ROLES-HOLE-IN-PERMANENT',{name='ROLES-HOLE-IN-PERMANENT',echoes=Rows(10,0),lockedEchoes={[2]={spellId=200011,quality=1,stacks=1}}},'permanent Echo row that cannot be read')
+Direct('ROLES-HOLE-IN-PERMANENT',{name='ROLES-HOLE-IN-PERMANENT',echoes=Rows(10,0),lockedEchoes={[2]={spellId=200011,quality=1,stacks=1}}},'locked Echo row that cannot be read')
 print('PASS array shape')
 
 -- 14. Review F9 / N4 / mutant n12: qualities. The harness catalog states quality i%4 for Echo i; this source states another.

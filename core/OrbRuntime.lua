@@ -382,7 +382,7 @@ local function preflight(automatic,m)
     local err;if not m then m,err=inspect();if not m then return nil,err end end
     if not entriesStillMatch(m.assignment) then return nil,"The selected Wishlist changed or is unavailable. Choose it again before starting." end
     if m.progress.rolledMissing==0 then
-        return nil,m.progress.permanentMissing>0 and "Rolled targets are complete. Remaining permanent-slot targets cannot be changed by Orbs; no spend will start."
+        return nil,m.progress.permanentMissing>0 and "Rolled targets are complete. Remaining locked Echo targets cannot be changed by Orbs; no spend will start."
             or "All rolled targets are already complete. No Orbs are needed."
     end
     for _,t in ipairs(m.progress.items) do
@@ -402,7 +402,7 @@ local function preflight(automatic,m)
     if not automatic then
         for k,n in pairs(config.sources) do if n>0 and not permitted[k] then return nil,"An approved source is no longer safe. Review the replacement pool." end end
     end
-    if capacity<1 then return nil,"No safe surplus copies are available. Required and permanent copies remain protected." end
+    if capacity<1 then return nil,"No safe surplus copies are available. Required and locked copies remain protected." end
     m.permitted=permitted;m.capacity=capacity;return m
 end
 function M.Prepare(mode)
@@ -503,7 +503,7 @@ local function finishResult(s,p)
     if p.restored and not p.baselineStamp then p.baselineStamp=s.grantStamp;return false end
     local fresh=s.grantStamp>(p.restored and p.baselineStamp or p.selectionStamp or p.beforeStamp)
     if s.offerPending or #s.board>0 or s.hostPending then return false end
-    if s.lockedKey~=p.lockedKey then pause("Permanent Echoes changed during the operation. Resolve the result manually.");return false end
+    if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed during the operation. Resolve the result manually.");return false end
     if s.charges~=p.chargesBefore-1 then return false end
     local gained,status=P.SingleGain(p.before,p.removed,s.granted)
     if status=="WAIT" then return false end
@@ -545,7 +545,7 @@ local function finishResult(s,p)
     end
     if progress.rolledMissing==0 then
         terminal(progress.permanentMissing==0 and "COMPLETE" or "ROLLED_COMPLETE",
-            progress.permanentMissing==0 and "All selected targets are complete." or "Rolled targets are complete. Remaining permanent targets are unchanged; no more Orbs will be spent.")
+            progress.permanentMissing==0 and "All selected targets are complete." or "Rolled targets are complete. Remaining locked targets are unchanged; no more Orbs will be spent.")
     elseif run.spent+run.reserved>=run.limit and run.state~="STOPPED"
         and finishedLimit() then
         -- The approved maximum is reached and this result settled it. There is
@@ -722,7 +722,7 @@ local RECOVERY_TEXT={
     WAIT_RESULT="A choice for the earlier Orb action is recorded. Nexus is waiting for a fresh ownership response that matches it exactly. Recheck requests one. Nothing will be sent.",
     WAIT_OFFER="The earlier Orb action is unresolved and no Orb offer is open. If the game opens an offer that matches the saved record and you choose in the game's offer window, Nexus records that choice at the moment you make it, unless another game action is in flight at that moment. Nexus cannot tell whether the game refused the spend."..KEPT,
     WAIT_OFFER_BLIND="The earlier Orb action is unresolved and no Orb offer is open. This client cannot observe a manual choice, so Nexus cannot confirm the earlier action if its offer opens later."..KEPT..NO_EXIT,
-    PERMANENT_CHANGED="Permanent Echoes changed since the earlier Orb action. Nexus cannot confirm that action."..KEPT..NO_EXIT,
+    PERMANENT_CHANGED="Locked Echoes changed since the earlier Orb action. Nexus cannot confirm that action."..KEPT..NO_EXIT,
     LOADOUT="The original loadout of the earlier Orb action cannot be verified. Nexus cannot confirm that action."..KEPT..NO_EXIT,
     UNOBSERVABLE="The earlier Orb action ended while Nexus could not observe it. The game gives no record of which choice belonged to it, so Nexus cannot confirm it, and Recheck cannot settle it. The record, its spending exposure, and the block on new Orb runs and ordinary rolling are kept. Nothing is retried, refunded or deleted."..NO_EXIT,
 }
@@ -796,7 +796,7 @@ function M.Pump(passive)
             if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
                 finishResult(s,p);return
             end
-            if s.lockedKey~=p.lockedKey then pause("Permanent Echoes changed; no further Orb action will be submitted.");return end
+            if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed; no further Orb action will be submitted.");return end
             if not observeLifecycle(s,p) then return end
             if not p.spendConfirmed and s.charges==p.chargesBefore-1 and s.offerPending then
                 p.spendConfirmed=true;run.spent=run.spent+1;run.reserved=0
@@ -862,7 +862,7 @@ function M.Pump(passive)
         local progress=P.Progress(run.targets,s)
         if progress.rolledMissing==0 then
             terminal(progress.permanentMissing==0 and "COMPLETE" or "ROLLED_COMPLETE",
-                progress.permanentMissing==0 and "All selected targets are complete." or "Rolled targets are complete; Orbs cannot change the remaining permanent targets.");return
+                progress.permanentMissing==0 and "All selected targets are complete." or "Rolled targets are complete; Orbs cannot change the remaining locked targets.");return
         end
         for _,target in ipairs(progress.items) do
             local row=s.catalog[target.spellId]
@@ -882,7 +882,7 @@ function M.Pump(passive)
         local safe=P.Sources(run.targets,s,run.excluded)
         for _,r in ipairs(safe) do if r.key==run.recycleKey then source=r;break end end
         if not source then for _,r in ipairs(safe) do if run.automatic or (run.remaining[r.key] or 0)>0 then source=r;break end end end
-        if not source then terminal("NO_SOURCES","No safe surplus source copies remain. Required and permanent copies stay protected.");return end
+        if not source then terminal("NO_SOURCES","No safe surplus source copies remain. Required and locked copies stay protected.");return end
         local recycle=source.key==run.recycleKey
         run.opSerial=(run.opSerial or 0)+1
         p={before=copy(s.granted),lockedKey=s.lockedKey,removed=source.key,chargesBefore=s.charges,

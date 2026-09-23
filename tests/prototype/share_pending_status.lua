@@ -220,7 +220,7 @@ assert(chosenSource,'fixture: the oversized source is listed');chosenSource:Clic
 p._postTitleBox:_NexusSetRawText('REFUSED-CLICK')
 lines=Captured(function()p._postGoBtn:Click()end)
 local refusal=p._shareStatus:GetText()
-assert(refusal:find('86 ordinary and 0 permanent',1,true) and lines[1]:find('86 ordinary',1,true),'fixture: a click-time refusal is shown in the form: '..tostring(refusal))
+assert(refusal:find('86 ordinary and 0 locked',1,true) and lines[1]:find('86 ordinary',1,true),'fixture: a click-time refusal is shown in the form: '..tostring(refusal))
 -- Ordinary refreshes of every kind: explicit refresh, window open/close, frames, an incoming catalog commit.
 Nexus.CommunityBuilds.Refresh();Nexus.CommunityBuilds.Show();Nexus.CommunityBuilds.Hide();Nexus.CommunityBuilds.Refresh()
 local ticket=S.Incoming(H,C);T.Until(H,function()return ticket.committed end)

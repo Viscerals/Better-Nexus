@@ -79,9 +79,11 @@ assert(popup and popup.which=='NEXUS_UPDATE_RELEASES' and popup.url=='https://gi
 assert(Chat('Releases page: https://github.com/Viscerals/Better-Nexus/releases')==1)
 print('PASS unknown status and manual link before catalog completion')
 
--- 3. The real path: test.9027 receives the real test.9028 request. Since 2026-09-21 a peer
--- version is a diagnostic observation only: no chat, no popup text, no menu state, no badge,
--- nothing saved (native report: a peer stating 1.96.6 was announced as a newer release).
+-- 3. The real path: test.9027 receives the real test.9028 request. Since 2026-09-23
+-- a qualifying same-series public test is shown as an explicitly UNVERIFIED hint:
+-- never a candidate, never saved, never a GitHub check and never a peer link.
+-- Anything that is not that exact shape stays completely silent (native report:
+-- a peer stating 1.96.6 was announced as a newer release; still refused below).
 Ready()
 local function NoNotice(why)
  local s=Nexus.Updates.Status()
@@ -89,46 +91,92 @@ local function NoNotice(why)
  assert(Nexus.Updates.GetVisibleNotice()==nil and Nexus.Updates.GetCandidate()==nil,why..': no visible notice, no candidate')
  assert(Chat('newer Nexus')==0 and Chat('was reported')==0 and Chat('available:')==0,why..': no update chat line')
  assert(NexusDB.updateAdvisory==nil and NexusDB.updateNotice==nil,why..': nothing is saved as an advisory or a notice')
+ assert(Nexus.Updates.PublicTestHint()==nil,why..': and no public-test hint either')
  return s
+end
+-- A hint, and none of the things a hint must never become.
+local function HintOnly(display,why)
+ local s=Nexus.Updates.Status()
+ local hint=Nexus.Updates.PublicTestHint()
+ assert(hint,why..': a qualifying announcement is shown as a hint: '..s.detail)
+ assert(hint.display==display and hint.verified==false and hint.authority=='peer-report-unverified',
+  why..': the hint states exactly what it is: '..tostring(hint.display)..' / '..tostring(hint.authority))
+ assert(Nexus.Updates.GetCandidate()==nil and Nexus.Updates.GetVisibleNotice()==nil,
+  why..': a hint is never a candidate and never a trusted notice')
+ assert(NexusDB.updateAdvisory==nil and NexusDB.updateNotice==nil and NexusDB.updateDismissed==nil,
+  why..': and nothing about it is written to saved data')
+ assert(s.detail:find('not checked against GitHub',1,true) and not s.detail:lower():find('up to date',1,true),
+  why..': the status says it was not checked: '..s.detail)
+ assert(s.url=='https://github.com/Viscerals/Better-Nexus/releases',why..': the configured Releases page only')
+ return s,hint
 end
 local function Observed(source)
  for _,row in ipairs(Nexus.Updates.PeerObservations())do if row.source==source or row.source:sub(1,#source+1)==source..'-' then return row end end
 end
 assert(Deliver(request28,'TesterB'),'the inbound decoder accepts the request')
-status=NoNotice('same-series test.9028 from one peer')
+local hint
+status,hint=HintOnly('1.20.0-beta.1 test.9028','same-series test.9028 from one peer')
+assert(status.state=='hint' and status.candidate==nil,'the state is the hint, never "available": '..status.detail)
+assert(status.menu=='Newer public test reported: 1.20.0-beta.1 test.9028 (unverified)','the menu says it is unverified: '..status.menu)
 local row=assert(Observed('TesterB'),'the peer version is kept as a bounded diagnostic observation')
 assert(row.version=='1.20.0-beta.1+test.9028' and row.authority=='peer-observation' and row.reported=='test','the observation states what the peer said and its shape, not release evidence')
-assert(status.detail:find('not release information',1,true) and status.detail:find('not proof that this build is the latest',1,true)
- and not status.detail:lower():find('up to date',1,true),'unknown is honest: neither available nor latest: '..status.detail)
+assert(Chat('UNVERIFIED')==1 and Chat('available:')==0,'one unverified hint line, and no trusted-release wording')
+assert(LastChat('UNVERIFIED'):find('1.20.0-beta.1 test.9028',1,true) and not LastChat('UNVERIFIED'):lower():find('http',1,true),
+ 'the line names the reported build and carries no link: '..tostring(LastChat('UNVERIFIED')))
 for i=1,12 do assert(Deliver(request28,'Crowd'..i))end
-NoNotice('many agreeing peers')
+HintOnly('1.20.0-beta.1 test.9028','many agreeing peers')
+assert(Chat('UNVERIFIED')==1,'twelve peers repeating it add no further chat line')
 assert(#Nexus.Updates.PeerObservations()>=13,'every peer is still observed')
+assert(NexusPanel._menuBtn:GetText()~='!','an unverified hint never raises the trusted HUD badge')
 Nexus.Panel.ShowUpdateStatus()
-assert(popup.url=='https://github.com/Viscerals/Better-Nexus/releases' and popup.text:find('no release information',1,true)
- and not popup.text:find('test.9028',1,true),'the popup: installed build, honest unknown, local link; no peer version')
+assert(popup.url=='https://github.com/Viscerals/Better-Nexus/releases'
+ and popup.text:find('Newer public test reported: 1.20.0-beta.1 test.9028',1,true)
+ and popup.text:find('Reported by another client; not checked against GitHub',1,true)
+ and popup.text:find('Check the Better Nexus Releases page before updating',1,true),
+ 'the popup: installed build, the unverified hint, the local link: '..popup.text)
+assert(not popup.text:find('http',1,true),'and no link inside the popup text at all: '..popup.text)
 assert(#H.actions==0,'opening the status is read-only')
-print('PASS same-series peer version is a diagnostic observation only')
+-- Seeing it is a session dismissal: it stops the line and writes nothing.
+assert(NexusDB.updateDismissed==nil,'the hint dismissal saved no dismissal list')
+for i=1,3 do assert(Deliver(request28,'Again'..i))end
+assert(Chat('UNVERIFIED')==1,'a dismissed hint is not announced again by a repeat')
+assert(Nexus.Updates.PublicTestHint().dismissed==true,'and it stays in the status, marked as seen')
+print('PASS a qualifying same-series public test is an unverified hint and nothing more')
 
 -- 4. Fresh peer reports that must never create authority: the reported 1.96.6, an arbitrary
 -- high number, a forged public test number, another release line.
-for _,version in ipairs({'1.96.6','999.0.0','1.20.0-beta.1+test.99999','2.0.0-beta.1+test.1','1.20.0','1.21.0'})do
+local FORGED='1.20.0-beta.1+test.99999'
+for _,version in ipairs({'1.96.6','999.0.0',FORGED,'2.0.0-beta.1+test.1','1.20.0','1.21.0'})do
  Boot(PUBLIC27);Ready()
  assert(Deliver(request28,'Reporter',version),'fixture: the decoder accepts '..version)
- NoNotice('peer '..version)
+ local hinted=version==FORGED
+ if hinted then
+  -- Valid syntax, a public-test marker and a plausible number authenticate
+  -- nothing. A deliberately false announcement of the right shape becomes a
+  -- hint that says it is unverified, and never anything stronger.
+  local hs,hh=HintOnly('1.20.0-beta.1 test.99999','forged but valid-looking '..version)
+  assert(hs.state=='hint' and hh.verified==false and hh.authority=='peer-report-unverified',
+   'a forged announcement stays unverified: '..hs.detail)
+ else
+  NoNotice('peer '..version)
+ end
  assert(Observed('Reporter').version==version,'observed as stated: '..version)
  local items;EasyMenu=function(list)items=list end
  NexusPanel._menuBtn:Click();H.Advance(1,.05)
  local found=false
  for _,item in ipairs(items or {})do
   if type(item.text)=='string' then
-   assert(not item.text:find(version:match('^[%d%.]+'),1,true) or item.text:find('Installed',1,true),'no menu entry names the peer version '..version..': '..item.text)
+   if not hinted then
+    assert(not item.text:find(version:match('^[%d%.]+'),1,true) or item.text:find('Installed',1,true),'no menu entry names the peer version '..version..': '..item.text)
+   end
    if item.text=='Update status unknown - open Releases page' then found=not item.disabled end
+   if hinted and item.text=='Newer public test reported: 1.20.0-beta.1 test.99999 (unverified)' then found=not item.disabled end
   end
  end
- assert(found,'the menu keeps the enabled manual Releases entry')
+ assert(found,'the menu keeps an enabled entry to the manual Releases page')
  assert(NexusPanel._menuBtn:GetText()~='!','no HUD badge for a peer version '..version)
 end
-print('PASS fresh 1.96.6, 999.0.0, forged test number, other lineage, peer stable claims: no notice, menu, badge or saved state')
+print('PASS 1.96.6, 999.0.0, another lineage and peer stable claims stay silent; a forged same-series test is an unverified hint only')
 
 -- 5. A peer advisory saved by an earlier build (as test.9028 stored "1.96.6") does not return at
 -- login or reload. It is moved once into a bounded diagnostic record; nothing else changes.
@@ -163,7 +211,18 @@ for _,version in ipairs({'1.96.6','1.20.0-beta.1+test.9031','999.0.0'})do
  s=Nexus.Updates.Status()
  assert(s.candidate.display=='1.20.0-beta.1 test.9029' and s.candidate.verified==true,'a peer '..version..' does not replace or hide trusted evidence')
 end
-assert(Chat('available:')==1 and Chat('reported')==0,'no further chat line')
+assert(Chat('available:')==1,'exactly one trusted chat line')
+-- The 1.20.0-beta.1+test.9031 report above is newer than this installation, so
+-- it is a hint. It is added beside the trusted candidate, never over it.
+local beside=assert(Nexus.Updates.PublicTestHint(),'the reported 9031 is a hint')
+assert(beside.display=='1.20.0-beta.1 test.9031' and beside.verified==false,'unverified: '..beside.display)
+s=Nexus.Updates.Status()
+assert(s.state=='available' and s.candidate.display=='1.20.0-beta.1 test.9029' and s.candidate.verified==true,
+ 'the trusted candidate still owns the state: '..s.detail)
+assert(s.detail:find('New Nexus test build available: 1.20.0-beta.1 test.9029',1,true)
+ and s.detail:find('Another client also reports 1.20.0-beta.1 test.9031 (unverified',1,true),
+ 'the trusted line comes first and the hint is marked: '..s.detail)
+assert(Nexus.Updates.GetCandidate().display=='1.20.0-beta.1 test.9029','and the candidate is unchanged')
 local items;EasyMenu=function(list)items=list end
 NexusPanel._menuBtn:Click();H.Advance(1,.05)
 local entry
@@ -208,8 +267,17 @@ Boot({label='test.9027-3f1cd20',channel='public-test',available='1.20.0-beta.1+t
 Nexus.Updates.SetPreference('stable')
 assert(Nexus.Updates.Status().state=='unknown' and Nexus.Updates.Preference()=='stable','stable-only hides a bundled test build')
 assert(Nexus.Updates.Status().detail:find('A newer test build (1.20.0-beta.1 test.9029) is not announced because notices are set to stable releases only.',1,true),'the hidden trusted build is named truthfully: '..Nexus.Updates.Status().detail)
+assert(Deliver(request28,'ToStableOnly','1.20.0-beta.1+test.9031'))
+assert(Nexus.Updates.PublicTestHint()==nil and Nexus.Updates.Status().state=='unknown',
+ 'stable-only: a public-test announcement produces no hint')
+assert(Chat('UNVERIFIED')==0,'stable-only: and no hint chat line')
 Nexus.Updates.SetPreference('test')
 assert(Nexus.Updates.Status().state=='available','the test-inclusive preference shows it again')
+assert(Nexus.Updates.PublicTestHint()~=nil,
+ 'and the announcement withheld by the preference is available again without any new traffic')
+Nexus.Updates.SetEnabled(false)
+assert(Nexus.Updates.PublicTestHint()==nil,'notices off: no hint either')
+Nexus.Updates.SetEnabled(true)
 Nexus.Updates.SetEnabled(false)
 s=Nexus.Updates.Status()
 assert(s.state=='disabled' and Nexus.Updates.GetVisibleNotice()==nil and s.url=='https://github.com/Viscerals/Better-Nexus/releases','opt-out: no notice, manual link kept')
@@ -247,8 +315,14 @@ assert(Deliver(request28,'SyncPeer','1.96.6') and (Nexus.Sync.Stats().malformedR
 assert(Observed('SyncPeer') and Observed('SyncPeer').reported=='stable','and observed for diagnostics')
 for i=1,40 do assert(Deliver(request28,'Many'..i,'1.20.0-beta.1+test.'..(9100+i)))end
 assert(#Nexus.Updates.PeerObservations()<=32,'the diagnostic list stays bounded')
-NoNotice('a flood of rising peer numbers')
-print('PASS Sync peer acceptance and bounded diagnostics unchanged')
+-- Forty different rising numbers are ONE hint - the highest - and at most the
+-- bounded number of chat lines. A flood never becomes a stream of popups.
+local flood=assert(Nexus.Updates.PublicTestHint(),'the highest reported test is the one hint')
+assert(flood.display=='1.20.0-beta.1 test.9140','the highest by number, not by order or text: '..flood.display)
+assert(Chat('UNVERIFIED')<=2,'the session hint bound holds: '..Chat('UNVERIFIED'))
+assert(Nexus.Updates.GetCandidate()==nil and NexusDB.updateNotice==nil and NexusDB.updateAdvisory==nil,
+ 'and forty peers still create no candidate and no saved state')
+print('PASS Sync peer acceptance, bounded diagnostics and one bounded hint')
 
 -- 11. Review of the earlier padded-label rule stays.
 Boot({label='test.007-abcdef0',channel='public-test'})

@@ -18,11 +18,11 @@ local function export(id,wrong)
  local found=false
  for _,e in ipairs(parsed.entries)do
   if e.locked then
-   assert(e.spellId~=wrong,'editor must not load the other assignment permanent design')
+   assert(e.spellId~=wrong,'editor must not load the other assignment locked design')
    if e.spellId==id then assert(e.quality==id%4 and e.stacks==1);found=true end
   end
  end
- assert(found,'normal editor export includes the exact assigned permanent target')
+ assert(found,'normal editor export includes the exact assigned locked target')
 end
 local function inspect(h,slot,id,wrong,name)
  local a,w=Nexus.GameAdapter,Nexus.WishlistEditor
@@ -34,9 +34,9 @@ local function inspect(h,slot,id,wrong,name)
  local progress=Nexus.Panel._lastModel.progress
  assert(progress.wishlistName==name and NexusOrbPanel.snapshot.config.name==name,'normal main and Orb views agree')
  local labels={};for _,label in ipairs(progress.toLock or {})do labels[label]=true end
- assert(labels[h.names[id]],'normal main permanent-target consumer uses the assignment design')
+ assert(labels[h.names[id]],'normal main locked-target consumer uses the assignment design')
  assert(not labels[h.names[wrong]],'main does not inherit the other design')
- assert(NexusPanel.toLockText:GetText():find(h.names[id],1,true),'normal permanent-target fontstring renders the same design')
+ assert(NexusPanel.toLockText:GetText():find(h.names[id],1,true),'normal locked-target fontstring renders the same design')
 end
 inspect(H,1,200080,200081,'Plan A');inspect(H,2,200081,200080,'Plan B')
 local candidates={}
@@ -61,7 +61,7 @@ H2.perks.serverBuildSlots=server
 inspect(H2,1,200080,200081,'Plan A');inspect(H2,2,200081,200080,'Plan B')
 H2.perks.serverActiveSlot=1;H2.granted={['Echo 80']={{spellId=200080,quality=0}}}
 H2.Notify();Nexus.GameAdapter.Poll()
-assert(not Nexus.OrbRuntime.Start(1) and H2.Count('orb-spend')==0,'restored exact permanent design still protects its only acquired copy')
+assert(not Nexus.OrbRuntime.Start(1) and H2.Count('orb-spend')==0,'restored exact locked design still protects its only acquired copy')
 -- Two equal-name/equal-content mirrors cannot identify which row to overwrite.
 local rolled=Nexus.GameAdapter.GetLoadoutWishlist(1).echoes
 H2.perks.serverBuildSlots[101]={name='Plan A',verified=false,echoes=H2.Clone(rolled)}

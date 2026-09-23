@@ -51,7 +51,7 @@ local function LogText_AutoLock()
     local lastAutoLockTrace = options.getAutoLockTrace and options.getAutoLockTrace() or {}
     if type(lastAutoLockTrace) ~= "table" then lastAutoLockTrace = {} end
     local age = lastAutoLockTrace.at and (GetTime() - lastAutoLockTrace.at) or nil
-    local out = { string.format("PERMANENT-SLOT ACTION TRACE (last run %s ago)",
+    local out = { string.format("LOCKED-ECHO SLOT ACTION TRACE (last run %s ago)",
         age and string.format("%.1fs", age) or "never") , "" }
     for _, line in ipairs(lastAutoLockTrace.lines or {}) do
         out[#out + 1] = line
@@ -65,7 +65,7 @@ local function LogText_AutoLock()
     -- LockDesignTargetsFor/CommitLockDesignTargets) -- LogText_Locked shows
     -- a live re-derivation from LockedOwned()/Wishlist(), which is close but
     -- not the same thing as what automation is actually keyed off.
-    out[#out + 1] = "CONFIRMED PERMANENT-SLOT TARGETS (used by the optional slot automation):"
+    out[#out + 1] = "CONFIRMED LOCKED ECHO TARGETS (used by the optional slot automation):"
     local wl = Adapter.Wishlist()
     if wl then
         local targets = LockDesignTargetsFor(wl)
@@ -493,7 +493,7 @@ local function LogText_Locked()
     for id,n in pairs(lockedBySpell) do lockedIds[#lockedIds + 1] = id; lockedCopies=lockedCopies+(tonumber(n) or 0) end
     table.sort(lockedIds)
     out[#out + 1] = string.format(
-        "CURRENT PERMANENT ECHOES -- %d/6 (display only; optional permanent-slot automation is controlled separately)",
+        "CURRENTLY LOCKED ECHOES -- %d/6 (display only; optional locked-Echo slot automation is controlled separately)",
         lockedCopies)
     for _, id in ipairs(lockedIds) do
         local row = catalog and catalog.rows and catalog.rows[id]
@@ -503,7 +503,7 @@ local function LogText_Locked()
 
     local wl = Adapter.Wishlist()
     if not wl then
-        out[#out + 1] = "No Wishlist resolved. Open the editor to choose its permanent targets or assign a plan."
+        out[#out + 1] = "No Wishlist resolved. Open the editor to choose its locked targets or assign a plan."
         return table.concat(out, "\n")
     end
 
@@ -524,13 +524,13 @@ local function LogText_Locked()
     end
     if #unwantedLocked > 0 then
         out[#out + 1] = string.format(
-            "Current permanent Echo IDs absent from this Wishlist (%d). This display changes nothing:", #unwantedLocked)
+            "Currently locked Echo IDs absent from this Wishlist (%d). This display changes nothing:", #unwantedLocked)
         for _, id in ipairs(unwantedLocked) do
             local row = catalog and catalog.rows and catalog.rows[id]
             out[#out + 1] = "  " .. ((row and row.name) or ("spell " .. tostring(id)))
         end
     else
-        out[#out + 1] = "Every current permanent Echo ID appears in this Wishlist. Check the exact desired qualities and roles in the editor."
+        out[#out + 1] = "Every currently locked Echo ID appears in this Wishlist. Check the exact desired qualities and roles in the editor."
     end
     out[#out + 1] = ""
 

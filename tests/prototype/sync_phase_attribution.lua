@@ -76,31 +76,57 @@ check(next(S.PhaseStats().phases)==nil,
 -- The phase state sits on the module table because this file is at the Lua
 -- local limit, so it is writable from outside. Measurement must never be able
 -- to stop the update: every step still runs whatever is done to that table.
+-- Surviving the update is not enough: the WORK has to happen. A real step of
+-- the default list is counted, so a phase table that silently removes every
+-- step fails here instead of passing as "it did not raise".
 local ranSteps=0
-local realPump=Nexus.Sync.RequestDataViewRefresh
+local handshakes=0
+local realHandshake=Nexus.SyncWire and Nexus.SyncWire.PumpHandshake
+if Nexus.SyncWire then
+ Nexus.SyncWire.PumpHandshake=function(...)
+  handshakes=handshakes+1
+  if realHandshake then return realHandshake(...) end
+ end
+end
+check(Nexus.SyncWire~=nil,'fixture: the handshake step has a real owner to count')
 -- A raising clock or recorder is a MEASUREMENT failure. It must never be a
--- sync failure, and an emptied step list must not silently remove the work.
+-- sync failure, an emptied or replaced step list must not remove the work,
+-- and a metatable on the phase table must not raise out of the update.
 local raising={thresholdMs=50,window=20,stats={},armed=5,slowUpdates=0,
  steps=Nexus.Sync._defaultSteps,
  clock=function() error('measurement clock raised') end,
  record=function() error('measurement recorder raised') end}
+local decoy={clock=function() return 1 end,record=function() end,
+ steps={{name='decoy',run=function() end}}}
+local indexRaises=setmetatable({},{__index=function() error('index raised') end})
+local writeRaises=setmetatable({thresholdMs=50,window=20,stats={},armed=0,slowUpdates=0,
+ clock=function() return debugprofilestop and debugprofilestop() or 0 end,
+ record=function() end},{__newindex=function() error('newindex raised') end})
 for _,broken in ipairs({'not a table',{},{clock=1},false,raising,
- {clock=function() return 1 end,record=function() end,steps={}}}) do
+ {clock=function() return 1 end,record=function() end,steps={}},
+ decoy,indexRaises,writeRaises}) do
  Nexus.Sync._phases=broken
+ local before=handshakes
  local ok,err=pcall(Nexus.Sync.OnUpdate,0.05)
  check(ok,'a broken phase table does not stop the update ('..tostring(broken)..'): '..tostring(err))
+ check(handshakes>before,
+  'and every step still runs ('..tostring(broken)..'): handshakes '..handshakes)
  ranSteps=ranSteps+1
 end
 Nexus.Sync._phases=nil
+local before=handshakes
 local ok,err=pcall(Nexus.Sync.OnUpdate,0.05)
 check(ok,'and neither does removing it entirely: '..tostring(err))
+check(handshakes>before,'the steps run with no phase table at all: '..handshakes)
 check(type(Nexus.Sync.PhaseStats())=='table','the reader survives it too')
+check(Nexus.Sync.ResetPhaseStats()==false,'and the reset refuses instead of raising')
+if Nexus.SyncWire then Nexus.SyncWire.PumpHandshake=realHandshake end
 -- Put a working owner back for the rest of the checks.
 Nexus.Sync._phases={thresholdMs=50,window=20,stats={},armed=0,slowUpdates=0,
  steps=Nexus.Sync._defaultSteps,
  clock=function() return debugprofilestop and debugprofilestop() or nil end,
  record=function() end}
-check(ranSteps==6,'every broken shape was exercised: '..ranSteps)
+check(ranSteps==9,'every broken shape was exercised: '..ranSteps)
 check(type(Nexus.Sync._defaultSteps)=='table' and #Nexus.Sync._defaultSteps>=13,
  'the step list built at load is what an emptied one falls back to: '
  ..tostring(Nexus.Sync._defaultSteps and #Nexus.Sync._defaultSteps))

@@ -63,7 +63,7 @@ check(#body<=builder.SUMMARY_MAX_BYTES,
  'the summary fits the supported '..builder.SUMMARY_MAX_BYTES..' bytes: '..#body)
 check(meta.bytes==#body,'and reports its own size: '..meta.bytes)
 check(body:find('SEMANTIC_ENVELOPE',1,true)~=nil,'it names the refusal')
-check(body:find('81 ordinary, 6 permanent, 87 total',1,true)~=nil,'with the counted copies')
+check(body:find('81 ordinary, 6 locked, 87 total',1,true)~=nil,'with the counted copies')
 check(body:find('limits 79/6/85',1,true)~=nil,'and the limits that were enforced')
 check(body:find('saved-build capture',1,true)~=nil,'it names the producer')
 check(body:find('this write did not commit',1,true)~=nil,'and the terminal result')
@@ -121,7 +121,7 @@ check(page.prepared:GetText():find('Interface/AddOns',1,true)==nil,
 -- 5. The report carries the incident and the scope of the outcome.
 local text=table.concat(NexusSupportDB.report.chunks,'')
 check(text:find('SEMANTIC_ENVELOPE',1,true)~=nil,'the report contains the incident')
-check(text:find('81 ordinary, 6 permanent, 87 total',1,true)~=nil,'with its counts')
+check(text:find('81 ordinary, 6 locked, 87 total',1,true)~=nil,'with its counts')
 check(text:find('earlier personal or public writes are not covered',1,true)~=nil,
  'and the honest scope of the refusal')
 check(NexusSupportDB.report.meta.format==builder.FORMAT,
@@ -286,6 +286,21 @@ record({committed=false,readiness={activeSlot=1}})
 record({committed=false,readiness={activeSlot=1}})
 check(support.Count()==1 and support.Latest().occurrences==2,
  'while a true repeat is still one incident with a count: '..support.Count())
+-- A retained readiness value is TEXT the failing boundary supplied, so it can
+-- contain the characters the description itself uses. Two different readings
+-- must not describe themselves identically and be merged into one incident
+-- that then states a source reading the second failure never had.
+support.Clear()
+record({committed=false,readiness={permanentSource='x;y=z'}})
+record({committed=false,readiness={permanentSource='x',y='z'}})
+check(support.Count()==2,
+ 'two readings that only look alike when joined are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,readiness={a='b=c'}})
+record({committed=false,readiness={['a=b']='c'}})
+check(support.Count()==2,'and so are two readings that differ only in where the key ends: '
+ ..support.Count())
+support.Clear()
 local caller={activeSlot=1}
 for i=1,40 do caller['k'..i]=i end
 record({committed=false,readiness=caller})
