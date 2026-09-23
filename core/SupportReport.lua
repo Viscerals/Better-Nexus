@@ -192,9 +192,87 @@ end
 -- The compact report. It is BUILT at this size: the incident and its context
 -- come first, and sections stop being added when the budget is reached. It is
 -- never a truncated copy of the extended report.
+-- Every owner read in this file is protected: the report is the route a player
+-- uses when something else is already broken, so one failing owner must not
+-- take it away.
+function M.StartupSnapshot()
+    local ok, status = pcall(function()
+        return Nexus and Nexus.StartupStatus and Nexus.StartupStatus() or nil
+    end)
+    if not ok or type(status) ~= "table" then return nil end
+    return status
+end
+
+-- ONE projection of what the passive start-up owner retained, used by the
+-- copyable summary and by the prepared file. It reads that owner only: it
+-- initializes nothing, pumps nothing, rescans nothing and writes nothing.
+-- A start-up refusal is not a Lua error and not an incident, so it must be
+-- legible with zero of both.
+function M.StartupLines(status, extended)
+    if type(status) ~= "table" then return {} end
+    local failed = status.state == "failed"
+    local out = {}
+    out[#out + 1] = (failed and "STARTUP FAILED: state " or "Startup: state ")
+        .. plain(status.state, 32)
+        .. (status.coreReady ~= nil and ("; core ready " .. tostring(status.coreReady)) or "")
+        .. (status.phase ~= nil and ("; phase " .. plain(status.phase, 48)) or "")
+    if status.reason ~= nil then
+        out[#out + 1] = "  reason: " .. plain(status.reason, 96)
+    end
+    local facts = type(status.failure) == "table" and status.failure or nil
+    if facts then
+        local row = {}
+        for _, field in ipairs({"stage", "detail", "cause", "component", "owner"}) do
+            if facts[field] ~= nil then
+                row[#row + 1] = field .. "=" .. plain(facts[field], 64)
+            end
+        end
+        if #row > 0 then out[#out + 1] = "  " .. table.concat(row, "; ") end
+        if facts.formatClass ~= nil or facts.formatVersion ~= nil then
+            out[#out + 1] = "  saved format: " .. plain(facts.formatClass, 24)
+                .. (facts.formatVersion ~= nil
+                    and (" version " .. tostring(facts.formatVersion)) or "")
+                .. (extended and facts.formatField ~= nil
+                    and (" (" .. plain(facts.formatField, 64) .. ")") or "")
+        end
+        local width = type(facts.keyWidth) == "table" and facts.keyWidth or nil
+        if width then
+            out[#out + 1] = "  refused key: " .. plain(width.path, 64)
+                .. ", depth " .. tostring(width.depth)
+                .. ", " .. plain(width.keyType, 16) .. " key of "
+                .. tostring(width.keyBytes) .. " bytes, limit "
+                .. tostring(width.limit)
+                .. ", path exception " .. plain(width.exception, 24)
+            out[#out + 1] = "  (the key, the character and the record contents are not included)"
+        end
+        if extended then
+            if facts.error ~= nil then
+                out[#out + 1] = "  owner error: " .. plain(facts.error, 160)
+            end
+            if facts.row ~= nil then
+                out[#out + 1] = "  selection row: " .. tostring(facts.row)
+            end
+            if facts.legacyClass ~= nil then
+                out[#out + 1] = "  legacy class: " .. plain(facts.legacyClass, 32)
+            end
+        end
+    end
+    if failed then
+        out[#out + 1] = "  A start-up refusal is a business rule, not a Lua error"
+            .. " and not an incident: both histories can be empty."
+    end
+    return out
+end
+
 function M.Summary(selection)
     local support = Nexus and Nexus.SupportIncidents
-    local incidents = support and support.History() or {}
+    -- Protected like every other owner read here: an incident owner that
+    -- raises must not take away the start-up reason, which is the one fact a
+    -- player with a failed start-up came to copy.
+    local okIncidents, incidents = pcall(function()
+        return support and type(support.History) == "function" and support.History() or {}
+    end)
+    if not okIncidents or type(incidents) ~= "table" then incidents = {} end
     local incident = nil
     if type(selection) == "table" then incident = selection
     elseif type(selection) == "number" then
@@ -218,6 +296,14 @@ function M.Summary(selection)
             .. tostring(semantic.total) .. " total copies")
     end
     add("Session incidents retained: " .. #incidents)
+    -- A failed start-up goes ABOVE the incident and inside the kept part of the
+    -- summary: it is the reason the player is here, and it is exactly the case
+    -- in which no incident and no Lua error exists to carry it.
+    local startup = M.StartupSnapshot()
+    if type(startup) == "table" and startup.state == "failed" then
+        add("")
+        for _, line in ipairs(M.StartupLines(startup, false)) do add(line) end
+    end
     add("")
     for _, line in ipairs(M.IncidentLines(incident)) do add(line) end
     local budget = SUMMARY_MAX_BYTES
@@ -241,14 +327,11 @@ function M.Summary(selection)
     -- Every owner read here is protected: this summary is the route a player
     -- uses when something else is already broken, so one failing owner must
     -- not take it away.
-    local okStartup, startup = pcall(function()
-        return Nexus and Nexus.StartupStatus and Nexus.StartupStatus() or nil
-    end)
-    if not okStartup then startup = nil end
-    if type(startup) == "table" then
+    if type(startup) == "table" and startup.state ~= "failed" then
         context[#context + 1] = ""
-        context[#context + 1] = "Startup: state " .. tostring(startup.state)
-            .. (startup.coreReady ~= nil and ("; core ready " .. tostring(startup.coreReady)) or "")
+        for _, line in ipairs(M.StartupLines(startup, false)) do
+            context[#context + 1] = line
+        end
     end
     local errors = Nexus and Nexus.Errors
     local okHistory, history = pcall(function()
@@ -256,7 +339,9 @@ function M.Summary(selection)
     end)
     if not okHistory or type(history) ~= "table" then history = {} end
     context[#context + 1] = "Recorded Lua errors this session: " .. #history
-        .. (#history == 0 and " (a refusal is not an error; the incident above is retained separately)" or "")
+        .. (#history == 0 and (#incidents > 0
+            and " (a refusal is not an error; the incident above is retained separately)"
+            or " (a refusal is not an error, and nothing was retained in either history)") or "")
     local omitted = 0
     for _, line in ipairs(context) do
         local size = #escape(line) + 1
@@ -379,12 +464,17 @@ function M.Step(job)
     if job.stage == "sections" then
         local sections = {
             {name = "startup", build = function()
-                local status = Nexus.StartupStatus and Nexus.StartupStatus() or {}
+                local status = M.StartupSnapshot() or {}
                 local out = {"-- startup --"}
+                -- The scalars this section has always carried, then the same
+                -- retained failure facts the copyable summary shows.
                 for _, key in ipairs({"state", "coreReady", "storeReady", "reason"}) do
                     if status[key] ~= nil then
                         out[#out + 1] = key .. "=" .. tostring(status[key])
                     end
+                end
+                for _, line in ipairs(M.StartupLines(status, true)) do
+                    out[#out + 1] = line
                 end
                 return out
             end},

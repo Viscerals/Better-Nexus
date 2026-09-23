@@ -146,6 +146,19 @@ function Lifecycle.New(options)
             detail=Token(r.detail, 48), owner=Token(r.owner, 64),
             error=Token(r.error, 160), row=tonumber(r.row),
             legacyClass=Token(r.legacyClass, 32)}
+        -- The refused-key measurement the Store already retained at its own
+        -- refusal cursor. Scalars only, and no key, name or record content:
+        -- it is copied here, never recomputed, and it never re-reads the
+        -- profile. Absent for every failure that is not a key-width refusal.
+        local width = type(r.keyWidth) == "table" and r.keyWidth or nil
+        if width then
+            facts.keyWidth = {
+                path=Token(width.path, 64), depth=tonumber(width.depth),
+                keyType=Token(width.keyType, 16), keyBytes=tonumber(width.keyBytes),
+                valueType=Token(width.valueType, 16), limit=tonumber(width.limit),
+                exception=Token(width.exception, 24),
+            }
+        end
         local internals = Nexus.MainInternals
         local classify = type(internals) == "table" and internals.SavedFormatClassV1
         if type(classify) == "function" then

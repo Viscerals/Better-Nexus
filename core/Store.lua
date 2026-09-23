@@ -590,6 +590,27 @@ local CharMigration = {
     -- wishlist. A normal 79-row key can be 710 bytes, not a catalog ID.
     -- Only the immediate character lock-design map gets this bounded width.
     WISHLIST_KEY_WIDTH=2048,
+    -- Local native startup correction, 2026-09-23. The lock-attempt record map
+    -- is keyed by the automation producer's own compound key, which EMBEDS a
+    -- wishlist key, so it is routinely wider than the general rule and is NOT
+    -- reachable through the lock-design exception above. Refusing it stopped
+    -- start-up on a key this addon had itself written.
+    --
+    -- A derivation, not a literal. KeyPart(v) writes "<type>:<#text>:<text>",
+    -- and AutoLockBaseKey joins KeyPart(wishlistKey), KeyPart(spellId),
+    -- KeyPart(replacementToken) and, above one copy, KeyPart(copies) with "|":
+    --   wishlistKey      a key wider than WISHLIST_KEY_WIDTH cannot have a
+    --                    lock-design row this same walk accepts, so 2048 is
+    --                    the widest one that can reach this map at all
+    --   a number         Lua 5.1 prints any number in at most 21 bytes
+    --   replacementToken at most MAX_LOCK_SLOTS ids joined by commas
+    -- The whole compound key is therefore bounded by its own parts, not by the
+    -- wishlist key alone: the prefixes and separators are counted here.
+    ATTEMPT_NUMBER_TEXT=21, ATTEMPT_REPLACEMENTS=6,
+    ATTEMPT_KEY_WIDTH=(6 + 1 + 4 + 1 + 2048)
+        + 1 + (6 + 1 + 2 + 1 + 21)
+        + 1 + (6 + 1 + 3 + 1 + (6 * 21 + 5))
+        + 1 + (6 + 1 + 2 + 1 + 21),
     CAPS = {
         rows=8, edges=64, nodes=64, graphBytes=2048,
         cursorEntries=64, comparisons=64, comparedBytes=2048,
@@ -604,6 +625,39 @@ local CharMigration = {
         SSB = 2 * 183 * ((2 * 2048 * 11) + (64 * 6)),
     },
 }
+
+-- A bounded, sanitized description of ONE refused key, built from the frame
+-- that refused it. It names no key, no character, no wishlist and no record
+-- content: only the schema path, the measured width and the rule that applied.
+-- A schema field name is an identifier of at most 32 bytes; the keys a player's
+-- data produces here (wishlist keys, attempt keys) are serialized blobs that
+-- carry ":" and "|", so they never pass this shape test.
+local function SchemaName(value)
+    if type(value) ~= "string" or #value > 32 then return nil end
+    return value:match("^[%a_][%w_]*$")
+end
+
+function CharMigration.KeyWidthFacts(work, stack, frame, key, value, keyText, limit, exception)
+    local first = type(stack[1]) == "table" and SchemaName(stack[1].key) or nil
+    local second = type(stack[2]) == "table" and SchemaName(stack[2].key) or nil
+    local path
+    if not work.settingsCharged then
+        path = "settings graph"
+    elseif frame.depth == 1 then
+        path = "character row"
+    elseif frame.depth == 2 and first then
+        path = "character." .. first
+    elseif frame.depth == 3 and first and second then
+        path = "character." .. first .. "." .. second
+    else
+        path = "character graph"
+    end
+    return {
+        path=path, depth=frame.depth,
+        keyType=type(key), keyBytes=#keyText,
+        valueType=type(value), limit=limit, exception=exception,
+    }
+end
 
 -- Charge a graph against the source bounds, RESUMABLY.
 --
@@ -643,18 +697,38 @@ function CharMigration.ChargeSlice(work)
         else
             local keyText = tostring(key)
             local keyLimit = CharMigration.KEY_WIDTH
+            local keyException = "none"
             if work.settingsCharged and frame.depth == 2
                 and stack[1].key == "lockDesignTargetsBySlot"
                 and type(key) == "string" and type(value) == "table" then
                 keyLimit = CharMigration.WISHLIST_KEY_WIDTH
+                keyException = "lock-design"
+            elseif work.settingsCharged and frame.depth == 3
+                and stack[1].key == "autoLockAttempts"
+                and stack[2].key == "records"
+                and type(key) == "string" and type(value) == "table" then
+                -- The record map of the lock-attempt bucket, and nothing else:
+                -- a wide key anywhere else in the graph is still refused, and
+                -- the record itself is still validated by its own owner.
+                keyLimit = CharMigration.ATTEMPT_KEY_WIDTH
+                keyException = "lock-attempt"
             end
             if #keyText > keyLimit then
                 work.failure = "SOURCE_KEY_WIDTH_EXCEEDED"
+                -- Retained AT the refusal, from what this frame already holds:
+                -- no rescan, no second walk, and no key, name or record content.
+                work.keyWidth = CharMigration.KeyWidthFacts(
+                    work, stack, frame, key, value, keyText, keyLimit, keyException)
                 return "failed"
             end
             -- Do not make the wider key exceed the existing byte slice.
             -- Keep the cursor before this edge when it must wait for a pump.
+            -- A key wider than the WHOLE slice is charged alone in a fresh
+            -- pump instead of waiting for room that an empty slice can never
+            -- have: without that, a legitimate wide key becomes an endless
+            -- "capped" retry that never advances the cursor.
             if #keyText > CharMigration.KEY_WIDTH
+                and work.pumpBytes > 0
                 and work.pumpBytes + #keyText > caps.graphBytes then
                 return "capped"
             end
@@ -1042,7 +1116,9 @@ local function BootstrapSlice(C)
         if C.charWork.failure then
             C.state = SS.INVALID
             C.result = {state="failed", reason="STORE_INVALID",
-                detail=C.charWork.failure, stage=state}
+                detail=C.charWork.failure, stage=state,
+                -- Already measured at the refusal; carried, not recomputed.
+                keyWidth=C.charWork.keyWidth}
             return
         end
         -- Line 1346: the completed frontier yields ONE detached StoreDataV1.
