@@ -295,6 +295,26 @@ record({committed=false,readiness={permanentSource='x;y=z'}})
 record({committed=false,readiness={permanentSource='x',y='z'}})
 check(support.Count()==2,
  'two readings that only look alike when joined are two incidents: '..support.Count())
+-- A value the boundary supplied is retained SHORTENED and with its control
+-- characters written out. Two readings that differ only in what shortening or
+-- flattening would remove are still two readings.
+support.Clear()
+record({committed=false,readiness={note='x'..string.char(10)..'y'}})
+record({committed=false,readiness={note='x y'}})
+check(support.Count()==2,
+ 'a newline is not a space in a retained reading: '..support.Count())
+support.Clear()
+record({committed=false,readiness={note=string.rep('a',400)..'1'}})
+record({committed=false,readiness={note=string.rep('a',400)..'2'}})
+check(support.Count()==2,
+ 'two long readings that differ past the retained length are two readings: '..support.Count())
+support.Clear()
+record({committed=false,readiness={note=string.rep('a',400)}})
+record({committed=false,readiness={note=string.rep('a',400)}})
+check(support.Count()==1 and support.Latest().occurrences==2,
+ 'while the same long reading twice is still one: '..support.Count())
+check(#tostring(support.Latest().readiness.note)<=240,
+ 'and what is retained is still bounded: '..#tostring(support.Latest().readiness.note))
 support.Clear()
 record({committed=false,readiness={permanentSource=1}})
 record({committed=false,readiness={permanentSource='1'}})

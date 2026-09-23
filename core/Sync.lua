@@ -4496,7 +4496,10 @@ function Sync.OnUpdate(elapsed)
     local detail = phases and (tonumber(rawget(phases, "armed")) or 0) > 0
         and updateStarted ~= nil
     for index = 1, steps and #steps or 0 do
-        local entry = steps[index]
+        -- rawget on the LIST too, not only on the entry: `#` ignores __len in
+        -- Lua 5.1, so a list with a hole below its length reaches __index, and
+        -- a raising one there would raise out of the update on every frame.
+        local entry = rawget(steps, index)
         -- rawget for the same reason as the phase table: a step entry carrying
         -- a metatable must not raise on the guard line and stop every step
         -- after it. Its `run` is called directly, so a failing step is still a

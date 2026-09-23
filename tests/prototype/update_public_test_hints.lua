@@ -112,6 +112,9 @@ end
 local d=Nexus.Updates.HintDiagnostics()
 check(d.notified<=d.maxKeys and d.dismissed<=d.maxKeys,
  'the remembered hint keys stay bounded: '..d.notified..'/'..d.dismissed..' of '..d.maxKeys)
+check(d.notifiedOrder==d.notified and d.dismissedOrder==d.dismissed,
+ 'the set and the order beside it hold the same keys, so the bound is the set: '
+ ..d.notified..'/'..d.notifiedOrder..' and '..d.dismissed..'/'..d.dismissedOrder)
 check(d.notices<=d.maxNotices,'and the session chat bound holds: '..d.notices)
 check(Nexus.Updates.PublicTestHint().display=='1.20.0-beta.1 test.9500',
  'the one hint is still the highest reported: '..Nexus.Updates.PublicTestHint().display)

@@ -510,10 +510,18 @@ function Updates.Observe(version, source)
 end
 
 -- What this session is holding for hints. Diagnostic only: counts, no text,
--- so that the bounds can be observed instead of assumed.
+-- so that the bounds can be observed instead of assumed. The SETS are counted,
+-- not the order lists beside them: the sets are what holds the memory, and
+-- counting the lists would report a bound that the sets do not have.
+local function size(map)
+    local n = 0
+    for _ in pairs(map) do n = n + 1 end
+    return n
+end
 function Updates.HintDiagnostics()
-    return {notices=hintNotices, notified=#hintNotifiedOrder,
-        dismissed=#hintDismissedOrder, maxKeys=MAX_HINT_KEYS,
+    return {notices=hintNotices, notified=size(hintNotified),
+        dismissed=size(hintDismissed), notifiedOrder=#hintNotifiedOrder,
+        dismissedOrder=#hintDismissedOrder, maxKeys=MAX_HINT_KEYS,
         maxNotices=MAX_HINT_NOTICES}
 end
 

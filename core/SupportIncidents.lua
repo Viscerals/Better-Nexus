@@ -39,6 +39,22 @@ local function now()
     return nil
 end
 
+-- A bounded 32-bit sum over at most the first MAX_SUMMED bytes. It exists so
+-- that a value which had to be shortened still describes itself: without it
+-- two readings that differ only beyond the retained length are retained as the
+-- same text, and identity then merges two failures that were not the same.
+-- A value longer than MAX_SUMMED that differs only after that point still
+-- collides; the length is part of the marker, so that needs both.
+local MAX_SUMMED = 4096
+local function sum32(value)
+    local a, b = 1, 0
+    for index = 1, math.min(#value, MAX_SUMMED) do
+        a = (a + value:byte(index)) % 65521
+        b = (b + a) % 65521
+    end
+    return string.format("%04x%04x", b, a)
+end
+
 local function text(value)
     if value == nil then return nil end
     -- tostring runs a caller-supplied __tostring, which could raise or return
@@ -47,7 +63,17 @@ local function text(value)
     if not ok or type(converted) ~= "string" then
         converted = "unreadable " .. type(value)
     end
-    return (converted:gsub("%c", " ")):sub(1, MAX_TEXT)
+    -- A control character is written as the byte it is rather than replaced by
+    -- a space: a report line cannot carry a raw newline, and mapping every
+    -- control character onto one space made two different values identical.
+    converted = (converted:gsub("%c", function(char)
+        return string.format("\\%03d", char:byte())
+    end))
+    if #converted > MAX_TEXT then
+        local marker = "...(" .. #converted .. "B#" .. sum32(converted) .. ")"
+        converted = converted:sub(1, math.max(1, MAX_TEXT - #marker)) .. marker
+    end
+    return converted
 end
 
 local function count(value)

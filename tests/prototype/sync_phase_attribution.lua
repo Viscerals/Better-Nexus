@@ -113,6 +113,40 @@ for _,broken in ipairs({'not a table',{},{clock=1},false,raising,
   'and every step still runs ('..tostring(broken)..'): handshakes '..handshakes)
  ranSteps=ranSteps+1
 end
+-- The STEP LIST is the other writable reference. A hostile entry, and a list
+-- with a hole below its length (# ignores __len in 5.1, so the hole reaches
+-- __index), must not raise out of the update either: the remaining steps run.
+local realSteps=Nexus.Sync._defaultSteps
+local function copySteps()
+ local out={}
+ for i,entry in ipairs(realSteps) do out[i]=entry end
+ return out
+end
+local entryRaises=copySteps()
+-- No real run/skip/name key, so a plain index would reach the metatable.
+entryRaises[1]=setmetatable({},{__index=function() error('step entry metatable raised') end})
+local holed=copySteps()
+holed[5]=nil
+setmetatable(holed,{__index=function() error('step LIST metatable raised') end})
+for name,list in pairs({['a hostile step entry']=entryRaises,['a holed step list']=holed}) do
+ Nexus.Sync._defaultSteps=list
+ local had=handshakes
+ local okList,errList=pcall(Nexus.Sync.OnUpdate,0.05)
+ check(okList,name..' does not stop the update: '..tostring(errList))
+ check(handshakes>had,name..' still runs the real steps: '..handshakes)
+end
+Nexus.Sync._defaultSteps=realSteps
+check(Nexus.Sync._defaultSteps==realSteps,'the real step list is back')
+
+-- A hostile row inside the measurement statistics must not stop the reader.
+local goodPhases=Nexus.Sync._phases
+Nexus.Sync._phases={thresholdMs=50,window=20,armed=0,slowUpdates=0,
+ stats={bad=setmetatable({},{__index=function() error('stats row raised') end})},
+ clock=function() return 0 end,record=function() end}
+local okStats,statsOrErr=pcall(Nexus.Sync.PhaseStats)
+check(okStats,'a hostile statistics row does not stop the reader: '..tostring(statsOrErr))
+Nexus.Sync._phases=goodPhases
+
 Nexus.Sync._phases=nil
 local before=handshakes
 local ok,err=pcall(Nexus.Sync.OnUpdate,0.05)

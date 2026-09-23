@@ -181,9 +181,22 @@ check(Why(80,0):find('ordinary copies above the supported envelope',1,true)~=nil
  'the ordinary sentence: '..Why(80,0))
 check(Why(1,7):find('locked copies above the supported envelope',1,true)~=nil,
  'the locked sentence says locked, not permanent: '..Why(1,7))
-for _,text in ipairs({Why(80,0),Why(1,7),Why(79,6)}) do
- check(not tostring(text):lower():find('permanent',1,true),
-  'no envelope sentence still says permanent: '..tostring(text))
+-- The third sentence needs a total below ordinary+locked, which the supported
+-- envelope never is, so the authority states one for this check only.
+local realLimits=Evidence.SemanticLimits
+Evidence.SemanticLimits=function() return {ordinary=79,locked=6,total=10} end
+local totalWhy=Why(9,2)
+Evidence.SemanticLimits=realLimits
+check(totalWhy:find('total copies above the supported envelope',1,true)~=nil,
+ 'the total sentence: '..totalWhy)
+check(Evidence.SemanticLimits().total==85,'the real limits are back: '..Evidence.SemanticLimits().total)
+-- A coherent capture states NO sentence at all; asserting on tostring(nil)
+-- would test the word "nil" and pass whatever the code said.
+local okVerdict,_,_,noWhy=verdict({{spellId=300001,quality=2,stacks=1}},{})
+check(okVerdict==true and noWhy==nil,'a capture inside the envelope states no refusal')
+for _,line in ipairs({Why(80,0),Why(1,7),totalWhy}) do
+ check(not line:lower():find('permanent',1,true),
+  'no envelope sentence still says permanent: '..line)
 end
 
 -- 1e. A character who holds NO permanent Echo at all. GetLockedPerks answers
