@@ -65,6 +65,7 @@ NAMES += ['quickstart_seen_guard']
 NAMES += ['sync_admission_batch']
 NAMES += ['sync_admission_traffic_acceptance']
 NAMES += ['orb_finished_run_log']
+NAMES += ['wishlist_import_paste_path']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

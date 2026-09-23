@@ -30,10 +30,17 @@ local function DisplayUntrusted(value, maxBytes, allowEmpty, allowLineBreaks)
         value, maxBytes, allowEmpty, allowLineBreaks)
 end
 
+-- A pasted EBH1 code is a wire value, not a name: it needs the whole field.
+-- The supported envelope is 85 entries of at most "id.quality.stacks.1" plus
+-- the class and a 96-letter name, so this bound is far above any code the
+-- addon can produce and still bounded.
+local IMPORT_MAX_LETTERS = 4096
+
 local function ConfigureSafeNameEditBox(box)
     if not box or box._nexusSafeNameOwner then return end
     box._nexusSafeNameOwner = true
     local priorChanged = box:GetScript("OnTextChanged")
+    box._nexusSafeNamePriorChanged = priorChanged
     box:SetMaxLetters(96)
     box._NexusSetRawText = function(self, value)
         local raw = tostring(value or "")
@@ -59,6 +66,26 @@ local function ConfigureSafeNameEditBox(box)
         if self._nexusNormalizing then return end
         self:_NexusSetRawText(tostring(self:GetText() or ""):gsub("||", "|"))
     end)
+end
+
+-- StaticPopup frames and their edit boxes are pooled and reused, so a dialog
+-- that declares nothing inherits the limit and the handlers the previous
+-- dialog left. The import dialog therefore claims its own field every time it
+-- opens: the naming dialog's 96-letter limit and its display-sanitising
+-- handler are removed, so the pasted bytes reach the importer unchanged.
+local function ConfigureImportEditBox(box)
+    if not box then return end
+    if box._nexusSafeNameOwner then
+        box:SetScript("OnTextChanged", box._nexusSafeNamePriorChanged)
+        box._nexusSafeNameOwner = nil
+        box._nexusSafeNamePriorChanged = nil
+        box._NexusSetRawText = nil
+        box._NexusRawText = nil
+        box._nexusRawText = nil
+        box._nexusDisplayText = nil
+    end
+    box:SetMaxLetters(IMPORT_MAX_LETTERS)
+    box:SetText("")
 end
 
 local function SetExplicitCopyText(box, value)
@@ -632,9 +659,17 @@ StaticPopupDialogs["NEXUS_IMPORT_WISHLIST"] = {
     button2 = "Cancel",
     hasEditBox = true,
     editBoxWidth = 350,
+    maxLetters = IMPORT_MAX_LETTERS,
+    OnShow = function(self)
+        ConfigureImportEditBox(self and self.editBox)
+        if self and self.editBox and self.editBox.SetFocus then
+            self.editBox:SetFocus()
+        end
+    end,
     OnAccept = function(self)
         -- Explicit EBH1 input is a lossless wire value, not ordinary display.
-        M.ImportEBH1String(self.editBox and self.editBox:GetText())
+        -- The field was claimed by OnShow, so its text is the pasted bytes.
+        M.ImportEBH1String(self and self.editBox and self.editBox:GetText())
     end,
     EditBoxOnEnterPressed = function(self)
         self:GetParent().button1:Click()
