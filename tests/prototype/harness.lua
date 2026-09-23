@@ -120,11 +120,14 @@ function StaticPopup_Show(which,a,b,data)
   H.popupPool[1]=frame
  end
  frame.which,frame.data=which,data
+ -- The client substitutes the show arguments into the dialog's text; a
+ -- confirmation that cannot be read back cannot be tested for what it says.
+ frame.arg1,frame.arg2=a,b
  frame.text=type(dialog)=='table' and dialog.text or nil
  if type(dialog)=='table' and dialog.maxLetters then
   frame.editBox:SetMaxLetters(dialog.maxLetters)
  end
- H.popup={which=which,data=data,frame=frame,editBox=frame.editBox}
+ H.popup={which=which,data=data,frame=frame,editBox=frame.editBox,arg1=a,arg2=b}
  if type(dialog)=='table' and type(dialog.OnShow)=='function' then
   dialog.OnShow(frame,data)
  end

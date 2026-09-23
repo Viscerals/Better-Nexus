@@ -263,6 +263,175 @@ local function StyleWishlistSelector(button)
     button._arrow = arrow
 end
 
+-- Compact management list. State lives on the menu frame and the function
+-- on M, so this adds no upvalue to Renderer.New.
+function M.HideManageWishlistsMenu()
+    if M._manageMenu then M._manageMenu:Hide() end
+end
+
+function M.ShowManageWishlistsMenu(anchor, offset)
+    local perMenu = 8
+    local plans = Controller.RetainedPlansProjection() or {}
+    local support = Controller.ServerDeletionSupportProjection() or {}
+    local undo = Controller.ForgottenPlanProjection()
+    local menu = M._manageMenu
+    if not menu then
+        menu = CreateFrame("Frame", "NexusWishlistManageMenu", frame or UIParent)
+        menu:SetFrameStrata("TOOLTIP")
+        menu:SetFrameLevel((frame and frame:GetFrameLevel() or 50) + 100)
+        menu:SetToplevel(true)
+        menu:EnableMouse(true)
+        menu.rows = {}
+        pcall(function()
+            menu:SetBackdrop({
+                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 16,
+                insets = { left = 4, right = 4, top = 4, bottom = 4 },
+            })
+            menu:SetBackdropColor(0.015, 0.02, 0.03, 0.99)
+            menu:SetBackdropBorderColor(0.48, 0.42, 0.25, 1)
+        end)
+        menu.header = menu:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        menu.header:SetPoint("TOPLEFT", 10, -8)
+        menu.header:SetPoint("TOPRIGHT", -10, -8)
+        menu.header:SetJustifyH("LEFT")
+        M._manageMenu = menu
+    end
+    if frame and menu:GetParent() ~= frame then menu:SetParent(frame) end
+
+    -- Rows: the plans on this page, then the undo row when one is
+    -- retained, then the pager when more plans exist than fit.
+    local total = #plans
+    local paged = total > perMenu
+    local perPage = paged and (perMenu - 1) or perMenu
+    if offset ~= nil then menu._offset = tonumber(offset) or 0 end
+    local first = tonumber(menu._offset) or 0
+    if not paged or first >= total or first < 0 then first = 0 end
+    menu._offset = first
+    local shown = math.min(perPage, total - first)
+    local extra = (undo and 1 or 0) + (paged and 1 or 0)
+    local visible = math.max(1, shown + extra)
+
+    menu.header:SetText(string.format(
+        "Saved wishlists on this character: %d  |cff777777%s|r", total,
+        support.supported and "server copies can also be removed"
+            or ("server copies cannot be removed here ("
+                .. tostring(support.reason or "no deletion call") .. ")")))
+    menu:SetSize(360, 34 + visible * 24)
+    menu:ClearAllPoints()
+    menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
+
+    for i = 1, visible do
+        local row = menu.rows[i]
+        if not row then
+            row = CreateFrame("Button", nil, menu)
+            row:SetSize(344, 22)
+            row:SetPoint("TOPLEFT", 8, -26 - ((i - 1) * 24))
+            row:EnableMouse(true)
+            row:RegisterForClicks("LeftButtonUp")
+            row:SetFrameLevel(menu:GetFrameLevel() + 2)
+            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+            local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            label:SetPoint("LEFT", 8, 0)
+            label:SetPoint("RIGHT", row, "RIGHT", -7, 0)
+            label:SetJustifyH("LEFT")
+            row._label = label
+            menu.rows[i] = row
+        end
+        local plan = (i <= shown) and plans[first + i] or nil
+        local undoRow = undo and i == shown + 1
+        local pagerRow = paged and i == visible
+        if plan then
+            local planName = DisplayUntrusted(plan.name, 1024, false)
+                or ("Wishlist " .. tostring(plan.associationIndex))
+            local association
+            if plan.usable then
+                association = "Saved Build " .. tostring(plan.associationIndex)
+            else
+                association = "|cffff9040not a Saved Build ("
+                    .. tostring(plan.associationIndex) .. ")|r"
+            end
+            row._label:SetTextColor(0.92, 0.92, 0.92)
+            row._label:SetText(string.format(
+                "%s  |cff777777%s, %d Echo rows|r  |cffff6060[Remove]|r",
+                planName, association, tonumber(plan.rows) or 0))
+            row:Enable()
+            -- The confirmation carries the identity, not the label: two
+            -- plans may share a name, and only one is being removed.
+            local confirmPlan = {
+                associationIndex = plan.associationIndex, key = plan.key,
+                assignmentId = plan.assignmentId, mirrorSlot = plan.mirrorSlot,
+                name = planName, rows = plan.rows, usable = plan.usable,
+                ordinaryCopies = plan.ordinaryCopies,
+                lockedCopies = plan.lockedCopies,
+            }
+            row:SetScript("OnClick", function()
+                M.HideManageWishlistsMenu()
+                -- The confirmation repeats the facts this row showed, and
+                -- states plainly what is and is not removed.
+                local where = confirmPlan.mirrorSlot
+                    and "The Wishlist on the server is NOT removed: this client has no call that deletes one."
+                    or "This is the only copy. Undo in the same list brings it back."
+                StaticPopup_Show("NEXUS_FORGET_WISHLIST", string.format(
+                    "Remove \"%s\" from this character?\n%d Echo rows, %d ordinary and %d locked copies, %s.\n%s",
+                    confirmPlan.name, tonumber(confirmPlan.rows) or 0,
+                    tonumber(confirmPlan.ordinaryCopies) or 0,
+                    tonumber(confirmPlan.lockedCopies) or 0,
+                    confirmPlan.usable
+                        and ("Saved Build " .. tostring(confirmPlan.associationIndex))
+                        or ("association " .. tostring(confirmPlan.associationIndex)
+                            .. " which is not a Saved Build"),
+                    where), nil, {
+                    plan = confirmPlan,
+                    forget = function(selector)
+                        return Controller.ForgetRetainedPlan(selector)
+                    end,
+                    after = function() requestRefresh() end,
+                })
+            end)
+            row:Show()
+        elseif undoRow then
+            local undoName = DisplayUntrusted(undo.name, 1024, false)
+                or "the last removed wishlist"
+            row._label:SetTextColor(0.45, 0.95, 0.6)
+            row._label:SetText("Undo: bring back \"" .. undoName .. "\"")
+            row:Enable()
+            row:SetScript("OnClick", function()
+                local ok, reason = Controller.RestoreForgottenPlan()
+                if not ok then
+                    print("|cffff9040Nexus:|r " .. tostring(reason))
+                end
+                requestRefresh()
+                M.ShowManageWishlistsMenu(anchor, 0)
+            end)
+            row:Show()
+        elseif pagerRow then
+            local nextFirst = first + shown
+            if nextFirst >= total then nextFirst = 0 end
+            row._label:SetTextColor(0.85, 0.75, 0.45)
+            row._label:SetText(string.format(
+                "More saved wishlists (%d-%d of %d)  |cff777777click for the next %d|r",
+                first + 1, first + shown, total,
+                math.min(perPage, total - nextFirst)))
+            row:Enable()
+            row:SetScript("OnClick", function()
+                M.ShowManageWishlistsMenu(anchor, nextFirst)
+            end)
+            row:Show()
+        else
+            row._label:SetTextColor(0.55, 0.55, 0.55)
+            row._label:SetText("No saved wishlists are retained on this character")
+            row:SetScript("OnClick", nil)
+            row:Disable()
+            row:Show()
+        end
+    end
+    for i = visible + 1, #menu.rows do menu.rows[i]:Hide() end
+    menu:Show()
+    return menu
+end
+
 local function HideWishlistSwitchMenu()
     if wishlistSwitchMenu then wishlistSwitchMenu:Hide() end
 end
@@ -277,7 +446,13 @@ local function CandidateEvidenceSuffix(candidate)
     return ""
 end
 
-local function ShowWishlistSwitchMenu(anchor)
+-- How many rows the menu shows at once, and where the visible window starts.
+-- The offset survives between openings so a player who paged forward and
+-- clicked a row does not start from the top again.
+local WISHLIST_MENU_ROWS = 10
+local wishlistSwitchOffset = 0
+
+local function ShowWishlistSwitchMenu(anchor, offset)
     if wishlistSwitchMenu and frame and wishlistSwitchMenu:GetParent() ~= frame then wishlistSwitchMenu:SetParent(frame) end
     local candidates = (View and View.GetWishlistCandidates and View.GetWishlistCandidates()) or {}
     local editingContext = EditingContext()
@@ -299,7 +474,18 @@ local function ShowWishlistSwitchMenu(anchor)
             wishlistSwitchMenu:SetBackdropBorderColor(0.48, 0.42, 0.25, 1)
         end)
     end
-    local visible = math.min(#candidates, 10)
+    -- More candidates than rows: the last row becomes the pager, so nine are
+    -- listed per page and every one of them is reachable by paging.
+    local total = #candidates
+    local paged = total > WISHLIST_MENU_ROWS
+    local perPage = paged and (WISHLIST_MENU_ROWS - 1) or WISHLIST_MENU_ROWS
+    if offset ~= nil then wishlistSwitchOffset = tonumber(offset) or 0 end
+    if not paged or wishlistSwitchOffset >= total or wishlistSwitchOffset < 0 then
+        wishlistSwitchOffset = 0
+    end
+    local first = wishlistSwitchOffset
+    local shown = math.min(perPage, total - first)
+    local visible = shown + (paged and 1 or 0)
     wishlistSwitchMenu:SetSize(286, 18 + math.max(1, visible) * 24)
     wishlistSwitchMenu:ClearAllPoints()
     wishlistSwitchMenu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
@@ -327,8 +513,24 @@ local function ShowWishlistSwitchMenu(anchor)
             row._label = label
             wishlistSwitchMenu.rows[i] = row
         end
-        local c = candidates[i]
-        if c then
+        -- The pager occupies the last row when there is more than one page.
+        local pagerRow = paged and i == visible
+        local c = (not pagerRow) and candidates[first + i] or nil
+        if pagerRow then
+            local nextFirst = first + shown
+            if nextFirst >= total then nextFirst = 0 end
+            row._check:Hide()
+            row._label:SetTextColor(0.85, 0.75, 0.45)
+            row._label:SetText(string.format(
+                "More wishlists (%d-%d of %d)  |cff777777click for the next %d|r",
+                first + 1, first + shown, total,
+                math.min(perPage, total - nextFirst)))
+            row:Enable()
+            row:SetScript("OnClick", function()
+                ShowWishlistSwitchMenu(anchor, nextFirst)
+            end)
+            row:Show()
+        elseif c then
             local assignedSlot, assignedName = CandidateAssignment(c)
             local current=editingContext and ((editingContext.assignmentId and c.assignmentId
                 and editingContext.assignmentId==c.assignmentId) or (not editingContext.assignmentId
@@ -941,7 +1143,9 @@ local function EnsureFrame()
     end)
     loadoutSwitchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    wishlistSwitchBtn = CreateFrame("Button", nil, frame)
+    -- Named like the other editor controls, so the switch list can be driven
+    -- by the prototype suite the way a player drives it.
+    wishlistSwitchBtn = CreateFrame("Button", "NexusWishlistEditorSwitchButton", frame)
     wishlistSwitchBtn:SetSize(270, 22)
     wishlistSwitchBtn:SetPoint("LEFT", loadoutSwitchBtn, "RIGHT", 8, 0)
     wishlistSwitchBtn:SetText("Choose wishlist to edit")
@@ -962,9 +1166,32 @@ local function EnsureFrame()
     end)
     wishlistSwitchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    frame._manageBtn = CreateFrame("Button", "NexusWishlistEditorManageButton",
+        frame, "UIPanelButtonTemplate")
+    frame._manageBtn:SetSize(88, 22)
+    frame._manageBtn:SetText("Manage")
+    frame._manageBtn:SetScript("OnClick", function(self)
+        HideWishlistSwitchMenu()
+        if M._manageMenu and M._manageMenu:IsShown() then
+            M.HideManageWishlistsMenu()
+        else
+            M.ShowManageWishlistsMenu(self)
+        end
+    end)
+    frame._manageBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Manage saved wishlists", 1, 0.8, 0.3)
+        GameTooltip:AddLine(
+            "Remove a saved wishlist from this character, with an undo. "
+            .. "Server Wishlists are not touched.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    frame._manageBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     newWishlistBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     newWishlistBtn:SetSize(112, 22)
     newWishlistBtn:SetPoint("LEFT", wishlistSwitchBtn, "RIGHT", 8, 0)
+    frame._manageBtn:SetPoint("LEFT", newWishlistBtn, "RIGHT", 6, 0)
     newWishlistBtn:SetText("+ New Wishlist")
     newWishlistBtn:SetScript("OnClick", function()
         HideWishlistSwitchMenu()
@@ -2094,6 +2321,7 @@ end
     end
 
     function M.Hide()
+        M.HideManageWishlistsMenu()
         HideEditorTransients()
         if frame then frame:Hide() end
     end
@@ -2108,5 +2336,30 @@ end
 
     return M
 end
+
+-- Confirmation for removing one retained wishlist. Everything it needs comes
+-- in as data, so this registration holds no editor state and the dialog
+-- cannot act on a plan other than the one the clicked row named.
+StaticPopupDialogs["NEXUS_FORGET_WISHLIST"] = {
+    text = "%s",
+    button1 = "Remove",
+    button2 = "Cancel",
+    OnAccept = function(self, data)
+        data = type(data) == "table" and data
+            or (type(self) == "table" and self.data) or nil
+        local plan = type(data) == "table" and data.plan or nil
+        if not (plan and type(data.forget) == "function") then return end
+        local ok, reason = data.forget({
+            associationIndex = plan.associationIndex,
+            key = plan.key, assignmentId = plan.assignmentId,
+        })
+        if not ok then
+            print("|cffff9040Nexus:|r " .. tostring(reason
+                or "that wishlist could not be removed"))
+        end
+        if type(data.after) == "function" then data.after() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
 
 Nexus.WishlistInternals.Renderer = Renderer

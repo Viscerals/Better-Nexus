@@ -1617,6 +1617,14 @@ function A.GetWishlistCandidates()
     for _, candidate in ipairs(out) do
         if candidate.key then seen[candidate.key] = true end
     end
+    local maxLoadout = tonumber(slots and slots.maxSlots) or 5
+    local associationIndex, associationUsable
+    local function Stamp(candidate)
+        if not candidate or associationIndex == nil then return candidate end
+        candidate.associationIndex = associationIndex
+        candidate.associationUsable = associationUsable
+        return candidate
+    end
     local function Add(saved)
         local candidate = CandidateFromStoredRecord(saved)
         if candidate and candidate.designTargets~=nil and candidate.assignmentId then
@@ -1624,6 +1632,7 @@ function A.GetWishlistCandidates()
             seenAssignments[candidate.assignmentId]=true
             candidate=WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(slots))
             candidate=ResolveWishlistEvidence(candidate,slots)
+            Stamp(candidate)
             for index,live in ipairs(out) do
                 if candidate.slot and live.slot==candidate.slot and live.designTargets==nil then
                     out[index]=candidate;return
@@ -1634,10 +1643,20 @@ function A.GetWishlistCandidates()
         if not candidate or seen[candidate.key] then return end
         seen[candidate.key] = true
         candidate = ResolveWishlistEvidence(candidate, slots)
-        out[#out + 1] = candidate
+        out[#out + 1] = Stamp(candidate)
     end
+    associationIndex, associationUsable = nil, nil
     Add(state.firstRunWishlist)
-    for _, saved in pairs(state.loadoutWishlists or {}) do Add(saved) end
+    for loadoutIndex, saved in pairs(state.loadoutWishlists or {}) do
+        local index = tonumber(loadoutIndex)
+        associationIndex = index or loadoutIndex
+        -- An index outside the configured Saved Build range names no loadout.
+        -- The plan is kept and shown; only its use as a target is withheld.
+        associationUsable = index ~= nil and index >= 1
+            and index == math.floor(index) and index <= maxLoadout
+        Add(saved)
+    end
+    associationIndex, associationUsable = nil, nil
     table.sort(out, function(a, b)
         return (tonumber(a.slot) or 0) < (tonumber(b.slot) or 0)
     end)
@@ -2063,6 +2082,15 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     -- Slot 0 is the first-run context, never a numbered loadout association.
     -- Refuse invalid identifiers before clearing its durable assignment.
     if not loadoutSlot or not wishlistSlot then return false, "invalid slot" end
+    -- The SAME loadout range its two sibling writers require. Without it this
+    -- was the one path that could persist an association under a Wishlist
+    -- mirror number (the designed range sits ABOVE maxSlots), and a stored map
+    -- key is then read back as though it named a playable Saved Build.
+    -- The range is the configured one: a higher supported slot stays valid.
+    local slots = A.Slots()
+    if not slots or loadoutSlot > (tonumber(slots.maxSlots) or 5) then
+        return false, "invalid loadout"
+    end
     local record = StoredWishlistRecord({
         slot=wishlistSlot, name=name, echoes=echoes,designTargets=designTargets,
     })
@@ -2077,16 +2105,188 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     return true
 end
 
+-- Unassign. The label and tooltip promise the Wishlist is kept, which holds
+-- for a plan that mirrors a server Wishlist because the server copy stays.
+-- A local-only plan has no other copy, so the removed record is retained in
+-- the SAME write as the single recoverable undo, and the control can no
+-- longer be the last thing that touched a plan the player still wants.
 function A.ClearLoadoutWishlist(loadoutSlot)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     loadoutSlot = tonumber(loadoutSlot)
     if not loadoutSlot then return false end
     if not UpdateStoreState(function(state)
         state.loadoutWishlists = state.loadoutWishlists or {}
+        local removed = state.loadoutWishlists[loadoutSlot]
         state.loadoutWishlists[loadoutSlot] = nil
+        if type(removed) == "table" then
+            state.forgottenWishlist = {record = removed, loadoutSlot = loadoutSlot}
+        end
     end) then return false end
     MarkWishlistProjectionDirty()
     return true
+end
+
+-- Every retained local plan, with the identity a caller must quote to act on
+-- one. Read-only: it associates nothing, resolves no mirror and writes nothing.
+-- `usable` states whether this record's map index names a Saved Build in the
+-- CONFIGURED range; a plan whose index does not is still the player's plan.
+function A.RetainedWishlistPlans()
+    local state = Store and Store.State and Store.State()
+    if type(state) ~= "table" then return {} end
+    local slots = A.Slots()
+    local maxLoadout = tonumber(slots and slots.maxSlots) or 5
+    local out = {}
+    for loadoutIndex, saved in pairs(state.loadoutWishlists or {}) do
+        local candidate = CandidateFromStoredRecord(saved)
+        if candidate then
+            local index = tonumber(loadoutIndex)
+            local ordinary, locked = 0, 0
+            for _, echo in ipairs(candidate.echoes or {}) do
+                if echo.locked == true then locked = locked + (tonumber(echo.stacks) or 1)
+                else ordinary = ordinary + (tonumber(echo.stacks) or 1) end
+            end
+            out[#out + 1] = {
+                associationIndex = index or loadoutIndex,
+                usable = index ~= nil and index >= 1 and index == math.floor(index)
+                    and index <= maxLoadout or false,
+                name = candidate.name, key = candidate.key,
+                assignmentId = candidate.assignmentId,
+                mirrorSlot = candidate.slot,
+                rows = #(candidate.echoes or {}),
+                ordinaryCopies = ordinary, lockedCopies = locked,
+                designTargets = candidate.designTargets ~= nil,
+            }
+        end
+    end
+    table.sort(out, function(left, right)
+        return tostring(left.associationIndex) < tostring(right.associationIndex)
+    end)
+    return out
+end
+
+-- Stop exposing ONE exact retained plan. The caller must quote the identity it
+-- means; a name is never enough, and two plans can share one. Nothing on the
+-- server, in the build, on another character, in another plan's shared design
+-- or in any pending receipt is touched: this removes one association record
+-- and the first-run pointer if it names the same identity.
+--
+-- One bounded recoverable copy is kept, so the removal can be undone in the
+-- same session and survives a reload. Only the most recent removal is kept:
+-- this is an undo, not an archive.
+function A.ForgetWishlistPlan(selector)
+    if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if type(selector) ~= "table" then return false, "no plan was selected" end
+    local wantIndex = tonumber(selector.associationIndex)
+    local wantKey = type(selector.key) == "string" and selector.key ~= "" and selector.key or nil
+    local wantAssignment = type(selector.assignmentId) == "string"
+        and selector.assignmentId ~= "" and selector.assignmentId or nil
+    if wantIndex == nil and not wantKey and not wantAssignment then
+        return false, "the exact plan identity is required"
+    end
+    local removed, removedIndex
+    local firstRunRemoved = false
+    local ok = UpdateStoreState(function(state)
+        state.loadoutWishlists = state.loadoutWishlists or {}
+        for loadoutIndex, saved in pairs(state.loadoutWishlists) do
+            local candidate = CandidateFromStoredRecord(saved)
+            local sameIndex = wantIndex == nil
+                or tonumber(loadoutIndex) == wantIndex
+            local sameKey = not wantKey
+                or (candidate and candidate.key == wantKey)
+            local sameAssignment = not wantAssignment
+                or (candidate and candidate.assignmentId == wantAssignment)
+            if sameIndex and sameKey and sameAssignment and removed == nil then
+                removed, removedIndex = saved, loadoutIndex
+            end
+        end
+        if removed == nil then return end
+        state.loadoutWishlists[removedIndex] = nil
+        -- The same identity pointed at from first-run state would restore the
+        -- record on the next read. It is reconciled in THIS write.
+        local first = CandidateFromStoredRecord(state.firstRunWishlist)
+        local removedCandidate = CandidateFromStoredRecord(removed)
+        if first and removedCandidate and first.key == removedCandidate.key
+            and first.assignmentId == removedCandidate.assignmentId then
+            state.firstRunWishlist = nil
+            firstRunRemoved = true
+        end
+        state.forgottenWishlist = {
+            record = removed, loadoutSlot = tonumber(removedIndex) or removedIndex,
+            firstRun = firstRunRemoved or nil,
+        }
+    end)
+    if not ok then return false, "saved data is not writable right now" end
+    if removed == nil then return false, "that exact plan is no longer retained" end
+    MarkWishlistProjectionDirty()
+    return true, nil, {loadoutSlot = tonumber(removedIndex) or removedIndex,
+        firstRun = firstRunRemoved or nil}
+end
+
+-- What the single retained undo currently holds, as facts a caller can show:
+-- the display name, the index it came from and whether it still has a distinct
+-- server mirror. Read-only, and never the stored record itself.
+function A.ForgottenWishlistPlan()
+    local state = Store and Store.State and Store.State()
+    local retained = type(state) == "table" and state.forgottenWishlist or nil
+    if type(retained) ~= "table" or type(retained.record) ~= "table" then
+        return nil
+    end
+    local candidate = CandidateFromStoredRecord(retained.record)
+    if not candidate then return nil end
+    return {
+        name = candidate.name,
+        associationIndex = retained.loadoutSlot,
+        mirrorSlot = candidate.slot,
+        rows = #(candidate.echoes or {}),
+    }
+end
+
+-- Undo the last forget, if one is retained. The record goes back under the
+-- same index it had; an index now occupied is never overwritten.
+function A.RestoreForgottenWishlistPlan()
+    if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    local state = Store and Store.State and Store.State()
+    local retained = type(state) == "table" and state.forgottenWishlist or nil
+    if type(retained) ~= "table" or type(retained.record) ~= "table" then
+        return false, "nothing was removed in a way this can restore"
+    end
+    local occupied = false
+    local ok = UpdateStoreState(function(live)
+        live.loadoutWishlists = live.loadoutWishlists or {}
+        local index = retained.loadoutSlot
+        if index ~= nil and live.loadoutWishlists[index] ~= nil then
+            occupied = true
+            return
+        end
+        if index ~= nil then live.loadoutWishlists[index] = retained.record end
+        if retained.firstRun then live.firstRunWishlist = retained.record end
+        live.forgottenWishlist = nil
+    end)
+    if not ok then return false, "saved data is not writable right now" end
+    if occupied then
+        return false, "that Saved Build now uses a different plan; unassign it first"
+    end
+    MarkWishlistProjectionDirty()
+    return true
+end
+
+-- What the supported client interface can do about a SERVER Wishlist. The
+-- service surface this addon is given has no delete of any kind: a Wishlist
+-- mirror is a build slot the server reports unverified or above maxSlots, and
+-- every write path offered creates or overwrites one. Overwriting a slot with
+-- other contents is not deletion and would alter what the player has saved, so
+-- no delete is offered and the reason is stated rather than hidden.
+function A.ServerWishlistDeletionSupport()
+    local svc = PS()
+    local names = {"DeleteServerBuildSlot", "RemoveServerBuildSlot",
+        "DeleteWishlist", "RemoveWishlist", "ClearServerBuildSlot"}
+    for _, name in ipairs(names) do
+        if svc and type(svc[name]) == "function" then
+            return {supported = true, entry = name}
+        end
+    end
+    return {supported = false,
+        reason = "this client build exposes no Wishlist deletion call"}
 end
 
 function A.Wishlist()

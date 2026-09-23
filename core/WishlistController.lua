@@ -364,6 +364,62 @@ function Controller.New(options)
             and Adapter.GetWishlistCandidates() or {}
     end
 
+    -- Read-only management projections.
+    function M.RetainedPlansProjection()
+        return Adapter and Adapter.RetainedWishlistPlans
+            and Adapter.RetainedWishlistPlans() or {}
+    end
+
+    function M.ForgottenPlanProjection()
+        return Adapter and Adapter.ForgottenWishlistPlan
+            and Adapter.ForgottenWishlistPlan() or nil
+    end
+
+    function M.ServerDeletionSupportProjection()
+        local probe = Adapter and Adapter.ServerWishlistDeletionSupport
+        if type(probe) ~= "function" then
+            return {supported = false, reason = "deletion support is unknown"}
+        end
+        return probe()
+    end
+
+    -- Intentions. Each returns ok plus the reason to show when it refuses, and
+    -- a refusal is retained with the same bounded facts as a switch refusal.
+    function M.ForgetRetainedPlan(selector)
+        local act = Adapter and Adapter.ForgetWishlistPlan
+        if type(act) ~= "function" then
+            return false, "this build cannot remove a saved wishlist"
+        end
+        local ok, reason, detail = act(selector)
+        if not ok then
+            if M._RecordSwitchRefusal then M._RecordSwitchRefusal("forget wishlist", "FORGET_REFUSED", {
+                detail = reason,
+                key = type(selector) == "table" and selector.key or nil,
+                loadoutSlot = type(selector) == "table"
+                    and selector.associationIndex or nil,
+                sourceKind = "local",
+            }) end
+            return false, reason or "that plan could not be removed"
+        end
+        return true, nil, detail
+    end
+
+    function M.RestoreForgottenPlan()
+        local act = Adapter and Adapter.RestoreForgottenWishlistPlan
+        if type(act) ~= "function" then
+            return false, "this build cannot restore a removed wishlist"
+        end
+        local ok, reason = act()
+        if not ok then
+            if M._RecordSwitchRefusal then
+                M._RecordSwitchRefusal("restore wishlist", "RESTORE_REFUSED",
+                    {detail = reason, sourceKind = "local"})
+            end
+            return false, reason or "nothing could be restored"
+        end
+        return true
+    end
+
     function M.SlotsProjection()
         return Adapter and Adapter.Slots and Adapter.Slots() or nil
     end
@@ -1174,13 +1230,56 @@ function Controller.New(options)
         return false, err
     end
 
+    -- One bounded record of a refused switch, assignment or save, through the
+    -- incident owner this addon already has. Identity travels as a short hash
+    -- of the exact content key, never the key, the name, the Echo list or the
+    -- character: enough to tell two plans apart in a ticket, not enough to
+    -- reconstruct either. A refusal is a business rule, not a Lua error.
+    local function RecordSwitchRefusal(operation, reason, detail)
+        local support = Nexus and Nexus.SupportIncidents
+        if not (support and type(support.Record) == "function") then return end
+        detail = type(detail) == "table" and detail or {}
+        local context = state.editingContext or {}
+        local slots = Adapter and Adapter.Slots and Adapter.Slots() or nil
+        local function alias(value)
+            if type(value) ~= "string" or value == "" then return nil end
+            local sum = 0
+            for index = 1, #value do
+                sum = (sum * 31 + value:byte(index)) % 4294967296
+            end
+            return string.format("plan-%08x", sum)
+        end
+        pcall(support.Record, "wishlist-refusal", {
+            reason = reason,
+            producer = "Wishlist editor",
+            origin = "local",
+            operation = operation,
+            build = Nexus.Release and Nexus.Release.buildLabel or nil,
+            representation = "inline",
+            committed = false,
+            scope = "no Wishlist was uploaded, assigned or removed by this refusal",
+            detail = detail.detail,
+            readiness = {
+                planAlias = alias(detail.key or context.key),
+                sourceKind = detail.sourceKind or (context.assignmentId and "local" or "live"),
+                targetLoadoutSlot = tonumber(detail.loadoutSlot or context.loadoutSlot),
+                mirrorSlot = tonumber(detail.mirrorSlot or context.slot),
+                configuredMaxLoadout = tonumber(slots and slots.maxSlots),
+                matchingCandidates = tonumber(detail.matches),
+            },
+        })
+    end
+    M._RecordSwitchRefusal = RecordSwitchRefusal
+
     function M.PrepareApply(nameText)
         if not (Adapter and Adapter.UploadWishlist) then
             notify("|cffff6060Nexus:|r adapter not ready.")
             return nil, "adapter"
         end
         if state.editingContext and not tonumber(state.editingContext.slot) then
-            notify("|cffff9040Nexus:|r This saved plan has no distinct current server mirror. Refresh the list before saving; no other Wishlist will be overwritten.")
+            notify("|cffff9040Nexus:|r This saved plan has no distinct current server mirror. It is kept exactly as it is; saving it would need a mirror to write to, and no other Wishlist will be overwritten.")
+            RecordSwitchRefusal("save wishlist", "MIRROR_UNRESOLVED",
+                {detail = "the saved plan has no distinct current server mirror"})
             return nil,"mirror_unresolved"
         end
         local current, staleReason = CandidateCurrent()
