@@ -517,9 +517,8 @@ function Updates.Observe(version, source)
 end
 
 -- What this session is holding for hints. Diagnostic only: counts, no text,
--- so that the bounds can be observed instead of assumed. The SETS are counted,
--- not the order lists beside them: the sets are what holds the memory, and
--- counting the lists would report a bound that the sets do not have.
+-- so that the bounds can be observed instead of assumed. There is exactly ONE
+-- structure per set, so nothing beside it can report a bound it does not have.
 local function size(map)
     local n = 0
     for _ in pairs(map) do n = n + 1 end

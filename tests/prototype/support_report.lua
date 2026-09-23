@@ -324,6 +324,23 @@ local retained=tostring(support.Latest().readiness.note)
 record({committed=false,readiness={note=retained}})
 check(support.Count()==2,
  'the retained form of a long reading is not the same reading: '..support.Count())
+-- The marker is an IDENTITY device. It must never reach the text a player
+-- copies into a ticket, or the prepared file, as the byte it is stored as.
+support.Clear()
+record({committed=false,readiness={note=string.rep('a',400)}})
+local copied=builder.Summary()
+check(copied:find(string.char(1),1,true)==nil,
+ 'no marker byte reaches the copied summary')
+check(copied:find('(400B#',1,true)~=nil,
+ 'while the shortening is still stated in the text the reader sees')
+check(copied:find('...(400B#',1,true)~=nil,
+ 'and reads as a shortening, not as text running into a bracket')
+local markerJob=builder.NewPreparation({extended=true})
+local markerGuard=0
+while builder.Step(markerJob)=='pending' and markerGuard<400 do markerGuard=markerGuard+1 end
+local markerText=table.concat(markerJob.chunks or {},'')
+check(markerText:find(string.char(1),1,true)==nil,
+ 'and none reaches the prepared file either')
 support.Clear()
 record({committed=false,readiness={permanentSource=1}})
 record({committed=false,readiness={permanentSource='1'}})

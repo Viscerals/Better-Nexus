@@ -248,15 +248,55 @@ do
   'it says the state is unknown instead of raising')
  local okJob,job=pcall(report.NewPreparation,{extended=true})
  check(okJob,'and does not take the prepared file away either: '..tostring(job))
- -- A retained fact whose __tostring raises.
- Nexus.StartupStatus=function()
-  return {state='failed',coreReady=false,reason='SOURCE_KEY_WIDTH_EXCEEDED',
-   failure={stage=setmetatable({},{__tostring=function() error('hostile') end})}}
+ -- EVERY field this projection concatenates, one at a time: a raising
+ -- __tostring in any of them must not take the report away. Naming them
+ -- individually is the point - the earlier version of this check exercised
+ -- one field and passed while six others still raised.
+ local hostileValue=function()
+  return setmetatable({},{__tostring=function() error('hostile') end})
  end
- local okHostile,hostile=pcall(report.Summary)
- check(okHostile,'a hostile value in a retained fact does not raise: '..tostring(hostile))
- check(hostile:find('SOURCE_KEY_WIDTH_EXCEEDED',1,true)~=nil,
-  'and the reason beside it still reaches the report')
+ local fields={'state','coreReady','phase','reason'}
+ for _,field in ipairs(fields) do
+  Nexus.StartupStatus=function()
+   local status={state='failed',coreReady=false,phase='store-validation',
+    reason='SOURCE_KEY_WIDTH_EXCEEDED'}
+   status[field]=hostileValue()
+   return status
+  end
+  local okField,text=pcall(report.Summary)
+  check(okField,'a hostile status.'..field..' does not take the summary away: '..tostring(text))
+  local okPrepared=pcall(report.NewPreparation,{extended=true})
+  check(okPrepared,'or the prepared file, for status.'..field)
+ end
+ for _,field in ipairs({'stage','detail','cause','owner','error','row','formatClass',
+  'formatVersion','formatField','legacyClass'}) do
+  Nexus.StartupStatus=function()
+   local facts={stage='STORE_CHAR_MIGRATION_PENDING',detail='SOURCE_KEY_WIDTH_EXCEEDED'}
+   facts[field]=hostileValue()
+   return {state='failed',coreReady=false,reason='SOURCE_KEY_WIDTH_EXCEEDED',failure=facts}
+  end
+  local okFact,text=pcall(report.Summary)
+  check(okFact,'a hostile failure.'..field..' does not take the summary away: '..tostring(text))
+  check(text:find('SOURCE_KEY_WIDTH_EXCEEDED',1,true)~=nil,
+   'and the reason survives beside it, for failure.'..field)
+ end
+ for _,field in ipairs({'path','depth','keyType','keyBytes','valueType','limit','exception'}) do
+  Nexus.StartupStatus=function()
+   local width={path='character.autoLockAttempts.records',depth=3,keyType='string',
+    keyBytes=595,valueType='table',limit=183,exception='none'}
+   width[field]=hostileValue()
+   return {state='failed',coreReady=false,reason='SOURCE_KEY_WIDTH_EXCEEDED',
+    failure={stage='STORE_CHAR_MIGRATION_PENDING',keyWidth=width}}
+  end
+  local okWidth,text=pcall(report.Summary)
+  check(okWidth,'a hostile keyWidth.'..field..' does not take the summary away: '..tostring(text))
+ end
+ -- An incident whose own fields are missing is not a nil concatenation either.
+ local realIncidents=Nexus.SupportIncidents.History
+ Nexus.SupportIncidents.History=function() return {{id=1,occurrences=1}} end
+ local okBare,bare=pcall(report.Summary)
+ Nexus.SupportIncidents.History=realIncidents
+ check(okBare,'an incident with no kind or reason does not raise: '..tostring(bare))
  -- A missing owner entirely.
  Nexus.StartupStatus=nil
  check(pcall(report.Summary),'a missing start-up owner does not raise')

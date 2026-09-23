@@ -78,6 +78,17 @@ local function shown(value, limit)
     return text
 end
 
+-- A retained incident value. The incident owner marks a value it had to
+-- shorten with a byte no caller can supply, because it escapes every control
+-- character a caller hands it; that byte is an IDENTITY device and must never
+-- reach a ticket, so it is read back here as the printable marker it stands
+-- for. Everything else goes through plain() exactly as before.
+local function retained(value, limit)
+    local ok, text = pcall(tostring, value)
+    if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
+    return plain((text:gsub(string.char(1), "...")), limit)
+end
+
 -- The report is copied out of an edit box and pasted into a ticket, so a pipe
 -- must survive as one pipe: an edit box shows its text literally, and a doubled
 -- pipe would reach support as part of a recorded label. Escaping belongs to the
@@ -163,7 +174,7 @@ function M.IncidentLines(incident, options)
     if incident.readiness then
         local parts = {}
         for key, value in pairs(incident.readiness) do
-            parts[#parts + 1] = tostring(key) .. "=" .. tostring(value)
+            parts[#parts + 1] = retained(key, 64) .. "=" .. retained(value, 240)
         end
         table.sort(parts)
         out[#out + 1] = "Capture-time sources: " .. (#parts > 0
@@ -227,7 +238,7 @@ function M.StartupLines(status, extended)
     local out = {}
     out[#out + 1] = (failed and "STARTUP FAILED: state " or "Startup: state ")
         .. shown(status.state, 32)
-        .. (status.coreReady ~= nil and ("; core ready " .. tostring(status.coreReady)) or "")
+        .. (status.coreReady ~= nil and ("; core ready " .. shown(status.coreReady, 16)) or "")
         .. (status.phase ~= nil and ("; phase " .. shown(status.phase, 48)) or "")
     if status.reason ~= nil then
         out[#out + 1] = "  reason: " .. shown(status.reason, 96)
@@ -244,17 +255,17 @@ function M.StartupLines(status, extended)
         if facts.formatClass ~= nil or facts.formatVersion ~= nil then
             out[#out + 1] = "  saved format: " .. shown(facts.formatClass, 24)
                 .. (facts.formatVersion ~= nil
-                    and (" version " .. tostring(facts.formatVersion)) or "")
+                    and (" version " .. shown(facts.formatVersion, 16)) or "")
                 .. (extended and facts.formatField ~= nil
                     and (" (" .. shown(facts.formatField, 64) .. ")") or "")
         end
         local width = type(facts.keyWidth) == "table" and facts.keyWidth or nil
         if width then
             out[#out + 1] = "  refused key: " .. shown(width.path, 64)
-                .. ", depth " .. tostring(width.depth)
+                .. ", depth " .. shown(width.depth, 8)
                 .. ", " .. shown(width.keyType, 16) .. " key of "
-                .. tostring(width.keyBytes) .. " bytes, limit "
-                .. tostring(width.limit)
+                .. shown(width.keyBytes, 16) .. " bytes, limit "
+                .. shown(width.limit, 16)
                 .. ", path exception " .. shown(width.exception, 24)
             out[#out + 1] = "  (the key, the character and the record contents are not included)"
         end
@@ -263,7 +274,7 @@ function M.StartupLines(status, extended)
                 out[#out + 1] = "  owner error: " .. shown(facts.error, 160)
             end
             if facts.row ~= nil then
-                out[#out + 1] = "  selection row: " .. tostring(facts.row)
+                out[#out + 1] = "  selection row: " .. shown(facts.row, 16)
             end
             if facts.legacyClass ~= nil then
                 out[#out + 1] = "  legacy class: " .. shown(facts.legacyClass, 32)
@@ -332,7 +343,7 @@ function M.Summary(selection)
     for _, entry in ipairs(incidents) do
         if not incident or entry.id ~= incident.id then
             context[#context + 1] = "  " .. tostring(entry.id) .. ". "
-                .. plain(entry.kind) .. "/" .. plain(entry.reason)
+                .. shown(entry.kind, 64) .. "/" .. shown(entry.reason, 96)
                 .. " from " .. (plain(entry.producer) or "unknown producer")
                 .. " x" .. tostring(entry.occurrences or 1)
         end
