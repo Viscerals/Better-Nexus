@@ -64,6 +64,10 @@ local logRendered=nil
 -- Labels resolved for the ids this page actually shows. Cleared whenever the
 -- history revision changes, so a stale label cannot outlive its page.
 local logLabels={key=nil,byId={}}
+local function logRunKey(run)
+    if not run then return "none" end
+    return tostring(run.which).."|"..tostring(run.runId)
+end
 local function logPageView(page)
     return Nexus.OrbRuntime.RunLog(logView,((page or 1)-1)*LOG_ROWS+1,LOG_ROWS)
 end
@@ -74,9 +78,13 @@ local function logKey(run)
     return table.concat({tostring(run.which),tostring(run.runId),
         tostring(run.revision),tostring(run.total)},"|")
 end
--- One bounded, read-only lookup of ONE recorded id: the catalog row this
--- client already holds, then the client's own spell info. No scan of the
--- catalog, no request, no gameplay state, and nothing is written back.
+-- One lookup of ONE recorded id, at most once per distinct id on the page:
+-- the addon's shared catalog accessor, then the client's own spell info. It
+-- indexes the catalog by that exact id and never iterates it; the accessor
+-- itself may refresh its own cache when the client's data changed, which is
+-- the same shared call every other view makes. It sends no request, reads no
+-- gameplay state, and writes nothing back into the run, the log or the
+-- profile.
 local function logResolve(spellId)
     local found=logLabels.byId[spellId]
     if found~=nil then return found.label,found.icon end
@@ -231,10 +239,13 @@ local function logCell(fs,label,color)
 end
 -- Two lines per Echo cell: the name, then the rarity word. The colour repeats
 -- the rarity; it is never the only cue.
+local CELL_LETTERS=30
 local function logEchoText(cell)
     if not cell then return "" end
-    if cell.recorded==false then return cell.label end
-    return cell.label.."\n"..cell.rarity.label
+    local history=Nexus.OrbHistory
+    local shown=history.Ellipsis(cell.label,CELL_LETTERS)
+    if cell.recorded==false then return shown end
+    return shown.."\n"..cell.rarity.label
 end
 local function logDetailText(details,history)
     if not details then return "Select an operation to see what was offered and why it was chosen." end
@@ -280,7 +291,8 @@ local function refreshLog(force)
     local history=logHistory()
     local run=logPageView(logPage)
     local key=logKey(run)
-    if logLabels.key~=key then logLabels.key,logLabels.byId=key,{} end
+    local runKey=logRunKey(run)
+    if logLabels.key~=runKey then logLabels.key,logLabels.byId=runKey,{} end
     local total=run and run.total or 0
     local pages=history.Pages(total,LOG_ROWS)
     if logPage>pages then
@@ -290,7 +302,10 @@ local function refreshLog(force)
     logFrame.header:SetText(header.empty and header.status
         or (header.runLabel.." - "..header.wishlist.."\n"..header.status.."\n"..header.usage
             ..(header.increased and " (maximum was increased)" or "")))
-    logFrame.warning:SetText(header.pending or header.truncated or "")
+    local warnings={}
+    if header.pending then warnings[#warnings+1]=header.pending end
+    if header.truncated then warnings[#warnings+1]=header.truncated end
+    logFrame.warning:SetText(table.concat(warnings,"  "))
     enable(logFrame.current,logView~="current")
     enable(logFrame.previous,logView~="previous" and header.hasPrevious)
     local rows=history.Rows(run,logResolve)
@@ -306,13 +321,17 @@ local function refreshLog(force)
             logCell(row.reason,model.reason.label)
             logCell(row.result,model.result.label,logRowTone(model.result))
             row.detail=model.reason.detail
+            row.full=model.source.label.." ("..model.source.rarity.label..")"
+                .."  ->  "..model.replacement.label
+                ..(model.replacement.recorded~=false
+                    and (" ("..model.replacement.rarity.label..")") or "")
             row.icon:SetTexture(model.source.icon or "")
             row.resultIcon:SetTexture(model.replacement.icon or "")
             if logSelection and model.serial==logSelection then
                 selected=model;row.highlight:Show()
             else row.highlight:Hide() end
         else
-            row:Hide();row.highlight:Hide()
+            row:Hide();row.highlight:Hide();row.detail=nil;row.full=nil
             logCell(row.index,"");logCell(row.source,"");logCell(row.replacement,"")
             logCell(row.reason,"");logCell(row.result,"")
         end
@@ -320,7 +339,7 @@ local function refreshLog(force)
     if logSelection and not selected then logSelection=nil end
     local details=selected and history.Details(selected.entry,logResolve,run and run.startedAt) or nil
     logFrame.details:SetText(logDetailText(details,history))
-    logFrame.page:SetText(history.PageLabel(total,logPage,LOG_ROWS))
+    logFrame.page:SetText(history.PageLabel(total,logPage,LOG_ROWS,run and run.truncated))
     enable(logFrame.prev,logPage>1)
     enable(logFrame.next,logPage<pages)
     -- The page the player is reading stays where it is; new operations are
@@ -368,7 +387,8 @@ local function ensureCopyView()
     f.check:SetSize(22,22);f.check:SetPoint("TOPLEFT",20,-68)
     f.checkLabel=text(f,46,-72,400,20,"Include technical details")
     f.check:SetScript("OnClick",function(self)
-        f.editBox:SetText(logReportText(self:GetChecked()==true))
+        -- GetChecked answers 1 or nil on this client, never a boolean.
+        f.editBox:SetText(logReportText(self:GetChecked() and true or false))
         f.editBox:SetCursorPosition(0)
     end)
     f.scroll=CreateFrame("ScrollFrame","NexusOrbHistoryCopyScroll",f,"UIPanelScrollFrameTemplate")
@@ -436,21 +456,30 @@ local function ensureLog()
         row.result=text(row,612,-4,105,34)
         row:SetScript("OnClick",function(self)
             -- Reading only: this selects a row for display and nothing else.
-            logSelection=(logSelection==self.serial) and nil or self.serial
+            if logSelection==self.serial then logSelection=nil
+            else logSelection=self.serial end
             refreshLog()
         end)
         row:SetScript("OnEnter",function(self)
-            if not self.detail or not GameTooltip then return end
+            -- A shortened cell keeps its whole recorded value here.
+            if not GameTooltip or (not self.detail and not self.full) then return end
             GameTooltip:SetOwner(self,"ANCHOR_TOP")
-            GameTooltip:SetText("Why this Echo was selected")
-            GameTooltip:AddLine(self.detail,1,1,1,true)
+            GameTooltip:SetText(self.full or "Why this Echo was selected")
+            if self.detail then GameTooltip:AddLine(self.detail,1,1,1,true) end
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave",function() if GameTooltip then GameTooltip:Hide() end end)
         row:Hide()
         logFrame.rows[i]=row
     end
-    logFrame.details=text(logFrame,20,-446,720,60)
+    logFrame.detailScroll=CreateFrame("ScrollFrame","NexusOrbHistoryDetailScroll",
+        logFrame,"UIPanelScrollFrameTemplate")
+    logFrame.detailScroll:SetPoint("TOPLEFT",20,-444)
+    logFrame.detailScroll:SetSize(700,96)
+    logFrame.detailChild=CreateFrame("Frame",nil,logFrame.detailScroll)
+    logFrame.detailChild:SetSize(680,96)
+    logFrame.details=text(logFrame.detailChild,0,0,680,400)
+    logFrame.detailScroll:SetScrollChild(logFrame.detailChild)
     logFrame.page=text(logFrame,20,-512,300,22)
     logFrame.prev=button(logFrame,320,-510,85,"Previous",function()
         if logPage<=1 then return end
@@ -462,7 +491,7 @@ local function ensureLog()
     button(logFrame,500,-510,115,"Copy report",function()
         local view=ensureCopyView()
         view:Show()
-        view.editBox:SetText(logReportText(view.check:GetChecked()==true))
+        view.editBox:SetText(logReportText(view.check:GetChecked() and true or false))
         view.editBox:SetCursorPosition(0)
     end)
     button(logFrame,625,-510,95,"Close",function()logFrame:Hide()end)

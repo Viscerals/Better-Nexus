@@ -85,6 +85,15 @@ local function display(value, limit)
 end
 M.Display = display
 
+-- A cell shows what fits and says that it was shortened; the caller keeps the
+-- whole value for the tooltip and the details.
+function M.Ellipsis(value, limit)
+    local text = tostring(value or "")
+    limit = math.max(4, tonumber(limit) or 32)
+    if #text <= limit then return text, false end
+    return text:sub(1, limit - 3) .. "...", true
+end
+
 function M.Rarity(quality)
     local q = tonumber(quality)
     local label = q and M.QUALITY_NAMES[q]
@@ -305,13 +314,14 @@ function M.Header(view)
     }
 end
 
-function M.PageLabel(total, page, rows)
+function M.PageLabel(total, page, rows, truncated)
     total = tonumber(total) or 0
     rows = math.max(1, tonumber(rows) or 1)
-    if total == 0 then return "No operations recorded" end
+    local bounded = truncated and " (recording stopped at this bound)" or ""
+    if total == 0 then return "No operations recorded" .. bounded end
     local first = (math.max(1, tonumber(page) or 1) - 1) * rows + 1
     local last = math.min(total, first + rows - 1)
-    return "Operations " .. first .. "-" .. last .. " of " .. total
+    return "Operations " .. first .. "-" .. last .. " of " .. total .. bounded
 end
 
 function M.Pages(total, rows)

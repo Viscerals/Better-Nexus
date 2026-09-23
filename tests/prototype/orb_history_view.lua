@@ -165,6 +165,7 @@ local function serveStub(which,from,count)
  local last=count and math.min(#all,first+math.max(0,math.floor(count))-1) or #all
  for index=first,last do page[#page+1]=all[index] end
  local run=view(page,{which=which or 'current',total=#all,
+  revision=stubHeader.revision or 3,
   hasPrevious=stubHeader.hasPrevious==true,runId=which=='previous' and 6 or 7})
  for k,v in pairs(stubHeader.fields or {})do run[k]=v end
  return run
@@ -220,6 +221,11 @@ check(detailText:find('Eligible surplus at selection',1,true)~=nil,
 check(detailText:find('copies used',1,true)==nil,'and never call it copies used')
 log.rows[3]:Click()
 check(log.details:GetText():find('Operation 3',1,true)~=nil,'another row replaces the open details')
+log.rows[3]:Click()
+check(not log.rows[3].highlight:IsShown(),'clicking the open row again closes its details')
+check(log.details:GetText():find('Select an operation',1,true)~=nil,
+ 'and the details area returns to its prompt: '..log.details:GetText())
+log.rows[3]:Click()
 check(not log.rows[2].highlight:IsShown() and log.rows[3].highlight:IsShown(),
  'only one operation is open at a time')
 button('Next',log):Click()
@@ -253,9 +259,15 @@ stubEntries[3].state='not sent';stubEntries[3].obtained=nil;stubEntries[3].selec
 stubEntries[3].reason='The adapter refused the request.'
 stubEntries[4].sourceName=nil;stubEntries[4].sourceKey='777777:1'
 log:Hide();log=Nexus.OrbPanel.ShowLog()
-check(#log.rows[1].source:GetText()<=140,'a long name is bounded for display: '..#log.rows[1].source:GetText())
-check(log.rows[1].source:GetText():find('Extremely Long Echo Name',1,true)~=nil,
- 'and still shows the recorded name')
+check(#log.rows[1].source:GetText()<=60,'a long name is shortened for its cell: '..#log.rows[1].source:GetText())
+check(log.rows[1].source:GetText():find('...',1,true)~=nil,
+ 'and says that it was shortened: '..log.rows[1].source:GetText())
+check(log.rows[1].source:GetText():find('Extremely Long',1,true)~=nil,
+ 'while still showing the start of the recorded name')
+log.rows[1]:GetScript('OnEnter')(log.rows[1])
+check(log.rows[1].full:find('Extremely Long Echo Name Extremely',1,true)~=nil,
+ 'the whole recorded name stays available on hover: '..log.rows[1].full)
+log.rows[1]:GetScript('OnLeave')(log.rows[1])
 check(log.rows[2].result:GetText()=='Awaiting result','a pending row says so: '..log.rows[2].result:GetText())
 check(log.rows[2].replacement:GetText():find('proposed',1,true)~=nil,
  'and marks its replacement as proposed: '..log.rows[2].replacement:GetText())
@@ -287,6 +299,9 @@ end
 check(copied:find('Awaiting result.',1,true) and copied:find('Not sent.',1,true)
  and copied:find('Confirmed.',1,true),'and distinguishes pending, not-sent and confirmed')
 check(copied:find('410002:2',1,true)==nil,'the readable report keeps raw keys out')
+-- This client answers 1 or nil, never a boolean, so the handler must not
+-- compare with true.
+copyView.check.GetChecked=function(self) return self.checked and 1 or nil end
 copyView.check:SetChecked(true);copyView.check:GetScript('OnClick')(copyView.check)
 local technicalCopy=copyView.editBox:GetText()
 check(technicalCopy:find('410002:2',1,true)~=nil,'technical mode exposes the exact identity')
@@ -325,6 +340,14 @@ stubHeader.fields={truncated=true}
 log:Hide();log=Nexus.OrbPanel.ShowLog()
 check(log.warning:GetText():find('reached its bound',1,true)~=nil,
  'a truncated history is stated, not hidden: '..log.warning:GetText())
+check(log.page:GetText():find('bound',1,true)~=nil,
+ 'and the page line carries the bound too: '..log.page:GetText())
+-- An unresolved operation must not hide the fact that recording stopped.
+stubHeader.fields={truncated=true,reserved=1,state='PAUSED',spent=14}
+log:Hide();log=Nexus.OrbPanel.ShowLog()
+check(log.warning:GetText():find('unresolved operation',1,true)~=nil
+ and log.warning:GetText():find('reached its bound',1,true)~=nil,
+ 'an unsettled AND truncated run states both: '..log.warning:GetText())
 stubHeader.fields=nil
 log:Hide();log=Nexus.OrbPanel.ShowLog()
 check(log.note:GetText()=='History clears on reload or logout.',
@@ -345,6 +368,27 @@ check(log.page:GetText():find(' of 20',1,true)~=nil,
 log=Nexus.OrbPanel.ShowLog()
 check(log.page:GetText():find(' of 40',1,true)~=nil,
  'reopening reads the history again: '..log.page:GetText())
+-- A recorded change at constant total must reach an open window: the runtime
+-- moves its revision on every event, and the view keys on it.
+stubEntries=stub(15)
+stubHeader.revision=10
+log:Hide();log=Nexus.OrbPanel.ShowLog()
+check(log.rows[1].result:GetText()=='Confirmed','the first row starts confirmed')
+button('Copy report',log):Click()
+local staleCopy=NexusOrbHistoryCopy.editBox:GetText()
+button('Close',NexusOrbHistoryCopy):Click()
+stubEntries[1].state='selected';stubEntries[1].obtained=nil
+stubHeader.revision=11
+log:GetScript('OnUpdate')(log,1)
+check(log.rows[1].result:GetText()=='Awaiting result',
+ 'the open window follows a recorded change at constant total: '..log.rows[1].result:GetText())
+button('Copy report',log):Click()
+check(NexusOrbHistoryCopy.editBox:GetText()~=staleCopy,
+ 'and the copied report is rebuilt instead of served stale')
+button('Close',NexusOrbHistoryCopy):Click()
+stubEntries=stub(15);stubHeader.revision=12
+log:GetScript('OnUpdate')(log,1)
+
 -- Only the visible page is read while the window refreshes.
 local reads={}
 local serve=M.RunLog
