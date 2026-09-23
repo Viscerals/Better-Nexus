@@ -418,14 +418,11 @@ function Controller.New(options)
         end
         local ok, reason, detail = act(selector)
         if ok then return true, nil, detail end
-        if not ok then
-            if M._RecordSwitchRefusal then
-                M._RecordSwitchRefusal("restore wishlist", "RESTORE_REFUSED",
-                    {detail = reason, sourceKind = "local"})
-            end
-            return false, reason or "nothing could be restored"
+        if M._RecordSwitchRefusal then
+            M._RecordSwitchRefusal("restore wishlist", "RESTORE_REFUSED",
+                {detail = reason, sourceKind = "local"})
         end
-        return true
+        return false, reason or "nothing could be restored"
     end
 
     function M.SlotsProjection()

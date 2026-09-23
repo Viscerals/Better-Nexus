@@ -578,4 +578,151 @@ do
   ..tostring((support.Latest().readiness or {}).targetLoadoutSlot))
 end
 
+-- 16. What the confirmation may say about the server. A mirror NUMBER that
+-- is still live is not the same fact as a server Wishlist that holds this
+-- plan: the number outlives the contents. Three states, three sentences.
+do
+ local function WithLiveMirror(rows)
+  Boot(function(db)
+   db.chars[F.NAME].loadoutWishlists={
+    [1]={slot=103,name=NAME,echoes=Echoes(false),assignmentId='assigned:6',designTargets={}},
+   }
+  end)
+  H.perks.serverBuildSlots[103]={name='Mirror',verified=false,echoes=rows}
+  H.Notify();A.Poll();H.Advance(1)
+  return A.RetainedWishlistPlans()[1]
+ end
+ -- The server holds exactly these contents.
+ local same=WithLiveMirror(Echoes(false))
+ check(same~=nil,'fixture: the plan is retained')
+ check(same.mirrorResolved==true,'an exact server copy is reported as such')
+ check(same.mirrorSlotLive==true,'and its slot is live')
+ -- The slot is still there, holding something else.
+ local other=Echoes(false)
+ other[#other+1]={spellId=316666,quality=2,stacks=1,locked=false}
+ local moved=WithLiveMirror(other)
+ check(moved.mirrorSlotLive==true,'the slot is still live when its contents changed')
+ check(moved.mirrorResolved==false,
+  'but no server Wishlist holds this plan, and it is not reported as one')
+ -- What the player is asked, in that middle state.
+ Nexus.WishlistEditor.Show()
+ NexusWishlistEditorManageButton:Click()
+ local row
+ for _,candidate in ipairs(NexusWishlistManageMenu.rows or {}) do
+  if candidate:IsShown() and (candidate._label:GetText() or ''):find(NAME,1,true) then
+   row=candidate
+  end
+ end
+ check(row~=nil,'the plan is listed for management')
+ row:Click()
+ local asked=tostring(H.popup and H.popup.arg1 or '')
+ check(asked:find('no longer holds these contents',1,true)~=nil,
+  'the confirmation says the slot no longer holds this plan: '..asked)
+ check(asked:find('holds exactly this plan',1,true)==nil,
+  'and does not claim the server holds it')
+ check(asked:find('this is the only copy',1,true)==nil,
+  'and does not claim there is nothing on the server either')
+ check(asked:find('can undo this',1,true)~=nil,'the undo is named here too')
+ check(#H.actions==0,'nothing was submitted to the server')
+end
+
+-- 17. Recoverability that was promised is not spent by a control that
+-- promises the opposite. Unassign keeps the Wishlist; a confirmed removal was
+-- told it could be undone. With one bounded list, five Unassigns must not
+-- push the confirmed removal out of it.
+do
+ Boot(function(db)
+  local map={}
+  for index=1,5 do
+   local rows=Echoes(false)
+   rows[#rows+1]={spellId=315000+index,quality=2,stacks=1,locked=false}
+   map[index]={slot=110+index,name='Assigned '..index,echoes=rows,
+    assignmentId='assigned:a'..index,designTargets={}}
+  end
+  local removed=Echoes(false)
+  removed[#removed+1]={spellId=315999,quality=2,stacks=1,locked=false}
+  map[207]={slot=120,name='Confirmed Removal',echoes=removed,
+   assignmentId='assigned:r',designTargets={}}
+  db.chars[F.NAME].loadoutWishlists=map
+ end)
+ local target
+ for _,plan in ipairs(A.RetainedWishlistPlans()) do
+  if plan.associationIndex==207 then target=plan end
+ end
+ check(target~=nil,'fixture: six retained plans, one of them out of range')
+ check(A.ForgetWishlistPlan({associationIndex=207,key=target.key,
+  assignmentId=target.assignmentId})==true,'one is removed after a confirmation')
+ for index=1,5 do
+  check(A.ClearLoadoutWishlist(index)==true,'Saved Build '..index..' is unassigned')
+ end
+ local offered=A.ForgottenWishlistPlans()
+ check(#offered==5,'the recoverable list stays bounded: '..#offered)
+ local kept=false
+ for _,entry in ipairs(offered) do
+  if entry.key==target.key then kept=true end
+ end
+ check(kept==true,'and the confirmed removal is still one of them')
+ check(A.RestoreForgottenWishlistPlan({key=target.key})==true,
+  'so the undo it was promised still works')
+ local back=false
+ for _,plan in ipairs(A.RetainedWishlistPlans()) do
+  if plan.key==target.key then back=true end
+ end
+ check(back==true,'and the plan is retained again')
+ check(#H.actions==0,'no gameplay or server action was taken')
+end
+
+-- 18. A stored record whose contents already appear in the live list is not
+-- offered twice -- but it still carries the association it was stored under,
+-- or the switch list cannot say that index names no Saved Build.
+do
+ local shared=Echoes(false)
+ Boot(function(db)
+  db.chars[F.NAME].loadoutWishlists={
+   [207]={slot=104,name='Shadowed Plan',echoes=shared,designTargets={}},
+  }
+ end)
+ H.perks.serverBuildSlots[104]={name='Shadowed Plan',verified=false,
+  echoes=Echoes(false)}
+ H.Notify();A.Poll();H.Advance(1)
+ local found
+ for _,candidate in ipairs(A.GetWishlistCandidates()) do
+  if candidate.associationIndex==207 then found=candidate end
+ end
+ check(found~=nil,'the stored association survives deduplication')
+ check(found.associationUsable==false,
+  'and is still marked as naming no Saved Build')
+ Nexus.WishlistEditor.Show()
+ NexusWishlistEditorSwitchButton:Click()
+ local labelled=0
+ for _,row in ipairs(NexusWishlistEditorSwitchMenu.rows or {}) do
+  if row:IsShown() and (row._label:GetText() or ''):find('is not a Saved Build',1,true) then
+   labelled=labelled+1
+  end
+ end
+ check(labelled==1,'so the switch list still labels it: '..labelled)
+end
+
+-- 19. A profile written by a build that kept only one removal. Its record is
+-- adopted into the list rather than shadowed by it, so an upgrade does not
+-- quietly drop the one thing that build could still have restored.
+do
+ Boot(function(db)
+  local row=db.chars[F.NAME]
+  row.loadoutWishlists={}
+  row.forgottenWishlist={loadoutSlot=3,record={slot=121,name='Legacy Removal',
+   echoes=Echoes(false),assignmentId='assigned:legacy',designTargets={}}}
+ end)
+ local offered=A.ForgottenWishlistPlans()
+ check(#offered==1,'the older shape is still offered: '..#offered)
+ check(offered[1].name=='Legacy Removal','naming the plan it holds: '..tostring(offered[1].name))
+ check(offered[1].associationIndex==3,'and the index it came from')
+ check(A.RestoreForgottenWishlistPlan()==true,'it can be taken back')
+ local back=A.RetainedWishlistPlans()
+ check(#back==1 and back[1].associationIndex==3,
+  'under that index: '..tostring(back[1] and back[1].associationIndex))
+ check(#A.ForgottenWishlistPlans()==0,'and it is not offered twice')
+ check(#H.actions==0,'no gameplay or server action was taken')
+end
+
 print('PASS wishlist_switch_recovery: an index is a loadout or it is not; both plans survive; one exact plan can be forgotten and restored checks='..checks)

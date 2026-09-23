@@ -369,6 +369,7 @@ function M.ShowManageWishlistsMenu(anchor, offset)
                 assignmentId = plan.assignmentId, mirrorSlot = plan.mirrorSlot,
                 name = planName, rows = plan.rows, usable = plan.usable,
                 mirrorResolved = plan.mirrorResolved,
+                mirrorSlotLive = plan.mirrorSlotLive,
                 ordinaryCopies = plan.ordinaryCopies,
                 lockedCopies = plan.lockedCopies,
             }
@@ -379,9 +380,18 @@ function M.ShowManageWishlistsMenu(anchor, offset)
                 -- Whether a server Wishlist survives this is a fact about
                 -- the live list, not about the mirror number the record
                 -- carries: a stored hint outlives the mirror it names.
-                local where = confirmPlan.mirrorResolved
-                    and "A Wishlist on the server still matches this plan and is NOT removed: this client has no call that deletes one."
-                    or "No Wishlist on the server currently matches this plan, so this is the only copy."
+                -- Three states, not two: a server Wishlist that holds exactly
+                -- this plan, a mirror slot that still exists but no longer
+                -- holds these contents, and nothing at all. Merging the last
+                -- two is what let the dialog claim a copy that was not there.
+                local where
+                if confirmPlan.mirrorResolved then
+                    where = "A Wishlist on the server holds exactly this plan and is NOT removed: this client has no call that deletes one."
+                elseif confirmPlan.mirrorSlotLive then
+                    where = "The Wishlist slot this plan came from still exists but no longer holds these contents; nothing on the server is removed either way."
+                else
+                    where = "No Wishlist on the server matches this plan, so this is the only copy."
+                end
                 StaticPopup_Show("NEXUS_FORGET_WISHLIST", string.format(
                     "Remove \"%s\" from this character?\n%d Echo rows, %d ordinary and %d locked copies, %s.\n%s\nThe Manage list can undo this.",
                     confirmPlan.name, tonumber(confirmPlan.rows) or 0,

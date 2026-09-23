@@ -1640,7 +1640,22 @@ function A.GetWishlistCandidates()
             end
             out[#out+1]=candidate;return
         end
-        if not candidate or seen[candidate.key] then return end
+        if not candidate then return end
+        if seen[candidate.key] then
+            -- The same contents are already offered from the live list. The
+            -- association still belongs on it: dropping it here is what made
+            -- an out-of-range record reach the switch list unlabelled.
+            if associationIndex ~= nil then
+                for _, existing in ipairs(out) do
+                    if existing.key == candidate.key
+                        and existing.associationIndex == nil then
+                        Stamp(existing)
+                        break
+                    end
+                end
+            end
+            return
+        end
         seen[candidate.key] = true
         candidate = ResolveWishlistEvidence(candidate, slots)
         out[#out + 1] = Stamp(candidate)
@@ -2115,12 +2130,31 @@ local function RemovalList(state)
     if type(state) ~= "table" then return {} end
     if type(state.forgottenWishlists) ~= "table" then
         state.forgottenWishlists = {}
-        if type(state.forgottenWishlist) == "table"
-            and type(state.forgottenWishlist.record) == "table" then
-            state.forgottenWishlists[1] = state.forgottenWishlist
-        end
     end
-    return state.forgottenWishlists
+    local list = state.forgottenWishlists
+    -- A build that knows only the single field can write it beside a list
+    -- this build created. Such a record is adopted rather than shadowed.
+    -- Compared by content, not by table identity: the store hands out copies,
+    -- so the same retained record is never the same table twice.
+    local single = state.forgottenWishlist
+    if type(single) == "table" and type(single.record) == "table" then
+        local function signature(entry)
+            local record = entry.record
+            return tostring(entry.loadoutSlot) .. "|" .. tostring(record.key)
+                .. "|" .. tostring(record.name) .. "|"
+                .. tostring(#(record.echoes or {}))
+        end
+        local wanted, present = signature(single), false
+        for _, entry in ipairs(list) do
+            if type(entry) == "table" and type(entry.record) == "table"
+                and signature(entry) == wanted then
+                present = true
+                break
+            end
+        end
+        if not present then table.insert(list, 1, single) end
+    end
+    return list
 end
 
 -- Put one removed record at the front of the list and drop the oldest beyond
@@ -2128,7 +2162,17 @@ end
 local function RememberRemoval(state, entry)
     local list = RemovalList(state)
     table.insert(list, 1, entry)
-    while #list > REMOVAL_HISTORY do table.remove(list) end
+    -- Unassign and a confirmed removal share one bounded budget, but they are
+    -- not worth the same: the player was told a confirmed removal could be
+    -- undone. When the list is full the oldest UNASSIGN is dropped first, and
+    -- a confirmed removal only when there is nothing else left to drop.
+    while #list > REMOVAL_HISTORY do
+        local dropped
+        for position = #list, 2, -1 do
+            if list[position].source == "unassign" then dropped = position; break end
+        end
+        table.remove(list, dropped or #list)
+    end
     -- The old single field is kept in step so bytes written here stay
     -- readable by a build that only knows the earlier shape.
     state.forgottenWishlist = list[1]
@@ -2137,8 +2181,8 @@ end
 -- Unassign. The label and tooltip promise the Wishlist is kept, which holds
 -- for a plan that mirrors a server Wishlist because the server copy stays.
 -- A local-only plan has no other copy, so the removed record is retained in
--- the SAME write as the single recoverable undo, and the control can no
--- longer be the last thing that touched a plan the player still wants.
+-- the SAME write as a recoverable entry, and the control can no longer be the
+-- last thing that touched a plan the player still wants.
 function A.ClearLoadoutWishlist(loadoutSlot)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     loadoutSlot = tonumber(loadoutSlot)
@@ -2148,7 +2192,8 @@ function A.ClearLoadoutWishlist(loadoutSlot)
         local removed = state.loadoutWishlists[loadoutSlot]
         state.loadoutWishlists[loadoutSlot] = nil
         if type(removed) == "table" then
-            RememberRemoval(state, {record = removed, loadoutSlot = loadoutSlot})
+            RememberRemoval(state,
+                {record = removed, loadoutSlot = loadoutSlot, source = "unassign"})
         end
     end) then return false end
     MarkWishlistProjectionDirty()
@@ -2190,9 +2235,13 @@ function A.RetainedWishlistPlans()
                 name = candidate.name, key = candidate.key,
                 assignmentId = candidate.assignmentId,
                 mirrorSlot = candidate.slot,
-                mirrorResolved = (candidate.key ~= nil and liveKeys[candidate.key] == true)
-                    or (tonumber(candidate.slot) ~= nil
-                        and liveSlots[tonumber(candidate.slot)] == true),
+                -- Two different facts, never merged: a server Wishlist whose
+                -- contents are exactly this plan, and a live mirror slot with
+                -- this number, which may hold anything by now.
+                mirrorResolved = candidate.key ~= nil
+                    and liveKeys[candidate.key] == true or false,
+                mirrorSlotLive = tonumber(candidate.slot) ~= nil
+                    and liveSlots[tonumber(candidate.slot)] == true or false,
                 rows = #(candidate.echoes or {}),
                 ordinaryCopies = ordinary, lockedCopies = locked,
                 designTargets = candidate.designTargets ~= nil,
@@ -2218,9 +2267,9 @@ end
 -- or in any pending receipt is touched: this removes one association record
 -- and the first-run pointer if it names the same identity.
 --
--- One bounded recoverable copy is kept, so the removal can be undone in the
--- same session and survives a reload. Only the most recent removal is kept:
--- this is an undo, not an archive.
+-- A bounded number of removals stay recoverable, newest first, so cleaning up
+-- several plans never costs the first one. The list is short on purpose: this
+-- is an undo, not an archive.
 function A.ForgetWishlistPlan(selector)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if type(selector) ~= "table" then return false, "no plan was selected" end
@@ -2267,7 +2316,7 @@ function A.ForgetWishlistPlan(selector)
         end
         RememberRemoval(state, {
             record = removed, loadoutSlot = tonumber(removedIndex) or removedIndex,
-            firstRun = firstRunRemoved or nil,
+            firstRun = firstRunRemoved or nil, source = "removal",
         })
     end)
     if not ok then return false, "saved data is not writable right now" end
