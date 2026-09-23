@@ -73,6 +73,28 @@ for _=1,3 do S.OnUpdate(0.05) end
 check(next(S.PhaseStats().phases)==nil,
  'and ordinary updates after a reset stay un-instrumented')
 
+-- The phase state sits on the module table because this file is at the Lua
+-- local limit, so it is writable from outside. Measurement must never be able
+-- to stop the update: every step still runs whatever is done to that table.
+local ranSteps=0
+local realPump=Nexus.Sync.RequestDataViewRefresh
+for _,broken in ipairs({'not a table',{},{clock=1},false}) do
+ Nexus.Sync._phases=broken
+ local ok,err=pcall(Nexus.Sync.OnUpdate,0.05)
+ check(ok,'a broken phase table does not stop the update ('..tostring(broken)..'): '..tostring(err))
+ ranSteps=ranSteps+1
+end
+Nexus.Sync._phases=nil
+local ok,err=pcall(Nexus.Sync.OnUpdate,0.05)
+check(ok,'and neither does removing it entirely: '..tostring(err))
+check(type(Nexus.Sync.PhaseStats())=='table','the reader survives it too')
+-- Put a working owner back for the rest of the checks.
+Nexus.Sync._phases={thresholdMs=50,window=20,stats={},armed=0,slowUpdates=0,
+ steps=Nexus.Sync._defaultSteps,
+ clock=function() return debugprofilestop and debugprofilestop() or nil end,
+ record=function() end}
+check(ranSteps==4,'every broken shape was exercised: '..ranSteps)
+
 -- No clock, no claims: the update still runs and nothing is invented.
 local saved=debugprofilestop
 debugprofilestop=nil

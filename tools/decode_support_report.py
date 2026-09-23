@@ -18,16 +18,18 @@ A checksum match means the text was not truncated or reordered on the way here.
 It is NOT authenticity, NOT proof of who produced it, and NOT server evidence.
 """
 from __future__ import annotations
-import argparse, pathlib, sys
+import argparse, pathlib, re, sys
 
 MAX_BYTES = 8 * 1024 * 1024
+MAX_DEPTH = 64          # a report is three levels deep; anything deeper is not one
+ASSIGNMENT = re.compile(r'^[ \t]*(?:local[ \t]+)?NexusSupportDB[ \t]*=', re.M)
 
 
 class Reader:
     """A tiny reader for the subset of Lua a SavedVariables literal uses."""
 
     def __init__(self, text: str) -> None:
-        self.text, self.pos = text, 0
+        self.text, self.pos, self.depth = text, 0, 0
 
     def error(self, message: str):
         line = self.text.count('\n', 0, self.pos) + 1
@@ -39,8 +41,17 @@ class Reader:
             if ch in ' \t\r\n':
                 self.pos += 1
             elif self.text.startswith('--', self.pos):
-                end = self.text.find('\n', self.pos)
-                self.pos = len(self.text) if end < 0 else end + 1
+                # Block comments are comments, not data. Lua reads
+                # --[[ ... ]] and --[==[ ... ]==] as one comment; reading them
+                # as values would return text Lua itself would never assign.
+                block = re.compile(r'--\[(=*)\[').match(self.text, self.pos)
+                if block:
+                    closer = ']' + block.group(1) + ']'
+                    end = self.text.find(closer, block.end())
+                    self.pos = len(self.text) if end < 0 else end + len(closer)
+                else:
+                    end = self.text.find('\n', self.pos)
+                    self.pos = len(self.text) if end < 0 else end + 1
             else:
                 return
 
@@ -105,12 +116,20 @@ class Reader:
                 if esc in mapping:
                     out.append(mapping[esc])
                     self.pos += 1
-                elif esc.isdigit():
+                elif esc in '0123456789':
+                    # Only ASCII digits: str.isdigit() is true for characters
+                    # int() cannot read, and \ddd in a WoW saved file is a
+                    # BYTE, so it is decoded as one.
                     digits = ''
-                    while len(digits) < 3 and self.pos < len(self.text) and self.text[self.pos].isdigit():
+                    while len(digits) < 3 and self.pos < len(self.text) \
+                            and self.text[self.pos] in '0123456789':
                         digits += self.text[self.pos]
                         self.pos += 1
-                    out.append(chr(int(digits)))
+                    value = int(digits)
+                    if value > 255:
+                        self.error(f'escape out of range: \\{digits}')
+                    out.append(chr(value) if value < 128
+                               else bytes([value]).decode('latin-1'))
                 else:
                     self.error(f'unsupported escape: \\{esc}')
             elif ch == quote:
@@ -142,6 +161,9 @@ class Reader:
         return None
 
     def table(self):
+        self.depth += 1
+        if self.depth > MAX_DEPTH:
+            self.error(f'tables nested deeper than {MAX_DEPTH} levels')
         self.expect('{')
         out, index = {}, 1
         while True:
@@ -150,6 +172,7 @@ class Reader:
                 self.error('unterminated table')
             if self.text[self.pos] == '}':
                 self.pos += 1
+                self.depth -= 1
                 return out
             key = self.key()
             value = self.value()
@@ -164,20 +187,24 @@ class Reader:
 
 
 def load(path: pathlib.Path) -> dict:
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise SystemExit(f'{path}: cannot be read: {error}')
     if len(raw) > MAX_BYTES:
         raise SystemExit(f'{path}: larger than the {MAX_BYTES} byte bound this reader accepts')
     text = raw.decode('utf-8', 'replace')
-    marker = 'NexusSupportDB'
-    start = text.find(marker)
-    if start < 0:
+    # The assignment must be a statement, not a mention. A copy of the text
+    # inside a comment or inside another variable's string is not what Lua
+    # would assign, so it is not what this tool reads either.
+    matches = list(ASSIGNMENT.finditer(text))
+    if not matches:
         raise SystemExit(f'{path}: no NexusSupportDB assignment found. '
                          'This tool reads the file WoW writes, not the addon source file.')
-    reader = Reader(text[start + len(marker):])
-    reader.skip()
-    if reader.pos >= len(reader.text) or reader.text[reader.pos] != '=':
-        raise SystemExit(f'{path}: NexusSupportDB is not an assignment')
-    reader.pos += 1
+    if len(matches) > 1:
+        print(f'PROBLEM: {len(matches)} NexusSupportDB assignments found; '
+              'reading the last one, which is the value Lua would end with')
+    reader = Reader(text[matches[-1].end():])
     return reader.value()
 
 
@@ -220,6 +247,10 @@ def main() -> int:
     declared_count = meta.get('chunkCount')
     declared_bytes = meta.get('bytes')
     declared_sum = meta.get('checksum')
+    missing = [name for name, value in (('chunkCount', declared_count),
+                                        ('bytes', declared_bytes),
+                                        ('checksum', declared_sum))
+               if value is None]
     body = ''.join(chunks)
     actual_bytes = sum(len(c.encode('utf-8', 'surrogateescape')) for c in chunks)
     recomputed = checksum(chunks)
@@ -236,6 +267,10 @@ def main() -> int:
     print(f'bytes         : {actual_bytes} (header says {declared_bytes})')
     print(f'checksum      : {recomputed} (header says {declared_sum})')
     problems = []
+    if missing:
+        # Nothing to verify against is not the same as verified.
+        problems.append('the header does not declare ' + ', '.join(missing)
+                        + ', so this copy cannot be checked')
     if declared_count is not None and declared_count != len(chunks):
         problems.append('the chunk count does not match the header')
     if declared_bytes is not None and declared_bytes != actual_bytes:
@@ -248,13 +283,32 @@ def main() -> int:
     print('note          : a checksum match shows the text arrived whole. It is not')
     print('                authenticity, not proof of the producer, and not server evidence.')
     if ns.out:
-        pathlib.Path(ns.out).write_text(body, encoding='utf-8')
+        try:
+            pathlib.Path(ns.out).write_text(body, encoding='utf-8')
+        except OSError as error:
+            raise SystemExit(f'{ns.out}: cannot be written: {error}')
         print(f'written       : {ns.out}')
     else:
         print('-' * 70)
-        print(body)
+        # A report from any realm can contain text the console encoding cannot
+        # represent. Write the bytes and replace what the console cannot show,
+        # instead of failing after the verification has already printed.
+        encoding = getattr(sys.stdout, 'encoding', None) or 'utf-8'
+        sys.stdout.flush()
+        buffer = getattr(sys.stdout, 'buffer', None)
+        if buffer is not None:
+            buffer.write(body.encode(encoding, 'replace'))
+            buffer.write(b'\n')
+            buffer.flush()
+        else:
+            print(body.encode(encoding, 'replace').decode(encoding, 'replace'))
     return 1 if problems else 0
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except ValueError as error:
+        # Every refusal is a message, not a traceback.
+        print(f'PROBLEM: this file is not a readable report: {error}')
+        raise SystemExit(1)

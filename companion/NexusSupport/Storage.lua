@@ -50,7 +50,10 @@ local function adopt()
         return false
     end
     local savedFormat = tonumber(saved.format)
-    if savedFormat == nil then
+    -- NaN is not a number for this purpose: it compares false against
+    -- everything, so it would slip past both bounds below and be treated as a
+    -- format this file understands.
+    if savedFormat == nil or savedFormat ~= savedFormat then
         -- Unknown shape: keep every byte of it and refuse to write, rather
         -- than deciding that somebody else's data was worthless.
         incompatible = "the saved data has no known format marker"
@@ -58,6 +61,13 @@ local function adopt()
     end
     if savedFormat > FORMAT then
         incompatible = "the saved data was written by a newer version ("
+            .. tostring(savedFormat) .. ")"
+        return false
+    end
+    if savedFormat < 1 or savedFormat ~= math.floor(savedFormat) then
+        -- Older or fractional: this file has no migration for it, so it is
+        -- left exactly as it is instead of being overwritten.
+        incompatible = "the saved data uses an earlier format ("
             .. tostring(savedFormat) .. ")"
         return false
     end
@@ -133,6 +143,7 @@ function Storage.Latest()
     local report = type(saved) == "table" and saved.report or nil
     if type(report) ~= "table" or type(report.meta) ~= "table" then return nil end
     local header = {}
+    if type(report.meta) ~= "table" then return nil end
     for key, value in pairs(report.meta) do header[key] = value end
     return header
 end
@@ -143,8 +154,12 @@ function Storage.Read()
     local report = type(saved) == "table" and saved.report or nil
     if type(report) ~= "table" then return nil end
     local copy = {meta = {}, chunks = {}}
-    for key, value in pairs(report.meta or {}) do copy.meta[key] = value end
-    for index, chunk in ipairs(report.chunks or {}) do copy.chunks[index] = chunk end
+    if type(report.meta) == "table" then
+        for key, value in pairs(report.meta) do copy.meta[key] = value end
+    end
+    if type(report.chunks) == "table" then
+        for index, chunk in ipairs(report.chunks) do copy.chunks[index] = chunk end
+    end
     return copy
 end
 

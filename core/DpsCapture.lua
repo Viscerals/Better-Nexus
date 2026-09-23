@@ -655,14 +655,23 @@ local function SnapshotEchoes()
     -- A row whose role the slot does not state is still merged, and the count
     -- of those rows is reported, so the capture boundary can refuse rather
     -- than guess.
+    -- The slot's rows are kept as the slot marked them: its ordinary rows are
+    -- ordinary evidence, its permanent rows are permanent evidence, and a row
+    -- whose role the slot does not state is counted so the capture boundary
+    -- knows it was guessed at.
     local roleUnknownRows = 0
+    local slotOrdinary, slotPermanent = {}, {}
     if activeRow and type(activeRow.echoes) == "table" then
         for _, e in ipairs(activeRow.echoes) do
             local eid = tonumber(e and e.spellId)
-            if eid and e.locked ~= true then
-                if e.locked == nil then roleUnknownRows = roleUnknownRows + 1 end
+            if eid then
                 local n = tonumber(e.stacks) or 1
-                if n > (tonumber(ownedBySpell[eid]) or 0) then ownedBySpell[eid] = n end
+                if e.locked == true then
+                    slotPermanent[eid] = (slotPermanent[eid] or 0) + n
+                else
+                    if e.locked == nil then roleUnknownRows = roleUnknownRows + 1 end
+                    if n > (slotOrdinary[eid] or 0) then slotOrdinary[eid] = n end
+                end
             end
         end
     end
@@ -672,16 +681,53 @@ local function SnapshotEchoes()
     -- 79-Echo completed build is captured under an 85-Echo key and can never
     -- be found by the panel or its posted community build.
     local lockedBySpell = {}
+    local permanentKnown = false
     if Adapter.LockedOwned then
         local locked = Adapter.LockedOwned()
-        if locked and type(locked.bySpell) == "table" then
+        if locked and type(locked.bySpell) == "table" and next(locked.bySpell) then
             lockedBySpell = locked.bySpell
+            permanentKnown = true
+        end
+    end
+    -- The live permanent map is the authority when it is there. When it has
+    -- not arrived yet, the saved slot's OWN permanent marks are used instead:
+    -- that is recorded evidence about those copies, not a guess, and it keeps
+    -- a correct 79+6 loadout recordable while GetLockedPerks is late.
+    local permanentSource = "live"
+    if not permanentKnown and next(slotPermanent) ~= nil then
+        lockedBySpell = slotPermanent
+        permanentSource = "saved slot marks"
+    elseif not permanentKnown then
+        permanentSource = "none available"
+    end
+
+    -- A row the saved slot marks permanent, for an id the CURRENT permanent
+    -- map does not carry, is two sources contradicting each other about one
+    -- copy: either it was replaced and is gone, or it is still held as an
+    -- ordinary copy. Nothing here can tell those apart, so the row is counted
+    -- and the capture boundary refuses rather than picking one and being
+    -- silently wrong in the other direction.
+    local contestedPermanent = 0
+    if permanentKnown then
+        for spellId, copies in pairs(slotPermanent) do
+            if (tonumber(lockedBySpell[spellId]) or 0) <= 0 then
+                contestedPermanent = contestedPermanent + copies
+            end
         end
     end
 
+    local ids = {}
+    for spellId in pairs(ownedBySpell) do ids[spellId] = true end
+    for spellId in pairs(slotOrdinary) do ids[spellId] = true end
     local source = {}
-    for spellId, count in pairs(ownedBySpell) do
-        local tracked = math.max(0, count - (tonumber(lockedBySpell[spellId]) or 0))
+    for spellId in pairs(ids) do
+        -- Permanent copies are subtracted from the OWNED projection, which is
+        -- the only pool that carries them. Subtracting them from the slot's
+        -- ordinary evidence as well would remove an ordinary copy the player
+        -- really has, which is how a 79-copy loadout became 78.
+        local ownedPortion = math.max(0, (tonumber(ownedBySpell[spellId]) or 0)
+            - (tonumber(lockedBySpell[spellId]) or 0))
+        local tracked = math.max(ownedPortion, slotOrdinary[spellId] or 0)
         if tracked > 0 then
             source[#source + 1] = { spellId = spellId, count = tracked }
         end
@@ -691,7 +737,9 @@ local function SnapshotEchoes()
         roleUnknownRows = roleUnknownRows,
         slotRows = activeRow and type(activeRow.echoes) == "table"
             and #activeRow.echoes or 0,
-        permanentKnown = next(lockedBySpell) ~= nil,
+        permanentKnown = permanentKnown,
+        permanentSource = permanentSource,
+        contestedPermanent = contestedPermanent,
         activeSlot = activeIdx or nil,
     }
 end
@@ -705,7 +753,15 @@ end
 local function CaptureEnvelopeVerdict(ordinary, locked)
     local evidence = Nexus and Nexus.LoadoutEvidence
     local limits = evidence and type(evidence.SemanticLimits) == "function"
-        and evidence.SemanticLimits() or {ordinary=79, locked=6, total=85}
+        and evidence.SemanticLimits() or nil
+    if type(limits) ~= "table" then limits = {} end
+    -- A partial answer from the authority must not turn a comparison into
+    -- "number < nil"; the documented values fill the gaps.
+    limits = {
+        ordinary = tonumber(limits.ordinary) or 79,
+        locked = tonumber(limits.locked) or 6,
+        total = tonumber(limits.total) or 85,
+    }
     local ordinaryCopies, lockedCopies = 0, 0
     for _, e in ipairs(type(ordinary) == "table" and ordinary or {}) do
         ordinaryCopies = ordinaryCopies + (tonumber(e.count or e.stacks) or 1)
@@ -3066,11 +3122,24 @@ local function CommitSession(category)
         -- are retained for support instead, and the previous record stands.
         local coherent, captureCounts, captureLimits, captureWhy =
             CaptureEnvelopeVerdict(snap, lockedSnap)
+        local contested = derivation and tonumber(derivation.contestedPermanent) or 0
+        local captureReason = "SEMANTIC_ENVELOPE"
+        if coherent and contested > 0 then
+            -- The counts fit, but the two sources disagree about the role of
+            -- a copy. Writing either answer is a guess: one way the record
+            -- carries a copy the character may not have, the other way it
+            -- silently drops one and is filed under a key nothing can match.
+            coherent = false
+            captureReason = "CONTESTED_PERMANENT_ROLE"
+            captureWhy = contested .. " copy(ies) are marked permanent by the saved "
+                .. "loadout but are not in this character's current permanent list; "
+                .. "save the loadout again to agree"
+        end
         if not coherent then
             local support = Nexus and Nexus.SupportIncidents
             if support and type(support.Record) == "function" then
                 pcall(support.Record, "capture-deferred", {
-                    reason = "SEMANTIC_ENVELOPE",
+                    reason = captureReason,
                     producer = "DPS record capture",
                     origin = "local",
                     operation = "personal record capture",

@@ -148,8 +148,10 @@ check(NexusSupportDB.report.meta.id==second.id,'and replaces the stored one')
 
 -- 7. Reopening verifies the stored report without claiming the old session.
 button('Inspect prepared report',page):Click()
-check(page.prepared:GetText():find('verified as loaded',1,true)~=nil,
- 'the stored report verifies against its own checksum: '..page.prepared:GetText())
+check(page.prepared:GetText():find('matches its own checksum in memory',1,true)~=nil,
+ 'the stored report verifies against its own checksum, and says only that: '..page.prepared:GetText())
+check(page.prepared:GetText():find('verified as loaded',1,true)==nil,
+ 'it never says the file was read back from disk')
 check(page.prepared:GetText():find('does not prove the session that made it still exists',1,true)~=nil,
  'and says what that does not prove')
 
@@ -185,7 +187,60 @@ support.Record('catalog-refusal',{reason='STORE_INVALID',producer='share|local',
  detail='name with \1 control and | pipe and \195\169 accent',
  counts={ordinary=1,locked=0,total=1},committed=false})
 local odd=builder.Summary()
-check(odd:find('||',1,true)~=nil,'a pipe is escaped for display in the copy box')
+check(odd:find('share|local',1,true)~=nil,
+ 'the copied text keeps a recorded label exactly: a pipe is not doubled into the ticket')
+check(odd:find('share||local',1,true)==nil,'and is not escaped on its way there')
 check(odd:find('\1',1,true)==nil,'a control character does not reach the report')
 check(odd:find('\195\169',1,true)~=nil,'and non-ASCII text is preserved: accent kept')
+
+-- 11. Bounds hold even when one incident is enormous, and the summary is cut
+-- on a line boundary so a ticket never receives half an identifier.
+support.Clear()
+local wide={}
+for i=1,400 do wide['key'..i]=i end
+local many={}
+for i=1,200 do many[#many+1]={spellId=2000000+i,quality=3,stacks=9} end
+for i=1,20 do
+ support.Record('catalog-refusal',{reason='WIDE'..i,producer=string.rep('p',400),
+  operation=string.rep('o',400),detail=string.rep('d',400),scope=string.rep('s',400),
+  counts={ordinary=79+i,locked=6,total=85+i},limits={ordinary=79,locked=6,total=85},
+  readiness=wide,affected=many,committed=false})
+end
+local big,bigMeta=builder.Summary()
+check(#big<=builder.SUMMARY_MAX_BYTES,
+ 'twenty large incidents still fit the summary bound: '..#big)
+check(bigMeta.bytes==#big,'and the reported size is the real one: '..bigMeta.bytes)
+local lastLine=big:match('[^' .. string.char(10) .. ']*$')
+check(lastLine and (#lastLine==0 or lastLine:sub(1,1)~=' '),
+ 'the summary ends on a whole line: '..tostring(lastLine and lastLine:sub(1,40)))
+local readinessKeys=0
+for _ in pairs(support.Latest().readiness or {}) do readinessKeys=readinessKeys+1 end
+check(readinessKeys<=13,'a large readiness map is bounded when retained: '..readinessKeys)
+check(#support.Latest().affected<=support.MAX_TUPLES,
+ 'and so is the tuple list: '..#support.Latest().affected)
+
+-- 12. A report that cannot fit its own bound says so and keeps the old one.
+local storedBefore=NexusSupportDB and NexusSupportDB.report and NexusSupportDB.report.meta.id
+local hugeReport=builder.Prepare({extended=true})
+check(type(hugeReport)=='table','a large history still produces a report')
+local hugeBytes=0
+for _,chunk in ipairs(hugeReport.chunks) do hugeBytes=hugeBytes+#chunk end
+check(hugeBytes<=builder.TOTAL_BYTES,
+ 'and it stays inside the supported total: '..hugeBytes..' of '..builder.TOTAL_BYTES)
+check(hugeReport.meta.chunkCount==#hugeReport.chunks,'its header counts its own chunks')
+
+-- 13. The copy route survives an owner that throws: it is the route a broken
+-- install depends on.
+local realStartup=Nexus.StartupStatus
+Nexus.StartupStatus=function() error('isolated startup owner') end
+local okSummary,brokenBody=pcall(builder.Summary)
+Nexus.StartupStatus=realStartup
+check(okSummary and type(brokenBody)=='string',
+ 'a failing startup owner does not take away Copy summary: '..tostring(brokenBody))
+check(brokenBody:find('Nexus support summary',1,true)~=nil,'the summary is still a summary')
+local realErrors=Nexus.Errors.History
+Nexus.Errors.History=function() error('isolated errors owner') end
+local okErrors=pcall(builder.Summary)
+Nexus.Errors.History=realErrors
+check(okErrors,'and neither does a failing Errors owner')
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)

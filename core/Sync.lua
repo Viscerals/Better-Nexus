@@ -4381,10 +4381,12 @@ end
 -- name -> the phase's own maximum and last measurement, plus how many updates
 -- crossed the slow threshold. Empty until an update was slow.
 function Sync.PhaseStats()
-    local out = {slowUpdates=Sync._phases.slowUpdates, armed=Sync._phases.armed,
-        thresholdMs=Sync._phases.thresholdMs, lastUpdateMs=Sync._phases.lastTotal,
-        maxUpdateMs=Sync._phases.maxTotal, phases={}}
-    for name, row in pairs(Sync._phases.stats) do
+    local phases = Sync._phases
+    if type(phases) ~= "table" then return {phases={}} end
+    local out = {slowUpdates=phases.slowUpdates, armed=phases.armed,
+        thresholdMs=phases.thresholdMs, lastUpdateMs=phases.lastTotal,
+        maxUpdateMs=phases.maxTotal, phases={}}
+    for name, row in pairs(type(phases.stats) == "table" and phases.stats or {}) do
         out.phases[name] = {count=row.count, maxMs=row.maxMs, lastMs=row.lastMs}
     end
     return out
@@ -4396,63 +4398,94 @@ function Sync.ResetPhaseStats()
     return true
 end
 
-function Sync.OnUpdate(elapsed)
-    local updateStarted = Sync._phases.clock()
-    local detail = Sync._phases.armed > 0 and updateStarted ~= nil
-    local function step(name, fn)
-        if not detail then return fn() end
-        local started = Sync._phases.clock()
-        local result = fn()
-        Sync._phases.record(name, started)
-        return result
-    end
-    step("admission.turn", function()
+-- The ordered steps of one update, built ONCE at load. Naming them in a table
+-- instead of wrapping each call in a closure per update keeps the un-armed
+-- path free of per-frame allocation: an ordinary update reads the clock twice
+-- and calls these functions directly.
+Sync._phases.steps = {
+    {name = "admission.turn", run = function()
         Responder.Admission.NoteTurn()
         Responder.Admission.Expire()
         Inbound.CleanExpired()
-    end)
-    step("responses", function() ProcessPendingResponses(elapsed) end)
-    step("recovery", function() Session.PumpRecovery(elapsed) end)
-    step("broadcast", function() Responder.Work.PumpBroadcastMine() end)
-    if not Sync._pendingDeleteScheduled then
-        step("deletes", function() PumpPendingDeletes(elapsed) end)
-        step("share", function() PumpPendingShare(elapsed) end)
-    end
-    step("transport.prepare", function() Session.PrepareTransport() end)
-    step("handshake", function()
+    end},
+    {name = "responses", run = function(elapsed) ProcessPendingResponses(elapsed) end},
+    {name = "recovery", run = function(elapsed) Session.PumpRecovery(elapsed) end},
+    {name = "broadcast", run = function() Responder.Work.PumpBroadcastMine() end},
+    {name = "deletes", run = function(elapsed) PumpPendingDeletes(elapsed) end,
+        skip = function() return Sync._pendingDeleteScheduled end},
+    {name = "share", run = function(elapsed) PumpPendingShare(elapsed) end,
+        skip = function() return Sync._pendingDeleteScheduled end},
+    {name = "transport.prepare", run = function() Session.PrepareTransport() end},
+    {name = "handshake", run = function()
         if Nexus.SyncWire then Nexus.SyncWire.PumpHandshake() end
-    end)
-    step("transport.pump", function() Transport.Pump(elapsed) end)
-    step("status.reply", function()
+    end},
+    {name = "transport.pump", run = function(elapsed) Transport.Pump(elapsed) end},
+    {name = "status.reply", run = function()
         if Sync.FlushStatusReply then Sync.FlushStatusReply() end
-    end)
-    step("auto.sync", function()
+    end},
+    {name = "auto.sync", run = function(elapsed)
         Session.UpdateAutoSync(elapsed)
         Session.UpdateAutoConvergence()
         Session.UpdateJoinRetry(elapsed)
-    end)
+    end},
     -- After the request, response and transport turn above, never before it.
-    step("admission.pump", function() Responder.Admission.Pump() end)
+    {name = "admission.pump", run = function() Responder.Admission.Pump() end},
     -- A refresh can initiate legacy catalog repair. Release it only after
     -- the already-ready update, not before its transport validation work.
-    if Operation.housekeepingRefreshPending then
-        Operation.housekeepingRefreshPending = false
-        step("view.refresh", function() pcall(Sync.RequestDataViewRefresh) end)
+    {name = "view.refresh", run = function() pcall(Sync.RequestDataViewRefresh) end,
+        skip = function()
+            if not Operation.housekeepingRefreshPending then return true end
+            Operation.housekeepingRefreshPending = false
+            return false
+        end},
+}
+
+-- Kept beside the table, so a replaced Sync._phases cannot take the steps with
+-- it: the update still runs every step in order.
+Sync._defaultSteps = Sync._phases.steps
+
+function Sync.OnUpdate(elapsed)
+    -- The phase state lives on the module table because this chunk is at the
+    -- Lua 5.1 local limit, which makes it writable from outside. Measurement
+    -- must never be able to stop the update, so it is read defensively once
+    -- and skipped entirely if anything replaced it.
+    local phases = Sync._phases
+    if type(phases) ~= "table" or type(phases.clock) ~= "function"
+        or type(phases.record) ~= "function" or type(phases.steps) ~= "table" then
+        phases = nil
     end
-    if updateStarted then
-        local finished = Sync._phases.clock()
+    local steps = phases and phases.steps or Sync._defaultSteps
+    local updateStarted = phases and phases.clock() or nil
+    local detail = phases and (tonumber(phases.armed) or 0) > 0
+        and updateStarted ~= nil
+    for index = 1, #steps do
+        local entry = steps[index]
+        if type(entry) == "table" and type(entry.run) == "function"
+            and not (type(entry.skip) == "function" and entry.skip()) then
+            if detail then
+                local started = phases.clock()
+                entry.run(elapsed)
+                phases.record(entry.name, started)
+            else
+                entry.run(elapsed)
+            end
+        end
+    end
+    if phases and updateStarted then
+        local finished = phases.clock()
         if finished then
             local total = finished - updateStarted
+            local threshold = tonumber(phases.thresholdMs) or 50
             if total >= 0 then
-                Sync._phases.lastTotal = total
-                if not Sync._phases.maxTotal or total > Sync._phases.maxTotal then
-                    Sync._phases.maxTotal = total
+                phases.lastTotal = total
+                if not phases.maxTotal or total > phases.maxTotal then
+                    phases.maxTotal = total
                 end
-                if total >= Sync._phases.thresholdMs then
-                    Sync._phases.slowUpdates = Sync._phases.slowUpdates + 1
-                    Sync._phases.armed = Sync._phases.window
-                elseif Sync._phases.armed > 0 then
-                    Sync._phases.armed = Sync._phases.armed - 1
+                if total >= threshold then
+                    phases.slowUpdates = (tonumber(phases.slowUpdates) or 0) + 1
+                    phases.armed = tonumber(phases.window) or 20
+                elseif (tonumber(phases.armed) or 0) > 0 then
+                    phases.armed = phases.armed - 1
                 end
             end
         end

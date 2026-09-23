@@ -76,6 +76,47 @@ def main() -> int:
         expect('entry outside Nexus/', run('tools/release_check.py', '--label', label, '--zip', str(outside)), False)
         expect('--public without a displayable label', run('tools/build_package.py', '--label', 'nightly', '--public', '--allow-dirty'), False)
 
+        # The storage-only support component: every rule the packager applies
+        # must also fail here, because this check inspects artefacts it did not
+        # build. Each case rewrites only the companion TOC.
+        CRLF = chr(13) + chr(10)
+
+        def companion(target_name, change_toc, extra_name=None, extra_data=b''):
+            target = dist / target_name / public.name
+            target.parent.mkdir()
+            with zipfile.ZipFile(public) as z, zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as out:
+                for item in z.infolist():
+                    data = z.read(item.filename)
+                    if item.filename == 'NexusSupport/NexusSupport.toc':
+                        data = change_toc(data.decode('utf-8')).encode('utf-8')
+                        if data == b'':
+                            continue
+                    out.writestr(item, data)
+                if extra_name:
+                    out.writestr(extra_name, extra_data)
+            return target
+
+        dep = companion('companion-dep', lambda t: t.replace(
+            '## LoadOnDemand: 1', '## Dependencies: Nexus' + CRLF + '## LoadOnDemand: 1'))
+        expect('a support component that depends on another addon',
+               run('tools/release_check.py', '--label', label, '--zip', str(dep)), False)
+        prose = companion('companion-prose', lambda t: t.replace(
+            '## SavedVariables: NexusSupportDB',
+            '## X-Note: SavedVariables: NexusSupportDB is declared elsewhere'))
+        expect('a support component that declares no saved variables',
+               run('tools/release_check.py', '--label', label, '--zip', str(prose)), False)
+        nolod = companion('companion-nolod',
+                          lambda t: re.sub(r'(?im)^[ \t]*##[ \t]*LoadOnDemand.*\r?\n?', '', t))
+        expect('a support component that is not load-on-demand',
+               run('tools/release_check.py', '--label', label, '--zip', str(nolod)), False)
+        stray = companion('companion-stray', lambda t: t,
+                          extra_name='NexusSupport/probe.py', extra_data=b'print(1)')
+        expect('an unexpected file type inside the support component',
+               run('tools/release_check.py', '--label', label, '--zip', str(stray)), False)
+        missing = companion('companion-missing', lambda t: '')
+        expect('a package with no support component TOC',
+               run('tools/release_check.py', '--label', label, '--zip', str(missing)), False)
+
         with zipfile.ZipFile(public) as z:
             packaged = z.read('Nexus/data/Release.lua').decode()
         for needle in (f'buildLabel = "{label}"', 'channel = "public-test"'):

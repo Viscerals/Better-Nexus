@@ -165,14 +165,16 @@ local function ensure()
             frame.prepared:SetText("No prepared report is stored for this account.")
             return
         end
-        local stored = storage.Read()
+        local readOk, stored = pcall(storage.Read)
+        if not readOk then stored = nil end
         local builder = report()
         local sum = stored and builder and builder.Checksum(stored.chunks) or nil
         frame.prepared:SetText("Stored report " .. tostring(latest.id) .. ": "
             .. tostring(latest.bytes) .. " bytes, " .. tostring(latest.chunkCount)
             .. " chunk(s), checksum " .. tostring(latest.checksum)
-            .. (sum and (sum == latest.checksum and "; verified as loaded"
-                or "; CHECKSUM MISMATCH on the loaded copy") or "")
+            .. (sum and (sum == latest.checksum
+                and "; matches its own checksum in memory"
+                or "; CHECKSUM MISMATCH in the stored copy") or "")
             .. ". This reads the stored copy; it does not prove the session that made it still exists.")
     end)
     frame.prepared = text(frame, 20, -378, 680, 46)
@@ -214,16 +216,37 @@ function UI.PrepareFile(extended)
         refresh()
         return nil, why
     end
-    local snapshot, failure = builder.Prepare({
+    local status = builder.StorageStatus()
+    if status.incompatible then
+        -- Known before any work is done: do not build a report that cannot be
+        -- stored, and leave the existing data exactly as it is.
+        lastPrepared = "Not prepared: existing support data was left untouched ("
+            .. tostring(status.incompatible) .. "). Use Copy summary instead."
+        refresh()
+        return nil, status.incompatible
+    end
+    local prepared, snapshot, failure = pcall(builder.Prepare, {
         incident = selected(), extended = extended == true,
     })
+    if not prepared then
+        lastPrepared = "Not prepared: the report could not be built ("
+            .. tostring(snapshot) .. "). The previously stored report was kept."
+        refresh()
+        return nil, snapshot
+    end
     if not snapshot then
         lastPrepared = "Not prepared: " .. tostring(failure)
             .. ". The previously stored report was kept."
         refresh()
         return nil, failure
     end
-    local stored, meta = builder.Store(snapshot)
+    local ok, stored, meta = pcall(builder.Store, snapshot)
+    if not ok then
+        lastPrepared = "Not prepared: the support component refused the report ("
+            .. tostring(stored) .. "). The previously stored report was kept."
+        refresh()
+        return nil, stored
+    end
     if not stored then
         lastPrepared = "Not prepared: " .. tostring(meta)
             .. ". The previously stored report was kept."

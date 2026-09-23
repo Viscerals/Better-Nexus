@@ -117,8 +117,16 @@ def main() -> int:
             else:
                 with zipfile.ZipFile(ns.zip) as z:
                     ctoc = z.read('NexusSupport/NexusSupport.toc').decode('utf-8', 'replace')
-                if 'SavedVariables: NexusSupportDB' not in ctoc:
-                    problems.append('NexusSupport.toc must declare SavedVariables: NexusSupportDB')
+                # The same rules the packager applies, applied again to the
+                # artefact, because this tool inspects packages it did not build.
+                sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+                from build_package import companion_toc_problems, ALLOWED_SUFFIXES
+                problems.extend(companion_toc_problems(ctoc, 'NexusSupport.toc'))
+                for name in names:
+                    if pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES:
+                        problems.append(f'unexpected file type in the package: {name}')
+                    if '..' in pathlib.PurePosixPath(name).parts:
+                        problems.append(f'package entry escapes its folder: {name}')
             if field(packaged, 'version') != version:
                 problems.append(f'packaged version {field(packaged, "version")} differs from {version}')
             if field(packaged, 'buildLabel') != ns.label:

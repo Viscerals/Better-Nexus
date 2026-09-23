@@ -26,6 +26,7 @@ for i=1,6 do H.AddEcho(320000+i,'Stale ordinary '..i,2,4,320000+i) end
 T.Load();H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
 T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
 local A,D=Nexus.GameAdapter,Nexus.DpsCapture
+local support=assert(Nexus.SupportIncidents,'the incident owner is loaded')
 local Evidence=Nexus.LoadoutEvidence
 local limits=Evidence.SemanticLimits()
 check(limits.ordinary==79 and limits.locked==6 and limits.total==85,
@@ -81,6 +82,13 @@ local function applySlot(rows,lockedRows)
  H.Notify();A.Poll()
 end
 
+local function capture()
+ D.OnCombatStart()
+ -- A real capture needs a real session length; the harness clock supplies it.
+ for _=1,7 do H.Advance(5,.05);D.OnUpdate(5) end
+ D.OnCombatEnd()
+end
+
 -- 1. The exact reported shape: the saved slot's permanent rows are NOT the
 -- permanent copies the character holds now (two were replaced), which is the
 -- only difference between a clean capture and the refused one.
@@ -99,14 +107,74 @@ local inflated=0
 for _,e in ipairs(ordinary) do inflated=inflated+e.stacks end
 check(inflated+2==81,'the reported inflation is exactly the two stale permanent rows: '..(inflated+2))
 
--- 2. The capture writes a record, and the record is inside the envelope.
-local function capture()
- D.OnCombatStart()
- -- A real capture needs a real session length; the harness clock supplies it.
- for _=1,7 do H.Advance(5,.05);D.OnUpdate(5) end
- D.OnCombatEnd()
-end
+-- 1b. A copy the player really holds is never lost. The permanent map is
+-- subtracted from the OWNED projection, which is the only pool that carries
+-- permanent copies; subtracting it from the slot's ordinary evidence as well
+-- would drop an ordinary copy of an Echo the player also holds permanently.
+local shared=ordinary[1].spellId
+applyOwned(ordinary,permanent)
+-- This run granted only part of what the saved slot lists, which is the
+-- ordinary gap the merge exists for, and the shared id is also permanent.
+local thinGrant={}
+for i=2,79 do thinGrant[#thinGrant+1]=ordinary[i] end
+applyOwned(thinGrant,{{spellId=shared,quality=3,stacks=1}})
+local slotRows={}
+for _,e in ipairs(ordinary) do slotRows[#slotRows+1]=e end
+applySlot(slotRows,{{spellId=shared,quality=3,stacks=1}})
+local kept=D.GetCurrentEchoCount()
+check(kept==79,'an Echo held both ordinarily and permanently keeps its ordinary copy: '..kept)
+
+-- 1c. A correct 79 + 6 loadout stays recordable while the permanent map is
+-- still arriving: the saved slot's own permanent marks are used instead of
+-- guessing, and that source is reported.
+-- The client grants permanent copies too, so they are inside the owned
+-- projection; only the permanent map says which ones they are.
+local grantedWithPermanent={}
+for _,e in ipairs(ordinary) do grantedWithPermanent[#grantedWithPermanent+1]=e end
+for _,e in ipairs(permanent) do grantedWithPermanent[#grantedWithPermanent+1]=e end
+applyOwned(grantedWithPermanent,{})
+applySlot(ordinary,permanent)
+local lateSnapshot=D.GetCurrentEchoCount()
+check(lateSnapshot==79,
+ 'a late permanent map does not inflate the ordinary pool: '..lateSnapshot)
+combat.total=200000
 capture()
+check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
+ 'and a correct 79 + 6 loadout still records while that map is arriving: '
+ ..tostring(Nexus.lastDpsNote))
+-- 1d. When the current permanent list is KNOWN and the saved loadout marks a
+-- copy permanent that the list does not carry, the two sources contradict each
+-- other about that copy. Guessing either way is wrong in the other direction -
+-- an inflated pool that the catalog refuses, or a silently dropped copy filed
+-- under a key nothing can match - so the capture is deferred with that exact
+-- reason and the player is told how to make the sources agree.
+support.Clear()
+applyOwned(ordinary,permanent)
+applySlot(ordinary,stalePermanent)
+local bestBeforeContest=D.GetCurrentPersonalBest('dummy')
+combat.total=400000
+capture()
+check((Nexus.lastDpsNote or ''):find('deferred',1,true)~=nil,
+ 'a contested permanent role defers the capture: '..tostring(Nexus.lastDpsNote))
+check((Nexus.lastDpsNote or ''):find('save the loadout again',1,true)~=nil,
+ 'and says how to resolve it: '..tostring(Nexus.lastDpsNote))
+local contestIncident=support.Latest()
+check(contestIncident and contestIncident.reason=='CONTESTED_PERMANENT_ROLE',
+ 'the incident names the contradiction: '..tostring(contestIncident and contestIncident.reason))
+check(contestIncident.readiness and contestIncident.readiness.contestedPermanent==2,
+ 'with the number of contested copies: '..tostring(contestIncident.readiness and contestIncident.readiness.contestedPermanent))
+local afterContest=D.GetCurrentPersonalBest('dummy')
+check((afterContest and afterContest.dps or 0)==(bestBeforeContest and bestBeforeContest.dps or 0),
+ 'and no record was replaced while the sources disagree')
+
+-- 2. With the saved loadout and the current permanent list in agreement, the
+-- capture writes a record, and the record is inside the envelope.
+support.Clear()
+applySlot(ordinary,permanent)
+combat.total=500000
+capture()
+check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
+ 'agreeing sources record normally: '..tostring(Nexus.lastDpsNote))
 local best=D.GetCurrentPersonalBest('dummy')
 check(best~=nil,'a coherent capture is recorded: '..tostring(Nexus.lastDpsNote))
 local recordedOrdinary,recordedPermanent=0,0
@@ -125,7 +193,6 @@ end
 -- 3. A snapshot that cannot be a current loadout is deferred, not written.
 -- Here the saved slot holds ordinary copies the character no longer owns, so
 -- the union of two moments exceeds the ordinary envelope on its own.
-local support=Nexus.SupportIncidents
 support.Clear()
 local before=D.GetCurrentPersonalBest('dummy')
 local beforeKey=before and before.fingerprint

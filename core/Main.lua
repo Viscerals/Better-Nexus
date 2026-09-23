@@ -1053,7 +1053,15 @@ EnsureMainCommands = function()
         callbacks={
             orbs=function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end,
             report=function()
-                if Nexus.SupportReportUI then Nexus.SupportReportUI.Show() end
+                -- This command exists for a broken install, so it says
+                -- something even when its own view did not load.
+                if Nexus.SupportReportUI then
+                    Nexus.SupportReportUI.Show()
+                else
+                    print("|cffff6060Nexus:|r the support report view is not "
+                        .. "loaded. Reinstall the addon folder, or send the "
+                        .. "text of the error you are seeing.")
+                end
             end,
             loading=function()
                 if Nexus.LoadingStatus then Nexus.LoadingStatus.Show() end

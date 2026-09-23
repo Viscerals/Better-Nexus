@@ -61,6 +61,40 @@ def companion_files(files: dict[str, bytes]) -> dict[str, bytes]:
     return {n[len(prefix):]: d for n, d in files.items() if n.startswith(prefix)}
 
 
+def toc_directive(toc: str, name: str) -> str | None:
+    """The value of a TOC directive, read as WoW reads it: a line that starts
+    with ## and the directive name, not a substring anywhere in the file."""
+    for line in toc.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith('##'):
+            continue
+        body = stripped[2:].lstrip()
+        key, sep, value = body.partition(':')
+        if sep and key.strip().lower() == name.lower():
+            return value.strip()
+    return None
+
+
+def companion_toc_problems(toc: str, toc_name: str) -> list[str]:
+    """Rules the storage-only component must satisfy, each read from its own
+    directive so prose in a Notes line cannot satisfy them."""
+    problems = []
+    saved = toc_directive(toc, 'SavedVariables')
+    names = saved.replace(',', ' ').split() if saved else []
+    if 'NexusSupportDB' not in names:
+        problems.append(f'{toc_name} must declare SavedVariables: NexusSupportDB')
+    for name in names:
+        if name != 'NexusSupportDB':
+            problems.append(f'{toc_name} must not declare other saved variables: {name}')
+    for directive in ('Dependencies', 'RequiredDeps'):
+        value = toc_directive(toc, directive)
+        if value:
+            problems.append(f'{toc_name} must not depend on another addon: {directive}: {value}')
+    if (toc_directive(toc, 'LoadOnDemand') or '').strip() != '1':
+        problems.append(f'{toc_name} must declare LoadOnDemand: 1; it loads only for an explicit report action')
+    return problems
+
+
 def check(files: dict[str, bytes]) -> list[str]:
     problems = [f'missing top-level file: {n}' for n in TOP_LEVEL if n not in files]
     for name in files:
@@ -86,13 +120,7 @@ def check(files: dict[str, bytes]) -> list[str]:
             for name in companion:
                 if name.endswith('.lua') and name not in clisted:
                     problems.append(f'packaged support file is not loaded by {companion_toc_name}: {name}')
-            if 'SavedVariables: NexusSupportDB' not in ctoc:
-                problems.append(f'{companion_toc_name} must declare SavedVariables: NexusSupportDB')
-            if 'NexusSupportDB' in ctoc and 'NexusDB' in ctoc.replace('NexusSupportDB', ''):
-                problems.append(f'{companion_toc_name} must not declare the main addon saved variables')
-            for forbidden in ('## Dependencies:', '## RequiredDeps:'):
-                if forbidden in ctoc:
-                    problems.append(f'{companion_toc_name} must not depend on another addon: {forbidden}')
+            problems.extend(companion_toc_problems(ctoc, companion_toc_name))
 
     toc = files.get('Nexus.toc', b'').decode('utf-8', 'replace')
     listed = [l.strip().replace('\\', '/') for l in toc.splitlines() if l.strip() and not l.lstrip().startswith('#')]

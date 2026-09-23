@@ -66,7 +66,9 @@ local function plain(value, limit)
 end
 
 -- The report is copied out of an edit box and pasted into a ticket, so a pipe
--- must survive as one pipe. Escaping happens only where text is DISPLAYED.
+-- must survive as one pipe: an edit box shows its text literally, and a doubled
+-- pipe would reach support as part of a recorded label. Escaping belongs to the
+-- font strings on the page, which DO interpret pipe sequences.
 local function escape(value)
     return (tostring(value or ""):gsub("|", "||"))
 end
@@ -128,7 +130,8 @@ function M.IncidentLines(incident, options)
         out[#out + 1] = "No incident was retained in this session."
         return out
     end
-    out[#out + 1] = "Incident: " .. plain(incident.kind) .. " / " .. plain(incident.reason)
+    out[#out + 1] = "Incident: " .. (plain(incident.kind) or "not retained")
+        .. " / " .. (plain(incident.reason) or "not retained")
     out[#out + 1] = "Producer: " .. (plain(incident.producer) or "not retained")
         .. "; origin: " .. (plain(incident.origin) or "unknown")
     if incident.operation or incident.ticket then
@@ -205,8 +208,9 @@ function M.Summary(selection)
         .. alias((UnitName and UnitName("player")) or "unknown"))
     local semantic = limits()
     if semantic then
-        add("Supported envelope: " .. semantic.ordinary .. " ordinary, "
-            .. semantic.locked .. " permanent, " .. semantic.total .. " total copies")
+        add("Supported envelope: " .. tostring(semantic.ordinary) .. " ordinary, "
+            .. tostring(semantic.locked) .. " permanent, "
+            .. tostring(semantic.total) .. " total copies")
     end
     add("Session incidents retained: " .. #incidents)
     add("")
@@ -229,14 +233,23 @@ function M.Summary(selection)
                 .. " x" .. tostring(entry.occurrences or 1)
         end
     end
-    local startup = Nexus and Nexus.StartupStatus and Nexus.StartupStatus()
+    -- Every owner read here is protected: this summary is the route a player
+    -- uses when something else is already broken, so one failing owner must
+    -- not take it away.
+    local okStartup, startup = pcall(function()
+        return Nexus and Nexus.StartupStatus and Nexus.StartupStatus() or nil
+    end)
+    if not okStartup then startup = nil end
     if type(startup) == "table" then
         context[#context + 1] = ""
         context[#context + 1] = "Startup: state " .. tostring(startup.state)
             .. (startup.coreReady ~= nil and ("; core ready " .. tostring(startup.coreReady)) or "")
     end
     local errors = Nexus and Nexus.Errors
-    local history = errors and type(errors.History) == "function" and errors.History() or {}
+    local okHistory, history = pcall(function()
+        return errors and type(errors.History) == "function" and errors.History() or {}
+    end)
+    if not okHistory or type(history) ~= "table" then history = {} end
     context[#context + 1] = "Recorded Lua errors this session: " .. #history
         .. (#history == 0 and " (a refusal is not an error; the incident above is retained separately)" or "")
     local omitted = 0
@@ -253,16 +266,24 @@ function M.Summary(selection)
         add("[" .. omitted .. " context line(s) omitted to keep this summary under "
             .. SUMMARY_MAX_BYTES .. " bytes; use Prepare report file for the full retained report]")
     end
-    local text = table.concat(out, "\n")
-    -- The copyable size is the escaped size, because that is what the player
-    -- selects in the box.
-    local final = escape(text)
-    if #final > SUMMARY_MAX_BYTES then
-        local keep = SUMMARY_MAX_BYTES - 60
-        final = final:sub(1, keep) .. "\n[summary cut at " .. keep .. " bytes]"
+    -- The copyable size is measured on the text the player selects, and the
+    -- backstop drops WHOLE LINES: cutting mid-line could leave a partial
+    -- escape or half a recorded identifier in the ticket.
+    local cut = false
+    while true do
+        local text = table.concat(out, "\n")
+        if #text <= SUMMARY_MAX_BYTES or #out <= 3 then
+            if cut then
+                text = text .. "\n[summary shortened to stay under "
+                    .. SUMMARY_MAX_BYTES .. " bytes; use Prepare report file for everything retained]"
+            end
+            return text, {bytes = #text, incidents = #incidents,
+                cut = cut or nil,
+                incidentId = incident and incident.id or nil}
+        end
+        table.remove(out)
+        cut = true
     end
-    return final, {bytes = #final, incidents = #incidents,
-        incidentId = incident and incident.id or nil}
 end
 
 ------------------------------------------------------------------------
@@ -419,11 +440,26 @@ function M.Step(job)
             -- is declared, and the previous stored report is left alone.
             local essential = table.concat(M.IncidentLines(job.incident), "\n")
             job.omissions[#job.omissions + 1] = "context beyond the selected incident"
-            text = "Nexus support report (partial)\nformat=" .. FORMAT
+            local header = "Nexus support report (partial)\nformat=" .. FORMAT
                 .. "; id=" .. job.id .. "; build=" .. buildLabel()
                 .. "\nThe full retained report is larger than the supported "
                 .. TOTAL_BYTES .. " bytes, so only the selected incident is included.\n\n"
-                .. essential
+            -- The replacement is checked against the same bound it exists to
+            -- satisfy. A selected incident that still does not fit is cut on a
+            -- line boundary and says so, instead of being handed over oversized.
+            local room = TOTAL_BYTES - #header - 120
+            if #essential > room then
+                local kept, used = {}, 0
+                for _, line in ipairs(M.IncidentLines(job.incident)) do
+                    if used + #line + 1 > room then break end
+                    kept[#kept + 1] = line
+                    used = used + #line + 1
+                end
+                essential = table.concat(kept, "\n")
+                    .. "\n[the selected incident itself exceeds the supported size; later lines are omitted]"
+                job.omissions[#job.omissions + 1] = "part of the selected incident"
+            end
+            text = header .. essential
             job.partial = true
         end
         local position = 1
@@ -445,6 +481,14 @@ function M.Step(job)
                 captureStart = job.startedAt,
                 captureEnd = clock(),
                 rawBytes = job.rawBytes,
+                -- The header declares what the chunks are, so a reader can
+                -- check the copy it received against it.
+                chunkCount = #job.chunks,
+                bytes = (function()
+                    local total = 0
+                    for _, chunk in ipairs(job.chunks) do total = total + #chunk end
+                    return total
+                end)(),
                 checksum = checksum(job.chunks),
                 incidentCount = #job.incidents,
             },

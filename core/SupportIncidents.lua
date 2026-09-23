@@ -41,7 +41,13 @@ end
 
 local function text(value)
     if value == nil then return nil end
-    return (tostring(value):gsub("%c", " ")):sub(1, MAX_TEXT)
+    -- tostring runs a caller-supplied __tostring, which could raise or return
+    -- anything. A retained field is never allowed to depend on that.
+    local ok, converted = pcall(tostring, value)
+    if not ok or type(converted) ~= "string" then
+        converted = "unreadable " .. type(value)
+    end
+    return (converted:gsub("%c", " ")):sub(1, MAX_TEXT)
 end
 
 local function count(value)
@@ -88,16 +94,34 @@ local function tuples(value)
     return out, omitted > 0 and omitted or nil
 end
 
+local MAX_READINESS_KEYS = 12
 local function generations(value)
     if type(value) ~= "table" then return nil end
-    local out, any = {}, false
-    for key, entry in pairs(value) do
-        if type(key) == "string" then
-            if type(entry) == "number" then out[key], any = count(entry), true
-            elseif type(entry) == "boolean" then out[key], any = entry, true
-            elseif type(entry) == "string" then out[key], any = text(entry), true
+    -- Bounded like everything else here: a caller cannot turn one incident
+    -- into a large retained table by handing over a big map.
+    local keys = {}
+    for key in pairs(value) do
+        if type(key) == "string" then keys[#keys + 1] = key end
+    end
+    table.sort(keys)
+    local out, any, omitted = {}, false, 0
+    for index = 1, #keys do
+        local key = keys[index]
+        local entry = value[key]
+        if index > MAX_READINESS_KEYS then
+            omitted = omitted + 1
+        else
+            -- Keys are bounded as well as values: a long key is as much
+            -- retained text as a long value.
+            local name = key:sub(1, 48)
+            if type(entry) == "number" then out[name], any = count(entry), true
+            elseif type(entry) == "boolean" then out[name], any = entry, true
+            elseif type(entry) == "string" then out[name], any = text(entry), true
             end
         end
+    end
+    if omitted > 0 then
+        out.omittedKeys, any = omitted, true
     end
     return any and out or nil
 end
@@ -108,7 +132,13 @@ end
 local function sameIncident(a, b)
     if a.kind ~= b.kind or a.reason ~= b.reason
         or a.producer ~= b.producer or a.operation ~= b.operation
-        or a.origin ~= b.origin or a.ticket ~= b.ticket then return false end
+        or a.origin ~= b.origin or a.ticket ~= b.ticket
+        -- A deferral on one encounter is not a deferral on another, and two
+        -- refusals with different explanations are two incidents even when
+        -- their copy counts happen to match.
+        or a.category ~= b.category or a.detail ~= b.detail
+        or a.build ~= b.build or a.representation ~= b.representation
+        or a.scope ~= b.scope then return false end
     local ac, bc = a.counts, b.counts
     if (ac == nil) ~= (bc == nil) then return false end
     if ac and bc then
