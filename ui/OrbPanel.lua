@@ -49,14 +49,21 @@ local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="
 -- spending run. The first press only arms it; the second press starts it.
 local confirmNewRun=false
 
--- Read-only run log window. It renders only the rows it shows, rebuilds its
--- copy text only when the history changed or Copy is pressed, and performs no
--- Orb action: opening, paging and copying spend nothing and select nothing.
+-- Read-only Orb history window. It renders one fixed row pool, reads only the
+-- page it shows plus the operation whose details are open, and performs no Orb
+-- action: opening, paging, selecting and copying spend nothing, select nothing
+-- and write nothing. All presentation lives in Nexus.OrbHistory, which reads
+-- recorded fields only.
+local LOG_ROWS=8
 local logFrame,logView,logPage=nil,"current",1
+local logSelection=nil
+local logCopyFrame=nil
 local logCopy={key=nil,text=nil}
-local LOG_ROWS=10
--- Only the rows this page will render are requested; the whole run is copied
--- only for an explicit Copy.
+local logSeen={}
+local logRendered=nil
+-- Labels resolved for the ids this page actually shows. Cleared whenever the
+-- history revision changes, so a stale label cannot outlive its page.
+local logLabels={key=nil,byId={}}
 local function logPageView(page)
     return Nexus.OrbRuntime.RunLog(logView,((page or 1)-1)*LOG_ROWS+1,LOG_ROWS)
 end
@@ -67,44 +74,29 @@ local function logKey(run)
     return table.concat({tostring(run.which),tostring(run.runId),
         tostring(run.revision),tostring(run.total)},"|")
 end
-local function logLine(entry)
-    local parts={tostring(entry.ordinal)..".",
-        entry.sourceName and (name(entry.sourceName).." (quality "..tostring(entry.sourceQuality)..")")
-            or ("source "..tostring(entry.sourceKey))}
-    if entry.sourceCopies then parts[#parts+1]="safe copies: "..tostring(entry.sourceCopies) end
-    if entry.offered then
-        local names={}
-        for _,c in ipairs(entry.offered) do
-            names[#names+1]=(c.name and name(c.name) or tostring(c.spellId)).."/q"..tostring(c.quality)
+-- One bounded, read-only lookup of ONE recorded id: the catalog row this
+-- client already holds, then the client's own spell info. No scan of the
+-- catalog, no request, no gameplay state, and nothing is written back.
+local function logResolve(spellId)
+    local found=logLabels.byId[spellId]
+    if found~=nil then return found.label,found.icon end
+    local label,icon
+    local adapter=Nexus.GameAdapter
+    local catalog=adapter and adapter.Catalog and adapter.Catalog()
+    local rows=catalog and (catalog.rows or catalog)
+    local row=type(rows)=="table" and rows[spellId] or nil
+    if type(row)=="table" and row.name and row.name~="" then label=row.name end
+    if type(GetSpellInfo)=="function" then
+        local ok,spellName,_,texture=pcall(GetSpellInfo,spellId)
+        if ok then
+            if not label and spellName and spellName~="" then label=spellName end
+            if texture and texture~="" then icon=texture end
         end
-        parts[#parts+1]="offered: "..table.concat(names,", ")
     end
-    if entry.selectedKey then
-        parts[#parts+1]="selected "..tostring(entry.selectedKey)
-            ..(entry.selectionReason and (" ("..entry.selectionReason..")") or "")
-    end
-    parts[#parts+1]="state: "..tostring(entry.state)
-    if entry.obtained then parts[#parts+1]="confirmed result: "..tostring(entry.obtained) end
-    if entry.reason then parts[#parts+1]=entry.reason end
-    return table.concat(parts,"; ")
+    logLabels.byId[spellId]={label=label,icon=icon}
+    return label,icon
 end
-local function logText(run)
-    if not run or not run.runId then return "No run has been started in this session." end
-    local lines={
-        "Nexus Orb run log (this session only; it does not survive a reload).",
-        "Build: "..tostring(run.build or "unknown")..
-            "; run "..tostring(run.runId)..
-            "; character: "..tostring(run.character or "unknown"),
-        "Assigned Wishlist at start: "..name(run.wishlist or "none"),
-        "Approved maximum: "..tostring(run.limit)..
-            "; confirmed usage: "..tostring(run.spent or 0)..
-            "; unresolved exposure: "..tostring(run.reserved or 0),
-        "State: "..tostring(run.state)..(run.reason and ("; "..run.reason) or ""),
-    }
-    if run.truncated then lines[#lines+1]="Note: the log reached its bound; later operations are not listed." end
-    for _,entry in ipairs(run.entries or {}) do lines[#lines+1]=logLine(entry) end
-    return table.concat(lines,"\n")
-end
+local function logHistory() return assert(Nexus.OrbHistory,"Orb history projection unavailable") end
 local function refresh()
     if not frame or not frame:IsShown()then return end
     local ready=Nexus.StartupStatus and Nexus.StartupStatus()
@@ -225,64 +217,263 @@ local function ensure()
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
     frame:Hide();UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbPanel"
 end
-local function refreshLog()
-    if not logFrame or not logFrame:IsShown() then return end
-    local run=logPageView(logPage)
-    local total=run and run.total or 0
-    local pages=math.max(1,math.ceil(total/LOG_ROWS))
-    if logPage>pages then logPage=pages;run=logPageView(logPage) end
-    local entries=run and run.entries or {}
-    logFrame.header:SetText(run and run.runId and ("Run "..tostring(run.runId)..": "..name(run.wishlist or "none")
-        .."\nBuild "..tostring(run.build or "unknown").."; character "..tostring(run.character or "unknown")
-        .."\nApproved maximum "..tostring(run.limit)..tostring(run.spent and ("; confirmed usage "..run.spent) or "")
-        ..tostring((run.reserved or 0)>0 and ("; unresolved exposure "..run.reserved) or "")
-        .."\n"..tostring(run.state)..(run.reason and ("; "..run.reason) or ""))
-        or "No run has been started in this session.")
-    for index,row in ipairs(logFrame.rows) do
-        local entry=entries[index]
-        row:SetText(entry and logLine(entry) or "")
+local RESULT_TONE={Confirmed={.55,.85,.55},["Not sent"]={.95,.5,.45},
+    Unconfirmed={.95,.78,.35},Paused={.95,.78,.35}}
+local function logRowTone(result)
+    if result.confirmed then return RESULT_TONE.Confirmed end
+    if result.refused then return RESULT_TONE["Not sent"] end
+    if result.unresolved then return RESULT_TONE.Unconfirmed end
+    return {.82,.84,.88}
+end
+local function logCell(fs,label,color)
+    fs:SetText(label or "")
+    if color then pcall(fs.SetTextColor,fs,color[1],color[2],color[3]) end
+end
+-- Two lines per Echo cell: the name, then the rarity word. The colour repeats
+-- the rarity; it is never the only cue.
+local function logEchoText(cell)
+    if not cell then return "" end
+    if cell.recorded==false then return cell.label end
+    return cell.label.."\n"..cell.rarity.label
+end
+local function logDetailText(details,history)
+    if not details then return "Select an operation to see what was offered and why it was chosen." end
+    local lines={}
+    local function add(text) lines[#lines+1]=text end
+    add("Operation "..tostring(details.ordinal)..": "..details.result.label)
+    if details.offers then
+        local parts={}
+        for _,offer in ipairs(details.offers) do
+            local mark=offer.confirmed and " [received]" or (offer.selected and " [selected]" or "")
+            parts[#parts+1]=offer.label.." ("..offer.rarity.label..")"..mark
+        end
+        add("Offered: "..table.concat(parts,"   "))
+    else
+        add("Offered: "..tostring(details.offersNote))
     end
-    logFrame.page:SetText("Operations "..total.."; page "..logPage.." / "..pages
-        ..(run and run.truncated and " (bounded)" or ""))
-    logFrame.selector:SetText(logView=="current" and "Show previous run" or "Show current run")
+    add("Why: "..details.reason.label..(details.reason.detail and (" - "..details.reason.detail) or ""))
+    if details.proposedSource then
+        add("Proposed source: "..details.proposedSource.label
+            .." ("..details.proposedSource.rarity.label..")"
+            .."; no consumed source is recorded for this operation.")
+    elseif details.consumed then
+        add("Consumed source: "..details.consumed.label
+            .." ("..details.consumed.rarity.label..")")
+    end
+    if details.eligibleSurplus~=nil then
+        add("Eligible surplus at selection: "..tostring(details.eligibleSurplus)
+            .." copy(ies). This is what the policy could draw from, not a count of copies sacrificed.")
+    end
+    if details.recycled then add("This source was the run's permitted recycle candidate.") end
+    if details.note then add("Recorded note: "..details.note) end
+    local t=details.technical
+    add("Technical: serial "..tostring(t.serial or details.serial)
+        .."; state "..tostring(t.state)
+        .."; source "..tostring(t.sourceKey)
+        .."; selected "..tostring(t.selectedKey).." ("..tostring(t.selectionKind)..")"
+        .."; obtained "..tostring(t.obtained)
+        ..(details.sinceStart and ("; "..string.format("%.1f",details.sinceStart).."s after the run started") or ""))
+    return table.concat(lines,"\n")
+end
+local function refreshLog(force)
+    if not logFrame or not logFrame:IsShown() then return end
+    local history=logHistory()
+    local run=logPageView(logPage)
+    local key=logKey(run)
+    if logLabels.key~=key then logLabels.key,logLabels.byId=key,{} end
+    local total=run and run.total or 0
+    local pages=history.Pages(total,LOG_ROWS)
+    if logPage>pages then
+        logPage=pages;logSelection=nil;run=logPageView(logPage);key=logKey(run)
+    end
+    local header=history.Header(run)
+    logFrame.header:SetText(header.empty and header.status
+        or (header.runLabel.." - "..header.wishlist.."\n"..header.status.."\n"..header.usage
+            ..(header.increased and " (maximum was increased)" or "")))
+    logFrame.warning:SetText(header.pending or header.truncated or "")
+    enable(logFrame.current,logView~="current")
+    enable(logFrame.previous,logView~="previous" and header.hasPrevious)
+    local rows=history.Rows(run,logResolve)
+    local selected=nil
+    for index,row in ipairs(logFrame.rows) do
+        local model=rows[index]
+        row.serial=model and model.serial or nil
+        if model then
+            row:Show()
+            logCell(row.index,tostring(model.ordinal)..".")
+            logCell(row.source,logEchoText(model.source),model.source.rarity.color)
+            logCell(row.replacement,logEchoText(model.replacement),model.replacement.rarity.color)
+            logCell(row.reason,model.reason.label)
+            logCell(row.result,model.result.label,logRowTone(model.result))
+            row.detail=model.reason.detail
+            row.icon:SetTexture(model.source.icon or "")
+            row.resultIcon:SetTexture(model.replacement.icon or "")
+            if logSelection and model.serial==logSelection then
+                selected=model;row.highlight:Show()
+            else row.highlight:Hide() end
+        else
+            row:Hide();row.highlight:Hide()
+            logCell(row.index,"");logCell(row.source,"");logCell(row.replacement,"")
+            logCell(row.reason,"");logCell(row.result,"")
+        end
+    end
+    if logSelection and not selected then logSelection=nil end
+    local details=selected and history.Details(selected.entry,logResolve,run and run.startedAt) or nil
+    logFrame.details:SetText(logDetailText(details,history))
+    logFrame.page:SetText(history.PageLabel(total,logPage,LOG_ROWS))
+    enable(logFrame.prev,logPage>1)
+    enable(logFrame.next,logPage<pages)
+    -- The page the player is reading stays where it is; new operations are
+    -- announced instead of moving them.
+    local seen=logSeen[tostring(logView)..":"..tostring(run and run.runId)]
+    if seen and total>seen and logPage<pages then
+        logFrame.note:SetText((total-seen).." new operation(s) recorded. Use Next to read them.")
+    else
+        logFrame.note:SetText(history.SESSION_NOTE)
+    end
+    logSeen[tostring(logView)..":"..tostring(run and run.runId)]=total
+    logRendered=key
+end
+-- Cheap bounded check: one header read with a single entry, never the whole
+-- run. It re-renders only when the recorded history actually changed.
+local function logVisibleCheck()
+    if not logFrame or not logFrame:IsShown() then return end
+    local probe=Nexus.OrbRuntime.RunLog(logView,1,1)
+    if logKey(probe)~=logRendered then refreshLog() end
+end
+local function logReportText(technical)
+    local run=Nexus.OrbRuntime.RunLog(logView)
+    local key=logKey(run)..(technical and "|tech" or "|plain")
+    if logCopy.key~=key or not logCopy.text then
+        -- The whole selected run is serialized only here, for the text the
+        -- player asked for, and only when it changed since the last request.
+        logCopy.key,logCopy.text=key,logHistory().Report(run,logResolve,technical)
+    end
+    return logCopy.text
+end
+local function ensureCopyView()
+    if logCopyFrame then return logCopyFrame end
+    local f=CreateFrame("Frame","NexusOrbHistoryCopy",UIParent);f:Hide()
+    logCopyFrame=f
+    f:SetSize(640,460);f:SetPoint("CENTER",UIParent,"CENTER",0,0)
+    f:SetFrameStrata("DIALOG");f:SetFrameLevel(60);f:EnableMouse(true)
+    f:SetMovable(true);f:SetClampedToScreen(true);f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart",function(self)self:StartMoving()end)
+    f:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
+    f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
+    f:SetBackdropColor(.035,.04,.05,1)
+    text(f,20,-14,600,22,"Copy this report")
+    text(f,20,-36,600,32,"Select the text and copy it. Opening this view sends nothing anywhere.")
+    f.check=CreateFrame("CheckButton","NexusOrbHistoryTechnical",f,"UICheckButtonTemplate")
+    f.check:SetSize(22,22);f.check:SetPoint("TOPLEFT",20,-68)
+    f.checkLabel=text(f,46,-72,400,20,"Include technical details")
+    f.check:SetScript("OnClick",function(self)
+        f.editBox:SetText(logReportText(self:GetChecked()==true))
+        f.editBox:SetCursorPosition(0)
+    end)
+    f.scroll=CreateFrame("ScrollFrame","NexusOrbHistoryCopyScroll",f,"UIPanelScrollFrameTemplate")
+    f.scroll:SetPoint("TOPLEFT",20,-96);f.scroll:SetSize(580,300)
+    f.editBox=CreateFrame("EditBox",nil,f.scroll)
+    f.editBox:SetMultiLine(true)
+    -- The dedicated copy field is sized for the whole report: no name-limited
+    -- popup, and nothing is silently cut.
+    f.editBox:SetMaxLetters(0)
+    f.editBox:SetAutoFocus(false)
+    f.editBox:SetFontObject(ChatFontNormal)
+    f.editBox:SetWidth(566)
+    f.editBox:SetScript("OnEscapePressed",function(self)self:ClearFocus()end)
+    f.scroll:SetScrollChild(f.editBox)
+    button(f,20,-410,110,"Clear focus",function()f.editBox:ClearFocus()end)
+    button(f,515,-410,85,"Close",function()f:Hide()end)
+    f:SetScript("OnHide",function()f.editBox:ClearFocus()end)
+    UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbHistoryCopy"
+    return f
 end
 local function ensureLog()
     if logFrame then return end
     logFrame=CreateFrame("Frame","NexusOrbRunLog",UIParent);logFrame:Hide()
-    logFrame:SetSize(620,420);logFrame:SetPoint("CENTER",UIParent,"CENTER",40,-20)
+    logFrame:SetSize(760,560);logFrame:SetPoint("CENTER",UIParent,"CENTER",40,-20)
     logFrame:SetFrameStrata("DIALOG");logFrame:SetFrameLevel(40);logFrame:EnableMouse(true)
     logFrame:SetMovable(true);logFrame:SetClampedToScreen(true);logFrame:RegisterForDrag("LeftButton")
     logFrame:SetScript("OnDragStart",function(self)self:StartMoving()end)
     logFrame:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
     logFrame:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
     logFrame:SetBackdropColor(.035,.04,.05,1)
-    text(logFrame,20,-16,560,24,"Orb run log")
-    logFrame.header=text(logFrame,20,-44,580,64)
+    text(logFrame,20,-14,400,24,"Orb history")
+    logFrame.current=button(logFrame,20,-42,120,"Current run",function()
+        if logView=="current" then return end
+        logView="current";logPage=1;logSelection=nil;refreshLog()
+    end)
+    logFrame.previous=button(logFrame,146,-42,120,"Previous run",function()
+        if logView=="previous" then return end
+        logView="previous";logPage=1;logSelection=nil;refreshLog()
+    end)
+    logFrame.header=text(logFrame,280,-40,460,50)
+    logFrame.warning=text(logFrame,20,-72,720,20)
+    logFrame.columns=text(logFrame,20,-96,720,18,
+        "#      Replaced Echo                 Replacement                    Why selected            Result")
     logFrame.rows={}
-    for i=1,LOG_ROWS do logFrame.rows[i]=text(logFrame,20,-112-(i-1)*22,580,20) end
-    logFrame.page=text(logFrame,20,-338,320,22)
-    button(logFrame,330,-336,85,"Previous",function()logPage=math.max(1,logPage-1);refreshLog()end)
-    button(logFrame,420,-336,85,"Next",function()logPage=logPage+1;refreshLog()end)
-    logFrame.selector=button(logFrame,20,-366,170,"Show previous run",function()
-        logView=logView=="current" and "previous" or "current";logPage=1;refreshLog()
+    for i=1,LOG_ROWS do
+        local row=CreateFrame("Button",nil,logFrame)
+        row:SetSize(720,40);row:SetPoint("TOPLEFT",20,-118-(i-1)*40)
+        row:SetFrameLevel(logFrame:GetFrameLevel()+1)
+        row.highlight=row:CreateTexture(nil,"BACKGROUND")
+        row.highlight:SetTexture("Interface\\Buttons\\WHITE8X8")
+        row.highlight:SetAllPoints(row);row.highlight:SetVertexColor(.16,.24,.29,.5)
+        row.highlight:Hide()
+        row.separator=row:CreateTexture(nil,"BACKGROUND")
+        row.separator:SetTexture("Interface\\Buttons\\WHITE8X8")
+        row.separator:SetSize(720,1);row.separator:SetPoint("BOTTOMLEFT",0,0)
+        row.separator:SetVertexColor(.22,.24,.28,.55)
+        row.index=text(row,0,-4,28,18)
+        row.icon=row:CreateTexture(nil,"ARTWORK");row.icon:SetSize(18,18)
+        row.icon:SetPoint("TOPLEFT",30,-4)
+        row.source=text(row,52,-4,180,34)
+        row.resultIcon=row:CreateTexture(nil,"ARTWORK");row.resultIcon:SetSize(18,18)
+        row.resultIcon:SetPoint("TOPLEFT",238,-4)
+        row.replacement=text(row,260,-4,190,34)
+        row.reason=text(row,456,-4,150,34)
+        row.result=text(row,612,-4,105,34)
+        row:SetScript("OnClick",function(self)
+            -- Reading only: this selects a row for display and nothing else.
+            logSelection=(logSelection==self.serial) and nil or self.serial
+            refreshLog()
+        end)
+        row:SetScript("OnEnter",function(self)
+            if not self.detail or not GameTooltip then return end
+            GameTooltip:SetOwner(self,"ANCHOR_TOP")
+            GameTooltip:SetText("Why this Echo was selected")
+            GameTooltip:AddLine(self.detail,1,1,1,true)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave",function() if GameTooltip then GameTooltip:Hide() end end)
+        row:Hide()
+        logFrame.rows[i]=row
+    end
+    logFrame.details=text(logFrame,20,-446,720,60)
+    logFrame.page=text(logFrame,20,-512,300,22)
+    logFrame.prev=button(logFrame,320,-510,85,"Previous",function()
+        if logPage<=1 then return end
+        logPage=logPage-1;logSelection=nil;refreshLog()
     end)
-    logFrame.copyBox=CreateFrame("EditBox",nil,logFrame,"InputBoxTemplate")
-    logFrame.copyBox:SetSize(220,25);logFrame.copyBox:SetPoint("TOPLEFT",300,-364)
-    logFrame.copyBox:SetFrameLevel(42);logFrame.copyBox:SetAutoFocus(false);logFrame.copyBox:Hide()
-    logFrame.copyBox:SetScript("OnEscapePressed",function(self)self:ClearFocus();self:Hide()end)
-    button(logFrame,200,-366,95,"Copy log",function()
-        -- The whole run is copied only here, for the text the player asked
-        -- for, and only when the history changed since the last copy.
-        local run=Nexus.OrbRuntime.RunLog(logView)
-        local key=logKey(run)
-        if logCopy.key~=key or not logCopy.text then
-            logCopy.key,logCopy.text=key,logText(run)
-        end
-        logFrame.copyBox:Show();logFrame.copyBox:SetText(logCopy.text)
-        logFrame.copyBox:HighlightText()
+    logFrame.next=button(logFrame,410,-510,85,"Next",function()
+        logPage=logPage+1;logSelection=nil;refreshLog()
     end)
-    button(logFrame,515,-366,85,"Close",function()logFrame:Hide()end)
+    button(logFrame,500,-510,115,"Copy report",function()
+        local view=ensureCopyView()
+        view:Show()
+        view.editBox:SetText(logReportText(view.check:GetChecked()==true))
+        view.editBox:SetCursorPosition(0)
+    end)
+    button(logFrame,625,-510,95,"Close",function()logFrame:Hide()end)
+    logFrame.note=text(logFrame,20,-536,720,20,Nexus.OrbHistory and Nexus.OrbHistory.SESSION_NOTE or "")
     logFrame:SetScript("OnShow",function()refreshLog()end)
+    logFrame:SetScript("OnHide",function() if logCopyFrame then logCopyFrame:Hide() end end)
+    local elapsed=0
+    logFrame:SetScript("OnUpdate",function(_,dt)
+        -- Nothing runs while hidden; visible, this is one bounded header read.
+        elapsed=elapsed+(dt or 0);if elapsed>=.5 then elapsed=0;logVisibleCheck() end
+    end)
     UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbRunLog"
 end
 function UI.ShowLog()

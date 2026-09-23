@@ -101,14 +101,16 @@ do
  check(type(live.revision)=='number' and live.revision>0,'the log carries a revision: '..tostring(live.revision))
 end
 
--- 4. Copy log produces the text on demand and changes nothing.
-button('Copy log',log):Click()
-check(log.copyBox:IsShown() and log.copyBox:GetText():find('Orb run log',1,true),
- 'Copy log fills a copyable box')
-check(log.copyBox:GetText():find('does not survive a reload',1,true),
+-- 4. Copy report produces the text on demand and changes nothing.
+button('Copy report',log):Click()
+local copyView=assert(NexusOrbHistoryCopy,'Copy report opens its own view')
+check(copyView:IsShown() and copyView.editBox:GetText():find('Nexus Orb history',1,true),
+ 'Copy report fills a copyable field')
+check(copyView.editBox:GetText():find('History clears on reload or logout',1,true),
  'the copied text states that the history is session-only')
 check(H.Count('orb-spend')==before,'copying spends nothing')
 button('Close',log):Click();check(not log:IsShown(),'the log closes')
+check(not copyView:IsShown(),'and the copy view closes with it')
 
 -- 5. A new authorized run starts without Stop and keeps the previous log.
 O.charges=10

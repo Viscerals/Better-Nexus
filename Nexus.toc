@@ -62,6 +62,7 @@ core\OrbRuntime.lua
 ui\VirtualList.lua
 ui\Theme.lua
 ui\Help.lua
+ui\OrbHistory.lua
 ui\OrbPanel.lua
 ui\LayoutMetrics.lua
 ui\Readout.lua

@@ -68,6 +68,7 @@ NAMES += ['orb_finished_run_log']
 NAMES += ['wishlist_import_paste_path']
 NAMES += ['wishlist_export_copy_field']
 NAMES += ['orb_finished_new_run_confirm']
+NAMES += ['orb_history_view']
 NAMES += ['sync_admission_restore']
 
 def main() -> int:
