@@ -271,6 +271,51 @@ do
   'and it is not touched at all')
 end
 
+-- 4f. An owner whose FACTS TABLE raises on every field read. The owner
+-- answered; what it handed back is the hostile part. Reading it outside the
+-- protection is how this hazard came back once already, and it strands the
+-- player with no HUD and an error every second.
+do
+ local ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local panel={VisibilityFacts=function() return ready end}
+ local root,status,tick=Host(panel,'nexus')
+ tick()
+ check(root.shown==false,'fixture: the widget was replaced while the facts were readable')
+ panel.VisibilityFacts=function()
+  return setmetatable({},{__index=function() error('facts table raises') end})
+ end
+ local ok,err=pcall(tick)
+ check(ok,'a scan survives a facts table that raises on every read: '..tostring(err))
+ check(root.shown==true and root.showCalls==1,
+  'and the widget we hid is given back, because such an owner cannot be a replacement')
+ local okFacts,facts=pcall(status.VisibilityFacts)
+ check(okFacts and facts.replacementAvailable==false,
+  'the facts report it unavailable rather than raising')
+end
+
+-- 4g. A widget that was ALREADY hidden is not claimed as ours, so a later
+-- give-back cannot put back something the player closed themselves.
+do
+ local ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local panel={VisibilityFacts=function() return ready end}
+ local root,_,tick=Host(panel,'nexus')
+ tick()
+ check(root.shown==false,'fixture: we hid it while it was on screen')
+ ready={exists=true,shown=false,wanted=true,ready=false,committed=false,hadFailure=true}
+ tick()
+ check(root.shown==true and root.showCalls==1,'it is given back when the replacement fails')
+ -- The player closes it. The replacement recovers, hides an already-hidden
+ -- widget, and then fails again.
+ root:Hide()
+ local closedAt=root.showCalls
+ ready={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ tick()
+ ready={exists=true,shown=false,wanted=true,ready=false,committed=false,hadFailure=true}
+ tick()
+ check(root.shown==false and root.showCalls==closedAt,
+  'and a widget the player had already closed is not pushed back on screen')
+end
+
 -- 5. A panel that cannot answer. An owner that raises is unavailable, not
 -- assumed ready: the stock widget keeps its place.
 do

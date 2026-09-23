@@ -211,8 +211,14 @@ local function PanelFacts()
             end
             return nil
         end
-        local facts = panel.VisibilityFacts()
-        return type(facts) == "table" and facts or nil
+        local raw = panel.VisibilityFacts()
+        if type(raw) ~= "table" then return nil end
+        -- The two scalars are copied out INSIDE the protection, and the
+        -- foreign table is never handed to a caller. Returning it would put
+        -- every later field read outside this pcall, which is how the same
+        -- hazard came back once already: the rule is not "protect the call",
+        -- it is "never let a foreign table out of here".
+        return {ready = raw.ready == true, committed = raw.committed == true}
     end)
     if not ok then return nil end
     return facts
@@ -268,8 +274,17 @@ local function ApplyVisibility()
     if ReplacingServerHud() then
         -- The confirmed Project Ebonhold root is the complete stock widget.
         -- Hide/show it as one unit; never touch unrelated global addon frames.
-        -- Only a hide that actually happened is remembered as ours.
-        suppressedFrame = SetShown(rootFrame, false) and rootFrame or nil
+        -- Only a hide that actually took something away is remembered as
+        -- ours: hiding an already-hidden widget takes nothing, and claiming
+        -- it would let a later give-back put back something the player -- or
+        -- the game -- had closed for their own reasons.
+        local wasShown = nil
+        if type(rootFrame.IsShown) == "function" then
+            local okShown, value = pcall(rootFrame.IsShown, rootFrame)
+            if okShown then wasShown = value and true or false end
+        end
+        local hid = SetShown(rootFrame, false)
+        suppressedFrame = (hid and wasShown ~= false) and rootFrame or nil
     elseif not UsingNexusHud() then
         SetShown(rootFrame, true)
         suppressedFrame = nil
