@@ -164,20 +164,18 @@ local function ensure()
     frame.advanced:SetSize(22, 22); frame.advanced:SetPoint("TOPLEFT", 330, -316)
     text(frame, 356, -320, 340, 20, "Advanced: full retained report (private)")
     button(frame, 20, -348, 200, "Inspect prepared report", function()
-        local storage = _G.NexusSupportStorage
-        local latest = storage and storage.Latest()
+        -- Through the builder, like every other component read on this page.
+        local builder = report()
+        local latest = builder and type(builder.StoredReport) == "function"
+            and builder.StoredReport() or nil
         if not latest then
             frame.prepared:SetText("No prepared report is stored for this account.")
             return
         end
-        local readOk, stored = pcall(storage.Read)
-        if not readOk then stored = nil end
-        local builder = report()
-        local sum = stored and builder and builder.Checksum(stored.chunks) or nil
         frame.prepared:SetText("Stored report " .. tostring(latest.id) .. ": "
             .. tostring(latest.bytes) .. " bytes, " .. tostring(latest.chunkCount)
             .. " chunk(s), checksum " .. tostring(latest.checksum)
-            .. (sum and (sum == latest.checksum
+            .. (latest.matches ~= nil and (latest.matches
                 and "; matches its own checksum in memory"
                 or "; CHECKSUM MISMATCH in the stored copy") or "")
             .. ". This reads the stored copy; it does not prove the session that made it still exists.")
@@ -261,7 +259,8 @@ function UI.PrepareFile(extended)
     lastPrepared = builder.WrittenNotice(meta) .. "\nAfter that, attach "
         .. builder.FilePathHint()
         .. " (the account folder is the one you played on)."
-        .. (meta.partial and "\nThis report is partial: " .. tostring(meta.omissions) or "")
+        .. (type(meta) == "table" and meta.partial
+            and ("\nThis report is partial: " .. tostring(meta.omissions)) or "")
     refresh()
     return meta
 end

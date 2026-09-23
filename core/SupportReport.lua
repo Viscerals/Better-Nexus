@@ -306,12 +306,12 @@ end
 -- The compact report. It is BUILT at this size: the incident and its context
 -- come first, and sections stop being added when the budget is reached. It is
 -- never a truncated copy of the extended report.
--- What is guaranteed, exactly: every CONTAINER read from Nexus or from the
--- globals (the release identity, the evidence owner, the start-up owner, the
--- error history, the incident history, the Orb owners, the storage component,
--- UnitName) is reached through a pcall, and every value that enters a line
--- goes through safeText, shown or retained. A poison sweep in the prototype
--- suite checks both.
+-- What is guaranteed, exactly: every value that enters a line goes through
+-- safeText, shown or retained; the STORAGE COMPONENT - a separate addon, the
+-- one owner treated as adversarial here - is read only inside a pcall, one
+-- lookup and call at a time, and everything it returns is copied into a shape
+-- this file owns before any caller sees it; and a caller's incident is copied
+-- the same way. A poison sweep in the prototype suite checks all three.
 -- What is NOT guaranteed: a table an owner RETURNS is read as an ordinary
 -- table. A status, a limits table, a start-up snapshot or an incident row
 -- whose own fields raise on __index is out of scope here, because the owners
@@ -760,13 +760,35 @@ function M.Store(report)
         or #report.chunks == 0 then
         return nil, "the report was not completed, so the previous one was kept"
     end
-    -- The call too, not only the lookup: a component that raises inside
-    -- Replace must not raise out of the route that offered it.
-    local ok, stored, why = pcall(storage.Replace, report)
+    -- The LOOKUP and the call in one pcall: a component whose __index answers
+    -- once and then raises must not raise out of the route that offered it.
+    -- What it returns is copied into a shape this file owns, so a caller never
+    -- holds the component's table.
+    local copied = {}
+    local ok, stored, why = pcall(function()
+        local value, meta = storage.Replace(report)
+        if type(meta) ~= "table" then return value, meta end
+        -- The header the component accepted, field by field, into a table
+        -- this file owns. Numbers stay numbers; text is converted.
+        for _, field in ipairs({"bytes", "rawBytes", "chunkCount",
+            "captureStart", "captureEnd", "incidentCount", "format"}) do
+            copied[field] = tonumber(meta[field])
+        end
+        for _, field in ipairs({"id", "build", "topic", "checksum", "omissions"}) do
+            if meta[field] ~= nil then copied[field] = safeText(meta[field], 120) end
+        end
+        copied.partial = meta.partial == true or nil
+        copied.extended = meta.extended == true or nil
+        return value, nil
+    end)
     if not ok then
         return nil, "the support component refused the report"
     end
-    return stored, why
+    if not stored then
+        return nil, why ~= nil and safeText(why, 240)
+            or "the support component refused the report"
+    end
+    return stored, copied
 end
 
 -- The LAST prepared report, as scalars this file owns. The component's own
@@ -774,17 +796,40 @@ end
 function M.StoredSummary()
     local storage = storageOwner("Latest")
     if not storage then return nil end
-    local ok, latest = pcall(storage.Latest)
-    if not ok or type(latest) ~= "table" then return nil end
     local out = {}
-    local okFields = pcall(function()
+    local ok, found = pcall(function()
+        local latest = storage.Latest()
+        if type(latest) ~= "table" then return false end
         out.id = safeText(latest.id, 48)
         out.bytes = safeText(latest.bytes, 24)
         out.chunkCount = safeText(latest.chunkCount, 16)
         out.checksum = safeText(latest.checksum, 24)
+        return true
     end)
-    if not okFields then return nil end
+    if not ok or not found then return nil end
     return out
+end
+
+-- What the stored copy says about ITSELF, checked against this session's own
+-- checksum of it. The page never touches the component: it asks for this.
+function M.StoredReport()
+    local storage = storageOwner("Read")
+    local summary = M.StoredSummary()
+    if not storage or not summary then return nil end
+    local ok, recomputed = pcall(function()
+        local stored = storage.Read()
+        if type(stored) ~= "table" or type(stored.chunks) ~= "table" then return nil end
+        local chunks = {}
+        for index, chunk in ipairs(stored.chunks) do
+            if type(chunk) ~= "string" then return nil end
+            chunks[index] = chunk
+        end
+        return checksum(chunks)
+    end)
+    summary.recomputed = ok and recomputed or nil
+    summary.matches = summary.recomputed ~= nil
+        and summary.recomputed == summary.checksum or nil
+    return summary
 end
 
 function M.StorageStatus()
@@ -798,11 +843,17 @@ function M.StorageStatus()
         if type(value) ~= "table" then return nil end
         -- Copied into a shape this file owns: a caller reading the result
         -- never touches the component's table or its metamethods.
-        return {loaded = value.loaded ~= false,
+        -- false is an answer, not a value to print: a component saying it is
+        -- NOT incompatible must not be read as incompatible with the reason
+        -- "false", which would disable the file route for good.
+        local incompatible = value.incompatible
+        local reason = value.reason
+        return {loaded = value.loaded == true,
             ready = value.ready == true,
-            incompatible = value.incompatible ~= nil
-                and safeText(value.incompatible, 120) or nil,
-            reason = value.reason ~= nil and safeText(value.reason, 240) or nil}
+            incompatible = (incompatible ~= nil and incompatible ~= false)
+                and safeText(incompatible, 120) or nil,
+            reason = (reason ~= nil and reason ~= false)
+                and safeText(reason, 240) or nil}
     end)
     if not ok or type(status) ~= "table" then
         return {loaded = false, ready = false,

@@ -849,4 +849,103 @@ do
  Nexus.SupportReportUI.Show()
 end
 
+-- 22. The storage component is read ONE lookup and call at a time, inside a
+-- pcall, and everything it returns is copied. A component whose __index
+-- answers once and then raises is the shape that proves both.
+do
+ local realStorage=_G.NexusSupportStorage
+ local builderRef=builder
+ local function stateful(entries)
+  local answered={}
+  return setmetatable({},{__index=function(_,key)
+   if answered[key] then error('second read of '..tostring(key)) end
+   answered[key]=true
+   return entries[key]
+  end})
+ end
+ _G.NexusSupportStorage=stateful({
+  Latest=function() return {id='S',bytes=1,chunkCount=1,checksum='abcd1234'} end,
+  Read=function() return {chunks={'x'}} end,
+  Status=function() return {loaded=true,ready=true} end,
+  Replace=function() return true,{bytes=1,chunkCount=1,checksum='abcd1234'} end})
+ local okStored,stored=pcall(builderRef.StoredSummary)
+ check(okStored,'a component whose __index answers once does not raise: '..tostring(stored))
+ local okReport=pcall(builderRef.StoredReport)
+ check(okReport,'and neither does the stored-report reader')
+ local okStatus2=pcall(builderRef.StorageStatus)
+ check(okStatus2,'nor the status reader')
+ local okStore2=pcall(builderRef.Store,{chunks={'x'}})
+ check(okStore2,'nor the store route')
+ local okPage2=pcall(function() Nexus.SupportReportUI.Show() end)
+ check(okPage2,'nor the page')
+ -- What it returns is a shape this addon owns, not the component's table.
+ local componentTable={id='T',bytes=2,chunkCount=1,checksum='dead',extra='leak'}
+ _G.NexusSupportStorage={Latest=function() return componentTable end,
+  Read=function() return {chunks={'x'}} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local owned=builderRef.StoredSummary()
+ check(owned~=componentTable,'the stored summary is not the component table')
+ check(owned.extra==nil,'and carries no field this addon did not ask for')
+ check(getmetatable(owned)==nil,'and no metatable of theirs')
+ -- A component that says it is NOT incompatible is compatible.
+ _G.NexusSupportStorage={Replace=function() return true,{} end,
+  Status=function() return {loaded=true,ready=true,incompatible=false,reason=false} end}
+ local status=builderRef.StorageStatus()
+ check(status.incompatible==nil,'incompatible=false is not an incompatibility: '
+  ..tostring(status.incompatible))
+ check(status.reason==nil,'and reason=false is not a reason: '..tostring(status.reason))
+ check(status.loaded==true and status.ready==true,'while the rest of the status is kept')
+ -- A component that says nothing is not loaded.
+ _G.NexusSupportStorage={Replace=function() return true,{} end,
+  Status=function() return {} end}
+ local silent=builderRef.StorageStatus()
+ check(silent.loaded==false and silent.ready==false,
+  'a component that states nothing is not reported as loaded or ready: '
+  ..tostring(silent.loaded)..'/'..tostring(silent.ready))
+ -- Bounds on what the component can put on the page.
+ local LONG=string.rep('W',900)
+ _G.NexusSupportStorage={Latest=function()
+   return {id=LONG,bytes=LONG,chunkCount=LONG,checksum=LONG} end,
+  Read=function() return {chunks={'x'}} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local bounded=builderRef.StoredSummary()
+ check(#bounded.id<=48 and #bounded.bytes<=24 and #bounded.chunkCount<=16
+  and #bounded.checksum<=24,'every stored-summary field is bounded: '..#bounded.id
+  ..'/'..#bounded.bytes..'/'..#bounded.chunkCount..'/'..#bounded.checksum)
+ -- The page's own Inspect handler reads the same owned shape.
+ Nexus.SupportReportUI.Show()
+ local inspect
+ for _,b in ipairs(H.frames) do
+  if b.kind=='Button' and b:GetText()=='Inspect prepared report' then inspect=b end
+ end
+ check(inspect~=nil,'the Inspect control exists')
+ local okInspect=pcall(function() inspect:Click() end)
+ check(okInspect,'and a hostile component does not take it away')
+ local inspectText=page.prepared and page.prepared:GetText() or ''
+ check(inspectText:find(string.rep('W',200),1,true)==nil,
+  'nothing unbounded from the component reaches the page: '..#inspectText)
+ local inspectBad
+ for index=1,#inspectText do
+  local byte=inspectText:byte(index)
+  if byte<32 and byte~=10 then inspectBad=byte;break end
+ end
+ check(inspectBad==nil,'and no control byte either: '..tostring(inspectBad))
+ _G.NexusSupportStorage=setmetatable({},{__index=function() error('hostile component') end})
+ check(pcall(function() inspect:Click() end),'a raising component does not take Inspect away')
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 23. The prepared-file route survives a component that returns less than the
+-- one shipped with this addon does.
+do
+ local realStorage=_G.NexusSupportStorage
+ _G.NexusSupportStorage={Replace=function() return true end,
+  Status=function() return {loaded=true,ready=true} end,
+  Latest=function() return nil end,Read=function() return nil end}
+ local okBare=pcall(function() return Nexus.SupportReportUI.PrepareFile(false) end)
+ check(okBare,'a component that returns no header does not break the file route')
+ _G.NexusSupportStorage=realStorage
+end
+
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)
