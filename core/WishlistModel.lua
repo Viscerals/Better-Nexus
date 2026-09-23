@@ -1053,6 +1053,14 @@ end
 
 local function TrimName(name)
     name = tostring(name or "")
+    -- WoW rich-text widgets interpret pipe-prefixed sequences, and a wishlist
+    -- name travels verbatim inside an EBH1 code that the player copies out of
+    -- an edit box and pastes into another. A name carrying a pipe is therefore
+    -- either rendered as something else or changed by the projection that makes
+    -- it inert, and it drifts on every round trip. The character is removed
+    -- once, here, at the single boundary where a name is accepted, so a name is
+    -- inert everywhere and an exported code says exactly what was saved.
+    name = name:gsub("|", "")
     return name:gsub("^%s+", ""):gsub("%s+$", "")
 end
 

@@ -94,31 +94,30 @@ local function ConfigureImportEditBox(box)
     box:SetText("")
 end
 
-local function ValidWireValue(value)
-    local identity = Nexus and Nexus.Identity
-    return identity and type(identity.ValidWireText) == "function"
-        and identity.ValidWireText(value, #value, true, true) == true
-end
-
 local function SetExplicitCopyText(box, value)
     -- EBH1 is an explicit copy/paste wire boundary, and the player copies
-    -- whatever this field holds. A display projection doubles every literal
-    -- pipe, and a wishlist name may contain one, so a projected code imports
-    -- under a different name and gains another pipe on every round trip. A
-    -- value that is already a valid wire value is therefore shown exactly; only
-    -- a value that is not gets the inert projection, which stays readable
-    -- without pretending to be copyable bytes.
+    -- whatever this field holds. The field is still a WoW rich-text surface, so
+    -- the value is shown through the inert projection and never as raw bytes.
+    -- The projection doubles a literal pipe; a wishlist name no longer carries
+    -- one, because TrimName removes it where a name is accepted, so for every
+    -- code this addon produces the projection is the identity and the field
+    -- holds the code exactly.
     -- The field is claimed first: a name limit inherited from the naming dialog
     -- would cut the code that the player is about to copy.
     if not box then return end
     ClaimWireEditBox(box)
     local raw = tostring(value or "")
     box._nexusExplicitExportText = raw
-    if ValidWireValue(raw) then
-        box:SetText(raw)
-    else
-        box:SetText(DisplayUntrusted(raw, #raw, true, true) or "")
+    local shown = DisplayUntrusted(raw, #raw, true, true)
+    if not shown then
+        -- Nothing showable, so nothing is shown. Say so instead of leaving an
+        -- empty box under a "copy this" label.
+        box:SetText("")
+        print("|cffff6060Nexus:|r this wishlist cannot be exported as text: "
+            .. "its name contains characters the game cannot display.")
+        return
     end
+    box:SetText(shown)
 end
 
 local Model, Adapter

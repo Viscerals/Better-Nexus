@@ -6,9 +6,11 @@
 -- anything happened. The player who receives it reports that the code "does
 -- not import", so the defect is reported on the other side of the transfer.
 -- The field must also hold the exact code: the player copies what the field
--- holds, so a display projection that doubles a pipe changes the wishlist name
--- inside the code. This drives the real sequence: import a code, name the
--- imported wishlist, export it, and paste what was copied back in. The code is
+-- holds, and the inert projection doubles a pipe, so a name carrying one would
+-- change inside the copied code. A name is accepted without that character, so
+-- the projection is the identity and the field is exact. This drives the real
+-- sequence: import a code, name the imported wishlist, export it, and paste
+-- what was copied back in. The code is
 -- SYNTHETIC, built with the product's own encoder at the supported maximum,
 -- and is not any reporter's code.
 local T=dofile('tests/prototype/startup_support.lua')
@@ -34,9 +36,11 @@ end
 local code=assert(Nexus.Codec.EncodeEBH1(entries,'MAGE',string.rep('R',96)))
 check(#code>1024,'the encoded code is longer than the handler keeps: '..#code..' bytes')
 
--- A pipe is legal in a wishlist name, and it is the character a display
--- projection changes.
-local CHOSEN='Raid|ST Synthetic'
+-- A pipe is the character a display projection changes, and a WoW edit box
+-- interprets it. A name is accepted without it, so what is typed here is saved
+-- and exported as EXPECTED, and the copied code says exactly that.
+local TYPED='Raid|ST Synthetic'
+local EXPECTED='RaidST Synthetic'
 
 -- The pooled edit box already carries the client's own handler before any
 -- Nexus dialog opens. Claiming the field must restore that handler, not clear
@@ -56,7 +60,7 @@ check(box==pooled,'it is the same pooled box')
 box:SetText(code)
 H.AcceptPopup()
 if H.popup and H.popup.which=='NEXUS_NAME_IMPORTED_WISHLIST' then
- H.popup.editBox:SetText(CHOSEN)
+ H.popup.editBox:SetText(TYPED)
  H.AcceptPopup()
 end
 local draft=Nexus.WishlistEditor.DebugDraftState()
@@ -73,9 +77,12 @@ check(#shown>1024,'the copy field is not cut to a name length: it shows '..#show
 local parsed=Nexus.Codec.DecodeEBH1(shown,true)
 check(type(parsed)=='table' and parsed.entries~=nil,'the copied text is still a decodable EBH1 code')
 check(#parsed.entries==85,'the copied text carries every entry: '..#parsed.entries..' of 85')
--- The copied text is the code itself, not a projection of it: the name keeps
--- its single pipe, and every entry keeps its own id, quality, stacks and role.
-check(parsed.name==CHOSEN,'the copied code keeps the exact wishlist name: '..tostring(parsed.name))
+-- The copied text says exactly what was saved: the name as it was accepted,
+-- and every entry with its own id, quality, stacks and role.
+check(parsed.name==EXPECTED,
+ 'the copied code carries exactly the saved wishlist name: '..tostring(parsed.name))
+check(parsed.name:find('|',1,true)==nil,
+ 'and the name the game would interpret never reaches the field: '..tostring(parsed.name))
 local seen,locked=0,0
 for _,e in ipairs(parsed.entries)do
  local want=wanted[e.spellId]
