@@ -273,7 +273,7 @@ function M.ShowManageWishlistsMenu(anchor, offset)
     local perMenu = 8
     local plans = Controller.RetainedPlansProjection() or {}
     local support = Controller.ServerDeletionSupportProjection() or {}
-    local undo = Controller.ForgottenPlanProjection()
+    local undone = Controller.ForgottenPlansProjection() or {}
     local menu = M._manageMenu
     if not menu then
         menu = CreateFrame("Frame", "NexusWishlistManageMenu", frame or UIParent)
@@ -310,14 +310,15 @@ function M.ShowManageWishlistsMenu(anchor, offset)
     if not paged or first >= total or first < 0 then first = 0 end
     menu._offset = first
     local shown = math.min(perPage, total - first)
-    local extra = (undo and 1 or 0) + (paged and 1 or 0)
+    local extra = #undone + (paged and 1 or 0)
     local visible = math.max(1, shown + extra)
 
     menu.header:SetText(string.format(
         "Saved wishlists on this character: %d  |cff777777%s|r", total,
-        support.supported and "server copies can also be removed"
-            or ("server copies cannot be removed here ("
-                .. tostring(support.reason or "no deletion call") .. ")")))
+        support.supported
+            and "removals here are local; this addon never removes a server Wishlist"
+            or ("removals here are local; "
+                .. tostring(support.reason or "no deletion call"))))
     menu:SetSize(360, 34 + visible * 24)
     menu:ClearAllPoints()
     menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
@@ -340,22 +341,26 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             menu.rows[i] = row
         end
         local plan = (i <= shown) and plans[first + i] or nil
-        local undoRow = undo and i == shown + 1
+        local undoRow = (i > shown) and undone[i - shown] or nil
         local pagerRow = paged and i == visible
         if plan then
             local planName = DisplayUntrusted(plan.name, 1024, false)
                 or ("Wishlist " .. tostring(plan.associationIndex))
+            -- Colour codes are not nested: the client's first |r closes the
+            -- run it is in, so a nested one leaves the rest uncoloured and
+            -- the trailing marker unmatched.
             local association
             if plan.usable then
-                association = "Saved Build " .. tostring(plan.associationIndex)
+                association = string.format("|cff777777Saved Build %s, %d Echo rows|r",
+                    tostring(plan.associationIndex), tonumber(plan.rows) or 0)
             else
-                association = "|cffff9040not a Saved Build ("
-                    .. tostring(plan.associationIndex) .. ")|r"
+                association = string.format(
+                    "|cffff9040not a Saved Build (%s)|r|cff777777, %d Echo rows|r",
+                    tostring(plan.associationIndex), tonumber(plan.rows) or 0)
             end
             row._label:SetTextColor(0.92, 0.92, 0.92)
-            row._label:SetText(string.format(
-                "%s  |cff777777%s, %d Echo rows|r  |cffff6060[Remove]|r",
-                planName, association, tonumber(plan.rows) or 0))
+            row._label:SetText(planName .. "  " .. association
+                .. "  |cffff6060[Remove]|r")
             row:Enable()
             -- The confirmation carries the identity, not the label: two
             -- plans may share a name, and only one is being removed.
@@ -363,6 +368,7 @@ function M.ShowManageWishlistsMenu(anchor, offset)
                 associationIndex = plan.associationIndex, key = plan.key,
                 assignmentId = plan.assignmentId, mirrorSlot = plan.mirrorSlot,
                 name = planName, rows = plan.rows, usable = plan.usable,
+                mirrorResolved = plan.mirrorResolved,
                 ordinaryCopies = plan.ordinaryCopies,
                 lockedCopies = plan.lockedCopies,
             }
@@ -370,11 +376,14 @@ function M.ShowManageWishlistsMenu(anchor, offset)
                 M.HideManageWishlistsMenu()
                 -- The confirmation repeats the facts this row showed, and
                 -- states plainly what is and is not removed.
-                local where = confirmPlan.mirrorSlot
-                    and "The Wishlist on the server is NOT removed: this client has no call that deletes one."
-                    or "This is the only copy. Undo in the same list brings it back."
+                -- Whether a server Wishlist survives this is a fact about
+                -- the live list, not about the mirror number the record
+                -- carries: a stored hint outlives the mirror it names.
+                local where = confirmPlan.mirrorResolved
+                    and "A Wishlist on the server still matches this plan and is NOT removed: this client has no call that deletes one."
+                    or "No Wishlist on the server currently matches this plan, so this is the only copy."
                 StaticPopup_Show("NEXUS_FORGET_WISHLIST", string.format(
-                    "Remove \"%s\" from this character?\n%d Echo rows, %d ordinary and %d locked copies, %s.\n%s",
+                    "Remove \"%s\" from this character?\n%d Echo rows, %d ordinary and %d locked copies, %s.\n%s\nThe Manage list can undo this.",
                     confirmPlan.name, tonumber(confirmPlan.rows) or 0,
                     tonumber(confirmPlan.ordinaryCopies) or 0,
                     tonumber(confirmPlan.lockedCopies) or 0,
@@ -392,15 +401,25 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             end)
             row:Show()
         elseif undoRow then
-            local undoName = DisplayUntrusted(undo.name, 1024, false)
-                or "the last removed wishlist"
+            local undoName = DisplayUntrusted(undoRow.name, 1024, false)
+                or "a removed wishlist"
             row._label:SetTextColor(0.45, 0.95, 0.6)
-            row._label:SetText("Undo: bring back \"" .. undoName .. "\"")
+            row._label:SetText(string.format("Undo: bring back \"%s\"  |cff777777removed from %s|r",
+                undoName, tostring(undoRow.associationIndex)))
             row:Enable()
+            -- Each row takes back ITS removal, by the identity that row
+            -- names, so an older one can be recovered without disturbing a
+            -- newer one.
+            local take = {position = undoRow.position, key = undoRow.key,
+                assignmentId = undoRow.assignmentId}
             row:SetScript("OnClick", function()
-                local ok, reason = Controller.RestoreForgottenPlan()
+                local ok, reason, detail = Controller.RestoreForgottenPlan(take)
                 if not ok then
                     print("|cffff9040Nexus:|r " .. tostring(reason))
+                elseif type(detail) == "table" and detail.movedFrom ~= nil then
+                    print(string.format(
+                        "|cff4dff80Nexus:|r \"%s\" came back as Saved Build %s, because %s now holds a different plan.",
+                        undoName, tostring(detail.loadoutSlot), tostring(detail.movedFrom)))
                 end
                 requestRefresh()
                 M.ShowManageWishlistsMenu(anchor, 0)
@@ -543,6 +562,14 @@ local function ShowWishlistSwitchMenu(anchor, offset)
             local suffix = displayAssignedName
                 and ("  |cff777777Saved Build: " .. displayAssignedName .. "|r")
                 or "  |cff666666Saved Build: None|r"
+            -- A stored record whose map index names no Saved Build is
+            -- shown and labelled here too, not only in the management
+            -- list: it can be opened and saved, but it cannot be an
+            -- assignment target.
+            if c.associationUsable == false then
+                suffix = suffix .. "  |cffff9040(index "
+                    .. tostring(c.associationIndex) .. " is not a Saved Build)|r"
+            end
             row._label:SetText(wishlistLabel
                 .. CandidateEvidenceSuffix(c) .. suffix)
             if current then

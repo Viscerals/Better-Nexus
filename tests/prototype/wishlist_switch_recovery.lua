@@ -337,8 +337,10 @@ do
  local header=menu.header:GetText() or ''
  check(header:find('Saved wishlists on this character: 2',1,true)~=nil,
   'it states how many plans are retained: '..header)
- check(header:find('server copies cannot be removed here',1,true)~=nil,
-  'and that a server Wishlist cannot be removed from this client')
+ check(header:find('removals here are local',1,true)~=nil,
+  'and that removing here is local only')
+ check(header:find('no Wishlist deletion call',1,true)~=nil,
+  'stating why a server Wishlist is not removed: '..header)
  local rows,mirrorRow={},nil
  for _,row in ipairs(menu.rows or {}) do
   if row:IsShown() then
@@ -359,8 +361,20 @@ do
  check(asked:find(NAME,1,true)~=nil,'the confirmation names the plan: '..asked)
  check(asked:find('not a Saved Build',1,true)~=nil,
   'states the association it is removing')
- check(asked:find('server is NOT removed',1,true)~=nil,
-  'and states that the Wishlist on the server is not removed')
+ -- No live server Wishlist resolves for this fixture, so claiming that a
+ -- server copy survives would be telling the player the opposite of the
+ -- truth about the only copy they have.
+ local resolved=false
+ for _,plan in ipairs(A.RetainedWishlistPlans()) do
+  if plan.associationIndex==101 then resolved=plan.mirrorResolved end
+ end
+ check(resolved==false,'fixture: no server Wishlist resolves for this plan')
+ check(asked:find('this is the only copy',1,true)~=nil,
+  'the confirmation says so: '..asked)
+ check(asked:find('still matches this plan',1,true)==nil,
+  'and does not claim a server copy survives')
+ check(asked:find('can undo this',1,true)~=nil,
+  'and the undo is named whatever the mirror state is')
  H.AcceptPopup()
  local after=A.RetainedWishlistPlans()
  check(#after==1,'exactly one plan was removed: '..#after)
@@ -415,6 +429,153 @@ do
  check(summary:find(NAME,1,true)==nil,'without the plan name')
  check(summary:find(plan.key,1,true)==nil,'or its exact identity')
  check(#H.actions==0,'and no gameplay action followed')
+end
+
+-- 12. Taking a removal back when its Saved Build is now used by a different
+-- plan. The refusal used to tell the player to unassign that plan, and
+-- unassigning overwrote the very record being restored: the wanted plan was
+-- lost for good and the other one came back in its place. A restore must
+-- never need a destructive step.
+do
+ Boot(WithBothPlans)
+ local plans=A.RetainedWishlistPlans()
+ local wanted
+ for _,plan in ipairs(plans) do if plan.associationIndex==1 then wanted=plan end end
+ check(wanted~=nil,'fixture: a plan is associated with Saved Build 1')
+ check(A.ForgetWishlistPlan({associationIndex=1,key=wanted.key,
+  assignmentId=wanted.assignmentId})==true,'it is removed')
+ -- Saved Build 1 is then used by something else.
+ local other={}
+ for index=1,12 do other[#other+1]={spellId=310000+index,quality=2,stacks=1,locked=false} end
+ other[#other+1]={spellId=317777,quality=2,stacks=1,locked=false}
+ check(A.UpdateWishlistAssociationAfterSave(1,104,'Other Plan',other,{})==true,
+  'a different plan now holds Saved Build 1')
+ local ok,reason,detail=A.RestoreForgottenWishlistPlan()
+ check(ok==true,'the removal can still be taken back: '..tostring(reason))
+ check(type(detail)=='table' and tonumber(detail.loadoutSlot)~=nil,
+  'and it says where it landed: '..tostring(detail and detail.loadoutSlot))
+ check(tonumber(detail.loadoutSlot)~=1,'not on the Saved Build that is in use')
+ check(tostring(detail.movedFrom)=='1','saying which one it came from')
+ local after=A.RetainedWishlistPlans()
+ local byIndexAfter={}
+ for _,plan in ipairs(after) do byIndexAfter[plan.associationIndex]=plan end
+ check(byIndexAfter[1]~=nil and byIndexAfter[1].name=='Other Plan',
+  'the plan that holds Saved Build 1 is untouched')
+ local recovered=byIndexAfter[tonumber(detail.loadoutSlot)]
+ check(recovered~=nil and recovered.key==wanted.key,
+  'and the recovered plan is the exact one that was removed')
+ check(recovered.ordinaryCopies==wanted.ordinaryCopies
+  and recovered.lockedCopies==wanted.lockedCopies,
+  'with its exact contents: '..recovered.ordinaryCopies..'/'..recovered.lockedCopies)
+ check(#A.ForgottenWishlistPlans()==0,'and it is no longer offered twice')
+ check(#H.actions==0,'no gameplay or server action was taken')
+end
+
+-- 13. More than one removal stays recoverable, and each is taken back by its
+-- own identity. A single slot meant the second removal silently discarded the
+-- first, so a player who cleaned up two plans could only ever get one back.
+do
+ Boot(WithBothPlans)
+ local plans=A.RetainedWishlistPlans()
+ local firstPlan,secondPlan=plans[1],plans[2]
+ check(firstPlan and secondPlan,'fixture: two retained plans')
+ check(A.ClearLoadoutWishlist(1)==true,'the first is unassigned')
+ check(A.ForgetWishlistPlan({associationIndex=101,key=secondPlan.key,
+  assignmentId=secondPlan.assignmentId})==true,'the second is removed')
+ local offered=A.ForgottenWishlistPlans()
+ check(#offered==2,'both are still recoverable: '..#offered)
+ check(offered[1].key==secondPlan.key,'the newest is offered first')
+ -- Take back the OLDER one, by its identity, not the newest.
+ local ok=A.RestoreForgottenWishlistPlan({key=firstPlan.key,
+  assignmentId=firstPlan.assignmentId})
+ check(ok==true,'an older removal can be taken back on its own')
+ local retained=A.RetainedWishlistPlans()
+ check(#retained==1 and retained[1].key==firstPlan.key,
+  'and it is the one that was asked for')
+ local left=A.ForgottenWishlistPlans()
+ check(#left==1 and left[1].key==secondPlan.key,
+  'while the other removal is still offered: '..#left)
+ check(A.RestoreForgottenWishlistPlan({key=secondPlan.key})==true,
+  'and it can be taken back too')
+ check(#A.RetainedWishlistPlans()==2,'so nothing was lost by removing both')
+ check(#H.actions==0,'no gameplay or server action was taken')
+end
+
+-- 14. The switch list says the same thing the management list does about an
+-- index that names no Saved Build, so the fact is not only visible to a
+-- player who opens the manager.
+do
+ Boot(WithBothPlans)
+ Nexus.WishlistEditor.Show()
+ NexusWishlistEditorSwitchButton:Click()
+ local labelled=0
+ for _,row in ipairs(NexusWishlistEditorSwitchMenu.rows or {}) do
+  if row:IsShown() and (row._label:GetText() or ''):find('is not a Saved Build',1,true) then
+   labelled=labelled+1
+  end
+ end
+ check(labelled==1,'exactly the out-of-range plan is labelled in the switch list: '..labelled)
+end
+
+-- 15. The refusal the report quoted. "Wishlist uploaded and targets saved,
+-- but assignment failed (invalid loadout)" and the association refusal behind
+-- it were printed and retained nowhere, so the support file of a session full
+-- of them held no incidents at all.
+do
+ Boot(WithBothPlans)
+ local support=Nexus.SupportIncidents
+ support.Clear()
+ local controller=Nexus.WishlistInternals and Nexus.WishlistInternals.Controller
+ local instance=controller.New({model=Nexus.WishlistModel.New(),
+  store=Nexus.Store,notify=function() end})
+ instance.Initialize(A)
+ local ok,why=instance.AssociateCandidate({name='Nothing To Associate'})
+ check(ok~=true,'associating an unusable candidate is refused: '..tostring(why))
+ check(support.Count()==1,'and the refusal is retained: '..support.Count())
+ local incident=support.Latest()
+ check(incident.operation=='associate wishlist',
+  'naming the operation: '..tostring(incident.operation))
+ check(incident.reason=='ASSOCIATION_REFUSED',
+  'with its own reason: '..tostring(incident.reason))
+ check(incident.committed==false,'and stating that nothing was written')
+ local summary=Nexus.SupportReport.Summary()
+ check(summary:find('ASSOCIATION_REFUSED',1,true)~=nil,'the report shows it')
+ check(summary:find('Nothing To Associate',1,true)==nil,'without the name it was given')
+ check(#H.actions==0,'and no gameplay action followed')
+
+ -- The same refusal on the path a player with an active Saved Build takes.
+ -- Without this the in-range branch had no check behind it at all.
+ support.Clear()
+ H.perks.serverActiveSlot=1
+ H.perks.serverBuildSlots[1]={name='Active Saved Build',verified=true,
+  echoes={{spellId=200001,quality=1,stacks=1}}}
+ H.Notify();A.Poll();H.Advance(1)
+ local slots=A.Slots()
+ check(tonumber(slots and slots.activeSlot)==1,
+  'fixture: a Saved Build is active: '..tostring(slots and slots.activeSlot))
+ local okActive,whyActive=instance.AssociateCandidate({name='Still Nothing To Associate'})
+ check(okActive~=true,'associating an unusable candidate is refused there too: '
+  ..tostring(whyActive))
+ check(support.Count()==1,'and that refusal is retained as well: '..support.Count())
+ check(support.Latest().reason=='ASSOCIATION_REFUSED',
+  'with the same reason: '..tostring(support.Latest().reason))
+ check((support.Latest().readiness or {}).targetLoadoutSlot==1,
+  'naming the Saved Build it was refused for: '
+  ..tostring((support.Latest().readiness or {}).targetLoadoutSlot))
+
+ -- And when the active slot is a Wishlist mirror number rather than a Saved
+ -- Build, which is the state the reported profile was in.
+ support.Clear()
+ H.perks.serverActiveSlot=102
+ H.Notify();A.Poll();H.Advance(1)
+ check(tonumber(A.Slots().activeSlot)==102,'fixture: the active slot is a mirror number')
+ local okMirror,whyMirror=instance.AssociateCandidate({name='Mirror Active'})
+ check(okMirror==false and tostring(whyMirror)=='invalid active loadout',
+  'associating against it is refused: '..tostring(whyMirror))
+ check(support.Count()==1,'and that refusal is retained too: '..support.Count())
+ check((support.Latest().readiness or {}).targetLoadoutSlot==102,
+  'naming the slot that is not a Saved Build: '
+  ..tostring((support.Latest().readiness or {}).targetLoadoutSlot))
 end
 
 print('PASS wishlist_switch_recovery: an index is a loadout or it is not; both plans survive; one exact plan can be forgotten and restored checks='..checks)

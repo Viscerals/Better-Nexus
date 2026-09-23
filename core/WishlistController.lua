@@ -375,6 +375,13 @@ function Controller.New(options)
             and Adapter.ForgottenWishlistPlan() or nil
     end
 
+    -- Everything still recoverable, newest first, so the list can offer more
+    -- than the newest one back.
+    function M.ForgottenPlansProjection()
+        return Adapter and Adapter.ForgottenWishlistPlans
+            and Adapter.ForgottenWishlistPlans() or {}
+    end
+
     function M.ServerDeletionSupportProjection()
         local probe = Adapter and Adapter.ServerWishlistDeletionSupport
         if type(probe) ~= "function" then
@@ -404,12 +411,13 @@ function Controller.New(options)
         return true, nil, detail
     end
 
-    function M.RestoreForgottenPlan()
+    function M.RestoreForgottenPlan(selector)
         local act = Adapter and Adapter.RestoreForgottenWishlistPlan
         if type(act) ~= "function" then
             return false, "this build cannot restore a removed wishlist"
         end
-        local ok, reason = act()
+        local ok, reason, detail = act(selector)
+        if ok then return true, nil, detail end
         if not ok then
             if M._RecordSwitchRefusal then
                 M._RecordSwitchRefusal("restore wishlist", "RESTORE_REFUSED",
@@ -1031,6 +1039,12 @@ function Controller.New(options)
                 TouchPresentation()
                 return ok, err, active, false
             end
+            if M._RecordSwitchRefusal then M._RecordSwitchRefusal("associate wishlist", "ASSOCIATION_REFUSED", {
+                detail = err or "wishlist association failed",
+                key = candidate and candidate.key or nil,
+                loadoutSlot = active,
+                mirrorSlot = candidate and candidate.slot or nil,
+            }) end
             return ok, err or "wishlist association failed", active, false
         end
         if active == 0 then
@@ -1043,8 +1057,21 @@ function Controller.New(options)
                 TouchPresentation()
                 return ok, err, nil, true
             end
+            if M._RecordSwitchRefusal then M._RecordSwitchRefusal("associate wishlist", "ASSOCIATION_REFUSED", {
+                detail = err or "first-run association unavailable",
+                key = candidate and candidate.key or nil,
+                mirrorSlot = candidate and candidate.slot or nil,
+            }) end
             return ok, err or "first-run association unavailable", nil, true
         end
+        -- The active Saved Build is outside the configured range: the same
+        -- refusal a player sees when switching, and it is retained too.
+        if M._RecordSwitchRefusal then M._RecordSwitchRefusal("associate wishlist", "ASSOCIATION_REFUSED", {
+            detail = "invalid active loadout",
+            key = candidate and candidate.key or nil,
+            loadoutSlot = active,
+            mirrorSlot = candidate and candidate.slot or nil,
+        }) end
         return false, "invalid active loadout", active, false
     end
 
@@ -1201,6 +1228,11 @@ function Controller.New(options)
             end
             if associated ~= true then
                 state.applyRetry = nil
+                if M._RecordSwitchRefusal then M._RecordSwitchRefusal("assign saved wishlist", "ASSIGNMENT_REFUSED", {
+                    detail = tostring(associationReason or "unavailable"),
+                    loadoutSlot = state.createTargetContext
+                        and state.createTargetContext.loadoutSlot or nil,
+                }) end
                 notify("|cffff6060Nexus:|r Wishlist uploaded and targets saved, but assignment failed ("
                     .. tostring(associationReason or "unavailable") .. "). Select a valid loadout and assign it again.")
                 return false, "association_incomplete"

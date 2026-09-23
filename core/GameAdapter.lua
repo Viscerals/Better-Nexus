@@ -2105,6 +2105,35 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     return true
 end
 
+-- How many removals stay recoverable at once. A later removal must never
+-- discard an earlier one the player can still see offered as an undo.
+local REMOVAL_HISTORY = 5
+
+-- The removal list, newest first, migrating the single-record shape that
+-- earlier bytes wrote. Returns the live array so a writer can edit it.
+local function RemovalList(state)
+    if type(state) ~= "table" then return {} end
+    if type(state.forgottenWishlists) ~= "table" then
+        state.forgottenWishlists = {}
+        if type(state.forgottenWishlist) == "table"
+            and type(state.forgottenWishlist.record) == "table" then
+            state.forgottenWishlists[1] = state.forgottenWishlist
+        end
+    end
+    return state.forgottenWishlists
+end
+
+-- Put one removed record at the front of the list and drop the oldest beyond
+-- the cap. The dropped one is genuinely gone, which is why the cap is not 1.
+local function RememberRemoval(state, entry)
+    local list = RemovalList(state)
+    table.insert(list, 1, entry)
+    while #list > REMOVAL_HISTORY do table.remove(list) end
+    -- The old single field is kept in step so bytes written here stay
+    -- readable by a build that only knows the earlier shape.
+    state.forgottenWishlist = list[1]
+end
+
 -- Unassign. The label and tooltip promise the Wishlist is kept, which holds
 -- for a plan that mirrors a server Wishlist because the server copy stays.
 -- A local-only plan has no other copy, so the removed record is retained in
@@ -2119,7 +2148,7 @@ function A.ClearLoadoutWishlist(loadoutSlot)
         local removed = state.loadoutWishlists[loadoutSlot]
         state.loadoutWishlists[loadoutSlot] = nil
         if type(removed) == "table" then
-            state.forgottenWishlist = {record = removed, loadoutSlot = loadoutSlot}
+            RememberRemoval(state, {record = removed, loadoutSlot = loadoutSlot})
         end
     end) then return false end
     MarkWishlistProjectionDirty()
@@ -2135,6 +2164,15 @@ function A.RetainedWishlistPlans()
     if type(state) ~= "table" then return {} end
     local slots = A.Slots()
     local maxLoadout = tonumber(slots and slots.maxSlots) or 5
+    -- Whether a server Wishlist currently mirrors a plan is a fact about the
+    -- live list, not about the number the record happens to carry. A stored
+    -- hint survives the mirror it names, and a caller that reads it as
+    -- "a copy exists elsewhere" tells the player the opposite of the truth.
+    local liveKeys, liveSlots = {}, {}
+    for _, live in ipairs(LiveWishlistCandidates(slots) or {}) do
+        if live.key then liveKeys[live.key] = true end
+        if tonumber(live.slot) then liveSlots[tonumber(live.slot)] = true end
+    end
     local out = {}
     for loadoutIndex, saved in pairs(state.loadoutWishlists or {}) do
         local candidate = CandidateFromStoredRecord(saved)
@@ -2152,13 +2190,23 @@ function A.RetainedWishlistPlans()
                 name = candidate.name, key = candidate.key,
                 assignmentId = candidate.assignmentId,
                 mirrorSlot = candidate.slot,
+                mirrorResolved = (candidate.key ~= nil and liveKeys[candidate.key] == true)
+                    or (tonumber(candidate.slot) ~= nil
+                        and liveSlots[tonumber(candidate.slot)] == true),
                 rows = #(candidate.echoes or {}),
                 ordinaryCopies = ordinary, lockedCopies = locked,
                 designTargets = candidate.designTargets ~= nil,
             }
         end
     end
+    -- Saved Build 10 comes after Saved Build 2. Anything that is not a
+    -- number sorts after every number, by its text.
     table.sort(out, function(left, right)
+        local leftNumber = tonumber(left.associationIndex)
+        local rightNumber = tonumber(right.associationIndex)
+        if leftNumber and rightNumber then return leftNumber < rightNumber end
+        if leftNumber then return true end
+        if rightNumber then return false end
         return tostring(left.associationIndex) < tostring(right.associationIndex)
     end)
     return out
@@ -2182,6 +2230,13 @@ function A.ForgetWishlistPlan(selector)
         and selector.assignmentId ~= "" and selector.assignmentId or nil
     if wantIndex == nil and not wantKey and not wantAssignment then
         return false, "the exact plan identity is required"
+    end
+    -- Nothing is written unless a plan actually matched. A store write that
+    -- changes nothing still bumps the saved state, and an incident that says
+    -- `committed = false` beside one would be wrong.
+    local state = Store and Store.State and Store.State()
+    if type(state) ~= "table" or type(state.loadoutWishlists) ~= "table" then
+        return false, "that exact plan is no longer retained"
     end
     local removed, removedIndex
     local firstRunRemoved = false
@@ -2210,10 +2265,10 @@ function A.ForgetWishlistPlan(selector)
             state.firstRunWishlist = nil
             firstRunRemoved = true
         end
-        state.forgottenWishlist = {
+        RememberRemoval(state, {
             record = removed, loadoutSlot = tonumber(removedIndex) or removedIndex,
             firstRun = firstRunRemoved or nil,
-        }
+        })
     end)
     if not ok then return false, "saved data is not writable right now" end
     if removed == nil then return false, "that exact plan is no longer retained" end
@@ -2222,52 +2277,115 @@ function A.ForgetWishlistPlan(selector)
         firstRun = firstRunRemoved or nil}
 end
 
--- What the single retained undo currently holds, as facts a caller can show:
--- the display name, the index it came from and whether it still has a distinct
--- server mirror. Read-only, and never the stored record itself.
-function A.ForgottenWishlistPlan()
+-- Everything currently recoverable, newest first, as facts a caller can show
+-- and an identity it can quote back. Read-only, and never the stored records.
+function A.ForgottenWishlistPlans()
     local state = Store and Store.State and Store.State()
-    local retained = type(state) == "table" and state.forgottenWishlist or nil
-    if type(retained) ~= "table" or type(retained.record) ~= "table" then
-        return nil
+    if type(state) ~= "table" then return {} end
+    local list = type(state.forgottenWishlists) == "table"
+        and state.forgottenWishlists or nil
+    if not list then
+        local single = state.forgottenWishlist
+        list = (type(single) == "table" and type(single.record) == "table")
+            and {single} or {}
     end
-    local candidate = CandidateFromStoredRecord(retained.record)
-    if not candidate then return nil end
-    return {
-        name = candidate.name,
-        associationIndex = retained.loadoutSlot,
-        mirrorSlot = candidate.slot,
-        rows = #(candidate.echoes or {}),
-    }
+    local out = {}
+    for position, retained in ipairs(list) do
+        local candidate = type(retained) == "table"
+            and CandidateFromStoredRecord(retained.record) or nil
+        if candidate then
+            out[#out + 1] = {
+                position = position,
+                name = candidate.name,
+                key = candidate.key,
+                assignmentId = candidate.assignmentId,
+                associationIndex = retained.loadoutSlot,
+                mirrorSlot = candidate.slot,
+                rows = #(candidate.echoes or {}),
+            }
+        end
+    end
+    return out
 end
 
--- Undo the last forget, if one is retained. The record goes back under the
--- same index it had; an index now occupied is never overwritten.
-function A.RestoreForgottenWishlistPlan()
+-- The most recent one, for callers that only offer a single undo.
+function A.ForgottenWishlistPlan()
+    return A.ForgottenWishlistPlans()[1]
+end
+
+-- Undo one removal. Without a selector this is the most recent one; with a
+-- `position`, or an exact identity, it is that one, so an older removal that
+-- is still offered can be taken back without disturbing the newer ones.
+--
+-- The record goes back under the index it had. When that index now holds a
+-- different plan, the record lands on the lowest free Saved Build index and
+-- the caller is told which: the alternative is telling the player to remove
+-- whatever occupies it, and a removal would push this record further down its
+-- own list. A refusal here never asks for a destructive step.
+function A.RestoreForgottenWishlistPlan(selector)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     local state = Store and Store.State and Store.State()
-    local retained = type(state) == "table" and state.forgottenWishlist or nil
-    if type(retained) ~= "table" or type(retained.record) ~= "table" then
+    if type(state) ~= "table" then
         return false, "nothing was removed in a way this can restore"
     end
-    local occupied = false
+    selector = type(selector) == "table" and selector or {}
+    local wantPosition = tonumber(selector.position)
+    local wantKey = type(selector.key) == "string" and selector.key ~= "" and selector.key or nil
+    local wantAssignment = type(selector.assignmentId) == "string"
+        and selector.assignmentId ~= "" and selector.assignmentId or nil
+    local offered = A.ForgottenWishlistPlans()
+    local chosen
+    for _, entry in ipairs(offered) do
+        local samePosition = wantPosition == nil or entry.position == wantPosition
+        local sameKey = not wantKey or entry.key == wantKey
+        local sameAssignment = not wantAssignment or entry.assignmentId == wantAssignment
+        if samePosition and sameKey and sameAssignment and chosen == nil then
+            chosen = entry
+        end
+    end
+    if chosen == nil then
+        return false, "nothing was removed in a way this can restore"
+    end
+    local landedOn, full = nil, false
     local ok = UpdateStoreState(function(live)
         live.loadoutWishlists = live.loadoutWishlists or {}
-        local index = retained.loadoutSlot
-        if index ~= nil and live.loadoutWishlists[index] ~= nil then
-            occupied = true
+        local list = RemovalList(live)
+        local retained = list[chosen.position]
+        if type(retained) ~= "table" or type(retained.record) ~= "table" then
             return
         end
-        if index ~= nil then live.loadoutWishlists[index] = retained.record end
-        if retained.firstRun then live.firstRunWishlist = retained.record end
-        live.forgottenWishlist = nil
+        local index = retained.loadoutSlot
+        if index == nil or live.loadoutWishlists[index] ~= nil then
+            index = nil
+            local maxLoadout = tonumber((A.Slots() or {}).maxSlots) or 5
+            for candidateIndex = 1, maxLoadout do
+                if live.loadoutWishlists[candidateIndex] == nil then
+                    index = candidateIndex
+                    break
+                end
+            end
+            if index == nil then full = true; return end
+        end
+        live.loadoutWishlists[index] = retained.record
+        if retained.firstRun and live.firstRunWishlist == nil then
+            live.firstRunWishlist = retained.record
+        end
+        table.remove(list, chosen.position)
+        live.forgottenWishlist = list[1]
+        landedOn = index
     end)
     if not ok then return false, "saved data is not writable right now" end
-    if occupied then
-        return false, "that Saved Build now uses a different plan; unassign it first"
+    if full then
+        return false, "every Saved Build already holds a plan; this one stays "
+            .. "recoverable until one is free"
+    end
+    if landedOn == nil then
+        return false, "nothing was removed in a way this can restore"
     end
     MarkWishlistProjectionDirty()
-    return true
+    return true, nil, {loadoutSlot = landedOn,
+        movedFrom = (tonumber(chosen.associationIndex) ~= landedOn)
+            and chosen.associationIndex or nil}
 end
 
 -- What the supported client interface can do about a SERVER Wishlist. The
