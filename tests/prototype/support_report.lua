@@ -587,4 +587,152 @@ check(bigJob.report.meta.bytes==bigBytes,
 check(bigJob.report.meta.checksum==builder.Checksum(bigJob.report.chunks),
  'and the checksum covers the real chunks in order')
 
+-- 18. The poison sweep. One value, every owner these two routes read, and the
+-- property rather than the site: a report a player can copy or hand over must
+-- never carry a control byte, never gain a line its owner did not write,
+-- never carry an unbounded segment, and never be lost to a failing owner.
+do
+ local POISON='SENTINEL'..string.char(1)..string.char(10)..string.char(7)
+  ..string.char(0)..string.rep('Z',5000)
+ local function hostile()
+  return setmetatable({},{__tostring=function() error('hostile owner') end,
+   __index=function() error('hostile index') end})
+ end
+ -- A header FIELD legitimately holds the value itself, so only the report
+ -- text can be checked for a forged line; both are checked for control bytes
+ -- and for an unbounded segment.
+ local function clean(text,label)
+  local badByte,badAt
+  for index=1,#text do
+   local byte=text:byte(index)
+   if byte<32 and byte~=10 then badByte,badAt=byte,index;break end
+  end
+  check(badByte==nil,label..': control byte '..tostring(badByte)..' at '..tostring(badAt))
+  -- The widest bound any single value gets in this file is 240 bytes, so a
+  -- run past that is a segment that escaped its converter, not a long field.
+  check(text:find(string.rep('Z',400),1,true)==nil,label..': an unbounded segment was written')
+ end
+ -- A value can only forge a line by carrying a line break, and a section that
+ -- lists entries legitimately gives each one its own line. So the property is
+ -- counted, not pattern-matched: the report must have exactly as many lines as
+ -- the same report built from a value with no control bytes in it.
+ local function lineCount(text)
+  local count=0
+  for _ in text:gmatch('[^'..string.char(10)..']+') do count=count+1 end
+  return count
+ end
+ -- The same record and the same owners, with a control-byte-free value.
+ local CLEAN='SENTINEL'..string.rep('Z',5000)
+ local baselineSummaryLines,baselinePayloadLines
+ local saved={
+  Release=Nexus.Release,LoadoutEvidence=Nexus.LoadoutEvidence,
+  OrbRuntime=Nexus.OrbRuntime,OrbHistory=Nexus.OrbHistory,
+  StartupStatus=Nexus.StartupStatus,Errors=Nexus.Errors,
+  Storage=_G.NexusSupportStorage,UnitName=UnitName,
+ }
+ -- Every owner, poisoned one at a time, then all of them at once. The first
+ -- pass uses the clean value and fixes the line counts every later pass has
+ -- to match.
+ local owners={'baseline','Release','LoadoutEvidence','OrbRuntime','OrbHistory',
+  'StartupStatus','Errors','Storage','UnitName','all','raising'}
+ for _,owner in ipairs(owners) do
+  support.Clear()
+  support.Record('catalog-refusal',{reason=POISON,producer=POISON,scope=POISON,
+   detail=POISON,operation=POISON,ticket=POISON,build=POISON,category=POISON,
+   representation=POISON,origin=POISON,committed=false,
+   readiness={[POISON]=POISON,generation=12},
+   counts={ordinary=81,locked=6,total=87},limits={ordinary=79,locked=6,total=85},
+   affected={{spellId=1,quality=2,stacks=3}}})
+  -- Every owner is substituted in every pass, with the poisoned value for the
+  -- one under test and a control-byte-free value for the rest, so a count that
+  -- changes can only be a line a value added.
+  local function substitute(name,value,hostileOwner)
+   if name=='Release' then Nexus.Release={buildLabel=value,version=value}
+   elseif name=='LoadoutEvidence' then
+    Nexus.LoadoutEvidence={SemanticLimits=function()
+     return {ordinary=value,locked=value,total=value} end}
+   elseif name=='OrbRuntime' then Nexus.OrbRuntime={RunLog=function()
+     return {runId=value,state=value,spent=value,limit=value,total=value,entries={{}}} end}
+   elseif name=='OrbHistory' then Nexus.OrbHistory={Rows=function()
+     return {{ordinal=value,source={label=value},replacement={label=value},
+      result={label=value}}} end,Report=function() return {} end}
+   elseif name=='StartupStatus' then Nexus.StartupStatus=function()
+     return {state='failed',coreReady=false,reason=value,phase=value,
+      failure={stage=value,detail=value,cause=value,owner=value,error=value,
+       row=value,formatClass=value,formatVersion=value,formatField=value,
+       legacyClass=value,keyWidth={path=value,depth=value,keyType=value,
+        keyBytes=value,valueType=value,limit=value,exception=value}}} end
+   elseif name=='Errors' then Nexus.Errors={History=function() return {value,value} end}
+   elseif name=='Storage' then
+    _G.NexusSupportStorage={Replace=function() return true end,
+     Status=function() return {loaded=true,ready=true,reason=value} end}
+   elseif name=='UnitName' then UnitName=function() return value end
+   end
+  end
+  for _,each in ipairs(owners) do
+   if each~='baseline' and each~='all' then
+    local poisoned=owner=='all' or owner==each
+    substitute(each, poisoned and POISON or CLEAN, poisoned)
+    if owner=='raising' then
+     if each=='LoadoutEvidence' then Nexus.LoadoutEvidence=hostile()
+     elseif each=='Storage' then _G.NexusSupportStorage=hostile()
+     elseif each=='UnitName' then UnitName=function() error('hostile client') end
+     elseif each=='Release' then Nexus.Release=hostile()
+     elseif each=='Errors' then Nexus.Errors=hostile()
+     elseif each=='OrbRuntime' then Nexus.OrbRuntime=hostile()
+     elseif each=='OrbHistory' then Nexus.OrbHistory=hostile()
+     elseif each=='StartupStatus' then Nexus.StartupStatus=function() error('hostile owner') end
+     end
+    end
+   end
+  end
+  local okSummary,summaryText=pcall(builder.Summary)
+  local okStatus=pcall(builder.StorageStatus)
+  local okNotice,noticeText=pcall(builder.WrittenNotice,{id=POISON})
+  local okJob,job=pcall(builder.NewPreparation,{extended=true})
+  local payload=''
+  if okJob and type(job)=='table' then
+   local guard=0
+   while builder.Step(job)=='pending' and guard<800 do guard=guard+1 end
+   payload=table.concat(job.chunks or {},'')
+  end
+  for key,value in pairs(saved) do
+   if key=='Storage' then _G.NexusSupportStorage=value
+   elseif key=='UnitName' then UnitName=value
+   else Nexus[key]=value end
+  end
+  check(okSummary,'poisoned '..owner..': the summary route is not lost: '..tostring(summaryText))
+  check(okStatus,'poisoned '..owner..': the storage status is not lost')
+  check(okNotice,'poisoned '..owner..': the written notice is not lost')
+  if okNotice and type(noticeText)=='string' then
+   clean(noticeText,'poisoned '..owner..' written notice')
+  end
+  check(okJob,'poisoned '..owner..': the prepared-file route is not lost: '..tostring(job))
+  check(type(summaryText)=='string' and #summaryText<=builder.SUMMARY_MAX_BYTES,
+   'poisoned '..owner..': the summary still fits its bound: '..#tostring(summaryText))
+  clean(summaryText,'poisoned '..owner..' summary')
+  clean(payload,'poisoned '..owner..' payload')
+  if owner=='baseline' then
+   baselineSummaryLines,baselinePayloadLines=lineCount(summaryText),lineCount(payload)
+   check(baselineSummaryLines>0 and baselinePayloadLines>0,
+    'the baseline report has lines to compare against: '..baselineSummaryLines
+    ..'/'..baselinePayloadLines)
+  else
+   -- A poisoned owner may cost its OWN line - a failing owner loses only
+   -- what it was going to say - but no value may ADD one.
+   check(owner=='raising' or lineCount(summaryText)<=baselineSummaryLines,
+    'poisoned '..owner..': the summary gained a line: '..lineCount(summaryText)
+    ..' vs '..baselineSummaryLines)
+   check(owner=='raising' or lineCount(payload)<=baselinePayloadLines,
+    'poisoned '..owner..': the payload gained a line: '..lineCount(payload)
+    ..' vs '..baselinePayloadLines)
+  end
+  if okJob and type(job)=='table' and type(job.report)=='table' then
+   for field,value in pairs(job.report.meta or {}) do
+    if type(value)=='string' then clean(value,'poisoned '..owner..' meta.'..field) end
+   end
+  end
+ end
+end
+
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)

@@ -161,6 +161,15 @@ end
 -- The build label is an owner field like every other one, and it reaches the
 -- copied summary, the payload and the stored header. It gets the same
 -- treatment, not an exception for being "ours".
+-- A replaced UnitName can raise; the alias is not worth the summary.
+local function playerName()
+    local ok, name = pcall(function()
+        return UnitName and UnitName("player") or nil
+    end)
+    if not ok or type(name) ~= "string" or name == "" then return "unknown" end
+    return name
+end
+
 local function buildLabel()
     -- The READ is protected, not only the value: a metatable on the owner
     -- table can raise on the index itself.
@@ -254,9 +263,11 @@ end
 -- The compact report. It is BUILT at this size: the incident and its context
 -- come first, and sections stop being added when the budget is reached. It is
 -- never a truncated copy of the extended report.
--- Every owner read in this file is protected: the report is the route a player
--- uses when something else is already broken, so one failing owner must not
--- take it away.
+-- Every owner READ in this file is protected - the value, the field and the
+-- container - because the report is the route a player uses when something
+-- else is already broken: one failing owner must not take it away. That is a
+-- property of this file, checked by a poison sweep in the prototype suite,
+-- not an assumption about the owners.
 function M.StartupSnapshot()
     local ok, status = pcall(function()
         return Nexus and Nexus.StartupStatus and Nexus.StartupStatus() or nil
@@ -349,8 +360,7 @@ function M.Summary(selection)
         out[#out + 1] = line
     end
     add("Nexus support summary (report format " .. FORMAT .. ")")
-    add("Build: " .. buildLabel() .. "; character alias: "
-        .. alias((UnitName and UnitName("player")) or "unknown"))
+    add("Build: " .. buildLabel() .. "; character alias: " .. alias(playerName()))
     local semantic = limits()
     if semantic then
         add("Supported envelope: " .. safeText(semantic.ordinary, 16) .. " ordinary, "
@@ -498,7 +508,7 @@ function M.Step(job)
             "topic=" .. job.topic,
             "extended=" .. safeText(job.extended, 16),
             "captureStart=" .. safeText(job.startedAt, 24),
-            "characterAlias=" .. alias((UnitName and UnitName("player")) or "unknown"),
+            "characterAlias=" .. alias(playerName()),
             "",
         })
         job.stage = "incident"
@@ -678,9 +688,21 @@ end
 -- Hand a COMPLETE report to the isolated component. This is the only call in
 -- Nexus that writes support data, and it writes nothing else: no profile, no
 -- catalog, no receipt, no assignment.
+-- The component is a separate addon, so the READ of it is protected too: a
+-- broken or hostile storage owner must not take the page away.
+local function storageOwner(entry)
+    local ok, owner = pcall(function()
+        local storage = _G.NexusSupportStorage
+        return type(storage) == "table" and type(storage[entry]) == "function"
+            and storage or nil
+    end)
+    if not ok then return nil end
+    return owner
+end
+
 function M.Store(report)
-    local storage = _G.NexusSupportStorage
-    if type(storage) ~= "table" or type(storage.Replace) ~= "function" then
+    local storage = storageOwner("Replace")
+    if not storage then
         return nil, "the support component is not loaded"
     end
     if type(report) ~= "table" or type(report.chunks) ~= "table"
@@ -691,8 +713,8 @@ function M.Store(report)
 end
 
 function M.StorageStatus()
-    local storage = _G.NexusSupportStorage
-    if type(storage) ~= "table" or type(storage.Status) ~= "function" then
+    local storage = storageOwner("Status")
+    if not storage then
         return {loaded = false, ready = false,
             reason = "the support component is not loaded"}
     end
