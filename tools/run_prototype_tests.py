@@ -77,6 +77,7 @@ NAMES += ['update_public_test_hints']
 NAMES += ['startup_attempt_key_width']
 NAMES += ['wishlist_switch_recovery']
 NAMES += ['server_hud_handoff']
+NAMES += ['first_hud_display']
 
 def main() -> int:
     ap=argparse.ArgumentParser()

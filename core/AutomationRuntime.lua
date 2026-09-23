@@ -2945,11 +2945,29 @@ local function DispatchLevelStep(level, plan, slots, owned, flags,
             if board then
                 StepRun(level, plan, slots, owned, flags, disabledLevers,
                     static, locked)
+            -- Both waits below render the idle HUD, as every other outcome of
+            -- this dispatch already does. A status line alone never reaches
+            -- the screen when no panel input exists yet: Panel.Toggle then
+            -- only schedules a recompute and keeps itself hidden, so without
+            -- a render here the main HUD could not be opened at all in this
+            -- state, and each left-click only added to its hidden count.
+            -- The idle render takes, freezes, banishes, rerolls, saves,
+            -- locks and spends nothing.
             elseif Adapter.InFlight() then
                 SetStatus("finishing final Echo selections")
+                MeasurePhase("overlayRender", RenderIdlePanel,
+                    plan, owned, slots, static.catalog, static, locked)
             else
-                SetStatus(string.format("finishing run — %d/79 Echoes",
-                    rolledTotal))
+                -- A count that has not been synchronized is not a count:
+                -- say it is unknown rather than show a number it lacks.
+                if owned and owned.synced then
+                    SetStatus(string.format("finishing run — %d/79 Echoes",
+                        rolledTotal))
+                else
+                    SetStatus("finishing run — Echo count not synchronized yet")
+                end
+                MeasurePhase("overlayRender", RenderIdlePanel,
+                    plan, owned, slots, static.catalog, static, locked)
             end
         end
     end
