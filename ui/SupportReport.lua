@@ -55,16 +55,18 @@ local function storageLine()
         return "Support storage: not loaded. Prepare report file loads it on demand."
     end
     if status.incompatible then
-        return "Support storage: left untouched (" .. tostring(status.incompatible)
+        return "Support storage: left untouched ("
+            .. builder.Escape(status.incompatible)
             .. "). Use Copy summary instead."
     end
     -- Through the builder, which owns the shape: the page never reaches into
     -- the storage component itself, whatever that component turns out to be.
     local latest = type(builder.StoredSummary) == "function" and builder.StoredSummary() or nil
     if latest then
-        return "Support storage: report " .. tostring(latest.id) .. ", "
-            .. tostring(latest.bytes) .. " bytes in " .. tostring(latest.chunkCount)
-            .. " chunk(s), checksum " .. tostring(latest.checksum)
+        return "Support storage: report " .. builder.Escape(latest.id) .. ", "
+            .. builder.Escape(latest.bytes) .. " bytes in "
+            .. builder.Escape(latest.chunkCount)
+            .. " chunk(s), checksum " .. builder.Escape(latest.checksum)
             .. ". Preparing another one replaces it."
     end
     return "Support storage: ready; no report has been prepared yet."
@@ -172,9 +174,10 @@ local function ensure()
             frame.prepared:SetText("No prepared report is stored for this account.")
             return
         end
-        frame.prepared:SetText("Stored report " .. tostring(latest.id) .. ": "
-            .. tostring(latest.bytes) .. " bytes, " .. tostring(latest.chunkCount)
-            .. " chunk(s), checksum " .. tostring(latest.checksum)
+        frame.prepared:SetText("Stored report " .. builder.Escape(latest.id) .. ": "
+            .. builder.Escape(latest.bytes) .. " bytes, "
+            .. builder.Escape(latest.chunkCount)
+            .. " chunk(s), checksum " .. builder.Escape(latest.checksum)
             .. (latest.matches ~= nil and (latest.matches
                 and "; matches its own checksum in memory"
                 or "; CHECKSUM MISMATCH in the stored copy") or "")
@@ -260,7 +263,8 @@ function UI.PrepareFile(extended)
         .. builder.FilePathHint()
         .. " (the account folder is the one you played on)."
         .. (type(meta) == "table" and meta.partial
-            and ("\nThis report is partial: " .. tostring(meta.omissions)) or "")
+            and ("\nThis report is partial: "
+                .. builder.Escape(meta.omissions)) or "")
     refresh()
     return meta
 end

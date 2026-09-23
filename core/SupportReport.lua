@@ -90,6 +90,12 @@ local function retained(value, limit)
     -- nil is "not retained", exactly as plain() reports it: the callers here
     -- fall back on that, and "nil" is not a value anyone retained.
     if value == nil then return nil end
+    -- The same rule safeText applies: a heap address is not a retained value.
+    local kind = type(value)
+    if kind == "table" or kind == "function" or kind == "userdata"
+        or kind == "thread" then
+        return "unreadable " .. kind
+    end
     local ok, text = pcall(tostring, value)
     if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
     limit = limit or 200
@@ -153,6 +159,13 @@ end
 -- concatenation in this file takes one of the three; a segment appended
 -- without one is how three separate reviews found the same defect.
 local function safeText(value, limit)
+    local kind = type(value)
+    -- A table, function or userdata converts to its heap address, which is
+    -- noise in a ticket and an implementation detail in a saved file.
+    if kind == "table" or kind == "function" or kind == "userdata"
+        or kind == "thread" then
+        return "unreadable " .. kind
+    end
     local ok, text = pcall(tostring, value)
     if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
     return (text:gsub("%c", " ")):sub(1, limit or 200)
@@ -309,9 +322,10 @@ end
 -- What is guaranteed, exactly: every value that enters a line goes through
 -- safeText, shown or retained; the STORAGE COMPONENT - a separate addon, the
 -- one owner treated as adversarial here - is read only inside a pcall, one
--- lookup and call at a time, and everything it returns is copied into a shape
--- this file owns before any caller sees it; and a caller's incident is copied
--- the same way. A poison sweep in the prototype suite checks all three.
+-- lookup and call at a time, and NOTHING it returns reaches a caller: its
+-- header is copied field by field and its verdict comes back as a boolean.
+-- A caller's incident is copied the same way. A poison sweep in the prototype
+-- suite checks all three, and the page escapes what it displays.
 -- What is NOT guaranteed: a table an owner RETURNS is read as an ordinary
 -- table. A status, a limits table, a start-up snapshot or an incident row
 -- whose own fields raise on __index is out of scope here, because the owners
@@ -767,7 +781,12 @@ function M.Store(report)
     local copied = {}
     local ok, stored, why = pcall(function()
         local value, meta = storage.Replace(report)
-        if type(meta) ~= "table" then return value, meta end
+        if type(meta) ~= "table" then
+            -- A component that answered with a note rather than a header:
+            -- the note is kept, converted, instead of being discarded.
+            if meta ~= nil then copied.note = safeText(meta, 240) end
+            return value, nil
+        end
         -- The header the component accepted, field by field, into a table
         -- this file owns. Numbers stay numbers; text is converted.
         for _, field in ipairs({"bytes", "rawBytes", "chunkCount",
@@ -788,7 +807,9 @@ function M.Store(report)
         return nil, why ~= nil and safeText(why, 240)
             or "the support component refused the report"
     end
-    return stored, copied
+    -- `true`, not their table: the first return value is a verdict, and a
+    -- caller holding the component's table is the thing this route avoids.
+    return true, copied
 end
 
 -- The LAST prepared report, as scalars this file owns. The component's own
@@ -827,8 +848,11 @@ function M.StoredReport()
         return checksum(chunks)
     end)
     summary.recomputed = ok and recomputed or nil
-    summary.matches = summary.recomputed ~= nil
-        and summary.recomputed == summary.checksum or nil
+    -- NOT `a and b or nil`: the answer that matters here is `false`, and that
+    -- form collapses it to nil - which silently retired the mismatch warning.
+    if summary.recomputed ~= nil then
+        summary.matches = summary.recomputed == summary.checksum
+    end
     return summary
 end
 
@@ -848,7 +872,9 @@ function M.StorageStatus()
         -- "false", which would disable the file route for good.
         local incompatible = value.incompatible
         local reason = value.reason
-        return {loaded = value.loaded == true,
+        -- Reaching here means the component answered, so it is loaded
+        -- whatever it says about itself; `ready` stays its own statement.
+        return {loaded = true,
             ready = value.ready == true,
             incompatible = (incompatible ~= nil and incompatible ~= false)
                 and safeText(incompatible, 120) or nil,

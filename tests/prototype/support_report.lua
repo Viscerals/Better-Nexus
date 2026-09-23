@@ -899,9 +899,14 @@ do
  _G.NexusSupportStorage={Replace=function() return true,{} end,
   Status=function() return {} end}
  local silent=builderRef.StorageStatus()
- check(silent.loaded==false and silent.ready==false,
-  'a component that states nothing is not reported as loaded or ready: '
+ check(silent.loaded==true and silent.ready==false,
+  'a component that ANSWERS is loaded, and says for itself whether it is ready: '
   ..tostring(silent.loaded)..'/'..tostring(silent.ready))
+ _G.NexusSupportStorage=nil
+ local absent=builderRef.StorageStatus()
+ check(absent.loaded==false and absent.ready==false,
+  'while a component that is not there is neither: '
+  ..tostring(absent.loaded)..'/'..tostring(absent.ready))
  -- Bounds on what the component can put on the page.
  local LONG=string.rep('W',900)
  _G.NexusSupportStorage={Latest=function()
@@ -947,5 +952,97 @@ do
  check(okBare,'a component that returns no header does not break the file route')
  _G.NexusSupportStorage=realStorage
 end
+
+-- 24. A stored copy that no longer agrees with its own checksum must SAY so.
+-- The verdict is false, not absent, and "false or nil" cannot carry it.
+do
+ local realStorage=_G.NexusSupportStorage
+ local intact={id='R-1',bytes=3,chunkCount=1,checksum=builder.Checksum({'abc'})}
+ _G.NexusSupportStorage={
+  Latest=function() return intact end,
+  Read=function() return {chunks={'abc'}} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local good=builder.StoredReport()
+ check(good~=nil and good.matches==true,'an intact stored copy verifies: '
+  ..tostring(good and good.matches))
+ -- The same header, one byte of the stored copy changed.
+ _G.NexusSupportStorage={
+  Latest=function() return intact end,
+  Read=function() return {chunks={'abd'}} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local bad=builder.StoredReport()
+ check(bad~=nil,'a corrupted stored copy is still readable')
+ check(bad.matches==false,'and its verdict is FALSE, not absent: '..tostring(bad.matches))
+ check(bad.recomputed~=nil and bad.recomputed~=bad.checksum,
+  'the recomputed checksum differs from the stored one: '..tostring(bad.recomputed))
+ Nexus.SupportReportUI.Show()
+ local inspect
+ for _,b in ipairs(H.frames) do
+  if b.kind=='Button' and b:GetText()=='Inspect prepared report' then inspect=b end
+ end
+ inspect:Click()
+ local said=page.prepared:GetText()
+ check(said:find('CHECKSUM MISMATCH',1,true)~=nil,
+  'and the page says so in words: '..said:sub(1,160))
+ -- A component that cannot be read at all states nothing either way.
+ _G.NexusSupportStorage={
+  Latest=function() return intact end,
+  Read=function() return nil end,
+  Status=function() return {loaded=true,ready=true} end}
+ local unknown=builder.StoredReport()
+ check(unknown~=nil and unknown.matches==nil,
+  'an unreadable stored copy claims neither: '..tostring(unknown.matches))
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 25. What the component sends comes back as a verdict and a copied header,
+-- never as its own table, and its text is escaped before it is displayed.
+do
+ local realStorage=_G.NexusSupportStorage
+ local theirs={partial=true,omissions='|cffff0000|Hitem:1|h[x]|h|r',
+  bytes={},chunkCount=2,id='ID|PIPE',secret='leak'}
+ _G.NexusSupportStorage={Replace=function() return theirs,theirs end,
+  Status=function() return {loaded=true,ready=true} end,
+  Latest=function() return {id='ID|PIPE',bytes=1,chunkCount=1,checksum='c'} end,
+  Read=function() return {chunks={'x'}} end}
+ local stored,meta=builder.Store({chunks={'x'}})
+ check(stored==true,'the store verdict is a boolean, not their table: '..type(stored))
+ check(meta~=theirs,'and the header is a copy')
+ check(meta.secret==nil,'carrying no field this addon did not ask for')
+ check(meta.bytes==nil,'a header field of the wrong type is dropped, not passed on')
+ check(meta.chunkCount==2,'while a good one keeps its type: '..type(meta.chunkCount))
+ check(meta.partial==true,'and the partial flag survives')
+ -- The page displays it escaped, like everything else it shows.
+ Nexus.SupportReportUI.Show()
+ local line=page.storage:GetText()
+ check(line:find('||',1,true)~=nil or line:find('|',1,true)==nil,
+  'the storage line escapes a pipe from the component: '..line:sub(1,120))
+ local prepared=Nexus.SupportReportUI.PrepareFile(false)
+ local note=page.prepared:GetText()
+ check(note:find('This report is partial',1,true)~=nil,
+  'a partial header is declared on the page: '..note:sub(1,160))
+ check(not note:find('|c',1,true) or note:find('||c',1,true)~=nil,
+  'and the omission text is escaped: '..note:sub(1,160))
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 26. A component entry that is not a function is not a component.
+do
+ local realStorage=_G.NexusSupportStorage
+ _G.NexusSupportStorage={Replace='not a function',Status='not a function'}
+ local status=builder.StorageStatus()
+ check(status.loaded==false,'a non-function entry is not a loaded component: '
+  ..tostring(status.loaded))
+ local stored,why=builder.Store({chunks={'x'}})
+ check(stored==nil and tostring(why):find('not loaded',1,true)~=nil,
+  'and the store route says which: '..tostring(why))
+ _G.NexusSupportStorage=realStorage
+end
+
+-- 27. No heap address reaches a report.
+check(builder.Summary({kind={},reason=print,producer=coroutine.create(function() end)})
+ :find('0x',1,true)==nil,'a table, function or coroutine is named, not addressed')
 
 print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)
