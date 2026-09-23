@@ -2126,35 +2126,27 @@ local REMOVAL_HISTORY = 5
 
 -- The removal list, newest first, migrating the single-record shape that
 -- earlier bytes wrote. Returns the live array so a writer can edit it.
+-- The list, migrating the single-record shape that earlier bytes wrote.
+--
+-- Adoption happens ONLY when there is no list yet, which is the whole of the
+-- upgrade path. A record written into the single field BESIDE an existing
+-- list -- which needs an older build to write after a newer one created the
+-- list -- stays where it is and is not offered. Adopting it here was tried
+-- and withdrawn: this function runs inside the write, while the caller chose
+-- from a list read before it, so inserting an entry shifted every position
+-- the caller had selected by and restored a different plan than the one the
+-- player picked. Not offering a record is a limitation; restoring the wrong
+-- plan is a defect, and the limitation is the safer of the two.
 local function RemovalList(state)
     if type(state) ~= "table" then return {} end
     if type(state.forgottenWishlists) ~= "table" then
         state.forgottenWishlists = {}
-    end
-    local list = state.forgottenWishlists
-    -- A build that knows only the single field can write it beside a list
-    -- this build created. Such a record is adopted rather than shadowed.
-    -- Compared by content, not by table identity: the store hands out copies,
-    -- so the same retained record is never the same table twice.
-    local single = state.forgottenWishlist
-    if type(single) == "table" and type(single.record) == "table" then
-        local function signature(entry)
-            local record = entry.record
-            return tostring(entry.loadoutSlot) .. "|" .. tostring(record.key)
-                .. "|" .. tostring(record.name) .. "|"
-                .. tostring(#(record.echoes or {}))
+        local single = state.forgottenWishlist
+        if type(single) == "table" and type(single.record) == "table" then
+            state.forgottenWishlists[1] = single
         end
-        local wanted, present = signature(single), false
-        for _, entry in ipairs(list) do
-            if type(entry) == "table" and type(entry.record) == "table"
-                and signature(entry) == wanted then
-                present = true
-                break
-            end
-        end
-        if not present then table.insert(list, 1, single) end
     end
-    return list
+    return state.forgottenWishlists
 end
 
 -- Put one removed record at the front of the list and drop the oldest beyond
@@ -2169,7 +2161,13 @@ local function RememberRemoval(state, entry)
     while #list > REMOVAL_HISTORY do
         local dropped
         for position = #list, 2, -1 do
-            if list[position].source == "unassign" then dropped = position; break end
+            local entry = list[position]
+            -- Saved data this build did not write can hold anything; reading
+            -- a field off it must refuse, not raise, inside a store write.
+            if type(entry) == "table" and entry.source == "unassign" then
+                dropped = position
+                break
+            end
         end
         table.remove(list, dropped or #list)
     end

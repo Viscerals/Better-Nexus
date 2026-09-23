@@ -725,4 +725,77 @@ do
  check(#H.actions==0,'no gameplay or server action was taken')
 end
 
+-- 20. The plan the player picked is the plan that comes back, even when the
+-- saved data also holds a record in the shape an older build wrote. Making
+-- that record visible was tried: it was inserted at the front inside the
+-- write, while the player had already chosen from the list as it was read,
+-- so every position moved by one and the wrong plan was restored.
+do
+ Boot(function(db)
+  db.chars[F.NAME].loadoutWishlists={
+   [1]={slot=101,name='Alpha',echoes=Echoes(false),assignmentId='assigned:a',designTargets={}},
+   [2]={slot=102,name='Bravo',echoes=Echoes(true),assignmentId='assigned:b',designTargets={}},
+  }
+ end)
+ for _,plan in ipairs(A.RetainedWishlistPlans()) do
+  check(A.ForgetWishlistPlan({associationIndex=plan.associationIndex,
+   key=plan.key,assignmentId=plan.assignmentId})==true,'both plans are removed')
+ end
+ local offered=A.ForgottenWishlistPlans()
+ check(#offered==2,'both are recoverable: '..#offered)
+ -- An older build writes the single field it knows about, beside the list.
+ local owner=Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
+ check(owner~=nil,'fixture: the store writer is reachable')
+ owner.UpdateStateV1(function(state)
+  state.forgottenWishlist={loadoutSlot=4,record={slot=104,name='Older Build Record',
+   echoes=Echoes(false),assignmentId='assigned:legacy',designTargets={}}}
+ end)
+ local seen=A.ForgottenWishlistPlans()
+ check(#seen==2,'the offered list is unchanged by it: '..#seen)
+ local wanted
+ for _,entry in ipairs(seen) do if entry.name=='Alpha' then wanted=entry end end
+ check(wanted~=nil,'the player can still see the plan they want')
+ local ok,why,detail=A.RestoreForgottenWishlistPlan({position=wanted.position})
+ check(ok==true,'and take it back: '..tostring(why))
+ local restored
+ for _,plan in ipairs(A.RetainedWishlistPlans()) do
+  if plan.associationIndex==tonumber(detail.loadoutSlot) then restored=plan end
+ end
+ check(restored~=nil and restored.name=='Alpha',
+  'the plan that came back is the one that was picked: '..tostring(restored and restored.name))
+ check(restored.key==wanted.key,'by exact identity, not by position alone')
+ -- Selecting by identity alone must agree with selecting by position.
+ local byKey
+ for _,entry in ipairs(A.ForgottenWishlistPlans()) do byKey=entry end
+ check(byKey~=nil and byKey.name=='Bravo','the other plan is still offered')
+ check(A.RestoreForgottenWishlistPlan({key=byKey.key})==true,'and comes back on request')
+ local names={}
+ for _,plan in ipairs(A.RetainedWishlistPlans()) do names[plan.name]=true end
+ check(names['Alpha'] and names['Bravo'],'both plans are retained again')
+ check(names['Older Build Record']==nil,
+  'and nothing was restored that the player did not ask for')
+ check(#H.actions==0,'no gameplay or server action was taken')
+end
+
+-- 21. Saved data this build did not write. The recoverable list is read
+-- inside a store write; a foreign entry there must make the write refuse or
+-- skip, never raise, or an ordinary Unassign would error mid-write.
+do
+ Boot(WithBothPlans)
+ local owner=Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
+ owner.UpdateStateV1(function(state)
+  state.forgottenWishlists={1,'two',{},{record='not a record'},5}
+ end)
+ local ok,err=pcall(function() return A.ClearLoadoutWishlist(1) end)
+ check(ok==true,'unassigning does not raise on foreign retained data: '..tostring(err))
+ check(#A.RetainedWishlistPlans()==1,'and the unassign still happened')
+ local offeredNow=A.ForgottenWishlistPlans()
+ check(type(offeredNow)=='table','the list still reads as a list')
+ for _,entry in ipairs(offeredNow) do
+  check(type(entry.name)=='string' or entry.name==nil,
+   'and every offered entry is a real record')
+ end
+ check(#H.actions==0,'no gameplay or server action was taken')
+end
+
 print('PASS wishlist_switch_recovery: an index is a loadout or it is not; both plans survive; one exact plan can be forgotten and restored checks='..checks)
