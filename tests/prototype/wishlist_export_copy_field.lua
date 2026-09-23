@@ -114,6 +114,7 @@ check(again.pending==79 and again.pendingLock==6,
 -- name box feeds the same encoder through a different source, so the rule is
 -- asserted there too: typing the character must not put it in the copied code,
 -- and the exported name must be the name the plan is saved under.
+local W=Nexus.WishlistEditor
 local nameBox=assert(_G.NexusWishlistNameInput,'the editor has its own name box')
 nameBox:_NexusSetRawText(TYPED)
 check(Nexus.WishlistEditor.DebugDraftState()~=nil,'the editor is open with a draft')
@@ -125,6 +126,24 @@ check(typedParsed.name==EXPECTED,
  'a name typed into the editor is exported exactly as it is saved: '..tostring(typedParsed.name))
 check(typedParsed.name:find('|',1,true)==nil,
  'and the typed character never reaches the copied code: '..tostring(typedParsed.name))
+StaticPopup_Hide()
+
+-- The third source is an existing wishlist the player already holds. Its name
+-- comes from the game and is deliberately stored as the game holds it, so the
+-- export is the only place that can make it inert. This is the most likely
+-- source of a name with a pipe, and it must not reach the copied code either.
+local SERVER='Raid|cffff0000Plan'
+check(W.OpenForWishlist({slot=1,name=SERVER,
+ echoes={{spellId=2000001,quality=1,stacks=1},{spellId=2000002,quality=2,stacks=1}}},1)==true,
+ 'an existing wishlist opens for editing')
+StaticPopup_Show('NEXUS_EXPORT_WISHLIST')
+local serverBox=assert(H.popup and H.popup.editBox,'the export dialog opens for the existing wishlist')
+local serverShown=serverBox:GetText()
+local serverParsed=assert(Nexus.Codec.DecodeEBH1(serverShown,true),'the exported code decodes')
+check(serverParsed.name:find('|',1,true)==nil,
+ 'an existing wishlist exports a name the game will not interpret: '..tostring(serverParsed.name))
+check(serverParsed.name=='Raidcffff0000Plan',
+ 'and the exported name is the whole name without that character: '..tostring(serverParsed.name))
 StaticPopup_Hide()
 
 print('PASS wishlist_export_copy_field: the copied EBH1 code is exact, and it imports again checks='..checks)

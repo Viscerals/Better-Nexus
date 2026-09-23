@@ -1204,13 +1204,15 @@ function Controller.New(options)
         else
             local typed = tostring(nameText or "")
             name = DraftModel.TrimName(typed)
-            if name ~= typed:gsub("^%s+", ""):gsub("%s+$", "") then
-                notify("|cffff6060Nexus:|r the | character is not kept in a "
-                    .. "wishlist name; this plan is saved as \"" .. name .. "\".")
-            end
             if name == "" then
                 notify("|cffff6060Nexus:|r Enter a wishlist name before saving.")
                 return nil, "name"
+            end
+            -- Said only once the name is usable, and said as intent: this
+            -- prepares the confirmation, it does not save anything yet.
+            if name ~= typed:gsub("^%s+", ""):gsub("%s+$", "") then
+                notify("|cffff6060Nexus:|r the | character is not kept in a "
+                    .. "wishlist name; this plan will be named \"" .. name .. "\".")
             end
         end
         local data = {slot = slot, name = name, echoes = echoes}

@@ -663,7 +663,9 @@ StaticPopupDialogs["NEXUS_NAME_IMPORTED_WISHLIST"] = {
                 and self.editBox:_NexusRawText()
                 or (self.editBox and self.editBox:GetText()) or "")
         local name = TrimWishlistName(typed)
-        if name ~= "" and typed:find("|", 1, true) then
+        -- Said only when something really was dropped, so the message cannot
+        -- outlive the rule that produces it.
+        if name ~= "" and name ~= typed:gsub("^%s+", ""):gsub("%s+$", "") then
             print("|cffff6060Nexus:|r the | character is not kept in a wishlist "
                 .. "name; this import is named \"" .. name .. "\".")
         end
