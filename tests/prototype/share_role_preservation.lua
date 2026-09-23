@@ -79,8 +79,10 @@ local function Settle(id)
  -- a loaded machine needs more simulated frames for the commit and its root
  -- re-admission. The budget is therefore large enough not to fail for load.
  -- It is not a timing assertion: a real slowdown in this window is not what
- -- this fixture measures.
- T.Until(H,function()return Nexus.BuildCatalog.Get(id)~=nil end,400000)
+ -- this fixture measures. 400000 still failed when two suites ran at once
+ -- during packaging, while the same fixture passed three times in a row on an
+ -- idle machine, so the budget is raised rather than the fixture weakened.
+ T.Until(H,function()return Nexus.BuildCatalog.Get(id)~=nil end,1500000)
  return Nexus.CommunityBuilds.ShareStatus(id)
 end
 local function Population(rows,wantLocked)
