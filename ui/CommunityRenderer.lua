@@ -678,9 +678,44 @@ local function WishlistLabel(wl)
         (wl and wl.sourceKind) or "Wishlist", 128, false) or "Wishlist"
     local name = wl and DisplayRemoteText(wl.name, 1024, false) or nil
     if not name then name = "Unnamed " .. kind end
-    local count=0
-    for _,e in ipairs((wl and wl.echoes) or {}) do count=count+(tonumber(e.stacks or e.count) or 1) end
+    -- Stated permanent copies are not part of the 79 ordinary copies.
+    local count,permanent=0,0
+    for _,e in ipairs((wl and wl.echoes) or {}) do
+        local copies=tonumber(e.stacks or e.count) or 1
+        if e.locked==true or e.locked==1 then permanent=permanent+copies else count=count+copies end
+    end
+    if permanent==0 then
+        for _,e in ipairs((wl and type(wl.lockedEchoes)=="table" and wl.lockedEchoes) or {}) do permanent=permanent+(tonumber(e.stacks or e.count) or 1) end
+    end
+    if permanent>0 then
+        return string.format("[%s] %s  —  %d / 79 + %d / 6 permanent", kind, name, count, permanent)
+    end
     return string.format("[%s] %s  —  %d / 79", kind, name, count)
+end
+
+-- The controller's one sentence for the latest Share, coloured by its state.
+local function ShareStatusLine()
+    local controller = ControllerInstance()
+    if type(controller.ShareStatusText) ~= "function" then return nil end
+    local ok, state, text = pcall(controller.ShareStatusText)
+    if not ok or type(text) ~= "string" then return nil end
+    local colour = state == "refused" and "|cffff6060"
+        or (state == "preparing" or state == "stopped" or state == "saved") and "|cffffc040"
+        or "|cff4dff80"
+    return colour .. text .. "|r", state
+end
+
+-- The result of the user's own last Share click belongs to the form. A refusal
+-- stays there through every ordinary view refresh. Only a legitimate next step
+-- replaces it: another Share click, another source or class, or reopening the
+-- form. The latest Share of the session is shown when no refusal is held.
+local postRefusal
+local function SetPostRefusal(text)
+    postRefusal = type(text) == "string" and text ~= "" and text or nil
+end
+local function PostStatusText()
+    if postRefusal then return "|cffff6060" .. postRefusal .. "|r" end
+    return ShareStatusLine() or ""
 end
 
 local function RefreshPostWishlistMenu()
@@ -692,6 +727,7 @@ local function RefreshPostWishlistMenu()
     for i, c in ipairs(candidates) do
         AddMenuButton(postWishlistMenu, WishlistLabel(c), function()
             ControllerInstance().SetPostWishlist(c)
+            SetPostRefusal(nil)                         -- another source: the refusal was about the earlier one
             postWishlistBtn:SetText("Source: "
                 .. (DisplayRemoteText(c.name, 1024, false) or "Unnamed"))
             RefreshPostPopupPreview()
@@ -710,6 +746,7 @@ local function RefreshPostClassMenu()
     for i, token in ipairs(CLASS_PICK_ORDER) do
         AddMenuButton(postClassMenu, CLASS_LABEL[token], function()
             ControllerInstance().SetPostClass(token)
+            SetPostRefusal(nil)
             local cc = CLASS_COLOR[token] or {1,1,1}
             postClassBtn:SetText("Class: " .. CLASS_LABEL[token])
             postClassBtn:GetFontString():SetTextColor(cc[1],cc[2],cc[3])
@@ -787,24 +824,33 @@ local function EnsurePostPopup()
             postTitleBox:_NexusRawText(), postDescBox:_NexusRawText(),
             wishlist, class)
         if not ok then
+            -- The form, its draft and its source stay. A retained earlier
+            -- Share keeps its own sentence; a refusal states its reason.
             print("|cffff6060Nexus:|r "..tostring(value))
+            SetPostRefusal(not outcome and tostring(value) or nil)
+            p._shareStatus:SetText(PostStatusText())
             return
         end
-        outcome=type(outcome)=="table" and outcome or {}
-        if outcome.localPending then
-            print("|cffffc040Nexus:|r Share accepted. Waiting to save locally; nothing has been sent.")
-        elseif outcome.sendCompleted then
-            print("|cff4dff80Nexus:|r Build saved locally and sent. Peer storage confirmation is unavailable.")
-        elseif outcome.queueAdmitted then
-            print("|cff4dff80Nexus:|r Build saved locally and queued for sharing. Peer storage confirmation is unavailable.")
-        elseif outcome.retryPending then
-            print("|cffffc040Nexus:|r Build saved locally; the Sync queue is full. One bounded retry is pending.")
-        else
-            print("|cffffc040Nexus:|r Build saved locally; not queued: "
-                ..tostring(outcome.queueReason or "Sync unavailable")..".")
-        end
+        SetPostRefusal(nil)
+        -- One sentence, from the same owner that the status line reads.
+        print("Nexus: "..(ShareStatusLine() or "Share accepted."))
         ClearPostDescriptionFocus(); p:Hide(); M.Refresh()
     end)
+    -- The open form follows its Share by itself: queued -> sent, a retry, a
+    -- terminal stop. A passive read twice a second, only while the form is
+    -- shown; it does not depend on the Community window, a view refresh, Sync
+    -- housekeeping or a receive window.
+    local statusElapsed=0
+    p:SetScript("OnUpdate",function(_,elapsed)
+        statusElapsed=statusElapsed+(tonumber(elapsed) or 0)
+        if statusElapsed<0.5 then return end
+        statusElapsed=0
+        if p._shareStatus then
+            local text=PostStatusText()
+            if p._shareStatus:GetText()~=text then p._shareStatus:SetText(text) end
+        end
+    end)
+    local shareStatus=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); shareStatus:SetPoint("TOPLEFT",16,-396); shareStatus:SetSize(334,96); shareStatus:SetJustifyH("LEFT"); shareStatus:SetJustifyV("TOP"); p._shareStatus=shareStatus
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.ApplyFontTree then
         Nexus.LayoutMetrics.ApplyFontTree(p,"normal")
     end
@@ -817,6 +863,7 @@ end
 
 RefreshPostPopupPreview = function()
     if not postPopup or not postPopup:IsShown() then return end
+    postPopup._shareStatus:SetText(PostStatusText())
     local wl, selectedClass = ControllerInstance().PostDraft()
     local echoes = ControllerInstance().WishlistEchoes(wl)
     if not wl or not echoes or #echoes==0 then
@@ -844,6 +891,7 @@ function M.ShowPostBuild()
     if postPopup:IsShown() then
         HidePostMenus(); ClearPostDescriptionFocus(); postPopup:Hide(); return
     end
+    SetPostRefusal(nil)                                 -- reopening the form is a new start
     local candidates=BuildWishlistCandidates(); local wl=candidates[1]
     -- Auto-detect class from echo catalog, then fall back to player's own class
     local selectedClass = ControllerInstance().InferBuildClass(
@@ -852,10 +900,19 @@ function M.ShowPostBuild()
         local _, classToken = UnitClass("player")
         selectedClass = (classToken and classToken ~= "UNKNOWN") and tostring(classToken) or ""
     end
+    -- A Share whose local save failed gives its approved draft back unchanged.
+    local failedTitle, failedDescription, failedSource, failedClass
+    if type(ControllerInstance().FailedShareDraft) == "function" then
+        failedTitle, failedDescription, failedSource, failedClass =
+            ControllerInstance().FailedShareDraft()
+    end
+    if failedTitle then
+        wl, selectedClass = failedSource or wl, failedClass or selectedClass
+    end
     ControllerInstance().BeginPostDraft(wl, selectedClass)
-    postTitleBox:_NexusSetRawText(
-        (wl and wl.name and wl.name~="") and wl.name or "")
-    postDescBox:_NexusSetRawText("")
+    postTitleBox:_NexusSetRawText(failedTitle
+        or ((wl and wl.name and wl.name~="") and wl.name or ""))
+    postDescBox:_NexusSetRawText(failedDescription or "")
     postDescBox:SetCursorPosition(0)
     postPopup._postDescScroll:SetVerticalScroll(0)
     local displayWishlistName = wl and DisplayRemoteText(
@@ -2554,6 +2611,12 @@ RenderSyncStatus = function(receiveCount)
     local syncStats = type(sync.Stats) == "function" and sync.Stats() or {}
     local preparing = syncStats.preparingRequest == true
     if preparing then syncStatusText:SetText("|cff7fd5ffPreparing sync data...|r") end
+    -- The latest Share of this session keeps its own line here, so its state
+    -- is still stated after the form or this window is closed and reopened.
+    local shareLine = ShareStatusLine()
+    if shareLine then
+        syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n" .. shareLine)
+    end
     if syncBtn then syncBtn:SetText(preparing and "Preparing..."
         or receiving and "Listening..." or "Sync Now") end
 end
@@ -2643,6 +2706,11 @@ end
 ------------------------------------------------------------------------
 
 function M.Refresh()
+    -- An open Share form follows its Share when that settles, also when the
+    -- Community window is closed.
+    if postPopup and postPopup:IsShown() and postPopup._shareStatus then
+        postPopup._shareStatus:SetText(PostStatusText())
+    end
     if not frame or not frame:IsShown() then return end
     M.ApplyResponsiveLayout(false)
 

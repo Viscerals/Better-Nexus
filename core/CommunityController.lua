@@ -45,6 +45,9 @@ function Controller.New(options)
     local savedImportJob
     local lastShareOutcome
     local pendingShare
+    -- Approved title, description and source of a Share whose local save
+    -- failed. Session-only; the Share form offers it back unchanged.
+    local failedShareDraft
     -- Explicit Stop Sharing approvals waiting for catalog admission. Bounded,
     -- session-only, one entry per exact ID.
     local pendingRemovals, MAX_PENDING_REMOVALS = {}, 8
@@ -806,6 +809,7 @@ function Controller.New(options)
                         name=live.name or (kind .. " " .. tostring(slot)),
                         count=#live.echoes,echoes=live.echoes,
                         active=slots.activeSlot == slot,sourceKind=kind,
+                        roleSourceValid=live.roleSourceValid,
                     }
                     seen[tostring(slot)] = true
                 end
@@ -1642,6 +1646,242 @@ function Controller.New(options)
         return nil
     end
 
+    -- One role reading for every Share source. A copy is permanent only when
+    -- the source states it: an inline locked flag or the separate lockedEchoes
+    -- list. Nothing is read from order, name, totals or current ownership.
+    -- Returns ordinary, locked, counts; or nil, message, diagnostic reason.
+    local function ShareRoles(wl, rows)
+        local evidence = Nexus and Nexus.LoadoutEvidence
+        if not (evidence and type(evidence.SemanticEnvelope) == "function"
+            and type(evidence.SemanticLimits) == "function") then
+            return nil, "Echo role validation is unavailable", "role validator unavailable"
+        end
+        local label = tostring(wl and wl.name ~= "" and wl.name or "This source")
+        if wl.roleSourceValid == false then
+            -- The adapter omitted a server row that it could not read. The
+            -- remaining rows are not the complete source.
+            return nil, label .. " contains a server Echo row that cannot be read, so its copies are not complete. "
+                .. "Nothing was shared.", "source mirror incomplete (roleSourceValid=false)"
+        end
+        local function Whole(value, minimum)
+            return type(value) == "number" and value >= minimum
+                and value == math.floor(value) and value < math.huge
+        end
+        -- Every row of a dense list, or nothing: a hole must not hide rows.
+        local function Dense(list)
+            local count, length = 0, #list
+            for index in pairs(list) do
+                if type(index) == "number" then
+                    if index < 1 or index > length or index ~= math.floor(index) then return false end
+                    count = count + 1
+                end
+            end
+            return count == length
+        end
+        local function Split(list)
+            local ordinary, locked, unstated = {}, {}, 0
+            if type(list) ~= "table" or not Dense(list) then return nil end
+            for _, e in ipairs(list) do
+                if type(e) ~= "table" then return nil end
+                local stacks = e.stacks
+                if stacks == nil then stacks = e.count end
+                if stacks == nil then stacks = 1 end
+                local copy = {spellId=e.spellId or e.id, quality=e.quality, stacks=stacks}
+                if not Whole(copy.spellId, 1) or not Whole(copy.stacks, 1)
+                    or (copy.quality ~= nil and not Whole(copy.quality, 0)) then
+                    return nil
+                end
+                if e.locked == true or e.locked == 1 then
+                    copy.locked = true
+                    locked[#locked + 1] = copy
+                elseif e.locked == nil or e.locked == false then
+                    if e.locked == nil then unstated = unstated + 1 end
+                    ordinary[#ordinary + 1] = copy
+                else
+                    return nil
+                end
+            end
+            return ordinary, locked, unstated
+        end
+        local function Population(list)
+            local totals, parts = {}, {}
+            for _, e in ipairs(list) do
+                local k = tostring(e.spellId) .. ":" .. tostring(e.quality or 0)
+                totals[k] = (totals[k] or 0) + (tonumber(e.stacks) or 0)
+            end
+            for k, copies in pairs(totals) do
+                parts[#parts + 1] = k .. ":" .. tostring(copies)
+            end
+            table.sort(parts)
+            return table.concat(parts, ",")
+        end
+        local ordinary, locked, unstated = Split(rows)
+        if not ordinary then
+            return nil, label .. " contains an Echo row that cannot be read. Nothing was shared.",
+                "malformed source row"
+        end
+        if wl.lockedEchoes ~= nil and type(wl.lockedEchoes) ~= "table" then
+            return nil, label .. " states its permanent Echoes in a form that cannot be read. Nothing was shared.",
+                "malformed permanent list"
+        end
+        if type(wl.lockedEchoes) == "table" and next(wl.lockedEchoes) ~= nil then
+            -- Same row checks as the inline list; every row here is permanent.
+            local forced = {}
+            for index, e in pairs(wl.lockedEchoes) do
+                if type(e) == "table" then
+                    local stacks = e.stacks
+                    if stacks == nil then stacks = e.count end
+                    if stacks == nil then stacks = 1 end
+                    forced[index] = {spellId=e.spellId or e.id, quality=e.quality,
+                        stacks=stacks, locked=true}
+                else
+                    forced[index] = e
+                end
+            end
+            local _, separate = Split(forced)
+            if not separate then
+                return nil, label .. " contains a permanent Echo row that cannot be read. Nothing was shared.",
+                    "malformed permanent row"
+            end
+            -- The same permanent population stated twice is counted once. Two
+            -- different statements give no exact answer; nothing is guessed.
+            if #locked == 0 then
+                locked = separate
+            elseif Population(locked) ~= Population(separate) then
+                return nil, label .. " states its permanent Echoes in two lists that do not agree. "
+                    .. "Nothing was shared. Save the source again, then share it.",
+                    "permanent roles stated twice with different contents"
+            end
+        end
+        local limits = evidence.SemanticLimits()
+        local function Counts()
+            local o = evidence.SemanticEnvelope(ordinary)
+            local l = evidence.SemanticEnvelope(locked, {forceLocked=true})
+            if o.reason == "malformed" or l.reason == "malformed" then return nil end
+            return {ordinary=o.ordinary, locked=l.locked, total=o.ordinary + l.locked}
+        end
+        local counts = Counts()
+        if not counts then
+            return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
+                "malformed copy count"
+        end
+        if #locked == 0 and counts.total > limits.ordinary and counts.total <= limits.total then
+            -- No permanent role is stated and the copies cannot all be ordinary.
+            -- This includes the server mirror that marks every row false: the
+            -- adapter does not take that as role evidence either. Only the
+            -- adapter's own read-only evidence (a content-matched role choice or
+            -- the exact verified active loadout) may supply the roles.
+            local candidate = {slot=wl.slot, name=wl.name, count=#ordinary,
+                echoes=ordinary, active=wl.active}
+            local resolved, state, _, why
+            -- The source menu lists the raw slot mirror. The adapter's candidate
+            -- for that same slot already carries the resolved roles, if any.
+            local known = wl.slot ~= nil and Adapter
+                and type(Adapter.GetWishlistCandidates) == "function"
+                and Adapter.GetWishlistCandidates() or {}
+            for _, c in ipairs(type(known) == "table" and known or {}) do
+                if type(c) == "table" and tonumber(c.slot) == tonumber(wl.slot) then
+                    why = c.lockEvidenceReason
+                    if type(Adapter.WishlistEvidenceState) == "function"
+                        and Adapter.WishlistEvidenceState(c) == "actionable" then
+                        resolved, state = c, "actionable"
+                    end
+                    break
+                end
+            end
+            if not resolved and Adapter
+                and type(Adapter.ResolveWishlistEvidence) == "function" then
+                local reason
+                resolved, state, _, reason = Adapter.ResolveWishlistEvidence(candidate)
+                why = reason or why
+            end
+            local resolvedOrdinary, resolvedLocked, stillUnstated
+            if state == "actionable" and type(resolved) == "table"
+                and resolved.lockEvidenceStatus == "authoritative" then
+                resolvedOrdinary, resolvedLocked, stillUnstated = Split(resolved.echoes)
+            end
+            local function Ids(list)
+                local all = {}
+                for _, e in ipairs(list) do all[#all + 1] = {spellId=e.spellId, quality=0, stacks=e.stacks} end
+                return Population(all)
+            end
+            local combined = {}
+            for _, e in ipairs(resolvedOrdinary or {}) do combined[#combined + 1] = e end
+            for _, e in ipairs(resolvedLocked or {}) do combined[#combined + 1] = e end
+            local settled = resolvedOrdinary and stillUnstated == 0
+                and #resolvedLocked > 0 and Ids(combined) == Ids(ordinary)
+            -- The roles come from the adapter. A quality that the selected
+            -- source states for an ID stays the source's own. When the source
+            -- states two qualities for one ID, the role evidence must match
+            -- that exact ID-and-quality content; otherwise it does not say
+            -- which quality the permanent copies have, and nothing is guessed.
+            local stated, mixed = {}, false
+            for _, e in ipairs(ordinary) do
+                if e.quality ~= nil then
+                    if stated[e.spellId] ~= nil and stated[e.spellId] ~= e.quality then mixed = true end
+                    stated[e.spellId] = e.quality
+                end
+            end
+            local mixedUnmatched = false
+            if settled and mixed and Population(combined) ~= Population(ordinary) then
+                settled, mixedUnmatched = false, true
+                why = "the source states two qualities for one Echo, and the saved role evidence does not match that exact content"
+            end
+            if not settled then
+                -- The message names what is missing and the supported way to
+                -- supply it. A count alone does not tell the user what to do.
+                local marks = unstated == 0
+                    and "The server copy marks all of them as ordinary, which is not role information: "
+                    or "It does not say which copies are permanent: "
+                -- Only the ways that exist for this source. A Saved Build slot has
+                -- no role choice in the Wishlist Editor; a mixed-quality source is
+                -- not resolved by either way.
+                local way
+                if mixedUnmatched then
+                    way = "Nexus cannot tell which quality the permanent copies have. Change the source so that each Echo has one quality, then share again. "
+                elseif wl.sourceKind == "Saved Build" then
+                    way = "To resolve it, make this Saved Build your active loadout so that Nexus can read its permanent Echoes. Then share again. "
+                else
+                    way = "To resolve it, open this Wishlist in the Wishlist Editor and choose its permanent Echoes, "
+                        .. "or make the matching Saved Build your active loadout so that Nexus can read its permanent Echoes. Then share again. "
+                end
+                return nil, string.format("%s has %d Echo copies. %sa Share holds at most %d ordinary copies, "
+                    .. "so up to %d of them must be permanent Echoes, and Nexus must know which. Missing evidence: %s. "
+                    .. "%sNothing was shared and the source is unchanged.",
+                    label, counts.total, marks, limits.ordinary, limits.locked,
+                    tostring(why or "no role choice is saved for this exact content"), way),
+                    string.format("roles unresolved (ordinary=%d permanent=%d total=%d): %s",
+                        counts.ordinary, counts.locked, counts.total,
+                        tostring(why or state or "no role evidence"))
+            end
+            do
+                for _, e in ipairs(combined) do
+                    if not mixed and stated[e.spellId] ~= nil then e.quality = stated[e.spellId] end
+                end
+                ordinary, locked = resolvedOrdinary, resolvedLocked
+                counts = Counts()
+                if not counts then
+                    return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
+                        "malformed copy count"
+                end
+            end
+        end
+        if #ordinary == 0 then
+            return nil, label .. " has no ordinary Echoes to share.", "no ordinary Echoes"
+        end
+        if counts.ordinary > limits.ordinary or counts.locked > limits.locked
+            or counts.total > limits.total then
+            return nil, string.format("%s has %d ordinary and %d permanent Echo copies (%d total). "
+                .. "A Share holds at most %d ordinary, %d permanent and %d total. "
+                .. "Nothing was shared and the source is unchanged.",
+                label, counts.ordinary, counts.locked, counts.total,
+                limits.ordinary, limits.locked, limits.total),
+                string.format("SEMANTIC_ENVELOPE ordinary=%d permanent=%d total=%d",
+                    counts.ordinary, counts.locked, counts.total)
+        end
+        return ordinary, locked, counts
+    end
+
     local function CanonicalFingerprintHash(text)
         if type(text) ~= "string" or text == "" then return nil end
         local h = 5381
@@ -2039,7 +2279,9 @@ function Controller.New(options)
     function M.PostCurrentWishlist(title, description, selectedWishlist, selectedClass)
         if not (Adapter and Adapter.Wishlist) then return false, "adapter not ready" end
         if pendingShare then
-            return false, "A Share is already waiting for local saving.", lastShareOutcome
+            -- The one retained request keeps its identity; nothing is added.
+            local _, text = M.ShareStatusText()
+            return false, text or "A Share is already waiting for local saving.", lastShareOutcome
         end
         PeerRecord("share_confirmed", {outcome="button confirmed"})
 
@@ -2061,6 +2303,7 @@ function Controller.New(options)
                     count = #live.echoes,
                     echoes = live.echoes,
                     active = slots.activeSlot == wl.slot,
+                    roleSourceValid = live.roleSourceValid,
                 }
                 sourceEchoes = wl.echoes
             end
@@ -2086,9 +2329,14 @@ function Controller.New(options)
         if not Identity.ValidDisplayText(description, 2000, true, true) then
             return false, "description contains unsafe text"
         end
-        local echoes = {}
-        for _, e in ipairs(sourceEchoes) do
-            echoes[#echoes+1] = { spellId=e.spellId, quality=e.quality, stacks=e.stacks or 1 }
+        -- Roles are settled and the 79/6/85 envelope is checked here, before
+        -- anything is accepted or retained. The catalog still validates the
+        -- record again when the local write runs.
+        local echoes, lockedEchoes, roleCounts = ShareRoles(wl, sourceEchoes)
+        if not echoes then
+            local message, diagnostic = lockedEchoes, roleCounts
+            PeerRecord("share_source", {outcome="rejected", reason=diagnostic})
+            return false, message
         end
         local stamp = NextStamp(0)
         local id = string.format("mine-%d-%d", stamp, math.random(100000,999999))
@@ -2102,6 +2350,7 @@ function Controller.New(options)
             echoes=echoes, postedAt=stamp, lastModified=stamp,
             isMine=localOwner ~= nil,
         }
+        if #lockedEchoes > 0 then record.lockedEchoes = lockedEchoes end
         local identityOk, identityErr = RefreshBuildIdentity(record)
         if not identityOk then return false, identityErr end
         PeerRecord("share_created", {id=id,class=record.class or "UNKNOWN",
@@ -2109,6 +2358,8 @@ function Controller.New(options)
         local outcome = {
             id=id,class=record.class or "UNKNOWN",
             echoCount=record.echoCount or #echoes,
+            title=title,ordinaryCopies=roleCounts.ordinary,
+            permanentCopies=roleCounts.locked,
             buildRevision=BuildRevision(),localSaved=false,
             queueAdmitted=false,queueReason=nil,retryPending=false,
             sent=false,sendCompleted=false,peerStored=nil,
@@ -2150,9 +2401,15 @@ function Controller.New(options)
                 outcome.queueReason = not committed and (why or "local save failed")
                     or "Share stopped: the player or catalog changed."
                 lastShareOutcome = outcome
-                if operation.notify then notify("Share not sent: " .. tostring(outcome.queueReason)) end
+                -- The approved text and source stay available to the form.
+                failedShareDraft = not committed and SameOwner() and {id=id,title=title,
+                    description=description,wishlist=selectedWishlist,
+                    class=selectedClass} or nil
+                if operation.notify then notify("Nexus: " .. tostring(select(2, M.ShareStatusText(id)))) end
+                refreshView()
                 return false
             end
+            failedShareDraft = nil
             local admitted, queueWhy, syncStatus = BroadcastIfPossible(record, true)
             for key, value in pairs(type(syncStatus) == "table"
                 and syncStatus or {}) do
@@ -2182,11 +2439,8 @@ function Controller.New(options)
             if D and D.BroadcastBestForBuild then
                 pcall(D.BroadcastBestForBuild, id)
             end
-            if operation.notify then
-                notify(outcome.queueAdmitted
-                    and "Share saved locally and queued. Peer storage confirmation is unavailable."
-                    or ("Share saved locally; not queued: " .. tostring(outcome.queueReason)))
-            end
+            if operation.notify then notify("Nexus: " .. tostring(select(2, M.ShareStatusText(id)))) end
+            refreshView()
             return true
         end
         operation.complete = CompleteLocalSave
@@ -2303,12 +2557,80 @@ function Controller.New(options)
                 copy[key] = value
             end
         end
-        for key, value in pairs(type(remote) == "table" and remote or {}) do
-            copy[key] = value
+        -- Sync answers an unknown ID with its latest Share of any build. Only
+        -- the operation of this exact build may describe this build.
+        if type(remote) == "table" and tostring(remote.id) == tostring(current.id) then
+            for key, value in pairs(remote) do copy[key] = value end
         end
         copy.peerStored = nil
         copy.confirmation = "unavailable"
         return copy
+    end
+
+    -- One truthful sentence for the latest Share, read from the existing
+    -- outcome and the existing Sync operation status. It states no timing and
+    -- no percentage, and never calls retained work failed. Returns state, text.
+    function M.ShareStatusText(id)
+        local s = M.ShareStatus(id)
+        if not s then return nil end
+        local name = type(s.title) == "string" and s.title ~= ""
+            and ("\"" .. s.title .. "\"") or "this build"
+        if s.localPending then
+            -- Two different waits: the record is not yet submitted, or the one
+            -- submitted local write is not yet settled. Neither can be cancelled
+            -- safely from here, and neither needs a second Share.
+            return "preparing", "Preparing " .. name .. " to share — not sent yet. "
+                .. (s.localStage == "saving"
+                    and "The local save is submitted; the catalog has not finished it. "
+                    or "The local catalog is finishing earlier work first. ")
+                .. "The same request continues by itself. Do not share it again."
+        end
+        if s.localSaved ~= true then
+            local why = tostring(s.queueReason or "local save failed")
+            local evidence = Nexus and Nexus.LoadoutEvidence
+            local limits = evidence and type(evidence.SemanticLimits) == "function"
+                and evidence.SemanticLimits() or nil
+            if why == "SEMANTIC_ENVELOPE" and limits then
+                why = string.format("the local catalog refused %d ordinary and %d permanent Echo copies; "
+                    .. "a Share holds at most %d ordinary, %d permanent and %d total",
+                    tonumber(s.ordinaryCopies) or 0, tonumber(s.permanentCopies) or 0,
+                    limits.ordinary, limits.locked, limits.total)
+            end
+            -- The draft statement is made only when the form really has it.
+            local kept = failedShareDraft and failedShareDraft.id == s.id
+            return "refused", "Not shared: " .. name .. " — " .. why:gsub("%.+$", "")
+                .. ". Nothing was saved or sent."
+                .. (kept and " The Share form keeps the title, description and source." or "")
+        end
+        if s.sendCompleted == true then
+            return "sent", "Sent " .. name .. " — peer receipt not confirmed."
+        end
+        if s.terminal == true then
+            local why = tostring(s.outcome or "stopped")
+            if type(s.reason) == "string" and s.reason ~= "" and s.reason ~= "none"
+                and s.reason ~= why then
+                why = why .. " (" .. s.reason .. ")"
+            end
+            local retryable = M.CanRetryShare(s.id)
+            return "stopped", "Saved " .. name .. " locally — not sent: " .. why
+                .. (retryable and ". Open the build to use Retry Share." or ".")
+        end
+        if s.retryPending == true then
+            return "queued", "Saved " .. name .. " locally — the Sync queue is full. One bounded retry is pending."
+        end
+        if s.queueAdmitted == true then
+            return "queued", "Saved " .. name .. " locally — queued for sharing."
+        end
+        return "saved", "Saved " .. name .. " locally — not queued: "
+            .. tostring(s.queueReason or "Sync unavailable"):gsub("%.+$", "") .. "."
+    end
+
+    -- The approved draft of a Share whose local save failed, for the form.
+    function M.FailedShareDraft()
+        local draft = failedShareDraft
+        if not draft or type(lastShareOutcome) ~= "table"
+            or lastShareOutcome.id ~= draft.id then return nil end
+        return draft.title, draft.description, draft.wishlist, draft.class
     end
 
     function M.CanRetryShare(id)
@@ -2327,6 +2649,10 @@ function Controller.New(options)
             return false, "Share is not terminal"
         end
         local outcome = tostring(status.outcome or "")
+        -- A refusal that depends on the record itself repeats on every retry.
+        if outcome == "rejected" and tostring(status.reason or ""):find("too large", 1, true) then
+            return false, "the record is too large to send; a retry cannot change that"
+        end
         if outcome ~= "expired" and outcome ~= "dropped"
             and outcome ~= "throttle-exhausted" and outcome ~= "reset"
             and outcome ~= "rejected" then
@@ -2363,6 +2689,7 @@ function Controller.New(options)
             end
         end
         outcome.id = id
+        outcome.title = type(record.title) == "string" and record.title or nil
         outcome.class = record.class or "UNKNOWN"
         outcome.echoCount = record.echoCount or #(record.echoes or {})
         outcome.buildRevision = BuildRevision()
@@ -2376,7 +2703,7 @@ function Controller.New(options)
         outcome.sendCompleted = outcome.sendCompleted == true
         outcome.peerStored = nil
         outcome.confirmation = "unavailable"
-        lastShareOutcome = outcome
+        if not pendingShare then lastShareOutcome = outcome end
         local started = outcome.queueAdmitted or outcome.retryPending
         PeerRecord("share_retry_action", {id=id,
             outcome=started and "started" or "rejected",

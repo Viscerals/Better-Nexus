@@ -33,6 +33,9 @@ NAMES += ['rolling_no_guarantee','rolling_no_guarantee_runtime','policy_compare'
 NAMES += ['diagnostics_gate_status']
 NAMES += ['sync_channel_late_join']
 NAMES += ['update_notices']
+NAMES += ['share_role_preservation']
+NAMES += ['share_pending_status']
+NAMES += ['advisor_attachment']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
