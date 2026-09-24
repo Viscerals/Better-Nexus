@@ -37,12 +37,13 @@ end}
 local H=F.Boot(db,function(h) Hh=h;start=h.now;time=function() return clock+math.floor(h.now) end end)
 F.fileHooks=nil
 local C,R,S=Nexus.BuildCatalog,Nexus.DataRetention,Nexus.Scheduler
--- Read after the start-up publication (about 1.6 s), once the chain has begun.
+-- Read after the start-up publication (about 1.6 s) and before the chain's
+-- first retry.
 local generation
 local joined
 for _=1,math.floor(4500/0.5) do
  H.Advance(.5,.5)
- if generation==nil and Hh.now-start>=20 then generation=C.Status().generation end
+ if generation==nil and Hh.now-start>=3 then generation=C.Status().generation end
  if joined==nil and Hh.now-start>=600 then joined=R.Request('test: request during the chain') end
 end
 local chain,startup,other={},0,0
@@ -59,14 +60,13 @@ check(other==0 and joined==true,'a request during the chain joins it; no second 
 check(#runs==66,'the start-up run and the chain are all the busy runs: '..#runs)
 local expected={5,10,20,40}
 for i=5,64 do expected[i]=60 end
-local total=0
 for i=1,64 do
  local gap=chain[i+1].t-chain[i].t
- total=total+expected[i]
  check(gap>=expected[i]-0.001 and gap<=expected[i]+1,
   string.format('retry %d waits %d s: %.2f s',i,expected[i],gap))
 end
-check(total==3675,'the 64 delays add up to 3675 s')
+local span=chain[65].t-chain[1].t
+check(span>=3675-0.001 and span<=3675+64,string.format('the measured chain lasts 3675 s from its first to its last run: %.1f s',span))
 local now=Hh.now-start
 check(not S.Pending('data-retention.enforce'),'after the last retry nothing is scheduled')
 check(now-chain[65].t>=600,string.format('no run for %.0f s after the last retry',now-chain[65].t))
