@@ -70,19 +70,65 @@ local function Share(title,sourceName)
  p._postGoBtn:Click();print=real
  return p,label
 end
-local function Settle(id)
- T.Until(H,function()local s=Nexus.CommunityBuilds.ShareStatus(id);return s and s.localPending==false end,30000)
- -- A commit replaces the durable bundle, and the catalog re-admits its root
- -- from it. Nothing serves during that admission, so the stored record is
- -- read once it is served again, not inside that window.
- -- Patience, not tolerance: the shared drive is bounded by real CPU time, so
- -- a loaded machine needs more simulated frames for the commit and its root
- -- re-admission. The budget is therefore large enough not to fail for load.
- -- It is not a timing assertion: a real slowdown in this window is not what
- -- this fixture measures. 400000 still failed when two suites ran at once
- -- during packaging, while the same fixture passed three times in a row on an
- -- idle machine, so the budget is raised rather than the fixture weakened.
- T.Until(H,function()return Nexus.BuildCatalog.Get(id)~=nil end,1500000)
+-- Bounded snapshot for a Share whose record is not served: scalars from the
+-- public status reads only. Nothing is pumped, saved or repaired here.
+local function Snapshot(scenario,id,frame)
+ local s=Nexus.CommunityBuilds.ShareStatus(id) or {}
+ local root=C.RootState()
+ local prep=C.ManualPreparationStatus()
+ local evidence=Nexus.LoadoutEvidence
+ local token=evidence and evidence.AuthorityTokenV1 and evidence.AuthorityTokenV1() or {}
+ local parts={'scenario='..tostring(scenario),'record='..tostring(id),'frame='..tostring(frame),
+  string.format('clock=%.2f',H.now),'time='..tostring(time())}
+ for _,k in ipairs({'localStage','localSaved','localPending','outcome','reason','sendState','queueReason','retryPending','terminal'})do
+  parts[#parts+1]='share.'..k..'='..tostring(s[k])
+ end
+ for _,k in ipairs({'state','reason','candidate','generation','servingGeneration','durableBundleGeneration','committedMutationRevision','bindingGeneration'})do
+  parts[#parts+1]='root.'..k..'='..tostring(root[k])
+ end
+ parts[#parts+1]='prep.phase='..tostring(prep.phase);parts[#parts+1]='prep.reason='..tostring(prep.reason)
+ parts[#parts+1]='rebindPending='..tostring(C.RebindRequired())
+ parts[#parts+1]='driftInvalidations='..tostring(C.DebugStats().driftInvalidations)
+ parts[#parts+1]='evidence.append='..tostring(token.appendRevision)
+ parts[#parts+1]='evidence.candidateOpen='..tostring(evidence and evidence.CandidateOpen and evidence.CandidateOpen())
+ return table.concat(parts,' ')
+end
+-- One bounded wait. An invalidated catalog with no candidate and no pending
+-- rebind has no scheduled recovery, so waiting longer cannot help: the test
+-- fails at once and prints the state of the first frame that was invalidated.
+-- An invalidation while a rebind is pending or an admission runs is a
+-- legitimate re-admission and is waited for.
+local function Wait(scenario,id,stage,predicate,limit)
+ local firstInvalid
+ for frame=1,limit do
+  H.Advance(.05,.05)
+  if predicate() then return frame end
+  local root=C.RootState()
+  if root.state=='ROOT_INVALIDATED' then
+   firstInvalid=firstInvalid or Snapshot(scenario,id,frame)
+   if not root.candidate and not C.RebindRequired() then
+    local text=scenario..' ('..stage..'): the catalog is invalidated and no recovery is scheduled. First invalidated frame: '
+     ..firstInvalid..' | now: '..Snapshot(scenario,id,frame)
+    io.stderr:write(text..'\n');io.stderr:flush()
+    error(text,0)
+   end
+  end
+ end
+ local text=scenario..' ('..stage..'): not reached after '..limit..' frames: '..Snapshot(scenario,id,limit)
+ io.stderr:write(text..'\n');io.stderr:flush()
+ error(text,0)
+end
+local function Settle(id,scenario)
+ Wait(scenario,id,'local save',function()local s=Nexus.CommunityBuilds.ShareStatus(id);return s and s.localPending==false end,30000)
+ -- A commit replaces the durable bundle and publishes the new root at once;
+ -- a re-admission (a pending rebind) can follow, and nothing serves while it
+ -- runs. The earlier long intermittent wait here was not machine load: an
+ -- evidence-pool re-initialization during the Share's mutation published a
+ -- root that drifted from its own evidence revision (ROOT_INVALIDATED /
+ -- SOURCE_DRIFT), and no recovery was scheduled, so the record was never
+ -- served (see share_source_drift_order). That now fails at once above. The
+ -- bound only has to cover a legitimate re-admission.
+ Wait(scenario,id,'serving',function()return Nexus.BuildCatalog.Get(id)~=nil end,1500000)
  return Nexus.CommunityBuilds.ShareStatus(id)
 end
 local function Population(rows,wantLocked)
@@ -100,7 +146,7 @@ local function Copies(rows)local n=0;for _,e in ipairs(rows or {})do n=n+(e.stac
 -- record and in the record handed to transport; nothing in the wrong list.
 local function Accepted(name,source,ordinary,locked)
  local status=assert(Nexus.CommunityBuilds.ShareStatus(),name..': the Share was accepted')
- local final=Settle(status.id)
+ local final=Settle(status.id,name)
  assert(final.localSaved and final.queueReason~='SEMANTIC_ENVELOPE',name..': saved locally, never refused for its roles: '..tostring(final.queueReason))
  local record=assert(C.Get(status.id),name..': stored record')
  assert(Copies(record.echoes)==ordinary and Copies(record.lockedEchoes)==locked,name..': exact role copy counts '..Copies(record.echoes)..'/'..Copies(record.lockedEchoes))
