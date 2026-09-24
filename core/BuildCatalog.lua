@@ -3025,8 +3025,10 @@ end
 -- intern goes into the live pool and advances the append revision the
 -- admitted root binds (ROOT_INVALIDATED / SOURCE_DRIFT, no recovery). The
 -- walk's owner finds its handle no longer open and restarts from the next
--- published root. A mutation candidate is never released here; the
--- coordinator does not re-initialize the pool while one is in flight.
+-- published root. No mutation or admission candidate is released here:
+-- ST.activeMaintenance is never set while one exists (BeginCatalogMaintenance
+-- requires none; CommitMaintenance, MutationGate and BeginRootAdmission clear
+-- it).
 function Catalog.ReleaseMaintenanceForRebindV1()
     local displaced = ST.activeMaintenance
     if not displaced then return false end
@@ -3086,7 +3088,14 @@ local function MutationGate(maintenanceHandle)
         ST.activeMaintenance = nil
         EvidenceCancelCandidate()
     end
-    if ST.rebindRequired then Catalog.PumpAuthorityRebindV1() end
+    -- A rebind that would only resume the in-flight mutation is not driven
+    -- from here: PumpAuthorityRebindV1 keeps that request for a coordinator
+    -- turn anyway, and pumping the mutation from inside a caller could
+    -- publish it before that caller has stored its own write (a DPS record
+    -- whose build page is created here, for example).
+    if ST.rebindRequired and not Catalog.RebindWaitsForCandidateV1() then
+        Catalog.PumpAuthorityRebindV1()
+    end
     if ST.candidate then return nil, ST.candidate.mode == "mutation"
         and "ROOT_MUTATION_PENDING" or "ROOT_ADMISSION_PENDING" end
     return Gate()

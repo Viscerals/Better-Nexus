@@ -328,4 +328,44 @@ for _,case in ipairs({{'absent',nil},{'malformed','malformed'}})do
  summary[#summary+1]=case[1]..':'..frames..'f/'..tostring(Meta().last.restarts)..'r'
 end
 
-print('PASS dps_compaction_preservation: accepted DPS writes survive every exercised compaction window through publication, evidence cleanup and reload; worse/duplicate rules kept; finite burst settles; absent or malformed DPS payload completes ['..table.concat(summary,' ')..'] checks='..checks)
+-- 7. A DPS writer that calls the catalog before it stores its row (a new
+-- owner's record creates a build page through Catalog.Put) while a rebind
+-- request is pending during commit-pending. MutationGate used to drive that
+-- rebind, which resumed the compaction mutation inside the write and could
+-- publish the older copy before the row was stored and DPS_CHANGED advanced;
+-- the guard then passed. Every offset of the window is scanned.
+local landedOffsets=0
+for k=0,200 do
+ fx=NewFixture(0)
+ H=F.Boot(fx:Install(F.Database()))
+ local inWindow,requested,info=0,false,nil
+ for frame=1,6000 do
+  local st=Nexus.DataCompaction.Stats(NexusDB) or {}
+  if st.pending and st.phase=='commit-pending' then
+   if not requested then Nexus.BuildCatalog.RequestAuthorityRebindV1('SOURCE_REBIND_REQUIRED');requested=true end
+   if not info and inWindow==k then
+    local bundle=NexusDB.authorityBundle
+    local ok=fx:Receive('November','lk',{dps=49000,ts=L.STAMP+303})
+    info={ok=ok==true,phase=tostring((Nexus.DataCompaction.Stats(NexusDB) or {}).phase),inside=NexusDB.authorityBundle~=bundle}
+   end
+   inWindow=inWindow+1
+  end
+  if frame>10 and Completed() and not Nexus.Scheduler.Pending('data-compaction') then break end
+  H.Advance(.05,.05)
+ end
+ if not info then break end
+ landedOffsets=landedOffsets+1
+ local tag='rebind pending, commit-pending+'..k
+ check(info.ok and info.phase=='commit-pending',tag..': the record of the new owner was accepted inside commit-pending')
+ check(not info.inside,tag..': no catalog publication happened inside the write')
+ check(Completed(),tag..': compaction completed')
+ local row=Bucket()['november@ebonhold']
+ check(row and row.dps==49000,tag..': the accepted record is in the durable bundle ('..tostring(row and row.dps)..')')
+ H=F.Reload()
+ row=Bucket()['november@ebonhold']
+ check(row and row.dps==49000,tag..': the accepted record is kept after reload')
+end
+check(landedOffsets>=10,'the commit-pending window was scanned at '..landedOffsets..' offsets')
+summary[#summary+1]='rebind-pending-window:'..landedOffsets..'offsets'
+
+print('PASS dps_compaction_preservation: accepted DPS writes survive every exercised compaction window through publication, evidence cleanup and reload; worse/duplicate rules kept; finite burst settles; absent or malformed DPS payload completes; no publication inside a write under a pending rebind ['..table.concat(summary,' ')..'] checks='..checks)
