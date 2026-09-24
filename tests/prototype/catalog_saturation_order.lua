@@ -256,4 +256,20 @@ seen=(Bundle().dataRetention or {}).markerFirstSeen or {}
 check(seen['legacy-1']~=nil and seen['legacy-1']~=math.huge and seen['legacy-1']>=base,
  'an infinite first observation is recorded again from the clock: '..tostring(seen['legacy-1']))
 check(seen['legacy-2']==keep2,'the valid first observation is kept across the reload')
-print('PASS catalog_saturation_order: reservation, malformed and owner reasons before full; batch, shipped-copy and insert accounting; same-transaction expiry room; per-category chat; busy retry; first-observation range checks='..checks)
+-- 8. While the catalog is full, a refused claimless record for a new build
+-- takes no allocation reservation, so it does not supersede another owner's
+-- open reservation. That reservation stays valid: its next use is judged on
+-- capacity (refused as full), not refused as stale. (A committed change of the
+-- catalog makes an open reservation stale by design, so no room is made here.)
+local db8={settingsVersion=5,settings={},chars={},communityBuilds={}}
+for i=1,2048 do db8.communityBuilds['b-'..i]=Record('b-'..i) end
+C=Boot(db8);Run(5)
+local held,heldWhy=C.BeginAllocationClaim('held-1')
+check(held~=nil,'fixture: an allocation reservation for a new build is open: '..tostring(heldWhy))
+ok,why=C.Put(Record('other-1'),{source='sync'})
+check(ok==false and why=='ROOT_SLOT_LIMIT','a claimless new build is refused as full: '..tostring(why))
+ok,why=Settle(C.PutWithClaim(held,Record('held-1'),{source='import'}))
+check(ok==false and why=='ROOT_SLOT_LIMIT',
+ 'the open reservation was not superseded: its use is refused as full, not as stale: '..tostring(why))
+check(C.Get('held-1')==nil and C.Get('other-1')==nil and C.Status().buildIdentityCount==2048,'nothing was added')
+print('PASS catalog_saturation_order: reservation, malformed and owner reasons before full; batch, shipped-copy and insert accounting; same-transaction expiry room; per-category chat; busy retry; first-observation range; open reservation kept while full checks='..checks)
