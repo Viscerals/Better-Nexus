@@ -2,7 +2,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Check existing reports first
     url: https://github.com/Viscerals/Better-Nexus/issues?q=is%3Aissue
-    about: Search for an existing Bug, Performance, or Sync report before opening a duplicate.
+    about: Search for an existing Bug, Performance, or Sync report or Feature Suggestion before opening a duplicate.
   - name: Public prereleases and release notes
     url: https://github.com/Viscerals/Better-Nexus/releases
     about: Check the available Better Nexus prereleases and confirm the exact build you are testing.
