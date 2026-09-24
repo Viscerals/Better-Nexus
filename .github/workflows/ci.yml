@@ -67,3 +67,62 @@ jobs:
           if git ls-files | grep -Ei '(^|/)(WTF|SavedVariables)(/|$)|\.(zip|bundle|log|bak)$'; then
             echo 'Tracked file that must not be in the repository.'; exit 1
           fi
+
+  # For a pull request the two jobs above check out GitHub's generated merge
+  # commit. This job runs the same commands on the pull request's own head
+  # commit, so a result belongs to that exact SHA. It adds no trigger and no
+  # permission, and publishes nothing.
+  literal-head:
+    name: literal-head
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out the pull request head commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Record the tested commit and tree
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "tested commit $sha, tree $tree"
+          echo "### Literal head: commit \`$sha\`, tree \`$tree\`" >> "$GITHUB_STEP_SUMMARY"
+          test "$sha" = "$EXPECTED_SHA"
+      # The package steps come first: the suite writes ci-summary.txt into the
+      # checkout, and an archive build refuses a tree with uncommitted files.
+      - name: Package content and TOC compatibility checks
+        run: python3 tools/build_package.py --check
+      - name: Reproducible archive, then discard it
+        run: |
+          python3 tools/build_package.py --label ci-check
+          first=$(sha256sum dist/Nexus-ci-check.zip | cut -d' ' -f1)
+          rm dist/Nexus-ci-check.zip
+          python3 tools/build_package.py --label ci-check
+          second=$(sha256sum dist/Nexus-ci-check.zip | cut -d' ' -f1)
+          rm -r dist
+          test "$first" = "$second"
+      - name: Release identity consistency (fail-capable; publishes nothing)
+        run: python3 tools/release_selftest.py
+      - name: No private or generated files are tracked
+        run: |
+          if git ls-files | grep -Ei '(^|/)(WTF|SavedVariables)(/|$)|\.(zip|bundle|log|bak)$'; then
+            echo 'Tracked file that must not be in the repository.'; exit 1
+          fi
+      - name: Install LuaJIT
+        run: sudo apt-get update && sudo apt-get install --yes luajit
+      - name: Inventory check and complete offline suite
+        # Reference-dependent tests need a third-party archive that is not redistributed.
+        # They are printed as NOT RUN. They are never counted as passed.
+        shell: bash   # explicit bash runs with pipefail, so a failed suite fails this step
+        run: python3 tools/ci_check.py | tee ci-summary.txt
+      - name: Summary
+        if: always()
+        run: |
+          echo '### Offline suite (literal head)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 12 ci-summary.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
