@@ -210,6 +210,9 @@ end
 -- 10. Reload. A saved profile from an earlier build may still carry the old
 -- recordedPicks field; it is kept as data and never read back as ownership.
 -- A Select pending at the time of a reload is not ownership afterwards.
+-- These are CONTROLS, not regressions: the old code never read the stored
+-- field back and kept its picks in memory, so they hold on the parent too.
+-- They pin the contract so a later change cannot start reading it back.
 do
  Boot(30,nil,function(db) db.chars[F.NAME].recordedPicks={[X]=4} end)
  check(Owned(X)==0,'a stored recordedPicks count is not ownership: owned='..Owned(X))
@@ -240,9 +243,9 @@ do
  Resolve(nil)
  check(A.Owned().total==78,
   'an ungranted 79th Select does not complete the run: total='..tostring(A.Owned().total))
- local saves=0
- for _,action in ipairs(H.actions) do if action[1]=='save' then saves=saves+1 end end
- check(saves==0,'and nothing is saved on its strength')
+ -- The save gate reads this total (rolledTotal >= 79). A check that no save
+ -- happened would prove nothing here: this fixture has autoSave off, so it
+ -- holds on the parent as well. The total above is the discriminating fact.
  Grant(X,2)
  check(A.Owned().total==79,'the real grant completes it: total='..tostring(A.Owned().total))
 end
@@ -259,6 +262,72 @@ do
  A.RunBoundaryReset()
  check(A.InFlight()==false,'a run boundary releases it')
  check(Owned(X)==0,'without making it owned')
+end
+
+-- 13. The baseline is the count BEFORE the Select was sent. The grant can
+-- land before the latch clears, or in the same poll as the latch clear and
+-- the next board. A baseline taken at the board change would already include
+-- the grant, the mirror could never rise above it, and automation would stay
+-- held for good. Both orders must confirm.
+do
+ Boot(30)
+ ShowBoard(BOARD)
+ Submit(X)
+ -- The grant arrives while the latch is still held.
+ local out=H.Clone(H.granted or {})
+ out['Echo 10']=out['Echo 10'] or {}
+ table.insert(out['Echo 10'],{spellId=X,quality=2})
+ H.granted=out
+ Resolve(NEXT)
+ check(Owned(X)==1,'a grant that lands before the latch clears is owned')
+ check(A.InFlight()==false,'and it confirms the Select')
+end
+do
+ Boot(30)
+ ShowBoard(BOARD)
+ Submit(X)
+ -- Grant, latch clear and next board, all before the adapter next polls.
+ local out=H.Clone(H.granted or {})
+ out['Echo 10']=out['Echo 10'] or {}
+ table.insert(out['Echo 10'],{spellId=X,quality=2})
+ H.granted=out
+ H.perks.pendingSelectSpellId=nil
+ H.perks.currentChoice=H.Clone(NEXT)
+ H.Notify();A.Poll();H.Advance(.2)
+ check(Owned(X)==1,'a grant in the same poll as the board change is owned')
+ check(A.InFlight()==false,'and it confirms the Select in that same poll')
+end
+
+-- 14. With Ordinary Automation actually on. While the Select waits for its
+-- grant the runtime submits nothing: no second Select, and no Echo lock --
+-- locking the awaited Echo would move its stacks out of the granted mirror,
+-- so its grant could never be seen. Once the grant lands, both resume.
+do
+ Boot(30)
+ ShowBoard(BOARD)
+ Submit(X)
+ Resolve(NEXT)
+ check(A.InFlight()==true,'fixture: the Select is waiting for its grant')
+ Nexus.Store.Settings().autoLockEchoes=true
+ SlashCmdList.NEXUS('auto')
+ local takesBefore=0
+ for _,action in ipairs(H.actions) do if action[1]=='take' then takesBefore=takesBefore+1 end end
+ for _=1,4 do Nexus.RequestRecompute();H.Advance(.5) end
+ local takes,locks=0,0
+ for _,action in ipairs(H.actions) do
+  if action[1]=='take' then takes=takes+1 end
+  if action[1]=='lock' or action[1]=='unlock' then locks=locks+1 end
+ end
+ check(takes==takesBefore,'automation sends no second Select while one awaits its grant')
+ check(locks==0,'and locks nothing')
+ local trace=Nexus.GetDiagnosticPageText('autolock') or ''
+ check(trace:find('deferred: an Echo action is still in flight',1,true)~=nil,
+  'the lock step says it deferred because an Echo action is in flight')
+ Grant(X,2)
+ for _=1,2 do Nexus.RequestRecompute();H.Advance(.5) end
+ trace=Nexus.GetDiagnosticPageText('autolock') or ''
+ check(trace:find('deferred: an Echo action is still in flight',1,true)==nil,
+  'once the grant lands the lock step runs again')
 end
 
 print('PASS select_intent_ownership: a submitted Select is intent until the granted mirror shows it checks='..checks)

@@ -103,7 +103,10 @@ wishlist = nil | {           -- nil => advisor-only mode
   byFamily = { [familyKey] = { targetStacks=n, wishedQuality=n, spellId=n } },
 }
 
-owned = {                    -- granted ∪ locked ∪ adapter-recorded picks
+owned = {                    -- the granted mirror only: rolled stacks. Locked
+                             -- Echoes are separate (LockedOwned). A submitted
+                             -- Select is intent, never owned, until the mirror
+                             -- shows it (#62); it holds InFlight() meanwhile
   bySpell  = { [spellId] = count },
   byFamily = { [familyKey] = count },
   synced = bool,             -- false => engine must not auto-act at level > 1

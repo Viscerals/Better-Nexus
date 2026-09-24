@@ -1623,6 +1623,16 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         (not allowed and whyNot) and (" (" .. tostring(whyNot) .. ")") or "")
     if not allowed then return end
 
+    -- An Echo action whose outcome is not settled -- above all a Select still
+    -- waiting for its grant -- defers locking. Locking the awaited Echo in that
+    -- window would move its stacks out of the granted mirror, so the grant
+    -- could never be seen and automation would stay held. When the grant
+    -- lands the adapter marks data dirty, which makes this step due again.
+    if Adapter.InFlight and Adapter.InFlight() then
+        trace[#trace + 1] = "deferred: an Echo action is still in flight"
+        return
+    end
+
     -- Separate opt-in, off by default (Wishlist Editor checkbox next to the
     -- Locked strip) -- a player may want full board automation without
     -- also handing Nexus this specific, more consequential write action.

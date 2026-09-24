@@ -664,6 +664,9 @@ end
 -- How many stacks of one spell the granted mirror holds right now: the same
 -- evidence, counted the same way, as GrantedSignature and A.Owned. A Select is
 -- confirmed only when this rises above the count taken when it was submitted.
+-- This is exact spell AND tier evidence: the server guarantees exact spell
+-- IDs, and each quality tier of an Echo is its own sibling spellId (see
+-- Ratchet), so a count of one spellId is never another tier's stacks.
 local function GrantedCountOf(spellId)
     local svc = PS()
     local granted = svc and SafeCall(svc.GetGrantedPerks)
