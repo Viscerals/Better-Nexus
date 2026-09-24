@@ -376,7 +376,16 @@ function Lifecycle.New(options)
         -- turn is a coordinator dispatch point, not a dependent. It admits the
         -- evidence pool before the catalog on the rebind path, the order
         -- Catalog.Init used to enforce by driving LoadoutEvidence directly.
-        if type(catalog.PendingRebindDatabaseV1) == "function" then
+        -- While the catalog only resumes its in-flight candidate, the evidence
+        -- pool is not re-initialized: that would discard the candidate's open
+        -- evidence transaction, and the candidate would publish a root that
+        -- already drifts from the evidence revision its own plan advances.
+        local okWaits, waits = true, false
+        if type(catalog.RebindWaitsForCandidateV1) == "function" then
+            okWaits, waits = pcall(catalog.RebindWaitsForCandidateV1)
+        end
+        if type(catalog.PendingRebindDatabaseV1) == "function"
+            and not (okWaits and waits) then
             local okTarget, target = pcall(catalog.PendingRebindDatabaseV1)
             if okTarget and type(target) == "table"
                 and Nexus.LoadoutEvidence

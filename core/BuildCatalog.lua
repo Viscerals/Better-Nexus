@@ -3000,6 +3000,21 @@ function Catalog.PendingRebindDatabaseV1()
     return type(NexusDB) == "table" and NexusDB or ST.db
 end
 
+-- True while a candidate is in flight against the exact database and shipped
+-- builds the pending rebind would bind. Catalog.Init then only resumes that
+-- candidate, so a coordinator must not re-initialize a dependent owner in this
+-- turn: an open evidence candidate belongs to that in-flight transaction, and
+-- its publish plan already counts the candidate's appends. A pure read.
+function Catalog.RebindWaitsForCandidateV1()
+    local reason = ST.rebindRequired
+    if not reason or ST.candidate == nil then return false end
+    if reason == "OWNER_REBIND_REQUIRED" then return true end
+    local nextDb = type(NexusDB) == "table" and NexusDB or ST.db
+    local nextBundle = type(Nexus.BundledBuilds) == "table"
+        and Nexus.BundledBuilds or ST.bundled
+    return nextDb == ST.db and nextBundle == ST.bundled
+end
+
 function Catalog.PumpAuthorityRebindV1(database, bundle, requestedReason)
     local reason = ST.rebindRequired or requestedReason
     if not reason then return {rebound=false} end
@@ -3014,10 +3029,18 @@ function Catalog.PumpAuthorityRebindV1(database, bundle, requestedReason)
     end
     if type(database) == "table" then nextDb = database end
     if type(bundle) == "table" then nextBundle = bundle end
+    -- Against the same source, Init only resumes an in-flight candidate. That
+    -- is not the requested rebind, so the request stays pending until the
+    -- candidate settles: then the next turn re-admits when the root no longer
+    -- matches its source (for example after a genuine drift), or finds it
+    -- current and does nothing more.
+    local resumesCandidate = ST.candidate ~= nil and nextDb == ST.db
+        and nextBundle == ST.bundled
     local summary = Catalog.Init(nextDb, nextBundle)
     -- MASTER-RC-006: Init advances exactly one slice. Preserve the one pending
     -- request until a later coordinator turn reaches a terminal result.
-    if type(summary) == "table" and summary.state == "pending" then
+    if (type(summary) == "table" and summary.state == "pending")
+        or resumesCandidate then
         ST.rebindRequired = ST.rebindRequired or reason
     end
     return {rebound=true, reason=reason, summary=summary,
