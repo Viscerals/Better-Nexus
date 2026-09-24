@@ -10,7 +10,7 @@
 -- drives the immutable test.9020 baseline and a corrected candidate.
 local Adapter={}
 local PURE={'data\\DefaultProfile.lua','core\\EchoCatalogSource.lua','logic\\Model.lua','logic\\Strategy.lua','logic\\Ratchet.lua',
- 'logic\\WishlistPilot.lua','logic\\OrbPolicy.lua','logic\\Policy.lua'}
+ 'logic\\EchoWeaver.lua','logic\\OrbPolicy.lua','logic\\Policy.lua'}
 function Adapter.Load(root)
  root=(root or os.getenv('NEXUS_POLICY_ROOT') or '.'):gsub('\\','/')
  local toc=assert(io.open(root..'/Nexus.toc','rb')):read('*a')
@@ -22,7 +22,7 @@ function Adapter.Load(root)
  end
  Nexus=nil
  for _,entry in ipairs(order)do dofile(root..'/'..entry:gsub('\\','/'))end
- assert(Nexus.WishlistPilot and Nexus.Policy and Nexus.Strategy and Nexus.Ratchet and Nexus.Model and Nexus.EchoCatalogSource,'pure rolling modules loaded')
+ assert(Nexus.EchoWeaver and Nexus.Policy and Nexus.Strategy and Nexus.Ratchet and Nexus.Model and Nexus.EchoCatalogSource,'pure rolling modules loaded')
  Adapter.root,Adapter.order=root,order
  return Nexus
 end

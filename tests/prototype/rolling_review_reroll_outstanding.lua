@@ -1,6 +1,6 @@
 -- R3 (review of main eadff8a), report scenario F1: a satisfied Wishlist target
 -- on the board stopped a permitted Reroll. This is a PROPOSED strategy change,
--- not a proven bug: the earlier behaviour follows the named reference strategy.
+-- not a proven bug: the earlier behaviour follows the base strategy.
 -- NEW test written from the report's stated scenario; not a rerun of the
 -- review's original probe. It uses the maintained production-policy adapter
 -- (real pure modules in TOC order). The scripted board sequences below are
@@ -18,12 +18,12 @@ local function F1(extra)
 end
 -- F1: 101 is satisfied, only 102 is missing, five Rerolls are permitted.
 local a=P.Decide(F1())
-check(a.planner=='pilot103' and a.type=='reroll','F1 searches instead of taking a surplus copy: '..P.Line(a))
+check(a.planner=='echoweaver' and a.type=='reroll','F1 searches instead of taking a surplus copy: '..P.Line(a))
 check(a.reasonCode=='REROLL_NO_OUTSTANDING_ON_BOARD','F1 has its own reason code')
 check(not a.reason:find('no requested',1,true),'the reason does not claim that no requested Echo is on the board')
 dofile('core/UserText.lua')
 check(Nexus.UserText.Message(a.reason)=='Reroll: no Echo on this board is still needed','the visible text is truthful for this board')
--- Control from the report: only filler on the board. Unchanged reference decision and reason.
+-- Control from the report: only filler on the board. Unchanged base decision and reason.
 a=P.Decide(F1({cards={{spellId=903},{spellId=901},{spellId=902}}}))
 check(a.type=='reroll' and a.reasonCode=='REROLL_COMMON_UNWANTED_BOARD','filler-only control keeps the reference Reroll and reason')
 
@@ -55,30 +55,30 @@ check(a.type=='reroll','a target met by a locked copy is satisfied too')
 a=P.Decide(F1({owned=P.Owned(catalog,{[101]=1,[102]=1})}))
 check(a.type=='take' and a.reasonCode=='OBJECTIVE_COMPLETE_FALLBACK','complete Wishlist never rerolls')
 
--- The pure planner without the explicit option keeps the reference decision.
+-- The pure planner without the explicit option keeps the base decision.
 local function Pure(policy)
- return Nexus.WishlistPilot.Decide({objective={requestedCounts={[101]=1,[102]=1},outstandingCounts={[101]=0,[102]=1},outstandingTotal=1},
+ return Nexus.EchoWeaver.Decide({objective={requestedCounts={[101]=1,[102]=1},outstandingCounts={[101]=0,[102]=1},outstandingTotal=1},
   remainingPicks=1,board={choices={{echoID=101,quality=0},{echoID=901,quality=0},{echoID=902,quality=0}},
    capabilities={canSelect=true,canBanish=false,canFreeze=false,canReroll=true}},
   resources={banishesRemaining=0,freezesRemaining=0,rerollsRemaining=5},commonBoardRerollEnabled=true,policy=policy})
 end
 local ref=Pure(nil)
-check(ref.action=='SELECT' and ref.echoID==101 and ref.reasonCode=='RESOURCE_EXHAUSTED_FALLBACK','without the option: reference decision')
+check(ref.action=='SELECT' and ref.echoID==101 and ref.reasonCode=='RESOURCE_EXHAUSTED_FALLBACK','without the option: base decision')
 check(Pure({rerollIgnoresSatisfiedTargets=true}).action=='REROLL','with the option: Reroll')
-check(Nexus.WishlistPilot.NEXUS_POLICY.rerollIgnoresSatisfiedTargets==true,'DecideNexus uses the explicit option')
+check(Nexus.EchoWeaver.NEXUS_POLICY.rerollIgnoresSatisfiedTargets==true,'DecideNexus uses the explicit option')
 
 -- Fixed-fixture replays: one pick left, five Rerolls. Each Reroll shows the next
 -- scripted board. Counts are outcomes on these fixtures only.
 local function Replay(boards,policy)
- local saved=Nexus.WishlistPilot.NEXUS_POLICY
- Nexus.WishlistPilot.NEXUS_POLICY=policy
+ local saved=Nexus.EchoWeaver.NEXUS_POLICY
+ Nexus.EchoWeaver.NEXUS_POLICY=policy
  local rerolls,i,taken=5,1,nil
  while true do
   local d=P.Decide(F1({cards=boards[i],charges={trustworthy=true,banish=0,freeze=0,reroll=rerolls}}))
   if d.type=='reroll' then rerolls=rerolls-1;i=i+1;assert(boards[i],'fixture long enough')
   else taken=d.spellId;break end
  end
- Nexus.WishlistPilot.NEXUS_POLICY=saved
+ Nexus.EchoWeaver.NEXUS_POLICY=saved
  return taken,5-rerolls
 end
 local found={{{spellId=101},{spellId=901},{spellId=902}},{{spellId=902},{spellId=903},{spellId=904}},{{spellId=102},{spellId=901},{spellId=903}}}

@@ -40,7 +40,7 @@ mechanic.
 
 | Consumer | Correction |
 |---|---|
-| `logic/Policy.lua` dispatch on `snapshotVerified` | Removed. Every ordinary board uses `WishlistPilot`, which keeps its own incomplete-state refusals. The historical scoring is reachable only without that planner and then sees an empty queue. |
+| `logic/Policy.lua` dispatch on `snapshotVerified` | Removed. Every ordinary board uses `EchoWeaver`, which keeps its own incomplete-state refusals. The historical scoring is reachable only without that planner and then sees an empty queue. |
 | `logic/Ratchet.lua` `PredictQueue` | Always empty. The obsolete expansion is `HistoricalGuaranteeQueue`, with no production caller. |
 | `logic/Ratchet.lua` `RunsEstimate` | Counts known deficits only. |
 | `core/AutomationRuntime.lua` board preparation and `JournalData` | No verification flag and no inferred queue reach the policy or the estimate. |

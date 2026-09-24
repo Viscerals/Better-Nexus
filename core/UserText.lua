@@ -16,15 +16,15 @@ local reasons={
     ["orb state unavailable"]="Ordinary rolling paused: the game's Orb service does not expose its pending-offer state",
     ["orb state capability missing"]="Ordinary rolling paused: the game's Orb service does not report whether its state is known, so Nexus cannot confirm that no Orb choice is open",
     ["Orb offer active -- manual action required"]="An Orb offer is active; use Orb mode or resolve it in the game",
-    ["Take wanted Echo (Pilot)"]="Take a needed Echo",
-    ["Take available Echo (Pilot)"]="Take an available Echo",
-    ["Freeze wanted Echo before search (Pilot)"]="Freeze a needed Echo before searching for another target",
-    ["Banish to find Wishlist targets (Pilot)"]="Banish to find Wishlist targets",
-    ["Reroll: no requested Echo on board (Pilot)"]="Reroll: no requested Echo on board",
-    ["Reroll: no needed Echo on board (Pilot)"]="Reroll: no Echo on this board is still needed",
-    ["Take available filler (Pilot)"]="Take an available Echo outside the Wishlist",
-    ["Take filler; search unavailable (Pilot)"]="Take an Echo outside the Wishlist; no permitted Banish or Reroll action",
-    ["Wishlist complete; take filler (Pilot)"]="Wishlist complete; take an Echo outside the Wishlist",
+    ["Take wanted Echo (EchoWeaver)"]="Take a needed Echo",
+    ["Take available Echo (EchoWeaver)"]="Take an available Echo",
+    ["Freeze wanted Echo before search (EchoWeaver)"]="Freeze a needed Echo before searching for another target",
+    ["Banish to find Wishlist targets (EchoWeaver)"]="Banish to find Wishlist targets",
+    ["Reroll: no requested Echo on board (EchoWeaver)"]="Reroll: no requested Echo on board",
+    ["Reroll: no needed Echo on board (EchoWeaver)"]="Reroll: no Echo on this board is still needed",
+    ["Take available filler (EchoWeaver)"]="Take an available Echo outside the Wishlist",
+    ["Take filler; search unavailable (EchoWeaver)"]="Take an Echo outside the Wishlist; no permitted Banish or Reroll action",
+    ["Wishlist complete; take filler (EchoWeaver)"]="Wishlist complete; take an Echo outside the Wishlist",
     ["Take wanted Echo"]="Take a needed Echo",
     ["invalid wishlist"]="This Wishlist cannot be used yet. Open it in the editor to check its targets",
     ["invalid loadout"]="This Saved Build is unavailable or not valid for this action. Check My Builds",
@@ -86,7 +86,7 @@ function T.Message(value)
     if s:find("no net gain",1,true) then return "Not saved: no additional matching Wishlist copies were confirmed." end
     if s:find("coverage lost:",1,true) then return "Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets." end
     if s:match("^[A-Z][A-Z0-9_]+$") then return "This action is not available yet. Check the status or diagnostics. Details: "..s end
-    s=s:gsub("Take wanted Echo %(Pilot%)","Take a needed Echo")
+    s=s:gsub("Take wanted Echo %(EchoWeaver%)","Take a needed Echo")
         :gsub("Wishlist identity found; ","")
         :gsub("TARGET:","WISHLIST:")
         :gsub("OWNED this run:","Rolled Echoes this run:")

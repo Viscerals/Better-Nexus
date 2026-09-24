@@ -2,7 +2,7 @@
 -- Real pure modules in production TOC order through the maintained adapter.
 local P=dofile('tests/prototype/policy_adapter.lua')
 P.Load()
-assert(table.concat(P.order,','):find('WishlistPilot.lua,logic\\OrbPolicy.lua,logic\\Policy.lua',1,true),'WishlistPilot loads before Policy, as in the TOC')
+assert(table.concat(P.order,','):find('EchoWeaver.lua,logic\\OrbPolicy.lua,logic\\Policy.lua',1,true),'EchoWeaver loads before Policy, as in the TOC')
 local catalog=P.Catalog({f1={[0]=1001,[1]=1011},f2={[0]=1002},f3={[0]=1003},f4={[0]=1004}})
 local plan=P.Plan(catalog,{{spellId=1001,stacks=1},{spellId=1002,stacks=1}})
 local saved={verified=true,echoes=P.Echoes(catalog,{{spellId=1001,stacks=1}})}
@@ -39,9 +39,9 @@ print('PASS adapter projects the production catalog and Wishlist shapes: '..P.Li
 
 -- 1. Dispatch and useful progress. A targetless Wait is not adapter success.
 local action=P.Decide(Base({activeRow=unsaved}))
-assert(action.planner=='pilot103' and action.type~='wait' and plan.requestedCounts[action.spellId]==1,'ordinary Wishlist board reaches the intended planner and acts on a requested Echo')
+assert(action.planner=='echoweaver' and action.type~='wait' and plan.requestedCounts[action.spellId]==1,'ordinary Wishlist board reaches the intended planner and acts on a requested Echo')
 local reference=P.Line(action)
-assert(reference=='freeze|1001|1|pilot103|Freeze wanted Echo before search (Pilot)','exact diagnostic fixture decision: '..reference)
+assert(reference=='freeze|1001|1|echoweaver|Freeze wanted Echo before search (EchoWeaver)','exact diagnostic fixture decision: '..reference)
 print('PASS real TOC-order dispatch makes useful progress: '..reference)
 
 -- 2. Metadata invariance: only saved verification, old flags or a stale
