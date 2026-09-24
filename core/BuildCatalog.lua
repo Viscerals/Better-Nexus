@@ -3685,6 +3685,15 @@ local function PublishRoot(handle)
     local db = handle.token.databaseIdentity
     local drift = TokenDrifted(handle.token)
     if drift then return AdmissionFail(handle, drift) end
+    -- A maintenance owner's precondition on the source its payload overrides
+    -- were prepared from (Catalog.CommitMaintenance publicationGuard). This is
+    -- the last point before the durable bundle is replaced.
+    if handle.mode == "mutation" and type(handle.publicationGuard) == "function" then
+        local guardOk, current = pcall(handle.publicationGuard)
+        if not (guardOk and current == true) then
+            return AdmissionFail(handle, "PUBLICATION_SOURCE_CHANGED")
+        end
+    end
     local publishPlan = handle.publishPlan
     if type(publishPlan) ~= "table" then
         publishPlan = handle.mode == "mutation"
@@ -6579,7 +6588,13 @@ function Candidate.PumpMaintenancePreparation(handle, work)
     return "pending"
 end
 
-function Catalog.CommitMaintenance(handle, bundleOverrides)
+-- publicationGuard (optional): a function the maintenance owner binds to the
+-- source its bundleOverrides were prepared from. It is called at the actual
+-- publication point of this commit; unless it returns true, the publication
+-- is refused with PUBLICATION_SOURCE_CHANGED (the published root stays
+-- admitted and nothing is written), so the owner prepares again from the
+-- current source instead of publishing an older copy over an accepted write.
+function Catalog.CommitMaintenance(handle, bundleOverrides, publicationGuard)
     local root, why = MaintenanceOpen(handle)
     if not root then return false, why end
     handle.state = "committing"
@@ -6620,6 +6635,9 @@ function Catalog.CommitMaintenance(handle, bundleOverrides)
     end
     local candidate = Candidate.NewMaintenancePreparation(
         root, handle, bundleOverrides)
+    if type(publicationGuard) == "function" then
+        candidate.publicationGuard = publicationGuard
+    end
     ST.candidate = candidate
     local outcome = Catalog.PumpRootAdmission()
     if candidate.ticket.state == "committed" then
