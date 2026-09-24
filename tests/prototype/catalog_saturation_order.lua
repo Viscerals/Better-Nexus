@@ -132,6 +132,9 @@ check(C.Status().tombstoneCount==2048 and C.Get('keep-1')~=nil,'fixture: 2048 re
 local removed,removeWhy=C.SetTombstone('keep-1',{stamp=5,author='Other-Realm'},{source='remote',sender='Other-Realm'})
 check(removed==false and removeWhy=='REMOTE_OWNER_REQUIRED' and Refused(C)==0,
  'a removal from a sender who does not own the build keeps its reason and is not counted: '..tostring(removeWhy))
+removed,removeWhy=C.SetTombstone('keep-1',{stamp=5,author='x'},{source='local'})
+check(removed==false and removeWhy=='LOCAL_OWNER_REQUIRED' and Refused(C)==0,
+ 'a local removal of another player\'s build keeps its owner reason and is not counted: '..tostring(removeWhy))
 removed,removeWhy=C.SetTombstone('keep-1',{stamp=5,author='Peer-Realm'},{source='remote',sender='Peer-Realm'})
 check(removed==false and removeWhy=='TOMBSTONE_SET_LIMIT' and C.Get('keep-1')~=nil,
  'the owner removal is refused because the map is full and the build stays: '..tostring(removeWhy))
