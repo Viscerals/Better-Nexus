@@ -78,6 +78,7 @@ NAMES += ['startup_attempt_key_width']
 NAMES += ['wishlist_switch_recovery']
 NAMES += ['server_hud_handoff']
 NAMES += ['first_hud_display']
+NAMES += ['select_intent_ownership']
 
 def main() -> int:
     ap=argparse.ArgumentParser()
