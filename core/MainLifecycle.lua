@@ -136,7 +136,8 @@ function Lifecycle.New(options)
                 counter=last.counter, count=tonumber(last.count),
                 limit=tonumber(last.limit), source=last.source,
                 counted={overlay=tonumber(last.overlay), bundled=tonumber(last.bundled),
-                    tombstone=tonumber(last.tombstone), barrier=tonumber(last.barrier)}}
+                    tombstone=tonumber(last.tombstone), barrier=tonumber(last.barrier),
+                    builds=tonumber(last.builds)}}
         end
         local function Token(value, limit)
             if value == nil then return nil end
@@ -219,6 +220,7 @@ function Lifecycle.New(options)
         ["DpsCapture.OnUpdate"]={active=false,message=nil},
         ["DpsCapture.OnCombatStart"]={active=false,message=nil},
         ["DpsCapture.OnCombatEnd"]={active=false,message=nil},
+        ["DataRetention.Request"]={active=false,message=nil},
     }
 
     local function RunIsolatedOwner(source, callback, ...)
@@ -825,6 +827,20 @@ function Lifecycle.New(options)
     local function CompleteSharedWorldEntry()
         if not communityReady or not sharedWorldEntryPending then return end
         sharedWorldEntryPending = false
+        -- Retention maintenance (first observation and expiry of retention
+        -- markers) runs through its own scheduler once the shared catalog is
+        -- admitted, and only when retention markers exist. A request is
+        -- bounded and coalesced; reads never start it.
+        local catalog = Nexus.BuildCatalog
+        local okStatus, catalogStatus = pcall(function()
+            return catalog and type(catalog.Status)=="function" and catalog.Status() or nil
+        end)
+        if okStatus and type(catalogStatus)=="table"
+            and (tonumber(catalogStatus.barrierCount) or 0) > 0
+            and Nexus.DataRetention and type(Nexus.DataRetention.Request)=="function" then
+            RunIsolatedOwner("DataRetention.Request", Nexus.DataRetention.Request,
+                "shared catalog ready")
+        end
         local Adapter=dependencies.Adapter
         if Nexus.Sync and Nexus.Codec then
             if not syncInitialized
@@ -1182,6 +1198,19 @@ function Lifecycle.New(options)
         if dpsInitialized and Nexus.DpsCapture then
             RunIsolatedOwner("DpsCapture.OnUpdate",
                 Nexus.DpsCapture.OnUpdate, elapsed)
+        end
+        -- Runtime saturation: one chat line per session when a full category
+        -- first refuses new data. Existing data and the Leaderboard stay
+        -- available; /nexus status keeps the retained counts.
+        if catalogReady and not startupTiming.saturationNoticed then
+            local catalog = Nexus.BuildCatalog
+            if catalog and type(catalog.SaturationRefusals) == "function"
+                and catalog.SaturationRefusals() > 0 then
+                startupTiming.saturationNoticed = true
+                Print("Community catalog full: new shared builds are refused. "
+                    .. "Your existing Community builds and Leaderboard stay available. "
+                    .. "See /nexus status.")
+            end
         end
         local automation = EnsureAutomation()
         if automation then automation.OnUpdate(elapsed) end

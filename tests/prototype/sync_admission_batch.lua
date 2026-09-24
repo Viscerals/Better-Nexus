@@ -171,12 +171,23 @@ do
  check((stats.admissionExpired or 0)==0,'persistent: no valid item expired behind the failing one')
 end
 
--- 7. The capacity limits are unchanged: a batch cannot pass the root limit.
+-- 7. The build limit holds: a record for a new build identity is refused when
+-- the catalog already holds 2048, before any catalog work (no candidate, no
+-- futile mutation), explicitly, and the published root stays as it is.
 H,C=A.Boot(2048)
-A.Hold(C)
+A.Receive('admission-holder','Holder',A.base)
 A.Receive('overflow-1','PeerO',A.base+50,'Beyond capacity')
-T.Until(H,function()return (Stats().storageRejected or 0)>0 or C.Get('overflow-1')~=nil end)
-check(C.Get('overflow-1')==nil,'the record beyond the root limit is not committed')
+T.Until(H,function()return (Stats().storageRejected or 0)>=2 or C.Get('overflow-1')~=nil end)
+check(C.Get('overflow-1')==nil and C.Get('admission-holder')==nil,'no record beyond the build limit is committed')
 local rows=0;for _ in pairs(NexusDB.communityBuilds)do rows=rows+1 end
-check(rows<=2049,'the saved overlay did not grow past the limit: '..rows)
-print('PASS sync_admission_batch: one frozen batch per ready turn; per-member outcomes, bounds, cancellation, clock fallback and capacity unchanged checks='..checks)
+check(rows==2048,'the saved overlay did not grow past the limit: '..rows)
+check(H.puts['overflow-1'] and H.puts['overflow-1'].lastRefusal=='ROOT_SLOT_LIMIT',
+ 'the refusal is explicit: '..tostring(H.puts['overflow-1'] and H.puts['overflow-1'].lastRefusal))
+local full=C.SaturationSummary()
+check(full and full.reason=='ROOT_SLOT_LIMIT' and full.counter=='distinct-builds'
+ and full.limit==2048 and full.refused>=2,'the refusals are retained as saturation facts')
+check(C.ManualPreparationStatus().ready and #H.batches==0,
+ 'no catalog candidate was started for them: batches='..#H.batches)
+check(Nexus.StartupStatus().state=='ready' and C.Status().availableCount==2048,
+ 'the admitted catalog stays available with all 2048 builds')
+print('PASS sync_admission_batch: one frozen batch per ready turn; per-member outcomes, bounds, cancellation, clock fallback; a full catalog refuses new builds before any work checks='..checks)
