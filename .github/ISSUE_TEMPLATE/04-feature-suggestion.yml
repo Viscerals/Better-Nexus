@@ -1,0 +1,60 @@
+name: Feature Suggestion / Enhancement
+description: Suggest a new feature or improvement to Better Nexus.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Suggestions are reviewed, but submitting one does not promise that it will be implemented or give it a release date. Do not include private account information.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem, limitation, or use case
+      description: Describe what you are trying to do and what currently makes it difficult or impossible.
+      placeholder: "Example: When I compare two saved loadouts, I have to ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested-behavior
+    attributes:
+      label: Suggested behavior or improvement
+      description: Describe what you would like Better Nexus to do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or current workarounds
+      description: Describe other approaches you considered or what you do today instead.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Examples, screenshots, or additional context
+      description: Add examples, mockups, or screenshots that help explain the suggestion.
+    validations:
+      required: false
+
+  - type: input
+    id: nexus-build
+    attributes:
+      label: Installed Nexus build
+      description: If the suggestion relates to current behavior, copy the build shown by `/nexus status`. Leave this blank if it does not apply.
+      placeholder: "Example: test.18-d9b48c5"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: duplicate-search
+    attributes:
+      label: Duplicate search
+      options:
+        - label: I searched existing issues and did not find the same suggestion.
+          required: true
