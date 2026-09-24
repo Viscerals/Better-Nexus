@@ -3000,14 +3000,16 @@ function Catalog.PendingRebindDatabaseV1()
     return type(NexusDB) == "table" and NexusDB or ST.db
 end
 
--- True while a candidate is in flight against the exact database and shipped
--- builds the pending rebind would bind. Catalog.Init then only resumes that
--- candidate, so a coordinator must not re-initialize a dependent owner in this
--- turn: an open evidence candidate belongs to that in-flight transaction, and
--- its publish plan already counts the candidate's appends. A pure read.
+-- True while a mutation candidate is in flight against the exact database and
+-- shipped builds the pending rebind would bind. Catalog.Init then only resumes
+-- that mutation, so a coordinator must not re-initialize a dependent owner in
+-- this turn: an open evidence candidate belongs to that in-flight transaction,
+-- and its publish plan already counts the candidate's appends. An admission
+-- candidate (the rebind's own work) does not wait. A pure read.
 function Catalog.RebindWaitsForCandidateV1()
     local reason = ST.rebindRequired
-    if not reason or ST.candidate == nil then return false end
+    if not reason or ST.candidate == nil
+        or ST.candidate.mode ~= "mutation" then return false end
     if reason == "OWNER_REBIND_REQUIRED" then return true end
     local nextDb = type(NexusDB) == "table" and NexusDB or ST.db
     local nextBundle = type(Nexus.BundledBuilds) == "table"
@@ -3029,12 +3031,15 @@ function Catalog.PumpAuthorityRebindV1(database, bundle, requestedReason)
     end
     if type(database) == "table" then nextDb = database end
     if type(bundle) == "table" then nextBundle = bundle end
-    -- Against the same source, Init only resumes an in-flight candidate. That
+    -- Against the same source, Init only resumes an in-flight mutation. That
     -- is not the requested rebind, so the request stays pending until the
-    -- candidate settles: then the next turn re-admits when the root no longer
+    -- mutation settles: then the next turn re-admits when the root no longer
     -- matches its source (for example after a genuine drift), or finds it
-    -- current and does nothing more.
-    local resumesCandidate = ST.candidate ~= nil and nextDb == ST.db
+    -- current and does nothing more. An admission candidate is the rebind's
+    -- own work: its request ends with its terminal result (MASTER-RC-006), so
+    -- a failed re-admission is never started again by the same request.
+    local resumesCandidate = ST.candidate ~= nil
+        and ST.candidate.mode == "mutation" and nextDb == ST.db
         and nextBundle == ST.bundled
     local summary = Catalog.Init(nextDb, nextBundle)
     -- MASTER-RC-006: Init advances exactly one slice. Preserve the one pending
