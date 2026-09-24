@@ -88,6 +88,7 @@ NAMES += ['share_source_drift_order']
 NAMES += ['compaction_rebind_release']
 NAMES += ['dps_compaction_preservation']
 NAMES += ['dps_evidence_open_candidate']
+NAMES += ['retention_ranked_dps_preservation']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

@@ -105,6 +105,14 @@ local function ResolveLimits(database)
     return limits
 end
 
+local function DpsRevision()
+    local revisions = Nexus and Nexus.Revisions
+    if revisions and type(revisions.Get) == "function" then
+        return tonumber(revisions.Get(revisions.DPS_CHANGED)) or 0
+    end
+    return 0
+end
+
 local function EpochNow()
     if type(time) ~= "function" then return 0 end
     local ok, value = pcall(time)
@@ -749,8 +757,12 @@ local function PrepareMetadata(source, summary, now, changed, firstSeen)
     return meta
 end
 
+-- publicationGuard (optional, ranked runs): see Catalog.CommitMaintenance. A
+-- publication it refuses (PUBLICATION_SOURCE_CHANGED) writes nothing; the
+-- bounded retry in ScheduleRetention prepares the run again from the current
+-- rows of the bound database.
 local function FinishEnforcement(database, catalog, transaction, summary,
-                                 changed, overrides)
+                                 changed, overrides, publicationGuard)
     local function Finish()
         if changed and (summary.characterBestRemoved or 0)
             + (summary.personalRemoved or 0)
@@ -763,7 +775,7 @@ local function FinishEnforcement(database, catalog, transaction, summary,
     end
     if not transaction then return Finish() end
     local committed, why, ticket = catalog.CommitMaintenance(
-        transaction, overrides)
+        transaction, overrides, publicationGuard)
     if committed == true then return Finish() end
     if committed ~= nil or why ~= "ROOT_MUTATION_PENDING"
         or type(ticket) ~= "table" then
@@ -1002,6 +1014,7 @@ function Retention.Enforce(database, reason)
         return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
     end
     local dpsSource = DurablePayload(database, "dpsCapture")
+    local dpsRevision = DpsRevision()
     local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
     local overlaySource = DurablePayload(database, "communityBuilds")
     overlaySource = type(overlaySource) == "table" and overlaySource or {}
@@ -1065,8 +1078,18 @@ function Retention.Enforce(database, reason)
         -- this commit is pending is not replaced by the older copy.
         dpsCapture=dpsRemoved > 0 and (dps or {}) or nil,
     } or nil
+    -- The DPS removals and the overlay evictions were decided from this copy
+    -- of dpsCapture. They are published only while the live DPS store is
+    -- still the value copied and no DPS change was represented since, so a
+    -- record accepted while this commit is pending is never replaced by the
+    -- older copy; the run is prepared again from the current rows instead.
+    local publicationGuard = transaction
+        and (dpsRemoved > 0 or overlay.removed > 0) and function()
+            return DpsRevision() == dpsRevision
+                and DurablePayload(database, "dpsCapture") == dpsSource
+        end or nil
     return FinishEnforcement(database, owner, transaction, summary,
-        changed, overrides)
+        changed, overrides, publicationGuard)
 end
 
 function Retention.Init(database)
@@ -1085,7 +1108,10 @@ local ScheduleRetention
 -- before it finds the catalog busy, so that chain lasts longer; a retry of a
 -- marker-only pass (MarkerOnlyEnforcement) starts no scan. So a request made
 -- during a long first compaction or identity repair is not lost and never
--- becomes an endless retry.
+-- becomes an endless retry. A ranked run whose publication was refused
+-- because the DPS rows changed after its copy (PUBLICATION_SOURCE_CHANGED)
+-- is retried in the same chain and counts against the same limit; every
+-- other refusal ends the chain.
 local BUSY_RETRY_DELAY, BUSY_RETRY_MAX_DELAY, BUSY_RETRY_LIMIT = 5, 60, 64
 ScheduleRetention = function(scheduler, reason, delay, busyAttempts)
     return scheduler.After("data-retention.enforce", delay, function()
@@ -1097,7 +1123,8 @@ ScheduleRetention = function(scheduler, reason, delay, busyAttempts)
             -- turn, so one callback cannot drain a retained catalog cursor.
             ScheduleRetention(scheduler, reason, 0, busyAttempts)
         elseif type(result) == "table" and result.blocked == true
-            and result.reason == "ROOT_MUTATION_PENDING"
+            and (result.reason == "ROOT_MUTATION_PENDING"
+                or result.reason == "PUBLICATION_SOURCE_CHANGED")
             and attempts < BUSY_RETRY_LIMIT then
             ScheduleRetention(scheduler, reason, math.min(BUSY_RETRY_MAX_DELAY,
                 BUSY_RETRY_DELAY * 2 ^ attempts), attempts + 1)
