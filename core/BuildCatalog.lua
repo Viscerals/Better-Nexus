@@ -3017,6 +3017,28 @@ function Catalog.RebindWaitsForCandidateV1()
     return nextDb == ST.db and nextBundle == ST.bundled
 end
 
+-- The coordinator rebind turn re-initializes the evidence pool, and
+-- LoadoutEvidence.Init discards any open evidence candidate. An open
+-- maintenance walk (BeginCatalogMaintenance until CommitMaintenance) owns that
+-- candidate, so the walk is released with it first: the same displacement a
+-- direct product mutation applies in MutationGate. Otherwise the walk's next
+-- intern goes into the live pool and advances the append revision the
+-- admitted root binds (ROOT_INVALIDATED / SOURCE_DRIFT, no recovery). The
+-- walk's owner finds its handle no longer open and restarts from the next
+-- published root. No mutation or admission candidate is released here:
+-- ST.activeMaintenance is never set while one exists (BeginCatalogMaintenance
+-- requires none; CommitMaintenance, MutationGate and BeginRootAdmission clear
+-- it).
+function Catalog.ReleaseMaintenanceForRebindV1()
+    local displaced = ST.activeMaintenance
+    if not displaced then return false end
+    displaced.state = "cancelled"
+    ST.maintenanceRegistry[displaced] = nil
+    ST.activeMaintenance = nil
+    EvidenceCancelCandidate()
+    return true
+end
+
 function Catalog.PumpAuthorityRebindV1(database, bundle, requestedReason)
     local reason = ST.rebindRequired or requestedReason
     if not reason then return {rebound=false} end
@@ -3066,7 +3088,14 @@ local function MutationGate(maintenanceHandle)
         ST.activeMaintenance = nil
         EvidenceCancelCandidate()
     end
-    if ST.rebindRequired then Catalog.PumpAuthorityRebindV1() end
+    -- A rebind that would only resume the in-flight mutation is not driven
+    -- from here: PumpAuthorityRebindV1 keeps that request for a coordinator
+    -- turn anyway, and pumping the mutation from inside a caller could
+    -- publish it before that caller has stored its own write (a DPS record
+    -- whose build page is created here, for example).
+    if ST.rebindRequired and not Catalog.RebindWaitsForCandidateV1() then
+        Catalog.PumpAuthorityRebindV1()
+    end
     if ST.candidate then return nil, ST.candidate.mode == "mutation"
         and "ROOT_MUTATION_PENDING" or "ROOT_ADMISSION_PENDING" end
     return Gate()
@@ -3665,6 +3694,15 @@ local function PublishRoot(handle)
     local db = handle.token.databaseIdentity
     local drift = TokenDrifted(handle.token)
     if drift then return AdmissionFail(handle, drift) end
+    -- A maintenance owner's precondition on the source its payload overrides
+    -- were prepared from (Catalog.CommitMaintenance publicationGuard). This is
+    -- the last point before the durable bundle is replaced.
+    if handle.mode == "mutation" and type(handle.publicationGuard) == "function" then
+        local guardOk, current = pcall(handle.publicationGuard)
+        if not (guardOk and current == true) then
+            return AdmissionFail(handle, "PUBLICATION_SOURCE_CHANGED")
+        end
+    end
     local publishPlan = handle.publishPlan
     if type(publishPlan) ~= "table" then
         publishPlan = handle.mode == "mutation"
@@ -6559,7 +6597,13 @@ function Candidate.PumpMaintenancePreparation(handle, work)
     return "pending"
 end
 
-function Catalog.CommitMaintenance(handle, bundleOverrides)
+-- publicationGuard (optional): a function the maintenance owner binds to the
+-- source its bundleOverrides were prepared from. It is called at the actual
+-- publication point of this commit; unless it returns true, the publication
+-- is refused with PUBLICATION_SOURCE_CHANGED (the published root stays
+-- admitted and nothing is written), so the owner prepares again from the
+-- current source instead of publishing an older copy over an accepted write.
+function Catalog.CommitMaintenance(handle, bundleOverrides, publicationGuard)
     local root, why = MaintenanceOpen(handle)
     if not root then return false, why end
     handle.state = "committing"
@@ -6600,6 +6644,9 @@ function Catalog.CommitMaintenance(handle, bundleOverrides)
     end
     local candidate = Candidate.NewMaintenancePreparation(
         root, handle, bundleOverrides)
+    if type(publicationGuard) == "function" then
+        candidate.publicationGuard = publicationGuard
+    end
     ST.candidate = candidate
     local outcome = Catalog.PumpRootAdmission()
     if candidate.ticket.state == "committed" then

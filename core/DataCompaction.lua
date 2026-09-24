@@ -333,6 +333,10 @@ local function NewState(database, meta)
     state.buildRevision = Revision(
         revisions and revisions.BUILD_LIBRARY_CHANGED)
     state.dpsRevision = Revision(revisions and revisions.DPS_CHANGED)
+    -- The DPS revision and source table the private copy state.dps was taken
+    -- from; the publication guard compares them with the live source.
+    state.dpsSnapshotRevision, state.dpsSnapshotSource =
+        state.dpsRevision, sourceDps
     state.stats = {
         migrationVersion=MIGRATION_VERSION,
         overlayRecordsBefore=0,overlayRecordsAfter=0,
@@ -459,8 +463,13 @@ local function RestartForExternalChange(state, ownersChanged)
     local dpsRevision = Revision(revisions and revisions.DPS_CHANGED)
     if not ownersChanged and buildRevision == state.buildRevision
         and dpsRevision == state.dpsRevision then return false end
+    local dpsChanged = dpsRevision ~= state.dpsRevision
     state.buildRevision,state.dpsRevision = buildRevision,dpsRevision
-    if not ownersChanged and state.phase == "pool-before" then return false end
+    -- In pool-before no build row has been visited, so a build-only change
+    -- needs no restart. The private DPS copy already exists, though: a DPS
+    -- change must never be absorbed while that older copy is kept.
+    if not ownersChanged and state.phase == "pool-before"
+        and not dpsChanged then return false end
     CancelOverlayCandidate(state)
     state.meta = DeepCopy(type(state.sourceMeta) == "table"
         and state.sourceMeta or {})
@@ -469,6 +478,8 @@ local function RestartForExternalChange(state, ownersChanged)
     end
     state.dps = DeepCopy(type(state.sourceDps) == "table"
         and state.sourceDps or {})
+    state.dpsSnapshotRevision, state.dpsSnapshotSource =
+        dpsRevision, state.sourceDps
     state.candidateEntries,state.pendingOverlay,state.pendingDpsRow = nil,nil,nil
     state.buildChanged,state.dpsChanged = false,false
     if ownersChanged and state.catalogOwnerChanged then
@@ -484,6 +495,21 @@ local function RestartForExternalChange(state, ownersChanged)
     state.stats.restarts = state.stats.restarts + 1
     state.stats.pending,state.stats.phase = true,state.phase
     return true
+end
+
+-- True while the live DPS source is the one state.dps was copied from and no
+-- DPS change was represented since. Checked by the catalog at the actual
+-- publication of the compaction commit (the dpsCapture override replaces the
+-- live table there), so a DPS record accepted after the copy restarts the
+-- migration instead of being overwritten by the older copy. An absent or
+-- malformed payload is selected as the empty table, as RefreshOwners does.
+local function DpsSnapshotCurrent(state)
+    local revisions = Nexus and Nexus.Revisions
+    local live = DurablePayload(state.database, "dpsCapture")
+    if type(live) ~= "table" then live = state.emptyDps end
+    return Revision(revisions and revisions.DPS_CHANGED)
+            == state.dpsSnapshotRevision
+        and live == state.dpsSnapshotSource
 end
 
 local function BeginDps(state)
@@ -666,6 +692,14 @@ local function Step(state)
         state.stats.phase = state.phase
         return true
     elseif state.phase == "dps" then
+        -- A released walk (displaced by a direct mutation or a rebind turn)
+        -- has lost its evidence candidate, so an intern now would go into the
+        -- live pool. The partly compacted private copy refers to the
+        -- discarded candidate: restart from a fresh copy.
+        if state.maintenance and state.maintenance.state ~= "open" then
+            RestartForExternalChange(state,true)
+            return true, true
+        end
         return DpsStep(state)
     elseif state.phase == "pool-after" then
         local entries = state.candidateEntries or state.entries
@@ -787,7 +821,8 @@ function Compaction.Pump()
         state.pendingCommit = nil
         if ticket.state ~= "committed" or ticket.committed ~= true then
             local why = ticket.reason or "catalog maintenance unavailable"
-            if why == "SOURCE_DRIFT" or why == "CANDIDATE_FAILED" then
+            if why == "SOURCE_DRIFT" or why == "CANDIDATE_FAILED"
+                or why == "PUBLICATION_SOURCE_CHANGED" then
                 RestartForExternalChange(state,true)
                 return DeepCopy(state.stats),false
             end
@@ -896,14 +931,19 @@ function Compaction.Pump()
         end
         -- Publish every compacted overlay replacement as one catalog
         -- transaction before the migration stamp; a drifted candidate is
-        -- discarded and the bounded walk restarts from cursor zero.
+        -- discarded and the bounded walk restarts from cursor zero. A walk
+        -- released before its commit restarts the same way.
+        if state.maintenance and state.maintenance.state ~= "open" then
+            RestartForExternalChange(state,true)
+            return DeepCopy(state.stats),false
+        end
         local handle = state.maintenance
         state.maintenance = nil
         if handle then
             local catalog = Nexus and Nexus.BuildCatalog
             local overrides = PreparePublication(state)
             local committed, commitWhy, ticket = catalog.CommitMaintenance(
-                handle, overrides)
+                handle, overrides, function() return DpsSnapshotCurrent(state) end)
             if committed == nil and commitWhy == "ROOT_MUTATION_PENDING"
                 and type(ticket) == "table" then
                 state.pendingCommit = ticket
@@ -913,7 +953,8 @@ function Compaction.Pump()
                 return result,false
             end
             if not committed then
-                if commitWhy == "SOURCE_DRIFT" or commitWhy == "CANDIDATE_FAILED" then
+                if commitWhy == "SOURCE_DRIFT" or commitWhy == "CANDIDATE_FAILED"
+                    or commitWhy == "PUBLICATION_SOURCE_CHANGED" then
                     RestartForExternalChange(state,true)
                     return DeepCopy(state.stats),false
                 end

@@ -394,6 +394,16 @@ function Lifecycle.New(options)
                 local source=rawget(target,"authorityBundle") or target
                 if rebindEvidenceDb~=target or rebindEvidenceSource~=source
                     or rebindEvidenceOwner~=evidence or rebindEvidenceInit~=evidence.Init then
+                    -- Init discards an open evidence candidate: release an
+                    -- open maintenance walk with it, so that walk restarts
+                    -- instead of interning into the live pool.
+                    if type(catalog.ReleaseMaintenanceForRebindV1)=="function" then
+                        local okRelease,releaseError=pcall(catalog.ReleaseMaintenanceForRebindV1)
+                        if not okRelease then
+                            RecordError("BuildCatalog.ReleaseMaintenanceForRebindV1",releaseError)
+                            return
+                        end
+                    end
                     local okEvidence,evidenceError=pcall(evidence.Init,target)
                     if not okEvidence then
                         RecordError("LoadoutEvidence.Init",evidenceError)
