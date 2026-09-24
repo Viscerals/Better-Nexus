@@ -3017,6 +3017,26 @@ function Catalog.RebindWaitsForCandidateV1()
     return nextDb == ST.db and nextBundle == ST.bundled
 end
 
+-- The coordinator rebind turn re-initializes the evidence pool, and
+-- LoadoutEvidence.Init discards any open evidence candidate. An open
+-- maintenance walk (BeginCatalogMaintenance until CommitMaintenance) owns that
+-- candidate, so the walk is released with it first: the same displacement a
+-- direct product mutation applies in MutationGate. Otherwise the walk's next
+-- intern goes into the live pool and advances the append revision the
+-- admitted root binds (ROOT_INVALIDATED / SOURCE_DRIFT, no recovery). The
+-- walk's owner finds its handle no longer open and restarts from the next
+-- published root. A mutation candidate is never released here; the
+-- coordinator does not re-initialize the pool while one is in flight.
+function Catalog.ReleaseMaintenanceForRebindV1()
+    local displaced = ST.activeMaintenance
+    if not displaced then return false end
+    displaced.state = "cancelled"
+    ST.maintenanceRegistry[displaced] = nil
+    ST.activeMaintenance = nil
+    EvidenceCancelCandidate()
+    return true
+end
+
 function Catalog.PumpAuthorityRebindV1(database, bundle, requestedReason)
     local reason = ST.rebindRequired or requestedReason
     if not reason then return {rebound=false} end

@@ -666,6 +666,14 @@ local function Step(state)
         state.stats.phase = state.phase
         return true
     elseif state.phase == "dps" then
+        -- A released walk (displaced by a direct mutation or a rebind turn)
+        -- has lost its evidence candidate, so an intern now would go into the
+        -- live pool. The partly compacted private copy refers to the
+        -- discarded candidate: restart from a fresh copy.
+        if state.maintenance and state.maintenance.state ~= "open" then
+            RestartForExternalChange(state,true)
+            return true, true
+        end
         return DpsStep(state)
     elseif state.phase == "pool-after" then
         local entries = state.candidateEntries or state.entries
@@ -896,7 +904,12 @@ function Compaction.Pump()
         end
         -- Publish every compacted overlay replacement as one catalog
         -- transaction before the migration stamp; a drifted candidate is
-        -- discarded and the bounded walk restarts from cursor zero.
+        -- discarded and the bounded walk restarts from cursor zero. A walk
+        -- released before its commit restarts the same way.
+        if state.maintenance and state.maintenance.state ~= "open" then
+            RestartForExternalChange(state,true)
+            return DeepCopy(state.stats),false
+        end
         local handle = state.maintenance
         state.maintenance = nil
         if handle then
