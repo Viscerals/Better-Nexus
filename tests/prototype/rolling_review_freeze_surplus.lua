@@ -1,6 +1,6 @@
 -- R5 (review of main eadff8a), report scenario F3: Freeze reserved a copy that
 -- the next selection made surplus. This is a PROPOSED strategy change, not a
--- proven bug: the earlier behaviour follows the named reference strategy.
+-- proven bug: the earlier behaviour follows the base strategy.
 -- NEW test written from the report's stated scenario; not a rerun of the
 -- review's original probe. It uses the maintained production-policy adapter
 -- (real pure modules in TOC order). Fixtures only; no draw odds; no general
@@ -40,7 +40,7 @@ a=P.Decide(F3({ordinaryBoardAllowed=false}));check(a.type=='wait','ordinary-boar
 a=P.Decide(F3({cards={{spellId=101,isFrozen=true},{spellId=101},{spellId=901}},charges={trustworthy=true,banish=1,freeze=0,reroll=0}}))
 check(a.type=='take' and a.index==2,'observed frozen copy: the unfrozen needed copy is taken (unchanged)')
 
--- The pure planner without the explicit option keeps the reference decision.
+-- The pure planner without the explicit option keeps the base decision.
 local function Pure(policy)
  return Nexus.EchoWeaver.Decide({objective={requestedCounts={[101]=1,[102]=1},outstandingCounts={[101]=1,[102]=1},outstandingTotal=2},
   remainingPicks=2,board={choices={{echoID=101,quality=0},{echoID=101,quality=0},{echoID=901,quality=0}},

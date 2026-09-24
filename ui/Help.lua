@@ -95,7 +95,7 @@ Update notices: Nexus shows an update notice only from release information shipp
 Do not delete saved data or run advanced reset commands on guesswork. Keep a matching addon/WTF backup for rollback with WoW closed. Native timing and recovery are not established by offline tests.]]},
  {id="about",title="About and advanced details",text=[[Ordinary rolling and Orb decisions come from EchoWeaver, the rolling engine that Nexus maintains itself. Orb decisions use EchoWeaver's source, target and fallback rules with Nexus's exact-quality, locked-role, approval, budget and confirmation safeguards.
 
-The reference archive is not a second runtime dependency. Source and reuse notices are in THIRD_PARTY.md. Neither algorithm is claimed mathematically optimal or universally safe without matching client evidence.
+EchoWeaver has no runtime dependency on another addon. Source and reuse notices are in THIRD_PARTY.md. Neither algorithm is claimed mathematically optimal or universally safe without matching client evidence.
 
 This prototype uses a compatible global ChatThrottleLib where available, otherwise its disclosed private compatibility scheduler. That is not complete official-library/native acceptance.
 

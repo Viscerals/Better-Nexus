@@ -2,7 +2,7 @@
 -- maintained production-policy adapter (real pure modules in TOC order).
 --
 -- F5: the supported way to switch R3 or R5 off alone is its flag in
--- EchoWeaver.NEXUS_POLICY. Each flag alone restores the reference decision on
+-- EchoWeaver.NEXUS_POLICY. Each flag alone restores the base decision on
 -- the review fixtures F1 and F3, and leaves the other change active.
 -- N3: tests/prototype/policy_compare.lua pins no decision fingerprint. This
 -- test pins, on the same 432-state battery (864 decisions with the saved
@@ -39,8 +39,8 @@ local variants={
 for _,v in ipairs(variants)do
  local f1=With(v[2],function()return P.Line(F1())end)
  local f3=With(v[2],function()return P.Line(F3())end)
- check((f1==REFERENCE_F1)==v[3],v[1]..': F1 '..(v[3]and'is'or'is not')..' the reference decision: '..f1)
- check((f3==REFERENCE_F3)==v[4],v[1]..': F3 '..(v[4]and'is'or'is not')..' the reference decision: '..f3)
+ check((f1==REFERENCE_F1)==v[3],v[1]..': F1 '..(v[3]and'is'or'is not')..' the base decision: '..f1)
+ check((f3==REFERENCE_F3)==v[4],v[1]..': F3 '..(v[4]and'is'or'is not')..' the base decision: '..f3)
 end
 check(With({rerollIgnoresSatisfiedTargets=false,freezeMustStayNeeded=true},function()return F3().type end)=='take','R3 off alone leaves R5 active')
 check(With({rerollIgnoresSatisfiedTargets=true,freezeMustStayNeeded=false},function()return F1().type end)=='reroll','R5 off alone leaves R3 active')
@@ -103,4 +103,4 @@ changed,direction=Compare({freezeMustStayNeeded=true})
 check(changed==0 and Count(direction)==0,'R5 alone changes 0 of 864 battery decisions (got '..changed..')')
 changed,direction=Compare(PRODUCTION)
 check(changed==16 and direction['banish->reroll']==12 and direction['take->reroll']==4 and Count(direction)==2,'production policy: the same 16 decisions, same direction')
-print('PASS F5 each NEXUS_POLICY flag alone restores the reference decision; N3 battery drift pinned (16/864 R3, 0/864 R5) checks='..checks)
+print('PASS F5 each NEXUS_POLICY flag alone restores the base decision; N3 battery drift pinned (16/864 R3, 0/864 R5) checks='..checks)

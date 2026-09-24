@@ -21,4 +21,4 @@ P1.4 source. It is not a new merge of the user's separate T3 branch.
 
 See P1_5_TERMINOLOGY_IMPLEMENTATION.md for all approved IDs, ORB_MEMORY_MODE.md
 for the actual lifecycle and adaptations, and README-PROTOTYPE.md for the current
-user procedure. Older P1.x notes are preserved as historical evidence.
+user procedure. Older P1.x notes are historical evidence; those that described the retired outside comparison are in Git history only (since 2026-09-24).

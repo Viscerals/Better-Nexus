@@ -136,12 +136,12 @@ The controller requests **one Orb per replacement**, observes the actual offer,
 chooses the first missing exact target in your ordered list or an approved safe
 fallback, and waits for the observed offer/selection lifecycle, exact ownership
 change, and charge/result confirmation before
-another spend. It does not use the ordinary WishlistPlanner on Orb boards.
+another spend. It does not use the ordinary EchoWeaver planner on Orb boards.
 
 Required exact rolled copies, granted copies needed for future permanent targets,
 and permanent copies are protected. One granted copy cannot satisfy both roles.
 The candidate
-source respects the reference's lowest-quality-family sacrifice behavior. A
+source follows the lowest-quality-family sacrifice rule. A
 source that could ambiguously refer to a permanent copy or multiple qualities
 of the same ID is conservatively
 excluded. Some apparently extra copies may therefore be unavailable as sources.

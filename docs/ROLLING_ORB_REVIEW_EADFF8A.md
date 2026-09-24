@@ -214,7 +214,7 @@ switch it off: on the current branch it conflicts (this document, the test
 runner, and for R3 also `logic/EchoWeaver.lua`), and the R5 code uses the
 `local policy` that the R3 commit added. The supported way is the flag: set
 `rerollIgnoresSatisfiedTargets = false` in `EchoWeaver.NEXUS_POLICY`. That flag alone
-restores the reference decision and leaves the other change active
+restores the base decision and leaves the other change active
 (`tests/prototype/rolling_review_policy_flags.lua`).
 
 Reference rule: a permitted Reroll is skipped when any Echo of the original
@@ -223,8 +223,8 @@ Wishlist is on the board, also when its exact count is already met.
 Nexus rule (option `rerollIgnoresSatisfiedTargets` in
 `EchoWeaver.NEXUS_POLICY`, passed by `DecideNexus`): only an Echo that is
 still needed stops the Reroll. `EchoWeaver.Decide` without the option keeps the
-reference decision, so `tests/prototype/planner_reference.lua` still compares
-10,000 random inputs with the reference, unchanged.
+base decision. (An offline comparison of that base decision with an outside
+addon was retired on 2026-09-24.)
 
 Kept: the Reroll preference (`allowReroll`), the Reroll charge count, trusted
 resource state, the pending guards, the ordinary-board gate, the two-frozen
@@ -264,13 +264,13 @@ Test: `tests/prototype/rolling_review_reroll_outstanding.lua`.
 
 ## R5 - Freeze of a duplicate that the next selection makes surplus
 
-Status: deliberate policy difference from the named reference strategy. It is a
+Status: deliberate policy difference from the base strategy. It is a
 proposed strategy change, not a correction of a proven bug. It is one separate commit. `git revert` of that commit is NOT a supported way to
 switch it off: on the current branch it conflicts (this document, the test
 runner, and for R3 also `logic/EchoWeaver.lua`), and the R5 code uses the
 `local policy` that the R3 commit added. The supported way is the flag: set
 `freezeMustStayNeeded = false` in `EchoWeaver.NEXUS_POLICY`. That flag alone
-restores the reference decision and leaves the other change active
+restores the base decision and leaves the other change active
 (`tests/prototype/rolling_review_policy_flags.lua`).
 
 Reference rule: under high pressure, with a Freeze and a Banish available, the
@@ -279,8 +279,8 @@ best still-needed offer is frozen before the search.
 Nexus rule (option `freezeMustStayNeeded` in `EchoWeaver.NEXUS_POLICY`): the
 Freeze is skipped when the next selection is another selectable copy of the same
 Echo and exactly one copy is needed. The planner takes the Echo at once.
-`EchoWeaver.Decide` without the option keeps the reference decision;
-`planner_reference` is unchanged and passes.
+`EchoWeaver.Decide` without the option keeps the base decision. (The offline
+comparison that checked it was retired on 2026-09-24.)
 
 Kept: the Freeze preference, Freeze and Banish charges, trusted resource state,
 pending guards, the ordinary-board gate, exact copy counts, permanent ownership,

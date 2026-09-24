@@ -18,10 +18,14 @@ rights over the project's upstream material.
 EchoWeaver is the name of the rolling and Orb engine maintained in this
 repository: `logic/EchoWeaver.lua` (ordinary rolling), and `logic/OrbPolicy.lua`,
 `core/OrbAdapter.lua`, `core/OrbRuntime.lua` and `ui/OrbPanel.lua` (Orb mode).
-During the prototype phase its behavior was compared offline with a separately
-distributed Echo-picker addon that the user supplied, archive SHA-256
-`d471335ce243a7c0a42b1c2b22434bc757dca1ba40b852e8ded2545d7902190e`. That
-comparison is retired (2026-09-24). No source, UI, assets or database of that
+Its base strategy was reimplemented independently from the observed behavior
+of a separately distributed Echo-picker addon that the user supplied, archive
+SHA-256 `d471335ce243a7c0a42b1c2b22434bc757dca1ba40b852e8ded2545d7902190e`:
+for ordinary rolling the action order, tie breakers and reason codes, and for
+Orb mode the source, target and fallback rules. Nexus's own rules on top of it
+are documented in `CONTRACTS.md` and `docs/ROLLING_ORB_REVIEW_EADFF8A.md`.
+During the prototype phase the behavior was also compared offline with that
+addon; that comparison is retired (2026-09-24). No source, UI, assets or database of that
 addon are in this repository or in the installable package. The supplied
 archive contains no license or notice file; no notice obligation from it
 applies here. No claim of mathematical optimality or native validation is made.
@@ -58,9 +62,9 @@ The Orb mode files named above are Nexus code. No Lua implementation, UI,
 assets or database of the separately distributed addon is included, and its
 archive is no longer used by any test.
 
-Reference API calls are `OrbService.IsStateKnown/GetCharges/IsOfferPending/
-ConfirmSpend/RequestCharges` and the documented-in-reference PerkService choice,
-granted, locked, selection, and refresh calls. No action probe or speculative
+Game API calls used: `OrbService.IsStateKnown/GetCharges/IsOfferPending/
+ConfirmSpend/RequestCharges` and the PerkService choice, granted, locked,
+selection, and refresh calls. No action probe or speculative
 spending API is used. Presence/shape checks do not establish native compatibility.
 
 Nexus adaptations are intentional: exact quality and role-aware targets; a
