@@ -43,6 +43,8 @@ Changing `published`, a label or a parser flag would not have fixed any of these
 
 `tools/build_package.py` makes two declared substitutions in `data/Release.lua`: the label, and the channel (`public-test` with `--public`, otherwise `internal`). `Nexus.ReleaseIdentity()` is the one function that the comparison, the announced version and every visible label read.
 
+It makes one more declared substitution, in `Nexus.toc`, so that the addon list names the same build: the `## Version` line becomes `<version> test.<N>-<commit>` (for example `1.20.0-beta.1 test.9999-abcdef0`), with ` internal` after it for an internal package. Only a label the addon displays (`test.<number>-<hex>`) is stamped. A `test.` label of any other form (a leading zero, a number above 2147483647, upper-case hex) is refused, and a package with any other label runs as `source` and keeps the plain version. The repository `Nexus.toc` stays build-neutral: exactly one `## Version` line, equal to the `data/Release.lua` version. Nexus does not read its own TOC Version, so this changes no comparison, announcement, protocol or saved data. `tools/release_check.py` rejects a package whose `Nexus.toc` has no Version line, two, or one that names another build.
+
 | Channel | Meaning | Announces a test number |
 |---|---|---|
 | `development` | repository source (`buildLabel = "source"`) | no (`+dev`) |

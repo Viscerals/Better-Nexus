@@ -21,9 +21,14 @@ storage-only support component:
   * nothing else: no tests, tools, docs, .github, SavedVariables, logs or archives.
 The archive therefore contains two addon directories: Nexus/ and NexusSupport/.
 The companion is storage only: Nexus runs normally without it.
-Two declared substitutions in data/Release.lua, nothing else:
+Two declared substitutions in data/Release.lua, and one in Nexus.toc, nothing else:
   * buildLabel "source" -> the label;
-  * channel "development" -> "public-test" with --public, else "internal".
+  * channel "development" -> "public-test" with --public, else "internal";
+  * the Nexus.toc Version line "<version>" -> "<version> <label>" (with " internal" after it
+    for an internal package), so the addon list names the same build as Release.lua. Only a
+    label the addon displays (test.<number>-<hex>) is stamped; a test. label of any other
+    form is refused; any other label runs as "source", and the TOC keeps the plain version. The repository copy stays build-neutral:
+    its Version must equal Release.lua's version, on exactly one Version line.
 Only a "public-test" package states its test number to peers (as <version>+test.<N>), so an
 internal or review package can never announce itself as a public update. tools/release_check.py
 verifies that label, version, tag, asset name and announced identity agree.
@@ -42,7 +47,8 @@ ALLOWED_SUFFIXES = {'.lua', '.toc', '.md'}
 LABEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$')
 SOURCE_LABEL = b'buildLabel = "source"'
 SOURCE_CHANNEL = b'channel = "development"'
-RUNTIME_LABEL = re.compile(r'^test\.[1-9]\d{0,9}-[0-9a-f]{7,12}$')
+RUNTIME_LABEL = re.compile(r'test\.([1-9]\d{0,9})-[0-9a-f]{7,12}')   # used with fullmatch
+MAX_TEST = 2147483647
 
 
 def git(*args: str) -> bytes:
@@ -73,6 +79,52 @@ def toc_directive(toc: str, name: str) -> str | None:
         if sep and key.strip().lower() == name.lower():
             return value.strip()
     return None
+
+
+def toc_lines(toc: bytes) -> list[str]:
+    """The lines of a TOC split exactly as toc_directive splits them, each with
+    its own line end, so that joining them gives back the same bytes."""
+    return toc.decode('utf-8', 'surrogateescape').splitlines(keepends=True)
+
+
+def toc_directive_lines(toc: bytes, name: str) -> list[int]:
+    """Indexes of every line WoW reads as the directive (the rule toc_directive
+    applies), so a missing or a duplicate line can be counted."""
+    found = []
+    for index, line in enumerate(toc_lines(toc)):
+        stripped = line.strip()
+        if not stripped.startswith('##'):
+            continue
+        key, sep, _ = stripped[2:].lstrip().partition(':')
+        if sep and key.strip().lower() == name.lower():
+            found.append(index)
+    return found
+
+
+def runtime_label(label: str | None) -> bool:
+    """True for exactly the labels the addon shows with a test number:
+    data/Release.lua's RuntimeBuildLabel and ReleaseIdentity rules."""
+    m = RUNTIME_LABEL.fullmatch(label or '')
+    return bool(m) and int(m.group(1)) <= MAX_TEST
+
+
+def release_version(release: bytes) -> str | None:
+    found = re.findall(rb'^\s*version\s*=\s*"([^"]*)"', release, flags=re.M)
+    return found[0].decode('utf-8') if len(found) == 1 else None
+
+
+def toc_version(version: str, label: str, public: bool) -> str:
+    """The packaged Nexus.toc Version: the same version and label that the
+    packaged data/Release.lua states, and "internal" unless the package is public."""
+    return f'{version} {label}' + ('' if public else ' internal')
+
+
+def stamp_toc_version(toc: bytes, value: str) -> bytes:
+    lines = toc_lines(toc)
+    [index] = toc_directive_lines(toc, 'Version')   # check() allows exactly one
+    content = lines[index].splitlines()[0]
+    lines[index] = '## Version: ' + value + lines[index][len(content):]
+    return ''.join(lines).encode('utf-8', 'surrogateescape')
 
 
 def companion_toc_problems(toc: str, toc_name: str) -> list[str]:
@@ -135,6 +187,17 @@ def check(files: dict[str, bytes]) -> list[str]:
         problems.append('data/Release.lua must contain exactly one buildLabel = "source"')
     if files.get('data/Release.lua', b'').count(SOURCE_CHANNEL) != 1:
         problems.append('data/Release.lua must contain exactly one channel = "development"')
+    # The repository TOC is build-neutral: one Version line, the plain release
+    # version. Packaging stamps it; a source checkout never names a build.
+    version = release_version(files.get('data/Release.lua', b''))
+    version_lines = toc_directive_lines(files.get('Nexus.toc', b''), 'Version')
+    if version is None:
+        problems.append('data/Release.lua must contain exactly one version field')
+    if len(version_lines) != 1:
+        problems.append(f'Nexus.toc must contain exactly one ## Version line; found {len(version_lines)}')
+    elif version is not None and toc_directive(toc, 'Version') != version:
+        problems.append(f'Nexus.toc Version {toc_directive(toc, "Version")} must equal the data/Release.lua '
+                        f'version {version} in the repository; packaging adds the build label')
     return problems
 
 
@@ -147,11 +210,16 @@ def main() -> int:
     ns = ap.parse_args()
     if not ns.check and not ns.label:
         ap.error('give --label, or --check')
-    if ns.label and not LABEL.match(ns.label):
+    if ns.label and not LABEL.fullmatch(ns.label):
         ap.error('label: letters, digits, dot, underscore and hyphen; at most 48 characters')
-    if ns.public and not (ns.label and RUNTIME_LABEL.match(ns.label)):
+    # A test label the addon would read differently from this tool (a leading
+    # zero, a number above 2147483647, upper-case hex) is refused, so the
+    # packaged TOC and Release.lua can never describe two different builds.
+    if ns.label and ns.label.startswith('test.') and not runtime_label(ns.label):
+        ap.error('a test label must be test.<1 to 2147483647, no leading zero>-<7 to 12 lower-case hex digits>')
+    if ns.public and not runtime_label(ns.label):
         ap.error('--public needs a label of the form test.<number>-<7 to 12 hex digits>')
-    if ns.label and not RUNTIME_LABEL.match(ns.label):
+    if ns.label and not runtime_label(ns.label):
         print('NOTE: the addon shows only labels of the form test.<number>-<7 to 12 hex digits>; this label will display as "source".')
 
     files = committed_files()
@@ -179,6 +247,9 @@ def main() -> int:
                 data = data.replace(SOURCE_LABEL, f'buildLabel = "{ns.label}"'.encode())
                 channel = 'public-test' if ns.public else 'internal'
                 data = data.replace(SOURCE_CHANNEL, f'channel = "{channel}"'.encode())
+            if name == 'Nexus.toc' and runtime_label(ns.label):
+                version = release_version(files['data/Release.lua'])
+                data = stamp_toc_version(data, toc_version(version, ns.label, ns.public))
             if name.startswith(COMPANION_DIR + '/'):
                 archive_name = COMPANION_ADDON + '/' + name[len(COMPANION_DIR) + 1:]
             else:
