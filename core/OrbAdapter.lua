@@ -1,6 +1,6 @@
 -- Nexus: Orb of Lost Memories game boundary.
--- Independent integration of the public calls observed in supplied LoadoutPilot
--- 1.3.6/P103. Capability detection is read-only; no speculative spend/selection.
+-- EchoWeaver Orb mode: only the public OrbService and PerkService calls listed
+-- in THIRD_PARTY.md. Capability detection is read-only; no speculative spend/selection.
 Nexus = Nexus or {}
 local A = assert(Nexus.GameAdapter, "OrbAdapter requires GameAdapter")
 local O = {}

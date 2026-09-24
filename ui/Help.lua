@@ -93,7 +93,7 @@ Prepare full diagnostic report builds a paged report. Select this page and copy 
 Update notices: Nexus shows an update notice only from release information shipped inside this package. It does not check GitHub. Versions that other players' clients state during Sync are not release information and never produce a notice. /nexus update and the menu always open the Releases page. No notice does not mean your build is the latest. Nexus never downloads or installs.
 
 Do not delete saved data or run advanced reset commands on guesswork. Keep a matching addon/WTF backup for rollback with WoW closed. Native timing and recovery are not established by offline tests.]]},
- {id="about",title="About and advanced details",text=[[Ordinary rolling is independently implemented from the supplied LoadoutPilot 1.3.6 / P103 reference. Orb decisions use its MemoryMode source/target/fallback behavior with Nexus-specific exact-quality, locked-role, approval, budget, and confirmation safeguards.
+ {id="about",title="About and advanced details",text=[[Ordinary rolling and Orb decisions come from EchoWeaver, the rolling engine that Nexus maintains itself. Orb decisions use EchoWeaver's source, target and fallback rules with Nexus's exact-quality, locked-role, approval, budget and confirmation safeguards.
 
 The reference archive is not a second runtime dependency. Source and reuse notices are in THIRD_PARTY.md. Neither algorithm is claimed mathematically optimal or universally safe without matching client evidence.
 

@@ -32,8 +32,7 @@ This file has two parts.
   EchoWeaver is not loaded, which the production TOC never allows, and then
   only with an empty queue.
 - **`EchoWeaver.Decide(input)`** is the pure ordinary planner. Without
-  `input.policy` it follows the named reference strategy (LoadoutPilot 1.3.6 /
-  patch 103). `DecideNexus` passes `EchoWeaver.NEXUS_POLICY`, whose options
+  `input.policy` it follows the base strategy. `DecideNexus` passes `EchoWeaver.NEXUS_POLICY`, whose options
   are deliberate, documented differences (`docs/ROLLING_ORB_REVIEW_EADFF8A.md`).
   Exact `plan.requestedCounts` per spell ID, rolled plus permanent ownership,
   actual charges and the per-action permissions are its inputs. Actions:

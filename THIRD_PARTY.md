@@ -13,19 +13,24 @@ Git commit. Original LICENSE.md, UPSTREAM.md and AI_POLICY.md are preserved.
 The prototype is produced for the project's authorized user; it grants no new
 rights over the project's upstream material.
 
-## LoadoutPilot
+## EchoWeaver (Nexus rolling and Orb engine)
 
-Behavioral reference: user-supplied LoadoutPilot (6).zip, version 1.3.6,
-patch 103, build P103-V1.3.6-LEVEL80-ONE-SHOT-20260825.
-SHA-256: `d471335ce243a7c0a42b1c2b22434bc757dca1ba40b852e8ded2545d7902190e`.
+EchoWeaver is the name of the rolling and Orb engine maintained in this
+repository: `logic/EchoWeaver.lua` (ordinary rolling), and `logic/OrbPolicy.lua`,
+`core/OrbAdapter.lua`, `core/OrbRuntime.lua` and `ui/OrbPanel.lua` (Orb mode).
+During the prototype phase its behavior was compared offline with a separately
+distributed Echo-picker addon that the user supplied, archive SHA-256
+`d471335ce243a7c0a42b1c2b22434bc757dca1ba40b852e8ded2545d7902190e`. That
+comparison is retired (2026-09-24). No source, UI, assets or database of that
+addon are in this repository or in the installable package. The supplied
+archive contains no license or notice file; no notice obligation from it
+applies here. No claim of mathematical optimality or native validation is made.
 
-`logic/WishlistPilot.lua` is an independent behavioral implementation, not a
-copy of the external addon or its UI/assets. The differential harness runs the
-supplied reference separately on synthetic inputs. Original LoadoutPilot source
-and assets are not redistributed in the installable package. No claim of
-mathematical optimality, universal equivalence on malformed input, or native
-Nexus validation is made. Nexus-specific input, setting, Snapshot and action
-safety adaptations are documented in the prototype README.
+Compatibility exception: `A.RivalDetected()` in `core/GameAdapter.lua` detects
+that separately distributed addon by its exact addon name and slash-command key,
+so Nexus pauses automation while another picker may own the same server
+actions. These two identifiers are detection keys, not Nexus names;
+`tests/prototype/rival_picker_detection.lua` keeps the protection tested.
 
 ## ChatThrottleLib
 
@@ -47,13 +52,11 @@ https://github.com/WoWUIDev/Ace3/blob/5f34ac009746e4cc16cc867ea743efa01997c0a7/A
 No new license restriction is asserted on the public-domain-derived portion.
 Full official-library/native transport acceptance remains unproven.
 
-## P1.5 Memory-mode reference and independent integration
+## EchoWeaver Orb mode: game calls and Nexus adaptations
 
-`logic/OrbPolicy.lua`, `core/OrbAdapter.lua`, `core/OrbRuntime.lua`, and
-`ui/OrbPanel.lua` are new Nexus implementations informed by the supplied
-`Memory/MemoryMode.lua`, `UI/MemoryPanel.lua`, integration and runtime modules.
-No LoadoutPilot Lua implementation, UI, assets, or database is included in this
-installable archive. The supplied archive remains an external test reference.
+The Orb mode files named above are Nexus code. No Lua implementation, UI,
+assets or database of the separately distributed addon is included, and its
+archive is no longer used by any test.
 
 Reference API calls are `OrbService.IsStateKnown/GetCharges/IsOfferPending/
 ConfirmSpend/RequestCharges` and the documented-in-reference PerkService choice,

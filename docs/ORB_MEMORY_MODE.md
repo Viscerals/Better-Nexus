@@ -100,10 +100,11 @@ or interference from other game addons.
 ## Verification limits
 
 New tests exercise the actual Nexus adapter/runtime and mocked game services.
-3,000 offer-decision and 3,000 result-diff comparisons run against the supplied
-MemoryMode source on compatible represented inputs. Exact-role/source/budget and
-fresh-evidence guards have separate controls, not a claim of blanket parity.
-The ordinary 10,000-case reference comparison remains unchanged.
+Exact-role/source/budget and fresh-evidence guards have separate controls
+(`tests/prototype/echoweaver_orb_policy.lua` and the `orbs_*` tests). An earlier
+offline comparison with an outside addon's source (3,000 offer decisions,
+3,000 result diffs, and 10,000 ordinary decisions) is retired (2026-09-24);
+it was never a claim of blanket parity.
 
 All tests in this build use Lua 5.4 with the included compatibility shims. They are
 not a LuaJIT, native client, original upstream inventory, or independent review

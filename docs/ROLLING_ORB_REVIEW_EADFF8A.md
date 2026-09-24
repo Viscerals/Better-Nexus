@@ -208,8 +208,7 @@ Tests: `orb_review_reload_unobservable`, `orb_review_reload_manual_choice`,
 
 ## R3 - Reroll: outstanding need versus original Wishlist membership
 
-Status: deliberate policy difference from the named reference strategy
-(LoadoutPilot 1.3.6 / patch 103). It is a proposed strategy change, not a
+Status: deliberate policy difference from the base strategy. It is a proposed strategy change, not a
 correction of a proven bug. It is one separate commit. `git revert` of that commit is NOT a supported way to
 switch it off: on the current branch it conflicts (this document, the test
 runner, and for R3 also `logic/EchoWeaver.lua`), and the R5 code uses the
@@ -353,9 +352,9 @@ an open Orb offer, with its cost and its confirmation contract?
 |---|---|
 | `core/OrbAdapter.lua` capability probes | Required `OrbService` members: `IsStateKnown`, `GetCharges`, `IsOfferPending`, `ConfirmSpend`, `RequestCharges`. Required `PerkService` members: `GetGrantedPerks`, `GetLockedPerks`, `GetCurrentChoice`, `SelectPerk`, `RequestGrantedPerks`. Optional: `GetDiscoveredEchoes`, `IsTomeEchoDisabled`. No redraw member is probed or called. |
 | `core/OrbRuntime.lua` | One spend is `ConfirmSpend(sourceId, 1)`. A changed pending offer is treated as ambiguity ("The pending Orb offer changed unexpectedly") and pauses. |
-| `docs/ORB_MEMORY_MODE.md`, `docs/P1_5_1_CORRECTIONS.md` | Describe spend, offer, select, confirmation. No redraw action. |
+| `docs/ORB_MEMORY_MODE.md`, and a P1.5.1 corrections note (retired from the current tree on 2026-09-24; in Git history) | Describe spend, offer, select, confirmation. No redraw action. |
 | `tests/prototype/orbs_support.lua` and the `orbs_*` tests | The mocked `OrbService` has the five members above only. |
-| Supplied third-party reference used by `orbs_policy` (`Memory/MemoryMode.lua`) | Its one use of the word "redraw" means a result with the same spell ID as the source. It has no offer-redraw call. |
+| The outside addon source that a retired comparison test used (`Memory/MemoryMode.lua`) | Its one use of the word "redraw" means a result with the same spell ID as the source. It has no offer-redraw call. |
 | `PerkService.RequestReroll` | This is the ordinary-board Reroll. The ordinary gate blocks it while an Orb offer is pending. It is not evidence of an Orb-offer redraw, and it must not be used as one. |
 
 Result: unavailable from the repository's evidence. Exact missing capability:
@@ -387,8 +386,8 @@ behaviour was changed for them. Each needs a user decision.
 Facts:
 
 - Nothing in the repository defines when `IsStateKnown()` becomes true.
-  `THIRD_PARTY.md` lists the call only. The supplied reference
-  `Memory/MemoryMode.lua` does not contain it.
+  `THIRD_PARTY.md` lists the call only. The outside addon source that the
+  retired comparison used (`Memory/MemoryMode.lua`) does not contain it.
 - The ordinary rolling path never requests Orb state.
 - With R1, ordinary `Take`, `Banish`, `Reroll`, `Freeze` and automatic rolling
   are blocked while an existing OrbService reports `false`. If a legitimate
