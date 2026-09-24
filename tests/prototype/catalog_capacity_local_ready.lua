@@ -111,17 +111,22 @@ end
 local single={
  removal='Community data unavailable: the saved removal markers exceed the limit (2048). Nothing was changed or deleted.',
  retention='Community data unavailable: the saved retention markers exceed the limit (2048). Nothing was changed or deleted.'}
-local together='Community data unavailable: your saved Community builds, removal markers and retention markers together use more than the 2048 entries this build opens. Nothing was changed or deleted.'
+-- A combined overflow names only the maps read up to the stop.
+local together={
+ builds='Community data unavailable: your saved Community builds and the builds shipped with this version together use more than the 2048 entries this build opens. Nothing was changed or deleted.',
+ removal='Community data unavailable: your saved Community builds and removal markers together use more than the 2048 entries this build opens. Nothing was changed or deleted.',
+ retention='Community data unavailable: your saved Community builds, removal markers and retention markers together use more than the 2048 entries this build opens. Nothing was changed or deleted.'}
 local capacityCases={
- {'10 builds and 2039 removal markers','TOMBSTONE_SET_LIMIT','distinct-slots',together,'builds 10, shipped 0, removal markers 2039, retention markers 0',function()
+ {'10 builds, 2039 removal markers and 1500 retention markers','TOMBSTONE_SET_LIMIT','distinct-slots',together.removal,
+   'builds 10, shipped 0, removal markers 2039, retention markers not read',function()
    local d={settingsVersion=2,settings={},chars={},communityBuilds=Overlay(10)}
-   d.syncTombstones=Markers('tomb-',1,2039);return d
+   d.syncTombstones=Markers('tomb-',1,2039);d.communityRetentionEvictions=Markers('ev-',1,1500);return d
   end},
- {'10 builds and 2039 retention markers','BARRIER_SET_LIMIT','distinct-slots',together,'builds 10, shipped 0, removal markers 0, retention markers 2039',function()
+ {'10 builds and 2039 retention markers','BARRIER_SET_LIMIT','distinct-slots',together.retention,'builds 10, shipped 0, removal markers 0, retention markers 2039',function()
    local d={settingsVersion=2,settings={},chars={},communityBuilds=Overlay(10)}
    d.communityRetentionEvictions=Markers('ev-',1,2039);return d
   end},
- {'older-shape maps, each below 2048: 1200 builds, 100 removal and 800 retention markers','BARRIER_SET_LIMIT','distinct-slots',together,
+ {'older-shape maps, each below 2048: 1200 builds, 100 removal and 800 retention markers','BARRIER_SET_LIMIT','distinct-slots',together.retention,
    'builds 1200, shipped 0, removal markers 100, retention markers 749',function()
    local d={settingsVersion=5,settings={},chars={},communityBuilds=Overlay(1200)}
    d.syncTombstones=OldRemovals('gone-',1,100);d.communityRetentionEvictions=OldMarkers('evicted-',1,800);return d
@@ -130,23 +135,28 @@ local capacityCases={
    local d={settingsVersion=2,settings={},chars={}}
    d.communityRetentionEvictions=Markers('ev-',1,2049);return d
   end},
- {'2049 removal markers alone','TOMBSTONE_SET_LIMIT','map-keys',single.removal,'builds 0, shipped 0, removal markers 2049, retention markers 0',function()
+ {'2049 removal markers alone','TOMBSTONE_SET_LIMIT','map-keys',single.removal,'builds 0, shipped 0, removal markers 2049, retention markers not read',function()
    local d={settingsVersion=2,settings={},chars={}}
    d.syncTombstones=Markers('tomb-',1,2049);return d
   end},
+ {'1500 saved and 549 shipped builds, no markers','ROOT_SLOT_LIMIT','distinct-slots',together.builds,
+   'builds 1500, shipped 549, removal markers not read, retention markers not read',function()
+   return {settingsVersion=2,settings={},chars={},communityBuilds=Overlay(1500)}
+  end,(function()local m={};for i=1,549 do m['base-'..i]=Record('base-'..i) end;return m end)()},
 }
 for _,case in ipairs(capacityCases)do
- local label,reason,counter,sentence,counted,build=case[1],case[2],case[3],case[4],case[5],case[6]
+ local label,reason,counter,sentence,counted,build,shipped=case[1],case[2],case[3],case[4],case[5],case[6],case[7]
  local d=build()
  local savedBefore=F.Serialize({d.communityBuilds,d.syncTombstones,d.communityRetentionEvictions})
- local CH=F.Boot(d)
+ F.fileHooks=shipped and {[ [[data\BundledBuilds.lua]] ]=function()Nexus.BundledBuilds.builds=shipped end} or nil
+ local CH=F.Boot(d);F.fileHooks=nil
  local c=Nexus.StartupStatus()
  check(c.state=='failed' and c.reason==reason and c.coreReady==true,
   label..': the shared catalog is refused and local tools start: '..tostring(c.reason)..' coreReady='..tostring(c.coreReady))
  check(c.failure and c.failure.counter==counter,label..': the catalog recorded counter '..counter..': '..tostring(c.failure and c.failure.counter))
  local text=Nexus.LoadingStatus.CapacityText(c)
  check(text==sentence,label..': the sentence matches the recorded counter: '..tostring(text))
- check(Nexus.LoadingStatus.PhaseText(c)==sentence,label..': the loading window and tooltip use the same sentence')
+ check(Nexus.LoadingStatus.PhaseText(c)==sentence,label..': the shared-button tooltip text (PhaseText) uses the same sentence')
  local at=#CH.chat;SlashCmdList.NEXUS('status')
  local said=table.concat(CH.chat,'\n',at+1)
  check(said:find(sentence,1,true) and said:find('counter='..counter,1,true)

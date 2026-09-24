@@ -808,12 +808,18 @@ local function StartupFailureLine(status)
     Add("component", f.component); Add("phase", f.phase); Add("map", f.map)
     Add("counter", f.counter)
     if f.count then Add("count at refusal", tostring(f.count) .. " (limit " .. tostring(f.limit) .. "; counting stopped here)") end
+    -- The maps are read in this order; counting stops in f.map, so the maps
+    -- after it were not read and have no count.
     local counted = type(f.counted) == "table" and f.counted or nil
     if counted then
-        Add("keys counted before the stop (at least)", "builds " .. tostring(counted.overlay or 0)
-            .. ", shipped " .. tostring(counted.bundled or 0)
-            .. ", removal markers " .. tostring(counted.tombstone or 0)
-            .. ", retention markers " .. tostring(counted.barrier or 0))
+        local listed, stopped = {}, false
+        for _, entry in ipairs({{"overlay", "builds"}, {"bundled", "shipped"},
+            {"tombstone", "removal markers"}, {"barrier", "retention markers"}}) do
+            listed[#listed + 1] = entry[2] .. " "
+                .. (stopped and "not read" or tostring(counted[entry[1]] or 0))
+            if entry[1] == f.map then stopped = true end
+        end
+        Add("keys counted before the stop (at least)", table.concat(listed, ", "))
     end
     Add("source", f.source)
     Add("stage", f.stage); Add("cause", f.cause); Add("detail", f.detail)

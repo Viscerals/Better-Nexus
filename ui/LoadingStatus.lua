@@ -66,10 +66,16 @@ local capacity = {
     BARRIER_SET_LIMIT="Community data unavailable: the saved retention markers exceed the limit (2048). Nothing was changed or deleted.",
     ROOT_MAP_LIMIT="Community data unavailable: your saved Community records and markers together exceed the total this build opens (limit 8192). Nothing was changed or deleted.",
 }
--- Counter "distinct-slots": builds, removal markers and retention markers
--- share one budget of 2048 different entries. The reason then names only the
--- map in which counting stopped, and that map can be far below 2048.
-local combined="Community data unavailable: your saved Community builds, removal markers and retention markers together use more than the 2048 entries this build opens. Nothing was changed or deleted."
+-- Counter "distinct-slots": all saved maps share one budget of 2048 different
+-- entries. The reason names only the map in which counting stopped, and that
+-- map can be far below 2048. The maps are read in a fixed order (builds,
+-- shipped builds, removal markers, retention markers), so each sentence names
+-- only the maps read up to the stop.
+local combined={
+    ROOT_SLOT_LIMIT="Community data unavailable: your saved Community builds and the builds shipped with this version together use more than the 2048 entries this build opens. Nothing was changed or deleted.",
+    TOMBSTONE_SET_LIMIT="Community data unavailable: your saved Community builds and removal markers together use more than the 2048 entries this build opens. Nothing was changed or deleted.",
+    BARRIER_SET_LIMIT="Community data unavailable: your saved Community builds, removal markers and retention markers together use more than the 2048 entries this build opens. Nothing was changed or deleted.",
+}
 -- No recorded counter: say that the data is too large without naming a map.
 local uncounted="Community data unavailable: your saved Community data is larger than this build opens (limit 2048). Nothing was changed or deleted."
 -- The one sentence for a saved-capacity refusal, or nil for every other
@@ -81,7 +87,7 @@ function M.CapacityText(status)
     if not sentence then return nil end
     local counter=type(status.failure)=="table" and status.failure.counter or nil
     if counter=="map-keys" or counter=="root-map-edges" then return sentence end
-    if counter=="distinct-slots" then return combined end
+    if counter=="distinct-slots" and combined[status.reason] then return combined[status.reason] end
     return status.reason=="ROOT_MAP_LIMIT" and sentence or uncounted
 end
 function M.PhaseText(status)
