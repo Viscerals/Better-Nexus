@@ -80,6 +80,17 @@ NAMES += ['server_hud_handoff']
 NAMES += ['first_hud_display']
 NAMES += ['select_intent_ownership']
 
+# Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
+DEFAULT_TIMEOUT_SECONDS=45
+# Exact test names with a larger limit; every other test gets DEFAULT_TIMEOUT_SECONDS. No patterns.
+# Through a local LuaJIT bridge they passed in 42-43 s and 58-61 s; hosted CI run 36000257959
+# (ubuntu-latest, apt luajit) stopped both at 45 s.
+# main() refuses a name here that is not in NAMES, so a misspelt name cannot silently get 45 s.
+TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120}
+
+def timeout_for(name:str)->int:
+    return TEST_TIMEOUT_SECONDS.get(name,DEFAULT_TIMEOUT_SECONDS)
+
 def main() -> int:
     ap=argparse.ArgumentParser()
     ap.add_argument('--runtime',choices=['auto','luajit','lua54'],default='auto')
@@ -87,6 +98,8 @@ def main() -> int:
     ap.add_argument('--output',type=pathlib.Path,default=pathlib.Path('prototype-test-results.json'))
     ap.add_argument('--only',help='Comma-separated existing test names for a bounded shard; omitted runs every test')
     ns=ap.parse_args()
+    unlisted=sorted(set(TEST_TIMEOUT_SECONDS)-set(NAMES))
+    if unlisted: ap.error('TEST_TIMEOUT_SECONDS names a test that is not listed: '+', '.join(unlisted))
     names=ns.only.split(',') if ns.only else NAMES
     if len(names)!=len(set(names)) or any(n not in NAMES for n in names): ap.error('Unknown or duplicate --only test')
     native=shutil.which('luajit')
@@ -103,13 +116,15 @@ def main() -> int:
     for name in names:
         if (name=='planner_reference' and not (reference/'Engine/WishlistPlanner.lua').is_file()) or (name=='orbs_policy' and not (reference/'Memory/MemoryMode.lua').is_file()):
             results.append({'test':name,'status':'NOT_RUN','reason':'Supplied LoadoutPilot reference not available'});continue
-        start=time.monotonic()
+        # 'seconds' is the measured elapsed time, also for TIMEOUT; 'timeout_seconds' is the configured limit.
+        timeout=timeout_for(name);start=time.monotonic()
         try:
-            p=subprocess.run(command+[f'tests/prototype/{name}.lua'],cwd=ROOT,env=env,text=True,capture_output=True,timeout=45)
+            p=subprocess.run(command+[f'tests/prototype/{name}.lua'],cwd=ROOT,env=env,text=True,capture_output=True,timeout=timeout)
             row={'test':name,'status':'PASS' if p.returncode==0 else 'FAIL','exit':p.returncode,
-                 'seconds':round(time.monotonic()-start,6),'stdout':p.stdout,'stderr':p.stderr}
+                 'seconds':round(time.monotonic()-start,6),'timeout_seconds':timeout,'stdout':p.stdout,'stderr':p.stderr}
         except subprocess.TimeoutExpired as exc:
-            row={'test':name,'status':'TIMEOUT','seconds':45,'stdout':str(exc.stdout or ''),'stderr':str(exc.stderr or '')}
+            row={'test':name,'status':'TIMEOUT','seconds':round(time.monotonic()-start,6),'timeout_seconds':timeout,
+                 'stdout':str(exc.stdout or ''),'stderr':str(exc.stderr or '')}
         results.append(row);print(name,row['status']);print(row.get('stdout','').rstrip());print(row.get('stderr','').rstrip())
     runtime_files=[]
     for line in (ROOT/'Nexus.toc').read_text().splitlines():

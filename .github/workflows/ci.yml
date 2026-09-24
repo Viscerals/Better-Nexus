@@ -62,6 +62,8 @@ jobs:
           test "$first" = "$second"
       - name: Release identity consistency (fail-capable; publishes nothing)
         run: python3 tools/release_selftest.py
+      - name: Runner timeout self-test (no Lua runtime)
+        run: python3 tools/runner_selftest.py
       - name: No private or generated files are tracked
         run: |
           if git ls-files | grep -Ei '(^|/)(WTF|SavedVariables)(/|$)|\.(zip|bundle|log|bak)$'; then
@@ -107,6 +109,8 @@ jobs:
           test "$first" = "$second"
       - name: Release identity consistency (fail-capable; publishes nothing)
         run: python3 tools/release_selftest.py
+      - name: Runner timeout self-test (no Lua runtime)
+        run: python3 tools/runner_selftest.py
       - name: No private or generated files are tracked
         run: |
           if git ls-files | grep -Ei '(^|/)(WTF|SavedVariables)(/|$)|\.(zip|bundle|log|bak)$'; then
