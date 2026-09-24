@@ -130,7 +130,6 @@ check(Copies(shares[1].echoes,false)==78 and Copies(shares[1].lockedEchoes,true)
 check(C.ManualPreparationStatus().ready,'the catalog is ready for the next operation')
 -- A second legitimate Share in the same session works.
 H.perks.serverBuildSlots[103]={name='DRIFT-SECOND',verified=false,echoes=Rows(41,6,200100)}
-puts,shares=puts,shares
 local second=Run('DRIFT-SECOND')
 check(second.record~=nil and second.drift==0 and #puts==2 and #shares==2,'a second Share is stored and handed off once')
 -- Both records survive a reload.
@@ -142,7 +141,10 @@ check(C.Get(firstId)~=nil and C.Get(secondId)~=nil,'both records survive a reloa
 -- 3. Boundary schedules: a rebind requested in each phase of the Share's
 -- mutation that falls on a frame boundary under single-slice pacing ends with
 -- the record served and no drift invalidation. (The collect, sort, finalize
--- and bundle phases complete inside one frame here.)
+-- and bundle phases complete inside one frame here.) The put-prepare and
+-- rows phases come before the publish plan is computed, so they also pass on
+-- the defective code: they are controls. index, witness-capture and
+-- witness-verify reproduce the defect there.
 for _,phase in ipairs({'put-prepare','rows','index','witness-capture','witness-verify'})do
  local title='DRIFT-'..phase:upper():gsub('%W','')
  Boot({[102]={name=title,verified=false,echoes=Rows(78,6)}})
@@ -152,10 +154,12 @@ for _,phase in ipairs({'put-prepare','rows','index','witness-capture','witness-v
  check(b.requested~=nil and b.requestedPhase==phase,'fixture: the rebind was requested in phase '..phase)
 end
 
--- 4. Genuine drift is still refused safely, and the requested rebind recovers
--- the catalog from the current durable source. An outside writer replaces the
--- retention-marker table inside the durable bundle while the Share's mutation
--- is in flight (the kind of replacement DataCompaction reports).
+-- 4. Genuine drift is still refused safely, and a rebind requested at the same
+-- time recovers the catalog from the current durable source. An outside writer
+-- replaces the retention-marker table inside the durable bundle while the
+-- Share's mutation is in flight, and the test requests the rebind as a
+-- dependent owner would. (DataCompaction watches only the overlay and catalog
+-- metadata tables, so it would not report this replacement itself.)
 Boot({[102]={name='DRIFT-EXTERNAL',verified=false,echoes=Rows(78,6)}})
 local function Replace()
  local bundle=rawget(NexusDB,'authorityBundle')
@@ -171,4 +175,21 @@ check(r.record==nil and r.status.localSaved~=true,'the refused mutation is not c
 check(#shares==0,'nothing is handed to transport for the refused Share')
 check(r.state=='ROOT_ADMITTED' and r.rebind==nil,'the requested rebind re-admitted the catalog: '..tostring(r.state)..' '..tostring(r.reason))
 check(C.ManualPreparationStatus().ready,'the catalog is usable again without a reload')
-print('PASS share_source_drift_order: no drift after a local Share under a rebind in any mutation phase; roles, one write and one hand-off; second Share; reload; genuine drift refused and recovered checks='..checks)
+-- 5. The kept request is bounded. A rebind whose own re-admission fails (an
+-- invalid raw key after more than one slice of valid keys) ends with that
+-- terminal result: exactly one admission, the request cleared, the refusal
+-- kept, and no repeated re-admission.
+Boot({[102]={name='DRIFT-BOUND',verified=false,echoes=Rows(1,0)}})
+local bundle=rawget(NexusDB,'authorityBundle')
+local tombs={};for i=1,200 do tombs['bound-tomb-'..i]={deletedAt=1} end
+rawset(bundle,'syncTombstones',tombs)
+rawset(bundle,'communityRetentionEvictions',{[true]={}})
+local s0,g0=C.DebugStats(),C.RootState().bindingGeneration
+C.RequestAuthorityRebindV1('SOURCE_REBIND_REQUIRED')
+for _=1,600 do H.Advance(.05,.05) end
+local s1,st=C.DebugStats(),C.RootState()
+check(s1.rebinds-s0.rebinds==1 and st.bindingGeneration-g0==1,
+ 'a failed re-admission runs once: '..(s1.rebinds-s0.rebinds)..' admissions, binding +'..(st.bindingGeneration-g0))
+check(C.RebindRequired()==nil and not st.candidate,'the request ends with the terminal result')
+check(st.state=='ROOT_INVALIDATED' and st.reason~=nil,'the invalid saved data stays refused: '..tostring(st.reason))
+print('PASS share_source_drift_order: no drift after a local Share under a rebind in any mutation phase; roles, one write and one hand-off; second Share; reload; genuine drift refused and recovered; kept request bounded checks='..checks)
