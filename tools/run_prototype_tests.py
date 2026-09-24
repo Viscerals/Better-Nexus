@@ -82,6 +82,7 @@ NAMES += ['select_intent_ownership']
 NAMES += ['catalog_capacity_envelope','catalog_marker_expiry','catalog_saturation','catalog_saturation_order']
 NAMES += ['leaderboard_recovery_rows','leaderboard_recovery_upstream']
 NAMES += ['rival_picker_detection']
+NAMES += ['retention_busy_retry_bound']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

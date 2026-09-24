@@ -1013,10 +1013,12 @@ end
 
 local ScheduleRetention
 -- A run that finds the catalog busy with another change is tried again with a
--- growing delay (5, 10, 20 and 40 s, then every 60 s) for about one hour
--- (64 attempts, 3675 s), so a request made during a long first compaction or
--- identity repair is not lost and never becomes an endless retry. A busy
--- attempt stops before it copies any payload.
+-- growing delay (5, 10, 20 and 40 s, then every 60 s) for about one hour.
+-- BUSY_RETRY_LIMIT counts retries after the first busy run: one chain makes
+-- at most 1 + 64 = 65 runs, the last 3675 s after the first. A request during
+-- the chain joins it (Retention.Request). So a request made during a long
+-- first compaction or identity repair is not lost and never becomes an
+-- endless retry. A busy run stops before it copies any payload.
 local BUSY_RETRY_DELAY, BUSY_RETRY_MAX_DELAY, BUSY_RETRY_LIMIT = 5, 60, 64
 ScheduleRetention = function(scheduler, reason, delay, busyAttempts)
     return scheduler.After("data-retention.enforce", delay, function()
