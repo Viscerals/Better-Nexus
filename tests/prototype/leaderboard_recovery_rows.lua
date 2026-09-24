@@ -75,12 +75,18 @@ local planKey=F.Key(F.PLAN)
 -- boot). With expireAfterDays set, the test installs the same clock plus a
 -- test-controlled offset before each boot, so the retention owner records
 -- first observations at a known time and a later session can start that many
--- days later. The clock never steps backward inside one session.
-local CLOCK={base=1700000000,offset=0}
+-- days later. The clock never steps backward inside one session. Between
+-- sessions without an offset it restarts lower (H.now restarts at 1000), so
+-- CLOCK.latest keeps the latest time any session has read.
+local CLOCK={base=1700000000,offset=0,latest=0}
 local function Before(H)
  ServerSlots(H)
  if SIZE.expireAfterDays then
-  time=function() return CLOCK.base+CLOCK.offset+math.floor(H.now) end
+  time=function()
+   local t=CLOCK.base+CLOCK.offset+math.floor(H.now)
+   if t>CLOCK.latest then CLOCK.latest=t end
+   return t
+  end
   GetServerTime=time
  end
 end
@@ -465,9 +471,14 @@ if SIZE.expireAfterDays then
   check(fx.retention[id]~=nil,'expiry: first observations name only retention markers: '..tostring(id))
   earliest,latest=math.min(earliest,seen),math.max(latest,seen)
  end
+ -- Recorded from the harness clock, not from the marker values: no earlier
+ -- than a session start and no later than the latest time a session read.
+ -- They can come from an earlier session of this run (the request made when
+ -- the shared catalog is ready is retried while the catalog is busy).
  local now=time()
- check(ageing==0 or (earliest>=CLOCK.base+1000 and latest<=now),
-  'expiry: first observations carry the harness clock of this run: '..tostring(earliest)..'..'..tostring(latest)..' now '..now)
+ check(ageing==0 or (earliest>=CLOCK.base+1000 and latest<=CLOCK.latest),
+  'expiry: first observations carry the harness clock of this run: '..tostring(earliest)..'..'..tostring(latest)
+  ..' latest harness time '..CLOCK.latest..' now '..now)
  check(C.Status().barrierCount==retentionCount,'expiry: no retention marker expires before 30 days')
  local tombstonesBefore=F.Serialize(NexusDB.authorityBundle.syncTombstones)
  local buildsBefore=F.Serialize(NexusDB.authorityBundle.communityBuilds)
