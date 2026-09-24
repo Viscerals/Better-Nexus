@@ -17,7 +17,7 @@ core\EchoCatalogSource.lua
 logic\Model.lua
 logic\Strategy.lua
 logic\Ratchet.lua
-logic\WishlistPilot.lua
+logic\EchoWeaver.lua
 logic\OrbPolicy.lua
 logic\Policy.lua
 core\Revisions.lua

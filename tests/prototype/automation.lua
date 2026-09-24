@@ -1,6 +1,6 @@
 local H=dofile('tests/prototype/harness.lua');H.pendingRolls=2;H.Boot()
 local A=Nexus.GameAdapter;local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
-check(A.SetFirstLoadoutWishlistIdentity('Pilot planned',{ {spellId=200001,quality=1,stacks=2} }),'set first run plan')
+check(A.SetFirstLoadoutWishlistIdentity('EchoWeaver planned',{ {spellId=200001,quality=1,stacks=2} }),'set first run plan')
 H.Board({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}})
 H.Notify();H.Advance(.5)
 check(A.Wishlist()~=nil,'real first-run target resolves')

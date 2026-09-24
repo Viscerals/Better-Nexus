@@ -36,8 +36,8 @@ The report file it creates is
 `NexusSupport.lua` that ships inside the addon folder. A new component needs the
 normal closed-client installation and restart before WoW registers its file.
 
-Disable other Echo pickers, including a separate LoadoutPilot, before using Nexus
-automation. LoadoutPilot is a behavioral reference, not a runtime dependency.
+Disable any other Echo-picking addon before using Nexus automation. While Nexus
+detects one, it pauses automation and Orb mode.
 Keep Automation OFF for the initial navigation/save test.
 
 To roll back, close WoW and restore matching old code and old saved data together.
@@ -93,8 +93,8 @@ ownership, and safety checks. Orb refinement never changes permanent slots.
 
 ### Rolling recommendations
 
-Ordinary rolling follows an independent implementation of the supplied
-LoadoutPilot 1.3.6 / P103 policy. Snapshot activation and genuinely confirmed
+Ordinary rolling uses EchoWeaver, the rolling engine that Nexus maintains
+itself. Snapshot activation and genuinely confirmed
 saved-build guarantees remain distinct from random Designed/Wishlist rolling.
 Neither a prediction nor a submitted action proves future delivery or ownership.
 
@@ -136,12 +136,12 @@ The controller requests **one Orb per replacement**, observes the actual offer,
 chooses the first missing exact target in your ordered list or an approved safe
 fallback, and waits for the observed offer/selection lifecycle, exact ownership
 change, and charge/result confirmation before
-another spend. It does not use the ordinary WishlistPlanner on Orb boards.
+another spend. It does not use the ordinary EchoWeaver planner on Orb boards.
 
 Required exact rolled copies, granted copies needed for future permanent targets,
 and permanent copies are protected. One granted copy cannot satisfy both roles.
 The candidate
-source respects the reference's lowest-quality-family sacrifice behavior. A
+source follows the lowest-quality-family sacrifice rule. A
 source that could ambiguously refer to a permanent copy or multiple qualities
 of the same ID is conservatively
 excluded. Some apparently extra copies may therefore be unavailable as sources.

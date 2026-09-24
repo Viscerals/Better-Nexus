@@ -10,7 +10,7 @@ SelectPerk(choice ID) -> fresh ownership/diff/charge confirmation -> next approv
 source or terminal stop.
 
 The frame advances at most one transaction step per 0.2-second update; it does not
-loop through a run synchronously. The ordinary WishlistPilot planner is not called
+loop through a run synchronously. The ordinary EchoWeaver planner is not called
 on Orb boards. All mutation calls sit behind GameAdapter.Orbs. Ordinary Take,
 Freeze, Banish, Reroll and permanent-slot/activation/upload actions stay guarded
 while an Orb operation owns state. When an OrbService exists, ordinary Take,
@@ -100,10 +100,11 @@ or interference from other game addons.
 ## Verification limits
 
 New tests exercise the actual Nexus adapter/runtime and mocked game services.
-3,000 offer-decision and 3,000 result-diff comparisons run against the supplied
-MemoryMode source on compatible represented inputs. Exact-role/source/budget and
-fresh-evidence guards have separate controls, not a claim of blanket parity.
-The ordinary 10,000-case reference comparison remains unchanged.
+Exact-role/source/budget and fresh-evidence guards have separate controls
+(`tests/prototype/echoweaver_orb_policy.lua` and the `orbs_*` tests). An earlier
+offline comparison with an outside addon's source (3,000 offer decisions,
+3,000 result diffs, and 10,000 ordinary decisions) is retired (2026-09-24);
+it was never a claim of blanket parity.
 
 All tests in this build use Lua 5.4 with the included compatibility shims. They are
 not a LuaJIT, native client, original upstream inventory, or independent review

@@ -323,8 +323,8 @@ function Policy.Decide(state)
     -- planner. Every ordinary board uses the one planner that holds no
     -- future-offer assumption, and that planner keeps its own incomplete-state
     -- refusals. `snapshotVerified` is deliberately not read here.
-    if type(state) == "table" and Nexus.WishlistPilot then
-        return Nexus.WishlistPilot.DecideNexus(state)
+    if type(state) == "table" and Nexus.EchoWeaver then
+        return Nexus.EchoWeaver.DecideNexus(state)
     end
     -- Reached only when the ordinary planner is not loaded, which the
     -- production TOC never allows. The historical scoring below must then see
