@@ -15,6 +15,8 @@ Results are reported as they are. A test that was not run is NOT a pass:
 REFERENCE_DEPENDENT tests compare against a third-party LoadoutPilot archive that this repository
 has no permission to redistribute (see THIRD_PARTY.md and tools/prepare_pilot_reference.py).
 The inventory size is whatever tools/run_prototype_tests.py lists; no count is hard-coded here.
+Before the RESULT line, "timing:" lines give the elapsed time and limit of every executed test whose
+limit is not the runner's default, and of the five slowest executed tests. They change no result.
 """
 from __future__ import annotations
 import argparse, importlib.util, json, pathlib, subprocess, sys
@@ -26,11 +28,31 @@ REFERENCE_DEPENDENT = {'planner_reference', 'orbs_policy'}
 SUPPORT = {'harness', 'policy_adapter', 'startup_benchmark'}
 
 
-def inventory() -> list[str]:
+def runner_module():
     spec = importlib.util.spec_from_file_location('run_prototype_tests', ROOT / 'tools' / 'run_prototype_tests.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return list(module.NAMES)
+    return module
+
+
+def inventory() -> list[str]:
+    return list(runner_module().NAMES)
+
+
+def timing_lines(rows: dict, default_timeout) -> list[str]:
+    """Every executed test whose timeout_seconds is not the default, then the five slowest executed
+    tests by seconds; each test once. A missing seconds or timeout_seconds is printed as unknown."""
+    executed = {n: r for n, r in rows.items() if r['status'] != 'NOT_RUN'}
+    raised = [n for n, r in executed.items()
+              if default_timeout is not None and r.get('timeout_seconds') not in (None, default_timeout)]
+    timed = [n for n, r in executed.items() if isinstance(r.get('seconds'), (int, float))]
+    slowest = sorted(timed, key=lambda n: executed[n]['seconds'], reverse=True)[:5]
+
+    def shown(value):
+        return 'unknown' if value is None else value
+    return [f'timing: {n} {executed[n]["status"]} {shown(executed[n].get("seconds"))} s '
+            f'(limit {shown(executed[n].get("timeout_seconds"))} s)'
+            for n in raised + [n for n in slowest if n not in raised]]
 
 
 def check_inventory(names: list[str]) -> list[str]:
@@ -57,7 +79,8 @@ def main() -> int:
     ap.add_argument('--output', type=pathlib.Path, default=ROOT / 'build' / 'prototype-test-results.json')
     ns = ap.parse_args()
 
-    names = inventory()
+    runner = runner_module()
+    names = list(runner.NAMES)
     problems = check_inventory(names)
     print(f'inventory: {len(names)} listed tests')
     for p in problems:
@@ -99,6 +122,8 @@ def main() -> int:
         print(f'NOT RUN (not a pass): {n}: {rows[n].get("reason", "")}')
     if ns.only:
         print('PARTIAL: a shard was selected; this is not a complete run')
+    for line in timing_lines(rows, getattr(runner, 'DEFAULT_TIMEOUT_SECONDS', None)):
+        print(line)
     unexpected_not_run = [n for n in not_run if n not in REFERENCE_DEPENDENT or ns.require_reference]
     if failed or unexecuted or unexpected_not_run:
         print('RESULT: FAILED')

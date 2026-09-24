@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Fail-capable self-test of the per-test process timeouts in tools/run_prototype_tests.py.
+"""Fail-capable self-test of the per-test process timeouts in tools/run_prototype_tests.py
+and of the timing lines that tools/ci_check.py prints from the runner's report.
 
     python tools/runner_selftest.py
 
 It imports the runner and calls its main() with subprocess.run, shutil.which and the clock
 replaced by controlled stand-ins. No Lua runtime is started and nothing waits for a timeout:
 a timeout is a raised subprocess.TimeoutExpired, and elapsed time is a fake clock that each
-stand-in process advances. Each case prints one "ok" line; any wrong result prints WRONG and
-the exit status is 1.
+stand-in process advances. It calls tools/ci_check.py's main() with the runner replaced by a
+stand-in that writes a controlled report. Each case prints one "ok" line; any wrong result
+prints WRONG and the exit status is 1.
 """
 from __future__ import annotations
 import contextlib, importlib.util, io, json, pathlib, subprocess, sys, tempfile, types
@@ -81,6 +83,47 @@ def rows(report) -> dict:
 def counts(report):
     """(passed, failed, not_run) from the report, or None when no report was written."""
     return (report['passed'], report['failed'], report['not_run']) if report else None
+
+
+def controlled_report(names, overrides: dict) -> dict:
+    """A runner report written without a runner: each test PASS in 0.25 s at its configured limit,
+    the two reference-dependent tests NOT_RUN, then per-test overrides (None removes the key)."""
+    runner = load_runner()
+    results = []
+    for n in names:
+        if n in ('planner_reference', 'orbs_policy'):
+            results.append({'test': n, 'status': 'NOT_RUN', 'reason': 'Supplied LoadoutPilot reference not available'})
+            continue
+        row = {'test': n, 'status': 'PASS', 'exit': 0, 'seconds': 0.25, 'timeout_seconds': runner.timeout_for(n),
+               'stdout': '', 'stderr': ''}
+        row.update(overrides.get(n, {}))
+        results.append({k: v for k, v in row.items() if v is not None})
+    return {'schema': 'nexus-prototype-tests/1', 'runtime': 'LuaJIT', 'results': results}
+
+
+def run_ci_check(report: dict, *args: str):
+    """Call tools/ci_check.py main() with its runner replaced by one that writes `report`.
+    Return (exit status, stdout lines); an exception is returned as the exit status."""
+    spec = importlib.util.spec_from_file_location('ci_check', ROOT / 'tools' / 'ci_check.py')
+    ci = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ci)
+
+    def write_report(command, **kwargs):
+        pathlib.Path(command[command.index('--output') + 1]).write_text(json.dumps(report), encoding='utf-8')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+    ci.subprocess = types.SimpleNamespace(run=write_report)
+    out = io.StringIO()
+    with tempfile.TemporaryDirectory() as tmp:
+        saved_argv = sys.argv
+        sys.argv = ['ci_check.py', '--output', str(pathlib.Path(tmp) / 'report.json'), *args]
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                code = ci.main()
+        except Exception as exc:
+            code = f'raised {exc!r}'
+        finally:
+            sys.argv = saved_argv
+    return code, out.getvalue().splitlines()
 
 
 def main() -> int:
@@ -214,10 +257,57 @@ def main() -> int:
                code not in (0, None) and fake.calls == [] and report is None and 'catalog_root_capacty' in err,
                f'exit {code}, calls {fake.calls}, report written {report is not None}, stderr {err.strip()!r}')
 
+    # 7. tools/ci_check.py timing lines, complete inventory, all pass. startup_budget has no
+    # timeout_seconds; transport is the sixth slowest and must not be printed.
+    names = list(load_runner().NAMES)
+    code, out = run_ci_check(controlled_report(names, {
+        'catalog_root_capacity': {'seconds': 71.25}, 'sync_admission_traffic_acceptance': {'seconds': 88.5},
+        'startup_budget': {'seconds': 40.75, 'timeout_seconds': None}, 'boot': {'seconds': 30.5},
+        'orbs': {'seconds': 20.25}, 'transport': {'seconds': 3.0}}))
+    unchanged = [f'inventory: {len(names)} listed tests',
+                 'runtime: LuaJIT',
+                 f'passed {len(names) - 2}, failed 0, NOT RUN 2, no result row 0, listed {len(names)}',
+                 'NOT RUN (not a pass): planner_reference: Supplied LoadoutPilot reference not available',
+                 'NOT RUN (not a pass): orbs_policy: Supplied LoadoutPilot reference not available',
+                 'RESULT: no listed test failed; 2 reference-dependent test(s) NOT RUN']
+    timing = ['timing: catalog_root_capacity PASS 71.25 s (limit 120 s)',
+              'timing: sync_admission_traffic_acceptance PASS 88.5 s (limit 120 s)',
+              'timing: startup_budget PASS 40.75 s (limit unknown s)',
+              'timing: boot PASS 30.5 s (limit 45 s)',
+              'timing: orbs PASS 20.25 s (limit 45 s)']
+    expect('ci_check prints the raised limits, then the five slowest, each test once, just before RESULT',
+           out == unchanged[:-1] + timing + unchanged[-1:], ' | '.join(out[-12:]))
+    expect('ci_check output without the timing lines is unchanged, exit 0',
+           [line for line in out if not line.startswith('timing: ')] == unchanged and code == 0, f'exit {code}')
+
+    # 8. The same with a FAIL, a TIMEOUT, a missing seconds and a shard.
+    shard = ['parse', 'boot', 'catalog_root_capacity', 'sync_admission_traffic_acceptance', 'orbs_policy']
+    code, out = run_ci_check(controlled_report(shard, {
+        'parse': {'status': 'FAIL', 'exit': 1, 'seconds': 2.5, 'stdout': 'parse out', 'stderr': 'parse err'},
+        'catalog_root_capacity': {'status': 'TIMEOUT', 'exit': None, 'seconds': 120.5, 'stdout': 'partial'},
+        'sync_admission_traffic_acceptance': {'seconds': None}}), '--only', ','.join(shard))
+    unchanged = [f'inventory: {len(names)} listed tests',
+                 '--- parse: FAIL', 'parse out', 'parse err',
+                 '--- catalog_root_capacity: TIMEOUT', 'partial', '',
+                 'runtime: LuaJIT',
+                 'passed 2, failed 2, NOT RUN 1, no result row 0, listed 5',
+                 'NOT RUN (not a pass): orbs_policy: Supplied LoadoutPilot reference not available',
+                 'PARTIAL: a shard was selected; this is not a complete run',
+                 'RESULT: FAILED']
+    timing = ['timing: catalog_root_capacity TIMEOUT 120.5 s (limit 120 s)',
+              'timing: sync_admission_traffic_acceptance PASS unknown s (limit 120 s)',
+              'timing: parse FAIL 2.5 s (limit 45 s)',
+              'timing: boot PASS 0.25 s (limit 45 s)']
+    expect('ci_check timing lines show TIMEOUT and FAIL rows and print a missing seconds as unknown',
+           out == unchanged[:-1] + timing + unchanged[-1:], ' | '.join(out[-12:]))
+    expect('ci_check output without the timing lines is unchanged: failure printing, counts, RESULT: FAILED, exit 1',
+           [line for line in out if not line.startswith('timing: ')] == unchanged and code == 1, f'exit {code}')
+
     if failures:
         print('RESULT: FAILED:', '; '.join(failures))
         return 1
-    print('RESULT: per-test timeouts, result rows, counts and exit status behave as declared; no Lua runtime was started')
+    print('RESULT: per-test timeouts, result rows, counts, exit status and ci_check timing lines behave as declared;'
+          ' no Lua runtime was started')
     return 0
 
 
