@@ -14,7 +14,11 @@
 -- set the global LEADERBOARD_RECOVERY_SIZE before dofile to compose a larger
 -- catalog (keyBudget is the envelope the code under test admits) or to use
 -- the current exact marker shapes (markerShape='v1'; default 'legacy', the
--- shapes an older retention owner wrote).
+-- shapes an older retention owner wrote). minDistinctKeys asserts a lower
+-- bound on the identities the saved data holds (e.g. above the old shared
+-- 2048). expireAfterDays enables section 3b: the retention-marker expiry
+-- step, with the harness clock moved forward that many days before a real
+-- start-up.
 -- settleSeconds bounds the wait for post-start-up background work: about
 -- 3 s here; about 2300 simulated seconds at 2000 builds on the first
 -- start-up (scheduler-paced evidence compaction, then the build hash
@@ -25,7 +29,8 @@ local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local started=os.clock()
 
-local SIZE={extraBuilds=6,removalMarkers=5,retentionMarkers=5,keyBudget=2048,settleSeconds=120,markerShape='legacy'}
+local SIZE={extraBuilds=6,removalMarkers=5,retentionMarkers=5,keyBudget=2048,settleSeconds=120,markerShape='legacy',
+ minDistinctKeys=0,expireAfterDays=nil}
 for k,v in pairs(rawget(_G,'LEADERBOARD_RECOVERY_SIZE') or {})do SIZE[k]=v end
 local S=L.STAMP
 local fx=L.New({extraBuilds=SIZE.extraBuilds,removalMarkers=SIZE.removalMarkers,
@@ -48,7 +53,10 @@ local fx=L.New({extraBuilds=SIZE.extraBuilds,removalMarkers=SIZE.removalMarkers,
  {name='Kilo',class='PALADIN'},
 }})
 check(fx:DistinctKeys()<=SIZE.keyBudget,'fixture: builds and marker-only IDs fit the '..SIZE.keyBudget..'-key budget: '..fx:DistinctKeys())
+check(fx:DistinctKeys()>=SIZE.minDistinctKeys,'fixture: the saved data holds at least '..SIZE.minDistinctKeys..' identities: '..fx:DistinctKeys())
 local removalCount,retentionCount=L.Count(fx.removal),L.Count(fx.retention)
+-- Set by section 3b once the retention markers have expired.
+local retentionExpired=false
 -- Catalog records the test expects: the fixture builds, plus any record the
 -- product itself adds during the test (asserted where it is added).
 local known,mirrors={},{}
@@ -61,6 +69,21 @@ local function ServerSlots(H)
  H.perks.serverActiveSlot=1
 end
 local planKey=F.Key(F.PLAN)
+
+-- The harness clock. time() and GetServerTime() are the simulated client
+-- APIs from harness.lua (1700000000 + H.now, H.now starting at 1000 in every
+-- boot). With expireAfterDays set, the test installs the same clock plus a
+-- test-controlled offset before each boot, so the retention owner records
+-- first observations at a known time and a later session can start that many
+-- days later. The clock never steps backward inside one session.
+local CLOCK={base=1700000000,offset=0}
+local function Before(H)
+ ServerSlots(H)
+ if SIZE.expireAfterDays then
+  time=function() return CLOCK.base+CLOCK.offset+math.floor(H.now) end
+  GetServerTime=time
+ end
+end
 
 local function List(rows,field)
  local out={}
@@ -86,6 +109,8 @@ local function Settle(H)
  for _=1,math.floor(SIZE.settleSeconds*20) do
   H.Advance(.05,.05)
   local s=Nexus.StartupStatus()
+  -- A refused start-up never settles; the caller reports its facts.
+  if s.state=='failed' then return s end
   local calm=s.syncGate=='open' and not Nexus.BuildCatalog.RootState().candidate
    and not Nexus.Scheduler.Pending('data-compaction')
    and not Nexus.Scheduler.Pending('data-retention.enforce')
@@ -99,7 +124,9 @@ end
 -- Start-up facts must agree with what the shared views and Sync then do.
 local function Readiness(tag,H)
  local s=Settle(H)
- check(s.coreReady==true and s.state=='ready' and not s.reason,tag..': start-up is ready with no failure: '..tostring(s.state)..' '..tostring(s.reason))
+ local f=s.failure or {}
+ check(s.coreReady==true and s.state=='ready' and not s.reason,tag..': start-up is ready with no failure: '..tostring(s.state)..' '..tostring(s.reason)
+  ..(s.reason and (' (map '..tostring(f.map)..', counter '..tostring(f.counter)..', count '..tostring(f.count)..', limit '..tostring(f.limit)..')') or ''))
  check(s.syncReady==true and s.dpsReady==true,tag..': Sync and DPS report ready')
  check(s.syncGate=='open' and s.syncGateAdapterReady and s.syncGateCatalogReady and s.syncGateHashesReady,
   tag..': the Sync gate is open with adapter, catalog and hashes ready: '..tostring(s.syncGate))
@@ -115,8 +142,16 @@ local function Readiness(tag,H)
  check(st.availableCount==L.Count(known) and st.overlayCount==L.Count(known) and st.invalidCount==0,
   tag..': every expected build is available and none is invalid: '..st.availableCount..'/'..st.overlayCount..'/'..st.invalidCount
   ..'; records that are not fixture builds: '..table.concat(other,', '))
- check(st.tombstoneCount==removalCount and st.barrierCount==retentionCount,
+ local liveRetention=retentionExpired and 0 or retentionCount
+ check(st.tombstoneCount==removalCount and st.barrierCount==liveRetention,
   tag..': the catalog holds the removal and retention markers: '..st.tombstoneCount..'/'..st.barrierCount)
+ if st.buildIdentityLimit~=nil then
+  -- Capacity envelope V2 facts, where the code under test reports them.
+  check(st.buildIdentityCount==L.Count(known) and st.buildIdentityLimit==2048
+   and st.tombstoneLimit==2048 and st.barrierLimit==2048,
+   tag..': capacity facts: '..tostring(st.buildIdentityCount)..' build identities of '..tostring(st.buildIdentityLimit))
+  check(C.SaturationSummary()==nil,tag..': no capacity refusal was recorded')
+ end
  return s
 end
 
@@ -142,16 +177,27 @@ local function MarkerCheck(tag)
  for _,id in ipairs(fx.markerOrder)do
   local kind=fx.markerIds[id]
   check(C.Get(id)==nil and C.GetSummary(id)==nil and not C.IsAdmittedRecord(id),tag..': '..id..' is not a build')
-  check(C.AuthorityState(id).occupancy=='BLOCKED',tag..': '..id..' stays a blocked reservation')
+  if kind=='retention' and retentionExpired then
+   check(C.BarrierState(id).blocked==false and C.AuthorityState(id).occupancy=='VACANT',
+    tag..': expired retention marker '..id..' leaves a vacant ID: '..tostring(C.AuthorityState(id).occupancy))
+  else
+   check(C.AuthorityState(id).occupancy=='BLOCKED',tag..': '..id..' stays a blocked reservation')
+  end
   if kind=='removal' then
    check(C.TombstoneState(id).state~='NONE',tag..': '..id..' is read as a removal marker: '..tostring(C.TombstoneState(id).state))
-  else
+  elseif not retentionExpired then
    check(C.BarrierState(id).blocked==true,tag..': '..id..' is read as a retention marker: '..tostring(C.BarrierState(id).state))
   end
  end
  local b=NexusDB.authorityBundle
  for id in pairs(fx.removal)do check(b.syncTombstones[id]~=nil,tag..': saved removal marker '..id..' is kept') end
- for id in pairs(fx.retention)do check(b.communityRetentionEvictions[id]~=nil,tag..': saved retention marker '..id..' is kept') end
+ for id in pairs(fx.retention)do
+  if retentionExpired then
+   check(b.communityRetentionEvictions[id]==nil,tag..': expired retention marker '..id..' is removed from the saved map')
+  else
+   check(b.communityRetentionEvictions[id]~=nil,tag..': saved retention marker '..id..' is kept')
+  end
+ end
 end
 
 -- Saved scores in the durable DPS store equal the fixture's.
@@ -286,7 +332,7 @@ end
 -- 1. First start-up from the legacy saved locations.
 ------------------------------------------------------------------------
 local db=fx:Install(F.Database())
-local H=F.Boot(db,ServerSlots)
+local H=F.Boot(db,Before)
 Readiness('start-up',H)
 check(type(NexusDB.authorityBundle)=='table','start-up: the saved data now lives in the authority bundle')
 MarkerCheck('start-up')
@@ -334,7 +380,7 @@ SyncNow('start-up',H)
 local scoresBefore=F.Serialize(NexusDB.authorityBundle.dpsCapture.characterBest)
 -- F.Reload itself for this size; a chunked literal round trip only when the
 -- saved table is too large for one literal (see L.Reload).
-H=L.Reload(F,ServerSlots)
+H=L.Reload(F,Before)
 check(L.lastReloadPieces==nil or SIZE.extraBuilds>100,'reload: format5_support F.Reload is used at the default size')
 Readiness('reload',H)
 check(F.Serialize(NexusDB.authorityBundle.dpsCapture.characterBest)==scoresBefore,'reload: the saved DPS store is unchanged')
@@ -355,12 +401,11 @@ SyncNow('reload',H)
 -- 3. A received record and the retention run over the saved markers.
 -- Kilo's first record arrives through the real inbound function, links to
 -- Kilo's saved build and requests a retention run (DataRetention.Request,
--- 3 s delay). Observed in this harness (reported, not asserted): the first
--- session's start-up retention run is refused while the compaction
--- maintenance is open; after the reload the start-up run completes, and the
--- run this record requests returns that completed run's result. Whichever
--- run is recorded, it must have removed nothing, and every marker, build and
--- saved score must still be there.
+-- 3 s delay). Which run the retention summary then records depends on the
+-- code under test (on 640d71f a run that met another catalog maintenance was
+-- dropped; the recovery retries it); this is not asserted. Whichever run is
+-- recorded, it must have removed nothing (every marker is younger than 30
+-- days), and every marker, build and saved score must still be there.
 ------------------------------------------------------------------------
 local accepted,refusal=fx:Receive('Kilo','lk',{dps=47000,ts=S+200,duration=100})
 check(accepted==true,'retention run: Kilo\'s record is accepted: '..tostring(refusal))
@@ -390,12 +435,110 @@ end
 check(third.lk['kilo@'..fx.realmKey]~=nil,'retention run: Kilo\'s received record is ranked on its saved build')
 
 ------------------------------------------------------------------------
+-- 3b. Optional (SIZE.expireAfterDays): the 30-day retention-marker expiry.
+-- The retention owner records the first local observation of every
+-- retention marker without its own local age (older numeric and untimed
+-- markers) in authorityBundle.dataRetention.markerFirstSeen. The harness
+-- clock then moves 29 days forward for one real start-up (nothing may
+-- expire, and no first observation may be reset), then expireAfterDays
+-- forward for another. The retention run requested after the shared catalog
+-- is ready must then expire every retention marker and change nothing else:
+-- removal markers, builds, saved scores, rendered rows, order, owners,
+-- build identities and evidence stay exactly as they were, and the evicted
+-- build of the retention-marker player is not restored.
+------------------------------------------------------------------------
+if SIZE.expireAfterDays then
+ local C,R=Nexus.BuildCatalog,Nexus.DataRetention
+ local ageing=0
+ for _,v in pairs(fx.retention)do
+  if type(v)=='number' or (type(v)=='table' and v.receiptAtServerTime==0) then ageing=ageing+1 end
+ end
+ for _=1,math.floor(SIZE.settleSeconds*20) do
+  if R.MarkerFirstSeenCount(NexusDB)==ageing then break end
+  H.Advance(.05,.05)
+ end
+ check(R.MarkerFirstSeenCount(NexusDB)==ageing,'expiry: a first observation is recorded for every retention marker without its own age: '
+  ..R.MarkerFirstSeenCount(NexusDB)..'/'..ageing)
+ local firstSeen=NexusDB.authorityBundle.dataRetention.markerFirstSeen or {}
+ local earliest,latest=math.huge,0
+ for id,seen in pairs(firstSeen)do
+  check(fx.retention[id]~=nil,'expiry: first observations name only retention markers: '..tostring(id))
+  earliest,latest=math.min(earliest,seen),math.max(latest,seen)
+ end
+ local now=time()
+ check(ageing==0 or (earliest>=CLOCK.base+1000 and latest<=now),
+  'expiry: first observations carry the harness clock of this run: '..tostring(earliest)..'..'..tostring(latest)..' now '..now)
+ check(C.Status().barrierCount==retentionCount,'expiry: no retention marker expires before 30 days')
+ local tombstonesBefore=F.Serialize(NexusDB.authorityBundle.syncTombstones)
+ local buildsBefore=F.Serialize(NexusDB.authorityBundle.communityBuilds)
+ local scoresNow=F.Serialize(NexusDB.authorityBundle.dpsCapture.characterBest)
+ local newest=latest
+ for _,v in pairs(fx.retention)do
+  if type(v)=='table' and (tonumber(v.receiptAtServerTime) or 0)>newest then newest=v.receiptAtServerTime end
+ end
+
+ -- Day 29: a real start-up and its retention run must expire nothing, and
+ -- must keep every recorded first observation as it was.
+ local firstSeenBefore=F.Serialize(firstSeen)
+ CLOCK.offset=29*86400
+ H=L.Reload(F,Before)
+ C,R=Nexus.BuildCatalog,Nexus.DataRetention
+ Settle(H)
+ local meta=NexusDB.authorityBundle.dataRetention or {}
+ check((tonumber(meta.nextMaintenanceAt) or 0)>CLOCK.base+CLOCK.offset,'day 29: a retention run ran in this session: '..tostring(meta.nextMaintenanceAt))
+ check(C.Status().barrierCount==retentionCount and R.MarkerFirstSeenCount(NexusDB)==ageing,
+  'day 29: no retention marker expires: '..C.Status().barrierCount..'/'..retentionCount)
+ check(F.Serialize(meta.markerFirstSeen or {})==firstSeenBefore,'day 29: the first observations are not reset by a reload or a run')
+
+ CLOCK.offset=SIZE.expireAfterDays*86400
+ H=L.Reload(F,Before)
+ -- A reload is a new module set: read the new catalog and retention owners.
+ C,R=Nexus.BuildCatalog,Nexus.DataRetention
+ check(time()-newest>=30*86400,'expiry: the new session starts more than 30 days after every marker age: '..(time()-newest))
+ for _=1,math.floor(SIZE.settleSeconds*20) do
+  H.Advance(.05,.05)
+  if C.Status().barrierCount==0 and not Nexus.Scheduler.Pending('data-retention.enforce') then break end
+ end
+ retentionExpired=true
+ local run=R.Stats(NexusDB)
+ check(type(run)=='table' and run.evictionMarkersRemoved==retentionCount and run.tombstonesRemoved==0
+  and run.overlayRemoved==0 and run.characterBestRemoved==0,
+  'expiry: the retention run expires every retention marker and removes nothing else: '
+  ..tostring(run and run.evictionMarkersRemoved)..'/'..tostring(run and run.tombstonesRemoved)..'/'..tostring(run and run.overlayRemoved))
+ check(R.MarkerFirstSeenCount(NexusDB)==0,'expiry: the first observations leave with their markers')
+ local tag='after '..SIZE.expireAfterDays..' days'
+ Readiness(tag,H)
+ check(F.Serialize(NexusDB.authorityBundle.syncTombstones)==tombstonesBefore,'expiry: the removal markers are unchanged')
+ check(F.Serialize(NexusDB.authorityBundle.communityBuilds)==buildsBefore,'expiry: every saved build is unchanged')
+ check(F.Serialize(NexusDB.authorityBundle.dpsCapture.characterBest)==scoresNow,'expiry: the saved scores are unchanged')
+ MarkerCheck(tag)
+ SavedScores(tag)
+ for _,p in ipairs(fx.players)do
+  if p.build=='retention' then
+   check(C.Get(p.buildId)==nil and not C.IsAdmittedRecord(p.buildId) and C.AuthorityState(p.buildId).occupancy=='VACANT',
+    'expiry: '..p.name..'\'s evicted build is not restored')
+  end
+ end
+ local fourth=Board(tag,H)
+ for _,category in ipairs({'lk','dummy','combined'})do
+  for owner,sig in pairs(third[category])do
+   check(fourth[category][owner]==sig,'expiry '..category..': '..owner..' renders the same row and detail')
+  end
+  check(L.Count(fourth[category])==L.Count(third[category]),'expiry '..category..': the same number of rows')
+ end
+ CommunityCheck(tag,H)
+ LocalPlan(tag)
+ SyncNow(tag,H)
+end
+
+------------------------------------------------------------------------
 -- 4. Cross-check: the same remote builds and records fed through the real
 -- inbound functions (BuildCatalog.Put source=remote, DpsCapture.ReceiveRecord)
 -- after a start-up without fixture data render the same rows.
 ------------------------------------------------------------------------
 local inbound=L.New(fx.spec)
-H=F.Boot(F.Database(),ServerSlots)
+CLOCK.offset=0
+H=F.Boot(F.Database(),Before)
 Settle(H)
 local result=inbound:Inbound(H)
 for _,b in ipairs(result.builds)do check(b.ok==true,'inbound: build '..b.id..' is admitted: '..tostring(b.why)) end
@@ -419,5 +562,6 @@ for _,category in ipairs({'lk','dummy','combined'})do
 end
 
 local elapsed=os.clock()-started
-print(string.format('PASS leaderboard_recovery_rows: %d builds + %d marker-only IDs (%d removal, %d retention, %s shape), %d players; lk/dummy/both rows, order, owner, build, exact ordinary and locked evidence, marker-only and missing-build rows, Open Build, reload, readiness, local plan, inbound cross-check checks=%d cpu=%.2fs',
- #fx.buildOrder,#fx.markerOrder,removalCount,retentionCount,SIZE.markerShape,#fx.players,checks,elapsed))
+print(string.format('PASS leaderboard_recovery_rows: %d builds + %d marker-only IDs (%d removal, %d retention, %s shape%s), %d players; lk/dummy/both rows, order, owner, build, exact ordinary and locked evidence, marker-only and missing-build rows, Open Build, reload, readiness, local plan, inbound cross-check checks=%d cpu=%.2fs',
+ #fx.buildOrder,#fx.markerOrder,removalCount,retentionCount,SIZE.markerShape,
+ SIZE.expireAfterDays and ('; retention markers expired after '..SIZE.expireAfterDays..' days') or '',#fx.players,checks,elapsed))
