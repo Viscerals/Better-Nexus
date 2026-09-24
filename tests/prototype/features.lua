@@ -1,6 +1,6 @@
 local H=dofile('tests/prototype/harness.lua');H.Boot()
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
-for _,name in ipairs({'Model','Policy','Ratchet','Strategy','GameAdapter','Store','WishlistEditor','CommunityBuilds','Leaderboard','DpsCapture','Sync','Codec','JournalTab','LogViewer','WishlistPilot','SyncWire'})do
+for _,name in ipairs({'Model','Policy','Ratchet','Strategy','GameAdapter','Store','WishlistEditor','CommunityBuilds','Leaderboard','DpsCapture','Sync','Codec','JournalTab','LogViewer','EchoWeaver','SyncWire'})do
  check(type(Nexus[name])=='table','included feature '..name)
 end
 local function invoke(label,fn)

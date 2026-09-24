@@ -17,7 +17,7 @@ local function F3(extra)
 end
 -- F3: need 101 x1 and 102 x1; the board shows 101 twice.
 local a=P.Decide(F3())
-check(a.planner=='pilot103' and a.type=='take' and a.spellId==101 and a.index==1,'F3: take one 101; do not Freeze a copy the next pick makes surplus: '..P.Line(a))
+check(a.planner=='echoweaver' and a.type=='take' and a.spellId==101 and a.index==1,'F3: take one 101; do not Freeze a copy the next pick makes surplus: '..P.Line(a))
 check(a.reasonCode=='SELECT_OUTSTANDING_WISHLIST','existing reason code')
 -- The Freeze rule itself is kept where the held copy stays needed.
 a=P.Decide(F3({cards={{spellId=101},{spellId=102},{spellId=901}}}))
@@ -42,7 +42,7 @@ check(a.type=='take' and a.index==2,'observed frozen copy: the unfrozen needed c
 
 -- The pure planner without the explicit option keeps the reference decision.
 local function Pure(policy)
- return Nexus.WishlistPilot.Decide({objective={requestedCounts={[101]=1,[102]=1},outstandingCounts={[101]=1,[102]=1},outstandingTotal=2},
+ return Nexus.EchoWeaver.Decide({objective={requestedCounts={[101]=1,[102]=1},outstandingCounts={[101]=1,[102]=1},outstandingTotal=2},
   remainingPicks=2,board={choices={{echoID=101,quality=0},{echoID=101,quality=0},{echoID=901,quality=0}},
    capabilities={canSelect=true,canBanish=true,canFreeze=true,canReroll=false}},
   resources={banishesRemaining=1,freezesRemaining=1,rerollsRemaining=0},commonBoardRerollEnabled=false,policy=policy})
@@ -51,11 +51,11 @@ local ref=Pure(nil)
 check(ref.action=='FREEZE' and ref.index==1 and ref.reasonCode=='FREEZE_OUTSTANDING_FOR_HIGH_PRESSURE_SEARCH','without the option: reference Freeze')
 local new=Pure({freezeMustStayNeeded=true})
 check(new.action=='SELECT' and new.echoID==101 and new.index==1,'with the option: select')
-check(Nexus.WishlistPilot.NEXUS_POLICY.freezeMustStayNeeded==true,'DecideNexus uses the explicit option')
+check(Nexus.EchoWeaver.NEXUS_POLICY.freezeMustStayNeeded==true,'DecideNexus uses the explicit option')
 -- A duplicate that cannot be selected is not the next selection. The production
 -- board projection carries no selectable field, so this uses the pure planner.
 local function PureUnselectable(policy)
- return Nexus.WishlistPilot.Decide({objective={requestedCounts={[101]=1,[102]=1},outstandingCounts={[101]=1,[102]=1},outstandingTotal=2},
+ return Nexus.EchoWeaver.Decide({objective={requestedCounts={[101]=1,[102]=1},outstandingCounts={[101]=1,[102]=1},outstandingTotal=2},
   remainingPicks=2,board={choices={{echoID=101,quality=0},{echoID=101,quality=0,selectable=false},{echoID=901,quality=0}},
    capabilities={canSelect=true,canBanish=true,canFreeze=true,canReroll=false}},
   resources={banishesRemaining=1,freezesRemaining=1,rerollsRemaining=0},commonBoardRerollEnabled=false,policy=policy})
@@ -65,14 +65,14 @@ check(PureUnselectable({freezeMustStayNeeded=true}).action=='FREEZE','unselectab
 -- Fixed two-step replay of F3. After a Freeze the held card stays on the next
 -- board; after a Take the next board is the scripted fresh board.
 local function Replay(policy)
- local saved=Nexus.WishlistPilot.NEXUS_POLICY;Nexus.WishlistPilot.NEXUS_POLICY=policy
+ local saved=Nexus.EchoWeaver.NEXUS_POLICY;Nexus.EchoWeaver.NEXUS_POLICY=policy
  local first=P.Decide(F3())
  local freezes,owned,second=0,{},nil
  if first.type=='freeze' then
   freezes=1
   second=P.Decide(F3({cards={{spellId=101,isFrozen=true},{spellId=101},{spellId=901}},charges={trustworthy=true,banish=1,freeze=0,reroll=0}}))
  end
- Nexus.WishlistPilot.NEXUS_POLICY=saved
+ Nexus.EchoWeaver.NEXUS_POLICY=saved
  return first,second,freezes
 end
 local r1,r2,rf=Replay({})

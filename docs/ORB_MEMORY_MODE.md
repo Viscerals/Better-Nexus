@@ -10,7 +10,7 @@ SelectPerk(choice ID) -> fresh ownership/diff/charge confirmation -> next approv
 source or terminal stop.
 
 The frame advances at most one transaction step per 0.2-second update; it does not
-loop through a run synchronously. The ordinary WishlistPilot planner is not called
+loop through a run synchronously. The ordinary EchoWeaver planner is not called
 on Orb boards. All mutation calls sit behind GameAdapter.Orbs. Ordinary Take,
 Freeze, Banish, Reroll and permanent-slot/activation/upload actions stay guarded
 while an Orb operation owns state. When an OrbService exists, ordinary Take,

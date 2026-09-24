@@ -212,9 +212,9 @@ Status: deliberate policy difference from the named reference strategy
 (LoadoutPilot 1.3.6 / patch 103). It is a proposed strategy change, not a
 correction of a proven bug. It is one separate commit. `git revert` of that commit is NOT a supported way to
 switch it off: on the current branch it conflicts (this document, the test
-runner, and for R3 also `logic/WishlistPilot.lua`), and the R5 code uses the
+runner, and for R3 also `logic/EchoWeaver.lua`), and the R5 code uses the
 `local policy` that the R3 commit added. The supported way is the flag: set
-`rerollIgnoresSatisfiedTargets = false` in `WishlistPilot.NEXUS_POLICY`. That flag alone
+`rerollIgnoresSatisfiedTargets = false` in `EchoWeaver.NEXUS_POLICY`. That flag alone
 restores the reference decision and leaves the other change active
 (`tests/prototype/rolling_review_policy_flags.lua`).
 
@@ -222,8 +222,8 @@ Reference rule: a permitted Reroll is skipped when any Echo of the original
 Wishlist is on the board, also when its exact count is already met.
 
 Nexus rule (option `rerollIgnoresSatisfiedTargets` in
-`WishlistPilot.NEXUS_POLICY`, passed by `DecideNexus`): only an Echo that is
-still needed stops the Reroll. `Pilot.Decide` without the option keeps the
+`EchoWeaver.NEXUS_POLICY`, passed by `DecideNexus`): only an Echo that is
+still needed stops the Reroll. `EchoWeaver.Decide` without the option keeps the
 reference decision, so `tests/prototype/planner_reference.lua` still compares
 10,000 random inputs with the reference, unchanged.
 
@@ -268,19 +268,19 @@ Test: `tests/prototype/rolling_review_reroll_outstanding.lua`.
 Status: deliberate policy difference from the named reference strategy. It is a
 proposed strategy change, not a correction of a proven bug. It is one separate commit. `git revert` of that commit is NOT a supported way to
 switch it off: on the current branch it conflicts (this document, the test
-runner, and for R3 also `logic/WishlistPilot.lua`), and the R5 code uses the
+runner, and for R3 also `logic/EchoWeaver.lua`), and the R5 code uses the
 `local policy` that the R3 commit added. The supported way is the flag: set
-`freezeMustStayNeeded = false` in `WishlistPilot.NEXUS_POLICY`. That flag alone
+`freezeMustStayNeeded = false` in `EchoWeaver.NEXUS_POLICY`. That flag alone
 restores the reference decision and leaves the other change active
 (`tests/prototype/rolling_review_policy_flags.lua`).
 
 Reference rule: under high pressure, with a Freeze and a Banish available, the
 best still-needed offer is frozen before the search.
 
-Nexus rule (option `freezeMustStayNeeded` in `WishlistPilot.NEXUS_POLICY`): the
+Nexus rule (option `freezeMustStayNeeded` in `EchoWeaver.NEXUS_POLICY`): the
 Freeze is skipped when the next selection is another selectable copy of the same
 Echo and exactly one copy is needed. The planner takes the Echo at once.
-`Pilot.Decide` without the option keeps the reference decision;
+`EchoWeaver.Decide` without the option keeps the reference decision;
 `planner_reference` is unchanged and passes.
 
 Kept: the Freeze preference, Freeze and Banish charges, trusted resource state,
@@ -310,14 +310,14 @@ Test: `tests/prototype/rolling_review_freeze_surplus.lua`.
 |---|---|---|
 | Counters `fillerFishState` (`guaranteedId`, `consecutive`, `bracket`, `bracketSpent`) | `core/AutomationRuntime.lua` | Session-local. Reset at each level-bracket change (`RerollBracket`: 1-34, 35-63, 64-69, 70-77, 78+), at a change of the guaranteed spell, and at each run boundary. Not saved. |
 | `state.rerollBudget` (`consecutive`, `consecutiveLimit` 3, or 2 at level 10 or lower; `bracketSpent`, `bracketLimit` 4, or 2 at level 10 or lower; `reserve` 5, or 0 from level 78) | `core/AutomationRuntime.lua` StepRun | Built for every decision. |
-| The only reader | `logic/Policy.lua`, historical branch "bracket fishing: reroll filler guarantee" | It rations Rerolls of an unwanted *guaranteed* Echo. Production never reaches it: `Policy.Decide` routes every ordinary board to `WishlistPilot.DecideNexus`. |
-| The active planner | `logic/WishlistPilot.lua` | Does not read `rerollBudget`. Its Reroll limits are: permission `allowReroll`, trusted charges, Reroll charges above 0, not pending, fewer than two frozen offers, no still-needed Echo on the board. |
-| Counter increment | `core/AutomationRuntime.lua`, after a confirmed `Adapter.Reroll()` | Keyed to the reason string `bracket fishing: reroll filler guarantee`. The Pilot never returns that reason, so `bracketSpent` stays 0 and `consecutive` is set to 0. |
+| The only reader | `logic/Policy.lua`, historical branch "bracket fishing: reroll filler guarantee" | It rations Rerolls of an unwanted *guaranteed* Echo. Production never reaches it: `Policy.Decide` routes every ordinary board to `EchoWeaver.DecideNexus`. |
+| The active planner | `logic/EchoWeaver.lua` | Does not read `rerollBudget`. Its Reroll limits are: permission `allowReroll`, trusted charges, Reroll charges above 0, not pending, fewer than two frozen offers, no still-needed Echo on the board. |
+| Counter increment | `core/AutomationRuntime.lua`, after a confirmed `Adapter.Reroll()` | Keyed to the reason string `bracket fishing: reroll filler guarantee`. EchoWeaver never returns that reason, so `bracketSpent` stays 0 and `consecutive` is set to 0. |
 | User setting | `data/DefaultProfile.lua` `autoReroll`, commands `/nexus reroll on|off` | Effective: it becomes `allowReroll` and `searchRefused.reroll`, and the action executor checks it again. There is no setting for a count, a bracket limit or a reserve. |
 | Current user-facing text | `ui/Help.lua` "Rolling and settings", `README.md`, in-game changelog | No limit or reserve is promised. Help says: "Reroll asks for new choices when enabled." |
 | Historical text | `CHANGELOG.md`, 1.19.2 Dev Test 13 | "maximum 3 consecutive rerolls against the same unwanted guaranteed Echo and 4 rerolls per level bracket", "Preserves 5 rerolls for later brackets until level 78". This describes the guarantee-based bracket fishing. |
 | `core/UserText.lua` | mapping for the old reason string | Display only. |
-| Test adapter | `tests/prototype/policy_adapter.lua` | Passes a fixed `rerollBudget`, as the runtime does. No test asserts that the ration limits a Pilot Reroll. |
+| Test adapter | `tests/prototype/policy_adapter.lua` | Passes a fixed `rerollBudget`, as the runtime does. No test asserts that the ration limits an EchoWeaver Reroll. |
 
 Conclusion: no current setting or text promises a Reroll ration. R4 changes no
 behaviour. The fields stay as they are.

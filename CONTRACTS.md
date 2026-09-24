@@ -26,14 +26,14 @@ This file has two parts.
   queue.
 - **`Policy.Decide(state)`** returns a wait when `state.ordinaryBoardAllowed ==
   false`. Otherwise every ordinary board goes to
-  `WishlistPilot.DecideNexus(state)`. `state.snapshotVerified`, `state.queue` and
+  `EchoWeaver.DecideNexus(state)`. `state.snapshotVerified`, `state.queue` and
   `state.flags` select no planner and change no decision. The scoring rules in
   the historical `logic/Policy.lua` section below are reachable only when
-  WishlistPilot is not loaded, which the production TOC never allows, and then
+  EchoWeaver is not loaded, which the production TOC never allows, and then
   only with an empty queue.
-- **`WishlistPilot.Decide(input)`** is the pure ordinary planner. Without
+- **`EchoWeaver.Decide(input)`** is the pure ordinary planner. Without
   `input.policy` it follows the named reference strategy (LoadoutPilot 1.3.6 /
-  patch 103). `DecideNexus` passes `WishlistPilot.NEXUS_POLICY`, whose options
+  patch 103). `DecideNexus` passes `EchoWeaver.NEXUS_POLICY`, whose options
   are deliberate, documented differences (`docs/ROLLING_ORB_REVIEW_EADFF8A.md`).
   Exact `plan.requestedCounts` per spell ID, rolled plus permanent ownership,
   actual charges and the per-action permissions are its inputs. Actions:
@@ -208,7 +208,7 @@ Fork from EchoOptimizer/logic/Model.lua VERBATIM: `NormName`, `StripRaritySuffix
 
 > **HISTORICAL.** Rules 1-7 below describe the guarantee-based scoring of
 > v1.19.4 (guaranteed card, `wantedInQueue`, "guarantee already exhausted").
-> Production routes every ordinary board to `WishlistPilot.DecideNexus`. See the
+> Production routes every ordinary board to `EchoWeaver.DecideNexus`. See the
 > current contract. Do not reintroduce these rules.
 
 - `Policy.Decide(state)` where `state = { board, owned, charges, plan, queue, flags,
