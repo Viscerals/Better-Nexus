@@ -130,9 +130,13 @@ function Lifecycle.New(options)
                 or last.mode ~= "admission" then
                 return {component="catalog"}
             end
+            -- Keys counted in each map when counting stopped: lower bounds,
+            -- because the maps after the refusing one were not read.
             return {component="catalog", phase=last.phase, map=last.map,
                 counter=last.counter, count=tonumber(last.count),
-                limit=tonumber(last.limit), source=last.source}
+                limit=tonumber(last.limit), source=last.source,
+                counted={overlay=tonumber(last.overlay), bundled=tonumber(last.bundled),
+                    tombstone=tonumber(last.tombstone), barrier=tonumber(last.barrier)}}
         end
         local function Token(value, limit)
             if value == nil then return nil end
