@@ -28,8 +28,8 @@ jobs:
       - name: Install LuaJIT
         run: sudo apt-get update && sudo apt-get install --yes luajit
       - name: Inventory check and complete offline suite
-        # Reference-dependent tests need a third-party archive that is not redistributed.
-        # They are printed as NOT RUN. They are never counted as passed.
+        # Every listed test runs from this checkout. A NOT RUN, FAIL or TIMEOUT row
+        # fails the check; nothing unexecuted is counted as passed.
         shell: bash   # explicit bash runs with pipefail, so a failed suite fails this step
         run: python3 tools/ci_check.py | tee ci-summary.txt
       - name: Summary
@@ -119,8 +119,8 @@ jobs:
       - name: Install LuaJIT
         run: sudo apt-get update && sudo apt-get install --yes luajit
       - name: Inventory check and complete offline suite
-        # Reference-dependent tests need a third-party archive that is not redistributed.
-        # They are printed as NOT RUN. They are never counted as passed.
+        # Every listed test runs from this checkout. A NOT RUN, FAIL or TIMEOUT row
+        # fails the check; nothing unexecuted is counted as passed.
         shell: bash   # explicit bash runs with pipefail, so a failed suite fails this step
         run: python3 tools/ci_check.py | tee ci-summary.txt
       - name: Summary

@@ -16,7 +16,6 @@ import contextlib, importlib.util, io, json, pathlib, subprocess, sys, tempfile,
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LONG = {'catalog_root_capacity': 120, 'sync_admission_traffic_acceptance': 120}
-NOT_RUN_ROW_KEYS = {'test', 'status', 'reason'}
 
 
 def load_runner():
@@ -53,7 +52,7 @@ class FakeProcesses:
         return subprocess.CompletedProcess(command, outcome, stdout=f'{name} out', stderr='')
 
 
-def run_main(runner, fake: FakeProcesses, reference: pathlib.Path, *args: str):
+def run_main(runner, fake: FakeProcesses, *args: str):
     """Call runner.main() with the stand-ins; return (exit status, report or None, stderr)."""
     runner.subprocess = types.SimpleNamespace(run=fake.run, TimeoutExpired=subprocess.TimeoutExpired)
     runner.shutil = types.SimpleNamespace(which=lambda exe: '/stand-in/luajit' if exe == 'luajit' else None)
@@ -61,8 +60,7 @@ def run_main(runner, fake: FakeProcesses, reference: pathlib.Path, *args: str):
     with tempfile.TemporaryDirectory() as tmp:
         out = pathlib.Path(tmp) / 'report.json'
         saved_argv = sys.argv
-        sys.argv = ['run_prototype_tests.py', '--runtime', 'luajit', '--output', str(out),
-                    '--reference', str(reference), *args]
+        sys.argv = ['run_prototype_tests.py', '--runtime', 'luajit', '--output', str(out), *args]
         err = io.StringIO()
         try:
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
@@ -87,12 +85,12 @@ def counts(report):
 
 def controlled_report(names, overrides: dict) -> dict:
     """A runner report written without a runner: each test PASS in 0.25 s at its configured limit,
-    the two reference-dependent tests NOT_RUN, then per-test overrides (None removes the key)."""
+    then per-test overrides (None removes the key; a NOT_RUN override replaces the whole row)."""
     runner = load_runner()
     results = []
     for n in names:
-        if n in ('planner_reference', 'orbs_policy'):
-            results.append({'test': n, 'status': 'NOT_RUN', 'reason': 'Supplied LoadoutPilot reference not available'})
+        if overrides.get(n, {}).get('status') == 'NOT_RUN':
+            results.append({'test': n, 'status': 'NOT_RUN', 'reason': overrides[n].get('reason', 'stand-in')})
             continue
         row = {'test': n, 'status': 'PASS', 'exit': 0, 'seconds': 0.25, 'timeout_seconds': runner.timeout_for(n),
                'stdout': '', 'stderr': ''}
@@ -134,18 +132,7 @@ def main() -> int:
         if not good:
             failures.append(name)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = pathlib.Path(tmp)
-        empty = tmp / 'no-reference'
-        full = tmp / 'reference'
-        planner_only = tmp / 'planner-only'
-        empty.mkdir()
-        for base, files in ((full, ('Engine/WishlistPlanner.lua', 'Memory/MemoryMode.lua')),
-                            (planner_only, ('Engine/WishlistPlanner.lua',))):
-            for f in files:
-                (base / f).parent.mkdir(parents=True, exist_ok=True)
-                (base / f).write_text('-- stand-in\n', encoding='utf-8')
-
+    if True:
         # 1. The declared values.
         runner = load_runner()
         expect('the default per-test timeout is 45 s',
@@ -155,10 +142,10 @@ def main() -> int:
                getattr(runner, 'TEST_TIMEOUT_SECONDS', None) == LONG,
                f'TEST_TIMEOUT_SECONDS={getattr(runner, "TEST_TIMEOUT_SECONDS", None)!r}')
 
-        # 2. The complete inventory, every process exits 0, reference present.
+        # 2. The complete inventory, every process exits 0.
         runner = load_runner()
         fake = FakeProcesses()
-        code, report, err = run_main(runner, fake, full)
+        code, report, err = run_main(runner, fake)
         passed = dict(fake.calls)
         names = list(runner.NAMES)
         expect('every listed test is started exactly once',
@@ -185,7 +172,7 @@ def main() -> int:
         # 3. A nonzero exit is FAIL, for an ordinary and a long test.
         runner = load_runner()
         fake = FakeProcesses(outcomes={'parse': 1, 'catalog_root_capacity': 3})
-        code, report, err = run_main(runner, fake, full, '--only', 'parse,catalog_root_capacity,sync_admission_traffic_acceptance')
+        code, report, err = run_main(runner, fake, '--only', 'parse,catalog_root_capacity,sync_admission_traffic_acceptance')
         r = rows(report)
         got = {n: (x['status'], x.get('exit'), x.get('timeout_seconds')) for n, x in r.items()}
         want = {'parse': ('FAIL', 1, 45), 'catalog_root_capacity': ('FAIL', 3, 120),
@@ -199,7 +186,7 @@ def main() -> int:
         # 4. TimeoutExpired is TIMEOUT; configured timeout and elapsed time are separate fields.
         runner = load_runner()
         fake = FakeProcesses(outcomes={'catalog_root_capacity': 'timeout'}, elapsed={'catalog_root_capacity': 121.25})
-        code, report, err = run_main(runner, fake, full, '--only', 'parse,catalog_root_capacity')
+        code, report, err = run_main(runner, fake, '--only', 'parse,catalog_root_capacity')
         row = rows(report).get('catalog_root_capacity', {})
         expect('a long test that times out is TIMEOUT with timeout_seconds=120 and seconds=121.25 (measured)',
                fake.calls == [('parse', 45), ('catalog_root_capacity', 120)]
@@ -211,48 +198,34 @@ def main() -> int:
                f'exit {code}, counts {counts(report)}, {err.strip()}')
         runner = load_runner()
         fake = FakeProcesses(outcomes={'parse': 'timeout'}, elapsed={'parse': 45.75})
-        code, report, err = run_main(runner, fake, full, '--only', 'parse')
+        code, report, err = run_main(runner, fake, '--only', 'parse')
         row = rows(report).get('parse', {})
         expect('an ordinary test that times out is TIMEOUT with timeout_seconds=45 and seconds=45.75 (measured), exit 1',
                fake.calls == [('parse', 45)] and row.get('status') == 'TIMEOUT' and row.get('timeout_seconds') == 45
                and row.get('seconds') == 45.75 and code == 1 and counts(report) == (0, 1, 0),
                f'calls {fake.calls}, row {row}, exit {code}')
 
-        # 5. Reference-dependent tests: NOT_RUN without the reference file, unchanged rows and counts.
-        shard = 'planner_reference,orbs_policy,parse'
+        # 5. No listed test needs a separate archive: the retired reference option is refused
+        # before anything runs, and the two engine tests run like every other test.
         runner = load_runner()
         fake = FakeProcesses()
-        code, report, err = run_main(runner, fake, empty, '--only', shard)
-        r = rows(report)
-        expect('without the reference: planner_reference and orbs_policy are NOT_RUN, not started, rows unchanged, exit 1',
-               [n for n, _ in fake.calls] == ['parse']
-               and all(set(r.get(n, {})) == NOT_RUN_ROW_KEYS and r[n]['status'] == 'NOT_RUN'
-                       and r[n]['reason'] == 'Supplied LoadoutPilot reference not available'
-                       for n in ('planner_reference', 'orbs_policy'))
-               and counts(report) == (1, 0, 2) and code == 1,
-               f'calls {fake.calls}, rows {r}, exit {code}')
+        code, report, err = run_main(runner, fake, '--reference', 'anywhere', '--only', 'parse')
+        expect('the retired --reference option is refused: nonzero exit, nothing started, no report',
+               code not in (0, None) and fake.calls == [] and report is None,
+               f'exit {code}, calls {fake.calls}, report written {report is not None}')
         runner = load_runner()
         fake = FakeProcesses()
-        code, report, err = run_main(runner, fake, planner_only, '--only', shard)
-        r = rows(report)
-        expect('with only Engine/WishlistPlanner.lua: planner_reference runs at 45 s, orbs_policy is NOT_RUN, exit 1',
-               fake.calls == [('planner_reference', 45), ('parse', 45)]
-               and r.get('planner_reference', {}).get('status') == 'PASS' and r.get('orbs_policy', {}).get('status') == 'NOT_RUN'
-               and counts(report) == (2, 0, 1) and code == 1,
-               f'calls {fake.calls}, exit {code}')
-        runner = load_runner()
-        fake = FakeProcesses()
-        code, report, err = run_main(runner, fake, full, '--only', shard)
-        expect('with the reference: planner_reference and orbs_policy run at 45 s and pass, exit 0',
-               fake.calls == [('planner_reference', 45), ('orbs_policy', 45), ('parse', 45)]
+        code, report, err = run_main(runner, fake, '--only', 'echoweaver_planner,echoweaver_orb_policy,parse')
+        expect('the engine tests run at 45 s like every other test and no row is NOT_RUN, exit 0',
+               fake.calls == [('echoweaver_planner', 45), ('echoweaver_orb_policy', 45), ('parse', 45)]
                and counts(report) == (3, 0, 0) and code == 0,
-               f'calls {fake.calls}, exit {code}')
+               f'calls {fake.calls}, counts {counts(report)}, exit {code}')
 
         # 6. A timeout-map name that is not a listed test is refused before anything runs.
         runner = load_runner()
         runner.TEST_TIMEOUT_SECONDS = dict(getattr(runner, 'TEST_TIMEOUT_SECONDS', {}), catalog_root_capacty=120)
         fake = FakeProcesses()
-        code, report, err = run_main(runner, fake, full, '--only', 'parse')
+        code, report, err = run_main(runner, fake, '--only', 'parse')
         expect('a timeout-map name that is not in NAMES is refused: nonzero exit, nothing started, no report',
                code not in (0, None) and fake.calls == [] and report is None and 'catalog_root_capacty' in err,
                f'exit {code}, calls {fake.calls}, report written {report is not None}, stderr {err.strip()!r}')
@@ -266,10 +239,8 @@ def main() -> int:
         'orbs': {'seconds': 20.25}, 'transport': {'seconds': 3.0}}))
     unchanged = [f'inventory: {len(names)} listed tests',
                  'runtime: LuaJIT',
-                 f'passed {len(names) - 2}, failed 0, NOT RUN 2, no result row 0, listed {len(names)}',
-                 'NOT RUN (not a pass): planner_reference: Supplied LoadoutPilot reference not available',
-                 'NOT RUN (not a pass): orbs_policy: Supplied LoadoutPilot reference not available',
-                 'RESULT: no listed test failed; 2 reference-dependent test(s) NOT RUN']
+                 f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}',
+                 'RESULT: no listed test failed; every listed test ran']
     timing = ['timing: catalog_root_capacity PASS 71.25 s (limit 120 s)',
               'timing: sync_admission_traffic_acceptance PASS 88.5 s (limit 120 s)',
               'timing: startup_budget PASS 40.75 s (limit unknown s)',
@@ -280,9 +251,10 @@ def main() -> int:
     expect('ci_check output without the timing lines is unchanged, exit 0',
            [line for line in out if not line.startswith('timing: ')] == unchanged and code == 0, f'exit {code}')
 
-    # 8. The same with a FAIL, a TIMEOUT, a missing seconds and a shard.
-    shard = ['parse', 'boot', 'catalog_root_capacity', 'sync_admission_traffic_acceptance', 'orbs_policy']
+    # 8. The same with a FAIL, a TIMEOUT, a missing seconds, a NOT_RUN row and a shard.
+    shard = ['parse', 'boot', 'catalog_root_capacity', 'sync_admission_traffic_acceptance', 'orbs']
     code, out = run_ci_check(controlled_report(shard, {
+        'orbs': {'status': 'NOT_RUN', 'reason': 'stand-in skip'},
         'parse': {'status': 'FAIL', 'exit': 1, 'seconds': 2.5, 'stdout': 'parse out', 'stderr': 'parse err'},
         'catalog_root_capacity': {'status': 'TIMEOUT', 'exit': None, 'seconds': 120.5, 'stdout': 'partial'},
         'sync_admission_traffic_acceptance': {'seconds': None}}), '--only', ','.join(shard))
@@ -291,7 +263,7 @@ def main() -> int:
                  '--- catalog_root_capacity: TIMEOUT', 'partial', '',
                  'runtime: LuaJIT',
                  'passed 2, failed 2, NOT RUN 1, no result row 0, listed 5',
-                 'NOT RUN (not a pass): orbs_policy: Supplied LoadoutPilot reference not available',
+                 'NOT RUN (not a pass): orbs: stand-in skip',
                  'PARTIAL: a shard was selected; this is not a complete run',
                  'RESULT: FAILED']
     timing = ['timing: catalog_root_capacity TIMEOUT 120.5 s (limit 120 s)',
@@ -302,6 +274,12 @@ def main() -> int:
            out == unchanged[:-1] + timing + unchanged[-1:], ' | '.join(out[-12:]))
     expect('ci_check output without the timing lines is unchanged: failure printing, counts, RESULT: FAILED, exit 1',
            [line for line in out if not line.startswith('timing: ')] == unchanged and code == 1, f'exit {code}')
+
+    # 9. A NOT_RUN row in a complete inventory is never a pass: RESULT FAILED, exit 1.
+    code, out = run_ci_check(controlled_report(names, {'parse': {'status': 'NOT_RUN', 'reason': 'stand-in skip'}}))
+    expect('a NOT_RUN row is printed as NOT RUN and fails the check, exit 1',
+           'NOT RUN (not a pass): parse: stand-in skip' in out and out[-1] == 'RESULT: FAILED' and code == 1,
+           f'exit {code}, last {out[-1:]}')
 
     if failures:
         print('RESULT: FAILED:', '; '.join(failures))
