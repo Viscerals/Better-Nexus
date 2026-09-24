@@ -1,6 +1,6 @@
 -- Saturation of an admitted catalog (capacity envelope V2). When a category is
 -- full, existing data and the Leaderboard stay usable; a change that needs a
--- new identity or marker is refused explicitly and before any catalog work;
+-- new identity or marker is refused explicitly and before any catalog mutation;
 -- an eviction that cannot keep its retention marker is not staged at all (no
 -- partial eviction); the refusals are retained as one bounded record with one
 -- chat line per session. Nothing expires early because a category is full.
@@ -40,7 +40,7 @@ local function ChatCount(text)
  local n=0;for _,line in ipairs(H.chat)do if tostring(line):find(text,1,true) then n=n+1 end end;return n
 end
 
--- 1. 2048 different builds: a record for a new build is refused before work,
+-- 1. 2048 different builds: a record for a new build is refused before any mutation,
 -- explicitly; an update of an existing build still commits; the Leaderboard
 -- and Community stay available; one chat line per session.
 local db={settingsVersion=5,settings={},chars={},communityBuilds={}}
@@ -49,7 +49,7 @@ local C=Boot(db)
 check(Nexus.StartupStatus().state=='ready' and C.Status().buildIdentityCount==2048,'a catalog with 2048 builds is admitted')
 Run(5)
 local ok,why,ticket=C.Put(Record('new-1'),{source='sync'})
-check(ok==false and why=='ROOT_SLOT_LIMIT' and ticket==nil,'a new build is refused before any work: '..tostring(why))
+check(ok==false and why=='ROOT_SLOT_LIMIT' and ticket==nil,'a new build is refused before any catalog mutation: '..tostring(why))
 check(C.ManualPreparationStatus().ready,'no catalog candidate was started')
 local updated=Record('full-7',{title='Updated title',lastModified=5})
 check(Settle(C.Put(updated,{source='sync'})),'an update of an existing build still commits')
@@ -94,12 +94,13 @@ check(rec.reason=='BARRIER_SET_LIMIT' and rec.limit==2048,'the refusal is retain
 Nexus.DataRetention.Request('full');Run(20)
 check(Count(Bundle().communityRetentionEvictions)==2048,'a full marker map expires nothing early')
 
--- 3. 2048 removal markers: a removal that needs a new marker is refused
--- explicitly and the build stays.
-local db3={settingsVersion=5,settings={},chars={},communityBuilds={['keep-1']=Record('keep-1')},syncTombstones={}}
+-- 3. 2048 removal markers: a removal by the build's owner that needs a new
+-- marker is refused explicitly and the build stays.
+local db3={settingsVersion=5,settings={},chars={},
+ communityBuilds={['keep-1']=Record('keep-1',{author='Peer-Realm',ownerKey='Peer@Realm'})},syncTombstones={}}
 for i=1,2048 do db3.syncTombstones['del-'..i]={stamp=1,author='OldPeer'} end
 C=Boot(db3);Run(5)
-local removed,removeWhy=C.SetTombstone('keep-1',{stamp=5,author='Peer-Realm'},{source='remote'})
+local removed,removeWhy=C.SetTombstone('keep-1',{stamp=5,author='Peer-Realm'},{source='remote',sender='Peer-Realm'})
 check(removed==false and removeWhy=='TOMBSTONE_SET_LIMIT' and C.Get('keep-1')~=nil,
  'a removal that needs a new marker is refused and the build stays: '..tostring(removeWhy))
 
@@ -151,4 +152,4 @@ local st=C.Status()
 check(serial==180 and st.buildIdentityCount<=8+4 and maxBuilds<=12,'builds stay bounded by the churn: '..st.buildIdentityCount..' max '..maxBuilds)
 check(maxMarkers<=4*31 and st.barrierCount<=4*31,'retention markers stay bounded by the 30-day age: max '..maxMarkers..' now '..st.barrierCount)
 check(Count((Bundle().dataRetention or {}).markerFirstSeen)==0,'writer-dated markers need no first observations')
-print(string.format('PASS catalog_saturation: explicit refusal before work, updates and Leaderboard usable when full, one chat line, no partial eviction, no early expiry, recovery after aging, bounded churn (markers max %d) checks=%d',maxMarkers,checks))
+print(string.format('PASS catalog_saturation: explicit refusal before any mutation, updates and Leaderboard usable when full, one chat line, no partial eviction, no early expiry, recovery after aging, bounded churn (markers max %d) checks=%d',maxMarkers,checks))

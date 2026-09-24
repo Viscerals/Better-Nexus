@@ -1199,17 +1199,33 @@ function Lifecycle.New(options)
             RunIsolatedOwner("DpsCapture.OnUpdate",
                 Nexus.DpsCapture.OnUpdate, elapsed)
         end
-        -- Runtime saturation: one chat line per session when a full category
-        -- first refuses new data. Existing data and the Leaderboard stay
-        -- available; /nexus status keeps the retained counts.
-        if catalogReady and not startupTiming.saturationNoticed then
+        -- Runtime saturation: one chat line per full category and session,
+        -- when that category first refuses a change. The line names what is
+        -- refused. Existing data and the Leaderboard stay available;
+        -- /nexus status keeps the retained counts.
+        if catalogReady then
             local catalog = Nexus.BuildCatalog
-            if catalog and type(catalog.SaturationRefusals) == "function"
-                and catalog.SaturationRefusals() > 0 then
-                startupTiming.saturationNoticed = true
-                Print("Community catalog full: new shared builds are refused. "
-                    .. "Your existing Community builds and Leaderboard stay available. "
-                    .. "See /nexus status.")
+            local refused = catalog and type(catalog.SaturationRefusals) == "function"
+                and catalog.SaturationRefusals() or 0
+            -- The record is read only when the refusal count changed.
+            if refused > 0 and refused ~= startupTiming.saturationSeen
+                and type(catalog.SaturationSummary) == "function" then
+                startupTiming.saturationSeen = refused
+                local record = catalog.SaturationSummary() or {}
+                local noticed = startupTiming.saturationNoticed or {}
+                startupTiming.saturationNoticed = noticed
+                for _, line in ipairs({
+                    {"refusedBuilds", "Community catalog full: new shared builds are refused."},
+                    {"refusedTombstones", "Community removal markers full: new build removals are refused."},
+                    {"refusedBarriers", "Community retention markers full: older shared builds are kept instead of removed."},
+                    {"refusedCatalog", "Community catalog full: new shared data is refused."},
+                }) do
+                    if not noticed[line[1]] and (tonumber(record[line[1]]) or 0) > 0 then
+                        noticed[line[1]] = true
+                        Print(line[2] .. " Your existing Community builds and Leaderboard stay available. "
+                            .. "See /nexus status.")
+                    end
+                end
             end
         end
         local automation = EnsureAutomation()

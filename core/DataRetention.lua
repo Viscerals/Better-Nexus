@@ -667,8 +667,11 @@ local function PruneEvictionMarkers(database, transaction, priorMeta)
         local kind = type(state) == "table" and state.ageKind or nil
         local seen
         if kind == "untimed" or kind == "legacy" then
+            -- The same range as the catalog's age check: an integer from 1
+            -- to 2^53 - 1. Anything else is recorded again from the clock.
             seen = tonumber(prior[id])
-            if not (seen and seen >= 1 and seen == math.floor(seen)) then
+            if not (seen and seen >= 1 and seen <= 9007199254740991
+                and seen == math.floor(seen)) then
                 seen = now
                 if seen then result.firstSeenRecorded = result.firstSeenRecorded + 1 end
             end
@@ -842,10 +845,6 @@ function Retention.Enforce(database, reason)
     end
     if not limits.enabled then
         pendingOverlayScans[database] = nil
-        local dpsSource = DurablePayload(database, "dpsCapture")
-        local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
-        local overlaySource = DurablePayload(database, "communityBuilds")
-        overlaySource = type(overlaySource) == "table" and overlaySource or {}
         local now = EpochNow()
         local prior = priorMeta and priorMeta.last
         local nextMaintenanceAt = tonumber(
@@ -857,6 +856,17 @@ function Retention.Enforce(database, reason)
             summary.fastPath = true
             return summary
         end
+        -- A busy catalog is found before any payload is copied.
+        local owner = CatalogFor(database)
+        local transaction = owner and owner.BeginCatalogMaintenance({database=database,
+            operation="retention"})
+        if owner and not transaction then
+            return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
+        end
+        local dpsSource = DurablePayload(database, "dpsCapture")
+        local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
+        local overlaySource = DurablePayload(database, "communityBuilds")
+        overlaySource = type(overlaySource) == "table" and overlaySource or {}
         local character = type(dps) == "table" and dps.characterBest or nil
         local dummyCount = Count(type(character) == "table"
             and character.dummy or nil)
@@ -868,12 +878,6 @@ function Retention.Enforce(database, reason)
             "communityRetentionEvictions"))
         local tombstoneCount = Count(DurablePayload(database,
             "syncTombstones"))
-        local owner = CatalogFor(database)
-        local transaction = owner and owner.BeginCatalogMaintenance({database=database,
-            operation="retention"})
-        if owner and not transaction then
-            return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
-        end
         local evictions = PruneEvictionMarkers(database, transaction, priorMeta)
         local tombstones = PruneTombstones(database, transaction)
         local evidenceRemoved, evidenceBlocked = 0, false
@@ -933,15 +937,15 @@ function Retention.Enforce(database, reason)
                 reason=scanWhy or "CATALOG_SCAN_FAILED"}
         end
     end
-    local dpsSource = DurablePayload(database, "dpsCapture")
-    local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
-    local overlaySource = DurablePayload(database, "communityBuilds")
-    overlaySource = type(overlaySource) == "table" and overlaySource or {}
     local transaction = owner and owner.BeginCatalogMaintenance({database=database,
         operation="retention"})
     if owner and not transaction then
         return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
     end
+    local dpsSource = DurablePayload(database, "dpsCapture")
+    local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
+    local overlaySource = DurablePayload(database, "communityBuilds")
+    overlaySource = type(overlaySource) == "table" and overlaySource or {}
     local selected, fingerprints, selectedBuildIds, categoryCounts =
         SelectCharacterBest(dps, limits, overlaySource)
     local characterRemoved = TrimCharacterBest(dps, selected)
@@ -1008,23 +1012,26 @@ function Retention.Init(database)
 end
 
 local ScheduleRetention
--- A run that finds the catalog busy with another change is tried again a
--- bounded number of times (24 * 5 s), so a request made while the catalog is
--- still settling is not lost and never becomes an endless retry.
-local BUSY_RETRY_DELAY, BUSY_RETRY_LIMIT = 5, 24
+-- A run that finds the catalog busy with another change is tried again with a
+-- growing delay (5, 10, 20 and 40 s, then every 60 s) for about one hour
+-- (64 attempts, 3675 s), so a request made during a long first compaction or
+-- identity repair is not lost and never becomes an endless retry. A busy
+-- attempt stops before it copies any payload.
+local BUSY_RETRY_DELAY, BUSY_RETRY_MAX_DELAY, BUSY_RETRY_LIMIT = 5, 60, 64
 ScheduleRetention = function(scheduler, reason, delay, busyAttempts)
     return scheduler.After("data-retention.enforce", delay, function()
         -- Resolve the exact bound authority at run time; never the raw global.
         local result = Retention.Enforce(nil, reason)
+        local attempts = busyAttempts or 0
         if type(result) == "table" and result.pending == true then
             -- A new scheduler generation runs this continuation on a later
             -- turn, so one callback cannot drain a retained catalog cursor.
             ScheduleRetention(scheduler, reason, 0, busyAttempts)
         elseif type(result) == "table" and result.blocked == true
             and result.reason == "ROOT_MUTATION_PENDING"
-            and (busyAttempts or 0) < BUSY_RETRY_LIMIT then
-            ScheduleRetention(scheduler, reason, BUSY_RETRY_DELAY,
-                (busyAttempts or 0) + 1)
+            and attempts < BUSY_RETRY_LIMIT then
+            ScheduleRetention(scheduler, reason, math.min(BUSY_RETRY_MAX_DELAY,
+                BUSY_RETRY_DELAY * 2 ^ attempts), attempts + 1)
         end
     end)
 end

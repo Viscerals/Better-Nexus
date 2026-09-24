@@ -97,10 +97,13 @@ local function BootUntilAdmitted(db,shipped)
  end
  F.fileHooks=nil
  HH.Fire('ADDON_LOADED','Nexus');HH.Fire('PLAYER_ENTERING_WORLD')
+ -- Stop when the admitted root is also published (Status no longer read-only):
+ -- the root can be admitted one turn before Status reports its counts.
  for _=1,20000 do
   HH.Advance(.05,.05)
   local root=Nexus.BuildCatalog.RootState()
-  if root.state=='ROOT_ADMITTED' or root.state=='ROOT_INVALIDATED' then break end
+  if (root.state=='ROOT_ADMITTED' and Nexus.BuildCatalog.Status().readOnly==false)
+   or root.state=='ROOT_INVALIDATED' then break end
  end
  return Nexus.BuildCatalog
 end

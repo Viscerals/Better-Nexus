@@ -3131,15 +3131,27 @@ end
 -- Runtime saturation of an admitted catalog: a change that would take a
 -- category above its limit is refused, and the published root, its rows and
 -- the Leaderboard stay as they are. Session-only, scalars only; one record
--- that counts refusals instead of one entry per refusal.
+-- that counts refusals instead of one entry per refusal, with one counter per
+-- category: builds, removal markers (tombstones), retention markers
+-- (barriers), and every identity or raw key together (catalog).
 function Candidate.NoteSaturation(fact)
     local now = type(GetTime) == "function" and tonumber(GetTime()) or 0
     local record = ST.saturation
     if type(record) ~= "table" then
-        record = {refused=0, firstAt=now}
+        record = {refused=0, firstAt=now, refusedBuilds=0, refusedTombstones=0,
+            refusedBarriers=0, refusedCatalog=0}
         ST.saturation = record
     end
+    local field = "refusedBuilds"
+    if fact.counter == "distinct-slots" or fact.counter == "root-map-edges" then
+        field = "refusedCatalog"
+    elseif fact.map == "tombstone" then
+        field = "refusedTombstones"
+    elseif fact.map == "barrier" then
+        field = "refusedBarriers"
+    end
     record.refused = record.refused + 1
+    record[field] = record[field] + 1
     record.lastAt = now
     record.reason, record.map, record.counter = fact.reason, fact.map, fact.counter
     record.count, record.limit = fact.count, fact.limit
@@ -3152,7 +3164,13 @@ function Candidate.AddsBuildIdentity(existing)
     return not (existing and (existing.overlayRaw ~= nil or existing.bundledRaw ~= nil))
 end
 
-function Candidate.CapacityRefusal(root, category, reserved)
+-- The refusal reason, and its scalar facts, when one more entry of the
+-- category would take the published count plus the transaction's signed
+-- reservation above the limit; nil when it fits. Records nothing. A negative
+-- reservation is room that earlier operations of the same transaction free
+-- (expired retention markers); the commit's full collection re-checks every
+-- limit on the resulting maps.
+function Candidate.CapacityFull(root, category, reserved)
     local counts = type(root) == "table" and type(root.counts) == "table"
         and root.counts or {}
     local spec
@@ -3163,11 +3181,19 @@ function Candidate.CapacityRefusal(root, category, reserved)
     else
         spec = {counts.barriers, BUDGET.barriers, "BARRIER_SET_LIMIT", "barrier", "map-keys"}
     end
-    local used = (tonumber(spec[1]) or 0) + math.max(0, tonumber(reserved) or 0)
+    local used = (tonumber(spec[1]) or 0) + (tonumber(reserved) or 0)
     if used < spec[2] then return nil end
-    Candidate.NoteSaturation({reason=spec[3], map=spec[4], counter=spec[5],
-        count=used + 1, limit=spec[2]})
-    return spec[3]
+    return spec[3], {reason=spec[3], map=spec[4], counter=spec[5],
+        count=used + 1, limit=spec[2]}
+end
+
+-- CapacityFull, and the refusal is recorded. Call it only after every check
+-- that gives a record its own reason, so only a change that would otherwise
+-- be accepted is counted as refused because the category is full.
+function Candidate.CapacityRefusal(root, category, reserved)
+    local full, fact = Candidate.CapacityFull(root, category, reserved)
+    if full then Candidate.NoteSaturation(fact) end
+    return full
 end
 
 -- Number of runtime capacity refusals this session. No allocation.
@@ -5583,6 +5609,13 @@ function Candidate.PumpPutPreparation(handle, work)
                 return Candidate.FinishPreparedPutWithoutCommit(handle, false,
                     "PROVENANCE_COLLISION")
             end
+            -- A valid record for a new build while the catalog is full: now
+            -- refused and recorded, before any destination or commit work.
+            if put.capacityFull then
+                Candidate.NoteSaturation(put.capacityFact)
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    put.capacityFull)
+            end
             local destination, destinationWhy = BuildDestination(verdict,
                 put.walker, existingRow and existingRow.source == "overlay"
                     and existingRow or nil, put.carriedUnknown)
@@ -5712,14 +5745,15 @@ function Candidate.PreparePut(root, record, options, claim, deferred, reservedBu
     options = type(options) == "table" and options or {}
     local slot, existing, slotWhy = SlotFor(root, record.id)
     if not slot then return false, slotWhy end
-    -- A record for a new build identity is refused before any work when the
-    -- catalog already holds the limit. The published root stays as it is.
-    if Candidate.AddsBuildIdentity(existing) then
-        local full = Candidate.CapacityRefusal(root, "builds", reservedBuilds)
-        if full then
-            if claim then ReleaseClaim(claim) end
-            return false, full
-        end
+    -- A record for a new build identity while the catalog already holds the
+    -- limit takes no allocation reservation and never reaches a commit. The
+    -- refusal is given after the reservation, row and owner checks (see the
+    -- "finish" phase), so a suppressed, malformed or unowned record keeps its
+    -- own reason and is not counted as refused because the catalog is full.
+    local addsBuild = Candidate.AddsBuildIdentity(existing)
+    local full, fullFact
+    if addsBuild then
+        full, fullFact = Candidate.CapacityFull(root, "builds", reservedBuilds)
     end
     local readmitTombstone = false
     if claim then
@@ -5745,7 +5779,7 @@ function Candidate.PreparePut(root, record, options, claim, deferred, reservedBu
         if existing and existing.state == "READ_ONLY_FUTURE_SCHEMA" then
             return false, "FUTURE_SCHEMA_RESERVATION"
         end
-        if Occupancy(existing) == "VACANT" then
+        if Occupancy(existing) == "VACANT" and not full then
             local superseded, supersedeWhy = SupersedeActiveClaim()
             if not superseded then return false, supersedeWhy end
             local issued, issueWhy = IssueClaim("allocation", slot.key, record.id)
@@ -5761,9 +5795,12 @@ function Candidate.PreparePut(root, record, options, claim, deferred, reservedBu
         return false, "LOCAL_OWNER_REQUIRED"
     end
     local candidateSlot = {key=slot.key, id=slot.id, kind=slot.kind}
-    return Candidate.NewPutPreparation(root, record, options, claim,
+    local handle = Candidate.NewPutPreparation(root, record, options, claim,
         deferred,
         candidateSlot, existing, readmitTombstone, carriedUnknown)
+    handle.put.addsBuild, handle.put.capacityFull, handle.put.capacityFact =
+        addsBuild, full, fullFact
+    return handle
 end
 
 local function PutInternal(record, options, claim, deferred)
@@ -5832,10 +5869,8 @@ function Candidate.PumpBatchPutPreparation(handle, work)
         if member.outcome then
             batch.index = batch.index + 1
         elseif not member.sub then
-            local record = member.record
-            local typedKey = type(record) == "table" and TypedKey(record.id) or nil
-            member.addsBuild = Candidate.AddsBuildIdentity(
-                typedKey and handle.originalRoot.rows[typedKey] or nil)
+            -- Members are prepared one after another, so batch.addedBuilds is
+            -- the number of new builds already admitted into this batch.
             local sub, prepareWhy = Candidate.PreparePut(handle.originalRoot,
                 member.record, member.options, nil, handle.deferred,
                 batch.addedBuilds or 0)
@@ -5858,7 +5893,7 @@ function Candidate.PumpBatchPutPreparation(handle, work)
                     put.claim = nil
                 end
                 member.outcome, member.storedAs = "admitted", put.storedAs
-                if member.addsBuild then batch.addedBuilds = (batch.addedBuilds or 0) + 1 end
+                if put.addsBuild then batch.addedBuilds = (batch.addedBuilds or 0) + 1 end
                 batch.items[#batch.items + 1] = put.item
                 batch.admitted = batch.admitted + 1
             elseif prepared == "noop" then
@@ -6073,8 +6108,9 @@ function Catalog.SetTombstone(id, tombstone, options)
         return false, sourceKind == "remote" and "REMOTE_OWNER_REQUIRED"
             or "LOCAL_OWNER_REQUIRED"
     end
-    local full = Candidate.CapacityRefusal(root, "tombstones", 0)
-    if full then return false, full end
+    -- A removal that needs a new removal marker while that map is full is
+    -- refused after the owner proof, so only a removal the sender may make
+    -- is counted as refused because the map is full.
     local current = CurrentOwnerKey()
     if sourceKind == "local" then
         -- Local deletion requires current local-owner proof for the admitted
@@ -6086,6 +6122,8 @@ function Catalog.SetTombstone(id, tombstone, options)
         if not owns then
             return false, "LOCAL_OWNER_REQUIRED"
         end
+        local full = Candidate.CapacityRefusal(root, "tombstones", 0)
+        if full then return false, full end
         local record = TombstoneRecord(slot, existing, tombstone)
         if not record then return false, "GENERATION_EXHAUSTED" end
         local verdict = NewVerdict(slot, "TOMBSTONED", "TOMBSTONE_CURRENT_DENY")
@@ -6138,6 +6176,8 @@ function Catalog.SetTombstone(id, tombstone, options)
     if not (owner and Identity.TransportOwns(owner, options.sender)) then
         return false, "REMOTE_OWNER_REQUIRED"
     end
+    local full = Candidate.CapacityRefusal(root, "tombstones", 0)
+    if full then return false, full end
     local payload = {stamp=stamp, author=author,
         ownerKey=type(tombstone.ownerKey) == "string" and tombstone.ownerKey or owner,
         ownerVerified=tombstone.ownerVerified == true or nil}
@@ -6354,11 +6394,18 @@ function Catalog.MaintenanceReplaceRow(handle, id, record, options)
         handle.failed = "PROVENANCE_COLLISION"
         return false, "PROVENANCE_COLLISION"
     end
+    -- An insert is a new build identity: while the catalog is full it is not
+    -- staged, so no commit starts only to be refused by the full collection.
+    if inserting then
+        local full = Candidate.CapacityRefusal(root, "builds", handle.buildDelta)
+        if full then return false, full end
+    end
     local destination, destinationWhy = BuildDestination(verdict, walker, existing)
     if not destination then
         handle.failed = destinationWhy
         return false, destinationWhy
     end
+    if inserting then handle.buildDelta = (handle.buildDelta or 0) + 1 end
     verdict.state = inserting and "ADMITTED" or "READMITTED"
     verdict.bundledRaw = existing and existing.bundledRaw or BundledRawFor(slot)
     verdict.overlayRaw = destination

@@ -383,7 +383,7 @@ function M.CatalogCapacityLines()
         return catalog and type(catalog.Status) == "function" and catalog.Status() or nil
     end)
     if okStatus and type(st) == "table" and st.state == "ROOT_ADMITTED"
-        and st.buildIdentityLimit ~= nil then
+        and st.readOnly ~= true and st.buildIdentityLimit ~= nil then
         local retention = Nexus and Nexus.DataRetention
         local okWaiting, waiting = pcall(function()
             return retention and type(retention.MarkerFirstSeenCount) == "function"
@@ -403,8 +403,18 @@ function M.CatalogCapacityLines()
             and catalog.SaturationSummary() or nil
     end)
     if okSaturation and type(record) == "table" then
+        local split = {}
+        for _, part in ipairs({{"refusedBuilds", "builds"},
+            {"refusedTombstones", "removal markers"},
+            {"refusedBarriers", "retention markers"}, {"refusedCatalog", "all identities"}}) do
+            if (tonumber(record[part[1]]) or 0) > 0 then
+                split[#split + 1] = part[2] .. " " .. shown(record[part[1]], 16)
+            end
+        end
         out[#out + 1] = "  catalog full: " .. shown(record.refused, 16)
-            .. " new change(s) refused this session, last " .. shown(record.reason, 32)
+            .. " new change(s) refused this session"
+            .. (#split > 0 and (" (" .. table.concat(split, ", ") .. ")") or "")
+            .. ", last " .. shown(record.reason, 32)
             .. " (" .. shown(record.counter, 24) .. " " .. shown(record.count, 16)
             .. ", limit " .. shown(record.limit, 16)
             .. "); existing Community and Leaderboard data stay available"

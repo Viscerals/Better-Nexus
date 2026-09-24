@@ -76,7 +76,7 @@ Refused('disjoint 1500 + 549',Boot(Db(Map('ov-',1,1500)),Map('base-',1,549)),'bu
 Ready('2048 invalid records',Boot(Db(Map('bad-',1,2048,false))))
 Refused('2049 invalid records',Boot(Db(Map('bad-',1,2049,false))),'overlay','map-keys','legacy')
 -- 7. At run time the overlay cannot grow past the limit: a received record
--- for a 2049th build identity is refused before any catalog work, the refusal
+-- for a 2049th build identity is refused before any catalog mutation, the refusal
 -- is retained as saturation facts, and the saved overlay stays at 2048.
 do
  local s7,H7=Boot(Db(Map('syn-',1,2048)))
@@ -142,4 +142,4 @@ do
  check(F.Serialize({builds=NexusDB.communityBuilds,tombstones=NexusDB.syncTombstones,
   barriers=NexusDB.communityRetentionEvictions})==beforeAll,'retention marker: all three saved maps are unchanged')
 end
-print('PASS catalog_root_capacity: 2047/2048/2049 boundaries, bundle vs stale legacy, bundled, overlap, disjoint union, invalid content, separate marker limits, runtime refusal before work, preservation and reload checks='..checks)
+print('PASS catalog_root_capacity: 2047/2048/2049 boundaries, bundle vs stale legacy, bundled, overlap, disjoint union, invalid content, separate marker limits, runtime refusal before any mutation, preservation and reload checks='..checks)

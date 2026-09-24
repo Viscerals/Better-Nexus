@@ -172,7 +172,7 @@ do
 end
 
 -- 7. The build limit holds: a record for a new build identity is refused when
--- the catalog already holds 2048, before any catalog work (no candidate, no
+-- the catalog already holds 2048, before any catalog mutation (no candidate, no
 -- futile mutation), explicitly, and the published root stays as it is.
 H,C=A.Boot(2048)
 A.Receive('admission-holder','Holder',A.base)
@@ -190,4 +190,4 @@ check(C.ManualPreparationStatus().ready and #H.batches==0,
  'no catalog candidate was started for them: batches='..#H.batches)
 check(Nexus.StartupStatus().state=='ready' and C.Status().availableCount==2048,
  'the admitted catalog stays available with all 2048 builds')
-print('PASS sync_admission_batch: one frozen batch per ready turn; per-member outcomes, bounds, cancellation, clock fallback; a full catalog refuses new builds before any work checks='..checks)
+print('PASS sync_admission_batch: one frozen batch per ready turn; per-member outcomes, bounds, cancellation, clock fallback; a full catalog refuses new builds before any mutation checks='..checks)
