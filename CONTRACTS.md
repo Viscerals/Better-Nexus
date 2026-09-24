@@ -256,7 +256,8 @@ anchorSpellId=nil, leverOptOut={}), `defaultFlags` (DISABLE_SUPPRESSES_GUARANTEE
 
 `Store.Init()` (wholesale-replace on version change, sibling pattern), `Store.Settings()`,
 `Store.State()` (per-char keyed subtable: tomeTogglePending per lever w/ timestamps,
-priorAutoAccept, flagDemotions, recordedPicks for the current session). Char key from
+priorAutoAccept, flagDemotions, and a legacy recordedPicks field that is kept for
+round-tripping but no longer written or read, #62). Char key from
 `UnitName("player")` guarded — if unavailable, defer (never latch "Unknown").
 
 ## core/GameAdapter.lua — `Nexus.GameAdapter` (sole IO; my file)

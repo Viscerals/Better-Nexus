@@ -298,36 +298,136 @@ do
  check(A.InFlight()==false,'and it confirms the Select in that same poll')
 end
 
--- 14. With Ordinary Automation actually on. While the Select waits for its
--- grant the runtime submits nothing: no second Select, and no Echo lock --
--- locking the awaited Echo would move its stacks out of the granted mirror,
--- so its grant could never be seen. Once the grant lands, both resume.
+-- 14. The real runtime, with Ordinary Automation on and a Wishlist that wants
+-- three copies of one Echo. Automation takes the first copy. The board is
+-- replaced by one that offers the same Echo again, and the mirror has not
+-- moved. Before #62 the runtime took it again on the strength of intent; now
+-- it waits. When the grant lands -- with no forced recompute -- the lock
+-- step, deferred throughout, runs to completion, and the next board that
+-- offers the Echo is taken.
 do
- Boot(30)
- ShowBoard(BOARD)
- Submit(X)
- Resolve(NEXT)
- check(A.InFlight()==true,'fixture: the Select is waiting for its grant')
+ -- A clean profile: the earlier sections' saved variables (autoPick off)
+ -- must not leak into this boot.
+ Nexus=nil;SlashCmdList=nil;NexusDB=nil;WishlistRealizerDB=nil
+ H=dofile('tests/prototype/harness.lua');H.pendingRolls=40;H.playerLevel=30;H.Boot()
+ A=Nexus.GameAdapter
+ local W=200001
+ A.SetFirstLoadoutWishlistIdentity('Synthetic three copies',{{spellId=W,quality=1,stacks=3}})
+ SlashCmdList.NEXUS('reroll off');SlashCmdList.NEXUS('freeze off');SlashCmdList.NEXUS('banish off')
+ Nexus.Store.Settings().autoLockEchoes=true
+ local function Takes(id)
+  id=id or W
+  local n=0
+  for _,action in ipairs(H.actions) do if action[1]=='take' and action[2]==id then n=n+1 end end
+  return n
+ end
+ local function Deferred()
+  local trace=Nexus.GetDiagnosticPageText('autolock') or ''
+  return trace:find('deferred: an Echo action is still in flight',1,true)~=nil
+ end
+ H.Board({{spellId=W,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+ H.Notify();H.Advance(.5)
+ SlashCmdList.NEXUS('auto');H.Advance(2)
+ check(Takes()==1,'fixture: automation takes the first wished copy: '..Takes())
+ -- The server accepts: the latch clears and the next board offers it again.
+ H.perks.pendingSelectSpellId=nil
+ H.Board({{spellId=W,quality=1},{spellId=200022,quality=0},{spellId=200023,quality=1}})
+ H.Notify();H.Advance(5)
+ check(Takes()==1,
+  'automation does not take it again while the first copy awaits its grant: '..Takes())
+ check(A.InFlight()==true and Owned(W)==0,'the Select is waiting, and not owned')
+ -- Data changes mid-wait -- here, another Echo is granted -- which makes the
+ -- lock step due. It must defer, and the other grant must confirm nothing.
+ do
+  local other=H.Clone(H.granted or {})
+  other['Echo 30']=other['Echo 30'] or {}
+  table.insert(other['Echo 30'],{spellId=200030,quality=1})
+  H.granted=other;H.Notify();H.Advance(1)
+ end
+ check(Deferred(),'the lock step, due on that change, defers while the Select waits')
+ check(A.InFlight()==true and Owned(W)==0 and Takes()==1,
+  'the other grant confirms nothing, and nothing is taken on intent')
+ -- The grant lands with a next board that does not offer the Echo. Nothing
+ -- forces a step.
+ local out=H.Clone(H.granted or {})
+ out['Echo 1']=out['Echo 1'] or {}
+ table.insert(out['Echo 1'],{spellId=W,quality=1})
+ H.granted=out
+ H.Board({{spellId=200024,quality=0},{spellId=200025,quality=1},{spellId=200026,quality=0}})
+ H.Notify();H.Advance(3)
+ check(Owned(W)==1,'the grant is ownership, counted once: '..Owned(W))
+ -- The fixture has no lock target, so the lock step's own trace is the
+ -- evidence, not lock actions.
+ check(not Deferred(),'the deferred lock step has run to completion')
+ check(Takes(200024)==1,
+  'automation acts again -- it takes from the new board -- so the wait is released: '..Takes(200024))
+ -- That Select is intent too. Once it is granted, the next board that
+ -- offers the wished Echo is taken.
+ H.perks.pendingSelectSpellId=nil
+ out=H.Clone(H.granted)
+ out['Echo 2']=out['Echo 2'] or {}
+ table.insert(out['Echo 2'],{spellId=200024,quality=0})
+ H.granted=out
+ H.Board({{spellId=W,quality=1},{spellId=200027,quality=0},{spellId=200028,quality=1}})
+ H.Notify();H.Advance(2)
+ check(Takes()==2,'and automation takes the next wished copy it is offered: '..Takes())
+end
+
+-- 15. A lock step deferred during a Banish latch runs again once the latch
+-- clears. A latch clearing marks only the board dirty, which on its own does
+-- not bring the lock step round again; without the re-check the deferred
+-- step was dropped until some unrelated data change.
+do
+ -- A clean profile: the earlier sections' saved variables (autoPick off)
+ -- must not leak into this boot.
+ Nexus=nil;SlashCmdList=nil;NexusDB=nil;WishlistRealizerDB=nil
+ H=dofile('tests/prototype/harness.lua');H.pendingRolls=40;H.playerLevel=30;H.Boot()
+ A=Nexus.GameAdapter
  Nexus.Store.Settings().autoLockEchoes=true
  SlashCmdList.NEXUS('auto')
- local takesBefore=0
- for _,action in ipairs(H.actions) do if action[1]=='take' then takesBefore=takesBefore+1 end end
- for _=1,4 do Nexus.RequestRecompute();H.Advance(.5) end
- local takes,locks=0,0
- for _,action in ipairs(H.actions) do
-  if action[1]=='take' then takes=takes+1 end
-  if action[1]=='lock' or action[1]=='unlock' then locks=locks+1 end
+ H.Board({{spellId=200010,quality=2},{spellId=200011,quality=1},{spellId=200012,quality=0}})
+ H.Notify();H.Advance(.5)
+ local function Deferred()
+  local trace=Nexus.GetDiagnosticPageText('autolock') or ''
+  return trace:find('deferred: an Echo action is still in flight',1,true)~=nil
  end
- check(takes==takesBefore,'automation sends no second Select while one awaits its grant')
- check(locks==0,'and locks nothing')
- local trace=Nexus.GetDiagnosticPageText('autolock') or ''
- check(trace:find('deferred: an Echo action is still in flight',1,true)~=nil,
-  'the lock step says it deferred because an Echo action is in flight')
- Grant(X,2)
- for _=1,2 do Nexus.RequestRecompute();H.Advance(.5) end
- trace=Nexus.GetDiagnosticPageText('autolock') or ''
- check(trace:find('deferred: an Echo action is still in flight',1,true)==nil,
-  'once the grant lands the lock step runs again')
+ H.perks.pendingBanishIndex=0
+ Nexus.RequestRecompute();H.Advance(.5)
+ check(Deferred(),'fixture: the lock step deferred while the Banish latch was held')
+ H.perks.pendingBanishIndex=nil
+ H.Notify();A.Poll();H.Advance(2.5)
+ check(not Deferred(),'the lock step runs again once the latch clears')
+end
+
+-- 16. The grant lands while the Select latch is still held, so the poll that
+-- confirms the Select sees no change in the mirror. The confirmation itself
+-- must make the deferred lock step due; the one-second re-check alone would
+-- run it late.
+do
+ Nexus=nil;SlashCmdList=nil;NexusDB=nil;WishlistRealizerDB=nil
+ H=dofile('tests/prototype/harness.lua');H.pendingRolls=40;H.playerLevel=30;H.Boot()
+ A=Nexus.GameAdapter
+ local W=200001
+ A.SetFirstLoadoutWishlistIdentity('Synthetic three copies',{{spellId=W,quality=1,stacks=3}})
+ SlashCmdList.NEXUS('reroll off');SlashCmdList.NEXUS('freeze off');SlashCmdList.NEXUS('banish off')
+ Nexus.Store.Settings().autoLockEchoes=true
+ local function Deferred()
+  local trace=Nexus.GetDiagnosticPageText('autolock') or ''
+  return trace:find('deferred: an Echo action is still in flight',1,true)~=nil
+ end
+ H.Board({{spellId=W,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+ H.Notify();H.Advance(.5)
+ SlashCmdList.NEXUS('auto');H.Advance(2)
+ local out=H.Clone(H.granted or {})
+ out['Echo 1']=out['Echo 1'] or {}
+ table.insert(out['Echo 1'],{spellId=W,quality=1})
+ H.granted=out;H.Notify();H.Advance(3)
+ check(Deferred() and A.InFlight(),'fixture: the lock step defers while the Select latch is held')
+ H.perks.pendingSelectSpellId=nil
+ H.Board({{spellId=200024,quality=0},{spellId=200025,quality=1},{spellId=200026,quality=0}})
+ H.Notify();H.Advance(.3)
+ check(not A.InFlight() and Owned(W)==1,'the latch clears, and the grant already seen confirms the Select')
+ check(not Deferred(),'and the confirmation makes the lock step due at once')
 end
 
 print('PASS select_intent_ownership: a submitted Select is intent until the granted mirror shows it checks='..checks)
