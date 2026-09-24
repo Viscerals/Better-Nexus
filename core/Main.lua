@@ -808,6 +808,9 @@ local function StartupFailureLine(status)
     Add("component", f.component); Add("phase", f.phase); Add("map", f.map)
     Add("counter", f.counter)
     if f.count then Add("count at refusal", tostring(f.count) .. " (limit " .. tostring(f.limit) .. "; counting stopped here)") end
+    if type(f.counted) == "table" and f.counted.builds ~= nil then
+        Add("different builds counted (at least)", f.counted.builds)
+    end
     -- The maps are read in this order; counting stops in f.map, so the maps
     -- after it were not read and have no count.
     local counted = type(f.counted) == "table" and f.counted or nil
@@ -844,6 +847,15 @@ local function CommandStatus()
         if capacity then Print(capacity) end
         local line = StartupFailureLine(startup)
         if line then Print(line) end
+    end
+    -- Capacity use of the admitted shared catalog and its saturation record
+    -- (read-only, the same lines the Copy summary carries).
+    local report = Nexus.SupportReport
+    if report and type(report.CatalogCapacityLines) == "function" then
+        local ok, lines = pcall(report.CatalogCapacityLines)
+        if ok and type(lines) == "table" then
+            for _, text in ipairs(lines) do Print((tostring(text):gsub("^%s+", ""))) end
+        end
     end
     local catalog = Adapter.Catalog()
     local wishlist = Adapter.Wishlist()

@@ -79,6 +79,7 @@ NAMES += ['wishlist_switch_recovery']
 NAMES += ['server_hud_handoff']
 NAMES += ['first_hud_display']
 NAMES += ['select_intent_ownership']
+NAMES += ['catalog_capacity_envelope','catalog_marker_expiry','catalog_saturation']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
