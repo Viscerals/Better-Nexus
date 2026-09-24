@@ -856,10 +856,11 @@ ReferenceEvidence = function(row)
     BindField("echoes", "evidenceKey")
     BindField("lockedEchoes", "lockedEvidenceKey", {forceLocked=true})
     if not candidateOpen then return changed end
-    if compact and type(compaction.CompactDpsRow) == "function" then
-        local ok, compacted = pcall(compaction.CompactDpsRow, row)
-        if ok then return compacted == true or changed end
-    end
+    -- The open candidate belongs to a catalog transaction that may still be
+    -- refused, fail or be cancelled, and its entries are discarded with it.
+    -- Stage the entries so a publication carries them, but keep the inline
+    -- arrays: the row stays self-sufficient, and BindField above drops them
+    -- on a later call outside a candidate once the entry is durable.
     if type(evidence.ReferenceDpsRow) == "function" then
         local ok, referenced = pcall(evidence.ReferenceDpsRow, row)
         return ok and referenced == true or changed
