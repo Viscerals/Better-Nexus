@@ -1637,9 +1637,10 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
     if Adapter.InFlight and Adapter.InFlight() then
         trace[#trace + 1] = "deferred: an Echo action is still in flight"
         -- Come back for it. A grant marks data dirty, which makes this step
-        -- due again; a Banish, Freeze or Reroll latch clearing, a refused
-        -- Select, or a latch the watchdog declares dead marks only the board
-        -- dirty, which does not. The delay only schedules a re-check: the
+        -- due again. A Banish, Freeze or Reroll latch clearing or a refused
+        -- Select marks only the board dirty, and a latch the watchdog
+        -- declares dead marks nothing dirty; neither makes this step due.
+        -- The delay only schedules a re-check: the
         -- gate above is still the in-flight evidence, and nothing here
         -- counts or confirms anything.
         RequestAutoLockAt(GetTime() + 1)
