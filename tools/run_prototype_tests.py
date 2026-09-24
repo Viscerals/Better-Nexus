@@ -81,6 +81,7 @@ NAMES += ['first_hud_display']
 NAMES += ['select_intent_ownership']
 NAMES += ['catalog_capacity_envelope','catalog_marker_expiry','catalog_saturation','catalog_saturation_order']
 NAMES += ['leaderboard_recovery_rows','leaderboard_recovery_upstream']
+NAMES += ['retention_ranked_marker_pass']
 NAMES += ['rival_picker_detection']
 NAMES += ['retention_busy_retry_bound']
 

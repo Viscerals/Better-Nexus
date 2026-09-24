@@ -789,6 +789,52 @@ local function FinishEnforcement(database, catalog, transaction, summary,
     return Copy(job.result)
 end
 
+-- Retention markers and removal markers only, in one retention transaction.
+-- Used when the ranked overlay scan could not complete. It writes only the
+-- retention metadata: no build, DPS or evidence payload. When the catalog is
+-- busy, the pass is marked pending and reports ROOT_MUTATION_PENDING, so the
+-- bounded busy retry repeats this marker pass, never another overlay scan.
+local pendingMarkerPasses = setmetatable({}, {__mode="k"})
+local function MarkerOnlyEnforcement(database, owner, reason, priorMeta, scanWhy)
+    local transaction = owner.BeginCatalogMaintenance({database=database,
+        operation="retention"})
+    if not transaction then
+        pendingMarkerPasses[database] = true
+        return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING",
+            markerPass="busy"}
+    end
+    pendingMarkerPasses[database] = nil
+    local evictions = PruneEvictionMarkers(database, transaction, priorMeta)
+    local tombstones = PruneTombstones(database, transaction)
+    local now = EpochNow()
+    local summary = {
+        schemaVersion=SCHEMA_VERSION,
+        reason=tostring(reason or "maintenance"):sub(1, 80),
+        overlayScanIncomplete=tostring(scanWhy):sub(1, 40),
+        characterBestRemoved=0, personalRemoved=0, buildBestRemoved=0,
+        overlayRemoved=0, evictionMarkersAdded=0,
+        evictionMarkersBefore=evictions.before,
+        evictionMarkersAfter=evictions.after,
+        evictionMarkersRemoved=evictions.removed,
+        evictionMarkersFirstSeenRecorded=evictions.firstSeenRecorded,
+        buildRetentionFloor=evictions.floor,
+        tombstonesBefore=tombstones.before,
+        tombstonesAfter=tombstones.after,
+        tombstonesRemoved=tombstones.removed,
+        tombstoneFloor=tombstones.floor,
+        evidenceRemoved=0, evidenceGcBlocked=false,
+    }
+    local changed = evictions.removed > 0 or tombstones.removed > 0
+    local metadataChanged = changed or type(priorMeta) ~= "table"
+        or evictions.firstSeenChanged
+    local overrides = metadataChanged and {
+        dataRetention=PrepareMetadata(priorMeta, summary, now, changed,
+            evictions.firstSeen),
+    } or nil
+    return FinishEnforcement(database, owner, transaction, summary,
+        changed, overrides)
+end
+
 function Retention.Enforce(database, reason)
     -- MASTER-RC-008 / RAW-01: an unsupplied database resolves to the exact
     -- bound authority, never to the raw NexusDB global. A database supplied
@@ -922,6 +968,12 @@ function Retention.Enforce(database, reason)
     end
     local owner = CatalogFor(database)
     local overlayRows = {}
+    if owner and pendingMarkerPasses[database] then
+        -- A marker pass found the catalog busy: its retry does the same
+        -- marker work without another overlay scan.
+        return MarkerOnlyEnforcement(database, owner, reason, priorMeta,
+            "MARKER_PASS_RETRY")
+    end
     if owner then
         local complete, scanWhy, slices
         overlayRows, complete, scanWhy, slices =
@@ -933,8 +985,15 @@ function Retention.Enforce(database, reason)
                 evictionMarkersRemoved=0, evictionMarkersAdded=0}
         end
         if complete ~= true then
-            return {pending=false, blocked=true,
-                reason=scanWhy or "CATALOG_SCAN_FAILED"}
+            -- The scan shares the one summary cursor with the build hash
+            -- warm-up and the Community view, and a commit also ends it.
+            -- Retention-marker aging and removal markers do not need it:
+            -- they run now in their own transaction, and overlay and DPS
+            -- trimming wait for a later complete run. A busy retry of this
+            -- pass starts no new scan, so a lost scan never leads to repeated
+            -- scans that would restart another summary reader.
+            return MarkerOnlyEnforcement(database, owner, reason, priorMeta,
+                scanWhy or "CATALOG_SCAN_FAILED")
         end
     end
     local transaction = owner and owner.BeginCatalogMaintenance({database=database,
@@ -1001,7 +1060,10 @@ function Retention.Enforce(database, reason)
     local overrides = transaction and metadataChanged and {
         dataRetention=PrepareMetadata(priorMeta, summary, now, changed,
             evictions.firstSeen),
-        dpsCapture=dps or {},
+        -- Only a run that removed DPS rows writes dpsCapture; otherwise the
+        -- stored DPS payload is left as it is, so a DPS record written while
+        -- this commit is pending is not replaced by the older copy.
+        dpsCapture=dpsRemoved > 0 and (dps or {}) or nil,
     } or nil
     return FinishEnforcement(database, owner, transaction, summary,
         changed, overrides)
@@ -1015,10 +1077,15 @@ local ScheduleRetention
 -- A run that finds the catalog busy with another change is tried again with a
 -- growing delay (5, 10, 20 and 40 s, then every 60 s) for about one hour.
 -- BUSY_RETRY_LIMIT counts retries after the first busy run: one chain makes
--- at most 1 + 64 = 65 runs, the last 3675 s after the first. A request during
--- the chain joins it (Retention.Request). So a request made during a long
--- first compaction or identity repair is not lost and never becomes an
--- endless retry. A busy run stops before it copies any payload.
+-- at most 1 + 64 = 65 busy runs, and the delays between them add up to
+-- 3675 s. A request during the chain joins it (Retention.Request). A busy run
+-- stops before it copies any payload. In the default mode a busy run does no
+-- other work, so the chain ends about 3675 s after its first run. In the
+-- ranked mode a retry that follows a completed overlay scan scans again
+-- before it finds the catalog busy, so that chain lasts longer; a retry of a
+-- marker-only pass (MarkerOnlyEnforcement) starts no scan. So a request made
+-- during a long first compaction or identity repair is not lost and never
+-- becomes an endless retry.
 local BUSY_RETRY_DELAY, BUSY_RETRY_MAX_DELAY, BUSY_RETRY_LIMIT = 5, 60, 64
 ScheduleRetention = function(scheduler, reason, delay, busyAttempts)
     return scheduler.After("data-retention.enforce", delay, function()
