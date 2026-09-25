@@ -176,6 +176,36 @@ function dbBinding.Select(payload)
     end
     return payload
 end
+-- A saved root the Store keeps read-only still shows the DPS records this
+-- build reads: the session store starts as a detached bounded copy of the
+-- keys this module reads (from the bundle's payload, or with no bundle from
+-- the saved dpsCapture). Other saved keys are not copied. The saved tables
+-- are never served, so writes and inbound records stay out of the saved
+-- root. An occupied bundle without a payload revives no legacy input.
+dbBinding.SAVED_KEYS = {
+    "personalBest", "buildBest", "characterBest", "leaderboard",
+    "lockedMigrationSource", "lockedMigrationVersion",
+}
+function dbBinding.SavedProjection(bundle)
+    local internals = Nexus and Nexus.MainInternals
+    local project = internals and internals.ReadOnlyProjectionV1
+    if type(project) ~= "function" then return nil end
+    local source
+    if bundle ~= nil then
+        source = type(bundle) == "table" and rawget(bundle, "dpsCapture") or nil
+    else
+        source = rawget(NexusDB, "dpsCapture")
+    end
+    if type(source) ~= "table" then return nil end
+    local known = {}
+    for _, key in ipairs(dbBinding.SAVED_KEYS) do known[key] = rawget(source, key) end
+    local copy = project(NexusDB, known)
+    if copy == nil and internals.SavedRootReadOnlyV1
+        and internals.SavedRootReadOnlyV1(NexusDB) ~= nil then
+        Debug("saved DPS records not shown: read-only saved data is not a plain table graph within the session copy bound")
+    end
+    return copy
+end
 local function DB()
     if type(NexusDB) ~= "table" then
         -- No saved table is loaded. A read must not create one: a fabricated
@@ -196,7 +226,8 @@ local function DB()
     dbPolicyReadOnly = type(status) == "table" and status.readOnly == true
     if dbPolicyReadOnly then
         if transientDbOwner ~= NexusDB then
-            transientDbOwner, transientDb = NexusDB, {}
+            transientDbOwner = NexusDB
+            transientDb = dbBinding.SavedProjection(bundle) or {}
         end
         return dbBinding.Select(transientDb)
     end
