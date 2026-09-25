@@ -57,7 +57,8 @@ local NOTE2 = "|cff8a8a8aSet associations in My Builds. Saved Build activation r
 local ASSIGN_NOTE = "Assigning by itself does not change any Saved Build."
 local AUTO_SAVE_WARNING = "With Auto ON, Nexus may replace the active Saved Build with a finished run that "
     .. "has more overall Wishlist progress, or equal progress after cleanup or an even swap of requested "
-    .. "copies. At level 80 after a finished run, Auto checks again right away when you change the assignment."
+    .. "copies. At level 80 after a finished run, Auto checks again right away when you change the assignment. "
+    .. "It also checks again right away when you save edits to the assigned Wishlist."
 local AUTO_SAVE_ORBS = "The replaced build may hold an Echo you value, even one obtained with Orbs: "
     .. "Orb investment is not compared. Keep Auto OFF to leave the Saved Build unchanged."
 

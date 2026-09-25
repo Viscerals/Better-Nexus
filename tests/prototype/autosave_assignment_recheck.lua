@@ -48,4 +48,11 @@ assign('Plan B',200080);H.Advance(8,.1)
 local s=saves()
 check(#s==1,'Auto ON at level 80: an assignment change is followed by one save ('..#s..')')
 check(s[1] and s[1][2]==1 and s[1][3]=='Plan B','the save targets the active Saved Build and uses the Wishlist name')
+-- Exactly one: more updates, longer than the adapter's save spacing, and a
+-- second round of assignment changes add no further save.
+for _=1,3 do H.Notify();H.Advance(4,.1) end
+assign('Plan A',200001);H.Advance(4,.1)
+assign('Plan B',200080);H.Advance(8,.1)
+s=saves()
+check(#s==1,'later updates and assignment changes add no second save ('..#s..')')
 print('PASS assignment writes no build itself; Auto OFF saves nothing; Auto ON at level 80 re-checks at once after an assignment change='..checks)
