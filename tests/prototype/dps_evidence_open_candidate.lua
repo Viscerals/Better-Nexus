@@ -1,26 +1,32 @@
--- A DPS record accepted while a catalog transaction holds an open evidence
--- candidate must stay self-sufficient until its evidence entry is durable.
+-- A DPS record accepted while another catalog transaction holds an open
+-- evidence candidate must stay self-sufficient, and must not disturb that
+-- transaction.
 --
--- Cause: after the first compaction, DpsCapture.ReferenceEvidence compacted
--- a received row into the open candidate: it interned the Echo arrays there
--- and removed the row's inline arrays. The candidate belongs to another
--- transaction (here a pending ranked-retention commit). If that transaction
--- is refused, fails or is cancelled, its candidate is discarded with it, and
--- the stored row keeps only a reference to an entry that no longer exists.
--- Now, while a candidate is open, the entries are still staged in it (a
--- publication carries them), but the inline arrays are kept; the existing
--- rule outside a candidate drops them once the entry is durable.
+-- F8: after the first compaction, DpsCapture.ReferenceEvidence compacted a
+-- received row into the open candidate: it interned the Echo arrays there and
+-- removed the row's inline arrays. If that transaction is refused, fails or is
+-- cancelled, its candidate is discarded, and the row keeps only a reference
+-- to an entry that no longer exists.
+-- M1 (review of the F8 commit): interning into that candidate at all is also
+-- wrong once its publish plan is fixed (index and witness phases): the
+-- published root then counts one evidence append more than the plan applied,
+-- the next read finds the drift, and the catalog stays ROOT_INVALIDATED for
+-- the session (received records refused, public reads empty; a reload
+-- recovers). This happened in the shipped (unlimited) mode too.
+-- Now a record written under an open candidate binds its key and keeps its
+-- inline arrays, exactly as outside a candidate, and is never interned into
+-- another transaction's candidate.
 --
--- Real TOC boot, compaction, ranked retention, catalog and
--- DpsCapture.ReceiveRecord; single-slice pacing; synthetic data. The pending
--- window is a ranked run that removes no DPS row (25 Lich King rows), so this
--- test does not depend on the ranked publication guard.
+-- Real TOC boot, compaction, retention, catalog and DpsCapture.ReceiveRecord;
+-- single-slice pacing; synthetic data. The pending windows are unguarded
+-- retention commits (a ranked run that removes no DPS row; a default-mode
+-- run), so this test does not depend on the ranked publication guard.
 local T=dofile('tests/prototype/startup_support.lua')
 T.SingleSlicePacing()
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
-local H,fx
+local H,fx,target
 local function Own(name) return name:lower()..'@ebonhold' end
 local function Lk() return ((rawget(rawget(NexusDB,'authorityBundle') or {},'dpsCapture') or {}).characterBest or {}).lk or {} end
 local function Player(name) for _,p in ipairs(fx.players)do if p.name==name then return p end end end
@@ -30,79 +36,127 @@ local function List(rows)
  return table.concat(out,',')
 end
 
-local players={
- {name='Alpha',class='MAGE',dps={lk=52000},locked=6},
- {name='Kilo',class='MAGE',locked=0},
- {name='Lowell',class='MAGE',dps={lk=30001},locked=3},
- {name='Pat',class='PRIEST',dps={lk=10000}},
-}
-for i=1,22 do players[#players+1]={name='Filler'..string.char(64+i),class='MAGE',dps={lk=40000+i},build='missing',variant=100,locked=0} end
-fx=L.New({players=players})
-local db=fx:Install(F.Database())
-db.settings.communityRetentionEnabled=true
-db.settings.communityRetentionTopPerCategory=25
-db.settings.communityRetentionMinPerClassPerCategory=1
-H=F.Boot(db)
-for i=1,20000 do
- local m=(NexusDB.authorityBundle or {}).dataCompaction or {}
- if i>10 and m.version and not m.inProgress and not Nexus.Scheduler.Pending('data-compaction') then break end
- H.Advance(.05,.05)
-end
-check(Nexus.DataCompaction.Enabled(NexusDB),'fixture: the first compaction is complete (reference storage is enabled)')
-
--- Observe (pass through) the ranked retention commit to find its window.
-local C=Nexus.BuildCatalog
-local commit=C.CommitMaintenance
-local target
-C.CommitMaintenance=function(handle,overrides,guard)
- local info=debug.getinfo(2,'S')
- local a,b,c=commit(handle,overrides,guard)
- if info and tostring(info.source):find('DataRetention',1,true) and type(c)=='table' and not target then
-  target={ticket=c,dps=type(overrides)=='table' and overrides.dpsCapture~=nil}
+-- 25 Lich King rows (Alpha, Lowell, Pat and 22 fillers): a ranked run removes
+-- nothing. Kilo has a build and no record yet (known-zero locked).
+local function Boot(ranked)
+ local players={
+  {name='Alpha',class='MAGE',dps={lk=52000},locked=6},
+  {name='Kilo',class='MAGE',locked=0},
+  {name='Lowell',class='MAGE',dps={lk=30001},locked=3},
+  {name='Pat',class='PRIEST',dps={lk=10000}},
+ }
+ for i=1,22 do players[#players+1]={name='Filler'..string.char(64+i),class='MAGE',dps={lk=40000+i},build='missing',variant=100,locked=0} end
+ fx=L.New({players=players})
+ local db=fx:Install(F.Database())
+ if ranked then
+  db.settings.communityRetentionEnabled=true
+  db.settings.communityRetentionTopPerCategory=25
+  db.settings.communityRetentionMinPerClassPerCategory=1
  end
- return a,b,c
-end
-check(Nexus.DataRetention.Request('test: ranked run')==true,'fixture: a ranked run is requested')
-local wrote,after
-for _=1,6000 do
- if target and target.ticket.state=='pending' and not wrote then
-  check(Nexus.LoadoutEvidence.CandidateOpen(),'the retention transaction holds an open evidence candidate at the write')
-  check(not target.dps,'fixture: the pending ranked commit removes no DPS row')
-  local p=Player('Kilo')
-  check(fx:Receive('Kilo','lk',{dps=60000,ts=L.STAMP+300})==true,'a new record (known-zero locked) is accepted')
-  check(fx:Receive('Lowell','lk',{dps=59000,ts=L.STAMP+301})==true,'an improved record (explicit locked) is accepted')
-  wrote=true
-  check(target.ticket.state=='pending' and Nexus.LoadoutEvidence.CandidateOpen(),'the writes landed while the candidate was open')
-  for _,name in ipairs({'Kilo','Lowell'})do
-   local q,row=Player(name),Lk()[Own(name)]
-   check(row and type(row.echoes)=='table' and next(row.echoes)~=nil and type(row.evidenceKey)=='string',
-    name..': while the candidate is open the stored row keeps its inline Echoes and binds its key')
-   check(List(row.echoes)==List(q.dpsOrdinary),name..': the inline Echoes are the exact record')
-   if q.dpsLocked then check(List(row.lockedEchoes)==List(q.dpsLocked),name..': the inline locked Echoes are kept') end
+ H=F.Boot(db)
+ for i=1,20000 do
+  local m=(NexusDB.authorityBundle or {}).dataCompaction or {}
+  if i>10 and m.version and not m.inProgress and not Nexus.Scheduler.Pending('data-compaction') then break end
+  H.Advance(.05,.05)
+ end
+ check(Nexus.DataCompaction.Enabled(NexusDB),'fixture: the first compaction is complete (reference storage is enabled)')
+ check(Nexus.DataRetention.Limits(NexusDB).enabled==(ranked==true),'fixture: retention mode')
+ -- The default mode repeats its full run only after 300 s.
+ if not ranked then for _=1,310 do H.Advance(1,1) end end
+ target=nil
+ local C=Nexus.BuildCatalog
+ local commit=C.CommitMaintenance
+ C.CommitMaintenance=function(handle,overrides,guard)
+  local info=debug.getinfo(2,'S')
+  local a,b,c=commit(handle,overrides,guard)
+  if info and tostring(info.source):find('DataRetention',1,true) and type(c)=='table' and not target then
+   target={ticket=c,dps=type(overrides)=='table' and overrides.dpsCapture~=nil,guarded=guard~=nil,offset=-1}
   end
+  return a,b,c
  end
- if wrote and target.ticket.state~='pending' and not after then after=target.ticket.state end
- if after and not Nexus.Scheduler.Pending('data-retention.enforce') then break end
- H.Advance(.05,.05)
 end
-C.CommitMaintenance=commit
-check(wrote and after=='committed','the retention commit published after the writes: '..tostring(after))
-local function Exact(tag)
- for _,name in ipairs({'Kilo','Lowell'})do
+
+-- Request a retention run; at the k-th pending frame of its commit, run
+-- fn(). Every frame the catalog must not be invalidated. Returns the window
+-- length and whether fn ran inside it.
+local function Window(k,fn,tag)
+ check(Nexus.DataRetention.Request('test: retention run')==true,tag..': a retention run is requested')
+ local fired,invalid
+ for _=1,8000 do
+  if target and target.ticket.state=='pending' then
+   target.offset=target.offset+1
+   if k and target.offset==k and not fired then
+    check(Nexus.LoadoutEvidence.CandidateOpen(),tag..': the retention transaction holds an open evidence candidate at the write')
+    fn()
+    fired=target.ticket.state=='pending'
+   end
+  end
+  local s=Nexus.BuildCatalog.Status()
+  if s.state=='ROOT_INVALIDATED' and not invalid then invalid=tostring(s.reason) end
+  if target and target.ticket.state~='pending' and not Nexus.Scheduler.Pending('data-retention.enforce') then break end
+  H.Advance(.05,.05)
+ end
+ check(target and target.ticket.state=='committed',tag..': the retention commit published: '..tostring(target and target.ticket.state))
+ check(not target.dps and not target.guarded,tag..': the pending commit is unguarded and carries no DPS copy')
+ check(invalid==nil,tag..': the catalog is never invalidated ('..tostring(invalid)..')')
+ return target.offset+1,fired
+end
+
+local function Exact(tag,names)
+ for _,name in ipairs(names)do
   local q=Player(name)
   local public=Nexus.DpsCapture.GetCharacterBest('lk',q.name,q.owner)
   check(public and public.dps==q.dps.lk and List(public.echoes)==List(q.dpsOrdinary) and List(public.lockedEchoes)==List(q.dpsLocked),
    tag..': '..name..' resolves its exact ordinary and locked evidence')
  end
+ check(Nexus.BuildCatalog.Get(Player('Alpha').buildId)~=nil,tag..': the catalog serves builds')
 end
-Exact('after the commit')
+
+------------------------------------------------------------------------
+-- 1. F8: records accepted in the window keep their inline arrays while the
+-- candidate is open, and resolve after the commit and after a reload.
+------------------------------------------------------------------------
+Boot(true)
+local _,fired=Window(0,function()
+ check(fx:Receive('Kilo','lk',{dps=60000,ts=L.STAMP+300})==true,'a new record (known-zero locked) is accepted')
+ check(fx:Receive('Lowell','lk',{dps=59000,ts=L.STAMP+301})==true,'an improved record (explicit locked) is accepted')
+ for _,name in ipairs({'Kilo','Lowell'})do
+  local q,row=Player(name),Lk()[Own(name)]
+  check(row and type(row.echoes)=='table' and next(row.echoes)~=nil and type(row.evidenceKey)=='string',
+   name..': while the candidate is open the stored row keeps its inline Echoes and binds its key')
+  check(List(row.echoes)==List(q.dpsOrdinary),name..': the inline Echoes are the exact record')
+  if q.dpsLocked then check(List(row.lockedEchoes)==List(q.dpsLocked),name..': the inline locked Echoes are kept') end
+ end
+end,'inline')
+check(fired,'inline: the writes landed while the commit was pending')
+Exact('after the commit',{'Kilo','Lowell'})
 H=F.Reload()
-Exact('after reload')
--- Outside a candidate the existing rule drops inline arrays once the entry is
--- durable: Kilo's next record reuses the published entry.
-check(not Nexus.LoadoutEvidence.CandidateOpen(),'fixture: no candidate is open')
+Exact('after reload',{'Kilo','Lowell'})
 check(fx:Receive('Kilo','lk',{dps=61000,ts=L.STAMP+310})==true,'a later Kilo record is accepted outside a candidate')
-local row=Lk()[Own('Kilo')]
-check(row and row.echoes==nil and type(row.evidenceKey)=='string','the later record is stored as a reference to the durable entry')
-Exact('the later record')
-print('PASS dps_evidence_open_candidate: a record accepted under an open candidate keeps its inline evidence until the entry is durable checks='..checks)
+Exact('the later record',{'Kilo'})
+
+------------------------------------------------------------------------
+-- 2-3. M1: a new record at every offset of an unguarded pending retention
+-- commit (ranked run that removes nothing; default mode) leaves the catalog
+-- admitted, and the record resolves after the commit and after a reload.
+------------------------------------------------------------------------
+local summary={}
+for _,mode in ipairs({{true,'ranked'},{false,'default'}})do
+ Boot(mode[1])
+ local W=Window(nil,nil,mode[2]..' discovery')
+ check(W>=5,mode[2]..': the pending window lasts '..W..' frames')
+ local landed=0
+ for k=0,W-1 do
+  Boot(mode[1])
+  local length,inside=Window(k,function()
+   check(fx:Receive('Kilo','lk',{dps=60000,ts=L.STAMP+300})==true,mode[2]..' +'..k..': Kilo is accepted')
+  end,mode[2]..' +'..k)
+  check(inside and length==W,mode[2]..' +'..k..': the write landed inside the window ('..length..'/'..W..' frames)')
+  landed=landed+1
+  Exact(mode[2]..' +'..k,{'Kilo'})
+  if k==W-1 then H=F.Reload();Exact(mode[2]..' +'..k..' after reload',{'Kilo'}) end
+ end
+ check(landed==W,mode[2]..': every offset of the window was exercised ('..landed..'/'..W..')')
+ summary[#summary+1]=mode[2]..' W='..W
+end
+print('PASS dps_evidence_open_candidate: a record accepted under another transaction\'s open candidate keeps its inline evidence and never drifts that transaction ['..table.concat(summary,' ')..'] checks='..checks)
