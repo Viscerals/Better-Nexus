@@ -406,4 +406,39 @@ do
  assert(o.synced and o.total==79,'reached: the save path at level 80: '..tostring(o.total))
  assert(status:find('auto paused: no confirmed result for '..l.actionType..' sent before the loading screen',1,true),'the save path says why: '..status)
 end
+-- 16. At level 80 no StepRun resolves a Take, so a Take granted with no
+-- loading screen is still "submitted" at a later leave. Its visible grant is
+-- its result there: the zone holds nothing.
+do
+ local H=Boot();H.run=NOCHARGES
+ H.playerLevel=80;H.granted=Granted(78,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
+ H.Offer({{spellId=200001,quality=1},{spellId=200089,quality=0},{spellId=200090,quality=1}})
+ SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1 and Nexus.RecomputeStats().lastActionLifecycle.actionType=='take','the final Take is sent')
+ H.perks.pendingSelectSpellId=nil;H.Board({});H.Notify();H.granted=Granted(78,true);H.Notify();H.Advance(34)
+ assert(Nexus.RecomputeStats().lastActionLifecycle.state=='submitted','precondition: nothing resolved the granted Take before the zone')
+ H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
+ local l=Nexus.RecomputeStats().lastActionLifecycle
+ assert(l.state=='confirmed' and l.reason=='grant_observed','the leave records the visible grant: '..tostring(l.state)..'/'..tostring(l.reason))
+ assert(H.Allowed() and H.runtime.StatusLine():find('run complete',1,true),'the zone holds nothing: '..H.runtime.StatusLine())
+end
+
+-- 17. A later leave adds its pending items to an open hold. At the first
+-- leave only the automatic Take waited (its grant could end the hold). The
+-- player's own Freeze, sent during that hold, is pending at the second
+-- leave, so the Take's grant no longer ends the hold.
+do
+ local H=Boot();H.run=NOCHARGES;H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1 and Nexus.RecomputeStats().lastActionLifecycle.actionType=='take','one Take sent')
+ H.perks.pendingSelectSpellId=nil;H.Offer(OTHER);H.Advance(.3) -- answered; the grant lags
+ H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer(OTHER);H.Advance(5)
+ assert(not H.Allowed(),'held after the first zone')
+ H.perks.pendingFreezeIndex=1 -- the player's own Freeze during the hold, never answered
+ H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer(OTHER)
+ local g=H.Clone(H.granted) or {};g['Echo 1']=g['Echo 1'] or {};table.insert(g['Echo 1'],{spellId=200001});H.granted=g;H.Notify()
+ H.Advance(14)
+ local ok,why=H.Allowed()
+ assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for freeze and take',1,true),'held for the player latch: '..tostring(why)..', attempts='..H.attempts)
+ assert(not Nexus.GameAdapter.InFlight(),'reached: the Take is granted and the player latch is dead')
+end
 print('PASS Auto selection kept across a same-session loading screen with actions held until settled; whatever still waited at the leave (runtime action or adapter latch) holds automation until player input, a run boundary or a Take grant, with the reason shown; unclassified entry and logout revoke; compact Auto labels')

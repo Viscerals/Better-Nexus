@@ -2489,6 +2489,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
                 forcedTakesBySpell[fid] = (forcedTakesBySpell[fid] or 0) + 1
             end
         end
+        -- The granted count before the send: a later rise is this Take's
+        -- result (the ConfirmAwaitingGrant rule), used at a loading screen.
+        intent.grantBaseline = Adapter.GrantedCount(immutable.spellId)
         local ok, err = Adapter.Take(immutable.spellId)
         if ok then
             lastDecision = immutable
@@ -3349,6 +3352,14 @@ end
                     nextStepAt = nil
                     ScheduleKnownDeadlines()
                 end
+            elseif actionIntent and not actionIntent.crossedWorld
+                and actionIntent.action.type == "take"
+                and actionIntent.grantBaseline
+                and Adapter.GrantedCount(actionIntent.action.spellId)
+                    > actionIntent.grantBaseline then
+                -- Its grant is already visible (for example at level 80,
+                -- where no StepRun resolves it): this is its result.
+                FinishActionIntent("confirmed", "grant_observed", false)
             elseif actionIntent and (actionIntent.state == "submitted"
                 or actionIntent.state == "uncertain"
                 or actionIntent.state == "expired") then
@@ -3360,29 +3371,39 @@ end
             -- already have recorded the action as a result, or the player
             -- sent it. A later watchdog release of a latch is not a result.
             -- A grant can end the hold only when a single Select is pending
-            -- and, with a crossed intent, it is that Take's own spell.
+            -- and, with a crossed intent, it is that Take's own spell. A
+            -- later leave adds its items to an open hold, and keeps the grant
+            -- release only if that same Select is still all that is pending.
             local pendingNow = Adapter.PendingActions()
             local crossed = actionIntent and actionIntent.crossedWorld
-            if not actionHold.worldPending and (crossed or #pendingNow > 0) then
-                local labels, named = {}, {}
-                local function Name(kind)
-                    kind = kind == "select" and "take" or tostring(kind)
-                    if not named[kind] then
-                        named[kind] = true
-                        labels[#labels + 1] = kind
-                    end
-                end
-                if crossed then Name(actionIntent.action.type) end
-                for i = 1, #pendingNow do Name(pendingNow[i].kind) end
-                table.sort(labels)
+            local held = actionHold.worldPending
+            if held or crossed or #pendingNow > 0 then
                 local only = #pendingNow == 1 and pendingNow[1] or nil
                 local byGrant = only and only.kind == "select"
                     and only.spellId and only.baseline
                     and (not crossed or (actionIntent.action.type == "take"
                         and tonumber(actionIntent.action.spellId) == only.spellId))
-                actionHold.worldPending = { label = table.concat(labels, " and "),
-                    spellId = byGrant and only.spellId or nil,
-                    baseline = byGrant and only.baseline or nil }
+                if not held then
+                    held = { kinds = {}, label = "",
+                        spellId = byGrant and only.spellId or nil,
+                        baseline = byGrant and only.baseline or nil }
+                    actionHold.worldPending = held
+                elseif held.spellId and #pendingNow > 0
+                    and not (byGrant and only.spellId == held.spellId) then
+                    held.spellId, held.baseline = nil, nil
+                end
+                if crossed then
+                    local kind = tostring(actionIntent.action.type)
+                    held.kinds[kind == "select" and "take" or kind] = true
+                end
+                for i = 1, #pendingNow do
+                    local kind = tostring(pendingNow[i].kind)
+                    held.kinds[kind == "select" and "take" or kind] = true
+                end
+                local labels = {}
+                for kind in pairs(held.kinds) do labels[#labels + 1] = kind end
+                table.sort(labels)
+                held.label = table.concat(labels, " and ")
             end
             return autoEnabled and "held" or "off"
         end
