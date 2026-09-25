@@ -10,8 +10,8 @@ local pages={
 1. Back up your Nexus folder and WTF with WoW closed before testing.
 2. Open Wishlists, or use /nexus editor. Create a plan or import a Wishlist code.
 3. Check exact qualities/copies and the planned locked targets. Save it.
-4. Assign that Wishlist to the intended loadout in My Builds.
-5. Review recommendations with Automation OFF first.
+4. In My Builds, select the intended Saved Build and assign the Wishlist to it. Assigning only chooses the target; by itself it does not change the Saved Build.
+5. Review recommendations with Auto OFF first. With Auto ON, Nexus may replace that active Saved Build with a better finished run; at level 80 after a finished run, that can happen right after you turn Auto ON or change the assignment. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. It treats the slot as a working copy, not a protected archive. Keep Auto OFF if you want it left unchanged.
 
 A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Snapshot is the saved-run mode. A valid Saved Build proves its identity, contents and owner. Nexus treats no future random Echo roll as guaranteed, for a Snapshot or for a Designed Wishlist.
 
@@ -28,11 +28,15 @@ Import opens a draft. Save writes the plan; assignment selects which Wishlist a 
 /nexus currentlocks on: use matching locked targets by default.
 
 Opening or confirming targets does not lock/unlock anything. Automatic locked-Echo slot changes require both Automation and their separate option, plus ownership and safety checks.]]},
- {id="rolling",title="Rolling and settings",text=[[Automation is a master permission, separate from per-action settings. OFF leaves recommendations available; it does not disable build sharing. Enabling automation can use permitted Banish/Reroll/Freeze charges and configured activation, save, or locked-Echo slot actions.
+ {id="rolling",title="Rolling and settings",text=[[Automation (the Auto ON/OFF button) is a master permission, separate from per-action settings. OFF leaves recommendations available; it does not disable build sharing. Enabling automation can use permitted Banish/Reroll/Freeze charges and configured activation, save, or locked-Echo slot actions.
 
 Take chooses a needed offer. Banish removes an eligible offer. Reroll asks for new choices when enabled. Freeze preserves an eligible offered card. The planner considers remaining needs and choices; it does not always Freeze whenever two wanted cards appear.
 
 /nexus reroll on|off and /nexus freeze on|off change those permissions, not the master switch.
+
+Automatic save is separate from Take, Banish, Reroll and Freeze. After a completed run, Auto may replace your active Saved Build with that run and give it the Wishlist's name. Nexus compares the run with the Wishlist assigned to that loadout. It replaces an existing Saved Build only when overall Wishlist progress is higher than the Saved Build's, or equal with cleanup (some extra copies removed, or an even swap of requested copies). Not every run is saved. Assigning by itself changes nothing, but at level 80 after a finished run, turning Auto ON or changing the assigned Wishlist makes Nexus check again right away, so a replacement can follow within seconds. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. There is no separate automatic-save switch: Auto OFF stops it.
+
+Better means Wishlist progress, not Orb investment or keeping every individual Echo. Example: a run that loses 1 requested copy but gains 3 other requested copies is +2 overall. It can replace the Saved Build even when the lost Echo is one you value or obtained with Orbs. The save itself spends no Orbs, and it does not mean that Echo was judged worthless. Nexus cannot undo a completed save or bring back that Echo or the Orbs spent on it; Unassign does not restore a Saved Build. Keep Auto OFF if you want the current Saved Build left untouched. Auto starts OFF each session.
 
 EXTRA COPIES are rolled copies above exact Wishlist targets, including unrequested or different-quality copies. Target 2/current 5 means 3 extras. This display deletes nothing. A later run may reduce extras; replacement is not guaranteed.
 

@@ -396,9 +396,14 @@ function Controller.New(options)
             if type(filters) == "table" then return filters end
         end
         if type(NexusDB) ~= "table" then return fallbackFilters end
-        NexusDB.buildFilters = type(NexusDB.buildFilters) == "table"
-            and NexusDB.buildFilters or {}
-        return NexusDB.buildFilters
+        -- A read-only saved root keeps its filters: this session's filters
+        -- live in the Store owner's session-only table, seeded from them.
+        local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+        local root = type(writable) == "function"
+            and writable(NexusDB, {"buildFilters"}) or NexusDB
+        root.buildFilters = type(root.buildFilters) == "table"
+            and root.buildFilters or {}
+        return root.buildFilters
     end
 
 
@@ -1614,9 +1619,12 @@ function Controller.New(options)
             if ok and type(value) == "table" then settings = value end
         end
         if not settings then
-            settings = type(NexusDB) == "table"
-                and type(NexusDB.buildFilters) == "table"
-                and NexusDB.buildFilters or fallbackFilters
+            local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+            local root = type(NexusDB) == "table" and (type(writable) == "function"
+                and writable(NexusDB, {"buildFilters"}) or NexusDB) or nil
+            settings = type(root) == "table"
+                and type(root.buildFilters) == "table"
+                and root.buildFilters or fallbackFilters
         end
         local requestedPage = tonumber(settings.page)
         requestedPage = requestedPage and requestedPage == requestedPage
@@ -3774,6 +3782,16 @@ function Controller.New(options)
             return {state="pending",phase="source-changed"}
         end
         job.generation,job.servingGeneration=root.generation,root.servingGeneration
+        -- A read-only saved root is served as it was saved: the start-up
+        -- placeholder removal and identity repair below are writes, so they do
+        -- not run for it (the catalog would refuse them).
+        local readOnlyRoot=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+        if job.phase=="scan" and not job.cursor and type(readOnlyRoot)=="function"
+            and readOnlyRoot(job.database) then
+            job.state,job.phase="ready","complete"
+            job.removals,job.repairs=nil,nil
+            return Result(job)
+        end
 
         local function Clock()
             if type(debugprofilestop) ~= "function" then return nil end

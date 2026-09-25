@@ -13,7 +13,9 @@ local F=dofile('tests/prototype/format5_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local clock=1790000000
 local BUSY=5000
-local db={settingsVersion=5,settings={},chars={},communityBuilds={},
+-- A verified saved format 5 carries its account ledger (accountCharacters);
+-- without it the profile is read-only and nothing can be written into it.
+local db={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={},
  communityRetentionEvictions={['legacy-1']=1700000000,['legacy-2']=1700000001}}
 local Hh,start
 local runs={}

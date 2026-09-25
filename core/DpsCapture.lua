@@ -176,6 +176,37 @@ function dbBinding.Select(payload)
     end
     return payload
 end
+-- A saved root the Store keeps read-only still shows the DPS records this
+-- build reads, once the catalog has admitted that root: the session store
+-- becomes a detached bounded copy of the current DPS keys (from the bundle's
+-- payload, or with no bundle from the saved dpsCapture). Other saved keys,
+-- including the older per-player leaderboard shape, are not copied. The saved tables
+-- are never served, so writes and inbound records stay out of the saved
+-- root. An occupied bundle without a payload revives no legacy input.
+dbBinding.SAVED_KEYS = {
+    "personalBest", "buildBest", "characterBest",
+    "lockedMigrationSource", "lockedMigrationVersion",
+}
+function dbBinding.SavedProjection(bundle)
+    local internals = Nexus and Nexus.MainInternals
+    local project = internals and internals.ReadOnlyProjectionV1
+    if type(project) ~= "function" then return nil end
+    local source
+    if bundle ~= nil then
+        source = type(bundle) == "table" and rawget(bundle, "dpsCapture") or nil
+    else
+        source = rawget(NexusDB, "dpsCapture")
+    end
+    if type(source) ~= "table" then return nil end
+    local known = {}
+    for _, key in ipairs(dbBinding.SAVED_KEYS) do known[key] = rawget(source, key) end
+    local copy = project(NexusDB, known)
+    if copy == nil and internals.SavedRootReadOnlyV1
+        and internals.SavedRootReadOnlyV1(NexusDB) ~= nil then
+        Debug("saved DPS records not shown: read-only saved data is not a plain table graph within the session copy bound")
+    end
+    return copy
+end
 local function DB()
     if type(NexusDB) ~= "table" then
         -- No saved table is loaded. A read must not create one: a fabricated
@@ -195,8 +226,15 @@ local function DB()
         and catalog.Status() or nil
     dbPolicyReadOnly = type(status) == "table" and status.readOnly == true
     if dbPolicyReadOnly then
-        if transientDbOwner ~= NexusDB then
-            transientDbOwner, transientDb = NexusDB, {}
+        -- A root the catalog refuses (a catalog schema this build does not
+        -- know, an invalid bundle) shows nothing. The copy is made once, when
+        -- the catalog admits the root.
+        local admitted = status.state == "ROOT_ADMITTED"
+        if transientDbOwner ~= NexusDB
+            or (admitted and dbBinding.projectedFor ~= NexusDB) then
+            transientDbOwner = NexusDB
+            transientDb = admitted and dbBinding.SavedProjection(bundle) or {}
+            if admitted then dbBinding.projectedFor = NexusDB end
         end
         return dbBinding.Select(transientDb)
     end

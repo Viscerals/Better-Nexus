@@ -23,7 +23,9 @@ local function Record(id)
   echoes={{spellId=200001,quality=1,stacks=1},{spellId=200002,quality=2,stacks=1}}}
 end
 local function RankedDb(rows,extra)
- local db={settingsVersion=5,settings={communityRetentionEnabled=true},chars={},communityBuilds={},
+ -- A verified saved format 5 carries its account ledger (accountCharacters);
+ -- without it the profile is read-only and nothing can be written into it.
+ local db={settingsVersion=5,accountCharacters={},settings={communityRetentionEnabled=true},chars={},communityBuilds={},
   communityRetentionEvictions={['legacy-1']=1700000000,['legacy-2']=1700000001}}
  for i=1,rows do db.communityBuilds['b-'..i]=Record('b-'..i) end
  for k,v in pairs(extra or {})do db[k]=v end

@@ -21,6 +21,7 @@ NAMES += ['assignment_first_run_edit']
 NAMES += ['assignment_first_run_unassign']
 NAMES += ['assignment_first_run_reselect','assignment_first_run_handoff']
 NAMES += ['journal_picker_layers','wishlist_editor_context_label']
+NAMES += ['assignment_equal_content_picker']
 NAMES += ['share_catalog_contention','share_catalog_lifecycle','share_inbound_listing']
 NAMES += ['share_send_liveness','share_send_guards','share_transport_prepared']
 NAMES += ['share_edit_liveness','share_edit_guards']
@@ -91,6 +92,8 @@ NAMES += ['dps_evidence_open_candidate']
 NAMES += ['retention_ranked_dps_preservation']
 NAMES += ['retention_ranked_guard_identity']
 NAMES += ['automation_world_transition']
+NAMES += ['readonly_profile_preservation','readonly_saved_dps_visibility']
+NAMES += ['autosave_overwrite_warning','autosave_assignment_recheck']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

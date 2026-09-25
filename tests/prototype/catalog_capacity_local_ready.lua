@@ -170,7 +170,9 @@ local admitted={
    d.communityRetentionEvictions=Markers('ev-',1,2039);return d
   end},
  {'older-shape maps: 1200 builds, 100 removal and 800 retention markers',1200,100,800,function()
-   local d={settingsVersion=5,settings={},chars={},communityBuilds=Overlay(1200)}
+   -- A verified format 5 (its account ledger present); the same maps in a
+   -- read-only saved root are checked after this loop.
+   local d={settingsVersion=5,settings={},chars={},accountCharacters={},communityBuilds=Overlay(1200)}
    d.syncTombstones=OldRemovals('gone-',1,100);d.communityRetentionEvictions=OldMarkers('evicted-',1,800);return d
   end},
 }
@@ -205,6 +207,22 @@ for _,case in ipairs(admitted)do
   end
  end
  check(kept,label..': every saved build and every saved field is kept')
+end
+-- The same older-shape maps in a read-only saved root (format 5 without its
+-- account ledger does not pass the format check): admitted under the same
+-- limits and served, and nothing is written - no bundle, every map as saved.
+do
+ local d=admitted[3][5]();d.accountCharacters=nil
+ local before=F.Serialize(d)
+ F.Boot(d)
+ local c=Nexus.StartupStatus();local st=Nexus.BuildCatalog.Status()
+ check(Nexus.Store.StateWriteStatus().format=='unverified','read-only older-shape maps: the saved root is read-only')
+ check(c.state~='failed' and c.coreReady and Nexus.BuildCatalog.RootState().state=='ROOT_ADMITTED',
+  'read-only older-shape maps: admitted under the separate limits: '..tostring(c.reason))
+ check(st.availableCount==1200 and st.buildIdentityCount==1200 and st.tombstoneCount==100 and st.barrierCount==800,
+  'read-only older-shape maps: every build and marker is counted: '..st.availableCount..'/'..st.tombstoneCount..'/'..st.barrierCount)
+ check(rawget(NexusDB,'authorityBundle')==nil and F.Serialize(NexusDB)==before,
+  'read-only older-shape maps: no bundle is written and the saved root is unchanged')
 end
 
 -- The class itself is fixed: exactly these four saved-capacity refusals.

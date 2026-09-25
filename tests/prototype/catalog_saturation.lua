@@ -43,7 +43,9 @@ end
 -- 1. 2048 different builds: a record for a new build is refused before any mutation,
 -- explicitly; an update of an existing build still commits; the Leaderboard
 -- and Community stay available; one chat line per session.
-local db={settingsVersion=5,settings={},chars={},communityBuilds={}}
+-- A verified saved format 5 carries its account ledger (accountCharacters);
+-- without it the profile is read-only and nothing can be written into it.
+local db={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={}}
 for i=1,2048 do db.communityBuilds['full-'..i]=Record('full-'..i) end
 local C=Boot(db)
 check(Nexus.StartupStatus().state=='ready' and C.Status().buildIdentityCount==2048,'a catalog with 2048 builds is admitted')
@@ -80,7 +82,7 @@ check(Nexus.StartupStatus().state=='ready' and C.SaturationSummary()==nil and C.
 
 -- 2. 2048 retention markers: an eviction that needs a new marker is refused
 -- before it is staged, so the build stays; nothing expires early.
-local db2={settingsVersion=5,settings={},chars={},communityBuilds={},communityRetentionEvictions={}}
+local db2={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={},communityRetentionEvictions={}}
 for i=1,2048 do db2.communityRetentionEvictions['gone-'..i]=Marker('gone-'..i,clock-DAY) end
 for i=1,20 do db2.communityBuilds['auto-'..i]=Record('auto-'..i,{autoDps=true}) end
 C=Boot(db2);Run(600)
@@ -96,7 +98,7 @@ check(Count(Bundle().communityRetentionEvictions)==2048,'a full marker map expir
 
 -- 3. 2048 removal markers: a removal by the build's owner that needs a new
 -- marker is refused explicitly and the build stays.
-local db3={settingsVersion=5,settings={},chars={},
+local db3={settingsVersion=5,accountCharacters={},settings={},chars={},
  communityBuilds={['keep-1']=Record('keep-1',{author='Peer-Realm',ownerKey='Peer@Realm'})},syncTombstones={}}
 for i=1,2048 do db3.syncTombstones['del-'..i]={stamp=1,author='OldPeer'} end
 C=Boot(db3);Run(5)
@@ -107,7 +109,7 @@ check(removed==false and removeWhy=='TOMBSTONE_SET_LIMIT' and C.Get('keep-1')~=n
 -- 4. Saturated before migrated legacy markers age: 2048 legacy markers and
 -- 2048 builds. The data stays usable, new data is refused, and after the
 -- markers age out an eviction and a new build succeed again.
-local db4={settingsVersion=5,settings={},chars={},communityBuilds={},communityRetentionEvictions={}}
+local db4={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={},communityRetentionEvictions={}}
 for i=1,2048 do db4.communityRetentionEvictions['old-'..i]=1700000000+i end
 for i=1,2048 do db4.communityBuilds['b-'..i]=Record('b-'..i,{autoDps=i<=10}) end
 C=Boot(db4);Run(30)
@@ -129,7 +131,7 @@ check(Settle(C.Put(Record('fresh-1'),{source='sync'})) and C.Get('fresh-1')~=nil
 -- 5. Long-running churn stays bounded: every day new received automatic
 -- builds replace older ones, each eviction adds a dated marker, and markers
 -- expire after 30 days. Builds, markers and first observations stay bounded.
-local db5={settingsVersion=5,settings={},chars={},communityBuilds={}}
+local db5={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={}}
 C=Boot(db5);Run(600)
 local serial,maxMarkers,maxBuilds=0,0,0
 local alive={}
