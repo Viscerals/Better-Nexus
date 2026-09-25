@@ -855,15 +855,12 @@ ReferenceEvidence = function(row)
     end
     BindField("echoes", "evidenceKey")
     BindField("lockedEchoes", "lockedEvidenceKey", {forceLocked=true})
-    if not candidateOpen then return changed end
-    if compact and type(compaction.CompactDpsRow) == "function" then
-        local ok, compacted = pcall(compaction.CompactDpsRow, row)
-        if ok then return compacted == true or changed end
-    end
-    if type(evidence.ReferenceDpsRow) == "function" then
-        local ok, referenced = pcall(evidence.ReferenceDpsRow, row)
-        return ok and referenced == true or changed
-    end
+    -- An open candidate belongs to another catalog transaction. Its entries
+    -- are discarded if that transaction is refused, fails or is cancelled, and
+    -- once its publish plan is fixed an intern into it no longer matches the
+    -- revisions that plan applies (the published root then drifts). So this
+    -- row is never interned there: it keeps its key and its inline arrays,
+    -- exactly as outside a candidate.
     return changed
 end
 

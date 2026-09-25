@@ -74,6 +74,13 @@ check(C.Status().generation==generation and C.ManualPreparationStatus().ready,
  'the busy runs changed no catalog state and hold no catalog work')
 local meta=(NexusDB.authorityBundle or {}).dataRetention or {}
 check(meta.markerFirstSeen==nil,'nothing was recorded while the catalog stayed busy')
+-- The chain that stopped at its limit leaves one bounded support record.
+local deferred={}
+for _,incident in ipairs(Nexus.SupportIncidents.History())do
+ if incident.kind=='retention-deferred' then deferred[#deferred+1]=incident end
+end
+check(#deferred==1 and deferred[1].reason=='ROOT_MUTATION_PENDING' and deferred[1].committed==false
+ and deferred[1].occurrences==1,'the stopped chain leaves one retention-deferred record (busy, not committed, once)')
 -- After the busy period a new request runs and records the first observations.
 for _=1,math.floor((BUSY-now+10)/0.5) do H.Advance(.5,.5) end
 check(R.Request('test: after the busy period')==true,'a request after the busy period is scheduled')
@@ -81,4 +88,4 @@ for _=1,40 do H.Advance(.5,.5) end
 local seen=((NexusDB.authorityBundle or {}).dataRetention or {}).markerFirstSeen or {}
 local count=0;for _ in pairs(seen)do count=count+1 end
 check(count==2,'the later run records both first observations: '..count)
-print('PASS retention_busy_retry_bound: start-up run once, one chain of 1 + 64 busy runs, delays 5/10/20/40 then 60 s (3675 s), terminal stop, request joins the chain, no catalog change, later request runs checks='..checks)
+print('PASS retention_busy_retry_bound: start-up run once, one chain of 1 + 64 busy runs, delays 5/10/20/40 then 60 s (3675 s), terminal stop with one deferred record, request joins the chain, no catalog change, later request runs checks='..checks)
