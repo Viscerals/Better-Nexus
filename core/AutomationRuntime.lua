@@ -339,8 +339,11 @@ local refusedRerollSig = nil
 -- used is that this Lua state saw PLAYER_LEAVING_WORLD first (a login or
 -- /reload starts a new Lua state with Auto OFF). Actions are held from the
 -- leave until the entry that closes it, then for worldSettle seconds and
--- until the adapter is ready. An entry with no observed leave is not
--- classified and revokes Auto.
+-- until the adapter is ready. The settle is pacing only: Adapter.Ready() is
+-- normally already true at a same-session entry, and each action still needs
+-- its own current reads. An action sent before the leave and unresolved at it
+-- holds actions after the settle too (crossedWorld). An entry with no
+-- observed leave is not classified and revokes Auto.
 local actionHold = { externalUntil = 0, worldLeaving = false,
     worldSettleUntil = nil, worldSettle = 3 }
 
@@ -447,6 +450,11 @@ local function AutoAllowed()
     if actionHold.worldSettleUntil and (GetTime() < actionHold.worldSettleUntil
         or not Adapter.Ready()) then
         return false, "settling after world entry"
+    end
+    if actionIntent and actionIntent.crossedWorld then
+        return false, tostring(actionIntent.action.type)
+            .. " sent before the loading screen is unconfirmed"
+            .. " -- turn Auto off and on to continue"
     end
     if GetTime() < actionHold.externalUntil then return false, "user acting" end
     if Adapter.RivalDetected() then return false, "Another Echo automation addon is loaded -- disable it" end
@@ -2030,6 +2038,11 @@ end
 local function ResolveActionIntent(board)
     local intent = actionIntent
     if not intent then return end
+    -- Sent before a loading screen and unresolved at its start: a board read
+    -- after it (missing, changed or the same) and elapsed time are not its
+    -- result. It stays unresolved and AutoAllowed holds every automatic
+    -- action until new player input or a run boundary ends it.
+    if intent.crossedWorld then return end
     if type(board) ~= "table" then
         if intent.state == "prepared" then
             FinishActionIntent("superseded", "board_unavailable_before_submit", false)
@@ -3269,6 +3282,12 @@ end
             -- Authorization changed, represented data did not. Coalesce one
             -- bounded decision evaluation without invalidating static state.
             authorizationStepPending = true
+            -- New player input ends the hold of an action that a loading
+            -- screen left unresolved. Its result stays unknown: it is
+            -- recorded as uncertain, never as confirmed.
+            if actionIntent and actionIntent.crossedWorld then
+                FinishActionIntent("uncertain", "player_resumed", false)
+            end
         else
             authorizationStepPending = false
             if actionIntent and actionIntent.state == "prepared" then
@@ -3289,9 +3308,10 @@ end
             actionHold.worldLeaving = true
             actionHold.worldSettleUntil = nil
             -- A prepared (unsubmitted) action is dropped, not kept for after
-            -- the loading screen. Submitted and uncertain actions keep their
-            -- own lifecycle; nothing is resent. (Inline, not a helper local:
-            -- this factory is at Lua 5.1's 200-local limit.)
+            -- the loading screen. A sent action without a result is marked:
+            -- nothing is resent, and it stays unresolved (ResolveActionIntent,
+            -- AutoAllowed). (Inline, not a helper local: this factory is at
+            -- Lua 5.1's 200-local limit.)
             if actionIntent and actionIntent.state == "prepared" then
                 local revokedDeadline = actionIntent.readyAt
                 FinishActionIntent("superseded", "world_transition", false)
@@ -3299,6 +3319,11 @@ end
                     nextStepAt = nil
                     ScheduleKnownDeadlines()
                 end
+            elseif actionIntent and (actionIntent.state == "submitted"
+                or actionIntent.state == "uncertain"
+                or actionIntent.state == "expired") then
+                actionIntent.crossedWorld = true
+                FinishActionIntent("uncertain", "world_transition", true)
             end
             return autoEnabled and "held" or "off"
         end
