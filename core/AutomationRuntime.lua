@@ -331,7 +331,18 @@ local forcedTakesBySpell = {}
 local frozeThisBoard = nil       -- board signature we already spent a freeze on
 local refusedBanishSig = nil
 local refusedRerollSig = nil
-local externalPauseUntil = 0
+-- Reasons actions are held while Auto stays selected. One table, not
+-- separate locals: this factory is at Lua 5.1's 200-local limit.
+-- externalUntil: a short pause after the player acted on the board.
+-- World fields: loading-screen transitions inside this UI session. The 3.3.5a
+-- client gives PLAYER_ENTERING_WORLD no login/reload arguments; the evidence
+-- used is that this Lua state saw PLAYER_LEAVING_WORLD first (a login or
+-- /reload starts a new Lua state with Auto OFF). Actions are held from the
+-- leave until the entry that closes it, then for worldSettle seconds and
+-- until the adapter is ready. An entry with no observed leave is not
+-- classified and revokes Auto.
+local actionHold = { externalUntil = 0, worldLeaving = false,
+    worldSettleUntil = nil, worldSettle = 3 }
 
 -- SAVE state
 local savedThisVisit = false
@@ -432,7 +443,12 @@ end
 
 local function AutoAllowed()
     if not autoEnabled then return false, "manual mode" end
-    if GetTime() < externalPauseUntil then return false, "user acting" end
+    if actionHold.worldLeaving then return false, "loading screen (waiting for world entry)" end
+    if actionHold.worldSettleUntil and (GetTime() < actionHold.worldSettleUntil
+        or not Adapter.Ready()) then
+        return false, "settling after world entry"
+    end
+    if GetTime() < actionHold.externalUntil then return false, "user acting" end
     if Adapter.RivalDetected() then return false, "Another Echo automation addon is loaded -- disable it" end
     if Adapter.AutoAcceptOn() then return false, "client auto-accept re-enabled" end
     if type(Adapter.OrdinaryBoardAllowed) == "function" then
@@ -2811,12 +2827,12 @@ local function HandleLevelTransition(level, boundaryGeneration)
         -- A short user-action pause belongs to the board/level where it was
         -- observed. Never let it suppress the first actionable board after a
         -- genuine progression transition.
-        externalPauseUntil = 0
+        actionHold.externalUntil = 0
         if level ~= 80 then savedThisVisit = false end
         lastLevelSeen = level
     end
     if Adapter.ExternalActionSeen() and not levelChanged then
-        externalPauseUntil = GetTime() + 3
+        actionHold.externalUntil = GetTime() + 3
     end
 end
 
@@ -3112,8 +3128,11 @@ local function ScheduleKnownDeadlines()
         local resumeAt = Adapter.TomeMutationResumeAt()
         if resumeAt and resumeAt > now then RequestStepAt(resumeAt) end
     end
-    if externalPauseUntil and externalPauseUntil > now then
-        RequestStepAt(externalPauseUntil)
+    if actionHold.externalUntil and actionHold.externalUntil > now then
+        RequestStepAt(actionHold.externalUntil)
+    end
+    if actionHold.worldSettleUntil and actionHold.worldSettleUntil > now then
+        RequestStepAt(actionHold.worldSettleUntil)
     end
     if actionIntent then
         if actionIntent.state == "prepared"
@@ -3260,6 +3279,41 @@ end
             end
         end
         return autoEnabled
+    end
+    -- Called by Main before the lifecycle sees the event. Returns "held",
+    -- "resuming", "revoked" or "off" (Auto was not selected).
+    function M.OnWorldEvent(event)
+        if event == "PLAYER_LEAVING_WORLD" then
+            actionHold.worldLeaving = true
+            actionHold.worldSettleUntil = nil
+            -- A prepared (unsubmitted) action is dropped, not kept for after
+            -- the loading screen. Submitted and uncertain actions keep their
+            -- own lifecycle; nothing is resent. (Inline, not a helper local:
+            -- this factory is at Lua 5.1's 200-local limit.)
+            if actionIntent and actionIntent.state == "prepared" then
+                local revokedDeadline = actionIntent.readyAt
+                FinishActionIntent("superseded", "world_transition", false)
+                if revokedDeadline ~= nil and nextStepAt == revokedDeadline then
+                    nextStepAt = nil
+                    ScheduleKnownDeadlines()
+                end
+            end
+            return autoEnabled and "held" or "off"
+        end
+        local closesTransition = event == "PLAYER_ENTERING_WORLD"
+            and actionHold.worldLeaving
+        actionHold.worldLeaving = false
+        actionHold.worldSettleUntil = nil
+        if closesTransition then
+            actionHold.worldSettleUntil = GetTime() + actionHold.worldSettle
+            if not autoEnabled then return "off" end
+            RequestStepAt(actionHold.worldSettleUntil)
+            return "resuming"
+        end
+        -- Logout, or an entry this session cannot classify (no leave seen).
+        if not autoEnabled then return "off" end
+        M.ToggleAuto()
+        return "revoked"
     end
     function M.RecomputeStats()
         local out = {}
