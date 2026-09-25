@@ -560,7 +560,8 @@ check(refusedCount==65 and committedCount==0 and #other==0,
  'contention: 65 refusals (the first run and 64 retries), no commit: '..refusedCount..'/'..committedCount..' '..table.concat(other,','))
 check(support.Count()==incidentsBefore+1,'contention: one support record when the chain stops')
 local incident=support.Latest()
-check(incident and incident.kind=='retention-deferred' and incident.reason=='PUBLICATION_SOURCE_CHANGED' and incident.committed==false,
+check(incident and incident.kind=='retention-deferred' and incident.reason=='PUBLICATION_SOURCE_CHANGED' and incident.committed==false
+ and incident.occurrences==1,
  'contention: the record says the ranked run was deferred and not committed: '..tostring(incident and incident.kind)..' '..tostring(incident and incident.reason))
 ctx=Drive()
 check(ctx.windows[#ctx.windows].state=='committed','contention over: a later request commits')
