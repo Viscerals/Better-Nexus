@@ -3359,8 +3359,10 @@ function A.RestoreAutoAccept()
 end
 
 function A.RivalDetected()
-    -- Another loaded picker may own the same server action latches. The
-    -- LoadoutPilot policy is embedded here; its separate addon must be off.
+    -- Another loaded picker may own the same server action latches, so
+    -- automation pauses while one is loaded. The addon name and slash-command
+    -- key below belong to a separately distributed picker: they are exact
+    -- compatibility detection keys, not Nexus names (THIRD_PARTY.md).
     return _G.EchoOptimizer ~= nil
         or (type(IsAddOnLoaded) == "function" and IsAddOnLoaded("LoadoutPilot"))
         or (type(SlashCmdList) == "table" and type(SlashCmdList.LOADOUTPILOT) == "function")

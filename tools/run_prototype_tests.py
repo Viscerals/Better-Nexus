@@ -6,7 +6,7 @@ is explicitly labelled and requires liblua5.4. No network or game access.
 from __future__ import annotations
 import argparse, ctypes.util, hashlib, json, os, pathlib, shutil, subprocess, sys, time
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-NAMES=['parse','boot','wishlist','lock_evidence','ownership','typed_hash','transport','automation','manual_sync','diagnostics','features','planner_reference','startup','startup_evidence','startup_failure','startup_validation','startup_drift','startup_budget','startup_persistence','startup_source_change','role_selection','role_boundaries','role_persistence','role_export','current_locks','loading_status','loading_local','current_locks_reload','current_locks_exact','orbs','orbs_controls','orbs_ambiguity','orbs_same_echo','orbs_prerequisites','orbs_reload','orbs_policy','orbs_ui','orbs_context','orbs_permanent','orbs_loading','help','terminology']
+NAMES=['parse','boot','wishlist','lock_evidence','ownership','typed_hash','transport','automation','manual_sync','diagnostics','features','echoweaver_planner','startup','startup_evidence','startup_failure','startup_validation','startup_drift','startup_budget','startup_persistence','startup_source_change','role_selection','role_boundaries','role_persistence','role_export','current_locks','loading_status','loading_local','current_locks_reload','current_locks_exact','orbs','orbs_controls','orbs_ambiguity','orbs_same_echo','orbs_prerequisites','orbs_reload','echoweaver_orb_policy','orbs_ui','orbs_context','orbs_permanent','orbs_loading','help','terminology']
 NAMES += ['orbs_review_sources','orbs_review_lifecycle','orbs_review_same_id','orbs_review_recheck','orbs_review_availability','orbs_review_ordering','orbs_review_disclosure','orbs_review_recovery','terminology_consumers']
 NAMES += ['orbs_review_rejected_selection','orbs_review_catalog','orbs_review_catalog_grouping']
 NAMES += ['orbs_assigned','help_layout','assignment_restore','orbs_target_changes','orbs_assigned_protection','orbs_main_controls','session_permissions','orbs_assignment_races','orbs_assigned_resources','assignment_identity','orbs_loadout_change']
@@ -82,6 +82,7 @@ NAMES += ['select_intent_ownership']
 NAMES += ['catalog_capacity_envelope','catalog_marker_expiry','catalog_saturation','catalog_saturation_order']
 NAMES += ['leaderboard_recovery_rows','leaderboard_recovery_upstream']
 NAMES += ['retention_ranked_marker_pass']
+NAMES += ['rival_picker_detection']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
@@ -97,7 +98,6 @@ def timeout_for(name:str)->int:
 def main() -> int:
     ap=argparse.ArgumentParser()
     ap.add_argument('--runtime',choices=['auto','luajit','lua54'],default='auto')
-    ap.add_argument('--reference',type=pathlib.Path,help='Path to extracted supplied LoadoutPilot directory')
     ap.add_argument('--output',type=pathlib.Path,default=pathlib.Path('prototype-test-results.json'))
     ap.add_argument('--only',help='Comma-separated existing test names for a bounded shard; omitted runs every test')
     ns=ap.parse_args()
@@ -113,12 +113,9 @@ def main() -> int:
         command=[sys.executable,str(ROOT/'tools/prototype_lua54.py')]
         runtime='Lua 5.4 with test-only compatibility shims; NOT LuaJIT/Lua 5.1/WoW'
     env=os.environ.copy()
-    reference=(ns.reference or ROOT.parent/'reference/LoadoutPilot').resolve()
-    env['LOADOUTPILOT_ROOT']=str(reference)
     results=[]
+    # Every listed test runs; none needs a separate checkout or archive.
     for name in names:
-        if (name=='planner_reference' and not (reference/'Engine/WishlistPlanner.lua').is_file()) or (name=='orbs_policy' and not (reference/'Memory/MemoryMode.lua').is_file()):
-            results.append({'test':name,'status':'NOT_RUN','reason':'Supplied LoadoutPilot reference not available'});continue
         # 'seconds' is the measured elapsed time, also for TIMEOUT; 'timeout_seconds' is the configured limit.
         timeout=timeout_for(name);start=time.monotonic()
         try:

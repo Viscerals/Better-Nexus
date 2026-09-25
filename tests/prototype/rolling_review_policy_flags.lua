@@ -2,7 +2,7 @@
 -- maintained production-policy adapter (real pure modules in TOC order).
 --
 -- F5: the supported way to switch R3 or R5 off alone is its flag in
--- WishlistPilot.NEXUS_POLICY. Each flag alone restores the reference decision on
+-- EchoWeaver.NEXUS_POLICY. Each flag alone restores the base decision on
 -- the review fixtures F1 and F3, and leaves the other change active.
 -- N3: tests/prototype/policy_compare.lua pins no decision fingerprint. This
 -- test pins, on the same 432-state battery (864 decisions with the saved
@@ -13,12 +13,12 @@
 -- Fixtures only. No draw odds. No efficiency claim.
 local P=dofile('tests/prototype/policy_adapter.lua');P.Load()
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
-local Pilot=Nexus.WishlistPilot
-local PRODUCTION=Pilot.NEXUS_POLICY
+local EchoWeaver=Nexus.EchoWeaver
+local PRODUCTION=EchoWeaver.NEXUS_POLICY
 check(PRODUCTION.rerollIgnoresSatisfiedTargets==true and PRODUCTION.freezeMustStayNeeded==true,'production policy has both flags on')
 local function With(policy,fn)
- local saved=Pilot.NEXUS_POLICY;Pilot.NEXUS_POLICY=policy
- local ok,a,b=pcall(fn);Pilot.NEXUS_POLICY=saved;assert(ok,a);return a,b
+ local saved=EchoWeaver.NEXUS_POLICY;EchoWeaver.NEXUS_POLICY=policy
+ local ok,a,b=pcall(fn);EchoWeaver.NEXUS_POLICY=saved;assert(ok,a);return a,b
 end
 -- F1 and F3 fixtures from the review report.
 local small=P.Catalog({a={[0]=101},b={[0]=102},x={[0]=901},y={[0]=902}})
@@ -27,8 +27,8 @@ local function F1()return P.Decide({catalog=small,plan=smallPlan,horizon=1,cards
  owned=P.Owned(small,{[101]=1}),charges={trustworthy=true,banish=0,freeze=0,reroll=5},allowReroll=true})end
 local function F3()return P.Decide({catalog=small,plan=smallPlan,horizon=2,cards={{spellId=101},{spellId=101},{spellId=901}},
  charges={trustworthy=true,banish=1,freeze=1,reroll=0},allowFreeze=true,allowBanish=true})end
-local REFERENCE_F1='take|101|1|pilot103|Take filler; search unavailable (Pilot)'
-local REFERENCE_F3='freeze|101|1|pilot103|Freeze wanted Echo before search (Pilot)'
+local REFERENCE_F1='take|101|1|echoweaver|Take filler; search unavailable (EchoWeaver)'
+local REFERENCE_F3='freeze|101|1|echoweaver|Freeze wanted Echo before search (EchoWeaver)'
 local variants={
  {'both on (production)',{rerollIgnoresSatisfiedTargets=true,freezeMustStayNeeded=true},false,false},
  {'R3 off alone',{rerollIgnoresSatisfiedTargets=false,freezeMustStayNeeded=true},true,false},
@@ -39,8 +39,8 @@ local variants={
 for _,v in ipairs(variants)do
  local f1=With(v[2],function()return P.Line(F1())end)
  local f3=With(v[2],function()return P.Line(F3())end)
- check((f1==REFERENCE_F1)==v[3],v[1]..': F1 '..(v[3]and'is'or'is not')..' the reference decision: '..f1)
- check((f3==REFERENCE_F3)==v[4],v[1]..': F3 '..(v[4]and'is'or'is not')..' the reference decision: '..f3)
+ check((f1==REFERENCE_F1)==v[3],v[1]..': F1 '..(v[3]and'is'or'is not')..' the base decision: '..f1)
+ check((f3==REFERENCE_F3)==v[4],v[1]..': F3 '..(v[4]and'is'or'is not')..' the base decision: '..f3)
 end
 check(With({rerollIgnoresSatisfiedTargets=false,freezeMustStayNeeded=true},function()return F3().type end)=='take','R3 off alone leaves R5 active')
 check(With({rerollIgnoresSatisfiedTargets=true,freezeMustStayNeeded=false},function()return F1().type end)=='reroll','R5 off alone leaves R3 active')
@@ -103,4 +103,4 @@ changed,direction=Compare({freezeMustStayNeeded=true})
 check(changed==0 and Count(direction)==0,'R5 alone changes 0 of 864 battery decisions (got '..changed..')')
 changed,direction=Compare(PRODUCTION)
 check(changed==16 and direction['banish->reroll']==12 and direction['take->reroll']==4 and Count(direction)==2,'production policy: the same 16 decisions, same direction')
-print('PASS F5 each NEXUS_POLICY flag alone restores the reference decision; N3 battery drift pinned (16/864 R3, 0/864 R5) checks='..checks)
+print('PASS F5 each NEXUS_POLICY flag alone restores the base decision; N3 battery drift pinned (16/864 R3, 0/864 R5) checks='..checks)

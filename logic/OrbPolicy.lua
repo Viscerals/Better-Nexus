@@ -1,7 +1,7 @@
--- Independent single-Orb policy, behavior reference LoadoutPilot P103 MemoryMode.
+-- EchoWeaver single-Orb policy (source, target and fallback rules).
 -- No gameplay calls. Nexus keeps rolled and permanent roles and exact quality.
 Nexus=Nexus or {}
-local P={reference="LoadoutPilot 1.3.6 / P103 MemoryMode"};Nexus.OrbPolicy=P
+local P={name="EchoWeaver Orb policy"};Nexus.OrbPolicy=P
 local function key(id,q) return tostring(id)..":"..tostring(q) end
 P.Key=key
 local function integer(n,min) return type(n)=="number" and n==math.floor(n) and n<math.huge and n>=(min or 0) end

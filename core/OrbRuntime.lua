@@ -1,5 +1,5 @@
 -- Nexus Orb of Lost Memories controller: one owner, one Orb, one confirmed result.
--- Independent behavioral integration of supplied LoadoutPilot P103 MemoryMode.
+-- EchoWeaver Orb mode: source, target and fallback rules from logic/OrbPolicy.lua.
 Nexus=Nexus or {}
 local M={};Nexus.OrbRuntime=M
 local P=assert(Nexus.OrbPolicy);local B=assert(Nexus.GameAdapter.Orbs)

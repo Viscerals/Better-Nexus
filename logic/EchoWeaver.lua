@@ -1,10 +1,9 @@
--- Nexus experimental ordinary-Wishlist planner.
--- Independent implementation of the behavior in supplied LoadoutPilot 1.3.6,
--- patch 103 (WishlistPlanner / WishlistObjective); no external runtime dependency.
+-- Nexus: EchoWeaver, the internally maintained ordinary-Wishlist rolling
+-- engine (Take, Freeze, Banish, Reroll decisions for one board).
 -- No WoW API calls, saved-state writes, or predicted Snapshot guarantees here.
 Nexus = Nexus or {}
-local Pilot = { reference = "LoadoutPilot 1.3.6 / patch 103" }
-Nexus.WishlistPilot = Pilot
+local EchoWeaver = { name = "EchoWeaver" }
+Nexus.EchoWeaver = EchoWeaver
 
 local function Integer(value, minimum)
     return type(value) == "number" and value == math.floor(value)
@@ -21,12 +20,11 @@ local function Frozen(c)
         or c.justFrozen == true
 end
 
--- Deliberate Nexus differences from the named reference strategy. Each one is
--- an explicit input option of Pilot.Decide. Without the option, Pilot.Decide
--- keeps the reference decision (tests/prototype/planner_reference.lua compares
--- exactly that). DecideNexus passes this table. See
+-- Deliberate Nexus rules on top of the base strategy. Each one is an explicit
+-- input option of EchoWeaver.Decide. Without the option, EchoWeaver.Decide
+-- keeps the base decision. DecideNexus passes this table. See
 -- docs/ROLLING_ORB_REVIEW_EADFF8A.md for the fixtures and the trade-offs.
-Pilot.NEXUS_POLICY = {
+EchoWeaver.NEXUS_POLICY = {
     -- R3: a requested Echo whose exact count is already met does not stop a
     -- permitted Reroll. Only an Echo that is still needed does.
     rerollIgnoresSatisfiedTargets = true,
@@ -35,10 +33,10 @@ Pilot.NEXUS_POLICY = {
     freezeMustStayNeeded = true,
 }
 
--- Normalized pure policy. Its action order and tie breakers intentionally match
--- the supplied reference. Runtime-specific safety differences belong in the
--- adapter below, never in hidden re-scoring after this function returns.
-function Pilot.Decide(input)
+-- Normalized pure policy with a fixed action order and fixed tie breakers.
+-- Runtime-specific safety differences belong in the adapter below, never in
+-- hidden re-scoring after this function returns.
+function EchoWeaver.Decide(input)
     if type(input) ~= "table" then return Block("INVALID_WISHLIST_STATE") end
     local obj, board = input.objective, input.board
     if type(obj) ~= "table" or type(obj.requestedCounts) ~= "table"
@@ -169,19 +167,19 @@ function Pilot.Decide(input)
 end
 
 local LABELS = {
-    SELECT_OUTSTANDING_WISHLIST="Take wanted Echo (Pilot)",
-    FREEZE_OUTSTANDING_FOR_HIGH_PRESSURE_SEARCH="Freeze wanted Echo before search (Pilot)",
-    BANISH_FOR_WISHLIST_SEARCH="Banish to find Wishlist targets (Pilot)",
-    REROLL_COMMON_UNWANTED_BOARD="Reroll: no requested Echo on board (Pilot)",
-    REROLL_NO_OUTSTANDING_ON_BOARD="Reroll: no needed Echo on board (Pilot)",
-    LOW_PRESSURE_FALLBACK="Take available filler (Pilot)",
-    RESOURCE_EXHAUSTED_FALLBACK="Take filler; search unavailable (Pilot)",
-    OBJECTIVE_COMPLETE_FALLBACK="Wishlist complete; take filler (Pilot)",
+    SELECT_OUTSTANDING_WISHLIST="Take wanted Echo (EchoWeaver)",
+    FREEZE_OUTSTANDING_FOR_HIGH_PRESSURE_SEARCH="Freeze wanted Echo before search (EchoWeaver)",
+    BANISH_FOR_WISHLIST_SEARCH="Banish to find Wishlist targets (EchoWeaver)",
+    REROLL_COMMON_UNWANTED_BOARD="Reroll: no requested Echo on board (EchoWeaver)",
+    REROLL_NO_OUTSTANDING_ON_BOARD="Reroll: no needed Echo on board (EchoWeaver)",
+    LOW_PRESSURE_FALLBACK="Take available filler (EchoWeaver)",
+    RESOURCE_EXHAUSTED_FALLBACK="Take filler; search unavailable (EchoWeaver)",
+    OBJECTIVE_COMPLETE_FALLBACK="Wishlist complete; take filler (EchoWeaver)",
 }
 
-function Pilot.DecideNexus(state)
+function EchoWeaver.DecideNexus(state)
     local annotations, deltas = {}, {}
-    local function Wait(reason) return {type="wait",reason=reason,annotations=annotations,deltas=deltas,planner="pilot103"} end
+    local function Wait(reason) return {type="wait",reason=reason,annotations=annotations,deltas=deltas,planner="echoweaver"} end
     local plan, owned, board = state.plan, state.owned, state.board
     if state.ordinaryBoardAllowed == false then return Wait("Orb state active or unknown") end
     if not plan or plan.advisorOnly then return Wait("assign a Wishlist") end
@@ -219,7 +217,7 @@ function Pilot.DecideNexus(state)
     end
     local charges,refused=state.charges or {},state.searchRefused or {}
     local trusted=charges.trustworthy==true
-    local decision=Pilot.Decide({
+    local decision=EchoWeaver.Decide({
         objective={requestedCounts=requested,outstandingCounts=outstanding,outstandingTotal=total},
         remainingPicks=state.horizon,
         board={choices=choices,twoFrozenRerollProhibited=frozenCount>=2,
@@ -229,10 +227,10 @@ function Pilot.DecideNexus(state)
                 canReroll=trusted and state.allowReroll~=false and not refused.reroll}},
         resources={banishesRemaining=charges.banish,freezesRemaining=charges.freeze,rerollsRemaining=charges.reroll},
         commonBoardRerollEnabled=state.allowReroll~=false,
-        policy=Pilot.NEXUS_POLICY})
+        policy=EchoWeaver.NEXUS_POLICY})
     local kinds={SELECT="take",FREEZE="freeze",BANISH="banish",REROLL="reroll",BLOCKED="wait"}
     return {type=kinds[decision.action] or "wait",spellId=decision.echoID,index=decision.index,
         reason=LABELS[decision.reasonCode] or decision.reasonCode,reasonCode=decision.reasonCode,
         annotations=annotations,deltas=deltas,pressure=decision.pressure,
-        outstanding=total,planner="pilot103"}
+        outstanding=total,planner="echoweaver"}
 end
