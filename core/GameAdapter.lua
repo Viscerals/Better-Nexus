@@ -2965,30 +2965,46 @@ function A.InFlight()
 end
 
 -- Read-only, for a caller that must not treat a loading screen as a result:
--- what still waits for the server, by the same rules as A.InFlight(). Returns
--- the kind ("select", "freeze", "banish" or "reroll"); for a Select with a
--- known spell, also the spell and its granted count before the send (a
--- player's own Select: the count now). nil when nothing is pending.
-function A.PendingAction()
+-- everything that still waits for the server, by the same rules as
+-- A.InFlight() (own marker, a Select awaiting its grant, every live latch,
+-- including one the player started). A list of { kind, spellId, baseline }
+-- sorted by kind and spell; kind is "select", "freeze", "banish" or
+-- "reroll". A Select has its spell and its granted count before the send (a
+-- player's own Select: the count now). Empty when nothing is pending.
+function A.PendingActions()
+    local out, seen = {}, {}
+    local function Add(kind, spellId, baseline)
+        local key = kind .. ":" .. tostring(spellId)
+        if seen[key] then return end
+        seen[key] = true
+        out[#out + 1] = { kind = kind, spellId = spellId, baseline = baseline }
+    end
     if awaitingGrant then
-        return "select", awaitingGrant.spellId, awaitingGrant.baseline
+        Add("select", awaitingGrant.spellId, awaitingGrant.baseline)
     end
     if inFlightKind == "select" then
-        return "select", pendingOwnPick, pendingOwnBaseline
+        Add("select", pendingOwnPick, pendingOwnBaseline)
+    elseif inFlightKind then
+        Add(inFlightKind)
     end
-    if inFlightKind then return inFlightKind end
     local p = PerksTbl()
-    if not p then return nil end
-    for kind, field in pairs(LATCH_FIELDS) do
-        if p[field] ~= nil and not deadLatch[kind] then
-            if kind == "select" then
-                local spellId = tonumber(p[field])
-                return "select", spellId, spellId and GrantedCountOf(spellId) or nil
+    if p then
+        for kind, field in pairs(LATCH_FIELDS) do
+            if p[field] ~= nil and not deadLatch[kind] then
+                if kind == "select" then
+                    local spellId = tonumber(p[field])
+                    Add("select", spellId, spellId and GrantedCountOf(spellId) or nil)
+                else
+                    Add(kind)
+                end
             end
-            return kind
         end
     end
-    return nil
+    table.sort(out, function(left, right)
+        if left.kind ~= right.kind then return left.kind < right.kind end
+        return (tonumber(left.spellId) or 0) < (tonumber(right.spellId) or 0)
+    end)
+    return out
 end
 
 -- The granted-mirror count ConfirmAwaitingGrant compares with a baseline.

@@ -225,7 +225,7 @@ for _,v in ipairs(VARIANTS) do
  local ok,why=H.Allowed()
  l=Nexus.RecomputeStats().lastActionLifecycle
  assert(Nexus.GameAdapter.Board() and not Nexus.GameAdapter.InFlight(),v[1]..': reached: a board is present and the adapter holds nothing')
- assert(H.Auto() and not ok and tostring(why):find('freeze sent before the loading screen has no confirmed result',1,true),v[1]..': held, reason shown: '..tostring(why))
+ assert(H.Auto() and not ok and tostring(why):find('no confirmed result for freeze sent before the loading screen',1,true),v[1]..': held, reason shown: '..tostring(why))
  if not v[3] then
   assert(l.state=='uncertain' and l.reason=='world_transition',v[1]..': still unresolved: '..tostring(l.state)..'/'..tostring(l.reason))
   assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,v[1]..': no confirmation recorded')
@@ -286,7 +286,42 @@ do
  H.perks.pendingSelectSpellId=nil;H.granted={['Echo 20']={{spellId=200020}}};H.Notify()
  H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer();H.Advance(14)
  local ok,why=H.Allowed()
- assert(H.attempts==1 and not ok and tostring(why):find('freeze sent before the loading screen',1,true),'the Freeze still holds: '..tostring(why)..', attempts='..H.attempts)
+ assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for freeze and take',1,true),'the Freeze still holds: '..tostring(why)..', attempts='..H.attempts)
+end
+
+-- 13c. Every item still pending at the leave is recorded. The automatic
+-- Take waits for its grant while the player's own Freeze latch is live: the
+-- Take's grant alone does not end the hold, and the watchdog release of the
+-- player's latch is not a result either.
+do
+ local H=Boot();H.run={remainingBanishes=0,totalRerolls=0,usedRerolls=0,totalFreezes=0,usedFreezes=0}
+ H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1 and Nexus.RecomputeStats().lastActionLifecycle.actionType=='take','one Take sent')
+ H.perks.pendingSelectSpellId=nil;H.Offer(OTHER);H.Advance(.3) -- answered; the grant lags
+ H.perks.pendingFreezeIndex=1 -- the player's own Freeze on the new board, never answered
+ Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer(OTHER)
+ local g=H.Clone(H.granted) or {};g['Echo 1']=g['Echo 1'] or {};table.insert(g['Echo 1'],{spellId=200001});H.granted=g;H.Notify()
+ H.Advance(14)
+ local ok,why=H.Allowed()
+ assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for freeze and take',1,true),'held for the player latch: '..tostring(why)..', attempts='..H.attempts)
+ assert(not Nexus.GameAdapter.InFlight(),'reached: the Take is granted and the player latch is dead')
+end
+
+-- 13d. A grant of another spell does not confirm a crossed Take. The
+-- automatic Take failed on the same board; the player's own Select of another
+-- spell is granted in the loading screen. The Take stays unresolved.
+do
+ local H=Boot();H.run={remainingBanishes=0,totalRerolls=0,usedRerolls=0,totalFreezes=0,usedFreezes=0}
+ H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1 and Nexus.RecomputeStats().lastActionLifecycle.actionType=='take','one Take sent')
+ H.perks.pendingSelectSpellId=nil;H.Advance(1) -- refused: the latch clears on the same board
+ assert(Nexus.RecomputeStats().lastActionLifecycle.state=='uncertain','precondition: the Take is uncertain on the same board')
+ H.perks.pendingSelectSpellId=200020 -- the player's own Select of another spell
+ Leave(H);H.perks.pendingSelectSpellId=nil;H.granted={['Echo 20']={{spellId=200020}}};H.Notify()
+ H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer();H.Advance(14)
+ local ok,why=H.Allowed()
+ assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for take',1,true),'the Take still holds: '..tostring(why))
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,'the other grant confirms nothing')
 end
 
 -- 14. A Take that crosses the loading screen is resolved by its grant, the
@@ -333,13 +368,13 @@ end
 do
  local H=Boot();H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
  Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(14)
- assert(not Nexus.GameAdapter.Board() and H.runtime.StatusLine():find('auto paused: freeze sent before the loading screen',1,true),
+ assert(not Nexus.GameAdapter.Board() and H.runtime.StatusLine():find('auto paused: no confirmed result for freeze sent before the loading screen',1,true),
   'no board: the hold says why: '..H.runtime.StatusLine())
  H.playerLevel=80;H.granted=Granted(79,false);Nexus.GameAdapter.RequestGranted();H.Notify();H.Advance(6)
  local o=Nexus.GameAdapter.Owned()
  assert(o.synced and o.total==79,'reached: level 80, run complete, no board: '..tostring(o.total))
  local status=H.runtime.StatusLine()
- assert(status:find('auto paused: freeze sent before the loading screen',1,true),'the save gate is held and says why: '..status)
+ assert(status:find('auto paused: no confirmed result for freeze sent before the loading screen',1,true),'the save gate is held and says why: '..status)
  SlashCmdList.NEXUS('auto');SlashCmdList.NEXUS('auto');H.Advance(.5)
  status=H.runtime.StatusLine()
  assert(status:find('run complete',1,true),'after player input the save gate runs: '..status)
@@ -355,6 +390,9 @@ do
  H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
  local status=H.runtime.StatusLine()
  assert(H.Allowed() and status:find('run complete',1,true),'the granted final Take lets the save gate run without a click: '..status)
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==1,'the Take is confirmed by its grant on the save path too')
+ H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
+ assert(H.Allowed() and H.runtime.StatusLine():find('run complete',1,true),'a second zone holds nothing: '..H.runtime.StatusLine())
 end
 do
  local H=Boot();H.playerLevel=80;H.granted=Granted(78,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
@@ -366,6 +404,6 @@ do
  local o=Nexus.GameAdapter.Owned()
  local status=H.runtime.StatusLine()
  assert(o.synced and o.total==79,'reached: the save path at level 80: '..tostring(o.total))
- assert(status:find('auto paused: '..l.actionType..' sent before the loading screen',1,true),'the save path says why: '..status)
+ assert(status:find('auto paused: no confirmed result for '..l.actionType..' sent before the loading screen',1,true),'the save path says why: '..status)
 end
 print('PASS Auto selection kept across a same-session loading screen with actions held until settled; whatever still waited at the leave (runtime action or adapter latch) holds automation until player input, a run boundary or a Take grant, with the reason shown; unclassified entry and logout revoke; compact Auto labels')
