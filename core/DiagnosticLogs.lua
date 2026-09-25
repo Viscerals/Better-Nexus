@@ -72,9 +72,18 @@ local function DefensiveCopy(value)
 end
 
 local function CurrentDB(database)
-    if type(database) == "table" then return database end
-    if type(NexusDB) ~= "table" then NexusDB = {} end
-    return NexusDB
+    if type(database) ~= "table" then
+        if type(NexusDB) ~= "table" then NexusDB = {} end
+        database = NexusDB
+    end
+    -- A read-only saved root keeps its histories unchanged; this session's
+    -- histories live in the Store owner's session-only table instead.
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    if type(writable) == "function" then
+        local root = writable(database)
+        if type(root) == "table" then return root end
+    end
+    return database
 end
 
 local function Number(value)

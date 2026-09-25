@@ -86,18 +86,29 @@ local function SanitizeHistory(value)
     return trimmed
 end
 
+-- The table that holds errorHistory: the saved root, or for a read-only saved
+-- root the Store owner's session-only table (the saved history is kept
+-- unchanged and this session's errors are not saved).
+local function HistoryRoot()
+    NexusDB = type(NexusDB) == "table" and NexusDB or {}
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function" and writable(NexusDB) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
 local function StoredHistory()
     if type(NexusDB) ~= "table" then return {} end
-    return type(NexusDB.errorHistory) == "table" and NexusDB.errorHistory or {}
+    local root = HistoryRoot()
+    return type(root.errorHistory) == "table" and root.errorHistory or {}
 end
 
 function Errors.Init()
     if recording then return false, "recursion blocked" end
     recording = true
     local ok, err = pcall(function()
-        NexusDB = type(NexusDB) == "table" and NexusDB or {}
-        NexusDB.errorHistory = SanitizeHistory(NexusDB.errorHistory)
-        local latest = NexusDB.errorHistory[#NexusDB.errorHistory]
+        local root = HistoryRoot()
+        root.errorHistory = SanitizeHistory(root.errorHistory)
+        local latest = root.errorHistory[#root.errorHistory]
         if latest then Nexus.lastError = latest.message end
     end)
     recording = false
@@ -111,15 +122,15 @@ function Errors.Record(source, value)
     local message = SafeText(value, "<unprintable error>")
     Nexus.lastError = message -- compatibility for existing integrations
     local ok, err = pcall(function()
-        NexusDB = type(NexusDB) == "table" and NexusDB or {}
-        local history = SanitizeHistory(NexusDB.errorHistory)
+        local root = HistoryRoot()
+        local history = SanitizeHistory(root.errorHistory)
         history[#history + 1] = {
             timestamp = Timestamp(nil, true),
             source = SourceText(source),
             message = message,
         }
         while #history > MAX_ENTRIES do table.remove(history, 1) end
-        NexusDB.errorHistory = history
+        root.errorHistory = history
     end)
     recording = false
     if not ok then return false, SafeText(err, "error history write failed") end
@@ -153,8 +164,7 @@ function Errors.Clear()
     if recording then return false, "recursion blocked" end
     recording = true
     local ok, err = pcall(function()
-        NexusDB = type(NexusDB) == "table" and NexusDB or {}
-        NexusDB.errorHistory = {}
+        HistoryRoot().errorHistory = {}
         Nexus.lastError = nil
     end)
     recording = false

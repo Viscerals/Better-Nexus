@@ -631,6 +631,13 @@ function Repair.Request(reason)
     if active then runtime.coalesced=runtime.coalesced+1; return true,"coalesced" end
     local database=type(NexusDB)=="table" and NexusDB or nil
     if not database then return false,"database unavailable" end
+    -- A read-only saved root is not repaired: the repair and its progress
+    -- record are writes into that root.
+    local readOnlyRoot=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+    if type(readOnlyRoot)=="function" and readOnlyRoot(database) then
+        runtime.lastReason="read-only-saved-data"
+        return true,"read-only"
+    end
     local meta,metaError=Meta(database)
     if not meta then return false,metaError end
     local revision=CurrentDpsRevision()
