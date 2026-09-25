@@ -1111,7 +1111,8 @@ local ScheduleRetention
 -- becomes an endless retry. A ranked run whose publication was refused
 -- because the DPS rows changed after its copy (PUBLICATION_SOURCE_CHANGED)
 -- is retried in the same chain and counts against the same limit; every
--- other refusal ends the chain.
+-- other refusal ends the chain. A chain that stops at the limit records one
+-- "retention-deferred" support incident (nothing was committed).
 local BUSY_RETRY_DELAY, BUSY_RETRY_MAX_DELAY, BUSY_RETRY_LIMIT = 5, 60, 64
 ScheduleRetention = function(scheduler, reason, delay, busyAttempts)
     return scheduler.After("data-retention.enforce", delay, function()
@@ -1124,10 +1125,25 @@ ScheduleRetention = function(scheduler, reason, delay, busyAttempts)
             ScheduleRetention(scheduler, reason, 0, busyAttempts)
         elseif type(result) == "table" and result.blocked == true
             and (result.reason == "ROOT_MUTATION_PENDING"
-                or result.reason == "PUBLICATION_SOURCE_CHANGED")
-            and attempts < BUSY_RETRY_LIMIT then
-            ScheduleRetention(scheduler, reason, math.min(BUSY_RETRY_MAX_DELAY,
-                BUSY_RETRY_DELAY * 2 ^ attempts), attempts + 1)
+                or result.reason == "PUBLICATION_SOURCE_CHANGED") then
+            if attempts < BUSY_RETRY_LIMIT then
+                ScheduleRetention(scheduler, reason, math.min(BUSY_RETRY_MAX_DELAY,
+                    BUSY_RETRY_DELAY * 2 ^ attempts), attempts + 1)
+            else
+                -- The chain stops: this run committed nothing and the saved
+                -- data is unchanged. Say so in the bounded, session-only
+                -- support record instead of leaving no trace.
+                local support = Nexus and Nexus.SupportIncidents
+                if support and type(support.Record) == "function" then
+                    pcall(support.Record, "retention-deferred", {
+                        reason=result.reason, producer="data retention",
+                        operation="bounded retry chain", committed=false,
+                        scope="run not committed after " .. (attempts + 1)
+                            .. " attempts; saved data unchanged; the next"
+                            .. " retention request runs again",
+                    })
+                end
+            end
         end
     end)
 end
