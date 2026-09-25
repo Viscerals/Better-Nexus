@@ -70,7 +70,15 @@ local MAX_SAFE_INTEGER = 9007199254740991
 -- including the start-token capture pump and every named and derived frontier
 -- term. Fixture drivers read it from Catalog.Budget instead of fitting a bound
 -- to the bundled data set.
-local ADMISSION_MAX_PUMPS = 58622488
+-- Capacity envelope V2 adds up to 4096 marker-only typed IDs (2048 removal +
+-- 2048 retention markers beside 2048 build identities). Their marker work was
+-- already budgeted per category (TE/TB, BR/BE/BN/BB at 2048 each), and the
+-- one merged identity sort (6144 * ceil(log2 6144) = 79,872 comparisons, keys
+-- <= 262 bytes) stays inside the ledger's root-map sort allowance
+-- (4 * 2048 * 11 = 90,112 comparisons). Each marker-only ID adds one
+-- finalization row (slice 8) and one index node (slice 64):
+--   58,622,488 + ceil(4096 / 8) + ceil(4096 / 64) = 58,623,064.
+local ADMISSION_MAX_PUMPS = 58623064
 
 -- CATALOG_AUTHORITY_BUDGET_V1: complete-root totals.
 local BUDGET = {
@@ -92,6 +100,33 @@ local BUDGET = {
     activeCandidates=1, cursorsPerFamily=1, oneCallRows=8,
     oneCallBytes=32768, oneCallNodes=2000,
 }
+-- Capacity envelope V2 (owner decision of 2026-09-24). Three identity
+-- categories, each with its own limit, instead of one shared 2048:
+--   rows        distinct build identities, saved and shipped builds together
+--   tombstones  removal-marker keys (one raw map; also rootMapKeys)
+--   barriers    retention-marker keys (one raw map; also rootMapKeys)
+-- A typed ID may belong to several categories; it is one identity. The total
+-- of distinct identities therefore cannot exceed rows + tombstones + barriers.
+-- Raw map entries are a separate dimension: four maps of at most rootMapKeys
+-- each (rootMapEdges = 4 * 2048), with saved and shipped copies of one build
+-- counted twice there.
+BUDGET.identities = BUDGET.rows + BUDGET.tombstones + BUDGET.barriers
+-- The serving source witness records every raw entry of the selected maps.
+-- It was sized for 2048 rows only (edges/nodes/bytesInspected). Its limits
+-- are now derived per raw entry and per map:
+--   saved builds    rows       * (edges/rows, nodes/rows, bytesInspected/rows)
+--   shipped builds  rows       * the same per-row maxima (overlap is raw)
+--   removal markers tombstones * (tombstoneEdges/tombstones edges,
+--                   tombstoneTables nodes, tombstoneBytes/tombstones bytes)
+--   retention       barriers   * (barrierEdges/barriers edges,
+--                   barrierNodes/barriers nodes, barrierBytes/barriers bytes)
+--   root keys       rootKeyBytes; five root values and the map tables.
+BUDGET.witnessEdges = 2 * BUDGET.edges + BUDGET.tombstoneEdges
+    + BUDGET.barrierEdges + BUDGET.rootMapEdges + 16
+BUDGET.witnessNodes = 2 * BUDGET.nodes + BUDGET.tombstones * BUDGET.tombstoneTables
+    + BUDGET.barrierNodes + 16
+BUDGET.witnessBytes = 2 * BUDGET.bytesInspected + BUDGET.tombstoneBytes
+    + BUDGET.barrierBytes + BUDGET.rootKeyBytes + 4096
 
 -- Per-pump frontier slices. A pump stops at the first exhausted slice.
 local SLICE = {
@@ -1254,6 +1289,11 @@ local function ClassifyBarrier(raw, slot, work)
         view.state = "BARRIER_CURRENT_DENY"
         view.receiptAtServerTime = tonumber(raw.receiptAtServerTime) or 0
         view.revision = tonumber(raw.receiptRevision) or 0
+        -- Age evidence (see BarrierExpired): the saved local creation time,
+        -- or none yet when the marker was written with an untrusted clock.
+        view.createdAt = FiniteInteger(raw.receiptAtServerTime, 1, MAX_SAFE_INTEGER)
+        view.ageKind = view.createdAt and "local"
+            or (raw.receiptAtServerTime == 0 and "untimed" or nil)
         return view
     end
     if type(raw) ~= "table" then
@@ -1261,6 +1301,10 @@ local function ClassifyBarrier(raw, slot, work)
         Charge(work, "barrierBytes", ScalarBytes(raw))
         view.state = "BARRIER_OPAQUE_BLOCK_ALL"
         view.revision = tonumber(raw) or 0
+        -- The numeric marker an older retention owner wrote (upstream 1.96.x,
+        -- Better-Nexus test.18): the evicted build's own stamp. It is a
+        -- recognized legacy marker, but that stamp is not local age.
+        if FiniteInteger(raw, 1, MAX_SAFE_INTEGER) then view.ageKind = "legacy" end
         return view
     end
     local bounded = BoundedShape(raw, work, "barrierEdges", "barrierBytes",
@@ -1292,11 +1336,17 @@ local function ClassifyBarrier(raw, slot, work)
         end
         view.readmittedAtServerTime = observed
         view.receiptAtServerTime = tonumber(raw.receiptAtServerTime) or 0
+        -- Age evidence (see BarrierExpired): the saved local creation time,
+        -- or none yet when the marker was written with an untrusted clock.
+        view.createdAt = FiniteInteger(raw.receiptAtServerTime, 1, MAX_SAFE_INTEGER)
+        view.ageKind = view.createdAt and "local"
+            or (raw.receiptAtServerTime == 0 and "untimed" or nil)
         return view
     end
     view.state = "BARRIER_OPAQUE_BLOCK_ALL"
     return view
 end
+
 
 ------------------------------------------------------------------------
 -- Selection and verdict construction
@@ -2234,9 +2284,9 @@ end
 -- the Lua 5.1 200 file-level local ceiling, so the capture and recheck helpers
 -- are fields of one table rather than two more locals.
 local Witness = {
-    EDGE_MAXIMUM=BUDGET.edges,
-    NODE_MAXIMUM=BUDGET.nodes,
-    BYTE_MAXIMUM=BUDGET.bytesInspected,
+    EDGE_MAXIMUM=BUDGET.witnessEdges,
+    NODE_MAXIMUM=BUDGET.witnessNodes,
+    BYTE_MAXIMUM=BUDGET.witnessBytes,
     DEPTH_MAXIMUM=BUDGET.depth + 2,
 }
 
@@ -2432,6 +2482,7 @@ function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
     handle.bundleClass, handle.bundleGeneration = "current", ST.durableBundleGeneration
     handle.bundleWrite, handle.source = true, ST.durableBundle
     handle.slots, handle.slotVector, handle.slotCount = {}, {}, 0
+    handle.buildSlots = 0
     handle.mapIndex, handle.mapCursor, handle.rootMapEdges = 1, nil, 0
     handle.verdicts, handle.index, handle.rowIndex = {}, NewIndex(), 0
     handle.mutationStates = {}
@@ -3034,7 +3085,7 @@ local function NewAdmission(db)
     if not binding then return nil, why end
     local handle = {
         mode="admission", phase="capture", counters=NewCounters(),
-        slots={}, slotVector={}, slotCount=0, mapIndex=1, mapCursor=nil,
+        slots={}, slotVector={}, slotCount=0, buildSlots=0, mapIndex=1, mapCursor=nil,
         rootMapEdges=0, verdicts={}, index=NewIndex(),
         rowIndex=0, indexIndex=0, counts=nil, mapCounts={},
         pumps=0, failure=nil, token=CaptureToken(db, nil, false),
@@ -3053,10 +3104,14 @@ local function AdmissionFail(handle, reason)
 end
 
 -- Session-only record of the last collection refusal: which map, which
--- counter (keys in one map, or distinct keys across maps), the count at the
--- moment of refusal (limit + 1; later keys are not counted), the limit, the
--- phase and whether the saved bundle or the legacy table was the active
--- source. Scalars only; no keys, names or record contents. Never saved.
+-- counter (keys in one map "map-keys", distinct build identities
+-- "distinct-builds", distinct identities of every kind "distinct-slots", or
+-- raw keys of all maps "root-map-edges"), the count at the moment of refusal
+-- (limit + 1; later keys are not counted), the limit, the phase and whether
+-- the saved bundle or the legacy table was the active source, with the keys
+-- read from each map and the distinct build identities seen so far (lower
+-- bounds: the maps after the refusing one were not read). Scalars only; no
+-- keys, names or record contents. Never saved.
 function Candidate.NoteLimit(handle, map, counter, count, limit, reason)
     local counts = {}
     for _, name in ipairs(MAP_ORDER) do
@@ -3066,7 +3121,94 @@ function Candidate.NoteLimit(handle, map, counter, count, limit, reason)
         limit=limit, phase="collect", mode=handle.mode,
         source=handle.sourceKind or (handle.mode == "mutation" and "bundle") or "unknown",
         overlay=counts.overlay, bundled=counts.bundled,
-        tombstone=counts.tombstone, barrier=counts.barrier}
+        tombstone=counts.tombstone, barrier=counts.barrier,
+        builds=tonumber(handle.buildSlots) or 0}
+    if handle.mode == "mutation" then
+        Candidate.NoteSaturation(ST.lastLimit)
+    end
+end
+
+-- Runtime saturation of an admitted catalog: a change that would take a
+-- category above its limit is refused, and the published root, its rows and
+-- the Leaderboard stay as they are. Session-only, scalars only; one record
+-- that counts refusals instead of one entry per refusal, with one counter per
+-- category: builds, removal markers (tombstones), retention markers
+-- (barriers), and every identity or raw key together (catalog).
+function Candidate.NoteSaturation(fact)
+    local now = type(GetTime) == "function" and tonumber(GetTime()) or 0
+    local record = ST.saturation
+    if type(record) ~= "table" then
+        record = {refused=0, firstAt=now, refusedBuilds=0, refusedTombstones=0,
+            refusedBarriers=0, refusedCatalog=0}
+        ST.saturation = record
+    end
+    local field = "refusedBuilds"
+    if fact.counter == "distinct-slots" or fact.counter == "root-map-edges" then
+        field = "refusedCatalog"
+    elseif fact.map == "tombstone" then
+        field = "refusedTombstones"
+    elseif fact.map == "barrier" then
+        field = "refusedBarriers"
+    end
+    record.refused = record.refused + 1
+    record[field] = record[field] + 1
+    record.lastAt = now
+    record.reason, record.map, record.counter = fact.reason, fact.map, fact.counter
+    record.count, record.limit = fact.count, fact.limit
+end
+
+-- Cheap capacity pre-checks against the published root, so a full catalog
+-- refuses a new identity without a whole mutation. The collection check stays
+-- the authority; these only avoid futile work and record the refusal.
+function Candidate.AddsBuildIdentity(existing)
+    return not (existing and (existing.overlayRaw ~= nil or existing.bundledRaw ~= nil))
+end
+
+-- The refusal reason, and its scalar facts, when one more entry of the
+-- category would take the published count plus the transaction's signed
+-- reservation above the limit; nil when it fits. Records nothing. A negative
+-- reservation is room that earlier operations of the same transaction free
+-- (expired retention markers); the commit's full collection re-checks every
+-- limit on the resulting maps.
+function Candidate.CapacityFull(root, category, reserved)
+    local counts = type(root) == "table" and type(root.counts) == "table"
+        and root.counts or {}
+    local spec
+    if category == "builds" then
+        spec = {counts.builds, BUDGET.rows, "ROOT_SLOT_LIMIT", "overlay", "distinct-builds"}
+    elseif category == "tombstones" then
+        spec = {counts.tombstones, BUDGET.tombstones, "TOMBSTONE_SET_LIMIT", "tombstone", "map-keys"}
+    else
+        spec = {counts.barriers, BUDGET.barriers, "BARRIER_SET_LIMIT", "barrier", "map-keys"}
+    end
+    local used = (tonumber(spec[1]) or 0) + (tonumber(reserved) or 0)
+    if used < spec[2] then return nil end
+    return spec[3], {reason=spec[3], map=spec[4], counter=spec[5],
+        count=used + 1, limit=spec[2]}
+end
+
+-- CapacityFull, and the refusal is recorded. Call it only after every check
+-- that gives a record its own reason, so only a change that would otherwise
+-- be accepted is counted as refused because the category is full.
+function Candidate.CapacityRefusal(root, category, reserved)
+    local full, fact = Candidate.CapacityFull(root, category, reserved)
+    if full then Candidate.NoteSaturation(fact) end
+    return full
+end
+
+-- Number of runtime capacity refusals this session. No allocation.
+function Catalog.SaturationRefusals()
+    local record = ST.saturation
+    return type(record) == "table" and record.refused or 0
+end
+
+-- Read-only copy of the saturation record, or nil. Starts no work.
+function Catalog.SaturationSummary()
+    local record = ST.saturation
+    if type(record) ~= "table" then return nil end
+    local copy = {}
+    for key, value in pairs(record) do copy[key] = value end
+    return copy
 end
 
 -- Read-only copy of that record, or nil. Touches no root, cursor or gate.
@@ -3098,11 +3240,10 @@ local function CollectRootMap(handle, work)
         Charge(work, "rootMapEdges", 1)
         handle.rootMapEdges = handle.rootMapEdges + 1
         if handle.rootMapEdges > BUDGET.rootMapEdges then
-            -- The combined key budget of all four maps, charged per key read.
-            -- Each map has its own 2048-key limit and all four share one
-            -- 2048 distinct-key budget, so this total (8192) is a defensive
-            -- stop that those checks normally reach first. It is the same
-            -- kind of saved-capacity verdict, so it records the same facts.
+            -- The raw key budget of all four maps, charged per key read. Each
+            -- map has its own 2048-key limit, so this total (8192) is a
+            -- defensive stop that those checks normally reach first. It is the
+            -- same kind of saved-capacity verdict, so it records the same facts.
             Candidate.NoteLimit(handle, name, "root-map-edges", handle.rootMapEdges,
                 BUDGET.rootMapEdges, "ROOT_MAP_LIMIT")
             return AdmissionFail(handle, "ROOT_MAP_LIMIT")
@@ -3123,12 +3264,25 @@ local function CollectRootMap(handle, work)
             slot = {key=typedKey, id=key, kind=kind}
             handle.slots[typedKey] = slot
             handle.slotCount = handle.slotCount + 1
-            if handle.slotCount > BUDGET.rows then
+            -- Defensive: the three category limits already bound this total.
+            if handle.slotCount > BUDGET.identities then
                 Candidate.NoteLimit(handle, name, "distinct-slots", handle.slotCount,
-                    BUDGET.rows, limitReason)
+                    BUDGET.identities, limitReason)
                 return AdmissionFail(handle, limitReason)
             end
             handle.slotVector[handle.slotCount] = slot
+        end
+        -- A build identity is a typed ID with a saved or a shipped copy, valid
+        -- or not: its content is judged later and never hides it from this
+        -- count. Saved and shipped copies of one ID are one identity.
+        if (name == "overlay" or name == "bundled") and not slot.buildCounted then
+            slot.buildCounted = true
+            handle.buildSlots = handle.buildSlots + 1
+            if handle.buildSlots > BUDGET.rows then
+                Candidate.NoteLimit(handle, name, "distinct-builds", handle.buildSlots,
+                    BUDGET.rows, "ROOT_SLOT_LIMIT")
+                return AdmissionFail(handle, "ROOT_SLOT_LIMIT")
+            end
         end
         slot[name] = rawget(map, key)
     end
@@ -4417,6 +4571,10 @@ function Catalog.Status()
         invalidCount=counts.invalid or 0,
         futureCount=counts.future or 0,
         barrierCount=counts.barriers or 0,
+        -- Capacity use against the three category limits (envelope V2).
+        buildIdentityCount=counts.builds or 0,
+        buildIdentityLimit=BUDGET.rows, tombstoneLimit=BUDGET.tombstones,
+        barrierLimit=BUDGET.barriers,
         catalogVersion=tostring(ST.bundled and ST.bundled.catalogVersion or "unversioned"),
         readOnly=root == nil,
         state=ST.rootState, reason=ST.rootReason,
@@ -4584,7 +4742,8 @@ function Catalog.BarrierState(id)
     return {state=barrier.state, blocked=true, revision=barrier.revision,
         recordedAt=barrier.recordedAt,
         receiptAtServerTime=barrier.receiptAtServerTime,
-        readmittedAtServerTime=barrier.readmittedAtServerTime}
+        readmittedAtServerTime=barrier.readmittedAtServerTime,
+        ageKind=barrier.ageKind, createdAt=barrier.createdAt}
 end
 
 -- Stateless generation-bound steps over the immutable overlay and tombstone
@@ -4735,7 +4894,10 @@ function Candidate.BeginAdmissionFinalization(handle)
     handle.publishPlan = publishPlan
     handle.meta, handle.metaVersion = meta, metaVersion
     handle.catalogVersion, handle.needsMigration = catalogVersion, needsMigration
+    -- builds: distinct build identities (saved and shipped), the category
+    -- that the rows limit bounds; fixed by collection and unchanged by prune.
     handle.counts = {bundled=handle.mapCounts.bundled or 0,
+        builds=handle.buildSlots or 0,
         overlay=0, tombstones=0, barriers=0, available=0, invalid=0, future=0}
     handle.overlayKeys, handle.tombstoneKeys, handle.barrierKeys = {}, {}, {}
     handle.finalizeIndex, handle.prune, handle.pruneIndex = 1, {}, 1
@@ -5447,6 +5609,13 @@ function Candidate.PumpPutPreparation(handle, work)
                 return Candidate.FinishPreparedPutWithoutCommit(handle, false,
                     "PROVENANCE_COLLISION")
             end
+            -- A valid record for a new build while the catalog is full: now
+            -- refused and recorded, before any destination or commit work.
+            if put.capacityFull then
+                Candidate.NoteSaturation(put.capacityFact)
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    put.capacityFull)
+            end
             local destination, destinationWhy = BuildDestination(verdict,
                 put.walker, existingRow and existingRow.source == "overlay"
                     and existingRow or nil, put.carriedUnknown)
@@ -5568,7 +5737,7 @@ end
 -- a single put makes them. Every receiver batch member is prepared through
 -- this same function, so no record reaches the catalog through a shortcut
 -- that skips these checks.
-function Candidate.PreparePut(root, record, options, claim, deferred)
+function Candidate.PreparePut(root, record, options, claim, deferred, reservedBuilds)
     local carriedUnknown
     if type(record) ~= "table" or record.id == nil then
         return false, "build id required"
@@ -5576,6 +5745,16 @@ function Candidate.PreparePut(root, record, options, claim, deferred)
     options = type(options) == "table" and options or {}
     local slot, existing, slotWhy = SlotFor(root, record.id)
     if not slot then return false, slotWhy end
+    -- A record for a new build identity while the catalog already holds the
+    -- limit takes no allocation reservation and never reaches a commit. The
+    -- refusal is given after the reservation, row and owner checks (see the
+    -- "finish" phase), so a suppressed, malformed or unowned record keeps its
+    -- own reason and is not counted as refused because the catalog is full.
+    local addsBuild = Candidate.AddsBuildIdentity(existing)
+    local full, fullFact
+    if addsBuild then
+        full, fullFact = Candidate.CapacityFull(root, "builds", reservedBuilds)
+    end
     local readmitTombstone = false
     if claim then
         local ok, entryOrWhy = ConsumeClaim(claim, slot.key,
@@ -5600,7 +5779,7 @@ function Candidate.PreparePut(root, record, options, claim, deferred)
         if existing and existing.state == "READ_ONLY_FUTURE_SCHEMA" then
             return false, "FUTURE_SCHEMA_RESERVATION"
         end
-        if Occupancy(existing) == "VACANT" then
+        if Occupancy(existing) == "VACANT" and not full then
             local superseded, supersedeWhy = SupersedeActiveClaim()
             if not superseded then return false, supersedeWhy end
             local issued, issueWhy = IssueClaim("allocation", slot.key, record.id)
@@ -5616,9 +5795,12 @@ function Candidate.PreparePut(root, record, options, claim, deferred)
         return false, "LOCAL_OWNER_REQUIRED"
     end
     local candidateSlot = {key=slot.key, id=slot.id, kind=slot.kind}
-    return Candidate.NewPutPreparation(root, record, options, claim,
+    local handle = Candidate.NewPutPreparation(root, record, options, claim,
         deferred,
         candidateSlot, existing, readmitTombstone, carriedUnknown)
+    handle.put.addsBuild, handle.put.capacityFull, handle.put.capacityFact =
+        addsBuild, full, fullFact
+    return handle
 end
 
 local function PutInternal(record, options, claim, deferred)
@@ -5687,8 +5869,11 @@ function Candidate.PumpBatchPutPreparation(handle, work)
         if member.outcome then
             batch.index = batch.index + 1
         elseif not member.sub then
+            -- Members are prepared one after another, so batch.addedBuilds is
+            -- the number of new builds already admitted into this batch.
             local sub, prepareWhy = Candidate.PreparePut(handle.originalRoot,
-                member.record, member.options, nil, handle.deferred)
+                member.record, member.options, nil, handle.deferred,
+                batch.addedBuilds or 0)
             if sub then
                 sub.batchMember = true
                 member.sub = sub
@@ -5708,6 +5893,7 @@ function Candidate.PumpBatchPutPreparation(handle, work)
                     put.claim = nil
                 end
                 member.outcome, member.storedAs = "admitted", put.storedAs
+                if put.addsBuild then batch.addedBuilds = (batch.addedBuilds or 0) + 1 end
                 batch.items[#batch.items + 1] = put.item
                 batch.admitted = batch.admitted + 1
             elseif prepared == "noop" then
@@ -5922,6 +6108,9 @@ function Catalog.SetTombstone(id, tombstone, options)
         return false, sourceKind == "remote" and "REMOTE_OWNER_REQUIRED"
             or "LOCAL_OWNER_REQUIRED"
     end
+    -- A removal that needs a new removal marker while that map is full is
+    -- refused after the owner proof, so only a removal the sender may make
+    -- is counted as refused because the map is full.
     local current = CurrentOwnerKey()
     if sourceKind == "local" then
         -- Local deletion requires current local-owner proof for the admitted
@@ -5933,6 +6122,8 @@ function Catalog.SetTombstone(id, tombstone, options)
         if not owns then
             return false, "LOCAL_OWNER_REQUIRED"
         end
+        local full = Candidate.CapacityRefusal(root, "tombstones", 0)
+        if full then return false, full end
         local record = TombstoneRecord(slot, existing, tombstone)
         if not record then return false, "GENERATION_EXHAUSTED" end
         local verdict = NewVerdict(slot, "TOMBSTONED", "TOMBSTONE_CURRENT_DENY")
@@ -5985,6 +6176,8 @@ function Catalog.SetTombstone(id, tombstone, options)
     if not (owner and Identity.TransportOwns(owner, options.sender)) then
         return false, "REMOTE_OWNER_REQUIRED"
     end
+    local full = Candidate.CapacityRefusal(root, "tombstones", 0)
+    if full then return false, full end
     local payload = {stamp=stamp, author=author,
         ownerKey=type(tombstone.ownerKey) == "string" and tombstone.ownerKey or owner,
         ownerVerified=tombstone.ownerVerified == true or nil}
@@ -6094,8 +6287,15 @@ function Catalog.MaintenanceEvictOverlay(handle, id)
     if existing.tombstone then return false, "TOMBSTONE_RESERVATION" end
     if existing.state == "READ_ONLY_FUTURE_SCHEMA" then return false, "FUTURE_SCHEMA_RESERVATION" end
     if not existing.snapshot then return false, "INVALID_RESERVATION" end
+    -- An eviction needs its retention marker. When the marker map is full the
+    -- eviction is not staged at all: no partial eviction, no futile commit.
+    if not existing.barrier then
+        local full = Candidate.CapacityRefusal(root, "barriers", handle.barrierDelta)
+        if full then return false, full end
+    end
     local barrier, barrierWhy = BarrierRecord(slot, existing)
     if not barrier then return false, barrierWhy end
+    if not existing.barrier then handle.barrierDelta = (handle.barrierDelta or 0) + 1 end
     handle.seen[slot.key] = true
     handle.ops[#handle.ops + 1] = {kind="evict", slot=slot, existing=existing,
         barrier=barrier}
@@ -6130,31 +6330,41 @@ function Catalog.MaintenanceRetireTombstone(handle, id)
     return true
 end
 
-local function BarrierExpired(barrier)
-    if barrier.state == "BARRIER_OPAQUE_BLOCK_ALL" then
+-- A retention marker expires 30 days after its trusted local age: the saved
+-- local creation time of a current-format marker, or the locally recorded
+-- first observation (firstSeen, kept by the retention owner) of an untimed or
+-- legacy marker. Missing, invalid or future age, and an untrusted clock, never
+-- expire anything. A full catalog is not a reason to expire a marker early.
+local function BarrierExpired(barrier, firstSeen)
+    local kind = barrier.ageKind
+    if kind ~= "local" and kind ~= "untimed" and kind ~= "legacy" then
         return false, "BARRIER_RESERVATION_BLOCK_ALL"
     end
     local now = TrustedServerTime()
     if not now then return false, "TIME_UNTRUSTED" end
-    local observed = barrier.state == "BARRIER_CURRENT_DENY"
-        and (tonumber(barrier.receiptAtServerTime) or 0)
-        or (tonumber(barrier.readmittedAtServerTime) or 0)
-    if observed <= 0 or now - observed < BARRIER_AGE then
-        return false, "BARRIER_NOT_EXPIRED"
-    end
+    local observed = kind == "local" and barrier.createdAt
+        or FiniteInteger(firstSeen, 1, MAX_SAFE_INTEGER)
+    if not observed then return false, "BARRIER_AGE_UNKNOWN" end
+    if observed > now then return false, "BARRIER_AGE_INVALID" end
+    if now - observed < BARRIER_AGE then return false, "BARRIER_NOT_EXPIRED" end
     return true
 end
 
-function Catalog.MaintenanceExpireBarrier(handle, id)
+-- Expiring a retention marker removes only that suppression: no build,
+-- score, Wishlist or assignment is removed, no row is restored, and a removal
+-- marker on the same ID stays in force. firstSeen is required only for an
+-- untimed or legacy marker.
+function Catalog.MaintenanceExpireBarrier(handle, id, firstSeen)
     local root, why = MaintenanceOpen(handle)
     if not root then return false, why end
     local slot, existing, slotWhy = SlotFor(root, id)
     if not slot then return false, slotWhy end
     if not (existing and existing.barrier) then return false, "BARRIER_ABSENT" end
-    local expired, expiredWhy = BarrierExpired(existing.barrier)
+    local expired, expiredWhy = BarrierExpired(existing.barrier, firstSeen)
     if not expired then return false, expiredWhy end
     if handle.seen[slot.key] then return false, "DUPLICATE_TARGET" end
     handle.seen[slot.key] = true
+    handle.barrierDelta = (handle.barrierDelta or 0) - 1
     handle.ops[#handle.ops + 1] = {kind="expire", slot=slot, existing=existing}
     return true
 end
@@ -6184,11 +6394,18 @@ function Catalog.MaintenanceReplaceRow(handle, id, record, options)
         handle.failed = "PROVENANCE_COLLISION"
         return false, "PROVENANCE_COLLISION"
     end
+    -- An insert is a new build identity: while the catalog is full it is not
+    -- staged, so no commit starts only to be refused by the full collection.
+    if inserting then
+        local full = Candidate.CapacityRefusal(root, "builds", handle.buildDelta)
+        if full then return false, full end
+    end
     local destination, destinationWhy = BuildDestination(verdict, walker, existing)
     if not destination then
         handle.failed = destinationWhy
         return false, destinationWhy
     end
+    if inserting then handle.buildDelta = (handle.buildDelta or 0) + 1 end
     verdict.state = inserting and "ADMITTED" or "READMITTED"
     verdict.bundledRaw = existing and existing.bundledRaw or BundledRawFor(slot)
     verdict.overlayRaw = destination

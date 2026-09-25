@@ -93,42 +93,135 @@ for _,key in ipairs({'authorityBundle','dataRetention','dataCompaction','legacyD
 end
 check(UpdateState()==updateBefore,'the saved update keys are unchanged after reload as well')
 
--- 5. Every saved-capacity refusal behaves the same way and states its own
--- sentence. Saved markers reserve keys in the same budget as the builds.
+-- 5. Capacity envelope V2: up to 2048 different builds (saved and shipped
+-- together), 2048 removal markers and 2048 retention markers, each with its
+-- own limit. Every saved-capacity refusal behaves the same way, and its
+-- sentence follows the recorded counter, map and counts: nothing after the
+-- map where counting stopped is named, and shipped builds are named only when
+-- they took part.
 local function Markers(prefix,from,to)
  local m={};for i=from,to do m[prefix..i]={at=1} end;return m
 end
-local capacityCases={
- {'removal markers','TOMBSTONE_SET_LIMIT','removal markers',function()
-   local d={settingsVersion=2,settings={},chars={},communityBuilds=Overlay(10)}
-   d.syncTombstones=Markers('tomb-',1,2039);return d
+-- The shapes an older retention owner wrote: a numeric retention marker (the
+-- evicted build's stamp) and a {stamp, author} removal marker.
+local function OldMarkers(prefix,from,to)
+ local m={};for i=from,to do m[prefix..i]=1700000000+i end;return m
+end
+local function OldRemovals(prefix,from,to)
+ local m={};for i=from,to do m[prefix..i]={stamp=1700000000+i,author='OldPeer'} end;return m
+end
+local function Shipped(prefix,n)local m={};for i=1,n do m[prefix..i]=Record(prefix..i) end;return m end
+local function Sentence(body)return 'Community data unavailable: '..body..' Nothing was changed or deleted.' end
+local refusals={
+ {'2049 retention markers alone','BARRIER_SET_LIMIT','map-keys',Sentence('the saved retention markers exceed the limit (2048).'),
+   'builds 0, shipped 0, removal markers 0, retention markers 2049',function()
+   local d={settingsVersion=2,settings={},chars={}}
+   d.communityRetentionEvictions=Markers('ev-',1,2049);return d
   end},
- {'retention markers','BARRIER_SET_LIMIT','retention markers',function()
-   local d={settingsVersion=2,settings={},chars={},communityBuilds=Overlay(10)}
-   d.communityRetentionEvictions=Markers('ev-',1,2039);return d
+ {'2049 removal markers alone','TOMBSTONE_SET_LIMIT','map-keys',Sentence('the saved removal markers exceed the limit (2048).'),
+   'builds 0, shipped 0, removal markers 2049, retention markers not read',function()
+   local d={settingsVersion=2,settings={},chars={}}
+   d.syncTombstones=Markers('tomb-',1,2049);return d
   end},
+ {'1500 saved and 549 shipped builds','ROOT_SLOT_LIMIT','distinct-builds',
+   Sentence('your saved Community builds and the builds shipped with this version together hold more than the 2048 different builds this build opens.'),
+   'builds 1500, shipped 549, removal markers not read, retention markers not read',function()
+   return {settingsVersion=2,settings={},chars={},communityBuilds=Overlay(1500)}
+  end,Shipped('base-',549)},
+ {'2049 shipped builds alone','ROOT_SLOT_LIMIT','map-keys',Sentence('the builds shipped with this version exceed the limit (2048).'),
+   'builds 0, shipped 2049, removal markers not read, retention markers not read',function()
+   return {settingsVersion=2,settings={},chars={}}
+  end,Shipped('base-',2049)},
 }
-for _,case in ipairs(capacityCases)do
- local label,reason,words,build=case[1],case[2],case[3],case[4]
- F.Boot(build())
+for _,case in ipairs(refusals)do
+ local label,reason,counter,sentence,counted,build,shipped=case[1],case[2],case[3],case[4],case[5],case[6],case[7]
+ local d=build()
+ local savedBefore=F.Serialize({d.communityBuilds,d.syncTombstones,d.communityRetentionEvictions})
+ F.fileHooks=shipped and {[ [[data\BundledBuilds.lua]] ]=function()Nexus.BundledBuilds.builds=shipped end} or nil
+ local CH=F.Boot(d);F.fileHooks=nil
  local c=Nexus.StartupStatus()
  check(c.state=='failed' and c.reason==reason and c.coreReady==true,
   label..': the shared catalog is refused and local tools start: '..tostring(c.reason)..' coreReady='..tostring(c.coreReady))
+ check(c.failure and c.failure.counter==counter,label..': the catalog recorded counter '..counter..': '..tostring(c.failure and c.failure.counter))
  local text=Nexus.LoadingStatus.CapacityText(c)
- check(type(text)=='string' and text:find(words,1,true) and text:find('Nothing was changed or deleted',1,true),
-  label..': the refusal is stated plainly: '..tostring(text))
+ check(text==sentence,label..': the sentence matches the recorded counter: '..tostring(text))
+ check(Nexus.LoadingStatus.PhaseText(c)==sentence,label..': the shared-button tooltip text (PhaseText) uses the same sentence')
+ local at=#CH.chat;SlashCmdList.NEXUS('status')
+ local said=table.concat(CH.chat,'\n',at+1)
+ check(said:find(sentence,1,true) and said:find('counter='..counter,1,true)
+  and said:find('keys counted before the stop (at least)='..counted,1,true),label..': /nexus status states the sentence, the counter and the counted keys: '..said)
+ local summary=table.concat(Nexus.SupportReport.StartupLines(c,false),'\n')
+ check(summary:find('catalog refusal: map '..c.failure.map..', counter '..counter,1,true)
+  and summary:find('keys counted before the stop (at least): '..counted,1,true),
+  label..': the Copy summary carries the counter, map and counted keys: '..summary)
  check(Nexus.BuildCatalog.RootState().state~='ROOT_ADMITTED',label..': the shared catalog stays refused')
+ check(F.Serialize({NexusDB.communityBuilds,NexusDB.syncTombstones,NexusDB.communityRetentionEvictions})==savedBefore,
+  label..': the saved builds and markers are unchanged')
+end
+-- The shapes the former shared 2048 budget refused are admitted now, with
+-- every saved build and marker kept as it was.
+local admitted={
+ {'10 builds, 2039 removal markers and 1500 retention markers',10,2039,1500,function()
+   local d={settingsVersion=2,settings={},chars={},communityBuilds=Overlay(10)}
+   d.syncTombstones=Markers('tomb-',1,2039);d.communityRetentionEvictions=Markers('ev-',1,1500);return d
+  end},
+ {'10 builds and 2039 retention markers',10,0,2039,function()
+   local d={settingsVersion=2,settings={},chars={},communityBuilds=Overlay(10)}
+   d.communityRetentionEvictions=Markers('ev-',1,2039);return d
+  end},
+ {'older-shape maps: 1200 builds, 100 removal and 800 retention markers',1200,100,800,function()
+   local d={settingsVersion=5,settings={},chars={},communityBuilds=Overlay(1200)}
+   d.syncTombstones=OldRemovals('gone-',1,100);d.communityRetentionEvictions=OldMarkers('evicted-',1,800);return d
+  end},
+}
+for _,case in ipairs(admitted)do
+ local label,builds,removals,retentions,build=case[1],case[2],case[3],case[4],case[5]
+ local d=build()
+ local buildsBefore=d.communityBuilds
+ -- An absent map and an empty one hold the same (no) markers.
+ local function Map(m) if type(m)=='table' and next(m)==nil then return nil end;return m end
+ local markersBefore=F.Serialize({Map(d.syncTombstones),Map(d.communityRetentionEvictions)})
+ F.Boot(d)
+ local c=Nexus.StartupStatus();local st=Nexus.BuildCatalog.Status()
+ check(c.state~='failed' and c.coreReady and Nexus.BuildCatalog.RootState().state=='ROOT_ADMITTED',
+  label..': admitted under the separate limits: '..tostring(c.reason))
+ check(Nexus.LoadingStatus.CapacityText(c)==nil,label..': no capacity sentence')
+ check(st.availableCount==builds and st.buildIdentityCount==builds and st.tombstoneCount==removals
+  and st.barrierCount==retentions,label..': every build and marker is counted: '..st.availableCount..'/'..st.tombstoneCount..'/'..st.barrierCount)
+ local b=NexusDB.authorityBundle
+ check(b and F.Serialize({Map(b.syncTombstones),Map(b.communityRetentionEvictions)})==markersBefore,
+  label..': the saved markers are carried unchanged into the bundle')
+ -- Start-up identity repair may add derived fields to a build; it never
+ -- removes a build or changes a saved field.
+ local kept=true
+ for id,row in pairs(buildsBefore or {})do
+  local now=b.communityBuilds[id]
+  if type(now)~='table' then kept=false;break end
+  for key,value in pairs(row)do
+   -- An empty list and an absent one carry the same (no) evidence.
+   local same=F.Serialize(now[key])==F.Serialize(value)
+    or (type(value)=='table' and next(value)==nil and now[key]==nil)
+   if not same then kept=false;break end
+  end
+ end
+ check(kept,label..': every saved build and every saved field is kept')
 end
 
--- The class itself is fixed: exactly these four saved-capacity refusals, each
--- with its own sentence. Everything else keeps the previous behavior.
+-- The class itself is fixed: exactly these four saved-capacity refusals.
+-- Without a recorded counter no sentence names one map; ROOT_MAP_LIMIT has
+-- only one counter and keeps its own sentence. Everything else keeps the
+-- previous behavior.
 local reasons=Nexus.MainInternals.CapacityRefusalReasonsV1()
 check(table.concat(reasons,',')=='BARRIER_SET_LIMIT,ROOT_MAP_LIMIT,ROOT_SLOT_LIMIT,TOMBSTONE_SET_LIMIT',
  'the capacity class holds exactly the four saved-capacity refusals: '..table.concat(reasons,','))
 for _,reason in ipairs(reasons)do
  local text=Nexus.LoadingStatus.CapacityText({state='failed',coreReady=true,reason=reason})
  check(type(text)=='string' and text:find('Community data unavailable',1,true)
-  and text:find('Nothing was changed or deleted',1,true),reason..': it has its own plain sentence: '..tostring(text))
+  and text:find('Nothing was changed or deleted',1,true),reason..': it has a plain sentence: '..tostring(text))
+ if reason~='ROOT_MAP_LIMIT' then
+  check(not text:find('exceed the limit',1,true) and not text:find('holds more builds',1,true),
+   reason..': without a recorded counter no single map is named: '..tostring(text))
+ end
  check(Nexus.LoadingStatus.CapacityText({state='failed',coreReady=false,reason=reason})==nil,
   reason..': no capacity sentence before local tools are ready')
 end

@@ -57,18 +57,62 @@ local function Snapshot()
 end
 -- Saved-capacity refusals of the shared catalog, stated plainly. The data is
 -- complete and unchanged; only the shared catalog cannot be opened.
-local capacity = {
-    ROOT_SLOT_LIMIT="Community data unavailable: your saved Community list holds more builds than this build opens (limit 2048). Nothing was changed or deleted.",
-    TOMBSTONE_SET_LIMIT="Community data unavailable: the saved removal markers exceed the limit (2048). Nothing was changed or deleted.",
-    BARRIER_SET_LIMIT="Community data unavailable: the saved retention markers exceed the limit (2048). Nothing was changed or deleted.",
-    ROOT_MAP_LIMIT="Community data unavailable: your saved Community records and markers together exceed the total this build opens (limit 8192). Nothing was changed or deleted.",
+-- The catalog opens up to 2048 different builds (saved and shipped together),
+-- 2048 removal markers and 2048 retention markers. The sentence follows the
+-- counter, the map and the limit the catalog recorded, and names only what
+-- took part: a map alone above its limit ("map-keys"), different builds
+-- ("distinct-builds"), all different entries ("distinct-slots"), or all raw
+-- keys ("root-map-edges"). The maps are read in a fixed order (builds,
+-- shipped builds, removal markers, retention markers), so nothing after the
+-- map where counting stopped is named.
+local function Refused(body)
+    return "Community data unavailable: "..body.." Nothing was changed or deleted."
+end
+local single = {
+    TOMBSTONE_SET_LIMIT="the saved removal markers exceed the limit (%d).",
+    BARRIER_SET_LIMIT="the saved retention markers exceed the limit (%d).",
 }
 -- The one sentence for a saved-capacity refusal, or nil for every other
 -- state. Callers ask for it directly instead of matching message text.
 function M.CapacityText(status)
     status=status or Snapshot()
-    if status.state=="failed" and status.coreReady then return capacity[status.reason] end
-    return nil
+    if not (status.state=="failed" and status.coreReady) then return nil end
+    local reason=status.reason
+    if reason~="ROOT_SLOT_LIMIT" and reason~="TOMBSTONE_SET_LIMIT"
+        and reason~="BARRIER_SET_LIMIT" and reason~="ROOT_MAP_LIMIT" then return nil end
+    local facts=type(status.failure)=="table" and status.failure or {}
+    local counter,map=facts.counter,facts.map
+    local limit=math.floor(tonumber(facts.limit) or 0)
+    local counted=type(facts.counted)=="table" and facts.counted or {}
+    local shipped=(tonumber(counted.bundled) or 0)>0
+    if reason=="ROOT_MAP_LIMIT" or counter=="root-map-edges" then
+        return Refused("your saved Community records and markers together exceed the total this build opens (limit 8192).")
+    end
+    if limit<=0 then
+        return Refused("your saved Community data is larger than this build opens.")
+    end
+    if counter=="map-keys" then
+        if reason=="ROOT_SLOT_LIMIT" then
+            return Refused(map=="bundled"
+                and ("the builds shipped with this version exceed the limit ("..limit..").")
+                or ("your saved Community list holds more builds than this build opens (limit "..limit..")."))
+        end
+        return Refused(string.format(single[reason],limit))
+    end
+    if counter=="distinct-builds" then
+        return Refused((shipped
+            and "your saved Community builds and the builds shipped with this version together hold"
+            or "your saved Community list holds")
+            .." more than the "..limit.." different builds this build opens.")
+    end
+    if counter=="distinct-slots" then
+        local builds=shipped and "your saved Community builds, the builds shipped with this version" or "your saved Community builds"
+        local parts=map=="barrier" and (builds..", removal markers and retention markers")
+            or map=="tombstone" and (builds.." and removal markers")
+            or (shipped and "your saved Community builds and the builds shipped with this version" or builds)
+        return Refused(parts.." together hold more than the "..limit.." different entries this build opens.")
+    end
+    return Refused("your saved Community data is larger than this build opens.")
 end
 function M.PhaseText(status)
     status=status or Snapshot()

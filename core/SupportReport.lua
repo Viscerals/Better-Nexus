@@ -346,6 +346,82 @@ end
 -- initializes nothing, pumps nothing, rescans nothing and writes nothing.
 -- A start-up refusal is not a Lua error and not an incident, so it must be
 -- legible with zero of both.
+-- The catalog's retained capacity facts, read-only: no scan and no work.
+-- A refusal keeps the map where counting stopped; the maps after it were not
+-- read and are shown as "not read", and every count is a lower bound.
+function M.CatalogRefusalLines(facts)
+    local out = {}
+    if type(facts) ~= "table" or facts.component ~= "catalog"
+        or facts.counter == nil then return out end
+    out[#out + 1] = "  catalog refusal: map " .. shown(facts.map, 16)
+        .. ", counter " .. shown(facts.counter, 24) .. ", count "
+        .. shown(facts.count, 16) .. " (limit " .. shown(facts.limit, 16)
+        .. "), source " .. shown(facts.source, 16)
+    local counted = type(facts.counted) == "table" and facts.counted or nil
+    if counted then
+        local parts, stopped = {}, false
+        for _, entry in ipairs({{"overlay", "builds"}, {"bundled", "shipped"},
+            {"tombstone", "removal markers"}, {"barrier", "retention markers"}}) do
+            parts[#parts + 1] = entry[2] .. " "
+                .. (stopped and "not read" or shown(counted[entry[1]] or 0, 16))
+            if entry[1] == facts.map then stopped = true end
+        end
+        out[#out + 1] = "  keys counted before the stop (at least): "
+            .. table.concat(parts, ", ")
+            .. (counted.builds ~= nil
+                and ("; different builds " .. shown(counted.builds, 16)) or "")
+    end
+    return out
+end
+
+-- Capacity use of an admitted catalog and its session saturation record.
+-- Protected owner reads; nothing is counted here.
+function M.CatalogCapacityLines()
+    local out = {}
+    local catalog = Nexus and Nexus.BuildCatalog
+    local okStatus, st = pcall(function()
+        return catalog and type(catalog.Status) == "function" and catalog.Status() or nil
+    end)
+    if okStatus and type(st) == "table" and st.state == "ROOT_ADMITTED"
+        and st.readOnly ~= true and st.buildIdentityLimit ~= nil then
+        local retention = Nexus and Nexus.DataRetention
+        local okWaiting, waiting = pcall(function()
+            return retention and type(retention.MarkerFirstSeenCount) == "function"
+                and retention.MarkerFirstSeenCount() or nil
+        end)
+        out[#out + 1] = "  catalog capacity: different builds "
+            .. shown(st.buildIdentityCount, 16) .. "/" .. shown(st.buildIdentityLimit, 16)
+            .. ", removal markers " .. shown(st.tombstoneCount, 16) .. "/"
+            .. shown(st.tombstoneLimit, 16) .. ", retention markers "
+            .. shown(st.barrierCount, 16) .. "/" .. shown(st.barrierLimit, 16)
+            .. ((okWaiting and tonumber(waiting) and tonumber(waiting) > 0)
+                and (" (" .. shown(waiting, 16) .. " aging from first local observation)")
+                or "")
+    end
+    local okSaturation, record = pcall(function()
+        return catalog and type(catalog.SaturationSummary) == "function"
+            and catalog.SaturationSummary() or nil
+    end)
+    if okSaturation and type(record) == "table" then
+        local split = {}
+        for _, part in ipairs({{"refusedBuilds", "builds"},
+            {"refusedTombstones", "removal markers"},
+            {"refusedBarriers", "retention markers"}, {"refusedCatalog", "all identities"}}) do
+            if (tonumber(record[part[1]]) or 0) > 0 then
+                split[#split + 1] = part[2] .. " " .. shown(record[part[1]], 16)
+            end
+        end
+        out[#out + 1] = "  catalog full: " .. shown(record.refused, 16)
+            .. " new change(s) refused this session"
+            .. (#split > 0 and (" (" .. table.concat(split, ", ") .. ")") or "")
+            .. ", last " .. shown(record.reason, 32)
+            .. " (" .. shown(record.counter, 24) .. " " .. shown(record.count, 16)
+            .. ", limit " .. shown(record.limit, 16)
+            .. "); existing Community and Leaderboard data stay available"
+    end
+    return out
+end
+
 function M.StartupLines(status, extended)
     if type(status) ~= "table" then return {} end
     local failed = status.state == "failed"
@@ -366,6 +442,7 @@ function M.StartupLines(status, extended)
             end
         end
         if #row > 0 then out[#out + 1] = "  " .. table.concat(row, "; ") end
+        for _, line in ipairs(M.CatalogRefusalLines(facts)) do out[#out + 1] = line end
         if facts.formatClass ~= nil or facts.formatVersion ~= nil then
             out[#out + 1] = "  saved format: " .. shown(facts.formatClass, 24)
                 .. (facts.formatVersion ~= nil
@@ -395,6 +472,7 @@ function M.StartupLines(status, extended)
             end
         end
     end
+    for _, line in ipairs(M.CatalogCapacityLines()) do out[#out + 1] = line end
     if failed then
         out[#out + 1] = "  A start-up refusal is a business rule, not a Lua error"
             .. " and not an incident: both histories can be empty."
