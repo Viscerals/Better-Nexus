@@ -2964,6 +2964,38 @@ function A.InFlight()
     return (inFlightKind ~= nil) or awaitingGrant ~= nil or AnyLatch()
 end
 
+-- Read-only, for a caller that must not treat a loading screen as a result:
+-- what still waits for the server, by the same rules as A.InFlight(). Returns
+-- the kind ("select", "freeze", "banish" or "reroll"); for a Select with a
+-- known spell, also the spell and its granted count before the send (a
+-- player's own Select: the count now). nil when nothing is pending.
+function A.PendingAction()
+    if awaitingGrant then
+        return "select", awaitingGrant.spellId, awaitingGrant.baseline
+    end
+    if inFlightKind == "select" then
+        return "select", pendingOwnPick, pendingOwnBaseline
+    end
+    if inFlightKind then return inFlightKind end
+    local p = PerksTbl()
+    if not p then return nil end
+    for kind, field in pairs(LATCH_FIELDS) do
+        if p[field] ~= nil and not deadLatch[kind] then
+            if kind == "select" then
+                local spellId = tonumber(p[field])
+                return "select", spellId, spellId and GrantedCountOf(spellId) or nil
+            end
+            return kind
+        end
+    end
+    return nil
+end
+
+-- The granted-mirror count ConfirmAwaitingGrant compares with a baseline.
+function A.GrantedCount(spellId)
+    return GrantedCountOf(tonumber(spellId))
+end
+
 -- The one confirmation there is: the granted mirror shows the selected spell
 -- above the count it had when the Select was submitted. A board transition,
 -- a cleared latch, elapsed time, a new table with the same contents, or a
