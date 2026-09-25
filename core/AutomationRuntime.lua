@@ -341,11 +341,11 @@ local refusedRerollSig = nil
 -- leave until the entry that closes it, then for worldSettle seconds and
 -- until the adapter is ready. The settle is pacing only: Adapter.Ready() is
 -- normally already true at a same-session entry, and each action still needs
--- its own current reads. worldPending: whatever still waited for the server
--- at the leave (a runtime intent, marked crossedWorld, or only an adapter
--- latch) holds actions after the settle too, until player input, a run
--- boundary or, for a Take, its grant. An entry with no observed leave is not
--- classified and revokes Auto.
+-- its own current reads. worldPending: everything that still waited for the
+-- server at the leave (a runtime intent, marked crossedWorld, and every
+-- adapter latch) holds actions after the settle too, until player input, a
+-- run boundary or, when a single Take was pending, its own grant. An entry
+-- with no observed leave is not classified and revokes Auto.
 local actionHold = { externalUntil = 0, worldLeaving = false,
     worldSettleUntil = nil, worldSettle = 3, worldPending = nil }
 
@@ -455,22 +455,10 @@ local function AutoAllowed()
         end
         actionHold.worldSettleUntil = nil
     end
-    local pending = actionHold.worldPending
-    if pending then
-        -- The one supported result after a loading screen: a Take's grant in
-        -- the granted mirror, by the rule of the adapter's
-        -- ConfirmAwaitingGrant. Freeze, Banish and Reroll have none here.
-        if pending.spellId and pending.baseline
-            and Adapter.GrantedCount(pending.spellId) > pending.baseline then
-            actionHold.worldPending = nil
-            if actionIntent and actionIntent.crossedWorld then
-                actionIntent.grantObserved = true
-            end
-        else
-            return false, pending.label
-                .. " sent before the loading screen has no confirmed result"
-                .. " -- turn Auto off and on to continue"
-        end
+    if actionHold.worldPending then
+        return false, "no confirmed result for "
+            .. actionHold.worldPending.label
+            .. " sent before the loading screen -- turn Auto off and on to continue"
     end
     if GetTime() < actionHold.externalUntil then return false, "user acting" end
     if Adapter.RivalDetected() then return false, "Another Echo automation addon is loaded -- disable it" end
@@ -2057,19 +2045,9 @@ local function ResolveActionIntent(board)
     -- Sent before a loading screen and unresolved at its start: a board read
     -- after it (missing, changed or the same) and elapsed time are not its
     -- result. It stays unresolved and AutoAllowed holds every automatic
-    -- action until new player input, a run boundary or, for a Take, its
-    -- grant ends it (the rule in AutoAllowed; also checked here so the
-    -- first step that sees the grant resolves the intent).
-    if intent.crossedWorld then
-        local pending = actionHold.worldPending
-        if intent.grantObserved or (pending and pending.spellId
-            and pending.baseline
-            and Adapter.GrantedCount(pending.spellId) > pending.baseline) then
-            actionHold.worldPending = nil
-            FinishActionIntent("confirmed", "grant_observed", false)
-        end
-        return
-    end
+    -- action until new player input, a run boundary or, for a Take, its own
+    -- grant (DispatchLevelStep) ends it.
+    if intent.crossedWorld then return end
     if type(board) ~= "table" then
         if intent.state == "prepared" then
             FinishActionIntent("superseded", "board_unavailable_before_submit", false)
@@ -3010,6 +2988,19 @@ end
 
 local function DispatchLevelStep(level, plan, slots, owned, flags,
                                  disabledLevers, static, locked)
+    -- The one supported result after a loading screen: a Take's grant in the
+    -- granted mirror, by the rule of the adapter's ConfirmAwaitingGrant. The
+    -- leave sets spellId only when that Select was the one pending item (and
+    -- the crossed intent's own spell). Checked here, before every level
+    -- path, so the hold and its intent end together.
+    local held = actionHold.worldPending
+    if held and held.spellId and held.baseline
+        and Adapter.GrantedCount(held.spellId) > held.baseline then
+        actionHold.worldPending = nil
+        if actionIntent and actionIntent.crossedWorld then
+            FinishActionIntent("confirmed", "grant_observed", false)
+        end
+    end
     if level == 1 then
         StepArm(level, plan, owned, slots, disabledLevers, static, locked)
         if plan.advisorOnly then
@@ -3364,19 +3355,34 @@ end
                 actionIntent.crossedWorld = true
                 FinishActionIntent("uncertain", "world_transition", true)
             end
-            -- Also a latch the adapter still holds with no runtime intent: a
-            -- board read one poll before the leave already recorded the
-            -- action as a result, or the player sent it. A later watchdog
-            -- release of that latch is not a result either.
-            local kind, spellId, baseline = Adapter.PendingAction()
+            -- Also every latch the adapter still holds, with or without a
+            -- runtime intent: a board read one poll before the leave may
+            -- already have recorded the action as a result, or the player
+            -- sent it. A later watchdog release of a latch is not a result.
+            -- A grant can end the hold only when a single Select is pending
+            -- and, with a crossed intent, it is that Take's own spell.
+            local pendingNow = Adapter.PendingActions()
             local crossed = actionIntent and actionIntent.crossedWorld
-            if not actionHold.worldPending and (crossed or kind) then
-                local label = crossed and actionIntent.action.type or kind
-                if label == "select" then label = "take" end
-                local byGrant = label == "take" and kind == "select"
-                actionHold.worldPending = { label = tostring(label),
-                    spellId = byGrant and spellId or nil,
-                    baseline = byGrant and baseline or nil }
+            if not actionHold.worldPending and (crossed or #pendingNow > 0) then
+                local labels, named = {}, {}
+                local function Name(kind)
+                    kind = kind == "select" and "take" or tostring(kind)
+                    if not named[kind] then
+                        named[kind] = true
+                        labels[#labels + 1] = kind
+                    end
+                end
+                if crossed then Name(actionIntent.action.type) end
+                for i = 1, #pendingNow do Name(pendingNow[i].kind) end
+                table.sort(labels)
+                local only = #pendingNow == 1 and pendingNow[1] or nil
+                local byGrant = only and only.kind == "select"
+                    and only.spellId and only.baseline
+                    and (not crossed or (actionIntent.action.type == "take"
+                        and tonumber(actionIntent.action.spellId) == only.spellId))
+                actionHold.worldPending = { label = table.concat(labels, " and "),
+                    spellId = byGrant and only.spellId or nil,
+                    baseline = byGrant and only.baseline or nil }
             end
             return autoEnabled and "held" or "off"
         end
