@@ -33,7 +33,9 @@ local function V1Marker(id,at)
 end
 local function Map(fill,from,to) local m={};for i=from,to do fill(m,i) end;return m end
 local function Db(builds,tombs,marks)
- return {settingsVersion=5,settings={},chars={},communityBuilds=builds,syncTombstones=tombs,communityRetentionEvictions=marks}
+ -- A verified saved format 5 carries its account ledger (accountCharacters);
+ -- without it the profile is read-only and nothing can be written into it.
+ return {settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds=builds,syncTombstones=tombs,communityRetentionEvictions=marks}
 end
 local function Boot(db,shipped)
  F.fileHooks=shipped and {[ [[data\BundledBuilds.lua]] ]=function()Nexus.BundledBuilds.builds=shipped end} or nil

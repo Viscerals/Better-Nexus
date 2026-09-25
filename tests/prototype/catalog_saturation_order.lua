@@ -58,7 +58,9 @@ end
 -- record for a new ID, keep their own reasons and are not counted as "full".
 -- An update of the shipped-only build is not a new build. Only a valid new
 -- build is refused as full, and that refusal is counted.
-local db={settingsVersion=5,settings={},chars={},communityBuilds={},
+-- A verified saved format 5 carries its account ledger (accountCharacters);
+-- without it the profile is read-only and nothing can be written into it.
+local db={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={},
  syncTombstones={['del-1']={stamp=1,author='OldPeer'}},
  communityRetentionEvictions={['gone-1']=Marker('gone-1',clock-DAY)}}
 for i=1,2047 do db.communityBuilds['b-'..i]=Record('b-'..i) end
@@ -93,7 +95,7 @@ check(ChatCount('Community catalog full: new shared builds are refused.')==1
 -- 2. A receiver batch at 2047 builds: the first new build fits and commits,
 -- the second new build is refused as full, an update of an existing build
 -- commits, and the number 5 (a new typed ID) is refused as full.
-local db2={settingsVersion=5,settings={},chars={},communityBuilds={}}
+local db2={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={}}
 for i=1,2047 do db2.communityBuilds['full-'..i]=Record('full-'..i) end
 C=Boot(db2);Run(5)
 check(C.Status().buildIdentityCount==2047 and C.ManualPreparationStatus().ready,'fixture: 2047 builds, catalog idle')
@@ -124,7 +126,7 @@ check(rec.refused==2 and rec.refusedBuilds==2,'two build refusals are counted: '
 -- 3. 2048 removal markers: a removal from a sender who does not own the build
 -- keeps its owner reason and is not counted; the owner's removal is refused
 -- because the map is full, is counted, and the build stays.
-local db3={settingsVersion=5,settings={},chars={},
+local db3={settingsVersion=5,accountCharacters={},settings={},chars={},
  communityBuilds={['keep-1']=Record('keep-1',{ownerKey='Peer@Realm'})},syncTombstones={}}
 for i=1,2048 do db3.syncTombstones['del-'..i]={stamp=1,author='OldPeer'} end
 C=Boot(db3);Run(5)
@@ -148,7 +150,7 @@ check(ChatCount('Community removal markers full: new build removals are refused.
 -- maintenance transaction an expiry makes room for exactly one eviction; the
 -- next eviction is refused and counted. The commit keeps 2048 markers.
 local function MarkerDb(ranked)
- local d={settingsVersion=5,settings={communityRetentionEnabled=ranked or nil},chars={},communityBuilds={},
+ local d={settingsVersion=5,accountCharacters={},settings={communityRetentionEnabled=ranked or nil},chars={},communityBuilds={},
   communityRetentionEvictions={}}
  for i=1,2048 do d.communityRetentionEvictions['r-'..i]=Marker('r-'..i,i<=30 and clock-31*DAY or clock-DAY) end
  for i=1,100 do d.communityBuilds['auto-'..i]=Record('auto-'..i,{autoDps=true,lastModified=i}) end
@@ -188,7 +190,7 @@ check(evicted>=1 and evicted<=30 and Count(marks)==2048-30+evicted and Count(mar
 -- 5. An imported build is a new build: at 2048 builds it is refused before it
 -- is staged (a malformed one keeps its own reason first); at 2047 builds one
 -- insert is staged and a second insert in the same transaction is refused.
-local db5={settingsVersion=5,settings={},chars={},communityBuilds={}}
+local db5={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={}}
 for i=1,2048 do db5.communityBuilds['b-'..i]=Record('b-'..i) end
 C=Boot(db5);Run(5)
 handle=Maintenance(C,'publish-imported')
@@ -201,7 +203,7 @@ check(s2==false and s2Why=='ROOT_SLOT_LIMIT' and Refused(C)==1,'an insert at 204
 C.CancelMaintenance(handle)
 check(C.ManualPreparationStatus().ready and C.Get('new-x')==nil and Count(Bundle().communityBuilds)==2048,
  'nothing was staged or committed')
-local db5b={settingsVersion=5,settings={},chars={},communityBuilds={}}
+local db5b={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={}}
 for i=1,2047 do db5b.communityBuilds['b-'..i]=Record('b-'..i) end
 C=Boot(db5b);Run(5)
 check(C.Status().buildIdentityCount==2047,'fixture: 2047 builds')
@@ -216,7 +218,7 @@ C.CancelMaintenance(handle)
 -- period such as a first compaction). The request made when the catalog is
 -- ready is retried with a growing delay and still records the first
 -- observations of legacy markers once the catalog is free.
-local db6={settingsVersion=5,settings={},chars={},communityBuilds={},
+local db6={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={},
  communityRetentionEvictions={['legacy-1']=1700000000,['legacy-2']=1700000001}}
 local busyUntil,busyRefusals,Hh=nil,0,nil
 F.fileHooks={[ [[core\DataRetention.lua]] ]=function()
@@ -261,7 +263,7 @@ check(seen['legacy-2']==keep2,'the valid first observation is kept across the re
 -- open reservation. That reservation stays valid: its next use is judged on
 -- capacity (refused as full), not refused as stale. (A committed change of the
 -- catalog makes an open reservation stale by design, so no room is made here.)
-local db8={settingsVersion=5,settings={},chars={},communityBuilds={}}
+local db8={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={}}
 for i=1,2048 do db8.communityBuilds['b-'..i]=Record('b-'..i) end
 C=Boot(db8);Run(5)
 local held,heldWhy=C.BeginAllocationClaim('held-1')
