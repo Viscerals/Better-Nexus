@@ -834,7 +834,15 @@ function Lifecycle.New(options)
         Adapter.OnEvent(event)
         -- Ordinary account registration, gated on readiness (1198-1206).
         SubmitOrdinaryRegistration()
-        if Store.Settings().autoPick then Adapter.SetSoloPicker() end
+        -- The client's own auto-accept option is changed only where the
+        -- remembered prior value can be saved to restore it later. A read-only
+        -- saved root keeps no such value, so start-up leaves the option as the
+        -- player set it (automation still waits while it is on).
+        local readOnlyRoot = Nexus.MainInternals.SavedRootReadOnlyV1
+        if Store.Settings().autoPick
+            and not (type(readOnlyRoot) == "function" and readOnlyRoot()) then
+            Adapter.SetSoloPicker()
+        end
         Adapter.RequestSlots()
         local automation = EnsureAutomation()
         if dependencies.JournalTab then

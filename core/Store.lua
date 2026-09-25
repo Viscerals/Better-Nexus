@@ -379,6 +379,139 @@ local function ExactInteger(value)
         and value == math.floor(value)
 end
 
+-- A saved root this build classifies as future, unverified or malformed is
+-- read-only (docs/SAVED_FORMAT_COMPATIBILITY.md, "Read-only saved data").
+-- This table is the one owner of that verdict and of the session-only
+-- settings such a root runs with. It is one file-level local on purpose (the
+-- Lua 5.1 local ceiling).
+local ReadOnlyRoot = {
+    -- Settings whose true value authorizes an automatic action. In a read-only
+    -- root only an exact saved boolean true keeps one on; false, absent or any
+    -- other value is off. Shipped defaults never switch one on here.
+    PERMISSIONS = {
+        autoPick=true, autoActivate=true, autoDisable=true, autoSave=true,
+        autoBanish=true, autoReroll=true, autoFreeze=true,
+        autoLockEchoes=true, communityRetentionEnabled=true,
+    },
+    -- Known settings outside the permissions whose meaning this build owns,
+    -- beyond the numeric and list defaults. Anything else in the saved
+    -- settings (another addon's Sync controls, unknown fields) is not copied
+    -- into the settings the session runs with.
+    BOOLEANS = {updateNotifications=true, useCurrentLocksForUntagged=true},
+    ANCHOR_NAMES = 32, TEXT = 128, LEVER_OPT_OUTS = 4096,
+}
+
+-- The class ("future", "unverified" or "malformed") of a read-only root, or nil.
+function ReadOnlyRoot.Class(db)
+    if type(db) ~= "table" or not HasFutureSettingsOwner(db) then return nil end
+    return (SavedFormat.Classify(db))
+end
+
+-- Is `value` a valid saved value for the known setting `key`? A nil result
+-- means the key is not one this build interprets in a read-only root.
+function ReadOnlyRoot.Valid(key, value)
+    if ReadOnlyRoot.PERMISSIONS[key] or ReadOnlyRoot.BOOLEANS[key] then
+        return type(value) == "boolean"
+    elseif key == "updateChannel" then
+        return value == "stable" or value == "test"
+    elseif key == "lastChangelogSeen" then
+        return type(value) == "string" and #value <= ReadOnlyRoot.TEXT
+    elseif key == "anchorSpellId" then
+        return value == nil or (ExactInteger(value) and value > 0)
+    elseif key == "anchorNames" then
+        if not PlainTable(value) then return false end
+        local count = 0
+        for index, name in pairs(value) do
+            count = count + 1
+            if type(index) ~= "number" or index ~= math.floor(index)
+                or index < 1 or index > ReadOnlyRoot.ANCHOR_NAMES
+                or type(name) ~= "string" or #name > ReadOnlyRoot.TEXT then
+                return false
+            end
+        end
+        return count == #value
+    elseif key == "leverOptOut" then
+        if not PlainTable(value) then return false end
+        local count = 0
+        for lever in pairs(value) do
+            count = count + 1
+            if count > ReadOnlyRoot.LEVER_OPT_OUTS
+                or not (ExactInteger(lever) or type(lever) == "string") then
+                return false
+            end
+        end
+        return true
+    end
+    local profile = Nexus.DefaultProfile
+    local default = profile and type(profile.defaultSettings) == "table"
+        and profile.defaultSettings[key] or nil
+    if type(default) == "number" then return ExactInteger(value) and value >= 0 end
+    return nil
+end
+
+-- The value a read-only session runs with for a valid saved value: a detached
+-- copy, with a lever opt-out normalized to true (any truthy saved marker keeps
+-- the lever opted out).
+function ReadOnlyRoot.Normalize(key, value)
+    if key == "leverOptOut" then
+        local out = {}
+        for lever, optedOut in pairs(value) do
+            if optedOut then out[lever] = true end
+        end
+        return out
+    end
+    return DeepCopy(value)
+end
+
+-- The settings a read-only session runs with, built from the saved settings
+-- by explicit per-key validation. Never the saved table and never written
+-- back. An invalid lever opt-out list cannot be honored, so lever automation
+-- stays off rather than acting on a lever the player may have opted out of.
+function ReadOnlyRoot.BuildSettings(saved)
+    local profile = Nexus.DefaultProfile
+    local defaults = profile and type(profile.defaultSettings) == "table"
+        and profile.defaultSettings or {}
+    local source = PlainTable(saved) and saved or {}
+    local view = {}
+    for key, default in pairs(defaults) do
+        if not ReadOnlyRoot.PERMISSIONS[key] then view[key] = DeepCopy(default) end
+    end
+    for key in pairs(ReadOnlyRoot.PERMISSIONS) do
+        view[key] = rawget(source, key) == true
+    end
+    for key, value in pairs(source) do
+        if not ReadOnlyRoot.PERMISSIONS[key] and type(key) == "string" then
+            if ReadOnlyRoot.Valid(key, value) then
+                view[key] = ReadOnlyRoot.Normalize(key, value)
+            elseif key == "leverOptOut" then
+                view.autoActivate, view.autoDisable = false, false
+            end
+        end
+    end
+    return view
+end
+
+-- The one settings table for a read-only root, stable across reads and
+-- rebuilt only when the database or its saved settings table is another one
+-- (a reload or another profile never inherits this session's edits).
+function ReadOnlyRoot.Settings(db)
+    local current = ReadOnlyRoot.settings
+    local source = rawget(db, "settings")
+    if current and current.db == db and current.source == source then
+        return current.view
+    end
+    local view = ReadOnlyRoot.BuildSettings(source)
+    ReadOnlyRoot.settings = {db=db, source=source, view=view}
+    return view
+end
+
+-- Internals seam (the public Store inventory stays fixed). `db` defaults to
+-- the saved root the client loaded.
+Nexus.MainInternals.SavedRootReadOnlyV1 = function(db)
+    if db == nil then db = NexusDB end
+    return ReadOnlyRoot.Class(db)
+end
+
 -- Returns "ABSENT" | "CURRENT" | "FUTURE" | "MALFORMED", marker.
 -- The exact future discriminator is a plain one-key namespace and a plain
 -- marker whose raw version is finite, exact, integral, and greater than one.
@@ -1992,16 +2125,57 @@ function Store.SettingsVersion()
 end
 
 -- Live subtable; callers re-fetch rather than caching so rename migration and
--- invalid pre-init globals are never latched.
+-- invalid pre-init globals are never latched. A read-only saved root gets its
+-- one validated session settings table (ReadOnlyRoot.Settings): the same
+-- table on every read, so the UI and the runtime see the same values, and
+-- never the saved table.
 function Store.Settings()
     local db = NexusDB
     if db and not HasFutureSettingsOwner(db)
         and type(db.settings) == "table" then return db.settings end
+    if ReadOnlyRoot.Class(db) then return ReadOnlyRoot.Settings(db) end
     if not transientSettings then
         local profile = Nexus.DefaultProfile
         transientSettings = DeepCopy(profile and profile.defaultSettings or {})
     end
     return transientSettings
+end
+
+-- MASTER-RC-001, the counted private `UpdateSettingsV1` entry: a user control
+-- changes one setting through the Store owner instead of writing a settings
+-- table it found itself, and learns whether the change was saved.
+--   {mode="durable"}                      written into the saved settings
+--   {mode="session", format=, savedFormat=, note=} the saved root is
+--       read-only: the change applies to this session's settings only and the
+--       saved data is unchanged; `note` says why in words (a value this build
+--       cannot validate is refused instead)
+--   {mode="session", reason="database"}    no saved root is loaded yet
+--   nil, "invalid-key" | "invalid-value"   refused; nothing changed
+-- The existing direct writers of the live table keep their exact behavior;
+-- this entry is the route for the controls that must report the outcome.
+function StoreAuthorityOwner.UpdateSettingsV1(key, value)
+    if type(key) ~= "string" or key == "" then return nil, "invalid-key" end
+    local db = NexusDB
+    local class = ReadOnlyRoot.Class(db)
+    if class then
+        local valid = ReadOnlyRoot.Valid(key, value)
+        if valid == nil then return nil, "invalid-key" end
+        if not valid then return nil, "invalid-value" end
+        local settings = ReadOnlyRoot.Settings(db)
+        if value == nil then settings[key] = nil
+        else settings[key] = ReadOnlyRoot.Normalize(key, value) end
+        local _, savedFormat = SavedFormat.Classify(db)
+        return {mode="session", format=class, savedFormat=savedFormat,
+            note=savedFormat and string.format(
+                "saved data format %d is kept unchanged and read-only", savedFormat)
+                or "the saved data format marker is not valid, so saved data is kept unchanged and read-only"}
+    end
+    local settings = Store.Settings()
+    settings[key] = value
+    if type(db) == "table" and rawget(db, "settings") == settings then
+        return {mode="durable"}
+    end
+    return {mode="session", reason="database"}
 end
 
 -- Per-character live subtable. The full local identity is re-read on every
