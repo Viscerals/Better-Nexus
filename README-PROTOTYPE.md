@@ -135,10 +135,10 @@ cleanup (some extra copies removed, or an even swap of requested copies).
 individual Echo, and Orb investment is not part of the comparison.
 
 The check does not wait for a new run. At level 80 after a finished run,
-turning Auto ON, changing the assigned Wishlist or saving edits to it makes
-Nexus check again right away, so a replacement can follow within seconds.
-Assigning by itself changes nothing; the save that may follow is the automatic
-save described here.
+turning Auto ON or changing the assigned Wishlist makes Nexus check again right
+away, so a replacement can follow within seconds. Saving edits to the assigned
+Wishlist can also lead to a replacement without a new run. Assigning by itself
+changes nothing; the save that may follow is the automatic save described here.
 
 Example: your Saved Build holds an Echo you value. The next completed run loses
 one requested copy but gains three other requested copies. That is +2 overall
@@ -148,9 +148,8 @@ recovered, and Nexus cannot bring that Echo back. The save does not mean the
 lost Echo was judged worthless, or that you approved that individual trade.
 
 Nexus cannot undo a completed server save. There is no separate automatic-save
-switch: Auto OFF stops it, together with Nexus's other automatic Echo actions.
-Auto starts OFF each session; keep it OFF if you want Nexus to leave the
-current Saved Build untouched.
+switch: Auto OFF stops it. Auto starts OFF each session; keep it OFF if you want
+Nexus to leave the current Saved Build untouched.
 
 ## Orbs / Lost Memories
 
