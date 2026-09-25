@@ -127,12 +127,15 @@ local function EnsureFrame()
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.body = body
-    body:SetPoint("TOPLEFT", 24, -62)
-    body:SetSize(372, 58)
+    -- Uses the gap above the buttons (top -132); the window size is unchanged.
+    body:SetPoint("TOPLEFT", 24, -56)
+    body:SetSize(372, 74)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
     body:SetText(
-        "Already have a Saved Build? Assign the Wishlist you want it to follow.\n" ..
+        "Already have a Saved Build? Assign the Wishlist you want it to follow. " ..
+        "|cffffd100With Auto ON, Nexus may replace the active Saved Build with a better finished run. " ..
+        "Keep Auto OFF to leave that slot unchanged.|r\n" ..
         "Starting fresh? Import a Wishlist code or copy a Community build into an editable draft."
     )
 
