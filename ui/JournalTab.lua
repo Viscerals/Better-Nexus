@@ -50,6 +50,13 @@ end
 local ASSET = "Interface\\AddOns\\ProjectEbonhold\\assets\\"
 local NOTE1 = "Compares the assigned Wishlist with the ACTIVE Saved Build."
 local NOTE2 = "|cff8a8a8aSet associations in My Builds. Saved Build activation requires the server's supported level and state.|r"
+-- Assignment only records the target. The later automatic save (Auto ON,
+-- autoSave, Ratchet.Dominates) is what may replace the active Saved Build.
+local ASSIGN_NOTE = "Assigning does not change any Saved Build."
+local AUTO_SAVE_WARNING = "With Auto ON, Nexus may later replace the active Saved Build with a completed run "
+    .. "that improves overall Wishlist progress, or keeps it equal while cleaning up. That run can lack "
+    .. "an Echo you value, even one obtained with Orbs: Orb investment is not compared. "
+    .. "Keep Auto OFF to leave the Saved Build unchanged."
 
 ------------------------------------------------------------------------
 -- Text lines
@@ -1000,7 +1007,9 @@ local function EnsureAssociationPanel(journal)
             if self.SetBackdropBorderColor then self:SetBackdropBorderColor(0.42, 0.72, 0.95, 1) end
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:AddLine("Automation Wishlist", 0.35, 0.8, 1)
-            GameTooltip:AddLine("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown.", 0.82, 0.82, 0.82, true)
+            GameTooltip:AddLine("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown. "
+                .. ASSIGN_NOTE, 0.82, 0.82, 0.82, true)
+            GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, 0.82, 0.25, true)
             GameTooltip:Show()
         end)
         associationPanel.selector:SetScript("OnLeave", function(self)
@@ -1181,6 +1190,16 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 end
             end
             row.nameButton:SetScript("OnClick", AssociateWishlistOnly)
+            row.nameButton:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine("Assign Wishlist", .35, .8, 1)
+                GameTooltip:AddLine("Target: " .. tostring(loadoutName or ""), 1, 1, 1, true)
+                GameTooltip:AddLine("Sets this Wishlist as the target for this loadout. " .. ASSIGN_NOTE,
+                    .82, .82, .82, true)
+                GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, .82, .25, true)
+                GameTooltip:Show()
+            end)
+            row.nameButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
             row.gear:SetScript("OnClick", OpenWishlistEditorOnly)
             row:Show()
         end
@@ -1197,6 +1216,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
                 GameTooltip:AddLine("Unassign Wishlist",1,1,1)
                 GameTooltip:AddLine("Keeps the Wishlist; stops using it for this loadout.",.8,.8,.8,true)
+                GameTooltip:AddLine("Does not change or restore the Saved Build.",.8,.8,.8,true)
                 GameTooltip:Show()
             end)
             row:SetScript("OnLeave",function()GameTooltip:Hide()end)
