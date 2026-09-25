@@ -331,7 +331,23 @@ local forcedTakesBySpell = {}
 local frozeThisBoard = nil       -- board signature we already spent a freeze on
 local refusedBanishSig = nil
 local refusedRerollSig = nil
-local externalPauseUntil = 0
+-- Reasons actions are held while Auto stays selected. One table, not
+-- separate locals: this factory is at Lua 5.1's 200-local limit.
+-- externalUntil: a short pause after the player acted on the board.
+-- World fields: loading-screen transitions inside this UI session. The 3.3.5a
+-- client gives PLAYER_ENTERING_WORLD no login/reload arguments; the evidence
+-- used is that this Lua state saw PLAYER_LEAVING_WORLD first (a login or
+-- /reload starts a new Lua state with Auto OFF). Actions are held from the
+-- leave until the entry that closes it, then for worldSettle seconds and
+-- until the adapter is ready. The settle is pacing only: Adapter.Ready() is
+-- normally already true at a same-session entry, and each action still needs
+-- its own current reads. worldPending: everything that still waited for the
+-- server at the leave (a runtime intent, marked crossedWorld, and every
+-- adapter latch) holds actions after the settle too, until player input, a
+-- run boundary or, when a single Take was pending, its own grant. An entry
+-- with no observed leave is not classified and revokes Auto.
+local actionHold = { externalUntil = 0, worldLeaving = false,
+    worldSettleUntil = nil, worldSettle = 3, worldPending = nil }
 
 -- SAVE state
 local savedThisVisit = false
@@ -432,7 +448,19 @@ end
 
 local function AutoAllowed()
     if not autoEnabled then return false, "manual mode" end
-    if GetTime() < externalPauseUntil then return false, "user acting" end
+    if actionHold.worldLeaving then return false, "loading screen (waiting for world entry)" end
+    if actionHold.worldSettleUntil then
+        if GetTime() < actionHold.worldSettleUntil or not Adapter.Ready() then
+            return false, "settling after world entry"
+        end
+        actionHold.worldSettleUntil = nil
+    end
+    if actionHold.worldPending then
+        return false, "no confirmed result for "
+            .. actionHold.worldPending.label
+            .. " sent before the loading screen -- turn Auto off and on to continue"
+    end
+    if GetTime() < actionHold.externalUntil then return false, "user acting" end
     if Adapter.RivalDetected() then return false, "Another Echo automation addon is loaded -- disable it" end
     if Adapter.AutoAcceptOn() then return false, "client auto-accept re-enabled" end
     if type(Adapter.OrdinaryBoardAllowed) == "function" then
@@ -2014,6 +2042,12 @@ end
 local function ResolveActionIntent(board)
     local intent = actionIntent
     if not intent then return end
+    -- Sent before a loading screen and unresolved at its start: a board read
+    -- after it (missing, changed or the same) and elapsed time are not its
+    -- result. It stays unresolved and AutoAllowed holds every automatic
+    -- action until new player input, a run boundary or, for a Take, its own
+    -- grant (DispatchLevelStep) ends it.
+    if intent.crossedWorld then return end
     if type(board) ~= "table" then
         if intent.state == "prepared" then
             FinishActionIntent("superseded", "board_unavailable_before_submit", false)
@@ -2148,12 +2182,20 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     lastStepContext.boardPresent = board ~= nil
     ResolveActionIntent(board)
     if not board then
-        SetStatus("waiting for board")
+        -- A loading-screen hold keeps its reason visible without a board.
+        local heldOk, heldWhy = true, nil
+        if autoEnabled and actionHold.worldPending then
+            heldOk, heldWhy = AutoAllowed()
+        end
+        SetStatus(heldOk and "waiting for board"
+            or ("auto paused: " .. tostring(heldWhy)))
         local preparePerformance, prepareStarted = BeginPhase("overlayPrepare")
         local model = { status = statusLine, cards = {}, recommendation = "",
             progress = BuildProgress(plan, owned, slots, catalog,
                 nil, nil, static, locked),
-            auto = AutoAllowed() and settings.autoPick,
+            -- The selection, as on the board path: a hold is shown in the
+            -- status line, never as a button that reads OFF.
+            auto = autoEnabled,
             version = Nexus.VERSION }
         FinishPhase(preparePerformance, "overlayPrepare", prepareStarted)
         MeasurePhase("overlayRender", RenderPanel, model)
@@ -2447,6 +2489,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
                 forcedTakesBySpell[fid] = (forcedTakesBySpell[fid] or 0) + 1
             end
         end
+        -- The granted count before the send: a later rise is this Take's
+        -- result (the ConfirmAwaitingGrant rule), used at a loading screen.
+        intent.grantBaseline = Adapter.GrantedCount(immutable.spellId)
         local ok, err = Adapter.Take(immutable.spellId)
         if ok then
             lastDecision = immutable
@@ -2517,7 +2562,11 @@ local function StepSave(level, plan, slots, owned, static, locked)
     MeasurePhase("overlayRender", RenderIdlePanel,
         plan, owned, slots, static.catalog, static, locked)
     local settings = Store.Settings()
-    local automationAllowed = AutoAllowed()
+    local automationAllowed, heldWhy = AutoAllowed()
+    if not automationAllowed and autoEnabled and actionHold.worldPending then
+        -- The save gate is held too; show why, as the board path does.
+        SetStatus("auto paused: " .. tostring(heldWhy))
+    end
     if not automationAllowed or not settings.autoSave or savedThisVisit then
         return
     end
@@ -2787,6 +2836,7 @@ local function ResetRunBoundary()
     if actionIntent then
         FinishActionIntent("superseded", "run_boundary", false)
     end
+    actionHold.worldPending = nil -- the dead run's pending action ends here
     lastDecision = nil
     lastLoggedSig = nil
     lastBoardForRerollWatch = nil
@@ -2811,12 +2861,12 @@ local function HandleLevelTransition(level, boundaryGeneration)
         -- A short user-action pause belongs to the board/level where it was
         -- observed. Never let it suppress the first actionable board after a
         -- genuine progression transition.
-        externalPauseUntil = 0
+        actionHold.externalUntil = 0
         if level ~= 80 then savedThisVisit = false end
         lastLevelSeen = level
     end
     if Adapter.ExternalActionSeen() and not levelChanged then
-        externalPauseUntil = GetTime() + 3
+        actionHold.externalUntil = GetTime() + 3
     end
 end
 
@@ -2941,6 +2991,19 @@ end
 
 local function DispatchLevelStep(level, plan, slots, owned, flags,
                                  disabledLevers, static, locked)
+    -- The one supported result after a loading screen: a Take's grant in the
+    -- granted mirror, by the rule of the adapter's ConfirmAwaitingGrant. The
+    -- leave sets spellId only when that Select was the one pending item (and
+    -- the crossed intent's own spell). Checked here, before every level
+    -- path, so the hold and its intent end together.
+    local held = actionHold.worldPending
+    if held and held.spellId and held.baseline
+        and Adapter.GrantedCount(held.spellId) > held.baseline then
+        actionHold.worldPending = nil
+        if actionIntent and actionIntent.crossedWorld then
+            FinishActionIntent("confirmed", "grant_observed", false)
+        end
+    end
     if level == 1 then
         StepArm(level, plan, owned, slots, disabledLevers, static, locked)
         if plan.advisorOnly then
@@ -3112,8 +3175,11 @@ local function ScheduleKnownDeadlines()
         local resumeAt = Adapter.TomeMutationResumeAt()
         if resumeAt and resumeAt > now then RequestStepAt(resumeAt) end
     end
-    if externalPauseUntil and externalPauseUntil > now then
-        RequestStepAt(externalPauseUntil)
+    if actionHold.externalUntil and actionHold.externalUntil > now then
+        RequestStepAt(actionHold.externalUntil)
+    end
+    if actionHold.worldSettleUntil and actionHold.worldSettleUntil > now then
+        RequestStepAt(actionHold.worldSettleUntil)
     end
     if actionIntent then
         if actionIntent.state == "prepared"
@@ -3248,6 +3314,13 @@ end
             -- Authorization changed, represented data did not. Coalesce one
             -- bounded decision evaluation without invalidating static state.
             authorizationStepPending = true
+            -- New player input ends the hold of an action that a loading
+            -- screen left unresolved. Its result stays unknown: it is
+            -- recorded as uncertain, never as confirmed.
+            actionHold.worldPending = nil
+            if actionIntent and actionIntent.crossedWorld then
+                FinishActionIntent("uncertain", "player_resumed", false)
+            end
         else
             authorizationStepPending = false
             if actionIntent and actionIntent.state == "prepared" then
@@ -3260,6 +3333,134 @@ end
             end
         end
         return autoEnabled
+    end
+    -- Called by Main before the lifecycle sees the event. Returns "held",
+    -- "resuming", "revoked" or "off" (Auto was not selected).
+    function M.OnWorldEvent(event)
+        if event == "PLAYER_LEAVING_WORLD" then
+            actionHold.worldLeaving = true
+            actionHold.worldSettleUntil = nil
+            -- A prepared (unsubmitted) action is dropped, not kept for after
+            -- the loading screen. A sent action without a result is marked:
+            -- nothing is resent, and it stays unresolved (ResolveActionIntent,
+            -- AutoAllowed). (Inline, not a helper local: this factory is at
+            -- Lua 5.1's 200-local limit.)
+            -- Every request the adapter still sees (GameAdapter.PendingActions;
+            -- a live latch next to a Select awaiting its grant is a separate
+            -- request, even for the same spell).
+            local pendingNow = Adapter.PendingActions()
+            local sent = actionIntent and (actionIntent.state == "submitted"
+                or actionIntent.state == "uncertain"
+                or actionIntent.state == "expired")
+            local sameSpellLatch = false
+            for i = 1, #pendingNow do
+                local item = pendingNow[i]
+                if actionIntent and item.kind == "select"
+                    and item.source == "latch"
+                    and item.spellId == tonumber(actionIntent.action.spellId) then
+                    sameSpellLatch = true
+                end
+            end
+            if actionIntent and actionIntent.state == "prepared" then
+                local revokedDeadline = actionIntent.readyAt
+                FinishActionIntent("superseded", "world_transition", false)
+                if revokedDeadline ~= nil and nextStepAt == revokedDeadline then
+                    nextStepAt = nil
+                    ScheduleKnownDeadlines()
+                end
+            elseif sent and not actionIntent.crossedWorld
+                and not sameSpellLatch
+                and actionIntent.action.type == "take"
+                and actionIntent.grantBaseline
+                and Adapter.GrantedCount(actionIntent.action.spellId)
+                    > actionIntent.grantBaseline then
+                -- Its grant is already visible (for example at level 80,
+                -- where no StepRun resolves it) and no other request for the
+                -- same spell is pending: this is its result. A Take that was
+                -- never sent, or one with another same-spell request pending,
+                -- cannot be matched to a grant.
+                FinishActionIntent("confirmed", "grant_observed", false)
+            elseif sent then
+                actionIntent.crossedWorld = true
+                FinishActionIntent("uncertain", "world_transition", true)
+            end
+            -- Also every latch the adapter still holds, with or without a
+            -- runtime intent: a board read one poll before the leave may
+            -- already have recorded the action as a result, or the player
+            -- sent it. A later watchdog release of a latch is not a result.
+            -- A grant can end the hold only when a single Select is pending
+            -- and, with a crossed intent, it is that Take's own tracked
+            -- request (not another latch for the same spell). A later leave
+            -- adds its items to an open hold, and keeps the grant release
+            -- only if that same Select is still all that is pending.
+            local crossed = actionIntent and actionIntent.crossedWorld
+            local held = actionHold.worldPending
+            if held or crossed or #pendingNow > 0 then
+                local only = #pendingNow == 1 and pendingNow[1] or nil
+                local byGrant = only and only.kind == "select"
+                    and only.spellId and only.baseline
+                    and (not crossed or (actionIntent.action.type == "take"
+                        and only.source ~= "latch"
+                        and tonumber(actionIntent.action.spellId) == only.spellId))
+                if not held then
+                    held = { kinds = {}, label = "",
+                        spellId = byGrant and only.spellId or nil,
+                        baseline = byGrant and only.baseline or nil }
+                    actionHold.worldPending = held
+                elseif held.spellId and #pendingNow > 0
+                    and not (byGrant and only.spellId == held.spellId) then
+                    held.spellId, held.baseline = nil, nil
+                end
+                -- Requests per kind, for a truthful reason. A crossed Take is
+                -- the adapter's own tracked Select ("own"/"grant") when one is
+                -- listed; otherwise it is one more Take request. Freeze,
+                -- Banish and Reroll have one client latch each and no grant
+                -- path; a crossed one is named once with its latch.
+                local counts, tracked = {}, false
+                for i = 1, #pendingNow do
+                    local kind = tostring(pendingNow[i].kind)
+                    kind = kind == "select" and "take" or kind
+                    counts[kind] = (counts[kind] or 0) + 1
+                    if kind == "take" and pendingNow[i].source ~= "latch" then
+                        tracked = true
+                    end
+                end
+                if crossed then
+                    local kind = tostring(actionIntent.action.type)
+                    if kind == "take" then
+                        if not tracked then counts.take = (counts.take or 0) + 1 end
+                    elseif not counts[kind] then
+                        counts[kind] = 1
+                    end
+                end
+                for kind, n in pairs(counts) do
+                    if n > (held.kinds[kind] or 0) then held.kinds[kind] = n end
+                end
+                local names, labels = {}, {}
+                for kind in pairs(held.kinds) do names[#names + 1] = kind end
+                table.sort(names)
+                for i = 1, #names do
+                    local n = held.kinds[names[i]]
+                    labels[i] = n > 1 and (n .. " " .. names[i] .. " requests") or names[i]
+                end
+                held.label = table.concat(labels, " and ")
+            end
+            return autoEnabled and "held" or "off"
+        end
+        local closesTransition = event == "PLAYER_ENTERING_WORLD"
+            and actionHold.worldLeaving
+        actionHold.worldLeaving = false
+        actionHold.worldSettleUntil = nil
+        if closesTransition then
+            actionHold.worldSettleUntil = GetTime() + actionHold.worldSettle
+            if not autoEnabled then return "off" end
+            RequestStepAt(actionHold.worldSettleUntil)
+            return "resuming"
+        end
+        -- Logout, or an entry this session cannot classify (no leave seen).
+        if not autoEnabled then return "off" end
+        M.ToggleAuto()
+        return "revoked"
     end
     function M.RecomputeStats()
         local out = {}

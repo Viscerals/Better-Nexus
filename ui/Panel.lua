@@ -165,10 +165,19 @@ local function ShortName(v, maxChars)
     return displayText and displayText(s, 1024, false) or ""
 end
 
+-- Auto button labels (plain text; AutoLabel adds the state colour) and their
+-- fit. This code sets no width limit on the label, so `inset` is a chosen
+-- per-side margin kept clear of the button's end caps (not a template value).
+-- AUTO_LABEL.Fit (below) measures the widest label with the button's own font
+-- object and reduces only that object's size when it does not fit, never
+-- below minSize. The tooltip names the full control.
+local AUTO_LABEL = { on = "Auto ON", off = "Auto OFF", unknown = "Auto --",
+    inset = 6, minSize = 9, font = "NexusAutoButtonFont" }
+
 local function AutoLabel(auto)
-    if auto == nil then return "Automation: --" end
-    if auto then return "|cff2ee62eAutomation: ON|r" end
-    return "|cffe63c3cAutomation: OFF|r"
+    if auto == nil then return AUTO_LABEL.unknown end
+    if auto then return "|cff2ee62e" .. AUTO_LABEL.on .. "|r" end
+    return "|cffe63c3c" .. AUTO_LABEL.off .. "|r"
 end
 
 local function FmtDps(dps)
@@ -260,6 +269,72 @@ local function SetOwnedButtonFont(widget, font)
     end
 end
 
+-- Fit of the Auto labels to this button (see AUTO_LABEL). The button uses its
+-- own font object, a copy of the owned normal font: the shared objects are
+-- never changed. Runs from the one-shot font pass and the footer layout, not
+-- per frame; the result is cached until the base font or the button width
+-- changes. Returns { width, budget, fits, size, baseSize, adjustable }.
+function AUTO_LABEL.Fit(force)
+    if not autoBtn then return nil end
+    local layout = Nexus.LayoutMetrics
+    local base = layout and _G[layout.FontObject("normal")]
+    local path, size, flags
+    if base and type(base.GetFont) == "function" then
+        local ok, p, s, f = pcall(base.GetFont, base)
+        if ok then path, size, flags = p, tonumber(s), f end
+    end
+    local width = tonumber(autoBtn:GetWidth()) or 72
+    local key = tostring(path) .. "|" .. tostring(size) .. "|" .. tostring(width)
+    if not force and autoBtn._nexusFit and autoBtn._nexusFitKey == key then
+        return autoBtn._nexusFit
+    end
+    local font = _G[AUTO_LABEL.font]
+    if not font and base and path and type(CreateFont) == "function" then
+        local ok, created = pcall(CreateFont, AUTO_LABEL.font)
+        if ok and created then
+            font = created
+            -- Colour and shadow come from the owned normal font.
+            if type(font.SetFontObject) == "function" then
+                pcall(font.SetFontObject, font, base)
+            end
+        end
+    end
+    -- A font string needs a font before SetText; with neither font there is
+    -- nothing to measure, and the button keeps the owned normal font.
+    if not (font or base) then return nil end
+    local probe = autoBtn._nexusFitProbe
+    if not probe then
+        probe = autoBtn:CreateFontString(nil, "OVERLAY")
+        if not probe then return nil end
+        probe:Hide()
+        autoBtn._nexusFitProbe = probe
+    end
+    local budget = width - 2 * AUTO_LABEL.inset
+    local fitSize, widest = size, 0
+    for _ = 1, 8 do
+        if font and path and fitSize and type(font.SetFont) == "function" then
+            pcall(font.SetFont, font, path, fitSize, flags or "")
+        end
+        if type(probe.SetFontObject) == "function" then
+            pcall(probe.SetFontObject, probe, font or base)
+        end
+        widest = 0
+        for _, text in ipairs({ AUTO_LABEL.on, AUTO_LABEL.off, AUTO_LABEL.unknown }) do
+            probe:SetText(text)
+            widest = math.max(widest, tonumber(probe:GetStringWidth()) or 0)
+        end
+        if widest <= budget or not (font and path and fitSize)
+            or fitSize <= AUTO_LABEL.minSize then break end
+        fitSize = math.max(AUTO_LABEL.minSize,
+            math.floor(fitSize * budget / widest))
+    end
+    if font then SetOwnedButtonFont(autoBtn, font) end
+    autoBtn._nexusFitKey = key
+    autoBtn._nexusFit = { width = widest, budget = budget, fits = widest <= budget,
+        size = fitSize, baseSize = size, adjustable = font ~= nil }
+    return autoBtn._nexusFit
+end
+
 function M.ApplyOwnedFonts()
     local layout = Nexus.LayoutMetrics
     if not (layout and frame) then return false end
@@ -285,6 +360,9 @@ function M.ApplyOwnedFonts()
             switchBtn,setupGetStartedBtn,setupImportBtn,autoBtn,buildsBtn,
             leaderboardBtn,menuBtn,
         }) do SetOwnedButtonFont(widget, normal) end
+        -- The Auto button then takes its own fitted font (AUTO_LABEL.Fit);
+        -- if none can be made it keeps the owned normal font above.
+        AUTO_LABEL.Fit(true)
     end
     if frame.toLockLabel and not frame.toLockLabel._nexusOwnedFont then
         SetOwnedFont(frame.toLockLabel, small)
@@ -1333,6 +1411,7 @@ local function LayoutFooter(showAuto, completed)
         autoBtn:Show()
         autoBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 8, 7)
         autoBtn:SetSize(72, 22)
+        AUTO_LABEL.Fit() -- cached; refits only when the font or width changed
 
         buildsBtn:SetPoint("LEFT", autoBtn, "RIGHT", 4, 0)
         buildsBtn:SetSize(84, 22)

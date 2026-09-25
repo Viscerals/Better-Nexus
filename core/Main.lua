@@ -761,7 +761,11 @@ EH:RegisterEvent("PLAYER_REGEN_DISABLED")
 EH:RegisterEvent("PLAYER_REGEN_ENABLED")
 EH:SetScript("OnEvent", function(_, event, ...)
     if event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
-        if AutomationRuntime and AutomationRuntime.AutoEnabled() then AutomationRuntime.ToggleAuto()end
+        -- A loading screen inside this session keeps Auto selected and holds
+        -- actions; logout or an unclassified entry turns it OFF.
+        if AutomationRuntime and AutomationRuntime.OnWorldEvent(event)=="revoked" and Panel.SetAuto then
+            Panel.SetAuto(false)
+        end
     end
     local lifecycle = Lifecycle()
     if lifecycle then return lifecycle.OnEvent(event, ...) end

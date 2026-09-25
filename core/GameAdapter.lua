@@ -2964,6 +2964,61 @@ function A.InFlight()
     return (inFlightKind ~= nil) or awaitingGrant ~= nil or AnyLatch()
 end
 
+-- Read-only, for a caller that must not treat a loading screen as a result:
+-- every request that still waits for the server, by the same rules as
+-- A.InFlight(). A new list of { kind, source, spellId, baseline }, sorted by
+-- kind, spell and source; kind is "select", "freeze", "banish" or "reroll".
+-- source is local bookkeeping, not a server identity:
+--   "own"   the adapter's own in-flight request (its client latch is the
+--           same request and is not listed again);
+--   "grant" the adapter's own Select after its latch cleared, waiting for
+--           its grant;
+--   "latch" any other live client latch (for example the player's click).
+-- A live select latch is never merged with "grant": that request's latch has
+-- already cleared, so a latch seen now is a separate request, even for the
+-- same spell. A Select has its spell and its granted count before the send
+-- (a "latch" Select: the count now). Empty when nothing is pending.
+function A.PendingActions()
+    local out = {}
+    if awaitingGrant then
+        out[#out + 1] = { kind = "select", source = "grant",
+            spellId = awaitingGrant.spellId, baseline = awaitingGrant.baseline }
+    end
+    if inFlightKind == "select" then
+        out[#out + 1] = { kind = "select", source = "own",
+            spellId = pendingOwnPick, baseline = pendingOwnBaseline }
+    elseif inFlightKind then
+        out[#out + 1] = { kind = inFlightKind, source = "own" }
+    end
+    local p = PerksTbl()
+    if p then
+        for kind, field in pairs(LATCH_FIELDS) do
+            if p[field] ~= nil and not deadLatch[kind] then
+                local spellId = kind == "select" and tonumber(p[field]) or nil
+                local ownLatch = inFlightKind == kind and (kind ~= "select"
+                    or spellId == tonumber(pendingOwnPick))
+                if not ownLatch then
+                    out[#out + 1] = { kind = kind, source = "latch",
+                        spellId = spellId,
+                        baseline = spellId and GrantedCountOf(spellId) or nil }
+                end
+            end
+        end
+    end
+    table.sort(out, function(left, right)
+        if left.kind ~= right.kind then return left.kind < right.kind end
+        local l, r = tonumber(left.spellId) or 0, tonumber(right.spellId) or 0
+        if l ~= r then return l < r end
+        return left.source < right.source
+    end)
+    return out
+end
+
+-- The granted-mirror count ConfirmAwaitingGrant compares with a baseline.
+function A.GrantedCount(spellId)
+    return GrantedCountOf(tonumber(spellId))
+end
+
 -- The one confirmation there is: the granted mirror shows the selected spell
 -- above the count it had when the Select was submitted. A board transition,
 -- a cleared latch, elapsed time, a new table with the same contents, or a
