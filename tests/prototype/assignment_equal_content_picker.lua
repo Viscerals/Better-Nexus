@@ -133,17 +133,32 @@ for _,context in ipairs({2,0})do
  -- remain in two other slots: refuse; never redirect by content.
  local p,r=staleRow('Plan B',{[101]={'Plan A',rolled},[102]={'Plan B',variant(1)},[103]={'Plan C',rolled}})
  refused(p,r,context,'wishlist changed; refresh and try again','changed clicked slot, context '..context)
- -- The clicked slot is gone and exactly one live Wishlist has its contents:
- -- follow the moved identity.
+ -- The same, with exactly one equal-content Wishlist elsewhere and under the
+ -- clicked name: still refused, never redirected by contents or name.
+ server({[101]={'Plan A',variant(2)},[102]={'Plan B',rolled},[103]={'Plan C',variant(3)}})
+ p,r=staleRow('Plan B',{[101]={'Plan A',variant(2)},[102]={'Plan B',variant(1)},[103]={'Plan C',variant(3)},[104]={'Plan B',rolled}})
+ refused(p,r,context,'wishlist changed; refresh and try again','changed clicked slot, one same-name match elsewhere, context '..context)
+ -- The clicked slot keeps its contents under a new name: it is still the
+ -- clicked Wishlist.
  server({[101]={'Plan A',variant(2)},[102]={'Plan B',rolled},[103]={'Plan C',variant(3)}})
  pick('Plan C',103,context)
- p,r=staleRow('Plan B',{[101]={'Plan A',variant(2)},[103]={'Plan C',variant(3)},[104]={'Plan B',rolled}})
+ p,r=staleRow('Plan B',{[101]={'Plan A',variant(2)},[102]={'Plan B2',rolled},[103]={'Plan C',variant(3)}})
  r.nameButton:Click()
  local a,record=A.AssignedWishlist(),saved(context)
+ print('EQUAL_CONTENT_RENAMED','context',context,'assigned',a.name,'savedSlot',record and record.slot)
+ assert(not p:IsShown() and a.state=='ready' and a.name=='Plan B2','renamed clicked slot is assigned')
+ assert(record.slot==102 and record.key==k,'renamed clicked slot keeps its slot')
+ -- The clicked slot is gone and exactly one live Wishlist has its contents,
+ -- under another name: follow the moved identity.
+ server({[101]={'Plan A',variant(2)},[102]={'Plan B',rolled},[103]={'Plan C',variant(3)}})
+ pick('Plan C',103,context)
+ p,r=staleRow('Plan B',{[101]={'Plan A',variant(2)},[103]={'Plan C',variant(3)},[104]={'Plan E',rolled}})
+ r.nameButton:Click()
+ a,record=A.AssignedWishlist(),saved(context)
  print('EQUAL_CONTENT_MOVED','context',context,'assigned',a.name,'savedSlot',record and record.slot)
  assert(not p:IsShown(),'unique moved identity: selection closes the picker')
- assert(a.state=='ready' and a.activeSlot==context and a.name=='Plan B','unique moved identity is assigned')
- assert(record.slot==104 and record.name=='Plan B' and record.key==k,'unique moved identity stores its new slot')
+ assert(a.state=='ready' and a.activeSlot==context and a.name=='Plan E','unique moved identity is assigned')
+ assert(record.slot==104 and record.name=='Plan E' and record.key==k,'unique moved identity stores its new slot')
  assert(#H.actions==actions and H.Count('orb-spend')==0,'unique moved identity: no gameplay or service mutation')
  -- The clicked slot is gone and two live Wishlists have its contents, one of
  -- them under the same name: ambiguous. Neither list order nor name decides.
