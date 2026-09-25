@@ -35,7 +35,9 @@ local function Markers() return Bundle().communityRetentionEvictions or {} end
 -- local first observation after the shared catalog is admitted; the marker's
 -- own number is not age. Opaque, malformed and future markers get none.
 local legacyStamp=clock+500*DAY -- a far-future upstream stamp must not matter
-local db={settingsVersion=5,settings={},chars={},communityBuilds={},
+-- A verified saved format 5 carries its account ledger (accountCharacters);
+-- without it the profile is read-only and nothing can be written into it.
+local db={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={},
  syncTombstones={['both-1']={stamp=1,author='Peer'}},
  communityRetentionEvictions={
   ['legacy-1']=legacyStamp,['legacy-2']=1700000000,['both-1']=1700000001,
@@ -107,7 +109,7 @@ check(okBlocked==false and whyBlocked=='TOMBSTONE_RESERVATION','a removal-marked
 
 -- 6. A marker the eviction writer creates now carries its own local time and
 -- expires 30 days after it, across reloads, without a first observation.
-local db6={settingsVersion=5,settings={},chars={},communityBuilds={}}
+local db6={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={}}
 for i=1,3 do db6.communityBuilds['auto-'..i]=Record('auto-'..i,{autoDps=true}) end
 clock=1800000000
 C=Boot(db6);Run(600)
@@ -128,7 +130,7 @@ check(Markers()['auto-1']==nil and Bundle().communityBuilds['auto-2']~=nil,
 -- 7. Interrupted maintenance commits nothing: a staged expiry that is
 -- cancelled leaves the marker, the first observation and the bundle as they
 -- were.
-local db7={settingsVersion=5,settings={},chars={},communityBuilds={},
+local db7={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={},
  communityRetentionEvictions={['legacy-9']=1700000000}}
 clock=1810000000
 C=Boot(db7);Run(20)
@@ -151,7 +153,7 @@ check(Markers()['legacy-9']==nil and FirstSeen()['legacy-9']==nil,
 
 -- 8. A clock that is not trusted at the first observation records nothing,
 -- and nothing expires without age.
-local db8={settingsVersion=5,settings={},chars={},communityBuilds={},
+local db8={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={},
  communityRetentionEvictions={['legacy-8']=1700000000}}
 clock=1820000000
 C=Boot(db8)

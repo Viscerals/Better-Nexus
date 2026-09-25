@@ -5,16 +5,28 @@
 -- A build that accepts format 5 then took the bundle path and refused the empty
 -- wrapper. Here the same placeholder comes from the current code: one start-up
 -- while the marker is 6 (read-only), then the marker is 5 again. Real TOC boot.
+-- This build no longer writes anything into a read-only root (see
+-- readonly_profile_preservation), so stage 1 reproduces the older builds'
+-- catalog commit by withholding the read-only verdict from the catalog alone;
+-- the Store still builds no Store-data wrapper, exactly as those builds did.
 local F=dofile('tests/prototype/format5_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local OTHER='otherchar@ebonhold'
 local function Receipt()return {pending={id='synthetic-pending',spellId=200010,at=11},exposure=1}end
 
 -- Stage 1: a start-up that keeps the data read-only writes the placeholder.
-local db=F.Database({version=6,mutate=function(d)
- d.chars[OTHER]={orbRefinement=Receipt(),loadoutWishlists={},otherUnknown={keep=true}}
-end})
-F.Boot(db)
+local function Stage1Database()
+ return F.Database({version=6,mutate=function(d)
+  d.chars[OTHER]={orbRefinement=Receipt(),loadoutWishlists={},otherUnknown={keep=true}}
+ end})
+end
+F.Boot(Stage1Database())
+check(rawget(NexusDB,'authorityBundle')==nil,'this build writes no bundle into a read-only root')
+local db=Stage1Database()
+F.fileHooks={[ [[core\Store.lua]] ]=function()
+ Nexus.MainInternals.SavedRootReadOnlyV1=function()return nil end
+end}
+F.Boot(db);F.fileHooks=nil
 check(Nexus.Store.StateWriteStatus().format=='future','fixture: stage 1 keeps the data read-only')
 local sd=NexusDB.authorityBundle and NexusDB.authorityBundle.storeData
 check(type(sd)=='table' and next(sd)==nil,'fixture: the bundle holds the empty Store-data placeholder')
