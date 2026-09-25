@@ -341,11 +341,13 @@ local refusedRerollSig = nil
 -- leave until the entry that closes it, then for worldSettle seconds and
 -- until the adapter is ready. The settle is pacing only: Adapter.Ready() is
 -- normally already true at a same-session entry, and each action still needs
--- its own current reads. An action sent before the leave and unresolved at it
--- holds actions after the settle too (crossedWorld). An entry with no
--- observed leave is not classified and revokes Auto.
+-- its own current reads. worldPending: whatever still waited for the server
+-- at the leave (a runtime intent, marked crossedWorld, or only an adapter
+-- latch) holds actions after the settle too, until player input, a run
+-- boundary or, for a Take, its grant. An entry with no observed leave is not
+-- classified and revokes Auto.
 local actionHold = { externalUntil = 0, worldLeaving = false,
-    worldSettleUntil = nil, worldSettle = 3 }
+    worldSettleUntil = nil, worldSettle = 3, worldPending = nil }
 
 -- SAVE state
 local savedThisVisit = false
@@ -447,14 +449,28 @@ end
 local function AutoAllowed()
     if not autoEnabled then return false, "manual mode" end
     if actionHold.worldLeaving then return false, "loading screen (waiting for world entry)" end
-    if actionHold.worldSettleUntil and (GetTime() < actionHold.worldSettleUntil
-        or not Adapter.Ready()) then
-        return false, "settling after world entry"
+    if actionHold.worldSettleUntil then
+        if GetTime() < actionHold.worldSettleUntil or not Adapter.Ready() then
+            return false, "settling after world entry"
+        end
+        actionHold.worldSettleUntil = nil
     end
-    if actionIntent and actionIntent.crossedWorld then
-        return false, tostring(actionIntent.action.type)
-            .. " sent before the loading screen is unconfirmed"
-            .. " -- turn Auto off and on to continue"
+    local pending = actionHold.worldPending
+    if pending then
+        -- The one supported result after a loading screen: a Take's grant in
+        -- the granted mirror, by the rule of the adapter's
+        -- ConfirmAwaitingGrant. Freeze, Banish and Reroll have none here.
+        if pending.spellId and pending.baseline
+            and Adapter.GrantedCount(pending.spellId) > pending.baseline then
+            actionHold.worldPending = nil
+            if actionIntent and actionIntent.crossedWorld then
+                actionIntent.grantObserved = true
+            end
+        else
+            return false, pending.label
+                .. " sent before the loading screen has no confirmed result"
+                .. " -- turn Auto off and on to continue"
+        end
     end
     if GetTime() < actionHold.externalUntil then return false, "user acting" end
     if Adapter.RivalDetected() then return false, "Another Echo automation addon is loaded -- disable it" end
@@ -2041,8 +2057,19 @@ local function ResolveActionIntent(board)
     -- Sent before a loading screen and unresolved at its start: a board read
     -- after it (missing, changed or the same) and elapsed time are not its
     -- result. It stays unresolved and AutoAllowed holds every automatic
-    -- action until new player input or a run boundary ends it.
-    if intent.crossedWorld then return end
+    -- action until new player input, a run boundary or, for a Take, its
+    -- grant ends it (the rule in AutoAllowed; also checked here so the
+    -- first step that sees the grant resolves the intent).
+    if intent.crossedWorld then
+        local pending = actionHold.worldPending
+        if intent.grantObserved or (pending and pending.spellId
+            and pending.baseline
+            and Adapter.GrantedCount(pending.spellId) > pending.baseline) then
+            actionHold.worldPending = nil
+            FinishActionIntent("confirmed", "grant_observed", false)
+        end
+        return
+    end
     if type(board) ~= "table" then
         if intent.state == "prepared" then
             FinishActionIntent("superseded", "board_unavailable_before_submit", false)
@@ -2177,7 +2204,13 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     lastStepContext.boardPresent = board ~= nil
     ResolveActionIntent(board)
     if not board then
-        SetStatus("waiting for board")
+        -- A loading-screen hold keeps its reason visible without a board.
+        local heldOk, heldWhy = true, nil
+        if autoEnabled and actionHold.worldPending then
+            heldOk, heldWhy = AutoAllowed()
+        end
+        SetStatus(heldOk and "waiting for board"
+            or ("auto paused: " .. tostring(heldWhy)))
         local preparePerformance, prepareStarted = BeginPhase("overlayPrepare")
         local model = { status = statusLine, cards = {}, recommendation = "",
             progress = BuildProgress(plan, owned, slots, catalog,
@@ -2548,7 +2581,11 @@ local function StepSave(level, plan, slots, owned, static, locked)
     MeasurePhase("overlayRender", RenderIdlePanel,
         plan, owned, slots, static.catalog, static, locked)
     local settings = Store.Settings()
-    local automationAllowed = AutoAllowed()
+    local automationAllowed, heldWhy = AutoAllowed()
+    if not automationAllowed and autoEnabled and actionHold.worldPending then
+        -- The save gate is held too; show why, as the board path does.
+        SetStatus("auto paused: " .. tostring(heldWhy))
+    end
     if not automationAllowed or not settings.autoSave or savedThisVisit then
         return
     end
@@ -2818,6 +2855,7 @@ local function ResetRunBoundary()
     if actionIntent then
         FinishActionIntent("superseded", "run_boundary", false)
     end
+    actionHold.worldPending = nil -- the dead run's pending action ends here
     lastDecision = nil
     lastLoggedSig = nil
     lastBoardForRerollWatch = nil
@@ -3285,6 +3323,7 @@ end
             -- New player input ends the hold of an action that a loading
             -- screen left unresolved. Its result stays unknown: it is
             -- recorded as uncertain, never as confirmed.
+            actionHold.worldPending = nil
             if actionIntent and actionIntent.crossedWorld then
                 FinishActionIntent("uncertain", "player_resumed", false)
             end
@@ -3324,6 +3363,20 @@ end
                 or actionIntent.state == "expired") then
                 actionIntent.crossedWorld = true
                 FinishActionIntent("uncertain", "world_transition", true)
+            end
+            -- Also a latch the adapter still holds with no runtime intent: a
+            -- board read one poll before the leave already recorded the
+            -- action as a result, or the player sent it. A later watchdog
+            -- release of that latch is not a result either.
+            local kind, spellId, baseline = Adapter.PendingAction()
+            local crossed = actionIntent and actionIntent.crossedWorld
+            if not actionHold.worldPending and (crossed or kind) then
+                local label = crossed and actionIntent.action.type or kind
+                if label == "select" then label = "take" end
+                local byGrant = label == "take" and kind == "select"
+                actionHold.worldPending = { label = tostring(label),
+                    spellId = byGrant and spellId or nil,
+                    baseline = byGrant and baseline or nil }
             end
             return autoEnabled and "held" or "off"
         end
