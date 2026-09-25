@@ -2,7 +2,9 @@
 -- stays ON; actions are held from PLAYER_LEAVING_WORLD until the entry that
 -- closes it has settled with the adapter ready. An entry with no observed leave
 -- (login, /reload, or anything this session cannot classify) and a logout turn
--- Auto OFF. Real runtime, adapter, policy and panel; synthetic game surface.
+-- Auto OFF. An action sent before the leave and unresolved at it stays
+-- unresolved and holds automation until player input (scenarios 10-12).
+-- Real runtime, adapter, policy and panel; synthetic game surface.
 local WANT={{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}}
 local function Boot()
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;NexusPanel=nil
@@ -34,7 +36,7 @@ local function Boot()
  function H.Takes()local n=0;for _,a in ipairs(H.actions)do if BOARD[a[1]] then n=n+1 end end;return n end
  function H.Auto()return Nexus.RecomputeStats().autoEnabled end
  function H.Allowed()return H.runtime.AutoAllowed()end
- function H.Offer()H.Board(WANT);H.Notify()end
+ function H.Offer(cards)H.Board(cards or WANT);H.Notify()end
  return H
 end
 local function Label()
@@ -156,16 +158,94 @@ do
  assert(not H.Auto() and Label()=='Auto: OFF','one click during a hold turns the selection OFF: '..Label())
 end
 
--- 9. Button labels fit the 72-pixel button: Auto: --, Auto: ON, Auto: OFF.
+-- 9. Shorter labels for the 72-pixel button: Auto: --, Auto: ON, Auto: OFF.
+-- Size and colours are unchanged. This checks strings and the offline frame
+-- model only; the rendered text width is not measured (native check).
 do
  local H=Boot();Nexus.Panel.Show();H.Advance(.5)
  assert(Label()=='Auto: OFF','OFF label: '..Label())
+ local btn=NexusPanel._autoBtn
+ assert(btn:GetWidth()==72 and btn:GetHeight()==22,'button size unchanged: '..tostring(btn:GetWidth())..'x'..tostring(btn:GetHeight()))
+ assert((btn:GetText() or ''):find('|cffe63c3c',1,true),'OFF colour unchanged')
  NexusPanel._autoBtn:Click();H.Advance(.5)
  assert(H.Auto() and Label()=='Auto: ON','button click turns Auto ON: '..Label())
+ assert((btn:GetText() or ''):find('|cff2ee62e',1,true),'ON colour unchanged')
  NexusPanel._autoBtn:Click();H.Advance(.5)
  assert(not H.Auto() and Label()=='Auto: OFF','button click turns Auto OFF: '..Label())
  local src=io.open('ui/Panel.lua'):read('*a')
  assert(src:find('"Auto: --"',1,true),'unknown-state label is Auto: --')
  assert(not src:find('Automation: ',1,true),'the long label is gone')
 end
-print('PASS Auto selection kept across a same-session loading screen with actions held until settled; unclassified entry and logout revoke; compact Auto labels')
+
+-- 10. An action sent before a loading screen and still without a result stays
+-- unresolved after it. A missing, returning or different board, the
+-- confirmation timeout and the adapter's dead-latch watchdog are not its
+-- result, so nothing dependent is sent. Every variant runs past the watchdog
+-- with a board present and the adapter no longer in flight: only this hold is
+-- left to stop a dependent action. Auto stays ON and the reason is shown.
+local OTHER={{spellId=200001,quality=1},{spellId=200030,quality=0},{spellId=200031,quality=1}}
+local function Leave(H)H.Fire('PLAYER_LEAVING_WORLD');H.Board({});H.Notify()end
+local VARIANTS={
+ {'board cleared in the loading screen',function(H)Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer()end},
+ {'no update frame between leave and entry',function(H)Leave(H);H.Fire('PLAYER_ENTERING_WORLD');H.Offer()end},
+ {'board cleared after the settle',function(H)H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD')
+   H.Advance(5);H.Board({});H.Notify();H.Advance(3);H.Offer()end},
+ {'board returns late',function(H)Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(20);H.Offer()end},
+ {'loading longer than the watchdog',function(H)Leave(H);H.Advance(15);H.Fire('PLAYER_ENTERING_WORLD');H.Offer()end},
+ {'a different board after entry',function(H)Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer(OTHER)end},
+ {'already expired at the leave',function(H)H.Advance(12)
+   assert(Nexus.RecomputeStats().lastActionLifecycle.state=='expired','precondition: expired, still holding the same board')
+   Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer()end},
+ {'latch cleared on the same board before the leave',function(H)H.perks.pendingFreezeIndex=nil;H.Advance(1)
+   assert(Nexus.RecomputeStats().lastActionLifecycle.state=='uncertain','precondition: uncertain on the same board')
+   Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer()end},
+}
+for _,v in ipairs(VARIANTS) do
+ local H=Boot();H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ local l=Nexus.RecomputeStats().lastActionLifecycle
+ assert(H.attempts==1 and l.actionType=='freeze' and l.state=='submitted',v[1]..': one Freeze sent, no reply: '..tostring(l.actionType)..'/'..tostring(l.state))
+ local sentAt=H.now
+ v[2](H)
+ local stop=math.max(H.now+10,sentAt+14)
+ while H.now<stop do
+  H.Advance(2)
+  assert(H.attempts==1,v[1]..': nothing dependent is sent, attempts='..H.attempts..' at +'..(H.now-sentAt))
+ end
+ local ok,why=H.Allowed()
+ l=Nexus.RecomputeStats().lastActionLifecycle
+ assert(Nexus.GameAdapter.Board() and not Nexus.GameAdapter.InFlight(),v[1]..': reached: a board is present and the adapter holds nothing')
+ assert(H.Auto() and not ok and tostring(why):find('unconfirmed',1,true),v[1]..': held, reason shown: '..tostring(why))
+ assert(l.state=='uncertain' and l.reason=='world_transition',v[1]..': still unresolved: '..tostring(l.state)..'/'..tostring(l.reason))
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,v[1]..': no confirmation recorded')
+end
+
+-- 11. Only new player input ends that hold: Auto off and on again. The earlier
+-- action is recorded as uncertain (player_resumed), never as confirmed, and
+-- automation continues within one beat and poll.
+do
+ local H=Boot();H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer();H.Advance(14)
+ assert(H.attempts==1 and not H.Allowed() and not Nexus.GameAdapter.InFlight(),'held after the watchdog, before the player acts')
+ SlashCmdList.NEXUS('auto');SlashCmdList.NEXUS('auto')
+ local l=Nexus.RecomputeStats().lastActionLifecycle
+ assert(H.Auto() and l.state=='uncertain' and l.reason=='player_resumed','the player ends the hold; the result stays unknown: '..tostring(l.state)..'/'..tostring(l.reason))
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,'nothing was confirmed')
+ H.Advance(1.2)
+ assert(H.attempts==2,'automation continues after the player input, attempts='..H.attempts)
+end
+
+-- 12. Control: an action whose result arrived before the leave holds nothing.
+-- After the settle the next action follows without a click.
+do
+ local H=Boot();H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1,'one Freeze sent')
+ local frozen=H.Clone(WANT);frozen[1].isFrozen=true
+ H.perks.pendingFreezeIndex=nil;H.Offer(frozen);H.Advance(.3)
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==1,'the answered Freeze is confirmed by its board change')
+ Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer(frozen)
+ H.Advance(2.5);assert(H.attempts==1,'held inside the settle')
+ -- Bounded: the settle ends at +3 s; the next action is prepared there and
+ -- sent after its 0.4 s beat and a poll (measured +3.8 s).
+ H.Advance(1.5);assert(H.attempts==2 and H.Allowed(),'resumes without a click within 1 s of the settle end, attempts='..H.attempts)
+end
+print('PASS Auto selection kept across a same-session loading screen with actions held until settled; an action unresolved at the leave stays unresolved and holds automation until player input; unclassified entry and logout revoke; compact Auto labels')

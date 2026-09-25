@@ -166,7 +166,8 @@ local function ShortName(v, maxChars)
 end
 
 local function AutoLabel(auto)
-    -- Short enough for the 72-pixel button; the tooltip names the full control.
+    -- Shorter for the 72-pixel button; the tooltip names the full control.
+    -- The rendered width at each font scale is not measured offline.
     if auto == nil then return "Auto: --" end
     if auto then return "|cff2ee62eAuto: ON|r" end
     return "|cffe63c3cAuto: OFF|r"
