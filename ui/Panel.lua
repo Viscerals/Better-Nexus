@@ -166,9 +166,10 @@ local function ShortName(v, maxChars)
 end
 
 local function AutoLabel(auto)
-    if auto == nil then return "Automation: --" end
-    if auto then return "|cff2ee62eAutomation: ON|r" end
-    return "|cffe63c3cAutomation: OFF|r"
+    -- Short enough for the 72-pixel button; the tooltip names the full control.
+    if auto == nil then return "Auto: --" end
+    if auto then return "|cff2ee62eAuto: ON|r" end
+    return "|cffe63c3cAuto: OFF|r"
 end
 
 local function FmtDps(dps)
