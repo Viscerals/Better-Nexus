@@ -1772,9 +1772,17 @@ local function SelectWishlistCandidate(wishlistSlot, candidate)
         if snapshot.designTargets~=nil then
             return Select(WishlistRoles.ResolveSaved(snapshot,live))
         end
+        -- Equal rolled contents do not identify one Wishlist: two plans can
+        -- differ only in local permanent designs. Prefer the clicked slot;
+        -- a key-only match still follows an identity that changed slots.
+        local moved
         for _, current in ipairs(live) do
-            if current.key == snapshot.key then return Select(current) end
+            if current.key == snapshot.key then
+                if tonumber(current.slot) == wishlistSlot then return Select(current) end
+                moved = moved or current
+            end
         end
+        if moved then return Select(moved) end
         for _, current in ipairs(live) do
             if tonumber(current.slot) == wishlistSlot then
                 return nil, "wishlist changed; refresh and try again"
