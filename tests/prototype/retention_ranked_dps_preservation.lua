@@ -228,10 +228,10 @@ summary[#summary+1]='control:'..RetentionCommits()..'c'
 local FRESH={Kilo=60000,Lowell=59000,Alpha=52000,Pat=10000}
 for i=5,26 do FRESH['Filler'..string.char(64+i)]=40000+i end
 Boot()
-local statsBefore,refusal
+local durableBefore,refusal
 local accepted={}
 ctx=Drive({{window=1,offset=0,fn=function()
- statsBefore=Nexus.DataRetention.Stats(NexusDB)
+ durableBefore={bundle=rawget(NexusDB,'authorityBundle'),meta=rawget(Bundle(),'dataRetention')}
  accepted.kilo=Receive('Kilo',{dps=60000,ts=L.STAMP+300})
  accepted.lowell=Receive('Lowell',{dps=59000,ts=L.STAMP+301})
  accepted.november=Receive('November',{dps=31000,ts=L.STAMP+302})
@@ -240,8 +240,8 @@ ctx=Drive({{window=1,offset=0,fn=function()
 end}},function(c)
  local w=c.windows[1]
  if w and not refusal and w.commit.ticket.state~='pending' then
-  refusal={state=w.commit.ticket.state,reason=w.commit.ticket.reason,stats=Nexus.DataRetention.Stats(NexusDB),
-   kilo=Lk()[Own('Kilo')],lowell=Lk()[Own('Lowell')]}
+  refusal={state=w.commit.ticket.state,reason=w.commit.ticket.reason,bundle=rawget(NexusDB,'authorityBundle'),
+   meta=rawget(Bundle(),'dataRetention'),kilo=Lk()[Own('Kilo')],lowell=Lk()[Own('Lowell')]}
  end
 end)
 check(accepted.kilo and accepted.lowell and accepted.november and not accepted.worse and not accepted.duplicate,
@@ -252,7 +252,8 @@ check((Nexus.DataRetention.Stats(NexusDB) or {}).characterBestRemoved==6,'fresh 
 check(refusal and refusal.state=='failed' and refusal.reason=='PUBLICATION_SOURCE_CHANGED',
  'stale window: the older snapshot is refused at publication: '..tostring(refusal and refusal.state)..' '..tostring(refusal and refusal.reason))
 check(refusal.kilo and refusal.kilo.dps==60000 and refusal.lowell and refusal.lowell.dps==59000,'stale window: the accepted records stay in the durable store after the refusal')
-check(refusal.stats==nil or (statsBefore and refusal.stats.lastRun==statsBefore.lastRun),'stale window: the refused run reports no removal or completion')
+check(durableBefore and refusal.bundle==durableBefore.bundle and refusal.meta==durableBefore.meta,
+ 'stale window: the refused run published nothing (same durable bundle and retention metadata tables)')
 check(#ctx.windows>=2,'stale window: the run is prepared again from the current rows ('..#ctx.windows..' windows)')
 check(RetentionCommits()<=3,'stale window: bounded re-preparation ('..RetentionCommits()..' commits)')
 summary[#summary+1]='stale:'..RetentionCommits()..'c'
@@ -443,12 +444,12 @@ check(RetentionCommits()==2 and commits[#commits].first==true,'immediate: prepar
 ------------------------------------------------------------------------
 -- 8. Unchanged path: a ranked run that removes nothing (25 Lich King rows)
 -- carries no DPS copy and no guard; a record accepted in its window is kept
--- and the commit is not refused. The new row waits for the next run.
+-- and that commit is not refused. (With Kilo the policy still keeps all 26.)
 ------------------------------------------------------------------------
 Boot({fillers=21})
 ctx=Drive({{window=1,offset=0,fn=function() check(Receive('Kilo',{dps=60000,ts=L.STAMP+300}),'no removals: Kilo accepted') end}})
-check(#ctx.windows==1 and ctx.windows[1].state=='committed' and not commits[1].guarded and not commits[1].dps,
- 'no removals: one unguarded commit without a DPS copy')
+check(ctx.windows[1].state=='committed' and not commits[1].guarded and not commits[1].dps,
+ 'no removals: the commit in the window is unguarded, carries no DPS copy and publishes')
 local NOREM={Kilo=60000,Alpha=52000,Lowell=30001,Lowry=30002,Pat=10000}
 for i=1,21 do NOREM['Filler'..string.char(64+i)]=40000+i end
 Expect('no removals',NOREM)
@@ -515,4 +516,57 @@ check(Nexus.BuildCatalog.BoundDatabase()==NexusDB,'replacement: the catalog bind
 local oldRow=old.authorityBundle.dpsCapture.characterBest.lk[Own('Kilo')]
 check(oldRow and oldRow.dps==60000,'replacement: the replaced database kept the accepted record')
 
-print('PASS retention_ranked_dps_preservation: control; writes in a pending ranked commit (new, improved, low, worse, duplicate) kept and re-ranked; separate windows; contention with chain delays; scan-yield write; nested catalog writer under a pending rebind; immediate refusal; unguarded no-removal run; orphan-page eviction refused; marker first observations kept; database replaced after a refusal ['..table.concat(summary,' ')..'] checks='..checks)
+------------------------------------------------------------------------
+-- 12. Contention to the chain limit: a better Kilo record is accepted in
+-- every pending ranked commit. Each refusal is retried in the same bounded
+-- chain (the first run and 64 retries), every accepted record stays durable
+-- on every frame, nothing is committed, and when the chain stops it leaves
+-- one "retention-deferred" support record. A later request, with the
+-- contention over, ranks the current rows.
+------------------------------------------------------------------------
+Boot()
+local support=Nexus.SupportIncidents
+local incidentsBefore=support.Count()
+check(Nexus.DataRetention.Request('test: contention')==true,'contention: a ranked run is requested')
+local value,last,settled=60000,nil,{}
+local refusedCount,committedCount,other,quiet=0,0,{},0
+for _=1,400000 do
+ local open
+ for _,c in ipairs(commits)do if c.ticket and c.ticket.state=='pending' then open=c end end
+ if last then
+  local row=Lk()[Own('Kilo')]
+  check(row and row.dps==last,'contention: the last accepted Kilo record is durable ('..tostring(row and row.dps)..'/'..last..')')
+ end
+ if open and not open.wrote then
+  open.wrote=true
+  value=value+1
+  if Receive('Kilo',{dps=value,ts=L.STAMP+300+(value-60000)}) then last=value end
+ end
+ for _,c in ipairs(commits)do
+  if c.ticket and c.ticket.state~='pending' and not settled[c] then
+   settled[c]=true
+   if c.ticket.state=='committed' then committedCount=committedCount+1
+   elseif c.ticket.reason=='PUBLICATION_SOURCE_CHANGED' then refusedCount=refusedCount+1
+   else other[#other+1]=tostring(c.ticket.reason) end
+  end
+ end
+ local task=Nexus.Scheduler.Pending('data-retention.enforce')
+ if open or task then quiet=0 else quiet=quiet+1 end
+ if quiet>40 then break end
+ if not open and type(task)=='table' and task.due and task.due-H.now>1 then H.Advance(1,1) else Step(1) end
+end
+check(quiet>40,'contention: the chain came to rest')
+check(refusedCount==65 and committedCount==0 and #other==0,
+ 'contention: 65 refusals (the first run and 64 retries), no commit: '..refusedCount..'/'..committedCount..' '..table.concat(other,','))
+check(support.Count()==incidentsBefore+1,'contention: one support record when the chain stops')
+local incident=support.Latest()
+check(incident and incident.kind=='retention-deferred' and incident.reason=='PUBLICATION_SOURCE_CHANGED' and incident.committed==false,
+ 'contention: the record says the ranked run was deferred and not committed: '..tostring(incident and incident.kind)..' '..tostring(incident and incident.reason))
+ctx=Drive()
+check(ctx.windows[#ctx.windows].state=='committed','contention over: a later request commits')
+local CSET={Kilo=last,Alpha=52000,Pat=10000}
+for i=4,26 do CSET['Filler'..string.char(64+i)]=40000+i end
+Expect('contention over',CSET)
+summary[#summary+1]='chain-limit:'..refusedCount..' refusals'
+
+print('PASS retention_ranked_dps_preservation: control; writes in a pending ranked commit (new, improved, low, worse, duplicate) kept and re-ranked; separate windows; contention with chain delays; scan-yield write; nested catalog writer under a pending rebind; immediate refusal; unguarded no-removal run; orphan-page eviction refused; marker first observations kept; database replaced after a refusal; contention to the chain limit reported ['..table.concat(summary,' ')..'] checks='..checks)
