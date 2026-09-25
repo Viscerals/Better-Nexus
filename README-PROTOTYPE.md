@@ -59,8 +59,11 @@ Shared builds and DPS; Orbs / Lost Memories; Loading and troubleshooting; About.
 1. Open **Wishlists** or `/nexus editor`.
 2. Create a plan or import a Wishlist code. Import opens a draft.
 3. Review exact qualities and copy counts, including permanent-slot targets.
-4. Save and assign the Wishlist to the intended Saved Build/loadout.
-5. Check recommendations before enabling Automation and its individual actions.
+4. Save the Wishlist, then assign it to the intended Saved Build/loadout.
+   Assigning only chooses the target; it does not change the Saved Build.
+5. Check recommendations with Auto OFF before enabling Automation and its
+   individual actions. With Auto ON, Nexus may later replace the active Saved
+   Build; see **Automatic save and your Saved Build** below.
 
 A Wishlist is a desired plan; you do not have to own it already. **Saved Builds**
 are server slots. **Active Loadout** is the currently selected server loadout.
@@ -110,6 +113,34 @@ In save comparisons, “fewer requested copies” is distinct from “extra copi
 “Waiting for current Echo data” is an ownership-readiness condition, not the
 shared-build channel status. Do not force that state or repeatedly reload to
 mask a lost response. Record the build and exact sequence for support.
+
+### Automatic save and your Saved Build
+
+Wishlist assignment and automatic save are separate steps:
+
+- **Wishlist assignment** chooses the target a Saved Build/loadout works toward.
+  It does not change the Saved Build. Unassign keeps the Wishlist and does not
+  change or restore the Saved Build.
+- **Automatic save** is a later, separate action, distinct from
+  Take/Banish/Reroll/Freeze. With Auto ON, after a completed run Nexus compares
+  that run with the Wishlist assigned to the active loadout and may replace the
+  **active Saved Build** with it. The slot is treated as an evolving working
+  copy, not a protected archive.
+
+Not every run is saved. A run is saved only when its overall Wishlist progress
+is higher than the Saved Build's, or equal with cleanup (fewer extra copies, or
+an even swap of requested copies). “Better” means overall Wishlist progress. It
+does not mean keeping every individual Echo, and Orb investment is not part of
+the comparison.
+
+Example: your Saved Build holds an Echo you value. The next completed run loses
+one requested copy but gains three others. That is +2 overall Wishlist progress,
+so Nexus may save the new run over the old build. This does not mean Nexus spent
+the Orbs used to obtain the old Echo, that the lost Echo was judged worthless,
+or that you approved that individual trade. The automatic save spends no Orbs.
+
+Nexus cannot undo a completed server save. Auto starts OFF each session; keep it
+OFF if you want Nexus to leave the current Saved Build untouched.
 
 ## Orbs / Lost Memories
 
