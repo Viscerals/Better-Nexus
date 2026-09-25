@@ -265,9 +265,17 @@ local function Preserved(label,db,expectCatalog)
 end
 for _,case in ipairs(PROTECTED)do
  -- lockDesignTargets is the retired flat lock-target key that the editor and
- -- the runtime move into the character row and then remove.
+ -- the runtime move into the character row and then remove; the legacy DPS
+ -- leaderboard is what the DPS converter rewrites; the removal and retention
+ -- markers start retention maintenance; the evidence pool is interned into.
  local db=F.Database({mutate=function(d)d.communityBuilds={['syn-1']=Row('syn-1')}
-  d.lockDesignTargets={[200002]=true};case.mutate(d)end})
+  d.lockDesignTargets={[200002]=true}
+  d.loadoutEvidence={schemaVersion=1,entries={}}
+  d.dpsCapture={leaderboard={fp1={dummy={['Other-Realm']={dps=1000,ts=1}}}}}
+  d.syncTombstones={['gone-1']={stamp=1700000001,author='OldPeer'}}
+  d.communityRetentionEvictions={['ev-1']=1700000001}
+  d.settings.communityRetentionEnabled=true
+  case.mutate(d)end})
  Preserved(case.label..' (legacy rows only)',db,'syn-1')
 end
 
@@ -305,7 +313,9 @@ end
 -- 8. A read-only profile that already carries an authority bundle keeps it
 -- byte for byte, is served from it, and refuses every catalog write.
 do
- local supported=F.Database({version=2,mutate=function(d)d.communityBuilds={['syn-1']=Row('syn-1')}end})
+ local supported=F.Database({version=2,mutate=function(d)d.communityBuilds={['syn-1']=Row('syn-1')}
+  d.syncTombstones={['gone-1']={stamp=1700000001,author='OldPeer'}}
+  d.communityRetentionEvictions={['ev-1']=1700000001}end})
  local H=Boot(supported);for _=1,120 do H.Advance(.5,.5) end
  check(type(rawget(NexusDB,'authorityBundle'))=='table','fixture: a supported session wrote its bundle')
  for _,case in ipairs(PROTECTED)do
