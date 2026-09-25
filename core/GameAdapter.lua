@@ -60,8 +60,15 @@ local boardDirty, slotsDirty, dataDirty = true, true, true
 local staticDirty = false
 local lastBoardSig
 local boardNotificationPending = false
-local inFlightKind, inFlightSig, pendingOwnPick
-local recordedPicks = {}
+local inFlightKind, inFlightSig, pendingOwnPick, pendingOwnBaseline
+-- A Select whose board has moved on but whose grant the mirror has not shown
+-- yet: {spellId=, baseline=}. Boards auto-chain and the granted mirror can
+-- lag the next board by one pick, so this keeps the Select "in flight" --
+-- blocking a duplicate Select and every dependent action -- until the mirror
+-- shows that spell's count above the baseline taken at submission. It is
+-- intent, never ownership: Owned() reads the granted mirror only. It used to
+-- be recordedPicks, which Owned() merged into ownership (issue #62).
+local awaitingGrant = nil
 local ownedProjectionRevision = 0
 local lockedProjectionRevision = 0
 local leverProjectionRevision = 0
@@ -654,6 +661,30 @@ local function GrantedSignature(granted)
     return table.concat(out, ",")
 end
 
+-- How many stacks of one spell the granted mirror holds right now: the same
+-- evidence, counted the same way, as GrantedSignature and A.Owned. A Select is
+-- confirmed only when this rises above the count taken when it was submitted.
+-- This is exact spell AND tier evidence: the server guarantees exact spell
+-- IDs, and each quality tier of an Echo is its own sibling spellId (see
+-- Ratchet), so a count of one spellId is never another tier's stacks.
+local function GrantedCountOf(spellId)
+    local svc = PS()
+    local granted = svc and SafeCall(svc.GetGrantedPerks)
+    if type(granted) ~= "table" then return 0 end
+    local n = 0
+    for _, entries in pairs(granted) do
+        if type(entries) == "table" then
+            for i = 1, #entries do
+                local e = entries[i]
+                if type(e) == "table" and tonumber(e.spellId) == spellId then
+                    n = n + 1
+                end
+            end
+        end
+    end
+    return n
+end
+
 function A.Owned()
     projectionStatus.owned.calls = projectionStatus.owned.calls + 1
     local cat = A.Catalog()
@@ -679,10 +710,9 @@ function A.Owned()
     -- captured for leaderboard/build metadata through LockedOwned(), but they
     -- are never part of the current run's rolled ownership, guarantee queue,
     -- wishlist progress, board decisions, or save candidate.
-    -- auto-chained boards are stale-by-one: union our own confirmed picks
-    for id, n in pairs(recordedPicks) do
-        if (bySpell[id] or 0) < n then bySpell[id] = n end
-    end
+    -- Ownership is the granted mirror and nothing else. A submitted Select is
+    -- not merged in here, however the board moved: until the mirror shows it,
+    -- it is intent, held by A.InFlight() (see awaitingGrant), not a stack.
     local byFamily, distinct, total = {}, 0, 0
     for id, n in pairs(bySpell) do
         local fam = FamilyOf(id)
@@ -722,7 +752,7 @@ end
 -- are void, and we re-request granted so the fresh run's owned set loads.
 -- Sync trust is handled per-level in A.Owned (no fragile snapshot compare).
 function A.RunBoundaryReset()
-    recordedPicks = {}
+    awaitingGrant = nil
     ownedProjectionRevision = ownedProjectionRevision + 1
     pendingOwnPick = nil
     ownedGeneration = ownedGeneration + 1
@@ -2926,8 +2956,26 @@ local function WatchLatches()
     end
 end
 
+-- A Select stays in flight until its grant is seen, not only while the
+-- client's latch is held: pending intent blocks a duplicate Select and every
+-- dependent action (Take, Banish, Freeze, Reroll, Orb actions), and is never
+-- counted as owned.
 function A.InFlight()
-    return (inFlightKind ~= nil) or AnyLatch()
+    return (inFlightKind ~= nil) or awaitingGrant ~= nil or AnyLatch()
+end
+
+-- The one confirmation there is: the granted mirror shows the selected spell
+-- above the count it had when the Select was submitted. A board transition,
+-- a cleared latch, elapsed time, a new table with the same contents, or a
+-- grant of a different spell confirms nothing.
+local function ConfirmAwaitingGrant()
+    local pending = awaitingGrant
+    if not pending then return end
+    if GrantedCountOf(pending.spellId) > (pending.baseline or 0) then
+        awaitingGrant = nil
+        boardDirty = true
+        dataDirty = true
+    end
 end
 
 -- poll tick: resolve our own in-flight marker from latch + board transitions
@@ -2944,14 +2992,17 @@ local function ResolveInFlight()
                 resolvedSig = table.concat(parts, ",")
             end
             if ch == nil or resolvedSig ~= inFlightSig then
-                -- success: board consumed (auto-chain requests the next one)
+                -- The board moved on (auto-chain, or it went away). That ends
+                -- the latch wait, not the Select: it now waits for its grant,
+                -- still in flight, and still not owned.
                 if pendingOwnPick then
-                    recordedPicks[pendingOwnPick] = (recordedPicks[pendingOwnPick] or 0) + 1
-                    ownedProjectionRevision = ownedProjectionRevision + 1
+                    awaitingGrant = {spellId = pendingOwnPick,
+                        baseline = pendingOwnBaseline or 0}
                 end
             end
             -- failure (SS-1000 "0"): latch cleared, same board -> just release
-            inFlightKind, inFlightSig, pendingOwnPick = nil, nil, nil
+            inFlightKind, inFlightSig, pendingOwnPick, pendingOwnBaseline =
+                nil, nil, nil, nil
             boardDirty = true
         end
     elseif inFlightKind == "banish" then
@@ -3029,6 +3080,9 @@ function A.Take(spellId)
     end
     if not found then return false, "not on board" end
     local svc = PS()
+    -- The count before the Select is sent: the only later proof of its grant
+    -- is the mirror rising above this.
+    local baseline = GrantedCountOf(spellId)
     selfCalling = true
     local ok = svc and SafeCall(svc.SelectPerk, spellId)
     selfCalling = false
@@ -3036,6 +3090,7 @@ function A.Take(spellId)
         -- ids-only signature: ResolveInFlight compares like-for-like (a
         -- flag-suffixed sig would misread every FAILED select as success)
         inFlightKind, inFlightSig, pendingOwnPick = "select", board.idSignature, spellId
+        pendingOwnBaseline = baseline
         return true
     end
     return false, "refused"
@@ -4131,6 +4186,7 @@ function A.Poll()
     end
     lastAutoAcceptState, lastRivalState = autoAcceptState, rivalState
     ResolveInFlight()
+    ConfirmAwaitingGrant()
     WatchLatches()
     ReconcileTomePending()
     -- owned-sync retry loop: keep re-requesting granted until non-empty

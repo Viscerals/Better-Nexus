@@ -103,7 +103,10 @@ wishlist = nil | {           -- nil => advisor-only mode
   byFamily = { [familyKey] = { targetStacks=n, wishedQuality=n, spellId=n } },
 }
 
-owned = {                    -- granted ∪ locked ∪ adapter-recorded picks
+owned = {                    -- the granted mirror only: rolled stacks. Locked
+                             -- Echoes are separate (LockedOwned). A submitted
+                             -- Select is intent, never owned, until the mirror
+                             -- shows it (#62); it holds InFlight() meanwhile
   bySpell  = { [spellId] = count },
   byFamily = { [familyKey] = count },
   synced = bool,             -- false => engine must not auto-act at level > 1
@@ -253,7 +256,8 @@ anchorSpellId=nil, leverOptOut={}), `defaultFlags` (DISABLE_SUPPRESSES_GUARANTEE
 
 `Store.Init()` (wholesale-replace on version change, sibling pattern), `Store.Settings()`,
 `Store.State()` (per-char keyed subtable: tomeTogglePending per lever w/ timestamps,
-priorAutoAccept, flagDemotions, recordedPicks for the current session). Char key from
+priorAutoAccept, flagDemotions, and a legacy recordedPicks field that is kept for
+round-tripping but no longer written or read, #62). Char key from
 `UnitName("player")` guarded — if unavailable, defer (never latch "Unknown").
 
 ## core/GameAdapter.lua — `Nexus.GameAdapter` (sole IO; my file)

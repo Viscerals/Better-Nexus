@@ -1630,6 +1630,23 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
     trace[#trace + 1] = string.format("autoLockEchoes setting: %s", tostring(settings.autoLockEchoes))
     if not settings.autoLockEchoes then return end
 
+    -- An Echo action whose outcome is not settled -- above all a Select still
+    -- waiting for its grant -- defers locking. Locking the awaited Echo in that
+    -- window would move its stacks out of the granted mirror, so the grant
+    -- could never be seen and automation would stay held.
+    if Adapter.InFlight and Adapter.InFlight() then
+        trace[#trace + 1] = "deferred: an Echo action is still in flight"
+        -- Come back for it. A grant marks data dirty, which makes this step
+        -- due again. A Banish, Freeze or Reroll latch clearing or a refused
+        -- Select marks only the board dirty, and a latch the watchdog
+        -- declares dead marks nothing dirty; neither makes this step due.
+        -- The delay only schedules a re-check: the
+        -- gate above is still the in-flight evidence, and nothing here
+        -- counts or confirms anything.
+        RequestAutoLockAt(GetTime() + 1)
+        return
+    end
+
     targets = targets or LockDesignTargetsFor(wishlist, wishlistKey)
     if type(targets) ~= "table" then
         trace[#trace + 1] = string.format(

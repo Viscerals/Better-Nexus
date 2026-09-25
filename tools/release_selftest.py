@@ -75,6 +75,127 @@ def decoder_bytes_checks() -> list:
     return problems
 
 
+def load_build_package():
+    spec = importlib.util.spec_from_file_location('build_package', ROOT / 'tools' / 'build_package.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def toc_line(zip_path: pathlib.Path) -> list[str]:
+    """Every Version line WoW would read in the packaged Nexus.toc."""
+    with zipfile.ZipFile(zip_path) as z:
+        toc = z.read('Nexus/Nexus.toc')
+    bp = load_build_package()
+    lines = bp.toc_lines(toc)
+    return [lines[i].strip() for i in bp.toc_directive_lines(toc, 'Version')]
+
+
+def toc_version_checks(public, internal, label, other, version, commit, expect, rewrite) -> list:
+    """The packaged Nexus.toc names the same build as the packaged Release.lua,
+    follows the label without a source edit, and every other byte is HEAD's."""
+    problems = []
+    if toc_line(public) != [f'## Version: {version} {label}']:
+        problems.append(f'public Nexus.toc Version is {toc_line(public)}')
+    if toc_line(internal) != [f'## Version: {version} {other} internal']:
+        problems.append(f'internal Nexus.toc Version is {toc_line(internal)}')
+
+    # A second public label updates both files; the repository files are untouched.
+    before = {n: (ROOT / n).read_bytes() for n in ('Nexus.toc', 'data/Release.lua')}
+    third = f'test.14-{commit[:7]}'
+    second = ROOT / 'dist' / f'Better-Nexus-{third}.zip'
+    expect('build a second public package', run('tools/build_package.py', '--label', third, '--public', '--allow-dirty'), True)
+    if second.is_file():
+        with zipfile.ZipFile(second) as z:
+            if f'buildLabel = "{third}"' not in z.read('Nexus/data/Release.lua').decode():
+                problems.append('second package Release.lua does not carry its own label')
+        if toc_line(second) != [f'## Version: {version} {third}']:
+            problems.append(f'second package Nexus.toc Version is {toc_line(second)}')
+        expect('consistent second public release', run('tools/release_check.py', '--label', third, '--zip', str(second)), True)
+    if {n: (ROOT / n).read_bytes() for n in before} != before:
+        problems.append('packaging changed a repository file')
+
+    # The same label twice gives the same bytes.
+    first_bytes = public.read_bytes()
+    kept = public.with_name(public.name + '.first')
+    public.rename(kept)
+    expect('rebuild the public package', run('tools/build_package.py', '--label', label, '--public', '--allow-dirty'), True)
+    if not public.is_file() or public.read_bytes() != first_bytes:
+        problems.append('two builds of one label differ')
+    if not public.is_file():
+        kept.rename(public)
+    else:
+        kept.unlink()
+
+    # Nothing else differs from HEAD: undo the declared substitutions and compare.
+    head = load_build_package().committed_files()
+    with zipfile.ZipFile(public) as z:
+        for name in z.namelist():
+            source = ('companion/NexusSupport/' + name[len('NexusSupport/'):]
+                      if name.startswith('NexusSupport/') else name[len('Nexus/'):])
+            data = z.read(name)
+            if source == 'data/Release.lua':
+                data = data.replace(f'buildLabel = "{label}"'.encode(), b'buildLabel = "source"')
+                data = data.replace(b'channel = "public-test"', b'channel = "development"')
+            elif source == 'Nexus.toc':
+                data = data.replace(f'## Version: {version} {label}'.encode(), f'## Version: {version}'.encode())
+            if head.get(source) != data:
+                problems.append(f'packaged {name} differs from HEAD beyond the declared substitutions')
+        if len(head) != len(z.namelist()):
+            problems.append('the package does not hold exactly the committed runtime files')
+
+    # Missing, duplicate and inconsistent Version metadata in an artefact.
+    stamped = f'## Version: {version} {label}'
+
+    def toc_case(dirname, change):
+        target = ROOT / 'dist' / dirname / public.name
+        rewrite(target, lambda n, d: change(d.decode('utf-8')).encode('utf-8') if n == 'Nexus/Nexus.toc' else d)
+        return target
+
+    for dirname, what, change in (
+            ('toc-missing', 'a packaged Nexus.toc without a Version line',
+             lambda t: re.sub(r'(?im)^[ \t]*##[ \t]*Version[^\n]*\n', '', t)),
+            ('toc-duplicate', 'a packaged Nexus.toc with two Version lines',
+             lambda t: t.replace(stamped, stamped + chr(10) + stamped)),
+            ('toc-cr-duplicate', 'a packaged Nexus.toc with a second Version line after a lone CR',
+             lambda t: t.replace(stamped, stamped + chr(13) + '## Version: 9.9.9')),
+            ('toc-other-build', 'a packaged Nexus.toc naming another build',
+             lambda t: t.replace(stamped, f'## Version: {version} test.13-{commit[:7]}')),
+            ('toc-unstamped', 'a packaged Nexus.toc left at the plain version',
+             lambda t: t.replace(stamped, f'## Version: {version}'))):
+        expect(what, run('tools/release_check.py', '--label', label, '--zip', str(toc_case(dirname, change))), False)
+
+    # A test label the addon would read differently is refused, public or not,
+    # so the TOC and Release.lua cannot describe two builds.
+    for bad in (f'test.01-{commit[:7]}', f'test.3000000000-{commit[:7]}',
+                'test.5-ABCDEF0', f'test.5-{commit[:7]}' + chr(10)):
+        for extra in ((), ('--public',)):
+            expect(f'packaging refuses the label {bad!r} {" ".join(extra)}'.rstrip(),
+                   run('tools/build_package.py', '--label', bad, *extra, '--allow-dirty'), False)
+    return problems
+
+
+def source_toc_checks() -> list:
+    """The repository Nexus.toc is build-neutral; the packager refuses one that
+    is not, and one with no or two Version lines."""
+    bp = load_build_package()
+    files = bp.committed_files()
+    problems = []
+    if bp.check(files):
+        problems.append('the committed tree does not pass the package check: ' + '; '.join(bp.check(files)))
+    version = bp.release_version(files['data/Release.lua'])
+    toc = files['Nexus.toc']
+    line = f'## Version: {version}'.encode()
+    for what, bad in (('no Version line', toc.replace(line, b'## X-Version-Note: none')),
+                      ('two Version lines', toc.replace(line, line + b'\n' + line)),
+                      ('a stamped Version in the source', toc.replace(line, line + b' test.1-abcdef0'))):
+        if not bp.check(dict(files, **{'Nexus.toc': bad})):
+            problems.append('the package check accepts a repository Nexus.toc with ' + what)
+        else:
+            print(f'ok    the package check refuses a repository Nexus.toc with {what}')
+    return problems
+
+
 def main() -> int:
     dist = ROOT / 'dist'
     if dist.exists():
@@ -182,6 +303,8 @@ def main() -> int:
         with zipfile.ZipFile(internal) as z:
             if 'channel = "internal"' not in z.read('Nexus/data/Release.lua').decode():
                 failures.append('internal package is not marked internal')
+        failures.extend(toc_version_checks(public, internal, label, other, version, commit, expect, rewrite))
+        failures.extend(source_toc_checks())
         failures.extend(decoder_bytes_checks())
     finally:
         shutil.rmtree(dist, ignore_errors=True)

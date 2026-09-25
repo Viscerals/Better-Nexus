@@ -147,7 +147,7 @@ local function FreshState()
         tomeTogglePending = {}, -- [leverId] = { t=sentAtTime, want=bool }
         priorAutoAccept = nil,  -- autoAcceptLoadoutEchoes before we touched it
         flagDemotions = {},     -- [flagName] = reason (runtime self-check)
-        recordedPicks = {},     -- [spellId] = count (session; adapter-managed)
+        recordedPicks = {},     -- legacy: no longer written or read (#62); kept so saved data round-trips
         loadoutWishlists = {},  -- [numbered loadout slot] = stable designed-wishlist identity
     }
 end
