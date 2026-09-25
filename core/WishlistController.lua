@@ -43,6 +43,28 @@ local function UpdateStoreState(mutator)
     return true, mutator(injected)
 end
 
+-- A settings change from a control goes through the same owner the runtime
+-- reads (Store.Settings), never into a settings table found on the saved root:
+-- for a read-only saved root that table is not the one the runtime uses, and
+-- it must stay unchanged. The real owner reports whether the change was saved
+-- ("durable") or applies to this session only ("session").
+local function UpdateStoreSetting(key, value)
+    local internals = Nexus and Nexus.MainInternals
+    local owner = type(internals) == "table" and internals.StoreAuthorityOwner
+    local Store = boundStore
+    local realStore = type(Store) == "table"
+        and type(Store.Init) == "function"
+        and type(Store.CurrentOwnerKey) == "function"
+    if realStore and type(owner) == "table"
+        and type(owner.UpdateSettingsV1) == "function" then
+        return owner.UpdateSettingsV1(key, value)
+    end
+    local settings = Store and Store.Settings and Store.Settings()
+    if type(settings) ~= "table" then return nil, "settings unavailable" end
+    settings[key] = value
+    return {mode="injected"}
+end
+
 function Controller.New(options)
     options = type(options) == "table" and options or {}
     local DraftModel = assert(options.model, "Wishlist controller requires WishlistModel")
@@ -434,17 +456,26 @@ function Controller.New(options)
             and Adapter.GetLoadoutWishlist(slot) or nil
     end
 
+    -- The runtime's own settings (Store.Settings), so the editor shows exactly
+    -- what locked-Echo slot automation will do.
     function M.AutoLockEnabled()
-        local settings = Preferences().settings
-        return settings and settings.autoLockEchoes and true or false
+        local settings = Store.Settings and Store.Settings()
+        return type(settings) == "table" and settings.autoLockEchoes and true or false
     end
 
     function M.SetAutoLockEnabled(value)
-        local preferences = Preferences()
-        preferences.settings = preferences.settings or {}
-        local wasEnabled = preferences.settings.autoLockEchoes and true or false
+        local wasEnabled = M.AutoLockEnabled()
         local enabled = value and true or false
-        preferences.settings.autoLockEchoes = enabled
+        local result, why = UpdateStoreSetting("autoLockEchoes", enabled)
+        if not result then
+            notify("|cffff6060Nexus:|r locked-Echo slot automation was not changed ("
+                .. tostring(why) .. ").")
+            return false
+        end
+        if result.mode == "session" and result.note then
+            notify(string.format("|cffff9040Nexus:|r locked-Echo slot automation is %s "
+                .. "for this session only: %s.", enabled and "on" or "off", result.note))
+        end
         if wasEnabled ~= enabled then TouchPresentation() end
         local retried = false
         if enabled and not wasEnabled

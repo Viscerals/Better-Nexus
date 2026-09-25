@@ -655,10 +655,19 @@ EnsureMainDiagnostics = function()
         getAutoEnabled=function() local r=Automation(); return r and r.AutoEnabled() or false end,
         getAutoLockTrace=function() local r=Automation(); return r and r.LastAutoLockTrace() or {at=0,lines={}} end,
         getAuditRunId=function() local r=Automation(); return r and r.AuditRunId() or 0 end,
-        getDatabase=function() return NexusDB end,
+        -- Only the run-status keys are read and cleared through these. A
+        -- read-only saved root keeps its own; the session's live in the Store
+        -- owner's session-only table.
+        getDatabase=function()
+            local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+            if type(writable) ~= "function" then return NexusDB end
+            return writable(nil, {"lastSaveRefusal", "lastSaveStatus", "auditRunCounter"})
+        end,
         ensureDatabase=function()
             NexusDB = NexusDB or {}
-            return NexusDB
+            local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+            if type(writable) ~= "function" then return NexusDB end
+            return writable(NexusDB, {"lastSaveRefusal", "lastSaveStatus", "auditRunCounter"})
         end,
         resetAuditState=function()
             local runtime=Automation(); if runtime then runtime.ResetAuditState() end
@@ -1043,13 +1052,19 @@ local function CommandErr()
     Print(latest and latest.message or ErrorText(Nexus.lastError))
 end
 
+-- `settings` is the Store owner's settings (Store.Settings). For a read-only
+-- saved root that is the session's own validated copy, so the change is real
+-- for this session and the reply says it is not saved.
 local function CommandAnchor(settings, argument)
+    local readOnly = Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+    local sessionOnly = type(readOnly) == "function" and readOnly()
+        and " for this session only (saved data is kept unchanged and read-only)" or ""
     if argument == "off" or argument == nil then
         settings.anchorSpellId = nil
-        Print("Adaptive Power preference cleared")
+        Print("Adaptive Power preference cleared" .. sessionOnly)
     else
         settings.anchorSpellId = tonumber(argument)
-        Print("Adaptive Power preference set to " .. tostring(settings.anchorSpellId))
+        Print("Adaptive Power preference set to " .. tostring(settings.anchorSpellId) .. sessionOnly)
     end
     RequestRecompute()
 end
@@ -1105,11 +1120,14 @@ EnsureMainCommands = function()
                     or argument.option=="reroll" and "autoReroll" or "autoFreeze"
                 settings[key]=argument.value=="on"
                 RequestRecompute()
+                local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+                local sessionOnly=type(readOnly)=="function" and readOnly()
+                    and " This session only: saved data is kept unchanged and read-only." or ""
                 if argument.option=="currentlocks" then
                     Print("Unmarked Wishlist locked targets: " .. (argument.value=="on"
                         and "suggest current matching locked Echoes on opening/import."
-                        or "choose intended locked targets manually.") .. " Existing confirmed plans are unchanged.")
-                else Print(argument.option .. " permission: " .. argument.value .. ". The master Automation switch remains separate.") end
+                        or "choose intended locked targets manually.") .. " Existing confirmed plans are unchanged." .. sessionOnly)
+                else Print(argument.option .. " permission: " .. argument.value .. ". The master Automation switch remains separate." .. sessionOnly) end
             end,
             prototype=function()
                 Print("Experimental Nexus: plan Wishlists, follow or automate Echo choices, refine with approved Orbs, share builds, and compare DPS. /nexus help explains each mode.")
