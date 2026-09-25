@@ -177,13 +177,14 @@ function dbBinding.Select(payload)
     return payload
 end
 -- A saved root the Store keeps read-only still shows the DPS records this
--- build reads: the session store starts as a detached bounded copy of the
--- keys this module reads (from the bundle's payload, or with no bundle from
--- the saved dpsCapture). Other saved keys are not copied. The saved tables
+-- build reads, once the catalog has admitted that root: the session store
+-- becomes a detached bounded copy of the current DPS keys (from the bundle's
+-- payload, or with no bundle from the saved dpsCapture). Other saved keys,
+-- including the older per-player leaderboard shape, are not copied. The saved tables
 -- are never served, so writes and inbound records stay out of the saved
 -- root. An occupied bundle without a payload revives no legacy input.
 dbBinding.SAVED_KEYS = {
-    "personalBest", "buildBest", "characterBest", "leaderboard",
+    "personalBest", "buildBest", "characterBest",
     "lockedMigrationSource", "lockedMigrationVersion",
 }
 function dbBinding.SavedProjection(bundle)
@@ -225,9 +226,15 @@ local function DB()
         and catalog.Status() or nil
     dbPolicyReadOnly = type(status) == "table" and status.readOnly == true
     if dbPolicyReadOnly then
-        if transientDbOwner ~= NexusDB then
+        -- A root the catalog refuses (a catalog schema this build does not
+        -- know, an invalid bundle) shows nothing. The copy is made once, when
+        -- the catalog admits the root.
+        local admitted = status.state == "ROOT_ADMITTED"
+        if transientDbOwner ~= NexusDB
+            or (admitted and dbBinding.projectedFor ~= NexusDB) then
             transientDbOwner = NexusDB
-            transientDb = dbBinding.SavedProjection(bundle) or {}
+            transientDb = admitted and dbBinding.SavedProjection(bundle) or {}
+            if admitted then dbBinding.projectedFor = NexusDB end
         end
         return dbBinding.Select(transientDb)
     end

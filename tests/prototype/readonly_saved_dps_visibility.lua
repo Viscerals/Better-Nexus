@@ -3,8 +3,10 @@
 -- records it has saved, from an existing authority bundle or from the saved
 -- dpsCapture with no bundle, through the DPS lookups, the Leaderboard view and
 -- the Build Library's default qualified view. Nothing is written into the
--- saved root and received records are still refused. A saved graph outside the
--- session copy bound is not shown. The saved error history is still listed.
+-- saved root and received records are still refused. Saved data the catalog
+-- refuses, an occupied bundle without DPS data, the older per-player
+-- leaderboard shape and a saved graph outside the session copy bound show no
+-- DPS records. The saved error history is still listed.
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
@@ -142,10 +144,9 @@ do
  check(F.Serialize(NexusDB)==input,'unknown saved DPS key: the saved root is byte-identical')
 end
 
--- DPS reads create a missing root and convert the older per-player
--- leaderboard shape in the store they read. Both must happen in the session
--- copy, never in the saved tables. The converted older rows are shown, as a
--- writable profile shows them.
+-- DPS reads create a missing root in the store they read, and would convert
+-- the older per-player leaderboard shape there. Neither may reach the saved
+-- tables. The older shape is not shown, as in a writable profile.
 do
  local db=Load(EB);db.settingsVersion=6
  db.authorityBundle.dpsCapture.characterBest.dummy=nil
@@ -183,10 +184,34 @@ do
  local lk,dummy=Board('lk'),Board('dummy')
  View(H,'lk')
  print('READONLY_DPS','OLD-future6','board',lk..'/'..dummy)
- check(lk==3 and dummy==2,'older leaderboard shape: converted in the session copy and shown')
+ check(lk==0 and dummy==0,'older leaderboard shape: not shown, as in a writable profile')
  check(F.Serialize(NexusDB)==input,'older leaderboard shape: reads convert nothing in the saved root')
  H.Fire('PLAYER_LOGOUT')
  check(F.Serialize(NexusDB)==input,'older leaderboard shape: the saved root is byte-identical after the session')
+end
+
+-- Saved data the catalog refuses shows no DPS records, and neither does an
+-- occupied bundle without DPS data (the saved dpsCapture is not revived).
+for _,case in ipairs({
+ {'bundle schema 2',EB,function(d)d.authorityBundle.schemaVersion=2 end,false},
+ {'bundle catalog schema 2',EB,function(d)d.authorityBundle.buildCatalog.schemaVersion=2 end,false},
+ {'legacy catalog schema 2',LEG,function(d)d.buildCatalog={schemaVersion=2} end,false},
+ {'invalid bundle schema',EB,function(d)d.authorityBundle.schemaVersion='x' end,false},
+ {'occupied bundle without DPS data',EB,function(d)
+   d.dpsCapture=L.Copy(d.authorityBundle.dpsCapture);d.authorityBundle.dpsCapture=nil end,true},
+})do
+ local db=Load(case[2]);db.settingsVersion=6;case[3](db)
+ local input=F.Serialize(db)
+ local H=F.Boot(db)
+ for _=1,240 do H.Advance(.5,.5) end
+ local status=Nexus.BuildCatalog.Status()
+ local lk=Board('lk')
+ print('READONLY_DPS',case[1],'state',status.state,'board',lk)
+ check((status.state=='ROOT_ADMITTED')==case[4],case[1]..': catalog admission is '..tostring(case[4])..' ('..tostring(status.state)..')')
+ check(status.readOnly==true,case[1]..': the catalog is read-only')
+ check(lk==0 and Nexus.DpsCapture.GetCharacterBest('lk','Alpha')==nil,case[1]..': no saved DPS record is shown')
+ H.Fire('PLAYER_LOGOUT')
+ check(F.Serialize(NexusDB)==input,case[1]..': the saved root is byte-identical')
 end
 
 -- The saved error history is still listed in a read-only session.
@@ -206,4 +231,4 @@ for _,v in ipairs({6,5})do
  H.Fire('PLAYER_LOGOUT')
  check(F.Serialize(NexusDB)==input,'format '..v..': the saved root is byte-identical')
 end
-print('PASS read-only saved profiles show their saved DPS records and error history and write nothing='..checks)
+print('PASS read-only saved profiles show their saved DPS records and error history and write nothing checks='..checks)
