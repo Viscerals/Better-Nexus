@@ -3345,6 +3345,22 @@ end
             -- nothing is resent, and it stays unresolved (ResolveActionIntent,
             -- AutoAllowed). (Inline, not a helper local: this factory is at
             -- Lua 5.1's 200-local limit.)
+            -- Every request the adapter still sees (GameAdapter.PendingActions;
+            -- a live latch next to a Select awaiting its grant is a separate
+            -- request, even for the same spell).
+            local pendingNow = Adapter.PendingActions()
+            local sent = actionIntent and (actionIntent.state == "submitted"
+                or actionIntent.state == "uncertain"
+                or actionIntent.state == "expired")
+            local sameSpellLatch = false
+            for i = 1, #pendingNow do
+                local item = pendingNow[i]
+                if actionIntent and item.kind == "select"
+                    and item.source == "latch"
+                    and item.spellId == tonumber(actionIntent.action.spellId) then
+                    sameSpellLatch = true
+                end
+            end
             if actionIntent and actionIntent.state == "prepared" then
                 local revokedDeadline = actionIntent.readyAt
                 FinishActionIntent("superseded", "world_transition", false)
@@ -3352,17 +3368,19 @@ end
                     nextStepAt = nil
                     ScheduleKnownDeadlines()
                 end
-            elseif actionIntent and not actionIntent.crossedWorld
+            elseif sent and not actionIntent.crossedWorld
+                and not sameSpellLatch
                 and actionIntent.action.type == "take"
                 and actionIntent.grantBaseline
                 and Adapter.GrantedCount(actionIntent.action.spellId)
                     > actionIntent.grantBaseline then
                 -- Its grant is already visible (for example at level 80,
-                -- where no StepRun resolves it): this is its result.
+                -- where no StepRun resolves it) and no other request for the
+                -- same spell is pending: this is its result. A Take that was
+                -- never sent, or one with another same-spell request pending,
+                -- cannot be matched to a grant.
                 FinishActionIntent("confirmed", "grant_observed", false)
-            elseif actionIntent and (actionIntent.state == "submitted"
-                or actionIntent.state == "uncertain"
-                or actionIntent.state == "expired") then
+            elseif sent then
                 actionIntent.crossedWorld = true
                 FinishActionIntent("uncertain", "world_transition", true)
             end
@@ -3371,10 +3389,10 @@ end
             -- already have recorded the action as a result, or the player
             -- sent it. A later watchdog release of a latch is not a result.
             -- A grant can end the hold only when a single Select is pending
-            -- and, with a crossed intent, it is that Take's own spell. A
-            -- later leave adds its items to an open hold, and keeps the grant
-            -- release only if that same Select is still all that is pending.
-            local pendingNow = Adapter.PendingActions()
+            -- and, with a crossed intent, it is that Take's own tracked
+            -- request (not another latch for the same spell). A later leave
+            -- adds its items to an open hold, and keeps the grant release
+            -- only if that same Select is still all that is pending.
             local crossed = actionIntent and actionIntent.crossedWorld
             local held = actionHold.worldPending
             if held or crossed or #pendingNow > 0 then
@@ -3382,6 +3400,7 @@ end
                 local byGrant = only and only.kind == "select"
                     and only.spellId and only.baseline
                     and (not crossed or (actionIntent.action.type == "take"
+                        and only.source ~= "latch"
                         and tonumber(actionIntent.action.spellId) == only.spellId))
                 if not held then
                     held = { kinds = {}, label = "",
@@ -3392,17 +3411,38 @@ end
                     and not (byGrant and only.spellId == held.spellId) then
                     held.spellId, held.baseline = nil, nil
                 end
-                if crossed then
-                    local kind = tostring(actionIntent.action.type)
-                    held.kinds[kind == "select" and "take" or kind] = true
-                end
+                -- Requests per kind, for a truthful reason. A crossed Take is
+                -- the adapter's own tracked Select ("own"/"grant") when one is
+                -- listed; otherwise it is one more Take request. Freeze,
+                -- Banish and Reroll have one client latch each and no grant
+                -- path; a crossed one is named once with its latch.
+                local counts, tracked = {}, false
                 for i = 1, #pendingNow do
                     local kind = tostring(pendingNow[i].kind)
-                    held.kinds[kind == "select" and "take" or kind] = true
+                    kind = kind == "select" and "take" or kind
+                    counts[kind] = (counts[kind] or 0) + 1
+                    if kind == "take" and pendingNow[i].source ~= "latch" then
+                        tracked = true
+                    end
                 end
-                local labels = {}
-                for kind in pairs(held.kinds) do labels[#labels + 1] = kind end
-                table.sort(labels)
+                if crossed then
+                    local kind = tostring(actionIntent.action.type)
+                    if kind == "take" then
+                        if not tracked then counts.take = (counts.take or 0) + 1 end
+                    elseif not counts[kind] then
+                        counts[kind] = 1
+                    end
+                end
+                for kind, n in pairs(counts) do
+                    if n > (held.kinds[kind] or 0) then held.kinds[kind] = n end
+                end
+                local names, labels = {}, {}
+                for kind in pairs(held.kinds) do names[#names + 1] = kind end
+                table.sort(names)
+                for i = 1, #names do
+                    local n = held.kinds[names[i]]
+                    labels[i] = n > 1 and (n .. " " .. names[i] .. " requests") or names[i]
+                end
                 held.label = table.concat(labels, " and ")
             end
             return autoEnabled and "held" or "off"
