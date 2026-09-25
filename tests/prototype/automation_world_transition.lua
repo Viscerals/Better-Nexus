@@ -67,7 +67,9 @@ do
  assert(H.Auto() and not ok and tostring(why):find('settling',1,true),'the closing entry settles first: '..tostring(why))
  H.Advance(2.5)
  assert(H.Takes()==0,'no action inside the settle window')
- H.Advance(1.5)
+ -- The settle end schedules its own step: the action follows within one
+ -- intent beat (0.4 s) and poll, not at a later fallback recompute.
+ H.Advance(1.2)
  assert(H.Auto() and H.Allowed(),'after the settle the selection acts again')
  assert(H.Takes()==1,'one action after the settle, actions='..H.Takes())
  H.Advance(3);assert(H.Takes()==1 and H.attempts==1,'and only once')
@@ -91,8 +93,13 @@ end
 do
  local H=Boot();H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
  assert(H.Takes()==1 and H.attempts==1,'one board action submitted')
- H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(8)
- assert(H.Auto() and H.attempts==1,'no resend of an unresolved action, attempts='..H.attempts)
+ H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD')
+ -- Well past the settle, the confirmation timeout and several fallback
+ -- recomputes: the unanswered action keeps holding the same board.
+ for _=1,6 do
+  H.Advance(5)
+  assert(H.Auto() and H.attempts==1,'no resend or new action on the unresolved board, attempts='..H.attempts..' at '..H.now)
+ end
 end
 
 -- 5. An entry with no observed leave cannot be classified and turns Auto OFF;
@@ -137,7 +144,19 @@ do
  assert(not J.Auto() and J.Takes()==0,'OFF chosen during the loading screen stays OFF')
 end
 
--- 8. Button labels fit the 72-pixel button: Auto: --, Auto: ON, Auto: OFF.
+-- 8. While actions are held with no board, the button shows the selection
+-- (ON), and the hold reason is in the status line; one click turns it OFF.
+do
+ local H=Boot();Nexus.Panel.Show();SlashCmdList.NEXUS('auto');H.Advance(.5)
+ H.Fire('PLAYER_LEAVING_WORLD');H.Advance(1)
+ assert(H.Auto() and Label()=='Auto: ON','held during the loading screen, button ON: '..Label())
+ H.Fire('PLAYER_ENTERING_WORLD');H.Advance(1)
+ assert(not H.Allowed() and Label()=='Auto: ON','settling, button still ON: '..Label())
+ NexusPanel._autoBtn:Click();H.Advance(.5)
+ assert(not H.Auto() and Label()=='Auto: OFF','one click during a hold turns the selection OFF: '..Label())
+end
+
+-- 9. Button labels fit the 72-pixel button: Auto: --, Auto: ON, Auto: OFF.
 do
  local H=Boot();Nexus.Panel.Show();H.Advance(.5)
  assert(Label()=='Auto: OFF','OFF label: '..Label())

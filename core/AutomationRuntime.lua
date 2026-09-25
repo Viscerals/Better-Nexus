@@ -2169,7 +2169,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         local model = { status = statusLine, cards = {}, recommendation = "",
             progress = BuildProgress(plan, owned, slots, catalog,
                 nil, nil, static, locked),
-            auto = AutoAllowed() and settings.autoPick,
+            -- The selection, as on the board path: a hold is shown in the
+            -- status line, never as a button that reads OFF.
+            auto = autoEnabled,
             version = Nexus.VERSION }
         FinishPhase(preparePerformance, "overlayPrepare", prepareStarted)
         MeasurePhase("overlayRender", RenderPanel, model)
