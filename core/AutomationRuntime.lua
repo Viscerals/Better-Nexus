@@ -21,6 +21,21 @@ Nexus.MainInternals.AutomationRuntime = AutomationRuntime
 -- so it cannot close over the constructor-local `Store` directly.
 local boundStore
 
+-- Run status (last save status/refusal, audit run counter) and the retired
+-- flat lockDesignTargets key live in the saved root, or for a read-only saved
+-- root in the Store owner's session-only table, which starts with copies of
+-- the saved values. File scope for the same local-ceiling reason as above.
+local RUN_SAVED_KEYS = {
+    "lastSaveStatus", "lastSaveRefusal", "auditRunCounter", "lockDesignTargets",
+}
+local function RunRoot()
+    if type(NexusDB) ~= "table" then return nil end
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, RUN_SAVED_KEYS) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
 local function UpdateStoreState(mutator)
     local internals = Nexus and Nexus.MainInternals
     local owner = type(internals) == "table" and internals.StoreAuthorityOwner
@@ -530,7 +545,8 @@ local function LockDesignTargetsFor(wishlist, knownKey)
     if type(wishlist)=="table" and wishlist.designTargets~=nil then
         return wishlist.designTargets
     end
-    local legacy = NexusDB and NexusDB.lockDesignTargets
+    local runRoot = RunRoot()
+    local legacy = runRoot and runRoot.lockDesignTargets
     if type(legacy) == "table" then
         UpdateStoreState(function(state)
             state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
@@ -539,7 +555,7 @@ local function LockDesignTargetsFor(wishlist, knownKey)
                 state.lockDesignTargetsBySlot[key] = legacy
             end
         end)
-        NexusDB.lockDesignTargets = nil
+        runRoot.lockDesignTargets = nil
     end
     -- Read LIVE, not from the defensive snapshot. lockDesignTargetsBySlot is
     -- part of the live sub-tree protocol: WishlistController.LockDesignTargets
@@ -2653,7 +2669,7 @@ local function StepSave(level, plan, slots, owned, static, locked)
                 SetStatus("Save sent — checking server")
                 Print(string.format("Save sent — %s. Checking the Saved Build now. Still needed: %s.",
                     saveVerifySummary or "loadout improved", stillNeeded))
-                NexusDB.lastSaveStatus = {
+                RunRoot().lastSaveStatus = {
                     state = "sent", slot = incumbent.slot, name = saveName,
                     t = date and date("%H:%M:%S") or "",
                     summary = saveVerifySummary or "", stillNeeded = stillNeeded,
@@ -2697,7 +2713,7 @@ local function StepSave(level, plan, slots, owned, static, locked)
             SetStatus(string.format(
                 "Working toward '%s' — run complete, no improvement (%s)",
                 wlName, readableDetail))
-            NexusDB.lastSaveRefusal = {
+            RunRoot().lastSaveRefusal = {
                 t = date and date("%H:%M:%S") or "",
                 level = level, detail = tostring(detail),
                 incumbentSlot = incumbent.slot,
@@ -2817,8 +2833,9 @@ local function ResetRunBoundary()
         Print("|cffff9040Nexus:|r the first-run Saved Build write was not confirmed before the reset. "
             .. "Open Echo Journal > My Builds and verify/save the loadout manually before relying on automated convergence.")
     end
-    NexusDB.auditRunCounter = (tonumber(NexusDB.auditRunCounter) or 0) + 1
-    auditRunId = NexusDB.auditRunCounter
+    local runRoot = RunRoot()
+    runRoot.auditRunCounter = (tonumber(runRoot.auditRunCounter) or 0) + 1
+    auditRunId = runRoot.auditRunCounter
     auditRunStarted = nil
     leversDoneThisVisit = {}
     armAttempts, armTargetSlot = 0, nil
@@ -2943,7 +2960,7 @@ local function ObservePendingSave(catalog)
                     SetStatus("Save complete — server confirmed Active Loadout "
                         .. saveVerifySlot)
                 end
-                NexusDB.lastSaveStatus = {
+                RunRoot().lastSaveStatus = {
                     state = "confirmed", slot = saveVerifySlot,
                     t = date and date("%H:%M:%S") or "",
                     summary = saveVerifySummary or "",
@@ -2969,7 +2986,7 @@ local function ObservePendingSave(catalog)
             else
                 SetStatus("Save request sent; server confirmation not received. Check My Builds before resetting.")
             end
-            NexusDB.lastSaveStatus = {
+            RunRoot().lastSaveStatus = {
                 state = seedVerify and "first_run_unconfirmed" or "saved_unverified",
                 slot = saveVerifySlot,
                 name = saveVerifyName or "",
@@ -3287,7 +3304,7 @@ end
     local M = {}
 
     function M.Initialize()
-        auditRunId = tonumber(NexusDB and NexusDB.auditRunCounter) or 0
+        auditRunId = tonumber(RunRoot() and RunRoot().auditRunCounter) or 0
         local revisions = Nexus and Nexus.Revisions
         if not catalogRevisionUnsubscribe and revisions
             and type(revisions.Subscribe) == "function" then

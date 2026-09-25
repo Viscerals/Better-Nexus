@@ -136,7 +136,15 @@ wishlistController = WishlistControllerFactory.New({
     model = DraftModel,
     store = assert(Nexus.Store,
         "Store must load before WishlistController"),
-    accountRoot = function() return NexusDB end,
+    -- The editor's own saved keys. A read-only saved root is never written:
+    -- the Store owner hands back a session-only table for it instead.
+    accountRoot = function()
+        local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+        if type(writable) == "function" then
+            return writable(nil, {"editorSearch", "editorClassOnly", "lockDesignTargets"})
+        end
+        return NexusDB
+    end,
     notify = function(message) print(Nexus.UserText and Nexus.UserText.Message(message) or message) end,
     requestRecompute = function()
         if Nexus.RequestRecompute then Nexus.RequestRecompute() end

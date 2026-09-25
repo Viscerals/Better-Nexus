@@ -48,8 +48,20 @@ local stats = {
     wishlistReads=0,ownedReads=0,lockedReads=0,catalogReads=0,
 }
 
+-- The overlay's own saved keys live in the saved root, or for a read-only
+-- saved root in the Store owner's session-only table (starting with copies
+-- of the saved values).
+local OVERLAY_SAVED_KEYS = {"overlayLocked", "overlayPosition", "overlayScale", "overlayShown"}
+local function OverlayRoot()
+    NexusDB = NexusDB or {}
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, OVERLAY_SAVED_KEYS) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
 local function IsLocked()
-    return NexusDB.overlayLocked ~= false
+    return OverlayRoot().overlayLocked ~= false
 end
 
 local function ApplyLockState()
@@ -74,7 +86,7 @@ end
 local function ApplyPosition()
     if not frame then return end
     frame:ClearAllPoints()
-    local pos = NexusDB.overlayPosition
+    local pos = OverlayRoot().overlayPosition
     if type(pos) == "table" and pos.point then
         frame:SetPoint(pos.point, UIParent, pos.relativePoint or pos.point, pos.x or 0, pos.y or 0)
     else
@@ -85,7 +97,7 @@ end
 local function SavePosition()
     if not frame then return end
     local point, _, relativePoint, x, y = frame:GetPoint(1)
-    NexusDB.overlayPosition = {
+    OverlayRoot().overlayPosition = {
         point = point or "LEFT", relativePoint = relativePoint or point or "LEFT",
         x = math.floor((x or 0) + 0.5), y = math.floor((y or 0) + 0.5),
     }
@@ -93,7 +105,7 @@ end
 
 local function ApplyScale()
     if not frame then return end
-    local scale = tonumber(NexusDB.overlayScale) or 1.0
+    local scale = tonumber(OverlayRoot().overlayScale) or 1.0
     pcall(function() frame:SetScale(scale) end)
     pcall(function() if controlsFrame then controlsFrame:SetScale(scale) end end)
 end
@@ -163,7 +175,7 @@ local function EnsureFrame()
     lockBtn:SetSize(122, 18)
     lockBtn:SetPoint("LEFT", 0, 0)
     lockBtn:SetScript("OnClick", function()
-        NexusDB.overlayLocked = not IsLocked()
+        OverlayRoot().overlayLocked = not IsLocked()
         ApplyLockState()
     end)
 
@@ -408,7 +420,7 @@ function M.Show()
     EnsureFrame()
     frame:Show()
     if controlsFrame then controlsFrame:Show() end
-    NexusDB.overlayShown = true
+    OverlayRoot().overlayShown = true
     ApplyLockState()
     M.Refresh()
 end
@@ -416,7 +428,7 @@ end
 function M.Hide()
     if frame then frame:Hide() end
     if controlsFrame then controlsFrame:Hide() end
-    NexusDB.overlayShown = false
+    OverlayRoot().overlayShown = false
 end
 
 function M.Toggle()
@@ -435,7 +447,7 @@ function M.IsLocked()
 end
 
 function M.ToggleLock()
-    NexusDB.overlayLocked = not IsLocked()
+    OverlayRoot().overlayLocked = not IsLocked()
     ApplyLockState()
 end
 
@@ -443,26 +455,26 @@ end
 -- overlay itself (moved there per request 2026-07-24) -- these are the
 -- read/write hooks it drives.
 function M.ResetPosition()
-    NexusDB.overlayPosition = nil
+    OverlayRoot().overlayPosition = nil
     ApplyPosition()
     if frame then
         frame:Show()
         if controlsFrame then controlsFrame:Show() end
-        NexusDB.overlayShown = true
+        OverlayRoot().overlayShown = true
         ApplyLockState()
         M.Refresh()
     end
 end
 
 function M.GetScale()
-    return tonumber(NexusDB.overlayScale) or 1.0
+    return tonumber(OverlayRoot().overlayScale) or 1.0
 end
 
 function M.SetScale(value)
     value = tonumber(value) or 1.0
     if value < 0.5 then value = 0.5 end
     if value > 1.6 then value = 1.6 end
-    NexusDB.overlayScale = value
+    OverlayRoot().overlayScale = value
     ApplyScale()
 end
 

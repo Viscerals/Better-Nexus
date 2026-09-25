@@ -166,16 +166,27 @@ local function ReadIntensity()
     return value, level
 end
 
-local function EnsureDefaultMode()
+-- The table the HUD mode is kept in: the saved root, or for a read-only saved
+-- root the Store owner's session-only table (starting with the saved mode).
+local MODE_SAVED_KEYS = {"soulAshHudMode"}
+local function ModeRoot()
     NexusDB = NexusDB or {}
-    if NexusDB.soulAshHudMode ~= "server" and NexusDB.soulAshHudMode ~= "nexus" then
-        NexusDB.soulAshHudMode = "nexus"
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, MODE_SAVED_KEYS) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
+local function EnsureDefaultMode()
+    local root = ModeRoot()
+    if root.soulAshHudMode ~= "server" and root.soulAshHudMode ~= "nexus" then
+        root.soulAshHudMode = "nexus"
     end
 end
 
 local function UsingNexusHud()
     EnsureDefaultMode()
-    return NexusDB.soulAshHudMode == "nexus"
+    return ModeRoot().soulAshHudMode == "nexus"
 end
 
 -- The same answer WITHOUT normalizing the stored value. EnsureDefaultMode
@@ -183,7 +194,7 @@ end
 -- applying the preference and wrong when something is merely reading it: a
 -- support report must not store a setting just by describing one.
 local function SavedModeIsNexus()
-    local saved = type(NexusDB) == "table" and NexusDB.soulAshHudMode or nil
+    local saved = type(NexusDB) == "table" and ModeRoot().soulAshHudMode or nil
     return saved ~= "server"
 end
 
@@ -406,8 +417,7 @@ function M.VisibilityFacts()
 end
 
 function M.SetMode(mode)
-    NexusDB = NexusDB or {}
-    NexusDB.soulAshHudMode = mode == "server" and "server" or "nexus"
+    ModeRoot().soulAshHudMode = mode == "server" and "server" or "nexus"
     ApplyVisibility()
     if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
 end

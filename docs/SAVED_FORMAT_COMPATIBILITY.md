@@ -12,8 +12,8 @@ Format 5 is not newer. The earlier Better Nexus test line (archived commit `58b8
 |---|---|
 | Classification | Saved format 3, 4 or 5 is accepted only when the data shows what those formats' migrations produce: `syncMode` is off, manual, automatic or absent; the community-retention numbers are whole numbers of 0 or more; the account ledger is a table (4 and up); and the ledger has no `name@unknown` rows (5). This build also requires, for format 5, string ledger keys, table ledger rows and at most 4096 ledger rows. |
 | Accepted ("known") | Local reads and writes are durable. The saved marker stays at its value; it is not lowered or raised. As for every profile this build opens, start-up also adds missing default settings keys and missing empty character sub-tables, and writes its own storage-migration receipt (`nexusStoreMigrations`). Before this change, none of that happened for formats 3 to 5. |
-| Not accepted ("unverified") | The data stays unchanged and read-only (see "Read-only saved data" for settings). Messages name the saved format, the supported format and the first failing field. |
-| Format 6 and higher ("future") | Unchanged and read-only, as before (see "Read-only saved data" for settings). |
+| Not accepted ("unverified") | The data stays unchanged and read-only (see "Read-only saved data"). Messages name the saved format, the supported format and the first failing field. |
+| Format 6 and higher ("future") | Unchanged and read-only, as before (see "Read-only saved data"). |
 | Format 2, 1, 0 and unversioned (marker absent) | Unchanged behavior. |
 | Malformed marker | A marker that is present but not a finite whole number of 0 or more: fractions such as 6.5, negative values, NaN and infinities, every string (including a numeric string such as "5"), booleans, tables and other types. The data stays unchanged and read-only, like a future format: no default filling, stamping, conversion or character writes. The message names the marker's type and, for a number, boolean or short string, its value. This build and the older converter both refuse it. Treating numeric strings as malformed is an intentional tightening: test.9034 and earlier read "5" as 5. |
 
@@ -21,11 +21,16 @@ The message "written by a newer Nexus version" is replaced by the real markers, 
 
 ## Read-only saved data
 
-For an unverified format, a future format and a malformed marker, from the build after test.9035 (the change for audit items AUD-01 and AUD-10):
+For an unverified format, a future format and a malformed marker, "read-only" covers the whole saved profile, not only its settings, character rows and ledger. From the build after test.9035 (the change for audit items AUD-01, AUD-02 and AUD-10):
 
+- **Nothing is written.** No key is added, replaced or removed anywhere in the saved data, at start-up, during play or at logout: no catalog bundle (`authorityBundle`), no storage migration receipt, no diagnostic or error history, no repair record, no panel, overlay, minimap or HUD placement, no filter or run status, and no conversion or cleanup. Those values live in session memory and are gone after a reload.
+- **Community data.** The Build Library is admitted from the saved data as it is and served for the session. Community writes (Share, received rows, removal and retention markers, maintenance) are refused with `SAVED_FORMAT_READ_ONLY`. The next session admits the saved data again, including rows the other version added meanwhile. An authority bundle that an earlier build wrote into such data is served and kept byte for byte; it is never rewritten.
+- **DPS records.** The session uses the existing read-only DPS mode: a session-only store. Saved DPS records are kept but not shown, and received records are refused.
 - **Settings.** The session runs with a validated copy of the saved settings. An automation permission (`autoPick`, `autoActivate`, `autoDisable`, `autoSave`, `autoBanish`, `autoReroll`, `autoFreeze`, `autoLockEchoes`, `communityRetentionEnabled`) is on only when its saved value is exactly `true`. `false`, an absent value and any other value are off; shipped defaults never switch one on. Other settings this build knows keep a valid saved value and otherwise use the default. Settings this build does not know (for example the other addon's Sync controls) are not used. A lever opt-out list that cannot be read turns lever automation off. The session Automation master switch still starts OFF and cannot override a permission that is off.
-- **Changes in the session.** The editor's locked-Echo switch, `/nexus reroll|freeze|currentlocks on|off` and `/nexus anchor` change this session only, and the switch and the commands say so. The saved settings are not changed; a reload starts again from the saved values.
+- **Changes in the session.** The editor's locked-Echo switch, `/nexus reroll|freeze|currentlocks on|off`, `/nexus anchor` and the placement controls change this session only, and the switch and the commands say so. The saved data is not changed; a reload starts again from the saved values.
 - **Client auto-accept.** Start-up does not change the client's auto-accept option (`autoAcceptLoadoutEchoes`), because the previous value could not be saved to restore it later. Automation waits while that option is on, as it always has.
+
+Earlier builds (test.9033 and older, and up to the change above) wrote a catalog bundle and diagnostic keys into such data. What they wrote is kept as it is.
 
 ## Upgrading from a build that kept the data read-only
 

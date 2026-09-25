@@ -655,10 +655,19 @@ EnsureMainDiagnostics = function()
         getAutoEnabled=function() local r=Automation(); return r and r.AutoEnabled() or false end,
         getAutoLockTrace=function() local r=Automation(); return r and r.LastAutoLockTrace() or {at=0,lines={}} end,
         getAuditRunId=function() local r=Automation(); return r and r.AuditRunId() or 0 end,
-        getDatabase=function() return NexusDB end,
+        -- Only the run-status keys are read and cleared through these. A
+        -- read-only saved root keeps its own; the session's live in the Store
+        -- owner's session-only table.
+        getDatabase=function()
+            local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+            if type(writable) ~= "function" then return NexusDB end
+            return writable(nil, {"lastSaveRefusal", "lastSaveStatus", "auditRunCounter"})
+        end,
         ensureDatabase=function()
             NexusDB = NexusDB or {}
-            return NexusDB
+            local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+            if type(writable) ~= "function" then return NexusDB end
+            return writable(NexusDB, {"lastSaveRefusal", "lastSaveStatus", "auditRunCounter"})
         end,
         resetAuditState=function()
             local runtime=Automation(); if runtime then runtime.ResetAuditState() end

@@ -2321,6 +2321,16 @@ end
 local Candidate, Cursor = {}, {}
 Candidate.EvidenceCandidateStore = EvidenceCandidateStore
 
+-- Is `db` a saved root the Store owner keeps read-only (future, unverified or
+-- malformed saved format)? Such a root is admitted and served, but nothing is
+-- ever committed into it. The verdict is the Store's own; it is not re-derived.
+function Candidate.ReadOnlySource(db)
+    local internals = Nexus and Nexus.MainInternals
+    local verdict = type(internals) == "table" and internals.SavedRootReadOnlyV1
+    return type(db) == "table" and type(verdict) == "function"
+        and verdict(db) ~= nil or false
+end
+
 function Candidate.SourceValue(db, source, field)
     if field == "dpsAuthority" then
         local internals = Nexus and Nexus.MainInternals
@@ -2824,7 +2834,18 @@ local function TokenDrifted(token)
     local db = token.databaseIdentity
     if type(db) ~= "table" then return "SOURCE_DRIFT" end
     local bundle = rawget(db, "authorityBundle")
-    if bundle ~= token.bundleIdentity then return "SOURCE_DRIFT" end
+    if bundle ~= token.bundleIdentity then
+        -- A read-only saved root is served from its session-only admission
+        -- bundle (ST.sessionBundle, set in PublishRoot), which is never
+        -- written into the root; the root's own slot must still hold exactly
+        -- what it held when that bundle was admitted.
+        local session = ST.sessionBundle
+        if not (session and session.db == db and session.durable == bundle
+            and session.bundle == token.bundleIdentity) then
+            return "SOURCE_DRIFT"
+        end
+        bundle = session.bundle
+    end
     local source = type(bundle) == "table" and bundle or db
     if rawget(source, "communityBuilds") ~= token.overlayIdentity
         or rawget(source, "syncTombstones") ~= token.tombstoneIdentity
@@ -3753,11 +3774,24 @@ local function PublishRoot(handle)
         sealedServing.generation = ST.servingGeneration + 1
     end
 
+    -- A read-only saved root (future, unverified or malformed saved format) is
+    -- never written: its admission bundle stays session-only, so the next
+    -- session admits the same saved input again, including legacy rows another
+    -- version added meanwhile. A mutation never reaches this point for such a
+    -- root (CommitBatch refuses it); this is the last guard.
+    local sessionOnly = handle.bundleWrite and Candidate.ReadOnlySource(db)
+    if sessionOnly and handle.mode == "mutation" then
+        return AdmissionFail(handle, "SAVED_FORMAT_READ_ONLY")
+    end
+
     -- Protected section: all allocation, copying, witness work, counter work,
     -- and callback work is complete. The durable and serving assignments are
     -- adjacent. Nothing between them can inspect or publish a partial graph.
     local ok = pcall(function()
-        if handle.bundleWrite and not CommitDurableBundle(db, handle.finalBundle) then
+        if sessionOnly then
+            ST.sessionBundle = {db=db, bundle=handle.finalBundle,
+                durable=rawget(db, "authorityBundle")}
+        elseif handle.bundleWrite and not CommitDurableBundle(db, handle.finalBundle) then
             error("AUTHORITY_BUNDLE_VERIFICATION_FAILED", 0)
         end
         if sealed then
@@ -3779,7 +3813,7 @@ local function PublishRoot(handle)
         ST.sessionTombstones = handle.sessionTombstones
         ST.sessionBarriers = handle.sessionBarriers
     end
-    if handle.bundleWrite then
+    if handle.bundleWrite and not sessionOnly then
         ST.debugStats.bundleWrites = ST.debugStats.bundleWrites + 1
     end
     if not sealed then
@@ -4181,7 +4215,7 @@ local function SummaryOf(handle, state, reason)
         schemaVersion=state == "ROOT_READ_ONLY_FUTURE_SCHEMA"
             and (handle and handle.futureSchema) or STORAGE_SCHEMA_VERSION,
         catalogVersion=tostring(ST.bundled and ST.bundled.catalogVersion or "unversioned"),
-        readOnly=state ~= "ROOT_ADMITTED",
+        readOnly=state ~= "ROOT_ADMITTED" or Candidate.ReadOnlySource(ST.db),
         state=state, reason=reason,
         generation=ST.generation,
         pumps=handle and handle.pumps or 0,
@@ -4281,6 +4315,7 @@ function Catalog.BeginRootAdmission(database, bundle)
         return {state=ST.rootState, reason="GENERATION_EXHAUSTED", pumps=0}
     end
     ST.db, ST.bundled, ST.baseline = db, bundled, baseline
+    if ST.sessionBundle and ST.sessionBundle.db ~= db then ST.sessionBundle = nil end
     PublishInvalidServing()
     ST.rootState, ST.rootReason = "ROOT_ADMISSION_PENDING", nil
     ST.activeClaim, ST.activeCursors, ST.activeMaintenance = nil, {}, nil
@@ -4642,7 +4677,8 @@ function Catalog.Status()
         buildIdentityLimit=BUDGET.rows, tombstoneLimit=BUDGET.tombstones,
         barrierLimit=BUDGET.barriers,
         catalogVersion=tostring(ST.bundled and ST.bundled.catalogVersion or "unversioned"),
-        readOnly=root == nil,
+        -- A read-only saved root is served but never written.
+        readOnly=root == nil or Candidate.ReadOnlySource(ST.db),
         state=ST.rootState, reason=ST.rootReason,
         generation=ST.generation,
     }
@@ -5491,6 +5527,13 @@ local function CommitBatch(root, items, reason, deferred, notifyScope,
         return false, drift
     end
     local db = root.token.databaseIdentity
+    -- A read-only saved root is never written: every commit into it (Share,
+    -- received rows, removal and retention markers, maintenance) is refused
+    -- before anything is prepared, and the served root stays as it is.
+    if Candidate.ReadOnlySource(db) then
+        EvidenceCancelCandidate()
+        return false, "SAVED_FORMAT_READ_ONLY"
+    end
     -- The occupied bundle is the sole durable authority payload. Every commit
     -- reads its current payload from that bundle and never from the exact PR #68
     -- legacy locations, which after occupancy are neither input nor storage.

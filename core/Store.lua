@@ -380,10 +380,12 @@ local function ExactInteger(value)
 end
 
 -- A saved root this build classifies as future, unverified or malformed is
--- read-only (docs/SAVED_FORMAT_COMPATIBILITY.md, "Read-only saved data").
--- This table is the one owner of that verdict and of the session-only
--- settings such a root runs with. It is one file-level local on purpose (the
--- Lua 5.1 local ceiling).
+-- read-only AS A WHOLE, not only its settings, character rows and ledger: no
+-- start-up, UI control, diagnostic or catalog path adds, replaces or removes
+-- anything in it (docs/SAVED_FORMAT_COMPATIBILITY.md, "Read-only saved data").
+-- This table is the one owner of that verdict and of the two session-only
+-- views that replace writes into such a root. It is one file-level local on
+-- purpose (the Lua 5.1 local ceiling).
 local ReadOnlyRoot = {
     -- Settings whose true value authorizes an automatic action. In a read-only
     -- root only an exact saved boolean true keeps one on; false, absent or any
@@ -399,6 +401,7 @@ local ReadOnlyRoot = {
     -- into the settings the session runs with.
     BOOLEANS = {updateNotifications=true, useCurrentLocksForUntagged=true},
     ANCHOR_NAMES = 32, TEXT = 128, LEVER_OPT_OUTS = 4096,
+    COPY_NODES = 256, COPY_DEPTH = 8,
 }
 
 -- The class ("future", "unverified" or "malformed") of a read-only root, or nil.
@@ -505,11 +508,73 @@ function ReadOnlyRoot.Settings(db)
     return view
 end
 
+-- A detached copy of a small plain saved graph, or nil when the value is not
+-- one (a metatable, a cycle, a non-scalar key, or past the node/depth bound).
+function ReadOnlyRoot.BoundedCopy(value)
+    local nodes = 0
+    local function Copy(current, depth, seen)
+        if type(current) ~= "table" then
+            local kind = type(current)
+            if kind == "string" or kind == "number" or kind == "boolean" then
+                return true, current
+            end
+            return false
+        end
+        nodes = nodes + 1
+        if not PlainTable(current) or seen[current]
+            or depth > ReadOnlyRoot.COPY_DEPTH
+            or nodes > ReadOnlyRoot.COPY_NODES then return false end
+        seen[current] = true
+        local out = {}
+        for key, child in pairs(current) do
+            local keyKind = type(key)
+            if keyKind ~= "string" and keyKind ~= "number"
+                and keyKind ~= "boolean" then return false end
+            local ok, copied = Copy(child, depth + 1, seen)
+            if not ok then return false end
+            out[key] = copied
+        end
+        seen[current] = nil
+        return true, out
+    end
+    local ok, copied = Copy(value, 1, {})
+    if ok then return copied end
+    return nil
+end
+
+-- The table an owner writes its own top-level keys into (presentation,
+-- diagnostic histories, run status): the saved root itself, or for a
+-- read-only root one session-only table bound to that root's identity. It is
+-- never reachable from NexusDB, so it is never saved. Each key named in
+-- `seedKeys` starts as a bounded copy of its saved value (a saved panel
+-- position is still shown); the saved value itself is never touched.
+function ReadOnlyRoot.Writable(db, seedKeys)
+    if ReadOnlyRoot.Class(db) == nil then return db end
+    local session = ReadOnlyRoot.session
+    if not session or session.db ~= db then
+        session = {db=db, root={}, seeded={}}
+        ReadOnlyRoot.session = session
+    end
+    for _, key in ipairs(type(seedKeys) == "table" and seedKeys or {}) do
+        if not session.seeded[key] then
+            session.seeded[key] = true
+            if rawget(session.root, key) == nil then
+                session.root[key] = ReadOnlyRoot.BoundedCopy(rawget(db, key))
+            end
+        end
+    end
+    return session.root
+end
+
 -- Internals seam (the public Store inventory stays fixed). `db` defaults to
 -- the saved root the client loaded.
 Nexus.MainInternals.SavedRootReadOnlyV1 = function(db)
     if db == nil then db = NexusDB end
     return ReadOnlyRoot.Class(db)
+end
+Nexus.MainInternals.WritableRootV1 = function(db, seedKeys)
+    if db == nil then db = NexusDB end
+    return ReadOnlyRoot.Writable(db, seedKeys)
 end
 
 -- Returns "ABSENT" | "CURRENT" | "FUTURE" | "MALFORMED", marker.
@@ -1456,7 +1521,10 @@ local function BootstrapSlice(C)
         -- DPS migration owns generated build references, so it must finish
         -- before compaction/retention can classify a page as unreferenced.
         local dataReady = not recovery or recovery.complete == true
+        -- A read-only saved root is never converted (its legacy DPS stays as
+        -- the other version left it).
         if Nexus.DpsCapture and not readOnly and dataReady
+            and not C.futureSettingsOwner
             and type(Nexus.DpsCapture.MigrateLegacyLeaderboard) == "function"
             and not OwnerCall(C, "DpsCapture.MigrateLegacyLeaderboard",
                 Nexus.DpsCapture.MigrateLegacyLeaderboard) then
@@ -1746,7 +1814,8 @@ function AuthorityBootstrap.New(options)
         -- retains this once-only owner initialization until MainLifecycle has
         -- finished required Community startup and ordinary registration.
         -- Dependents do not call maintenance owners or their pumps directly.
-        if not (self.catalogSummary and self.catalogSummary.readOnly) then
+        if not (self.catalogSummary and self.catalogSummary.readOnly)
+            and not self.futureSettingsOwner then
             if Nexus.DataCompaction and Nexus.DataCompaction.Init
                 and not OwnerCall(self,"DataCompaction.Init",
                     Nexus.DataCompaction.Init,self.database) then return self.result end

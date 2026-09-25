@@ -480,15 +480,29 @@ function M.CloseOtherWindows(exceptName)
     menuTransition = false
 end
 
+-- The panel's own saved keys (position, DPS-records toggle, minimap angle)
+-- live in the saved root, or for a read-only saved root in the Store owner's
+-- session-only table, which starts with copies of the saved values.
+-- It is a module field rather than a local because EnsureFrame is at the Lua
+-- 5.1 upvalue limit.
+local PANEL_SAVED_KEYS = {"panelX", "panelY", "uiShowPerformance", "minimapAngle"}
+function M.SavedLayoutRoot()
+    NexusDB = NexusDB or {}
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, PANEL_SAVED_KEYS) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
 local function EnsureFrame()
     if frame then return frame end
 
     frame = CreateFrame("Frame", "NexusPanel", UIParent)
     frame:SetSize(272, 210)
     frame:SetClampedToScreen(true)
-    NexusDB = NexusDB or {}
-    if tonumber(NexusDB.panelX) and tonumber(NexusDB.panelY) then
-        frame:SetPoint("CENTER", UIParent, "CENTER", NexusDB.panelX, NexusDB.panelY)
+    local savedLayout = M.SavedLayoutRoot()
+    if tonumber(savedLayout.panelX) and tonumber(savedLayout.panelY) then
+        frame:SetPoint("CENTER", UIParent, "CENTER", savedLayout.panelX, savedLayout.panelY)
     else
         frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
     end
@@ -501,7 +515,8 @@ local function EnsureFrame()
         local x, y = self:GetCenter()
         local ux, uy = UIParent:GetCenter()
         if x and y and ux and uy then
-            NexusDB.panelX, NexusDB.panelY = math.floor(x - ux + 0.5), math.floor(y - uy + 0.5)
+            local saved = M.SavedLayoutRoot()
+            saved.panelX, saved.panelY = math.floor(x - ux + 0.5), math.floor(y - uy + 0.5)
         end
     end)
     frame:Hide()
@@ -1000,7 +1015,7 @@ local function EnsureFrame()
                 notCheckable = true,
                 func = MenuAction(function()
                     showPerformance = not showPerformance
-                    NexusDB.uiShowPerformance = showPerformance
+                    M.SavedLayoutRoot().uiShowPerformance = showPerformance
                     if M.Refresh then M.Refresh() end
                 end),
             },
@@ -1024,7 +1039,8 @@ local function EnsureFrame()
                 text = "Reset Panel Position",
                 notCheckable = true,
                 func = MenuAction(function()
-                    NexusDB.panelX, NexusDB.panelY = nil, nil
+                    local saved = M.SavedLayoutRoot()
+                    saved.panelX, saved.panelY = nil, nil
                     frame:ClearAllPoints()
                     frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
                 end),
@@ -1103,8 +1119,7 @@ local function EnsureFrame()
     versionText = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     versionText:Hide() -- version remains in /nexus and tooltips; avoids bottom-row overlap
 
-    NexusDB = NexusDB or {}
-    showPerformance = NexusDB.uiShowPerformance == true
+    showPerformance = M.SavedLayoutRoot().uiShowPerformance == true
 
     pcall(function()
         frame:SetBackdrop({
@@ -1126,8 +1141,8 @@ end
 
 local function EnsureMinimapButton()
     if minimapBtn then return minimapBtn end
-    NexusDB = NexusDB or {}
-    NexusDB.minimapAngle = NexusDB.minimapAngle or 220
+    local saved = M.SavedLayoutRoot()
+    saved.minimapAngle = saved.minimapAngle or 220
 
     local btn = CreateFrame("Button", "NexusMinimapButton", Minimap)
     btn:SetSize(31, 31)
@@ -1144,7 +1159,7 @@ local function EnsureMinimapButton()
     end)
 
     local function Reposition()
-        local angle = math.rad(NexusDB.minimapAngle or 220)
+        local angle = math.rad(M.SavedLayoutRoot().minimapAngle or 220)
         local r = 80
         btn:ClearAllPoints()
         btn:SetPoint("CENTER", Minimap, "CENTER", r * math.cos(angle), r * math.sin(angle))
@@ -1157,7 +1172,7 @@ local function EnsureMinimapButton()
             local px, py = GetCursorPosition()
             local scale = Minimap:GetEffectiveScale()
             px, py = px / scale, py / scale
-            NexusDB.minimapAngle = math.deg(math.atan2(py - my, px - mx))
+            M.SavedLayoutRoot().minimapAngle = math.deg(math.atan2(py - my, px - mx))
             Reposition()
         end)
     end)
