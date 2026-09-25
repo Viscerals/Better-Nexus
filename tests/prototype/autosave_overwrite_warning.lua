@@ -40,20 +40,28 @@ local function sentences(text)
  for s in text:gmatch('[^%.%?!;:\n]+') do out[#out+1]=s:lower() end
  return out
 end
+-- Whole-word negation ("cannot" and "nothing" count; "note" does not).
+local function negated(s)
+ for _,w in ipairs({'not','no','nothing','cannot','separate'}) do
+  if s:find('%f[%a]'..w..'%f[%A]') then return true end
+ end
+ return false
+end
 local function honest(label,text)
  for _,s in ipairs(sentences(text)) do
-  -- Assigning is target selection; the save is a later, separate action.
-  -- ("Saved Build" is a noun here, not a save verb.)
-  if s:find('assign[ i]') or s:find('assignment') then
+  -- Assigning is target selection; the save is a separate action. The act of
+  -- assigning (assign/assigns/assigning/assignment) is checked, not "the
+  -- Wishlist assigned to"; "Saved Build" is a noun, not a save verb.
+  if s:find('%f[%a]assigns?%f[%A]') or s:find('%f[%a]assigning%f[%A]')
+   or s:find('%f[%a]assignment%f[%A]') then
    for _,verb in ipairs({'replace','overwrit','update','%f[%a]saves?%f[%A]','saving'}) do
-    check(not s:find(verb) or s:find('not',1,true) or s:find('separate',1,true),
+    check(not s:find(verb) or negated(s),
      label..': assignment is not described as saving or replacing: "'..s..'"')
    end
   end
   -- Ordinary automatic save never spends Orbs.
-  if s:find('orb',1,true) and (s:find('spend',1,true) or s:find('spent',1,true)) then
-   check(s:find('no orbs',1,true) or s:find('not',1,true),
-    label..': Orb spending is only ever denied: "'..s..'"')
+  if s:find('%f[%a]orbs?%f[%A]') and (s:find('spend',1,true) or s:find('spent',1,true)) then
+   check(negated(s),label..': Orb spending is only ever denied: "'..s..'"')
   end
   check(not s:find('every run is saved',1,true) or s:find('not every run',1,true),label..': not every run is saved')
   check(not s:find('every individual echo must',1,true),label..': no per-Echo improvement claim')
@@ -66,7 +74,8 @@ check(#Nexus.Help.Pages==7,'still seven Help pages')
 Nexus.Help.Show('start');local start=NexusHelpWindow.body:GetText()
 check(has(start,'select the intended Saved Build and assign the Wishlist to it'),'Help names the targeted Saved Build')
 check(has(start,'Assigning only chooses the target; it does not change the Saved Build.'),'Help: assignment changes no Saved Build')
-check(has(start,'With Auto ON, Nexus may later replace that active Saved Build'),'Help: Auto can later update that active Saved Build')
+check(has(start,'With Auto ON, Nexus may replace that active Saved Build with a better finished run'),'Help: Auto can update that active Saved Build')
+check(has(start,'right after you turn Auto ON or change the assignment'),'Help: the check can follow an assignment change at once')
 check(has(start,'working copy, not a protected archive'),'Help: working copy, not archive')
 check(has(start,'A Wishlist is a desired plan') and has(start,'Saved Builds are server slots'),'Help distinguishes Wishlist from Saved Build')
 local stepAssign=start:find('4. In My Builds',1,true);local stepAuto=start:find('With Auto ON',1,true)
@@ -74,14 +83,17 @@ check(stepAssign and stepAuto and stepAuto>stepAssign and stepAuto-stepAssign<40
 honest('Help start',start)
 Nexus.Help.Show('rolling');local rolling=NexusHelpWindow.body:GetText()
 check(has(rolling,'Automatic save is separate from Take, Banish, Reroll and Freeze.'),'Help: save distinct from Take/Banish/Reroll/Freeze')
-check(has(rolling,'Auto may replace your active Saved Build'),'Help: destination is the active Saved Build')
+check(has(rolling,'Auto may replace your active Saved Build with that run and give it the Wishlist\'s name.'),'Help: destination is the active Saved Build')
 check(has(rolling,'compares the run with the Wishlist assigned to that loadout'),'Help: compared with the assigned Wishlist')
+check(has(rolling,'It replaces an existing Saved Build only when overall Wishlist progress is higher than the Saved Build\'s, or equal with cleanup'),'Help: when a save replaces the build')
 check(has(rolling,'Not every run is saved.'),'Help: not every run is saved')
+check(has(rolling,'Assigning by itself changes nothing, but at level 80 after a finished run, turning Auto ON or changing the assigned Wishlist makes Nexus check again right away'),'Help: immediate recheck after Auto ON or an assignment change')
+check(has(rolling,'There is no separate automatic-save switch: Auto OFF stops it together with every other automatic action.'),'Help: Auto OFF is the only way to stop it')
 check(has(rolling,'Better means Wishlist progress, not Orb investment or keeping every individual Echo.'),'Help: meaning of better')
-check(has(rolling,'loses 1 requested copy but gains 3 others is +2 overall'),'Help: worked +2 example')
-check(has(rolling,'The save spends no Orbs'),'Help: automatic save is not an Orb spend')
+check(has(rolling,'loses 1 requested copy but gains 3 other requested copies is +2 overall'),'Help: worked +2 example')
+check(has(rolling,'The save itself spends no Orbs'),'Help: automatic save is not an Orb spend')
 check(has(rolling,'does not mean that Echo was judged worthless'),'Help: lost Echo not judged worthless')
-check(has(rolling,'Nexus cannot undo a completed save; Unassign does not restore a Saved Build.'),'Help: no undo, no restore')
+check(has(rolling,'Nexus cannot undo a completed save or bring back that Echo or the Orbs spent on it; Unassign does not restore a Saved Build.'),'Help: no undo, no restore')
 check(has(rolling,'Keep Auto OFF if you want the current Saved Build left untouched.'),'Help: how to leave the Saved Build untouched')
 check(has(rolling,'Target 2/current 5 means 3 extras'),'existing Rolling content retained')
 honest('Help rolling',rolling)
@@ -93,7 +105,7 @@ unchanged('Help')
 Nexus.QuickStart.Show();local qs=assert(NexusQuickStart);local body=assert(qs.body)
 local qsText=body:GetText()
 local assignAt=qsText:find('Assign the Wishlist you want it to follow.',1,true)
-local warnAt=qsText:find('With Auto ON, Nexus may update the active Saved Build after a better run.',1,true)
+local warnAt=qsText:find('With Auto ON, Nexus may replace the active Saved Build with a better finished run.',1,true)
 check(assignAt and warnAt and warnAt>assignAt,'Quick Start warning follows the assignment sentence')
 check(has(qsText,'Keep Auto OFF to leave that slot unchanged.'),'Quick Start: how to keep the slot unchanged')
 check(has(qsText,'Starting fresh? Import a Wishlist code'),'Quick Start: fresh-start sentence retained')
@@ -141,11 +153,12 @@ local function Hover(frame)
  return text
 end
 local function warns(label,text)
- check(has(text,'With Auto ON, Nexus may later replace the active Saved Build'),label..': names the active Saved Build as the destination')
- check(has(text,'improves overall Wishlist progress'),label..': save is judged on overall Wishlist progress')
+ check(has(text,'With Auto ON, Nexus may replace the active Saved Build'),label..': names the active Saved Build as the destination')
+ check(has(text,'more overall Wishlist progress, or equal progress after cleanup or an even swap of requested copies'),label..': save is judged on overall Wishlist progress')
+ check(has(text,'Auto checks again right away when you change the assignment.'),label..': an assignment change can be followed by a save at once')
  check(has(text,'even one obtained with Orbs: Orb investment is not compared.'),label..': Orb investment is not compared')
  check(has(text,'Keep Auto OFF to leave the Saved Build unchanged.'),label..': how to leave it unchanged')
- check(has(text,'Assigning does not change any Saved Build.'),label..': assigning changes no Saved Build')
+ check(has(text,'Assigning by itself does not change any Saved Build.'),label..': assigning changes no Saved Build')
  honest(label,text)
 end
 ProjectEbonholdEchoJournal:Show();Nexus.JournalTab.RefreshAssociations()
@@ -213,12 +226,15 @@ check(section,'guide has the automatic-save section')
 section=section:gsub('%s+',' ');guide=guide:gsub('%s+',' ')
 check(has(section,'**Wishlist assignment** chooses the target'),'guide: assignment is target selection')
 check(has(section,'It does not change the Saved Build.'),'guide: assignment changes no Saved Build')
-check(has(section,'**Automatic save** is a later, separate action'),'guide: automatic save is separate')
+check(has(section,'**Automatic save** is a separate action'),'guide: automatic save is separate')
 check(has(section,'may replace the **active Saved Build**'),'guide: destination is the active Saved Build')
 check(has(section,'Not every run is saved.'),'guide: not every run is saved')
+check(has(section,'A run replaces an existing Saved Build only when'),'guide: when a save replaces the build')
+check(has(section,'turning Auto ON or changing the assigned Wishlist makes Nexus check again right away'),'guide: immediate recheck')
+check(has(section,'There is no separate automatic-save switch'),'guide: Auto OFF is the only way to stop it')
 check(has(section,'Orb investment is not part of the comparison'),'guide: Orb investment not compared')
 check(has(section,'+2 overall Wishlist progress'),'guide: worked example')
-check(has(section,'The automatic save spends no Orbs.'),'guide: no Orb spend')
+check(has(section,'The save itself spends no Orbs, but Orbs already spent on the replaced Echo are not recovered'),'guide: no Orb spend, no Orb recovery')
 check(has(section,'Nexus cannot undo a completed server save.'),'guide: no undo')
 check(has(section,'does not change or restore the Saved Build'),'guide: Unassign restores nothing')
 check(has(guide,'Assigning only chooses the target; it does not change the Saved Build.'),'guide setup step matches Help')
