@@ -6,7 +6,7 @@
 -- unresolved and holds automation until player input (scenarios 10-12).
 -- Real runtime, adapter, policy and panel; synthetic game surface.
 local WANT={{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}}
-local function Boot()
+local function Boot(before)
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;NexusPanel=nil
  local H=dofile('tests/prototype/harness.lua');H.pendingRolls=2
  H.perks.serverActiveSlot=1
@@ -18,6 +18,7 @@ local function Boot()
  for _,name in ipairs({'SelectPerk','BanishPerk','FreezePerk','RequestReroll'})do
   local call=H.service[name];H.service[name]=function(...)H.attempts=H.attempts+1;return call(...)end
  end
+ if before then before(H) end
  -- H.Boot's own sequence, with the real runtime instance captured as Main
  -- creates it (no product seam is added for the test).
  for line in io.lines('Nexus.toc') do
@@ -108,10 +109,10 @@ end
 -- so does a logout. Neither is later restored.
 do
  local H=Boot();Nexus.Panel.Show();SlashCmdList.NEXUS('auto');H.Advance(.5)
- assert(Label()=='Auto: ON','button shows ON: '..Label())
+ assert(Label()=='Auto ON','button shows ON: '..Label())
  H.Fire('PLAYER_ENTERING_WORLD')
  assert(not H.Auto(),'entry without an observed leave revokes Auto')
- assert(Label()=='Auto: OFF','button shows OFF after the revoke: '..Label())
+ assert(Label()=='Auto OFF','button shows OFF after the revoke: '..Label())
  H.Offer();H.Advance(5);assert(H.Takes()==0,'revoked: no action')
  SlashCmdList.NEXUS('auto');H.Advance(.2);H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
  H.Fire('PLAYER_ENTERING_WORLD')
@@ -151,30 +152,29 @@ end
 do
  local H=Boot();Nexus.Panel.Show();SlashCmdList.NEXUS('auto');H.Advance(.5)
  H.Fire('PLAYER_LEAVING_WORLD');H.Advance(1)
- assert(H.Auto() and Label()=='Auto: ON','held during the loading screen, button ON: '..Label())
+ assert(H.Auto() and Label()=='Auto ON','held during the loading screen, button ON: '..Label())
  H.Fire('PLAYER_ENTERING_WORLD');H.Advance(1)
- assert(not H.Allowed() and Label()=='Auto: ON','settling, button still ON: '..Label())
+ assert(not H.Allowed() and Label()=='Auto ON','settling, button still ON: '..Label())
  NexusPanel._autoBtn:Click();H.Advance(.5)
- assert(not H.Auto() and Label()=='Auto: OFF','one click during a hold turns the selection OFF: '..Label())
+ assert(not H.Auto() and Label()=='Auto OFF','one click during a hold turns the selection OFF: '..Label())
 end
 
--- 9. Shorter labels for the 72-pixel button: Auto: --, Auto: ON, Auto: OFF.
--- Size and colours are unchanged. This checks strings and the offline frame
--- model only; the rendered text width is not measured (native check).
+-- 9. Labels for the 72-pixel button: Auto --, Auto ON, Auto OFF. Size and
+-- colours are unchanged. The fit of the labels is scenario 22.
 do
  local H=Boot();Nexus.Panel.Show();H.Advance(.5)
- assert(Label()=='Auto: OFF','OFF label: '..Label())
+ assert(Label()=='Auto OFF','OFF label: '..Label())
  local btn=NexusPanel._autoBtn
  assert(btn:GetWidth()==72 and btn:GetHeight()==22,'button size unchanged: '..tostring(btn:GetWidth())..'x'..tostring(btn:GetHeight()))
  assert((btn:GetText() or ''):find('|cffe63c3c',1,true),'OFF colour unchanged')
  NexusPanel._autoBtn:Click();H.Advance(.5)
- assert(H.Auto() and Label()=='Auto: ON','button click turns Auto ON: '..Label())
+ assert(H.Auto() and Label()=='Auto ON','button click turns Auto ON: '..Label())
  assert((btn:GetText() or ''):find('|cff2ee62e',1,true),'ON colour unchanged')
  NexusPanel._autoBtn:Click();H.Advance(.5)
- assert(not H.Auto() and Label()=='Auto: OFF','button click turns Auto OFF: '..Label())
+ assert(not H.Auto() and Label()=='Auto OFF','button click turns Auto OFF: '..Label())
  local src=io.open('ui/Panel.lua'):read('*a')
- assert(src:find('"Auto: --"',1,true),'unknown-state label is Auto: --')
- assert(not src:find('Automation: ',1,true),'the long label is gone')
+ assert(src:find('unknown = "Auto --"',1,true),'unknown-state label is Auto --')
+ assert(not src:find('Automation: ',1,true) and not src:find('Auto: ',1,true),'the older labels are gone')
 end
 
 -- 10. Whatever still waited for the server at the leave stays unresolved
@@ -574,5 +574,56 @@ do
  H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
  l=Nexus.RecomputeStats().lastActionLifecycle
  assert(l.state=='rejected' and Nexus.RecomputeStats().actionLifecycle.confirmed==0,'the refused Take stays refused: '..tostring(l.state)..'/'..tostring(l.reason))
+end
+-- 22. The Auto labels fit the button's text budget: the widest label is
+-- measured with the button's own font object against 72 px minus a 6 px
+-- inset per side, across the LayoutMetrics font-scale range 0.75-2. When the
+-- owned normal size does not fit, only the button's own font object is made
+-- smaller (never below 9); the shared normal font, the 72x22 size and the
+-- anchor stay unchanged, and all three button states use the fitted font.
+-- The measurement here is SIMULATED: the harness has no font renderer, so the
+-- doubles below model 0.55 em per visible character. Native pixel fit is not
+-- tested. (Last scenario: its CreateFont double is removed at the end.)
+do
+ local H=Boot(function()
+  CreateFont=function(name)
+   local f={name=name,path='Fonts\\FRIZQT__.TTF',size=12,flags=''}
+   function f:SetFont(p,sz,fl) self.path,self.size,self.flags=p,sz,fl;return true end
+   function f:GetFont() return self.path,self.size,self.flags end
+   function f:SetFontObject(o) self.parent=o end
+   _G[name]=f;return f
+  end
+ end)
+ Nexus.Panel.Show();H.Advance(.5)
+ local btn=NexusPanel._autoBtn
+ local probe=btn._nexusFitProbe
+ local base,own=_G.NexusFontNormal,_G.NexusAutoButtonFont
+ assert(probe and base and own and own~=base,'the button is measured with its own font object')
+ assert(own.parent==base,'the own font inherits colour and shadow from the owned normal font')
+ local function Visible(t) return ((t or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')) end
+ probe.SetFontObject=function(self,o) self.fontObject=o end
+ probe.GetStringWidth=function(self) local f=self.fontObject;return #Visible(self.text)*(f and f.size or 12)*0.55 end
+ btn.SetNormalFontObject=function(self,o) self.normalFont=o end
+ btn.SetHighlightFontObject=function(self,o) self.highlightFont=o end
+ btn.SetDisabledFontObject=function(self,o) self.disabledFont=o end
+ for i,scale in ipairs({0.75,1,1.25,1.5,2}) do
+  base:SetFont(base.path,12*scale,'')
+  local renders=Nexus.Panel.RenderStats().calls
+  H.Offer(i%2==1 and OTHER or WANT);H.Advance(1) -- a new board: a render runs the footer layout
+  assert(Nexus.Panel.RenderStats().calls>renders,'scale '..scale..': reached: the panel rendered again')
+  local fit=btn._nexusFit
+  assert(fit and fit.budget==60 and fit.baseSize==12*scale,'scale '..scale..': measured against the current owned size, budget 72-2x6')
+  assert(fit.fits and fit.width<=fit.budget,'scale '..scale..': the widest label fits: '..fit.width..' of '..fit.budget)
+  if 8*12*scale*0.55<=60 then
+   assert(fit.size==12*scale,'scale '..scale..': no reduction when the owned size fits: '..tostring(fit.size))
+  else
+   assert(fit.size<12*scale and fit.size>=9,'scale '..scale..': only the button font is made smaller: '..tostring(fit.size))
+  end
+  assert(own.size==fit.size and base.size==12*scale,'scale '..scale..': the shared normal font is unchanged')
+  assert(btn.normalFont==own and btn.highlightFont==own and btn.disabledFont==own,'scale '..scale..': all three states use the fitted font')
+  local point,rel,relPoint,x,y=btn:GetPoint(1)
+  assert(btn:GetWidth()==72 and btn:GetHeight()==22 and point=='BOTTOMLEFT' and x==8 and y==7,'scale '..scale..': size and anchor unchanged')
+ end
+ CreateFont=nil
 end
 print('PASS Auto selection kept across a same-session loading screen with actions held until settled; whatever still waited at the leave (runtime action or adapter latch) holds automation until player input, a run boundary or a Take grant, with the reason shown; unclassified entry and logout revoke; compact Auto labels')
