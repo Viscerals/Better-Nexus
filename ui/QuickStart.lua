@@ -134,7 +134,7 @@ local function EnsureFrame()
     body:SetJustifyV("TOP")
     body:SetText(
         "Already have a Saved Build? Assign the Wishlist you want it to follow. " ..
-        "|cffffd100With Auto ON, Nexus may update the active Saved Build after a better run. " ..
+        "|cffffd100With Auto ON, Nexus may replace the active Saved Build with a better finished run. " ..
         "Keep Auto OFF to leave that slot unchanged.|r\n" ..
         "Starting fresh? Import a Wishlist code or copy a Community build into an editable draft."
     )
