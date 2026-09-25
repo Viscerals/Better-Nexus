@@ -320,7 +320,7 @@ do
  Leave(H);H.perks.pendingSelectSpellId=nil;H.granted={['Echo 20']={{spellId=200020}}};H.Notify()
  H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer();H.Advance(14)
  local ok,why=H.Allowed()
- assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for take',1,true),'the Take still holds: '..tostring(why))
+ assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for 2 take requests',1,true),'the Take still holds: '..tostring(why))
  assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,'the other grant confirms nothing')
 end
 
@@ -440,5 +440,139 @@ do
  local ok,why=H.Allowed()
  assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for freeze and take',1,true),'held for the player latch: '..tostring(why)..', attempts='..H.attempts)
  assert(not Nexus.GameAdapter.InFlight(),'reached: the Take is granted and the player latch is dead')
+end
+-- 18. Two Select requests pending at the leave are two requests, also for
+-- the same spell: the automatic Take waits for its grant and the player
+-- clicks another copy of that spell (a live latch). One grant does not end
+-- the hold, the watchdog release of the player's latch does not erase it,
+-- and a second zone keeps it. Player input ends it without recording a
+-- confirmation. Control: the automatic Take alone is one request (its local
+-- tracking and its latch are not counted twice) and its grant resumes.
+local function Grant(H,id)
+ local g=H.Clone(H.granted) or {};local k='Echo '..(id-200000);g[k]=g[k] or {}
+ table.insert(g[k],{spellId=id});H.granted=g;H.Notify()
+end
+for _,v in ipairs({{'same spell',200001},{'different spell',200030},{'single automatic Take',nil}}) do
+ local H=Boot();H.run=NOCHARGES;H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1 and Nexus.RecomputeStats().lastActionLifecycle.actionType=='take',v[1]..': one automatic Take')
+ H.perks.pendingSelectSpellId=nil;H.Offer(OTHER);H.Advance(.3) -- answered; its grant lags
+ if v[2] then
+  local attempts=H.attempts -- the player's click goes through the same client service
+  assert(H.service.SelectPerk(v[2]),v[1]..': the player Select is accepted');H.attempts=attempts
+ end
+ local pending=Nexus.GameAdapter.PendingActions()
+ assert(#pending==(v[2] and 2 or 1),v[1]..': requests pending at the leave: '..#pending)
+ if v[2]==200001 then
+  assert(pending[1].spellId==200001 and pending[2].spellId==200001 and pending[1].source~=pending[2].source,
+   'same spell: two requests are listed, not one')
+ end
+ Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer(OTHER);H.Advance(4)
+ Grant(H,200001);H.Advance(1.5)
+ if not v[2] then
+  assert(H.attempts==2 and H.Allowed(),'single: its grant resumes without a click, attempts='..H.attempts)
+ else
+  H.Advance(12)
+  local ok,why=H.Allowed()
+  assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for 2 take requests',1,true),
+   v[1]..': one grant does not end the hold: '..tostring(why)..', attempts='..H.attempts)
+  assert(not Nexus.GameAdapter.InFlight(),v[1]..': reached: granted once, and the player latch is dead')
+  H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(5)
+  ok,why=H.Allowed()
+  assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for 2 take requests',1,true),
+   v[1]..': a second zone keeps it: '..tostring(why))
+  local confirmed=Nexus.RecomputeStats().actionLifecycle.confirmed
+  SlashCmdList.NEXUS('auto');SlashCmdList.NEXUS('auto')
+  local l=Nexus.RecomputeStats().lastActionLifecycle
+  -- Here the hold came from the adapter's two requests alone (the older
+  -- board-change rule had already dropped the automatic intent before the
+  -- leave), so no intent is resolved; nothing may be recorded as confirmed.
+  assert(l.state~='confirmed' and Nexus.RecomputeStats().actionLifecycle.confirmed==confirmed,
+   v[1]..': the acknowledgement records no confirmation: '..tostring(l.state)..'/'..tostring(l.reason))
+  H.Advance(1.5);assert(H.attempts==2,v[1]..': automation continues after the acknowledgement, attempts='..H.attempts)
+ end
+end
+
+-- 18b. A grant cannot be matched when another request for the same spell is
+-- pending. (i) The automatic Take was refused on the same board, then the
+-- player selects that spell: the player's grant does not end the hold and
+-- confirms nothing. (ii) Level 80, where no StepRun resolves the Take: its
+-- grant is visible at the leave while the player's own Select of the same
+-- spell is live; the Take is not recorded as confirmed.
+do
+ local H=Boot();H.run=NOCHARGES;H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ H.perks.pendingSelectSpellId=nil;H.Advance(1) -- refused: the latch clears on the same board
+ assert(Nexus.RecomputeStats().lastActionLifecycle.state=='uncertain','(i) precondition: the Take is uncertain on the same board')
+ local attempts=H.attempts;assert(H.service.SelectPerk(200001),'(i) the player Select is accepted');H.attempts=attempts
+ Leave(H);H.perks.pendingSelectSpellId=nil;Grant(H,200001);H.Advance(2)
+ H.Fire('PLAYER_ENTERING_WORLD');H.Offer();H.Advance(14)
+ local ok,why=H.Allowed()
+ assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for 2 take requests',1,true),'(i) held: '..tostring(why))
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,'(i) the player grant confirms nothing')
+end
+do
+ local H=Boot();H.run=NOCHARGES
+ H.playerLevel=80;H.granted=Granted(77,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
+ H.Offer({{spellId=200001,quality=1},{spellId=200089,quality=0},{spellId=200090,quality=1}})
+ SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1 and Nexus.RecomputeStats().lastActionLifecycle.actionType=='take','(ii) one automatic Take')
+ H.perks.pendingSelectSpellId=nil;H.Board({});H.Notify();H.Advance(1) -- answered; no board, no StepRun
+ Grant(H,200001)
+ H.Offer({{spellId=200001,quality=1},{spellId=200085,quality=0},{spellId=200086,quality=1}})
+ local attempts=H.attempts;assert(H.service.SelectPerk(200001),'(ii) the player Select is accepted');H.attempts=attempts
+ assert(Nexus.RecomputeStats().lastActionLifecycle.state=='submitted' and Nexus.GameAdapter.GrantedCount(200001)==1,
+  '(ii) precondition: the grant is visible and the Take is still submitted')
+ H.Fire('PLAYER_LEAVING_WORLD')
+ local l=Nexus.RecomputeStats().lastActionLifecycle
+ assert(l.state=='uncertain' and l.reason=='world_transition' and Nexus.RecomputeStats().actionLifecycle.confirmed==0,
+  '(ii) not matched to the grant: '..tostring(l.state)..'/'..tostring(l.reason))
+end
+
+-- 19. A hold that cannot end by a grant keeps its earlier items at a later
+-- leave. First leave: only the player's Freeze latch is pending (no grant
+-- path). Second leave: only a player Select is pending. Its grant does not
+-- end the hold.
+do
+ local H=Boot();H.run=NOCHARGES;H.Offer();H.Advance(.5)
+ H.perks.pendingFreezeIndex=1 -- the player's own Freeze, never answered
+ SlashCmdList.NEXUS('auto');H.Advance(1)
+ assert(H.attempts==0,'precondition: nothing automatic is sent while the player latch is live')
+ H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer();H.Advance(12)
+ assert(not Nexus.GameAdapter.InFlight(),'reached: the player Freeze latch is dead')
+ assert(H.service.SelectPerk(200020),'the player Select is accepted');H.attempts=0
+ H.Fire('PLAYER_LEAVING_WORLD');H.perks.pendingSelectSpellId=nil;H.Offer(OTHER);H.Advance(2)
+ H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4)
+ Grant(H,200020);H.Advance(3)
+ local ok,why=H.Allowed()
+ assert(H.attempts==0 and not ok and tostring(why):find('no confirmed result for freeze and take',1,true),
+  'the earlier Freeze still holds after the Select grant: '..tostring(why)..', attempts='..H.attempts)
+end
+
+-- 20. A run boundary ends the hold: the dead run's action is superseded
+-- (run_boundary), not confirmed, and the hold reason is gone.
+do
+ local H=Boot();H.Offer();SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ Leave(H);H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Offer();H.Advance(14)
+ assert(not H.Allowed(),'precondition: held after the zone')
+ H.playerLevel=80;H.Advance(1);H.playerLevel=1;H.Advance(2)
+ local l=Nexus.RecomputeStats().lastActionLifecycle
+ local _,why=H.Allowed()
+ assert(l.state=='superseded' and l.reason=='run_boundary','the run boundary supersedes it: '..tostring(l.state)..'/'..tostring(l.reason))
+ assert(not tostring(why):find('no confirmed result',1,true),'the hold is gone: '..tostring(why))
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,'nothing is recorded as confirmed')
+end
+-- 21. A Take that the client refused is never recorded as confirmed by a
+-- grant from the player's own Select of the same spell (level 80).
+do
+ local H=Boot();H.run=NOCHARGES
+ H.playerLevel=80;H.granted=Granted(77,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
+ H.Offer({{spellId=200001,quality=1},{spellId=200089,quality=0},{spellId=200090,quality=1}});H.Advance(.5)
+ assert(H.service.SelectPerk(200001),'the player Select is accepted');H.attempts=0
+ SlashCmdList.NEXUS('auto');H.Advance(12)
+ local l=Nexus.RecomputeStats().lastActionLifecycle
+ assert(H.attempts==1 and l.actionType=='take' and l.state=='rejected','precondition: the automatic Take was refused: '..tostring(l.state))
+ H.perks.pendingSelectSpellId=nil;H.Board({});H.Notify();Grant(H,200001);H.Advance(3)
+ H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
+ l=Nexus.RecomputeStats().lastActionLifecycle
+ assert(l.state=='rejected' and Nexus.RecomputeStats().actionLifecycle.confirmed==0,'the refused Take stays refused: '..tostring(l.state)..'/'..tostring(l.reason))
 end
 print('PASS Auto selection kept across a same-session loading screen with actions held until settled; whatever still waited at the leave (runtime action or adapter latch) holds automation until player input, a run boundary or a Take grant, with the reason shown; unclassified entry and logout revoke; compact Auto labels')
