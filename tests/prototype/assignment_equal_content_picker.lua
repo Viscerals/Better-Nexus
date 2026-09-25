@@ -86,4 +86,70 @@ assert(refused,'changed server slot is still refused')
 assert(p:IsShown(),'a refused selection keeps the picker open')
 assert(T.Equal(before,saved(0)),'a refused selection keeps the stored assignment')
 assert(#H.actions==actions and H.Count('orb-spend')==0,'picker selection submits no gameplay or service mutation')
-print('PASS equal-content Wishlists assign the clicked slot in numbered and first-run contexts; changed slots stay refused')
+
+-- Stale open rows: the server changes after the picker was built. Each click
+-- must use the row's own snapshot, so the row keeps the closure it was built with.
+local function server(rows)
+ for slot=101,110 do H.perks.serverBuildSlots[slot]=nil end
+ for slot,r in pairs(rows)do
+  H.perks.serverBuildSlots[slot]={name=r[1],verified=false,echoes=H.Clone(r[2])}
+ end
+ H.Notify();A.Poll()
+end
+local function variant(n)
+ local e=H.Clone(rolled);e[1].spellId=e[1].spellId+500+n;return e
+end
+local function staleRow(name,rows)
+ local p=open();local r=assert(row(p,name),'actual picker has '..name)
+ local click=r.nameButton:GetScript('OnClick')
+ server(rows)
+ assert(p:IsShown() and r.nameButton:GetScript('OnClick')==click,'SETUP: the open row keeps its snapshot')
+ return p,r
+end
+local function refused(p,r,context,text,label)
+ local before=H.Clone(saved(context))
+ local messages={}
+ local originalPrint=print
+ print=function(...)
+  local parts={};for i=1,select('#',...)do parts[#parts+1]=tostring((select(i,...)))end
+  messages[#messages+1]=table.concat(parts,' ')
+  originalPrint(...)
+ end
+ r.nameButton:Click()
+ print=originalPrint
+ local found=false
+ for _,m in ipairs(messages)do if m:find(text,1,true)then found=true end end
+ print('EQUAL_CONTENT_REFUSAL',label,'refused',found,'savedSlot',saved(context) and saved(context).slot)
+ assert(found,label..': refused with "'..text..'"')
+ assert(p:IsShown(),label..': a refused selection keeps the picker open')
+ assert(T.Equal(before,saved(context)),label..': a refused selection keeps the stored assignment')
+ assert(#H.actions==actions and H.Count('orb-spend')==0,label..': no gameplay or service mutation')
+end
+for _,context in ipairs({2,0})do
+ H.perks.serverActiveSlot=context;H.Notify();A.Poll()
+ server({[101]={'Plan A',rolled},[102]={'Plan B',rolled},[103]={'Plan C',rolled}})
+ pick('Plan C',103,context)
+ -- The clicked slot still exists with other contents while equal contents
+ -- remain in two other slots: refuse; never redirect by content.
+ local p,r=staleRow('Plan B',{[101]={'Plan A',rolled},[102]={'Plan B',variant(1)},[103]={'Plan C',rolled}})
+ refused(p,r,context,'wishlist changed; refresh and try again','changed clicked slot, context '..context)
+ -- The clicked slot is gone and exactly one live Wishlist has its contents:
+ -- follow the moved identity.
+ server({[101]={'Plan A',variant(2)},[102]={'Plan B',rolled},[103]={'Plan C',variant(3)}})
+ pick('Plan C',103,context)
+ p,r=staleRow('Plan B',{[101]={'Plan A',variant(2)},[103]={'Plan C',variant(3)},[104]={'Plan B',rolled}})
+ r.nameButton:Click()
+ local a,record=A.AssignedWishlist(),saved(context)
+ print('EQUAL_CONTENT_MOVED','context',context,'assigned',a.name,'savedSlot',record and record.slot)
+ assert(not p:IsShown(),'unique moved identity: selection closes the picker')
+ assert(a.state=='ready' and a.activeSlot==context and a.name=='Plan B','unique moved identity is assigned')
+ assert(record.slot==104 and record.name=='Plan B' and record.key==k,'unique moved identity stores its new slot')
+ assert(#H.actions==actions and H.Count('orb-spend')==0,'unique moved identity: no gameplay or service mutation')
+ -- The clicked slot is gone and two live Wishlists have its contents, one of
+ -- them under the same name: ambiguous. Neither list order nor name decides.
+ server({[101]={'Plan A',variant(2)},[102]={'Plan B',rolled},[103]={'Plan C',variant(3)}})
+ pick('Plan C',103,context)
+ p,r=staleRow('Plan B',{[101]={'Plan A',variant(2)},[103]={'Plan C',variant(3)},[105]={'Plan B',rolled},[106]={'Plan D',rolled}})
+ refused(p,r,context,'wishlist identity is ambiguous; refresh and try again','ambiguous moved identity, context '..context)
+end
+print('PASS equal-content Wishlists assign the clicked slot in numbered and first-run contexts; changed slots stay refused; a moved identity is followed only when unique')
