@@ -402,6 +402,9 @@ local ReadOnlyRoot = {
     BOOLEANS = {updateNotifications=true, useCurrentLocksForUntagged=true},
     ANCHOR_NAMES = 32, TEXT = 128, LEVER_OPT_OUTS = 4096,
     COPY_NODES = 256, COPY_DEPTH = 8,
+    -- Bound of a read projection of saved records this build reads (DPS):
+    -- tables and nesting. A larger saved graph is not projected.
+    PROJECTION_NODES = 65536, PROJECTION_DEPTH = 12,
 }
 
 -- The class ("future", "unverified" or "malformed") of a read-only root, or nil.
@@ -510,7 +513,10 @@ end
 
 -- A detached copy of a small plain saved graph, or nil when the value is not
 -- one (a metatable, a cycle, a non-scalar key, or past the node/depth bound).
-function ReadOnlyRoot.BoundedCopy(value)
+-- The bound defaults to COPY_NODES/COPY_DEPTH.
+function ReadOnlyRoot.BoundedCopy(value, maxNodes, maxDepth)
+    maxNodes = maxNodes or ReadOnlyRoot.COPY_NODES
+    maxDepth = maxDepth or ReadOnlyRoot.COPY_DEPTH
     local nodes = 0
     local function Copy(current, depth, seen)
         if type(current) ~= "table" then
@@ -522,8 +528,7 @@ function ReadOnlyRoot.BoundedCopy(value)
         end
         nodes = nodes + 1
         if not PlainTable(current) or seen[current]
-            or depth > ReadOnlyRoot.COPY_DEPTH
-            or nodes > ReadOnlyRoot.COPY_NODES then return false end
+            or depth > maxDepth or nodes > maxNodes then return false end
         seen[current] = true
         local out = {}
         for key, child in pairs(current) do
@@ -575,6 +580,16 @@ end
 Nexus.MainInternals.WritableRootV1 = function(db, seedKeys)
     if db == nil then db = NexusDB end
     return ReadOnlyRoot.Writable(db, seedKeys)
+end
+-- Read-only is not unreadable: for a read-only root, a detached bounded copy
+-- of saved records that a reader of this build interprets (`value`, taken
+-- from inside `db`), so they can still be shown. The copy is never reachable
+-- from the saved root. nil for any other root, or when `value` is not a
+-- plain table graph within PROJECTION_NODES/PROJECTION_DEPTH.
+Nexus.MainInternals.ReadOnlyProjectionV1 = function(db, value)
+    if ReadOnlyRoot.Class(db) == nil or type(value) ~= "table" then return nil end
+    return ReadOnlyRoot.BoundedCopy(value, ReadOnlyRoot.PROJECTION_NODES,
+        ReadOnlyRoot.PROJECTION_DEPTH)
 end
 
 -- Returns "ABSENT" | "CURRENT" | "FUTURE" | "MALFORMED", marker.

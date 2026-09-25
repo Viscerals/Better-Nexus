@@ -88,11 +88,13 @@ end
 
 -- The table that holds errorHistory: the saved root, or for a read-only saved
 -- root the Store owner's session-only table (the saved history is kept
--- unchanged and this session's errors are not saved).
+-- unchanged and this session's errors are not saved). That table starts with
+-- a bounded copy of the saved history, so earlier errors are still listed.
 local function HistoryRoot()
     NexusDB = type(NexusDB) == "table" and NexusDB or {}
     local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
-    local root = type(writable) == "function" and writable(NexusDB) or nil
+    local root = type(writable) == "function"
+        and writable(NexusDB, {"errorHistory"}) or nil
     return type(root) == "table" and root or NexusDB
 end
 
