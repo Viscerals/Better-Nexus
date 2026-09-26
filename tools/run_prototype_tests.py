@@ -95,6 +95,8 @@ NAMES += ['automation_world_transition']
 NAMES += ['readonly_profile_preservation','readonly_saved_dps_visibility']
 NAMES += ['autosave_overwrite_warning','autosave_assignment_recheck']
 NAMES += ['hud_prepare_reuse']
+NAMES += ['quickstart_layout_fit']
+NAMES += ['assignment_picker_selected_marker']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
