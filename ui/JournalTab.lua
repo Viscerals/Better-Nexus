@@ -1045,6 +1045,23 @@ HideWishlistPicker = function()
     if wishlistPicker then wishlistPicker:Hide() end
 end
 
+-- Display only: which picker row is the resolved assignment. The resolver
+-- copies the stored assignmentId onto the live server row it found, but the
+-- picker lists fresh live rows that carry none. So: equal assignmentIds on both
+-- sides decide; a row stamped with another assignment is never selected;
+-- otherwise the current resolved server slot and content key must both match.
+-- Equal contents in another slot, or a name, identify nothing.
+local function IsAssignedPickerRow(linked, c)
+    if type(linked) ~= "table" or type(c) ~= "table" then return false end
+    if linked.assignmentId and c.assignmentId then
+        return linked.assignmentId == c.assignmentId
+    end
+    if c.assignmentId then return false end
+    local slot = tonumber(linked.slot)
+    return slot ~= nil and slot == tonumber(c.slot)
+        and type(linked.key) == "string" and linked.key ~= "" and linked.key == c.key
+end
+
 local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A)
     if not wishlistPicker then
         wishlistPicker = CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
@@ -1126,9 +1143,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 wishlistPickerRows[i] = row
             end
             row:ClearAllPoints(); row:SetPoint("TOPLEFT", 6, -24 - (i-1)*rowH)
-            local selected = linked and ((linked.assignmentId and c.assignmentId
-                and linked.assignmentId==c.assignmentId) or (not linked.assignmentId
-                and not c.assignmentId and linked.key and cKey and linked.key==cKey))
+            local selected = IsAssignedPickerRow(linked, c)
             local editor=Nexus.WishlistEditor
             local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose locked targets"
             local evidenceSuffix = c.lockEvidenceStatus == "unavailable"
