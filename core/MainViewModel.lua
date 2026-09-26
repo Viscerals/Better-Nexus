@@ -12,11 +12,16 @@ local function QualityName(quality)
     return QUALITY_NAMES[quality] or ("q" .. quality)
 end
 
+-- Tables created by Copy in this session, for every view model. Observational
+-- only (HUD snapshot statistics); it never changes a result.
+local copiedTables = 0
+
 local function Copy(value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
     if seen[value] then return seen[value] end
     local out = {}
+    copiedTables = copiedTables + 1
     seen[value] = out
     for key, child in pairs(value) do
         out[Copy(key, seen)] = Copy(child, seen)
@@ -348,22 +353,38 @@ function ViewModel.New(options)
             stats.skipped = stats.skipped + 1
             return Copy(lastHudModel)
         end
-        local out = Copy(type(input.base) == "table" and input.base or {})
-        out.status = input.status
-        out.assignment = Copy(input.assignment)
-        if out.level == nil then out.level = input.level or 0 end
-        out.updateNotice = Copy(input.updateNotice)
-        if out.updateNotice then out.updateNotice.releaseUrl = input.releaseUrl end
-        out.serverStatus = input.useServerStatus and Copy(input.serverStatus) or nil
-        out.bestDps = Copy(type(input.bestDps) == "table" and input.bestDps or {
+        -- One private snapshot of the complete input. It is never mutated or
+        -- handed out. The retained model shares its subtables and only writes
+        -- to tables created here; callers receive a separate complete copy.
+        local snapshot = Copy(input)
+        local out = {}
+        for key, value in pairs(type(snapshot.base) == "table" and snapshot.base or {}) do
+            out[key] = value
+        end
+        out.status = snapshot.status
+        out.assignment = snapshot.assignment
+        if out.level == nil then out.level = snapshot.level or 0 end
+        local notice = snapshot.updateNotice
+        if notice then
+            local shown = {}
+            for key, value in pairs(notice) do shown[key] = value end
+            shown.releaseUrl = snapshot.releaseUrl
+            notice = shown
+        end
+        out.updateNotice = notice
+        out.serverStatus = snapshot.useServerStatus and snapshot.serverStatus or nil
+        out.bestDps = type(snapshot.bestDps) == "table" and snapshot.bestDps or {
             dummy=nil,lk=nil,info=nil,
-        })
-        local progress = type(out.progress) == "table" and out.progress or {}
+        }
+        local progress = {}
+        if type(out.progress) == "table" then
+            for key, value in pairs(out.progress) do progress[key] = value end
+        end
         out.progress = progress
-        progress.performance = Copy(type(input.performance) == "table"
-            and input.performance or {dummy={},lk={}})
-        lastHudInput = Copy(input)
-        lastHudModel = Copy(out)
+        progress.performance = type(snapshot.performance) == "table"
+            and snapshot.performance or {dummy={},lk={}}
+        lastHudInput = snapshot
+        lastHudModel = out
         stats.rebuilds = stats.rebuilds + 1
         return Copy(out)
     end
@@ -373,7 +394,9 @@ function ViewModel.New(options)
     end
 
     function M.Stats()
-        return Copy(stats)
+        local out = Copy(stats)
+        out.copiedTables = copiedTables
+        return out
     end
 
     return M

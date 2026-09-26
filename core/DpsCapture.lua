@@ -3051,6 +3051,100 @@ function DPS.GetLeaderboardForEchoes(echoes, category)
     return SortedEntries(GlobalForKey(DPS.GetEchoKey(echoes), category))
 end
 
+-- The main HUD shows this character's best Dummy and Lich King rows, its
+-- player summary and, for the displayed Echo set, the personal and global
+-- exact-set rows. Those reads walk every stored character row (and every
+-- personal row when the exact set has none) and materialize full records,
+-- and they ran on every HUD preparation, which Auto repeats for each board.
+-- One projection is kept and rebuilt only when something the reads depend on
+-- can have changed: the DPS and build-library revisions (the Leaderboard
+-- projection's key), the bound DPS payload, the player and realm, the Echo
+-- set, and the evidence the materialized rows resolve through. The pending
+-- migrations the reads start still run on every call, before the key is
+-- read. A failed read or a missing revision is never retained. The returned
+-- table holds detached records only; it is shared and must not be mutated.
+identityIndex.hud = {key=nil, value=nil, echoes=nil,
+    stats={builds=0,hits=0,uncached=0}}
+
+function DPS.GetHudProjection(playerName, echoes)
+    local hud = identityIndex.hud
+    MigrateLocalLockedBaseline()
+    MigrateLegacyLeaderboard()
+    DB()
+    local revisions = Nexus and Nexus.Revisions
+    local get = revisions and revisions.Get
+    local dpsRevision = type(get) == "function"
+        and get(revisions.DPS_CHANGED) or nil
+    local libraryRevision = type(get) == "function"
+        and get(revisions.BUILD_LIBRARY_CHANGED) or nil
+    local cacheable = dpsRevision ~= nil and libraryRevision ~= nil
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    local store, entries, appended, removed
+    if evidence then
+        local ok = type(evidence.ResolutionTokenV1) == "function"
+        if ok then
+            ok, store, entries, appended, removed =
+                pcall(evidence.ResolutionTokenV1)
+        end
+        if not ok or store == nil then cacheable = false end
+    end
+    local realm = CurrentRealm()
+    local key = hud.key
+    if cacheable and key and key.revisions == revisions
+        and key.dps == dpsRevision and key.library == libraryRevision
+        and key.database == dbBinding.database
+        and key.payload == dbBinding.payload
+        and key.player == playerName and key.realm == realm
+        and key.store == store and key.entries == entries
+        and key.appended == appended and key.removed == removed
+        and DeepEqual(echoes, hud.echoes) then
+        hud.stats.hits = hud.stats.hits + 1
+        return hud.value
+    end
+
+    local failed = false
+    local function Read(callback, ...)
+        if type(callback) ~= "function" then return nil end
+        local ok, value = pcall(callback, ...)
+        if not ok then failed = true end
+        return ok and value or nil
+    end
+    local value = {bestDps={
+        dummy=Read(DPS.GetCharacterBest, "dummy", playerName),
+        lk=Read(DPS.GetCharacterBest, "lk", playerName),
+        info=Read(DPS.GetPlayerInfo, playerName),
+    }}
+    if type(echoes) == "table" then
+        local dummyPersonal = Read(DPS.GetPersonalBestForEchoes, echoes, "dummy")
+        local lkPersonal = Read(DPS.GetPersonalBestForEchoes, echoes, "lk")
+        local dummyRows = Read(DPS.GetLeaderboardForEchoes, echoes, "dummy")
+        local lkRows = Read(DPS.GetLeaderboardForEchoes, echoes, "lk")
+        value.performance = {
+            dummy={personal=dummyPersonal,
+                global=type(dummyRows) == "table" and dummyRows[1] or nil},
+            lk={personal=lkPersonal,
+                global=type(lkRows) == "table" and lkRows[1] or nil},
+        }
+    end
+    hud.stats.builds = hud.stats.builds + 1
+    if cacheable and not failed then
+        hud.key = {revisions=revisions, dps=dpsRevision,
+            library=libraryRevision, database=dbBinding.database,
+            payload=dbBinding.payload, player=playerName, realm=realm,
+            store=store, entries=entries, appended=appended, removed=removed}
+        hud.echoes, hud.value = DeepCopy(echoes), value
+    else
+        hud.key, hud.echoes, hud.value = nil, nil, nil
+        hud.stats.uncached = hud.stats.uncached + 1
+    end
+    return value
+end
+
+function DPS.HudProjectionStats()
+    local stats = identityIndex.hud.stats
+    return {builds=stats.builds, hits=stats.hits, uncached=stats.uncached}
+end
+
 -- Exact build match for wishlist/community-page use.
 function DPS.FindMatchingBuildPublic(wishlist)
     if not wishlist then return nil end

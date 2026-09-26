@@ -327,6 +327,16 @@ function Evidence.AuthorityTokenV1(includeCandidate)
         providerRevision=authority.providerRevision}
 end
 
+-- What an ordinary (non-candidate) Resolve reads: the selected store table,
+-- its entries table, and the exact append/removal revisions that every
+-- durable entries write advances. A retained projection of resolved rows is
+-- current only while all four values are unchanged. Read-only; no allocation.
+function Evidence.ResolutionTokenV1()
+    local store = Store(false)
+    local entries = type(store) == "table" and store.entries or nil
+    return store, entries, authority.appendRevision, authority.removalRevision
+end
+
 function Evidence.CandidateRevisionPlanV1()
     local plan = {}
     if not candidate then return plan end
