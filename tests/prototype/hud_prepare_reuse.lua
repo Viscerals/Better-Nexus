@@ -249,7 +249,10 @@ do
  record.title='Renamed own build';record.lastModified=(record.lastModified or 0)+500
  local dpsRevision=Nexus.Revisions.Get('DPS_CHANGED')
  local ok,why,ticket=Nexus.BuildCatalog.Put(record,{source='overlay'})
- for _=1,400 do
+ -- The catalog paces its transaction with the profiler clock, so the number
+ -- of updates it needs depends on the machine (about 370 locally). The bound
+ -- is the one leaderboard_fixture_support uses for catalog tickets.
+ for _=1,4000 do
   if type(ticket)~='table' or ticket.state~='pending' then break end
   H.Advance(.05,.05)
  end
@@ -381,7 +384,7 @@ do
  local evidence=Nexus.LoadoutEvidence
  -- The received record in 6b started the real retention run; let its catalog
  -- transaction finish.
- for _=1,2000 do
+ for _=1,4000 do
   if not evidence.CandidateOpen() then break end
   H.Advance(.05,.05)
  end
