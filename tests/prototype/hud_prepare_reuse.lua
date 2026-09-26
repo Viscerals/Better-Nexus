@@ -250,9 +250,11 @@ do
  local dpsRevision=Nexus.Revisions.Get('DPS_CHANGED')
  local ok,why,ticket=Nexus.BuildCatalog.Put(record,{source='overlay'})
  -- The catalog paces its transaction with the profiler clock, so the number
- -- of updates it needs depends on the machine (about 370 locally). The bound
- -- is the one leaderboard_fixture_support uses for catalog tickets.
- for _=1,4000 do
+ -- of updates it needs depends on the machine (about 370 locally). Every
+ -- update runs at least one catalog step and this edit takes 9005 steps
+ -- (measured with one step per update), so 20000 updates bound it on any
+ -- machine; a fast machine leaves the loop early.
+ for _=1,20000 do
   if type(ticket)~='table' or ticket.state~='pending' then break end
   H.Advance(.05,.05)
  end
@@ -388,6 +390,7 @@ do
   if not evidence.CandidateOpen() then break end
   H.Advance(.05,.05)
  end
+ check(not evidence.CandidateOpen(),'fixture: the evidence candidate of the retention run is closed')
  local function Binding()
   local status=Nexus.BuildCatalog.Status()
   return status.readOnly==false and rawget(rawget(NexusDB,'authorityBundle'),'dpsCapture') or nil
