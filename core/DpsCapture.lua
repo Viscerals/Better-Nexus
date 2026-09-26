@@ -3058,46 +3058,56 @@ end
 -- and they ran on every HUD preparation, which Auto repeats for each board.
 -- One projection is kept and rebuilt only when something the reads depend on
 -- can have changed: the DPS and build-library revisions (the Leaderboard
--- projection's key), the bound DPS payload, the player and realm, the Echo
--- set, and the evidence the materialized rows resolve through. The pending
--- migrations the reads start still run on every call, before the key is
--- read. A failed read or a missing revision is never retained. The returned
--- table holds detached records only; it is shared and must not be mutated.
+-- projection's key), the bound DPS payload and saved table, the player and
+-- realm, the Echo set, and the evidence the materialized rows resolve
+-- through. The pending migrations the reads start still run on every call,
+-- before the key is read. A failed read, a missing revision or evidence
+-- token, or a key that moved during the reads is never retained. The
+-- returned table holds detached records only; it is shared and read-only.
 identityIndex.hud = {key=nil, value=nil, echoes=nil,
     stats={builds=0,hits=0,uncached=0}}
 
-function DPS.GetHudProjection(playerName, echoes)
-    local hud = identityIndex.hud
-    MigrateLocalLockedBaseline()
-    MigrateLegacyLeaderboard()
+-- Every value the projection depends on except the Echo set, or nil when one
+-- of them is unavailable.
+function identityIndex.hud.ReadKey(playerName)
     DB()
     local revisions = Nexus and Nexus.Revisions
     local get = revisions and revisions.Get
-    local dpsRevision = type(get) == "function"
-        and get(revisions.DPS_CHANGED) or nil
-    local libraryRevision = type(get) == "function"
-        and get(revisions.BUILD_LIBRARY_CHANGED) or nil
-    local cacheable = dpsRevision ~= nil and libraryRevision ~= nil
+    if type(get) ~= "function" then return nil end
+    local key = {revisions=revisions, dps=get(revisions.DPS_CHANGED),
+        library=get(revisions.BUILD_LIBRARY_CHANGED),
+        database=dbBinding.database, payload=dbBinding.payload,
+        player=playerName, realm=CurrentRealm()}
+    if key.dps == nil or key.library == nil then return nil end
     local evidence = Nexus and Nexus.LoadoutEvidence
-    local store, entries, appended, removed
     if evidence then
-        local ok = type(evidence.ResolutionTokenV1) == "function"
-        if ok then
-            ok, store, entries, appended, removed =
-                pcall(evidence.ResolutionTokenV1)
-        end
-        if not ok or store == nil then cacheable = false end
+        if type(evidence.ResolutionTokenV1) ~= "function" then return nil end
+        local ok, store, entries, appended, removed =
+            pcall(evidence.ResolutionTokenV1)
+        if not ok or store == nil then return nil end
+        key.store, key.entries = store, entries
+        key.appended, key.removed = appended, removed
     end
-    local realm = CurrentRealm()
-    local key = hud.key
-    if cacheable and key and key.revisions == revisions
-        and key.dps == dpsRevision and key.library == libraryRevision
-        and key.database == dbBinding.database
-        and key.payload == dbBinding.payload
-        and key.player == playerName and key.realm == realm
-        and key.store == store and key.entries == entries
-        and key.appended == appended and key.removed == removed
-        and DeepEqual(echoes, hud.echoes) then
+    return key
+end
+
+function identityIndex.hud.SameKey(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" then return false end
+    for field, value in pairs(left) do
+        if right[field] ~= value then return false end
+    end
+    for field in pairs(right) do
+        if left[field] == nil then return false end
+    end
+    return true
+end
+
+function DPS.GetSharedHudProjection(playerName, echoes)
+    local hud = identityIndex.hud
+    MigrateLocalLockedBaseline()
+    MigrateLegacyLeaderboard()
+    local key = hud.ReadKey(playerName)
+    if key and hud.SameKey(key, hud.key) and DeepEqual(echoes, hud.echoes) then
         hud.stats.hits = hud.stats.hits + 1
         return hud.value
     end
@@ -3127,12 +3137,8 @@ function DPS.GetHudProjection(playerName, echoes)
         }
     end
     hud.stats.builds = hud.stats.builds + 1
-    if cacheable and not failed then
-        hud.key = {revisions=revisions, dps=dpsRevision,
-            library=libraryRevision, database=dbBinding.database,
-            payload=dbBinding.payload, player=playerName, realm=realm,
-            store=store, entries=entries, appended=appended, removed=removed}
-        hud.echoes, hud.value = DeepCopy(echoes), value
+    if key and not failed and hud.SameKey(key, hud.ReadKey(playerName)) then
+        hud.key, hud.echoes, hud.value = key, DeepCopy(echoes), value
     else
         hud.key, hud.echoes, hud.value = nil, nil, nil
         hud.stats.uncached = hud.stats.uncached + 1

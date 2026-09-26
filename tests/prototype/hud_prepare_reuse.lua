@@ -271,13 +271,13 @@ do
  local function Payload() return rawget(rawget(NexusDB,'authorityBundle'),'dpsCapture') end
  local echoes=Nexus.Panel._lastModel.progress.dpsEchoes
  local payload=Payload()
- local mine=D.GetHudProjection(UnitName('player'),echoes)
- local alpha=D.GetHudProjection('Alpha',echoes)
+ local mine=D.GetSharedHudProjection(UnitName('player'),echoes)
+ local alpha=D.GetSharedHudProjection('Alpha',echoes)
  check(Payload()==payload,'fixture: the bound DPS payload is unchanged')
  check(Same(alpha.bestDps,{dummy=D.GetCharacterBest('dummy','Alpha'),lk=D.GetCharacterBest('lk','Alpha'),
   info=D.GetPlayerInfo('Alpha')}) and Dps(alpha.bestDps.dummy)==77777,
   'a projection for Alpha holds Alpha\'s rows: '..tostring(Dps(alpha.bestDps.dummy)))
- check(Dps(D.GetHudProjection(UnitName('player'),echoes).bestDps.dummy)==Dps(mine.bestDps.dummy),
+ check(Dps(D.GetSharedHudProjection(UnitName('player'),echoes).bestDps.dummy)==Dps(mine.bestDps.dummy),
   'and the own projection is this character\'s again')
  local before=Projection().builds
  Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED,{scope='all',reason='hud_prepare_reuse'})
@@ -311,15 +311,155 @@ end
 do
  local D=Nexus.DpsCapture
  local echoes=Nexus.Panel._lastModel.progress.dpsEchoes
- local projection=D.GetHudProjection(UnitName('player'),echoes)
+ local projection=D.GetSharedHudProjection(UnitName('player'),echoes)
  local before=F.Serialize(projection)
  Refresh(10)
- check(D.GetHudProjection(UnitName('player'),echoes)==projection,'fixture: the same projection is retained')
+ check(D.GetSharedHudProjection(UnitName('player'),echoes)==projection,'fixture: the same projection is retained')
  check(F.Serialize(projection)==before,'ten preparations leave the retained projection unchanged')
  local model=Nexus.Panel._lastModel
  check(model.bestDps.dummy~=projection.bestDps.dummy
   and model.progress.performance.dummy.global~=projection.performance.dummy.global,
   'the panel model holds its own copies')
+end
+
+-- 6b. Nothing is retained after a failed read: the next preparation reads
+-- again and shows the value the failure hid.
+do
+ local D=Nexus.DpsCapture
+ local original=D.GetPlayerInfo
+ -- A real revision first, so the next preparation must read.
+ check(fx:Receive('Filler9','lk',{dps=30900}),'fixture: a received record is stored')
+ D.GetPlayerInfo=function() error('synthetic read failure') end
+ local p0=Projection()
+ local ok,err=pcall(Refresh,1)
+ D.GetPlayerInfo=original
+ assert(ok,err)
+ local p1=Projection()
+ check(p1.builds==p0.builds+1 and p1.uncached==p0.uncached+1,'a projection with a failed read is built and not retained')
+ check(Nexus.Panel._lastModel.bestDps.info==nil,'the failed read shows as no player summary')
+ Refresh(1)
+ check(Projection().builds==p1.builds+1,'the next preparation reads again')
+ local shown=MatchesOracle('after a failed read')
+ check(shown.bestDps.info and shown.bestDps.info.dps==39000,'and shows the player summary')
+end
+
+-- 6c. Without revisions or without an evidence token nothing is retained.
+do
+ local D=Nexus.DpsCapture
+ local echoes=Nexus.Panel._lastModel.progress.dpsEchoes
+ local me=UnitName('player')
+ local revisions=Nexus.Revisions
+ local get=revisions.Get
+ revisions.Get=function() return nil end
+ local p0=Projection()
+ local ok,err=pcall(function()
+  D.GetSharedHudProjection(me,echoes);D.GetSharedHudProjection(me,echoes)
+ end)
+ revisions.Get=get
+ assert(ok,err)
+ local p1=Projection()
+ check(p1.builds==p0.builds+2 and p1.uncached==p0.uncached+2,'without revisions every projection is built and none retained')
+ local evidence=Nexus.LoadoutEvidence
+ local token=evidence.ResolutionTokenV1
+ evidence.ResolutionTokenV1=function() return nil end
+ ok,err=pcall(function()
+  D.GetSharedHudProjection(me,echoes);D.GetSharedHudProjection(me,echoes)
+ end)
+ evidence.ResolutionTokenV1=token
+ assert(ok,err)
+ local p2=Projection()
+ check(p2.builds==p1.builds+2 and p2.uncached==p1.uncached+2,'without an evidence token every projection is built and none retained')
+ Refresh(1);MatchesOracle('after the unretained projections')
+end
+
+-- 6d. The realm, the Echo set and the evidence resolution token are key
+-- parts, each checked with the bound DPS payload unchanged. DB() binds
+-- bundle.dpsCapture while the catalog is not read-only, so an unchanged bundle
+-- field and a writable catalog mean an unchanged binding.
+do
+ local D=Nexus.DpsCapture
+ local evidence=Nexus.LoadoutEvidence
+ -- The received record in 6b started the real retention run; let its catalog
+ -- transaction finish.
+ for _=1,2000 do
+  if not evidence.CandidateOpen() then break end
+  H.Advance(.05,.05)
+ end
+ local function Binding()
+  local status=Nexus.BuildCatalog.Status()
+  return status.readOnly==false and rawget(rawget(NexusDB,'authorityBundle'),'dpsCapture') or nil
+ end
+ Refresh(1)
+ local echoes=Nexus.Panel._lastModel.progress.dpsEchoes
+ local me=UnitName('player')
+ local payload=Binding()
+ check(payload~=nil,'fixture: the catalog is writable and the payload is bound')
+ D.GetSharedHudProjection(me,echoes)
+ -- Another realm is a rebuild that matches the uncached reads. (In a session
+-- a realm change also makes the catalog re-admit the root, which replaces
+-- the DPS binding; the realm term cannot be isolated here.)
+ local normalized=GetNormalizedRealmName
+ GetNormalizedRealmName=function() return 'Otherrealm' end
+ local p1=Projection()
+ local ok,err=pcall(function()
+  local other=D.GetSharedHudProjection(me,echoes)
+  check(Same(other.bestDps,{dummy=D.GetCharacterBest('dummy',me),lk=D.GetCharacterBest('lk',me),
+   info=D.GetPlayerInfo(me)}),'another realm: the projection equals the uncached reads')
+ end)
+ GetNormalizedRealmName=normalized
+ assert(ok,err)
+ check(Projection().builds==p1.builds+1,'another realm rebuilds the projection')
+ Refresh(1)
+ payload=Binding()
+ check(payload~=nil,'fixture: with the realm back the catalog is writable again')
+ D.GetSharedHudProjection(me,echoes)
+ local p2=Projection()
+ local none=D.GetSharedHudProjection(me,nil)
+ check(Projection().builds==p2.builds+1 and none.performance==nil,'without an Echo set the projection has no exact-set rows')
+ check(Same(none.bestDps,{dummy=D.GetCharacterBest('dummy',me),lk=D.GetCharacterBest('lk',me),info=D.GetPlayerInfo(me)})
+  and Dps(none.bestDps.dummy)==38000,'and still the character rows')
+ local again=D.GetSharedHudProjection(me,echoes)
+ check(Projection().builds==p2.builds+2 and Dps(again.performance.dummy.personal)==20000,'the Echo set back rebuilds with its rows')
+ -- A changed resolution token (here: one more durable append) is a rebuild.
+ local token=evidence.ResolutionTokenV1
+ evidence.ResolutionTokenV1=function()
+  local store,entries,appended,removed=token()
+  return store,entries,(appended or 0)+1,removed
+ end
+ local p3=Projection()
+ ok,err=pcall(function()
+  D.GetSharedHudProjection(me,echoes);D.GetSharedHudProjection(me,echoes)
+ end)
+ evidence.ResolutionTokenV1=token
+ assert(ok,err)
+ check(Projection().builds==p3.builds+1,'a changed evidence resolution token rebuilds the projection once')
+ check(Binding()==payload,'fixture: the DPS binding is still unchanged')
+ Refresh(1);MatchesOracle('after the key-part checks')
+end
+
+-- 6e. A facade without the projection (the compatibility path) shows the same
+-- values, and cannot change Main's panel input even if it writes the Echo set.
+do
+ local real=Nexus.DpsCapture
+ Refresh(1)
+ local expected=F.Serialize(Shown(Nexus.Panel._lastModel))
+ local echoesBefore=F.Serialize(Nexus.Panel._lastModel.progress.dpsEchoes)
+ local facade=setmetatable({
+  GetSharedHudProjection=false,
+  GetLeaderboardForEchoes=function(echoes,category)
+   echoes[1].stacks=99;echoes[#echoes+1]={spellId=200088,stacks=1}
+   return real.GetLeaderboardForEchoes(echoes,category)
+  end,
+ },{__index=real})
+ Nexus.DpsCapture=facade
+ local p0=Projection()
+ local ok,err=pcall(Refresh,1)
+ Nexus.DpsCapture=real
+ assert(ok,err)
+ check(Projection().builds==p0.builds and Projection().hits==p0.hits,'fixture: the facade path does not use the projection')
+ Refresh(1)
+ check(F.Serialize(Nexus.Panel._lastModel.progress.dpsEchoes)==echoesBefore,'a writing facade leaves the panel input\'s Echo set unchanged')
+ check(F.Serialize(Shown(Nexus.Panel._lastModel))==expected,'and the projection path shows the same values as before')
 end
 
 -- 7. The DPS source is replaced with no DPS revision (another saved root).
@@ -348,6 +488,29 @@ do
  Refresh(2)
  local shown=MatchesOracle('original source again')
  check(Dps(shown.bestDps.dummy)==38000,'with the original source back its row is shown again')
+end
+
+-- 7b. Only the bound DPS payload is replaced: the same saved table and bundle,
+-- a different dpsCapture, no revision. The HUD follows the payload.
+do
+ local bundle=NexusDB.authorityBundle
+ local original=bundle.dpsCapture
+ local revision=Nexus.Revisions.Get('DPS_CHANGED')
+ Refresh(1)
+ local swapped=L.Copy(original)
+ swapped.characterBest.dummy[F.OWNER].dps=23456
+ bundle.dpsCapture=swapped
+ local ok,err=pcall(function()
+  Refresh(2)
+  local shown=MatchesOracle('swapped payload')
+  check(Dps(shown.bestDps.dummy)~=38000,'the swapped payload\'s row is not the retained one: '..tostring(Dps(shown.bestDps.dummy)))
+  check(Nexus.Revisions.Get('DPS_CHANGED')==revision,'fixture: no DPS revision announced the swap')
+ end)
+ bundle.dpsCapture=original
+ assert(ok,err)
+ Refresh(2)
+ local shown=MatchesOracle('original payload again')
+ check(Dps(shown.bestDps.dummy)==38000,'with the original payload back its row is shown again')
 end
 
 ------------------------------------------------------------------------

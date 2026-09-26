@@ -481,8 +481,9 @@ local function BuildHudDisplayModel(base)
     local progress = type(baseSnapshot.progress) == "table"
         and baseSnapshot.progress or {}
     local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
-    local projection = capture and type(capture.GetHudProjection) == "function"
-        and DisplayCall(capture.GetHudProjection, player, echoes) or nil
+    local projection = capture
+        and type(capture.GetSharedHudProjection) == "function"
+        and DisplayCall(capture.GetSharedHudProjection, player, echoes) or nil
     if type(projection) == "table" then
         -- Detached, read-only records retained by DpsCapture for the current
         -- DPS state; the view model copies them into its snapshot.
@@ -500,7 +501,9 @@ local function BuildHudDisplayModel(base)
         end
         return viewModel.BuildHudDisplayModel(input)
     end
-    -- Compatibility path for injected facades without the projection.
+    -- Compatibility path for injected facades without the projection. They
+    -- receive a copy of the Echo set, never Main's private panel input.
+    echoes = echoes and viewModel.Copy(echoes)
     input.bestDps = {
         dummy=viewModel.Copy(capture and DisplayCall(
             capture.GetCharacterBest, "dummy", player)),
