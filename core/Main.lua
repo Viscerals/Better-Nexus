@@ -449,12 +449,13 @@ end
 -- Main owns every service read used by the adaptive HUD. Panel receives only
 -- this defensive display snapshot and never reaches back into data services
 -- while rendering it.
+-- `base` is always lastPanelInput: Main's private copy of the panel input,
+-- which nothing mutates, so it is read here without another copy. The view
+-- model takes its own snapshot of the complete input.
 local function BuildHudDisplayModel(base)
     local viewModel = EnsureMainViewModel and EnsureMainViewModel()
     if not viewModel then return type(base) == "table" and base or {} end
-    -- Preserve the old snapshot boundary: the panel input and each service
-    -- result are copied when read, before a later provider can mutate them.
-    local baseSnapshot = viewModel.Copy(type(base) == "table" and base or {})
+    local baseSnapshot = type(base) == "table" and base or {}
     local input = {base=baseSnapshot,status=StatusLine()}
     local assignment=Adapter.AssignedWishlist and DisplayCall(Adapter.AssignedWishlist)
     if assignment then
@@ -477,6 +478,32 @@ local function BuildHudDisplayModel(base)
 
     local capture = Nexus.DpsCapture
     local player = UnitName and UnitName("player") or nil
+    local progress = type(baseSnapshot.progress) == "table"
+        and baseSnapshot.progress or {}
+    local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
+    local projection = capture
+        and type(capture.GetSharedHudProjection) == "function"
+        and DisplayCall(capture.GetSharedHudProjection, player, echoes) or nil
+    if type(projection) == "table" then
+        -- Detached, read-only records retained by DpsCapture for the current
+        -- DPS state; the view model copies them into its snapshot.
+        input.bestDps = projection.bestDps
+        input.performance = {dummy={},lk={}}
+        local performance = type(projection.performance) == "table"
+            and projection.performance or nil
+        if echoes and performance then
+            local dummy = performance.dummy or {}
+            local lk = performance.lk or {}
+            input.performance.dummy.personal = dummy.personal
+            input.performance.lk.personal = lk.personal
+            input.performance.dummy.global = dummy.global
+            input.performance.lk.global = lk.global
+        end
+        return viewModel.BuildHudDisplayModel(input)
+    end
+    -- Compatibility path for injected facades without the projection. They
+    -- receive a copy of the Echo set, never Main's private panel input.
+    echoes = echoes and viewModel.Copy(echoes)
     input.bestDps = {
         dummy=viewModel.Copy(capture and DisplayCall(
             capture.GetCharacterBest, "dummy", player)),
@@ -484,9 +511,6 @@ local function BuildHudDisplayModel(base)
             capture.GetCharacterBest, "lk", player)),
         info=viewModel.Copy(capture and DisplayCall(capture.GetPlayerInfo, player)),
     }
-    local progress = type(baseSnapshot.progress) == "table"
-        and baseSnapshot.progress or {}
-    local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
     input.performance = {dummy={},lk={}}
     if capture and echoes then
         input.performance.dummy.personal = viewModel.Copy(DisplayCall(
@@ -564,7 +588,7 @@ end
 function Nexus.HudSnapshotStats()
     local viewModel = EnsureMainViewModel and EnsureMainViewModel()
     return viewModel and viewModel.Stats()
-        or {builds=0,refreshes=0,rebuilds=0,skipped=0}
+        or {builds=0,refreshes=0,rebuilds=0,skipped=0,copiedTables=0}
 end
 
 -- Renders the panel with just status + progress, no board cards. Used at
