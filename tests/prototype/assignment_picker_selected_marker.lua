@@ -149,5 +149,25 @@ for _,context in ipairs({2,0})do
  check(A.AssignedWishlist().state=='unassigned','SETUP: Unassign clears the association')
  expect(context,'','after Unassign')
 end
+-- 9. A legacy association without an assignmentId (numbered context). Only
+-- the current slot and content key decide; a row stamped with another
+-- assignment is never marked, and equal contents elsewhere mark nothing.
+H.perks.serverActiveSlot=2;H.Notify();A.Poll()
+local function legacy(slot,name)
+ Nexus.Store.State().loadoutWishlists[2]={slot=slot,key=k,name=name,echoes=H.Clone(rolled)}
+ check(saved(2).assignmentId==nil,'SETUP: legacy association has no assignmentId')
+end
+server({[101]={'Live A',rolled},[102]={'Live B',rolled},[103]={'Live C',rolled}})
+legacy(102,'Live B');expect(2,'Live B','legacy association among three equal-content rows')
+server({[101]={'Live A',variant(2)},[102]={'Live B changed',variant(3)}})
+legacy(102,'Live B');expect(2,'','legacy association whose slot changed')
+server({[101]={'Live A',rolled},[102]={'Plan A',rolled}})
+legacy(102,'Plan A')
+local foreign=false
+for _,c in ipairs(A.GetWishlistCandidates())do
+ if c.slot==102 and c.assignmentId then foreign=true end
+end
+check(foreign,'SETUP: loadout 1\'s design plan (another assignment) holds the slot-102 row')
+expect(2,'','legacy association against another assignment\'s row')
 check(#H.actions==actions and H.Count('orb-spend')==0,'no gameplay or service mutation in the whole test')
 print('PASS picker [Selected] marks exactly the resolved assignment; equal contents elsewhere, names, changed live rows and ambiguous identities mark nothing; checks='..checks)
