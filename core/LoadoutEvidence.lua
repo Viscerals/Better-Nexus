@@ -327,6 +327,23 @@ function Evidence.AuthorityTokenV1(includeCandidate)
         providerRevision=authority.providerRevision}
 end
 
+-- What an ordinary (non-candidate) Resolve reads: the selected store table,
+-- its entries table, and the exact append/removal revisions that every
+-- durable entries write advances. A retained projection of resolved rows is
+-- current only while all four values are unchanged. It never binds or
+-- rebinds the module (that would drop an open candidate): while the module is
+-- unbound or bound to another saved table it returns nil, and nothing may be
+-- retained.
+function Evidence.ResolutionTokenV1()
+    if type(boundDb) ~= "table"
+        or (type(NexusDB) == "table" and NexusDB ~= boundDb) then
+        return nil
+    end
+    local store = Store(false)
+    local entries = type(store) == "table" and store.entries or nil
+    return store, entries, authority.appendRevision, authority.removalRevision
+end
+
 function Evidence.CandidateRevisionPlanV1()
     local plan = {}
     if not candidate then return plan end

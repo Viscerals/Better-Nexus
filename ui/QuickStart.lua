@@ -97,7 +97,10 @@ local function EnsureFrame()
     if frame then return frame end
 
     frame = CreateFrame("Frame", "NexusQuickStart", UIParent)
-    frame:SetSize(420, 332)
+    -- Height fits the body and hint at a 16 px replacement font such as the
+    -- ElvUI font measured natively (6 body lines, 3 hint lines); the default
+    -- font needs 5 and 2. tests/prototype/quickstart_layout_fit.lua models both.
+    frame:SetSize(420, 360)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 55)
     frame:SetFrameStrata("DIALOG")
     frame:EnableMouse(true)
@@ -127,9 +130,8 @@ local function EnsureFrame()
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.body = body
-    -- Uses the gap above the buttons (top -132); the window size is unchanged.
     body:SetPoint("TOPLEFT", 24, -56)
-    body:SetSize(372, 74)
+    body:SetSize(372, 112)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
     body:SetText(
@@ -141,7 +143,7 @@ local function EnsureFrame()
 
     local current = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     current:SetSize(174, 26)
-    current:SetPoint("TOPLEFT", 24, -132)
+    current:SetPoint("TOPLEFT", 24, -176)
     current:SetText("Set up current build")
     current:SetScript("OnClick", function()
         Finish()
@@ -151,7 +153,7 @@ local function EnsureFrame()
 
     local import = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     import:SetSize(174, 26)
-    import:SetPoint("TOPRIGHT", -24, -132)
+    import:SetPoint("TOPRIGHT", -24, -176)
     import:SetText("Import / Create Wishlist")
     import:SetScript("OnClick", function()
         Finish()
@@ -180,14 +182,14 @@ local function EnsureFrame()
     end)
 
     local help = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    help:SetSize(174,26);help:SetPoint("TOPLEFT",24,-206);help:SetText("Help / Getting Started")
+    help:SetSize(174,26);help:SetPoint("TOPLEFT",24,-250);help:SetText("Help / Getting Started")
     help:SetScript("OnClick",function() Finish();if Nexus.Help then Nexus.Help.Show("start") end end)
     local orbs = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-206);orbs:SetText("Orbs / Lost Memories")
+    orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-250);orbs:SetText("Orbs / Lost Memories")
     orbs:SetScript("OnClick",function() Finish();if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end)
     local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("BOTTOMLEFT", 24, 22)
-    hint:SetSize(290, 30)
+    hint:SetSize(290, 54)
     hint:SetJustifyH("LEFT")
     hint:SetText("Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls.")
 
