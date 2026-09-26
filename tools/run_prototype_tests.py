@@ -94,6 +94,7 @@ NAMES += ['retention_ranked_guard_identity']
 NAMES += ['automation_world_transition']
 NAMES += ['readonly_profile_preservation','readonly_saved_dps_visibility']
 NAMES += ['autosave_overwrite_warning','autosave_assignment_recheck']
+NAMES += ['quickstart_layout_fit']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
