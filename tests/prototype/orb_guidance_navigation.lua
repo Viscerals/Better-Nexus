@@ -37,6 +37,10 @@ do
  check(r.state=='waiting' and not r.openOrbs,'a submitted action ranks before "choose": not asked to choose while pending')
  r=P(With({board=true,inFlight=true}))
  check(r.state=='waiting','an unconfirmed latch is not dropped because a board is visible')
+ r=P(With({intent='expired'}))
+ check(r.state=='waiting','an expired intent is not confirmation: '..r.state)
+ r=P(With({orbCapable=false}))
+ check(r.state=='finished-no-orbs' and not r.openOrbs,'no Orb capability: named, no Orb advice: '..r.state)
  r=P(With({ordinaryAllowed=false,ordinaryWhy='orb state unknown',board=true,intent='uncertain'}))
  check(r.state=='orb-state' and r.openOrbs,'an unknown Orb state ranks first among ordinary blockers, with inspection')
  check(#r.blockers==3,'and every present blocker stays listed for details: '..#r.blockers)
@@ -74,7 +78,16 @@ end
 local H
 local function Boot(opt)
  H=F.Boot(F.Database({}),function(h)
-  h.playerLevel=80;h.granted=Granted(opt.rolled or 75);h.pendingRolls=opt.pendingRolls
+  h.playerLevel=opt.level or 80;h.granted=Granted(opt.rolled or 75);h.pendingRolls=opt.pendingRolls
+  if opt.orbs~=false then
+   -- A state-aware Orb service that is idle (synthetic). Spending is counted.
+   ProjectEbonhold=ProjectEbonhold or {}
+   ProjectEbonhold.OrbService={IsStateKnown=function() return true end,IsOfferPending=function() return false end,
+    GetCharges=function() return 3 end,RequestCharges=function() return true end,
+    ConfirmSpend=function() h.actions[#h.actions+1]={'orb-spend'};return true end}
+  else
+   if ProjectEbonhold then ProjectEbonhold.OrbService=nil end
+  end
   if opt.before then opt.before(h) end
  end)
  if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then _G.NexusQuickStart:Hide();H.Advance(.2) end
@@ -106,6 +119,30 @@ do
  Boot({pendingRolls=12})
  local v=View()
  check(v.state=='rolling' and not v.button,'level 80 with normal rolls left: no "finished", no Orb button: '..tostring(v.state))
+end
+do
+ -- A client without an Orb service: the limitation is named, no button.
+ Boot({pendingRolls=0,orbs=false})
+ local v=View()
+ check(v.state=='finished-no-orbs' and not v.button,'no Orb service: named, no Orb button: '..tostring(v.state))
+ check(tostring(v.text):find('does not expose Orb mode',1,true)~=nil,'the text says so: '..tostring(v.text))
+end
+do
+ -- Level 1: the game's roll count is not read on purpose; no Orb text and
+ -- no extra HUD space appears.
+ Boot({level=1,pendingRolls=0})
+ local v=View()
+ check(v.text==nil and not v.button,'level 1 shows no Orb guidance: '..tostring(v.state)..' / '..tostring(v.text))
+end
+do
+ -- A latch the watchdog declared dead is still not a confirmed result.
+ Boot({pendingRolls=0})
+ H.perks.pendingSelectSpellId=200016;H.Notify()
+ for _=1,30 do Nexus.RequestRecompute();H.Advance(.5) end
+ check(not Nexus.GameAdapter.InFlight(),'fixture: the watchdog released the stuck latch')
+ local v=View()
+ check(v.state=='waiting' and not v.button,'an expired watchdog is not confirmation: still waiting: '..tostring(v.state))
+ H.perks.pendingSelectSpellId=nil;H.Notify()
 end
 do
  -- The game reports a pending choice latch (an action without its result).
@@ -160,7 +197,11 @@ local function Count(owner,names,calls)
   if type(real)=='function' then owner[n]=function(...) calls[#calls+1]=n;return real(...) end end
  end
 end
-do
+-- Two identical runs, with and without the click (the no-navigation
+-- control): the same saved data, game actions and mutator calls. Between the
+-- render and the click an Echo choice and an unconfirmed latch appear; the
+-- button still only opens the window, which reads the current state.
+local function RenderThenClick(click)
  Boot({pendingRolls=0})
  check(View().button,'fixture: the button is shown')
  local calls={}
@@ -169,20 +210,37 @@ do
   'PrepareLimitIncrease','ConfirmLimit'},calls)
  Count(Nexus.GameAdapter,{'Take','Banish','Reroll','Freeze','Activate','Save','UploadWishlist','LockPerk','UnlockPerk',
   'SetLoadoutWishlist','SetLoadoutWishlistIdentity','SetFirstLoadoutWishlistIdentity'},calls)
- local db0,actions0,auto0=Ser(NexusDB),#H.actions,View().auto
- -- The state changes between the render and the click: the button still
- -- only opens the window, which reads the current state.
- H.pendingRolls=5
- NexusPanel._orbsBtn:Click()
- check(NexusOrbPanel and NexusOrbPanel:IsShown(),'the click opens the Orb window')
+ local auto0=View().auto
+ H.Board({{spellId=200016,quality=0},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+ H.perks.pendingSelectSpellId=200016
+ if click then
+  local before=#calls
+  NexusPanel._orbsBtn:Click()
+  check(NexusOrbPanel and NexusOrbPanel:IsShown(),'the click opens the Orb window')
+  check(#calls==before,'the click itself calls no mutator: '..table.concat(calls,','))
+  local shown=Nexus.OrbRuntime.Status()
+  check(shown.canStart==false,'the window reads the current state: Start is not available')
+  check(tostring(shown.startReason):find('Echo choice is open in the game window',1,true)~=nil,
+   'and names the choice opened after the render: '..tostring(shown.startReason))
+  check(not NexusOrbPanel.start:IsEnabled(),'the Start button is disabled')
+ end
  for _=1,8 do H.Advance(.25) end
- check(#calls==0,'no Orb or game mutator was called, not even refused: '..table.concat(calls,','))
- check(#H.actions==actions0,'no action reached the game: '..(#H.actions-actions0))
- check(Ser(NexusDB)==db0,'saved data is unchanged')
  check(View().auto==auto0,'Auto is unchanged')
- NexusOrbPanel:Hide()
- for _=1,6 do Nexus.RequestRecompute();H.Advance(.4) end
- check(not NexusOrbPanel:IsShown(),'a closed Orb window does not reopen by itself')
+ local out={db=Ser(NexusDB),actions=Ser(H.actions),calls=table.concat(calls,',')}
+ H.perks.pendingSelectSpellId=nil;H.Board(nil);H.Notify()
+ if click then
+  NexusOrbPanel:Hide()
+  for _=1,6 do Nexus.RequestRecompute();H.Advance(.4) end
+  check(not NexusOrbPanel:IsShown(),'a closed Orb window does not reopen by itself')
+ end
+ return out
+end
+do
+ local control=RenderThenClick(false)
+ local opened=RenderThenClick(true)
+ check(opened.calls==control.calls,'the same mutator calls with and without the click: ['..opened.calls..'] vs ['..control.calls..']')
+ check(opened.actions==control.actions,'the same game actions with and without the click')
+ check(opened.db==control.db,'the same saved data with and without the click')
 end
 
 -- The Orb window's start refusal is covered with a real Orb service in

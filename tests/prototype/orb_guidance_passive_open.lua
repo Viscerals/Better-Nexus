@@ -33,6 +33,9 @@ local function Snapshot(H,M)
  local st=Nexus.Store.State()
  return table.concat({
   'spend='..H.Count('orb-spend'),'take='..H.Count('take'),'actions='..#H.actions,
+  -- Requests sent to the server (a refresh is outgoing traffic too).
+  'orbRequests='..tostring(H.orbs and H.orbs.requests),'slotRequests='..tostring(H.slotRequests),
+  'recovery='..Ser(M.Status().recovery),
   'state='..tostring(s.state),'spent='..tostring(s.spent),'reserved='..tostring(s.reserved),
   'limit='..tostring(s.limit),'pending='..tostring(s.pending),
   'receipt='..Ser(st.orbRefinement and st.orbRefinement.pending),
@@ -90,7 +93,17 @@ local function Recovery(open)
  M=Reload(H)
  H.Notify();A.Poll()
  if open then Nexus.OrbPanel.Show() end
- for _=1,20 do H.Advance(.25) end
+ for _=1,8 do H.Advance(.25) end
+ -- An event while the window is (or is not) open: the game reports a
+ -- change and the adapter polls.
+ H.Notify();A.Poll()
+ for _=1,12 do H.Advance(.25) end
+ -- The HUD names the unresolved earlier Orb action and suggests no start.
+ Nexus.RequestRecompute();H.Advance(.5)
+ local g=(Nexus.Panel._lastModel or {}).orbGuidance or {}
+ check(g.state=='orb-run','the HUD shows the unresolved Orb action: '..tostring(g.state))
+ check(not tostring(g.text):find('Review Orbs',1,true) and not tostring(g.text):find('Start',1,true),
+  'with its recovery reason, not a start suggestion: '..tostring(g.text))
  return Snapshot(H,M)
 end
 do

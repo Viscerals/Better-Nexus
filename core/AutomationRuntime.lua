@@ -2220,13 +2220,21 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             -- The selection, as on the board path: a hold is shown in the
             -- status line, never as a button that reads OFF.
             auto = autoEnabled,
-            paused = autoEnabled and not heldOk and tostring(heldWhy) or nil,
+            paused = nil,
             version = Nexus.VERSION }
+        if autoEnabled then
+            -- Between boards the same pause stays visible (read-only gate).
+            local gateOk, gateWhy = true, nil
+            if Adapter.OrdinaryBoardAllowed then gateOk, gateWhy = Adapter.OrdinaryBoardAllowed() end
+            if not heldOk then model.paused = tostring(heldWhy)
+            elseif not gateOk then model.paused = tostring(gateWhy) end
+        end
         if Nexus.OrbGuidance then
             model.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
                 model.progress, (actionIntent and (actionIntent.state == "submitted"
-                or actionIntent.state == "uncertain") and actionIntent.state or nil),
-            plan and not plan.advisorOnly))
+                or actionIntent.state == "uncertain" or actionIntent.state == "expired")
+                and actionIntent.state or nil),
+            plan and not plan.advisorOnly, {skipHorizon = actionHold.worldLeaving == true}))
         end
         FinishPhase(preparePerformance, "overlayPrepare", prepareStarted)
         MeasurePhase("overlayRender", RenderPanel, model)
@@ -2475,8 +2483,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     if Nexus.OrbGuidance then
         panelModel.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
             panelModel.progress, (actionIntent and (actionIntent.state == "submitted"
-                or actionIntent.state == "uncertain") and actionIntent.state or nil),
-            plan and not plan.advisorOnly))
+                or actionIntent.state == "uncertain" or actionIntent.state == "expired")
+                and actionIntent.state or nil),
+            plan and not plan.advisorOnly, {horizon = horizon, horizonKnown = true}))
     end
     FinishPhase(overlayPerformance, "overlayPrepare", overlayStarted)
     MeasurePhase("overlayRender", RenderPanel, panelModel)
@@ -3346,9 +3355,12 @@ end
     -- for its result (HUD guidance only; it authorizes nothing).
     function M.PendingIntentState()
         local state = actionIntent and actionIntent.state
-        if state == "submitted" or state == "uncertain" then return state end
+        -- An expired intent is not a confirmed one: it still counts.
+        if state == "submitted" or state == "uncertain" or state == "expired" then return state end
         return nil
     end
+    -- Read-only: true between a loading screen's start and its world entry.
+    function M.WorldLeaving() return actionHold.worldLeaving == true end
     function M.AutoEnabled() return autoEnabled end
     function M.AutoAllowed() return AutoAllowed() end
     function M.ToggleAuto()

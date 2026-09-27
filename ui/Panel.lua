@@ -1701,6 +1701,9 @@ local function ApplyModel(model, signatures)
             statusText:SetText("|cffffd100Auto ON — paused|r")
         elseif #cards == 0 and recommendation == "" then
             statusText:SetText("|cff7fd5ffRoll status|r")
+        elseif guide and guide.openOrbs and guideText ~= "" then
+            -- Room is shared with the Open Orbs button: the short form.
+            statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Slot " .. activeSlot) or "|cff888888Preview|r")
         else
             statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
         end
@@ -1708,7 +1711,10 @@ local function ApplyModel(model, signatures)
             local c = cards[i]
             cardTexts[i]:SetText(type(c) == "table" and SafeText(c.text) or "")
         end
-        recText:SetText(recommendation ~= "" and recommendation or guideText)
+        -- An unresolved Orb action's own reason is more specific than the
+        -- general pause text; otherwise the recommendation stays first.
+        recText:SetText((guide and guide.state == "orb-run" and guideText ~= "") and guideText
+            or (recommendation ~= "" and recommendation or guideText))
     end
     if frame._orbsBtn then
         frame._orbsBtn.blockers = guide and guide.blockers or nil
