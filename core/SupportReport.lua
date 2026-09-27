@@ -480,6 +480,98 @@ function M.StartupLines(status, extended)
     return out
 end
 
+------------------------------------------------------------------------
+-- Recorded Lua errors
+------------------------------------------------------------------------
+
+-- The error owner keeps {timestamp, source, message} per entry, newest last.
+-- Only those three fields are read, each through a converter, so no other
+-- field of an entry reaches a ticket, and a malformed entry costs only its own
+-- line. An entry is never handed to a converter whole: that turns the table
+-- into "unreadable table" instead of the error it holds.
+local ERROR_MESSAGE_BYTES = 240
+
+local function errorTime(value)
+    if type(value) ~= "number" or value ~= value or value <= 0
+        or value == math.huge then
+        return "time not recorded"
+    end
+    -- A wall-clock time is shown as UTC; anything smaller is not one.
+    if value >= 1000000000 and type(date) == "function" then
+        local ok, text = pcall(date, "!%Y-%m-%d %H:%M:%S", value)
+        if ok and type(text) == "string" then return safeText(text, 24) .. " UTC" end
+    end
+    return "t=" .. safeText(value, 24)
+end
+
+-- Bounded, and cut on a UTF-8 character boundary so a shortened message is
+-- still whole text; the "..." says it was shortened.
+local function errorMessage(value)
+    if value == nil then return "no message recorded" end
+    local text = safeText(value, 4096)
+    if #text <= ERROR_MESSAGE_BYTES then return text end
+    local cut = ERROR_MESSAGE_BYTES - 3
+    while cut > 0 do
+        local nextByte = text:byte(cut + 1)
+        if nextByte < 0x80 or nextByte > 0xBF then break end
+        cut = cut - 1
+    end
+    return text:sub(1, cut) .. "..."
+end
+
+local function errorLine(entry, origin)
+    local ok, line = pcall(function()
+        local message, source, stamp
+        if type(entry) == "table" then
+            -- The older shape {error, t} is read the way the owner reads it.
+            message = entry.message
+            if message == nil then message = entry.error end
+            source = entry.source
+            stamp = entry.timestamp
+            if stamp == nil then stamp = entry.t end
+        elseif type(entry) == "string" then
+            message = entry
+        else
+            return "entry unreadable (" .. type(entry) .. ")"
+        end
+        if source == nil or source == "" then source = "unknown source" end
+        return errorTime(stamp) .. (origin and (", " .. origin) or "") .. ", "
+            .. safeText(source, 64) .. ": " .. errorMessage(message)
+    end)
+    if ok and type(line) == "string" then return line end
+    return "entry unreadable"
+end
+
+-- The history and how many of its newest entries were recorded this session,
+-- or nil when the owner cannot answer: "not available" is not "none".
+local function errorHistoryView()
+    local ok, view = pcall(function()
+        local errors = Nexus and Nexus.Errors
+        if type(errors) ~= "table" or type(errors.History) ~= "function" then return nil end
+        local history = errors.History()
+        if type(history) ~= "table" then return nil end
+        local okCount, count = pcall(function()
+            return type(errors.SessionCount) == "function" and errors.SessionCount() or nil
+        end)
+        count = okCount and tonumber(count) or nil
+        if count and count ~= count then count = nil end
+        if count then count = math.min(math.max(math.floor(count), 0), #history) end
+        return {history = history, total = #history, session = count}
+    end)
+    if ok and type(view) == "table" then return view end
+    return nil
+end
+
+local function errorSessionText(view)
+    return view.session and (view.session .. " this session") or "this session not known"
+end
+
+-- rank 1 is the newest entry.
+local function errorOrigin(view, rank)
+    if not view.session then return nil end
+    return rank <= view.session and "this session" or "earlier session"
+end
+
 function M.Summary(selection)
     local support = Nexus and Nexus.SupportIncidents
     -- Protected like every other owner read here: an incident owner that
@@ -549,15 +641,20 @@ function M.Summary(selection)
             context[#context + 1] = line
         end
     end
-    local errors = Nexus and Nexus.Errors
-    local okHistory, history = pcall(function()
-        return errors and type(errors.History) == "function" and errors.History() or {}
-    end)
-    if not okHistory or type(history) ~= "table" then history = {} end
-    context[#context + 1] = "Recorded Lua errors this session: " .. #history
-        .. (#history == 0 and (#incidents > 0
-            and " (a refusal is not an error; the incident above is retained separately)"
-            or " (a refusal is not an error, and nothing was retained in either history)") or "")
+    local errorView = errorHistoryView()
+    if not errorView then
+        context[#context + 1] = "Recorded Lua errors: not available (the error owner did not answer)"
+    else
+        context[#context + 1] = "Recorded Lua errors retained: " .. errorView.total
+            .. " (" .. errorSessionText(errorView) .. ")"
+            .. (errorView.total == 0 and (#incidents > 0
+                and " (a refusal is not an error; the incident above is retained separately)"
+                or " (a refusal is not an error, and nothing was retained in either history)") or "")
+        if errorView.total > 0 then
+            context[#context + 1] = "Newest recorded Lua error: "
+                .. errorLine(errorView.history[errorView.total], errorOrigin(errorView, 1))
+        end
+    end
     local omitted = 0
     for _, line in ipairs(context) do
         local size = #escape(line) + 1
@@ -783,12 +880,22 @@ function M.Step(job)
                 return out
             end},
             {name = "errors", build = function()
-                local errors = Nexus.Errors
-                local history = errors and type(errors.History) == "function"
-                    and errors.History() or {}
-                local out = {"-- recorded Lua errors (" .. #history .. ") --"}
-                for index = 1, math.min(#history, job.extended and 20 or 5) do
-                    out[#out + 1] = safeText(history[index], 240)
+                -- An owner that cannot answer omits this section, declared
+                -- in the header like every other unavailable section.
+                local view = errorHistoryView()
+                if not view then error("the error owner did not answer") end
+                local history = view.history
+                local limit = job.extended and 20 or 5
+                local listed = math.min(view.total, limit)
+                local out = {"-- recorded Lua errors (" .. view.total .. " retained; "
+                    .. errorSessionText(view) .. "; newest first) --"}
+                for index = 1, listed do
+                    out[#out + 1] = "  " .. index .. ". "
+                        .. errorLine(history[view.total - index + 1], errorOrigin(view, index))
+                end
+                if view.total > listed then
+                    out[#out + 1] = "  [" .. (view.total - listed) .. " older recorded error(s) not shown"
+                        .. (job.extended and "" or "; the extended report lists up to 20") .. "]"
                 end
                 return out
             end},
