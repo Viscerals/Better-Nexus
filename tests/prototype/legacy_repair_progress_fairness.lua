@@ -12,11 +12,13 @@
 -- a receive window holds them back for a bounded time only.
 --
 -- Assertions count operations and scheduled work; no wall-clock threshold.
--- Modeled inputs, stated where used: a continuously open Sync receive window
--- (sections 8 and 8c) and a refused catalog publication (section 9, fault injection
--- at the catalog boundary). LRP_N sets the number of filler characters for
--- the main boot (default 240; the preserved large case, 2000, runs outside the
+-- Modeled inputs, stated where used: a Sync receive window that stays open
+-- (section 8) or closes early (section 8c), a closed window (section 8b) and
+-- a replaced saved root (section 9b). LRP_N sets the number of filler
+-- characters (default 240; the preserved large case, 2000, runs outside the
 -- inventory because its start-up alone exceeds the per-test time limit).
+-- Sections that boot their own session (1, 9, 11b, 13, 10) are in
+-- legacy_repair_boot_cases.lua; the two files share this helper block.
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local N=tonumber(os.getenv('LRP_N') or '') or 240
@@ -35,13 +37,6 @@ local function Players(n)
  for i=1,K do list[#list+1]={name='Legacy'..i,class='MAGE',build='missing',variant=400+i,ordinary=60,dps={lk=30000+i,dummy=29000+i}} end
  for i=1,n do list[#list+1]={name='Filler'..i,class='PRIEST',variant=100+i,dps={lk=20000+i,dummy=19000+i}} end
  return list
-end
-local function DeepCopy(v,seen)
- if type(v)~='table' then return v end
- seen=seen or {};if seen[v] then return seen[v] end
- local o={};seen[v]=o
- for k,x in pairs(v)do o[DeepCopy(k,seen)]=DeepCopy(x,seen) end
- return o
 end
 local function Wishlist(ord) local o={};for i,r in ipairs(ord)do o[i]={spellId=r.spellId,quality=r.quality,stacks=r.stacks}end;return o end
 
@@ -103,106 +98,6 @@ local function StartPass()
 end
 
 ------------------------------------------------------------------------
--- 1. Initial repair, no incoming changes: one pass recovers every legacy
--- candidate once, publishes once, stamps the covered revision, then idles;
--- repeated requests at the current revision start nothing.
-Boot({n=40})
-check(Settle(),'1: the start-up repair settles')
-local s=Stats()
-check(s.recovered==K and LegacyRecovered().n==K,'1: every legacy candidate is recovered once: '..s.recovered..' / '..LegacyRecovered().n)
-check(s.restarts==0 and s.published==1 and s.jobs==1,'1: one pass, one publication: restarts='..s.restarts..' published='..s.published..' jobs='..s.jobs)
-check(s.completedDpsRevision==CurrentRevision() and Meta().completedDpsRevision==CurrentRevision(),'1: the completed revision is the current one')
-local jobs,pumps=s.jobs,s.pumps
-Frames(10*FPS)
-s=Stats()
-check(s.jobs==jobs and s.pumps==pumps and not s.pending,'1: idle: no pass and no pump without changes')
-for key,value in pairs(Stats())do
- check(type(value)~='table' and type(value)~='function','1: Stats() reports scalars only (it is copied on every read): '..tostring(key))
-end
-for _=1,20 do R.Request('refresh') end
-check(Stats().jobs==jobs and Stats().lastReason=='current','6: repeated requests at the current revision start nothing')
-
-------------------------------------------------------------------------
--- 9. Catalog refusal (fault injection: PublishDeferred refuses). The pass
--- stages its writes but publishes nothing and stamps nothing; the next pass
--- after the refusal is lifted publishes the staged writes, and nothing is
--- recovered twice.
-do
- local refuse=true
- Boot({n=40,fileHooks={[ [[core\BuildCatalog.lua]] ]=function()
-  local publish=Nexus.BuildCatalog.PublishDeferred
-  Nexus.BuildCatalog.PublishDeferred=function(...)
-   if refuse then return false,'REFUSED (test)' end
-   return publish(...)
-  end
- end}})
- for _=1,20*FPS do if Stats().failures>0 or (Stats().passesCompleted or 0)>0 then break end;Frames(1) end
- local r=Stats()
- check(r.failures>=1 and r.completedDpsRevision==nil and Meta().inProgress==true,
-  '9: a refused publication stamps nothing: failures='..r.failures..' completed='..tostring(r.completedDpsRevision))
- refuse=false
- check(Stats().followUpPending and Nexus.Scheduler.Pending(FOLLOWUP)~=nil,'9: the refused pass schedules its own retry')
- check(Settle(),'9: the retry settles once publication is accepted (no manual request)')
- r=Stats()
- check(r.completedDpsRevision==CurrentRevision() and r.published>=1 and not Meta().inProgress,
-  '9: the staged writes are published by the next pass: published='..r.published)
- check(LegacyRecovered().n==K,'9: every candidate recovered exactly once: '..LegacyRecovered().n)
-end
-
-------------------------------------------------------------------------
--- 11b. Reload while the refused pass's writes are staged but unpublished: the
--- next session publishes them once and recovers nothing twice.
-do
- Boot({n=40,fileHooks={[ [[core\BuildCatalog.lua]] ]=function()
-  Nexus.BuildCatalog.PublishDeferred=function() return false,'REFUSED (test)' end
- end}})
- for _=1,20*FPS do if Stats().failures>0 then break end;Frames(1) end
- check(Meta().inProgress==true and (tonumber(Meta().pendingWrites) or 0)==K,'11b: setup: K writes staged, none published: '..tostring(Meta().pendingWrites))
- H.Fire('PLAYER_LOGOUT')
- H=L.Reload(F,function(h) h.playerLevel=60 end)
- R=Nexus.LegacyQualificationRepair
- check(Settle(),'11b: the next session settles')
- local r=Stats()
- check(r.published>=1 and not Meta().inProgress and LegacyRecovered().n==K,'11b: the staged writes are published once: published='..r.published..' recovered '..LegacyRecovered().n)
- check(r.completedDpsRevision==CurrentRevision(),'11b: and the new session completes its own revision')
-end
-
-------------------------------------------------------------------------
--- 13. The DPS store is replaced during classification without a DPS revision
--- (modeled: the saved dpsCapture payload is replaced by a deep copy, as a
--- compaction commit with no changed row does). The pass starts over on the
--- current store; it does not skip every candidate and stamp itself complete.
--- (Default size: at 40 fillers the start-up pass finishes during boot.)
-do
- Boot()
- for _=1,20000 do
-  local root=Nexus.BuildCatalog.RootState and Nexus.BuildCatalog.RootState() or nil
-  if not (type(root)=='table' and root.candidate==true) then break end
-  H.Advance(1,.05)
- end
- local swapped=false
- for _=1,math.floor(60*FPS*S) do
-  if not swapped and Stats().pending and Meta().phase=='classify' then
-   local bundle=rawget(NexusDB,'authorityBundle')
-   local rev=CurrentRevision()
-   if type(bundle)=='table' and type(rawget(bundle,'dpsCapture'))=='table' then
-    rawset(bundle,'dpsCapture',DeepCopy(rawget(bundle,'dpsCapture')))
-   else
-    NexusDB.dpsCapture=DeepCopy(NexusDB.dpsCapture)
-   end
-   swapped=CurrentRevision()==rev
-  end
-  if swapped and not Stats().pending and not Stats().followUpPending then break end
-  Frames(1)
- end
- check(swapped,'13: setup: the store was replaced during classification without a DPS revision')
- check(Settle(),'13: the repair settles after the store replacement')
- local r=Stats()
- check(LegacyRecovered().n==K,'13: every legacy candidate is still recovered: '..LegacyRecovered().n)
- check(r.completedDpsRevision==CurrentRevision() and (r.restarts or 0)>=1,'13: the pass started over and then completed: restarts='..tostring(r.restarts))
-end
-
-------------------------------------------------------------------------
 -- Main boot. 4 + 5 + 12 happen during the start-up pass, while the legacy
 -- candidates are still unrecovered: a relevant update during its scan and
 -- during its classification, a new stored row after its scope was captured,
@@ -250,7 +145,7 @@ for _=1,math.floor(60*FPS*S) do
  if injected.classify and not Stats().pending then break end
  Frames(1)
 end
-s=Stats()
+local s=Stats()
 print('LRP startup-pass','scan',tostring(injected.scan),'classify',tostring(injected.classify),'newcomer',tostring(injected.newcomer),
  'replaced',tostring(injected.replaced),'skippedChanged',s.changedSkipped,'stalePasses',s.stalePasses,
  'completed',tostring(s.completedDpsRevision),'passRevision',tostring(passRevision),'current',CurrentRevision())
@@ -360,7 +255,7 @@ check(Settle(40*FPS),'2: the repair converges after the input stops')
 s=Stats()
 check(not s.pending and not s.followUpPending and s.completedDpsRevision==CurrentRevision(),
  '2: converged: the completed revision is the current one, no follow-up pending')
-jobs,pumps=s.jobs,s.pumps
+local jobs,pumps=s.jobs,s.pumps
 Frames(10*FPS)
 check(Stats().jobs==jobs and Stats().pumps==pumps,'2: quiescent after convergence')
 
@@ -498,16 +393,6 @@ do
  check(LegacyRecovered().n==recoveredBefore and Stats().recovered==0,'11: nothing is recovered twice after the reload: '
   ..LegacyRecovered().n..' recovered+'..Stats().recovered)
  check(Stats().completedDpsRevision==CurrentRevision(),'11: the new session completes its own revision')
-end
-
-------------------------------------------------------------------------
--- 10. A protected (read-only) saved profile is never repaired.
-do
- Boot({n=40,mutate=function(db) db.settingsVersion=6 end})
- Frames(10*FPS)
- local r=Stats()
- check(r.jobs==0 and r.lastReason=='read-only-saved-data','10: a read-only profile is not repaired: '..tostring(r.lastReason))
- check(LegacyRecovered().n==0,'10: nothing is written into a read-only profile')
 end
 
 print('PASS legacy_repair_progress_fairness: finite passes complete under sustained DPS input, covered-revision stamps, one coalesced follow-up, views refresh while the repair is pending checks='..checks)
