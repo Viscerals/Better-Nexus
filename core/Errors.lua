@@ -13,18 +13,28 @@ local recording = false
 -- are its newest entries; everything before them was retained from earlier.
 local sessionRecorded = 0
 
+-- #36: cut at a UTF-8 character boundary (Identity.Utf8Prefix, loaded
+-- earlier in the TOC), never inside a character.
+local function Prefix(text, maxBytes)
+    local identity = Nexus.Identity
+    if identity and type(identity.Utf8Prefix) == "function" then
+        return identity.Utf8Prefix(text, maxBytes)
+    end
+    return text:sub(1, maxBytes)
+end
+
 local function SafeText(value, fallback)
     if value == nil then return "nil" end
     if type(value) == "string" then
         if #value <= MAX_MESSAGE_BYTES then return value end
-        return value:sub(1, MAX_MESSAGE_BYTES) .. "..."
+        return Prefix(value, MAX_MESSAGE_BYTES) .. "..."
     end
     local ok, text = pcall(tostring, value)
     if not ok or type(text) ~= "string" then
         return fallback or ("<unprintable " .. type(value) .. ">")
     end
     if #text > MAX_MESSAGE_BYTES then
-        text = text:sub(1, MAX_MESSAGE_BYTES) .. "..."
+        text = Prefix(text, MAX_MESSAGE_BYTES) .. "..."
     end
     return text
 end
@@ -34,7 +44,7 @@ local function SourceText(value)
     local text = SafeText(value, "unknown")
     text = text:gsub("[%c]", " ")
     if text == "" then text = "unknown" end
-    if #text > MAX_SOURCE_BYTES then text = text:sub(1, MAX_SOURCE_BYTES) end
+    if #text > MAX_SOURCE_BYTES then text = Prefix(text, MAX_SOURCE_BYTES) end
     return text
 end
 
