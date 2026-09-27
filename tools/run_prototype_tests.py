@@ -114,6 +114,7 @@ NAMES += ['role_save_keeps_explicit_ordinary']
 NAMES += ['automation_role_deficit']
 NAMES += ['automation_tier_annotation']
 NAMES += ['orb_guidance_navigation','orb_guidance_passive_open']
+NAMES += ['orb_draft_approval_preserved','orb_guidance_geometry']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

@@ -362,6 +362,7 @@ function M.ApplyOwnedFonts()
             switchBtn,setupGetStartedBtn,setupImportBtn,autoBtn,buildsBtn,
             leaderboardBtn,menuBtn,
         }) do SetOwnedButtonFont(widget, normal) end
+        SetOwnedButtonFont(frame._orbsBtn, small)
         -- The Auto button then takes its own fitted font (AUTO_LABEL.Fit);
         -- if none can be made it keeps the owned normal font above.
         AUTO_LABEL.Fit(true)
@@ -678,8 +679,10 @@ local function EnsureFrame()
     -- Passive navigation only: it opens the Orb window, which reads and
     -- shows state. It starts, resumes, approves and spends nothing.
     local orbsBtn = CreateFrame("Button", nil, rollArea, "UIPanelButtonTemplate")
-    orbsBtn:SetSize(84, 16)
-    orbsBtn:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -2, 0)
+    -- The responsive layout gives it its own row (ApplyPanelLayout); this is
+    -- only the initial placement.
+    orbsBtn:SetSize(104, 17)
+    orbsBtn:SetPoint("BOTTOMRIGHT", rollArea, "BOTTOMRIGHT", -2, 4)
     orbsBtn:SetText("Open Orbs...")
     orbsBtn:SetScript("OnClick", function()
         if Nexus.OrbPanel and Nexus.OrbPanel.Show then Nexus.OrbPanel.Show() end
@@ -703,6 +706,7 @@ local function EnsureFrame()
     recText:SetJustifyH("LEFT")
     recText:SetJustifyV("TOP")
     recText:SetTextColor(1, 0.82, 0)
+    frame._rollRec = recText
 
     rollDivider = rollArea:CreateTexture(nil, "ARTWORK")
     rollDivider:SetSize(278, 1)
@@ -1517,10 +1521,28 @@ local function ApplyPanelLayout(layout, completed)
             text:SetSize(boxes.roll.w-inset*2, layout.small)
             y = y + layout.small + math.max(2,math.floor(layout.gap/3))
         end
+        -- Guidance alone (no cards) starts right below the heading, so it
+        -- has the card rows' space; with cards it follows them as before.
+        local noCards = true
+        for index = 1, 3 do
+            if (cardTexts[index]:GetText() or "") ~= "" then noCards = false end
+        end
+        local recY = y
+        if noCards then
+            recY = 1 + layout.small + math.max(3,math.floor(layout.gap/2))
+        end
+        local button = frame._orbsBtn
+        local buttonRow = 0
+        if button and button:IsShown() and layout.orbButtonH then
+            buttonRow = layout.orbButtonH + math.ceil(layout.gap/2)
+            button:ClearAllPoints()
+            button:SetPoint("BOTTOMRIGHT", rollArea, "BOTTOMRIGHT", -inset, math.ceil(layout.gap/2))
+            button:SetSize(layout.orbButtonW, layout.orbButtonH)
+        end
         recText:ClearAllPoints()
-        recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -y)
+        recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -recY)
         recText:SetSize(boxes.roll.w-inset*2,
-            math.max(layout.small*2,boxes.roll.h-y-layout.gap))
+            math.max(layout.small*2,boxes.roll.h-recY-layout.gap-buttonRow))
         rollDivider:ClearAllPoints()
         rollDivider:SetPoint("BOTTOMLEFT", rollArea, "BOTTOMLEFT", 1, 0)
         rollDivider:SetSize(boxes.roll.w-2,1)
@@ -1677,6 +1699,14 @@ local function ApplyModel(model, signatures)
                 toLockCount=type(pr.toLock) == "table" and #pr.toLock or 0,
                 unknownTomes=type(pr.unknownTomes) == "table"
                     and #pr.unknownTomes or 0,
+                orbButton=(activeRoll and guide and guide.openOrbs
+                    and total > 0 and name) and true or false,
+                -- Rows for the Orb guidance when it is the body text.
+                guidanceRows=(guideText ~= "" and (recommendation == ""
+                    or guide.state == "orb-run"))
+                    and Nexus.LayoutMetrics.TextRows(guideText, 248, fontScale)
+                    or 0,
+                cardRows=#cards > 0,
             })
             if layoutOk and type(candidate) == "table" then
                 responsiveLayout = candidate
@@ -1701,9 +1731,6 @@ local function ApplyModel(model, signatures)
             statusText:SetText("|cffffd100Auto ON — paused|r")
         elseif #cards == 0 and recommendation == "" then
             statusText:SetText("|cff7fd5ffRoll status|r")
-        elseif guide and guide.openOrbs and guideText ~= "" then
-            -- Room is shared with the Open Orbs button: the short form.
-            statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Slot " .. activeSlot) or "|cff888888Preview|r")
         else
             statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
         end
@@ -1719,9 +1746,9 @@ local function ApplyModel(model, signatures)
     if frame._orbsBtn then
         frame._orbsBtn.blockers = guide and guide.blockers or nil
         if activeRoll and guide and guide.openOrbs and total > 0 and name then
-            statusText:SetWidth(186);frame._orbsBtn:Show()
+            frame._orbsBtn:Show()
         else
-            statusText:SetWidth(276);frame._orbsBtn:Hide()
+            frame._orbsBtn:Hide()
         end
     end
 

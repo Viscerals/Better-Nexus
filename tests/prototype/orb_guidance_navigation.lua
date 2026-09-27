@@ -220,8 +220,10 @@ local function RenderThenClick(click)
   check(#calls==before,'the click itself calls no mutator: '..table.concat(calls,','))
   local shown=Nexus.OrbRuntime.Status()
   check(shown.canStart==false,'the window reads the current state: Start is not available')
-  check(tostring(shown.startReason):find('Echo choice is open in the game window',1,true)~=nil,
-   'and names the choice opened after the render: '..tostring(shown.startReason))
+  local why=tostring(shown.startReason)
+  check(why:find('has no confirmed result',1,true)~=nil and why:find('An Echo choice is shown',1,true)~=nil,
+   'and names the unconfirmed action and the choice opened after the render: '..why)
+  check(not why:lower():find('choose',1,true),'without telling the player to choose it: '..why)
   check(not NexusOrbPanel.start:IsEnabled(),'the Start button is disabled')
  end
  for _=1,8 do H.Advance(.25) end

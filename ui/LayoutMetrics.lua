@@ -192,6 +192,38 @@ function M.Truncate(value, maxCharacters)
     return text:sub(1, stop - 1) .. "..."
 end
 
+-- Conservative text model for rows that must stay readable (the Orb
+-- guidance): a face wider than the default one, either not reflected in the
+-- runtime font scale (7.0 px per character, 17 px lines, the native-derived
+-- model of the QuickStart fit) or scaled with it (0.70 em per character,
+-- 1.2 em lines of the 10 px small font). The larger of the two is used.
+function M.ConservativeText(scale)
+    scale = Clamp(scale or 1, 0.75, 2)
+    return math.max(7.0, 0.70 * 10 * scale), math.max(17, math.ceil(12 * scale))
+end
+
+-- Greedy word-wrap row count of a text in a width under that model. Colour
+-- codes are not visible; a UTF-8 character counts once.
+function M.TextRows(text, width, scale)
+    local char = M.ConservativeText(scale)
+    text = tostring(text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    local rows = 0
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+        rows = rows + 1
+        local used = 0
+        for word in line:gmatch("%S+") do
+            local w = #(word:gsub("[\128-\191]", "")) * char
+            local space = used > 0 and char or 0
+            if used > 0 and used + space + w > width then
+                rows = rows + 1;used = w
+            else
+                used = used + space + w
+            end
+        end
+    end
+    return rows
+end
+
 local function PanelKey(spec)
     return table.concat({
         Round(spec.width or 272,1),Round(spec.fontScale or 1,3),
@@ -201,6 +233,8 @@ local function PanelKey(spec)
         spec.showPerformance and 1 or 0,
         (tonumber(spec.toLockCount) or 0) > 0 and 1 or 0,
         (tonumber(spec.unknownTomes) or 0) > 0 and 1 or 0,
+        spec.orbButton and 1 or 0,tonumber(spec.guidanceRows) or 0,
+        spec.cardRows and 1 or 0,
     }, "|")
 end
 
@@ -236,6 +270,29 @@ function M.Panel(spec)
     end
     if spec.activeRoll then
         local height = math.max(104, small * 6 + gap * 4)
+        if spec.orbButton then
+            -- Its own row for the passive "Open Orbs..." button, sized for
+            -- its 12-character label in the conservative text model plus the
+            -- template's end caps, and at least one of its lines high.
+            local char, line = M.ConservativeText(scale)
+            layout.orbButtonH = math.max(small + 6, line)
+            layout.orbButtonW = math.min(width-24, math.ceil(12 * char) + 20)
+            height = height + layout.orbButtonH + math.ceil(gap/2)
+        end
+        local rows = tonumber(spec.guidanceRows) or 0
+        if rows > 0 then
+            -- Readable allocation for the Orb guidance body: every row of the
+            -- conservative text model below the heading (and the card rows,
+            -- if any), above the button row. Never smaller than before.
+            local _, line = M.ConservativeText(scale)
+            local y = 1 + small + math.max(3,math.floor(gap/2))
+            if spec.cardRows then
+                y = y + 3 * (small + math.max(2,math.floor(gap/3)))
+            end
+            local needed = y + rows * line + gap
+            if spec.orbButton then needed = needed + layout.orbButtonH + math.ceil(gap/2) end
+            height = math.max(height, needed)
+        end
         Add(layout,"roll",10,cursor,width-20,height)
         cursor = cursor + height + gap
     end
