@@ -22,6 +22,9 @@ local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local N=tonumber(os.getenv('LRP_N') or '') or 240
 local K=6
 local FPS=60
+-- Time windows scale with the data size (1 at the default size): passes,
+-- fairness gaps and catalog admission all grow with the number of rows.
+local S=math.max(1,N/240)
 local FOLLOWUP='legacy-qualification-repair.follow-up'
 local checks=0
 local function check(v,m) if not v then error(m,2) end;checks=checks+1 end
@@ -63,7 +66,7 @@ local function Boot(opts)
 end
 -- Until the repair is idle with no follow-up pending.
 local function Settle(limit)
- for _=1,limit or 6000 do
+ for _=1,math.floor((limit or 6000)*S) do
   H.Advance(1/FPS,1/FPS)
   local st=Stats()
   if not st.pending and not st.followUpPending then return true end
@@ -88,7 +91,7 @@ end
 -- view refresh requests it; the fairness gap may delay it).
 local function StartPass()
  AlphaImproves('pass start')
- for _=1,20*FPS do if Stats().pending then return true end;Frames(1) end
+ for _=1,math.floor(20*FPS*S) do if Stats().pending then return true end;Frames(1) end
  return Stats().pending
 end
 
@@ -146,6 +149,13 @@ Boot()
 local injected={}
 local legacy5=Player('Legacy5')
 local passRevision
+-- While catalog admission runs the repair cannot progress (its pump waits);
+-- advance in coarse steps until the pass can work, then frame by frame.
+for _=1,20000 do
+ local root=Nexus.BuildCatalog.RootState and Nexus.BuildCatalog.RootState() or nil
+ if not (type(root)=='table' and root.candidate==true) then break end
+ H.Advance(1,.05)
+end
 -- Read-only observation of the real cursor: which rows each pass scanned.
 local scannedByPass={}
 do
@@ -161,7 +171,7 @@ do
   return item,done,err
  end
 end
-for _=1,60*FPS do
+for _=1,math.floor(60*FPS*S) do
  local phase=Meta().phase
  if Stats().pending and phase=='scan' and not injected.scan then
   injected.scan=true
@@ -234,23 +244,24 @@ local function Observe(i)
 end
 -- Every view refresh requests the repair; during a burst that is every few
 -- frames, modeled here as one request per frame.
-Frames(30*FPS,function(i)
+local SUSTAIN=math.floor(30*S)
+Frames(SUSTAIN*FPS,function(i)
  if i%FPS==1 then AlphaImproves('2');changes[#changes+1]={value=alphaDps,at=i} end
  R.Request('refresh')
  Observe(i)
 end)
-Frames(6*FPS,function(i) Observe(30*FPS+i) end)
+Frames(6*FPS,function(i) Observe(SUSTAIN*FPS+i) end)
 for _,c in ipairs(changes)do if not c.seen then maxLag=math.huge end end
 s=Stats()
 local completed=(s.passesCompleted or 0)-(base.passesCompleted or 0)
 print('LRP sustained','N',N,'passes',completed,'restarts',s.restarts-base.restarts,'jobs',s.jobs-base.jobs,
- 'activeFrames',passFrames,'of',36*FPS,'maxLagFrames',maxLag,'refreshedWhilePending',refreshedWhilePending,
+ 'activeFrames',passFrames,'of',(SUSTAIN+6)*FPS,'maxLagFrames',maxLag,'refreshedWhilePending',refreshedWhilePending,
  'maxScheduledFollowUps',maxScheduled,'coalesced',s.followUpsCoalesced,'deferred',s.deferredRequests,
  'lastPassActive',string.format('%.2f',s.lastPassDuration or -1))
 check(s.restarts==base.restarts,'2: a newer DPS revision does not discard the pass: restarts '..(s.restarts-base.restarts))
 check(completed>=2,'2: passes complete under sustained updates: '..tostring(completed))
 check(maxScheduled<=1,'6: at most one follow-up is ever scheduled: '..maxScheduled)
-check(passFrames<=0.6*36*FPS,'4: the fairness gap keeps the repair off most frames under sustained input: '..passFrames..'/'..36*FPS)
+check(passFrames<=0.6*(SUSTAIN+6)*FPS,'4: the fairness gap keeps the repair off most frames under sustained input: '..passFrames..'/'..(SUSTAIN+6)*FPS)
 check(maxLag<=math.floor(5.5*FPS),'7: the HUD shows each new DPS value within the bounded lag (frames): '..tostring(maxLag))
 check(refreshedWhilePending>=1,'7: including while the repair is pending: '..refreshedWhilePending)
 check(LegacyRecovered().n==K-1,'2: no duplicate legacy build: '..LegacyRecovered().n)
