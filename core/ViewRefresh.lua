@@ -9,6 +9,9 @@ local REFRESH_KEY = "ui.data-views.refresh"
 -- Longest a receive window may hold the data views back. During continuous
 -- Sync activity they refresh from committed data at least this often.
 local MAX_RECEIVE_DEFER = 5
+-- Minimum time between two view refreshes: a burst of accepted records is
+-- coalesced into at most one refresh per interval (leading edge).
+local MIN_REFRESH_INTERVAL = 0.5
 local initialized = false
 local schedulerReady = false
 local deferredCommunity = false
@@ -16,6 +19,7 @@ local communityOwnsDeferred = false
 local deferredLeaderboard = false
 local deferredPanel = false
 local deferredSince = nil
+local lastRefreshAt = nil
 local RefreshViews
 
 local function Clock()
@@ -145,6 +149,7 @@ local function RunRefreshViews()
     -- admitted data only, and a repair publishes its recovered builds itself
     -- when its pass completes.
     RequestLegacyRepair(hadDeferred and "sync" or "refresh")
+    lastRefreshAt = now
     if hadDeferred then
         local refreshCommunity = deferredCommunity and not communityOwnsDeferred
         local refreshLeaderboard, refreshPanel = deferredLeaderboard, deferredPanel
@@ -189,12 +194,21 @@ function ViewRefresh.Request()
     local scheduler = Nexus.Scheduler
     if initialized and schedulerReady and scheduler
         and type(scheduler.After) == "function" then
-        -- Coalesce onto a refresh that is already scheduled; rescheduling it
-        -- here would push it later with every revision and could starve it.
-        if type(scheduler.Pending) == "function" and scheduler.Pending(REFRESH_KEY) then
+        -- Coalesce: keep a refresh that is already due no later than this
+        -- one would be; otherwise schedule it earlier. A pending refresh is
+        -- never pushed later, so a burst of revisions cannot starve it, and
+        -- two refreshes are at least MIN_REFRESH_INTERVAL apart.
+        local now = Clock()
+        local delay = 0.05
+        if lastRefreshAt then
+            delay = math.max(delay, lastRefreshAt + MIN_REFRESH_INTERVAL - now)
+        end
+        local pending = type(scheduler.Pending) == "function"
+            and scheduler.Pending(REFRESH_KEY) or nil
+        if pending and tonumber(pending.due) and pending.due <= now + delay then
             return true
         end
-        return scheduler.After(REFRESH_KEY, 0.05, RefreshViews)
+        return scheduler.After(REFRESH_KEY, delay, RefreshViews)
     end
     RefreshViews()
     return true

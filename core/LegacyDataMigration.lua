@@ -754,8 +754,8 @@ local function Finish(job)
     end
     local refresh = Nexus and Nexus.ViewRefresh
     if refresh and type(refresh.Request) == "function" then
-        -- ViewRefresh owns the repair-before-publish ordering and coalesces the
-        -- UI work. Avoid a duplicate direct repair request here.
+        -- ViewRefresh requests the repair on each refresh and coalesces the UI
+        -- work. Avoid a duplicate direct repair request here.
         pcall(refresh.Request)
     else
         local repair = Nexus and Nexus.LegacyQualificationRepair

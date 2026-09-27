@@ -30,7 +30,7 @@ local runtime = {
     requested=0,coalesced=0,jobs=0,pumps=0,workUnits=0,maxWork=0,
     scanned=0,affected=0,recoverable=0,recovered=0,reused=0,rejected=0,
     published=0,restarts=0,failures=0,lastReason="none",pending=false,
-    completedDpsRevision=nil,completedRevisionSource=nil,
+    completedDpsRevision=nil,
     passesCompleted=0,stalePasses=0,changedSkipped=0,followUps=0,
     followUpsCoalesced=0,deferredRequests=0,followUpPending=false,
     lastPassStartedAt=nil,lastPassFinishedAt=nil,lastPassDuration=nil,
@@ -43,6 +43,9 @@ local runtime = {
     deferredCatalogWrite=0,
 }
 local active
+-- The revision owner and saved root the completed revision belongs to. Kept
+-- out of `runtime`, which Stats() copies: only scalars are reported.
+local completedSource, completedDatabase
 
 local REASON_FIELD = {
     ["no-catalog"]="deferredNoCatalog",
@@ -556,11 +559,16 @@ local function Finish(job)
     meta.workUnits=nil
     meta.pendingWrites=nil
     meta.requestedDpsRevision=nil
-    -- Only the generation this pass covered is complete. A newer revision
-    -- that arrived during the pass stays for the follow-up pass.
-    meta.completedDpsRevision=job.dpsRevision or 0
-    runtime.completedDpsRevision=job.dpsRevision
-    runtime.completedRevisionSource=job.revisionSource
+    -- Only the generation this pass covered is complete, and only when every
+    -- candidate in its scope was classified. A newer revision that arrived
+    -- during the pass, or a skipped changed candidate, stays for the
+    -- follow-up pass; a pass that skipped anything stamps nothing.
+    if (tonumber(job.skippedChanged) or 0) == 0 then
+        meta.completedDpsRevision=job.dpsRevision or 0
+        runtime.completedDpsRevision=job.dpsRevision
+        completedSource=job.revisionSource
+        completedDatabase=job.database
+    end
     meta.lastResult={
         schema=SCHEMA_VERSION,recoverable=job.recoverable,
         coveredDpsRevision=job.dpsRevision,followUp=job.stale == true,
@@ -621,7 +629,9 @@ local function PassEnded(job, completed)
     local newer = job.stale == true or (tonumber(job.skippedChanged) or 0) > 0
         or job.dpsRevision ~= CurrentDpsRevision()
         or job.revisionSource ~= RevisionSource()
-    if newer then
+    -- A pass that could not finish (publication refused, cursor lost) is
+    -- retried by the same bounded follow-up.
+    if newer or not completed then
         if completed then runtime.stalePasses = runtime.stalePasses + 1 end
         ScheduleFollowUp()
     else
@@ -665,6 +675,20 @@ function Repair.Pump(limit)
         -- still completes, each candidate is revalidated before a write, and
         -- one follow-up pass covers what changed.
         if active.dpsRevision ~= CurrentDpsRevision() then active.stale = true end
+        if active.phase == "classify"
+            and type(Nexus.DpsCapture.LegacyQualificationCursorSourceCurrent) == "function"
+            and not Nexus.DpsCapture.LegacyQualificationCursorSourceCurrent(active.cursor) then
+            -- The DPS store was replaced after the scan (possibly without a
+            -- DPS revision): no captured row can be revalidated any more.
+            -- Start over on the current store instead of skipping them all.
+            local database = active.database
+            RollbackRejected(active)
+            runtime.restarts = runtime.restarts + 1
+            active = NewJob(database, "restart", true, false)
+            runtime.pending = active ~= nil
+            if not active then runtime.failures = runtime.failures + 1 end
+            break
+        end
         if active.phase == "scan" then
             local item, done, err = Nexus.DpsCapture.LegacyQualificationCursorNext(
                 active.cursor)
@@ -687,6 +711,8 @@ function Repair.Pump(limit)
                     runtime.failures=runtime.failures+1
                     runtime.lastReason="cursor-incomplete"
                     active=nil;runtime.pending=false
+                    runtime.lastPassFinishedAt=Clock()
+                    ScheduleFollowUp()
                     break
                 end
                 runtime.scanned = runtime.scanned + result.scanned
@@ -770,7 +796,8 @@ function Repair.Request(reason)
     -- one bounded idempotent pass instead of trusting a coincidentally equal
     -- counter from an older session.
     if runtime.completedDpsRevision ~= nil
-        and runtime.completedRevisionSource == RevisionSource()
+        and completedSource == RevisionSource()
+        and completedDatabase == database
         and tonumber(runtime.completedDpsRevision)==tonumber(revision)
         and meta.inProgress ~= true then
         runtime.followUpPending=false

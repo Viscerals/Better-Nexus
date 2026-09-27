@@ -1730,6 +1730,12 @@ function DPS.LegacyQualificationCursorNext(cursor)
     return nil, false
 end
 
+-- False once the pass's DPS store or revision owner was replaced (a
+-- compaction or migration can replace the store without a DPS revision).
+function DPS.LegacyQualificationCursorSourceCurrent(cursor)
+    return type(cursor) == "table" and LegacyQualificationCursorObserve(cursor)
+end
+
 -- The row stored under a captured key right now, or nil when it was removed
 -- or re-keyed or the store was replaced. The repair owner compares it with the
 -- row it scanned before any write.
