@@ -79,6 +79,18 @@ The offer and the choice are also recorded at the moment of a manual choice
 depend on the timed reads. A block that has no exit says so: the settlement path
 is only a proposal and is not built.
 
+After a reload or login the client shows its load-time default active slot
+(0, "none") until the server sends its build-slot data; `GetServerBuildSlots()`
+is nil until then. That default is not an observation of a loadout change: a
+restored action waits read-only (`LOADOUT_UNKNOWN`), records nothing and
+settles nothing until the real slot is known, and then applies the normal
+loadout rule (a different slot, or a receipt without an original slot, keeps
+the hold). While a recorded choice waits for its result (`WAIT_RESULT`), the
+status names the settlement requirement that the last read did not meet (a
+fresh ownership response, the chosen Echo in ownership, an open offer or
+another game action, an open Echo choice, or an Orb balance other than one
+less than before the action). Naming it changes no requirement.
+
 Character/run/service/loadout change pauses the run. Resume rechecks the original
 context, targets, owner, and budget. A budget increase needs a new approval token
 and explicit Resume; it does not reset usage. Completed/stopped runs cannot be
