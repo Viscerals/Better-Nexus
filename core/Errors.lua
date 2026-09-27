@@ -197,7 +197,8 @@ function Errors.Limit()
 end
 
 -- How many errors were recorded since this load: the newest entries of
--- History. It can exceed the MAX_ENTRIES that History retains.
+-- History. It can exceed the MAX_ENTRIES that History retains, and Clear does
+-- not reset it, so a reader caps it at the number of entries it holds.
 function Errors.SessionCount()
     return sessionRecorded
 end

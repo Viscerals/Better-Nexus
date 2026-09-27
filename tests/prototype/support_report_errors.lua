@@ -196,7 +196,35 @@ lines=Lines(Section(File(false)))
 check(lines[1]=='-- recorded Lua errors (1 retained; this session not known; newest first) --'
  and lines[2]=='  1. '..When(1700000600)..', x: count unknown',
  'a failing session count leaves the entries listed and the origin unstated: '..tostring(lines[2]))
+-- Only a wall-clock time is shown as a date; anything else that is not a
+-- positive finite number is "not recorded".
+Nexus.Errors={History=function()return {
+ {timestamp=0/0,source='nan',message='m'},{timestamp=math.huge,source='inf',message='m'},
+ {timestamp=-5,source='negative',message='m'},{timestamp=123.5,source='uptime',message='m'},
+ {timestamp='1700000000',source='text',message='m'},
+}end}
+lines=Lines(Section(File(true)))
+local STAMPS={'  1. time not recorded, text: m','  2. t=123.5, uptime: m','  3. time not recorded, negative: m',
+ '  4. time not recorded, inf: m','  5. time not recorded, nan: m'}
+for index,want in ipairs(STAMPS)do
+ check(lines[index+1]==want,'timestamp case '..index..': '..tostring(lines[index+1])..' ~= '..want)
+end
+-- A field other than message, source and time is not a source either.
+Nexus.Errors={History=function()return {{message='only message',secret='PRIVATE-FIELD-VALUE',
+ stack=[[C:\Users\Someone\private.lua]],path=[[C:\Users\Someone]]}}end}
+local privateText=File(true);lines=Lines(Section(privateText))
+check(lines[2]=='  1. time not recorded, unknown source: only message','an entry without a source names none: '..tostring(lines[2]))
+check(privateText:find('PRIVATE-FIELD-VALUE',1,true)==nil and privateText:find('Someone',1,true)==nil,
+ 'and none of its other fields reaches the report')
 Nexus.Errors=realErrors
+-- A Record that fails to write is not an error of this session.
+local counted=Errors.SessionCount()
+local writable=Nexus.MainInternals.WritableRootV1
+Nexus.MainInternals.WritableRootV1=function()error('write refused')end
+local recorded=Errors.Record('Refused','not retained')
+Nexus.MainInternals.WritableRootV1=writable
+check(recorded==false and Errors.SessionCount()==counted,
+ 'a failed Record does not count as this session: '..tostring(recorded)..' '..tostring(Errors.SessionCount())..' vs '..tostring(counted))
 
 -- 7. UTF-8, line breaks and text that looks like formatting. A line break
 -- cannot forge a report line, a format directive is not interpreted, and a
@@ -214,6 +242,16 @@ check(lines[3]=='  2. '..When(history[2].timestamp)..', this session, Long: '..s
 check(lines[4]=='  3. '..When(history[1].timestamp)..', this session, Fmt: first line second line  third %s %d %% |cffff0000red|r |Hitem:1|h[x]|h Ünïcödé ✓ Ошибка',
  'line breaks become spaces; UTF-8 and formatting-looking text survive literally: '..tostring(lines[4]))
 check(#lines==4,'three entries, three lines: '..#lines)
+-- Three- and four-byte characters: the cut steps back over a whole character.
+Errors.Record('Tri','A'..string.rep('✓',100))
+Errors.Record('Emoji','AA'..string.rep('😀',70))
+text=File(false);lines=Lines(Section(text))
+check(lines[2]:sub(-(2+58*4+3))=='AA'..string.rep('😀',58)..'...',
+ 'a long message of 4-byte characters is cut on a character boundary: '..tostring(lines[2]))
+check(lines[3]:sub(-(1+78*3+3))=='A'..string.rep('✓',78)..'...',
+ 'a long message of 3-byte characters is cut on a character boundary: '..tostring(lines[3]))
+local cutValid,cutAt=ValidUtf8(text)
+check(cutValid,'the report with 3- and 4-byte cuts is valid UTF-8: byte '..tostring(cutAt))
 local valid,at=ValidUtf8(text)
 check(valid,'the whole report is valid UTF-8: byte '..tostring(at))
 Clean(text,'text cases file')

@@ -511,7 +511,9 @@ local function errorMessage(value)
     local text = safeText(value, 4096)
     if #text <= ERROR_MESSAGE_BYTES then return text end
     local cut = ERROR_MESSAGE_BYTES - 3
-    while cut > 0 do
+    -- A character is at most 4 bytes: text that is not UTF-8 is still cut.
+    local floor = cut - 3
+    while cut > floor do
         local nextByte = text:byte(cut + 1)
         if nextByte < 0x80 or nextByte > 0xBF then break end
         cut = cut - 1
