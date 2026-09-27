@@ -69,6 +69,34 @@ for _,c in ipairs(cases) do
  check(not Listed(c.dps),'and it is not listed ('..c.why..')')
 end
 
+-- 2b. The envelope counts COPIES, not rows: 78 ordinary rows where one row
+-- holds 3 copies (80 copies), and 6 locked rows where one holds 2 copies
+-- (7 copies), are both outside it.
+local function Stacked(name,dps,ordinaryRows,extraCount,lockedRows,lockedExtra)
+ stamp=stamp+1
+ local e=Rows(L.ORDINARY_POOL_FIRST,L.ORDINARY_POOL_SIZE,ordinaryRows-1)
+ e[#e+1]={spellId=L.ORDINARY_POOL_FIRST+ordinaryRows-1,count=extraCount}
+ local wire={v=7,c='dummy',d=dps,u=180,t=time()-100+stamp,p=name,l=80,k='MAGE',
+  o=name:lower()..'@'..fx.realmKey,r=fx.realm,e=e}
+ if lockedRows>0 then
+  local lk=Rows(L.LOCKED_POOL_FIRST,L.LOCKED_POOL_SIZE,lockedRows-1)
+  lk[#lk+1]={spellId=L.LOCKED_POOL_FIRST+lockedRows-1,count=lockedExtra}
+  wire.lk=lk
+ end
+ return wire
+end
+for _,c in ipairs({
+ {name='Stackord',wire=function() return Stacked('Stackord',47000,78,3,0,0) end,dps=47000,why='78 rows holding 80 ordinary copies'},
+ {name='Stacklock',wire=function() return Stacked('Stacklock',48000,79,1,6,2) end,dps=48000,why='6 locked rows holding 7 copies'},
+}) do
+ local before=Integrity()
+ local accepted=D.ReceiveRecord(c.wire(),c.name..'-'..fx.realm)
+ Settle()
+ check(accepted==false,'a record with '..c.why..' is refused: '..tostring(accepted))
+ check(Integrity()==before+1,'with the integrity reason ('..c.why..')')
+ check(not Listed(c.dps),'and it is not listed ('..c.why..')')
+end
+
 -- 3. The relay path has the same admission: a relayed record outside the
 -- envelope is refused the same way, while a relayed 79 + 6 record is not
 -- refused for its size.
@@ -82,5 +110,6 @@ before=Integrity()
 local relayedEdge=D.ReceiveRelayedRecord(Wire('Relayedge',79,6,46000),'Relayer-'..fx.realm)
 Settle()
 check(Integrity()==before,'a relayed 79 + 6 record is not refused for integrity: '..tostring(relayedEdge))
+check(relayedEdge==true,'and a relayed 79 + 6 record for an empty slot is accepted: '..tostring(relayedEdge))
 
 print('PASS dps_receive_envelope '..checks..' checks')
