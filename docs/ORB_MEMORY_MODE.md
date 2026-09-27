@@ -85,7 +85,10 @@ is nil until then. That default is not an observation of a loadout change: a
 restored action waits read-only (`LOADOUT_UNKNOWN`), records nothing and
 settles nothing until the real slot is known, and then applies the normal
 loadout rule (a different slot, or a receipt without an original slot, keeps
-the hold). While a recorded choice waits for its result (`WAIT_RESULT`), the
+the hold). A slot other than 0 shown in that state comes from the server's
+active-slot push: a different one is a loadout change, and a later return to
+the original slot does not settle the action. A client without
+`GetServerBuildSlots()` keeps the plain slot comparison. While a recorded choice waits for its result (`WAIT_RESULT`), the
 status names the settlement requirement that the last read did not meet (a
 fresh ownership response, the chosen Echo in ownership, an open offer or
 another game action, an open Echo choice, or an Orb balance other than one

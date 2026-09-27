@@ -487,12 +487,17 @@ function M.Start(value)
     return M.Confirm(a.token)
 end
 -- The receipt's loadout against the current read. UNKNOWN: the client has not
--- received its build-slot data since it loaded, so the slot it shows is only
--- its load-time default, not an observed change. Nothing is decided or
--- persisted on it; the action simply waits for the server's slot.
+-- received its build-slot data since it loaded, so a slot of 0 is only its
+-- load-time default, not an observed change. Nothing is decided or persisted
+-- on it; the action waits for the server's slot. Any other slot in that state
+-- came from the server's active-slot push and is an observation.
 local function loadoutCheck(s,p)
     if p.loadoutChanged or p.originalSlot==nil then return "CHANGED" end
-    if s.context.slotKnown==false then return "UNKNOWN" end
+    if s.context.slotKnown==false then
+        local slot=s.context.slot
+        if slot~=nil and slot~=0 and slot~=p.originalSlot then return "CHANGED" end
+        return "UNKNOWN"
+    end
     if p.originalSlot~=s.context.slot then return "CHANGED" end
     return "SAME"
 end
@@ -747,7 +752,7 @@ local RECOVERY_TEXT={
     WAIT_OFFER_BLIND="The earlier Orb action is unresolved and no Orb offer is open. This client cannot observe a manual choice, so Nexus cannot confirm the earlier action if its offer opens later."..KEPT..NO_EXIT,
     PERMANENT_CHANGED="Locked Echoes changed since the earlier Orb action. Nexus cannot confirm that action."..KEPT..NO_EXIT,
     LOADOUT="The original loadout of the earlier Orb action cannot be verified. Nexus cannot confirm that action."..KEPT..NO_EXIT,
-    LOADOUT_UNKNOWN="An earlier Orb action is unresolved. The game has not yet sent this character's active build slot since it loaded, so Nexus cannot check the original loadout yet. Nexus is waiting, read-only. Nothing will be sent.",
+    LOADOUT_UNKNOWN="An earlier Orb action is unresolved. The game has not yet sent this character's build-slot data since it loaded, so Nexus cannot check the original loadout yet. Nexus is waiting, read-only, and records nothing until then: if an Orb offer is open, a choice made in it now cannot be recorded for the earlier action. Nothing will be sent.",
     UNOBSERVABLE="The earlier Orb action ended while Nexus could not observe it. The game gives no record of which choice belonged to it, so Nexus cannot confirm it, and Recheck cannot settle it. The record, its spending exposure, and the block on new Orb runs and ordinary rolling are kept. Nothing is retried, refunded or deleted."..NO_EXIT,
 }
 -- WAIT_RESULT names the settlement requirement that the last read did not
@@ -757,8 +762,8 @@ local WAIT_RESULT_GATE={
     ownership="A choice for the earlier Orb action is recorded. Echo ownership does not show the chosen Echo yet. Nexus is waiting for an ownership response that shows it. Recheck requests one. Nothing will be sent.",
     offer="A choice for the earlier Orb action is recorded. The game still reports an open Orb offer. Nexus is waiting, read-only, until it closes. Nothing will be sent.",
     host="A choice for the earlier Orb action is recorded. Another game action is still in flight. Nexus is waiting, read-only, until it ends. Nothing will be sent.",
-    board="A choice for the earlier Orb action is recorded, but an Echo choice is open in the game. Nexus checks the result only while no Echo choice is open, and Recheck cannot change that."..KEPT,
-    charges="A choice for the earlier Orb action is recorded, but the Orb balance is %s and the record requires %s (one Orb less than before the action). Nexus cannot confirm the action while the balance differs, and Recheck cannot change that."..KEPT..NO_EXIT,
+    board="A choice for the earlier Orb action is recorded, but an Echo choice is open in the game. Nexus checks the result only while no Echo choice is open; Recheck cannot close it. Taking an Echo from that choice changes your Echoes, and Nexus then cannot confirm the earlier action."..KEPT,
+    charges="A choice for the earlier Orb action is recorded, but the Orb balance shown is %s and the record requires %s (one Orb less than before the action). Recheck asks the game for the current balance. While the balance differs, Nexus cannot confirm the action."..KEPT,
 }
 local function recoveryReason(kind,observing,s,p,proposed)
     local gate=run.settleGate
@@ -823,7 +828,7 @@ function M.Pump(passive)
             if finishResult(s,p) then return end
             if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
             run.recovery={kind=kind,observing=observing,proposed=proposed==true or nil,
-                gate=run.settleGate and copy(run.settleGate) or nil}
+                gate=kind=="WAIT_RESULT" and run.settleGate and copy(run.settleGate) or nil}
             setState("RECOVERY",recoveryReason(kind,observing,s,p,proposed))
             return
         end
