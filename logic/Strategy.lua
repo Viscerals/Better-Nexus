@@ -105,8 +105,8 @@ function M.Compile(catalog, wishlist, settings)
 
     -- requestedCounts: every requested copy of an exact Echo, both roles.
     -- lockedRequestedCounts: the copies of it that are LOCKED targets.
-    -- explicitRoles: the plan states ordinary roles (locked == false), so a
-    -- current lock may cover only its locked targets, not its ordinary ones.
+    -- explicitRoles: the plan's own rows state roles, so a current lock may
+    -- cover only its locked targets, not its ordinary ones.
     -- An untyped (legacy) plan keeps its established reading.
     local requestedCounts, lockedRequestedCounts = {}, {}
     local explicitRoles = false
@@ -118,7 +118,13 @@ function M.Compile(catalog, wishlist, settings)
                 requestedCounts[id] = (requestedCounts[id] or 0) + count
                 if entry.locked == true then
                     lockedRequestedCounts[id] = (lockedRequestedCounts[id] or 0) + count
-                elseif entry.locked == false then
+                end
+                -- The same rule the HUD applies to the plan's own rows: any
+                -- stated role makes the plan explicit. Rows appended from the
+                -- design (designTarget) are not the plan's own rows.
+                if not entry.designTarget and (type(entry.locked) == "boolean"
+                    or entry.sourceRole == "ordinary"
+                    or entry.sourceRole == "locked") then
                     explicitRoles = true
                 end
             end

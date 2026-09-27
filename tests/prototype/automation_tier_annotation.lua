@@ -10,12 +10,14 @@
 -- Real runtime and submitted action; the text is the player-facing
 -- UserText.Annotation. SYNTHETIC family 'Tiered Blade': T1 q1, T2 q2, T3 q3.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
-local T1,T2,T3,Y,F=290101,290102,290103,200002,200020
+local T1,T2,T3,T3b,Y,F=290101,290102,290103,290104,200002,200020
 
 local function Run(label,spec)
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
  local H=dofile('tests/prototype/harness.lua');H.pendingRolls=2
  H.AddEcho(T1,'Tiered Blade',1,5,901);H.AddEcho(T2,'Tiered Blade',2,5,901);H.AddEcho(T3,'Tiered Blade',3,5,901)
+ -- A second id at the same quality as T3 (a variant, not a quality tier).
+ H.AddEcho(T3b,'Tiered Blade',3,5,901)
  H.locked={}
  H.granted={}
  for _,id in ipairs(spec.owned or {}) do H.granted['Tiered Blade']=H.granted['Tiered Blade'] or {};table.insert(H.granted['Tiered Blade'],{spellId=id,quality=H.db[id].quality}) end
@@ -69,6 +71,14 @@ end
 do
  local r=Run('higher-offer',{requested={T1},owned={T1},offer=T3})
  check(r.action=='reroll' and r.text=='Different quality from target','a higher tier is explained, not taken: '..tostring(r.text))
+end
+
+-- 5. A second id of the family at the SAME quality as the requested T3 is
+-- not a quality difference: it is not explained as one.
+do
+ local r=Run('same-quality-variant',{requested={T3},offer=T3b})
+ check(r.action=='reroll','the variant is not taken in place of T3: '..tostring(r.action))
+ check(r.text~='Different quality from target','and it is not called a different quality: '..tostring(r.text))
 end
 
 print('PASS automation_tier_annotation checks='..checks)

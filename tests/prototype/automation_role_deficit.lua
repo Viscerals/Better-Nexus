@@ -12,7 +12,7 @@
 -- HUD model. SYNTHETIC ids: X=200001, Y=200002 (Y is wanted and never offered,
 -- so the plan stays incomplete).
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
-local X,Y=200001,200002
+local X,Y,Z=200001,200002,200003
 
 local function Run(label,spec)
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
@@ -36,7 +36,7 @@ local function Run(label,spec)
  local first=H.actions[a0+1]
  local log=Nexus.DiagnosticLogs.Snapshot('decision')
  local card=(log[#log] or {}).cards and log[#log].cards[1] or {}
- return {action=first and first[1],index=first and first[2],ann=card.ann,hudMissing=hudMissing,actions=#H.actions-a0,H=H}
+ return {action=first and first[1],index=first and first[2],ann=card.ann,hudMissing=hudMissing,actions=#H.actions-a0,H=H,A=A}
 end
 local function row(id,stacks,locked) local r={spellId=id,quality=id%4,stacks=stacks or 1};if locked~=nil then r.locked=locked end;return r end
 local lockX={[X]={version=1,copies=1,rows={{spellId=X,quality=X%4,stacks=1,locked=true,sourceRole='locked'}}}}
@@ -107,6 +107,50 @@ end
 do
  local r=Run('locks-unknown',{echoes={row(X,1,false),row(Y,1,false)},design={},locked=nil})
  check(r.actions==0,'nothing is submitted while current locks are unknown: '..r.actions)
+end
+
+-- 9. Two locks of X, one locked target X, and an ordinary X requested: the
+-- second lock is not a locked target, so it does not fill the ordinary X.
+do
+ local r=Run('two-locks-one-target',{echoes={row(X,1,false),row(Y,1,false)},design=lockX,locked={{spellId=X,stacks=2}}})
+ check(r.hudMissing,'fixture: the HUD lists the ordinary X as missing')
+ check(r.ann=='wanted' and Kept(r),'an extra lock does not fill the ordinary X: '..tostring(r.ann)..' / '..tostring(r.action))
+end
+
+-- 10. An untyped plan with a design on ANOTHER Echo Z: the design rows do
+-- not make the plan typed, so the legacy reading stays for X.
+do
+ local lockZ={[Z]={version=1,copies=1,rows={{spellId=Z,quality=Z%4,stacks=1,locked=true,sourceRole='locked'}}}}
+ local r=Run('untyped-with-design',{echoes={row(X,1,nil),row(Y,1,nil)},design=lockZ,locked=oneLock})
+ check(not r.hudMissing,'fixture: the untyped HUD credits the lock of X')
+ check(r.ann=='target satisfied' and r.action=='reroll','and so does automation: '..tostring(r.ann))
+end
+
+-- 11. A role-only change after the plan was compiled: the same Echoes and
+-- the same (empty) design, now with stated roles. The compiled plan is not
+-- reused for the new roles.
+do
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+ local H=dofile('tests/prototype/harness.lua');H.pendingRolls=2
+ H.locked={{spellId=X,stacks=1}};H.granted={}
+ H.Boot()
+ local A=Nexus.GameAdapter
+ local function rows(locked) return {row(X,1,locked),row(Y,1,locked)} end
+ check(A.SetFirstLoadoutWishlistIdentity('Synthetic Deficit',rows(nil),{})==true,'fixture: the plan starts without roles')
+ H.Board({{spellId=X,quality=X%4},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+ H.Notify();H.Advance(.5);Nexus.Panel.Refresh();H.Advance(.5)
+ check(A.SetFirstLoadoutWishlistIdentity('Synthetic Deficit',rows(false),{})==true,
+  'fixture: the same plan now states ordinary roles')
+ -- A fresh board (the decision log keeps one entry per board).
+ H.Board({{spellId=X,quality=X%4},{spellId=200022,quality=0},{spellId=200023,quality=1}})
+ H.Notify();H.Advance(.5);Nexus.Panel.Refresh();H.Advance(.5)
+ local a0=#H.actions
+ SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ local first=H.actions[a0+1]
+ local log=Nexus.DiagnosticLogs.Snapshot('decision')
+ local card=(log[#log] or {}).cards and log[#log].cards[1] or {}
+ check(card.ann=='wanted','after the role change the offered X is wanted: '..tostring(card.ann))
+ check(first and (first[1]=='freeze' or first[1]=='take'),'and it is kept, not rerolled away: '..tostring(first and first[1]))
 end
 
 print('PASS automation_role_deficit checks='..checks)
