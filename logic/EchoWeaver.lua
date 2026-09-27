@@ -191,10 +191,18 @@ function EchoWeaver.DecideNexus(state)
     -- Permanent locked ownership must be known before subtracting copies.
     if locked and locked.synced == false then return Wait("waiting for locked Echo state") end
     local requested, outstanding, total = {}, {}, 0
+    local lockedTargets = plan.lockedRequestedCounts or {}
     for id,n in pairs(plan.requestedCounts or {}) do
         requested[id]=Count(n)
-        local have = Count(owned.bySpell and owned.bySpell[id])
-            + Count(locked and locked.bySpell and locked.bySpell[id])
+        local lockedHave = Count(locked and locked.bySpell and locked.bySpell[id])
+        -- With explicit roles a current lock covers only the plan's LOCKED
+        -- targets of that Echo; an ordinary target needs an ordinary copy.
+        -- (A held rolled copy still counts toward a locked target it will
+        -- become, so lock acquisition is neither dropped nor doubled.)
+        if plan.explicitRoles then
+            lockedHave = math.min(lockedHave, Count(lockedTargets[id]))
+        end
+        local have = Count(owned.bySpell and owned.bySpell[id]) + lockedHave
         outstanding[id]=math.max(0,requested[id]-have)
         total=total+outstanding[id]
     end
