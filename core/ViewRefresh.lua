@@ -46,6 +46,12 @@ local function SafeRefresh(source, callback)
     return ok
 end
 
+-- A repair refusal repeats on every refresh until its cause changes (a newer
+-- saved repair schema stays refused for the whole session). The error log
+-- keeps few entries, so each distinct refusal is recorded once per session;
+-- recording it on every refresh pushed every earlier error out of the log.
+local recordedRepairRefusals = {}
+
 local function RequestLegacyRepair(reason)
     local repair = Nexus and Nexus.LegacyQualificationRepair
     if not (repair and type(repair.Request) == "function") then
@@ -53,8 +59,12 @@ local function RequestLegacyRepair(reason)
     end
     local ok, ready, err = pcall(repair.Request, reason)
     if not ok or ready == false then
-        RecordError("ViewRefresh.LegacyQualificationRepair",
-            ok and err or ready)
+        local refusal = ok and err or ready
+        local key = tostring(refusal)
+        if not recordedRepairRefusals[key] then
+            recordedRepairRefusals[key] = true
+            RecordError("ViewRefresh.LegacyQualificationRepair", refusal)
+        end
         return false, "failed"
     end
     return true, err
