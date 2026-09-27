@@ -630,7 +630,8 @@ local function PassEnded(job, completed)
         or job.dpsRevision ~= CurrentDpsRevision()
         or job.revisionSource ~= RevisionSource()
     -- A pass that could not finish (publication refused, cursor lost) is
-    -- retried by the same bounded follow-up.
+    -- retried by the same bounded follow-up; Request starts nothing while the
+    -- catalog authority is exhausted.
     if newer or not completed then
         if completed then runtime.stalePasses = runtime.stalePasses + 1 end
         ScheduleFollowUp()
@@ -786,6 +787,17 @@ function Repair.Request(reason)
     if type(readOnlyRoot)=="function" and readOnlyRoot(database) then
         runtime.lastReason="read-only-saved-data"
         return true,"read-only"
+    end
+    -- An exhausted catalog authority refuses every write until a fresh
+    -- session: a pass could only fail again, so none starts (fail closed, as
+    -- before follow-ups existed). The catalog state is the observable cause.
+    local catalog=Nexus.BuildCatalog
+    local root=catalog and type(catalog.RootState)=="function"
+        and catalog.RootState() or nil
+    if type(root)=="table" and root.state=="AUTHORITY_GENERATION_EXHAUSTED" then
+        runtime.followUpPending=false
+        runtime.lastReason="GENERATION_EXHAUSTED"
+        return true,"catalog-exhausted"
     end
     local meta,metaError=Meta(database)
     if not meta then return false,metaError end

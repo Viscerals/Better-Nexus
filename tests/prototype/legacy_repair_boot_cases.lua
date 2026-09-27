@@ -4,15 +4,20 @@
 -- Saved legacy rows (protocol 5, complete evidence, no catalog build) are
 -- real recovery candidates. Sections: 1 initial repair, 9 catalog refusal
 -- and automatic retry, 11b reload with staged writes, 13 store replaced
--- during classification, 10 read-only profile. The main-session sections
+-- during classification, 9c exhausted catalog authority, 9d incomplete
+-- cursor, 9e saved root replaced after completion, 12b removal markers,
+-- 10 read-only profile. The main-session sections
 -- are in legacy_repair_progress_fairness.lua; the two files share this
 -- helper block.
 --
 -- Assertions count operations and scheduled work; no wall-clock threshold.
 -- Modeled inputs, stated where used: a refused catalog publication (sections
--- 9 and 11b, fault injection at the catalog boundary) and a replaced DPS
--- store (section 13). LRP_N sets the number of filler characters for
--- section 13 (default 240).
+-- 9 and 11b, fault injection at the catalog boundary), a replaced DPS store
+-- (13), a saved counter one step below its maximum (9c), a withheld cursor
+-- result (9d, defensive injection), a replaced saved root (9e, defensive
+-- injection; the catalog rebinds through its real path) and saved removal
+-- markers (12b). LRP_N sets the number of filler characters for section 13
+-- (default 240).
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local N=tonumber(os.getenv('LRP_N') or '') or 240
@@ -55,7 +60,7 @@ local function CurrentRevision() return Nexus.Revisions.Get(Nexus.Revisions.DPS_
 local function Meta() return NexusDB.legacyQualificationRepair or {} end
 local function Boot(opts)
  opts=opts or {}
- fx=L.New({players=Players(opts.n or N)})
+ fx=L.New({players=opts.players or Players(opts.n or N)})
  for _,cat in ipairs({'lk','dummy'})do for owner,row in pairs(fx.rows[cat])do if owner:match('^legacy') then row.protocolVersion=5 end end end
  local db=fx:Install(F.Database({version=2}))
  if opts.mutate then opts.mutate(db) end
@@ -177,6 +182,155 @@ do
 end
 
 ------------------------------------------------------------------------
+-- 9c. Exhausted catalog authority (a saved durable counter one step below
+-- its maximum: the repair's own catalog write exhausts it). Every later write
+-- is refused until a fresh session, so the repair fails closed: at most one
+-- failed pass, no stamp, no follow-up loop, the catalog state names the
+-- cause. The first session only prepares the saved root (repair held back by
+-- a load hook on the repair owner).
+do
+ Boot({n=40,fileHooks={[ [[core\LegacyQualificationRepair.lua]] ]=function()
+  Nexus.LegacyQualificationRepair.Request=function() return true,'held (test)' end
+ end}})
+ Frames(10*FPS)
+ local bundle=rawget(NexusDB,'authorityBundle')
+ check(type(bundle)=='table','9c: setup: the saved authority bundle exists')
+ bundle.transactionGeneration=9007199254740991-1
+ H.Fire('PLAYER_LOGOUT')
+ H=L.Reload(F,function(h) h.playerLevel=60 end)
+ R=Nexus.LegacyQualificationRepair
+ Frames(120*FPS)
+ local r=Stats()
+ local root=Nexus.BuildCatalog.RootState()
+ print('LRP exhausted','catalog',tostring(root.state),'jobs',r.jobs,'failures',r.failures,'followUps',r.followUps,'last',tostring(r.lastReason))
+ check(root.state=='AUTHORITY_GENERATION_EXHAUSTED','9c: setup: the catalog authority is exhausted: '..tostring(root.state))
+ check(r.jobs<=2 and (r.passesCompleted or 0)==0,'9c: an exhausted authority is not retried pass after pass: jobs='..r.jobs)
+ check(r.completedDpsRevision==nil and Meta().completedDpsRevision==nil,'9c: nothing is stamped complete')
+ check(not r.pending and not r.followUpPending and Nexus.Scheduler.Pending(FOLLOWUP)==nil,'9c: no pass and no follow-up remain scheduled')
+ check(r.lastReason=='GENERATION_EXHAUSTED','9c: the cause is reported: '..tostring(r.lastReason))
+ check(LegacyRecovered().n==0,'9c: nothing is recovered into an exhausted catalog')
+ local jobs=r.jobs
+ for _=1,5 do R.Request('refresh');Frames(FPS) end
+ check(Stats().jobs==jobs and select(2,R.Request('refresh'))=='catalog-exhausted','9c: later requests start nothing')
+end
+
+------------------------------------------------------------------------
+-- 9d. Incomplete cursor (defensive injection: the cursor result is withheld
+-- once; no product route reaches this exit, because the scan's last step and
+-- the result read happen in one call). The pass stamps nothing, one follow-up
+-- is scheduled, and the repair converges once the fault is gone.
+do
+ local withhold=true
+ Boot({n=40,fileHooks={[ [[core\DpsCapture.lua]] ]=function()
+  local result=Nexus.DpsCapture.LegacyQualificationCursorResult
+  Nexus.DpsCapture.LegacyQualificationCursorResult=function(...)
+   if withhold then withhold=false;return nil end
+   return result(...)
+  end
+ end}})
+ for _=1,60*FPS do if not withhold then break end;Frames(1) end
+ local r=Stats()
+ check(not withhold and r.lastReason=='cursor-incomplete','9d: setup: the start-up pass hit the incomplete cursor: '..tostring(r.lastReason))
+ check(r.completedDpsRevision==nil and (r.passesCompleted or 0)==0,'9d: an incomplete pass stamps nothing')
+ local scheduled=0;for _,task in ipairs(Nexus.Scheduler.Pending())do if task.key==FOLLOWUP then scheduled=scheduled+1 end end
+ check(r.followUpPending and scheduled==1,'9d: exactly one follow-up is scheduled: '..scheduled)
+ check(Settle(),'9d: the follow-up runs and the repair settles')
+ r=Stats()
+ check(r.completedDpsRevision==CurrentRevision() and LegacyRecovered().n==K,'9d: converged: every candidate recovered, current revision stamped: '..LegacyRecovered().n)
+end
+
+------------------------------------------------------------------------
+-- 9e. The saved root is replaced after a completed pass (defensive injection:
+-- no product writer replaces NexusDB after the start-up binding) and the
+-- catalog rebinds to it through its real rebind path, with the DPS revision
+-- number unchanged. The completion of the old root does not count for the
+-- new one: a pass runs on the new root and recovers its candidates.
+do
+ Boot({n=40})
+ check(Settle(),'9e: setup: the first root is repaired')
+ local rev=CurrentRevision()
+ local fx2=L.New({players=Players(40)})
+ for _,cat in ipairs({'lk','dummy'})do for owner,row in pairs(fx2.rows[cat])do if owner:match('^legacy') then row.protocolVersion=5 end end end
+ local second=fx2:Install(F.Database({version=2}))
+ NexusDB=second
+ for _=1,20*FPS do
+  local cat=Nexus.BuildCatalog
+  if cat.BoundDatabase()==second and cat.RootState().state=='ROOT_ADMITTED' and not cat.RootState().candidate then break end
+  Frames(1)
+ end
+ check(Nexus.BuildCatalog.BoundDatabase()==second,'9e: setup: the catalog is bound to the new root')
+ print('LRP rootswap','revisionBefore',rev,'revisionAfter',CurrentRevision())
+ fx=fx2
+ R.Request('refresh')
+ check(Settle(),'9e: the repair settles on the new root')
+ check(LegacyRecovered().n==K,'9e: the new root\'s candidates are recovered: '..LegacyRecovered().n)
+ check(Stats().completedDpsRevision==CurrentRevision(),'9e: the new root completes its own revision')
+end
+
+------------------------------------------------------------------------
+-- 12b. Removal markers (the durable outcome of a deletion) for one
+-- candidate's referenced build and for another candidate's historical build
+-- ID. Neither is recovered by the start-up pass, by a later pass, or after a
+-- reload; the markers stay. (No supported path can add such a marker during a
+-- pass: a recovered build has no owner and a candidate's referenced build is
+-- absent, so the catalog refuses a local or remote removal of either.)
+do
+ local function HashText(value,seed)
+  local hash=seed
+  for i=1,#value do hash=(hash*33+value:byte(i))%2147483648 end
+  return string.format('%x',hash)
+ end
+ local function HistoricalId(fingerprint)
+  return 'legacy-dps-'..HashText(fingerprint,5381)..'-'..HashText(fingerprint,216613626)
+ end
+ local players=Players(40)
+ for _,p in ipairs(players)do if p.name=='Legacy1' then p.build='tombstone' end end
+ local removedRef,removedId,second
+ Boot({players=players,mutate=function(db)
+  for _,p in ipairs(fx.players)do
+   if p.name=='Legacy1' then removedRef=p.buildId end
+   if p.name=='Legacy2' then second=p end
+  end
+  removedId=HistoricalId(second.fingerprint)
+  db.syncTombstones=db.syncTombstones or {}
+  db.syncTombstones[removedId]={stamp=L.STAMP-7200,author='Legacy2'}
+ end})
+ local function Markers()
+  local bundle=rawget(NexusDB,'authorityBundle')
+  return type(bundle)=='table' and rawget(bundle,'syncTombstones') or NexusDB.syncTombstones or {}
+ end
+ local function NotResurrected(tag)
+  local rec=LegacyRecovered()
+  local cat=Nexus.BuildCatalog
+  check(rec.Legacy1==nil and rec.Legacy2==nil and rec.n==K-2,
+   tag..': neither removed identity is recovered: '..rec.n)
+  local suffixed=false
+  for i=1,64 do if cat.Get(removedId..'-'..i) then suffixed=true end end
+  check(cat.Get(removedId)==nil and not suffixed and cat.FindExactFingerprintId(second.fingerprint)==nil,
+   tag..': the removed historical ID is not re-created under any ID')
+  local markers=Markers()
+  check(markers[removedRef]~=nil and markers[removedId]~=nil,tag..': both removal markers remain')
+ end
+ check(Settle(),'12b: the start-up repair settles')
+ check((Stats().deferredStaleOrSuperseded or 0)>=2,'12b: both candidates are left as removed: '..tostring(Stats().deferredStaleOrSuperseded))
+ NotResurrected('12b start-up pass')
+ local filler
+ for _,p in ipairs(fx.players)do if p.name=='Filler1' then filler=p end end
+ filler.dps.dummy=filler.dps.dummy+1
+ assert(fx:Receive('Filler1','dummy',{dps=filler.dps.dummy,ts=time()-1}),'fixture: record accepted')
+ Frames(10*FPS)
+ check(Settle(),'12b: the later pass settles')
+ check((Stats().passesCompleted or 0)>=2,'12b: a later pass ran: '..tostring(Stats().passesCompleted))
+ NotResurrected('12b later pass')
+ H.Fire('PLAYER_LOGOUT')
+ H=L.Reload(F,function(h) h.playerLevel=60 end)
+ R=Nexus.LegacyQualificationRepair
+ check(Settle(),'12b: the next session settles')
+ check(Stats().jobs>=1,'12b: the next session ran its own pass')
+ NotResurrected('12b after reload')
+end
+
+------------------------------------------------------------------------
 -- 10. A protected (read-only) saved profile is never repaired.
 do
  Boot({n=40,mutate=function(db) db.settingsVersion=6 end})
@@ -186,4 +340,4 @@ do
  check(LegacyRecovered().n==0,'10: nothing is written into a read-only profile')
 end
 
-print('PASS legacy_repair_boot_cases: initial repair, catalog refusal and retry, reload with staged writes, store replacement during classification, read-only profile checks='..checks)
+print('PASS legacy_repair_boot_cases: initial repair, catalog refusal and retry, reload with staged writes, store replacement during classification, exhausted authority, incomplete cursor, root replacement, removal markers, read-only profile checks='..checks)

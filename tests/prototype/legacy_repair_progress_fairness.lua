@@ -57,7 +57,7 @@ local function CurrentRevision() return Nexus.Revisions.Get(Nexus.Revisions.DPS_
 local function Meta() return NexusDB.legacyQualificationRepair or {} end
 local function Boot(opts)
  opts=opts or {}
- fx=L.New({players=Players(opts.n or N)})
+ fx=L.New({players=opts.players or Players(opts.n or N)})
  for _,cat in ipairs({'lk','dummy'})do for owner,row in pairs(fx.rows[cat])do if owner:match('^legacy') then row.protocolVersion=5 end end end
  local db=fx:Install(F.Database({version=2}))
  if opts.mutate then opts.mutate(db) end
