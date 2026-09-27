@@ -2082,6 +2082,8 @@ local dpsHashCache = {
         bucketRebuilds=0, targetedInvalidations=0, fullInvalidations=0,
         rows=0, storedRows=0, durationIneligibleRows=0,
         scoreIneligibleRows=0, schemaIneligibleRows=0,
+        jobStarts=0, jobRestarts=0, keyRestarts=0, jobPumps=0,
+        maxRowsPerPump=0, maxUnitsPerPump=0, maxKeysPerPump=0,
     },
 }
 
@@ -2113,54 +2115,34 @@ local function RebuildDpsBucket(bucket)
     dpsHashCache.stats.bucketRebuilds = dpsHashCache.stats.bucketRebuilds + 1
 end
 
-local function WarmDpsHashCache()
-    local entries, classifications, responseRows = NewDpsBuckets(),
-        NewDpsBuckets(), NewDpsBuckets()
-    local store = CharacterBestStore()
-    local counts = {eligible=0,duration=0,score=0,schema=0,stored=0}
-    dpsHashCache.stats.collectionWalks = dpsHashCache.stats.collectionWalks + 1
-    for _, category in ipairs({ "dummy", "lk" }) do
-        for playerKey, row in pairs(store[category] or {}) do
-            local bucket = DpsBucket(category,
-                type(row) == "table" and row.player or playerKey)
-            local entryKey = category .. "|" .. tostring(playerKey)
-            local classification = DpsHashClass(category, row)
-            classifications[bucket][entryKey] = classification
-            counts.stored = counts.stored + 1
-            counts[classification] = counts[classification] + 1
-            if classification == "eligible" then
-                entries[bucket][entryKey] = DpsHashEntry(category, playerKey, row)
-                local safe, authority = DpsResponseClaimInfo(
-                    category, playerKey, row)
-                responseRows[bucket][entryKey] = safe and authority or false
-            end
-        end
-    end
-    dpsHashCache.entries, dpsHashCache.classifications = entries, classifications
-    dpsHashCache.responseRows = responseRows
-    dpsHashCache.hashes, dpsHashCache.dirty = {}, {}
-    dpsHashCache.responseClaimable, dpsHashCache.responseAuthority = {}, {}
-    dpsHashCache.stats.rows = counts.eligible
-    dpsHashCache.stats.storedRows = counts.stored
-    dpsHashCache.stats.durationIneligibleRows = counts.duration
-    dpsHashCache.stats.scoreIneligibleRows = counts.score
-    dpsHashCache.stats.schemaIneligibleRows = counts.schema
-    for bucket = 1, DPS_BUCKETS do
-        dpsHashCache.dirty[bucket] = true
-        RebuildDpsBucket(bucket)
-    end
-    dpsHashCache.initialized = true
-    dpsHashCache.stats.fullRebuilds = dpsHashCache.stats.fullRebuilds + 1
-    local revisions = Nexus and Nexus.Revisions
-    dpsHashCache.observedRevision = revisions and revisions.Get
-        and revisions.Get(revisions.DPS_CHANGED) or nil
-end
+-- Bounded DPS sync digest. After a full invalidation the digest is rebuilt
+-- by one job in bounded steps (keys, rows, changed rows, per-bucket
+-- collect/sort/hash), pumped once per lifecycle update in the Sync hash slot,
+-- exactly like BuildHashCache. Until the job publishes, the digest is not
+-- ready: GetSyncHash returns nil and no bucket can be claimed. The published
+-- value is the canonical digest of one store generation (same entries, same
+-- sorted order and hash as ComputeDpsSyncHash). The response-claim evidence of
+-- each bucket (the expensive part: one evidence resolution per row) is
+-- prepared afterwards by a second bounded job; until a bucket's claim is
+-- ready it cannot be claimed (the responder answers without an exclusive
+-- claim, as for any unsafe bucket).
+local DpsDigest = {
+    KEYS_PER_PUMP=4096, ROWS_PER_PUMP=256, CLAIMS_PER_PUMP=32,
+    UNITS_PER_PUMP=2048, ONE_CALL_VALUES=8, ONE_CALL_BYTES=2048,
+    job=nil, bucketJob=nil, claimJob=nil, bucketVersion={}, bucketShape={},
+    claimReady={}, pending={}, pendingSet={}, bucketOf={},
+}
 
 local function InvalidateAllDpsHashes()
     if dpsHashCache.initialized then
         dpsHashCache.initialized = false
         dpsHashCache.stats.fullInvalidations = dpsHashCache.stats.fullInvalidations + 1
     end
+    if DpsDigest.job then
+        dpsHashCache.stats.jobRestarts = dpsHashCache.stats.jobRestarts + 1
+    end
+    DpsDigest.job, DpsDigest.bucketJob, DpsDigest.claimJob = nil, nil, nil
+    DpsDigest.claimReady, DpsDigest.pending, DpsDigest.pendingSet = {}, {}, {}
 end
 
 -- Retained hash/index/response work belongs to the represented payload, even
@@ -2185,13 +2167,23 @@ end
 
 local function UpdateDpsHashRecord(category, player, ownerKey, realm,
         characterKey, previousCharacterKey)
-    if not dpsHashCache.initialized then return end
     if category ~= "dummy" and category ~= "lk" then
         InvalidateAllDpsHashes()
         return
     end
     local playerKey = characterKey
         or CharacterKey(player, ownerKey, realm)
+    if not dpsHashCache.initialized then
+        -- A running digest job revisits this row (and the key it replaced)
+        -- from the live store before it publishes.
+        if DpsDigest.job then
+            DpsDigest.Enqueue(DpsDigest.job, category, playerKey)
+            if previousCharacterKey and previousCharacterKey ~= playerKey then
+                DpsDigest.Enqueue(DpsDigest.job, category, previousCharacterKey)
+            end
+        end
+        return
+    end
     if previousCharacterKey and previousCharacterKey ~= playerKey then
         local previousBucket = DpsBucket(category, player)
         local previousEntry = category .. "|" .. previousCharacterKey
@@ -2202,6 +2194,9 @@ local function UpdateDpsHashRecord(category, player, ownerKey, realm,
         dpsHashCache.classifications[previousBucket][previousEntry] = nil
         dpsHashCache.responseRows[previousBucket][previousEntry] = nil
         dpsHashCache.dirty[previousBucket] = true
+        DpsDigest.bucketVersion[previousBucket] =
+            (DpsDigest.bucketVersion[previousBucket] or 0) + 1
+        DpsDigest.bucketOf[previousEntry] = nil
     end
     local bucket = DpsBucket(category, player)
     local entryKey = category .. "|" .. playerKey
@@ -2211,6 +2206,9 @@ local function UpdateDpsHashRecord(category, player, ownerKey, realm,
     AdjustDpsHashClass(previousClass, -1)
     AdjustDpsHashClass(nextClass, 1)
     dpsHashCache.classifications[bucket][entryKey] = nextClass
+    if nextClass == "eligible" and dpsHashCache.entries[bucket][entryKey] == nil then
+        DpsDigest.bucketShape[bucket] = (DpsDigest.bucketShape[bucket] or 0) + 1
+    end
     dpsHashCache.entries[bucket][entryKey] = nextClass == "eligible"
         and DpsHashEntry(category, playerKey, row) or nil
     if nextClass == "eligible" then
@@ -2220,8 +2218,439 @@ local function UpdateDpsHashRecord(category, player, ownerKey, realm,
         dpsHashCache.responseRows[bucket][entryKey] = nil
     end
     dpsHashCache.dirty[bucket] = true
+    DpsDigest.bucketVersion[bucket] = (DpsDigest.bucketVersion[bucket] or 0) + 1
+    DpsDigest.bucketOf[entryKey] = nextClass ~= nil and bucket or nil
     dpsHashCache.stats.targetedInvalidations =
         dpsHashCache.stats.targetedInvalidations + 1
+end
+
+-- One source generation: the store table, its binding generation and the
+-- revision owner. Any replacement restarts the job; nothing from an older
+-- store is carried into the published digest.
+function DpsDigest.SourceCurrent(job)
+    return job.store == CharacterBestStore()
+        and job.binding == responseGeneration
+        and job.revisionSource == (Nexus and Nexus.Revisions)
+end
+
+function DpsDigest.Start()
+    local store = CharacterBestStore()
+    local revisions = Nexus and Nexus.Revisions
+    local _, revision = CurrentDpsRevision()
+    DpsDigest.job = {
+        phase="keys", store=store, binding=responseGeneration,
+        revisionSource=revisions, keysRevision=revision,
+        categoryIndex=1, cursor=nil, keys={}, keyIndex=0,
+        entries=NewDpsBuckets(), classifications=NewDpsBuckets(),
+        responseRows=NewDpsBuckets(), bucketOf={},
+        counts={eligible=0,duration=0,score=0,schema=0,stored=0},
+        queue={}, queued={}, bucketDirty={}, hashes={},
+        claimable={}, authority={}, hashJob=nil,
+    }
+    DpsDigest.bucketJob = nil
+    dpsHashCache.stats.jobStarts = dpsHashCache.stats.jobStarts + 1
+    dpsHashCache.stats.collectionWalks = dpsHashCache.stats.collectionWalks + 1
+    return DpsDigest.job
+end
+
+function DpsDigest.Enqueue(job, category, playerKey)
+    if playerKey == nil then return end
+    local entryKey = category .. "|" .. tostring(playerKey)
+    if job.queued[entryKey] then return end
+    job.queued[entryKey] = true
+    job.queue[#job.queue + 1] = {category, playerKey, entryKey}
+end
+
+-- Classify one stored row into the job's maps from the live store.
+function DpsDigest.Process(job, category, playerKey)
+    local entryKey = category .. "|" .. tostring(playerKey)
+    local oldBucket = job.bucketOf[entryKey]
+    if oldBucket then
+        local oldClass = job.classifications[oldBucket][entryKey]
+        if oldClass then
+            job.counts[oldClass] = job.counts[oldClass] - 1
+            job.counts.stored = job.counts.stored - 1
+        end
+        job.entries[oldBucket][entryKey] = nil
+        job.classifications[oldBucket][entryKey] = nil
+        job.responseRows[oldBucket][entryKey] = nil
+        job.bucketDirty[oldBucket] = true
+        job.bucketOf[entryKey] = nil
+    end
+    local rows = job.store[category]
+    local row = type(rows) == "table" and rows[playerKey] or nil
+    if row == nil then return end
+    local bucket = DpsBucket(category,
+        type(row) == "table" and row.player or playerKey)
+    local classification = DpsHashClass(category, row)
+    job.classifications[bucket][entryKey] = classification
+    job.counts[classification] = job.counts[classification] + 1
+    job.counts.stored = job.counts.stored + 1
+    if classification == "eligible" then
+        job.entries[bucket][entryKey] = DpsHashEntry(category, playerKey, row)
+    end
+    job.bucketOf[entryKey] = bucket
+    job.bucketDirty[bucket] = true
+end
+
+-- One bucket: collect its values and claim info, merge-sort, then hash, one
+-- unit per step. The result equals HashStrings over the same values.
+function DpsDigest.NewBucketJob(bucket, entries, responseRows)
+    return {bucket=bucket, entries=entries, responseRows=responseRows,
+        phase="collect", key=nil, values={}, claimable=true, authority=nil}
+end
+
+function DpsDigest.BucketStep(job)
+    if job.phase == "collect" then
+        local key, value = next(job.entries, job.key)
+        job.key = key
+        if key ~= nil then
+            job.values[#job.values + 1] = value
+            local candidate = job.responseRows and job.responseRows[key]
+            if type(candidate) ~= "string" or candidate == "" then
+                job.claimable = false
+            elseif job.authority == nil or candidate < job.authority then
+                job.authority = candidate
+            end
+            return false
+        end
+        job.claimable = job.claimable and #job.values > 0
+        if #job.values <= 1 then
+            job.phase, job.sorted = "hash", job.values
+            job.hash, job.index = 5381, 1
+        else
+            job.phase, job.width, job.left = "sort", 1, 1
+            job.source, job.target, job.merge = job.values, {}, nil
+        end
+        return false
+    end
+    if job.phase == "sort" then
+        if not job.merge then
+            if job.left > #job.source then
+                if job.width >= #job.source then
+                    job.phase, job.sorted = "hash", job.source
+                    job.hash, job.index = 5381, 1
+                else
+                    job.source, job.target = job.target, {}
+                    job.width, job.left = job.width * 2, 1
+                end
+                return false
+            end
+            local leftEnd = math.min(job.left + job.width - 1, #job.source)
+            job.merge = {left=job.left, leftEnd=leftEnd, right=leftEnd + 1,
+                rightEnd=math.min(job.left + job.width * 2 - 1, #job.source)}
+        end
+        local merge = job.merge
+        local takeLeft = merge.right > merge.rightEnd
+            or (merge.left <= merge.leftEnd
+                and job.source[merge.left] <= job.source[merge.right])
+        if takeLeft then
+            job.target[#job.target + 1] = job.source[merge.left]
+            merge.left = merge.left + 1
+        else
+            job.target[#job.target + 1] = job.source[merge.right]
+            merge.right = merge.right + 1
+        end
+        if merge.left > merge.leftEnd and merge.right > merge.rightEnd then
+            job.left = merge.rightEnd + 1
+            job.merge = nil
+        end
+        return false
+    end
+    local text = job.sorted[job.index]
+    if text == nil then
+        job.result = #job.sorted > 0 and string.format("%x", job.hash) or "0"
+        return true
+    end
+    local h = job.hash
+    for i = 1, #text do h = ((h * 33) + text:byte(i)) % 2147483648 end
+    job.hash = h
+    job.index = job.index + 1
+    return false
+end
+
+-- Advance the full job by at most one bounded pump.
+function DpsDigest.PumpJob()
+    local job = DpsDigest.job
+    local stats = dpsHashCache.stats
+    stats.jobPumps = stats.jobPumps + 1
+    if not DpsDigest.SourceCurrent(job) then
+        InvalidateAllDpsHashes()
+        return false, false
+    end
+    if job.phase == "keys" then
+        local _, revision = CurrentDpsRevision()
+        if revision ~= job.keysRevision then
+            -- A table may not gain keys while `next` walks it: start the
+            -- (keys-only) walk again from the current revision.
+            job.keys, job.categoryIndex, job.cursor = {}, 1, nil
+            job.keysRevision = revision
+            stats.keyRestarts = stats.keyRestarts + 1
+        end
+        local count = 0
+        while count < DpsDigest.KEYS_PER_PUMP do
+            local category = ({ "dummy", "lk" })[job.categoryIndex]
+            if not category then
+                job.phase, job.keyIndex = "rows", 0
+                break
+            end
+            local rows = job.store[category]
+            local ok, key = true, nil
+            if type(rows) == "table" then ok, key = pcall(next, rows, job.cursor) end
+            if not ok then
+                job.keys, job.categoryIndex, job.cursor = {}, 1, nil
+                stats.keyRestarts = stats.keyRestarts + 1
+                break
+            end
+            if key == nil then
+                job.categoryIndex, job.cursor = job.categoryIndex + 1, nil
+            else
+                job.keys[#job.keys + 1] = {category, key}
+                job.cursor = key
+                count = count + 1
+            end
+        end
+        stats.maxKeysPerPump = math.max(stats.maxKeysPerPump, count)
+        return false, true
+    end
+    if job.phase == "rows" or job.phase == "changed" then
+        local count = 0
+        while count < DpsDigest.ROWS_PER_PUMP do
+            if job.phase == "rows" then
+                if job.keyIndex >= #job.keys then
+                    job.keys, job.phase = nil, "changed"
+                else
+                    job.keyIndex = job.keyIndex + 1
+                    local item = job.keys[job.keyIndex]
+                    DpsDigest.Process(job, item[1], item[2])
+                    count = count + 1
+                end
+            else
+                local item = table.remove(job.queue)
+                if not item then
+                    job.phase = "hash"
+                    break
+                end
+                job.queued[item[3]] = nil
+                DpsDigest.Process(job, item[1], item[2])
+                count = count + 1
+            end
+        end
+        stats.maxRowsPerPump = math.max(stats.maxRowsPerPump, count)
+        return false, true
+    end
+    -- phase "hash": rebuild every bucket the job changed, then publish.
+    local units = 0
+    while units < DpsDigest.UNITS_PER_PUMP do
+        if not job.hashJob then
+            local bucket
+            for candidate = 1, DPS_BUCKETS do
+                if job.bucketDirty[candidate] or job.hashes[candidate] == nil then
+                    bucket = candidate
+                    break
+                end
+            end
+            if not bucket then
+                DpsDigest.Publish(job)
+                stats.maxUnitsPerPump = math.max(stats.maxUnitsPerPump, units)
+                return true, true
+            end
+            job.bucketDirty[bucket] = nil
+            job.hashJob = DpsDigest.NewBucketJob(bucket,
+                job.entries[bucket], job.responseRows[bucket])
+        end
+        units = units + 1
+        if DpsDigest.BucketStep(job.hashJob) then
+            local done = job.hashJob
+            job.hashes[done.bucket] = done.result
+            job.claimable[done.bucket] = done.claimable
+            job.authority[done.bucket] = done.claimable and done.authority or nil
+            job.hashJob = nil
+        end
+    end
+    stats.maxUnitsPerPump = math.max(stats.maxUnitsPerPump, units)
+    return false, true
+end
+
+function DpsDigest.Publish(job)
+    dpsHashCache.entries, dpsHashCache.classifications =
+        job.entries, job.classifications
+    dpsHashCache.responseRows = job.responseRows
+    dpsHashCache.hashes, dpsHashCache.dirty = job.hashes, {}
+    dpsHashCache.responseClaimable, dpsHashCache.responseAuthority = {}, {}
+    DpsDigest.claimReady, DpsDigest.claimJob = {}, nil
+    -- Changes that arrived after the snapshot's rows were read are applied
+    -- to the published maps in bounded steps; the digest is not ready until
+    -- they are.
+    DpsDigest.bucketOf = job.bucketOf
+    DpsDigest.pending, DpsDigest.pendingSet = job.queue, job.queued
+    dpsHashCache.stats.rows = job.counts.eligible
+    dpsHashCache.stats.storedRows = job.counts.stored
+    dpsHashCache.stats.durationIneligibleRows = job.counts.duration
+    dpsHashCache.stats.scoreIneligibleRows = job.counts.score
+    dpsHashCache.stats.schemaIneligibleRows = job.counts.schema
+    dpsHashCache.initialized = true
+    dpsHashCache.stats.fullRebuilds = dpsHashCache.stats.fullRebuilds + 1
+    local _, revision = CurrentDpsRevision()
+    dpsHashCache.observedRevision = revision
+    DpsDigest.job, DpsDigest.bucketJob = nil, nil
+end
+
+-- Apply one queued change to the published maps from the live store.
+function DpsDigest.ApplyPending(category, playerKey)
+    local entryKey = category .. "|" .. tostring(playerKey)
+    local oldBucket = DpsDigest.bucketOf[entryKey]
+    if oldBucket then
+        local oldClass = dpsHashCache.classifications[oldBucket][entryKey]
+        AdjustDpsHashClass(oldClass, -1)
+        dpsHashCache.entries[oldBucket][entryKey] = nil
+        dpsHashCache.classifications[oldBucket][entryKey] = nil
+        dpsHashCache.responseRows[oldBucket][entryKey] = nil
+        dpsHashCache.dirty[oldBucket] = true
+        DpsDigest.bucketVersion[oldBucket] = (DpsDigest.bucketVersion[oldBucket] or 0) + 1
+        DpsDigest.bucketOf[entryKey] = nil
+    end
+    local rows = CharacterBestStore()[category]
+    local row = type(rows) == "table" and rows[playerKey] or nil
+    if row == nil then return end
+    local bucket = DpsBucket(category, type(row) == "table" and row.player or playerKey)
+    local classification = DpsHashClass(category, row)
+    AdjustDpsHashClass(classification, 1)
+    dpsHashCache.classifications[bucket][entryKey] = classification
+    if classification == "eligible" then
+        if dpsHashCache.entries[bucket][entryKey] == nil then
+            DpsDigest.bucketShape[bucket] = (DpsDigest.bucketShape[bucket] or 0) + 1
+        end
+        dpsHashCache.entries[bucket][entryKey] = DpsHashEntry(category, playerKey, row)
+        local safe, authority = DpsResponseClaimInfo(category, playerKey, row)
+        dpsHashCache.responseRows[bucket][entryKey] = safe and authority or false
+    end
+    DpsDigest.bucketOf[entryKey] = bucket
+    dpsHashCache.dirty[bucket] = true
+    DpsDigest.bucketVersion[bucket] = (DpsDigest.bucketVersion[bucket] or 0) + 1
+end
+
+function DpsDigest.PumpPending(budget)
+    local used = 0
+    while used < budget do
+        local item = table.remove(DpsDigest.pending)
+        if not item then return true end
+        DpsDigest.pendingSet[item[3]] = nil
+        DpsDigest.ApplyPending(item[1], item[2])
+        used = used + 1
+    end
+    return #DpsDigest.pending == 0
+end
+
+-- Response-claim evidence of the published digest, one bucket at a time, at
+-- most `budget` evidence resolutions per pump. A row updated after
+-- publication already carries its claim (UpdateDpsHashRecord); a bucket that
+-- gains a key while it is walked is walked again.
+function DpsDigest.PumpClaims(budget)
+    local used = 0
+    while used < budget do
+        local job = DpsDigest.claimJob
+        if job and job.shape ~= (DpsDigest.bucketShape[job.bucket] or 0) then
+            job, DpsDigest.claimJob = nil, nil
+        end
+        if not job then
+            local bucket
+            for candidate = 1, DPS_BUCKETS do
+                if not DpsDigest.claimReady[candidate] then bucket = candidate; break end
+            end
+            if not bucket then return true end
+            job = {bucket=bucket, key=nil, shape=DpsDigest.bucketShape[bucket] or 0,
+                claimable=true, authority=nil, count=0}
+            DpsDigest.claimJob = job
+        end
+        local entries = dpsHashCache.entries[job.bucket] or {}
+        local rows = dpsHashCache.responseRows[job.bucket]
+        local key = next(entries, job.key)
+        job.key = key
+        used = used + 1
+        if key == nil then
+            -- The same aggregate a bucket rebuild derives from its rows.
+            local claimable = job.claimable and job.count > 0
+            dpsHashCache.responseClaimable[job.bucket] = claimable
+            dpsHashCache.responseAuthority[job.bucket] =
+                claimable and job.authority or nil
+            DpsDigest.claimReady[job.bucket] = true
+            DpsDigest.claimJob = nil
+        else
+            if rows[key] == nil then
+                local separator = key:find("|", 1, true)
+                local category = key:sub(1, separator - 1)
+                local playerKey = key:sub(separator + 1)
+                local store = CharacterBestStore()
+                local row = store[category] and store[category][playerKey]
+                local safe, authority = false, nil
+                if row ~= nil then
+                    safe, authority = DpsResponseClaimInfo(category, playerKey, row)
+                end
+                rows[key] = safe and authority or false
+            end
+            job.count = job.count + 1
+            local candidate = rows[key]
+            if type(candidate) ~= "string" or candidate == "" then
+                job.claimable = false
+            elseif job.authority == nil or candidate < job.authority then
+                job.authority = candidate
+            end
+        end
+    end
+    return false
+end
+
+-- A published digest with changed buckets: rebuild them in bounded steps. A
+-- bucket that changes while its rebuild runs is started again.
+function DpsDigest.PumpBuckets()
+    local units = 0
+    while units < DpsDigest.UNITS_PER_PUMP do
+        local job = DpsDigest.bucketJob
+        if job and job.version ~= (DpsDigest.bucketVersion[job.bucket] or 0) then
+            job, DpsDigest.bucketJob = nil, nil
+        end
+        if not job then
+            local bucket
+            for candidate = 1, DPS_BUCKETS do
+                if dpsHashCache.dirty[candidate] then bucket = candidate; break end
+            end
+            if not bucket then break end
+            job = DpsDigest.NewBucketJob(bucket, dpsHashCache.entries[bucket],
+                dpsHashCache.responseRows[bucket])
+            job.version = DpsDigest.bucketVersion[bucket] or 0
+            DpsDigest.bucketJob = job
+        end
+        units = units + 1
+        if DpsDigest.BucketStep(job) then
+            dpsHashCache.hashes[job.bucket] = job.result
+            local claimsReady = DpsDigest.claimReady[job.bucket] == true
+            dpsHashCache.responseClaimable[job.bucket] = claimsReady and job.claimable
+            dpsHashCache.responseAuthority[job.bucket] =
+                claimsReady and job.claimable and job.authority or nil
+            dpsHashCache.dirty[job.bucket] = nil
+            dpsHashCache.stats.bucketRebuilds = dpsHashCache.stats.bucketRebuilds + 1
+            DpsDigest.bucketJob = nil
+        end
+    end
+    dpsHashCache.stats.maxUnitsPerPump = math.max(
+        dpsHashCache.stats.maxUnitsPerPump, units)
+    for bucket = 1, DPS_BUCKETS do
+        if dpsHashCache.dirty[bucket] then return false, units > 0 end
+    end
+    return true, units > 0
+end
+
+function DpsDigest.SmallBucket(entries)
+    local count, bytes = 0, 0
+    for _, value in pairs(entries or {}) do
+        count = count + 1
+        bytes = bytes + #tostring(value)
+        if count > DpsDigest.ONE_CALL_VALUES or bytes > DpsDigest.ONE_CALL_BYTES then
+            return false
+        end
+    end
+    return true
 end
 
 local function OnDpsRevision(_, revision, detail)
@@ -2260,11 +2689,22 @@ local function CachedDpsSyncHash()
         and currentRevision ~= dpsHashCache.observedRevision then
         InvalidateAllDpsHashes()
     end
-    if not dpsHashCache.initialized then WarmDpsHashCache() end
+    -- Not ready while the bounded job runs: nothing partial is returned.
+    if not dpsHashCache.initialized then
+        if not DpsDigest.job then DpsDigest.Start() end
+        return nil
+    end
+    if #DpsDigest.pending > 0 then return nil end
     local rebuilt = false
     for bucket = 1, DPS_BUCKETS do
         if dpsHashCache.dirty[bucket] then
+            -- Only a small changed bucket is rebuilt inside this call; a
+            -- larger one waits for the bounded pump.
+            if not DpsDigest.SmallBucket(dpsHashCache.entries[bucket]) then
+                return nil
+            end
             RebuildDpsBucket(bucket)
+            DpsDigest.bucketJob = nil
             rebuilt = true
         end
     end
@@ -2272,6 +2712,29 @@ local function CachedDpsSyncHash()
     return table.concat(dpsHashCache.hashes, ",")
 end
 
+-- One bounded step of the DPS digest for the lifecycle hash slot. Returns
+-- ready (a complete current digest exists) and progressed.
+function DPS.PumpSyncHash()
+    DB()
+    EnsureDpsHashSubscription()
+    if not dpsHashCache.initialized then
+        if not DpsDigest.job then DpsDigest.Start() end
+        return DpsDigest.PumpJob()
+    end
+    local applied = DpsDigest.PumpPending(DpsDigest.CLAIMS_PER_PUMP)
+    local ready, progressed = DpsDigest.PumpBuckets()
+    ready = ready and applied
+    progressed = progressed or not applied
+    if ready then
+        -- Readiness is the digest; claims follow within their own budget.
+        local claimsDone = DpsDigest.PumpClaims(DpsDigest.CLAIMS_PER_PUMP)
+        progressed = progressed or not claimsDone
+    end
+    return ready, progressed
+end
+
+-- The canonical digest of the current store, or nil while it is being
+-- prepared (see DPS.PumpSyncHash). Never a partial or older value.
 function DPS.GetSyncHash()
     MigrateLocalLockedBaseline()
     MigrateLegacyLeaderboard()
@@ -2290,6 +2753,32 @@ function DPS.GetSyncHashUncached()
     return ComputeDpsSyncHash()
 end
 
+-- Diagnostic oracle: the response claim of one bucket computed synchronously
+-- from the current store, as the digest owner publishes it.
+function DPS.ResponseBucketClaimInfoUncached(bucket)
+    bucket = tonumber(bucket)
+    if not bucket or bucket < 1 or bucket > DPS_BUCKETS then return false end
+    local store = CharacterBestStore()
+    local claimable, authority, count = true, nil, 0
+    for _, category in ipairs({ "dummy", "lk" }) do
+        for playerKey, row in pairs(store[category] or {}) do
+            if DpsBucket(category, type(row) == "table" and row.player or playerKey) == bucket
+                and DpsHashClass(category, row) == "eligible" then
+                count = count + 1
+                local safe, candidate = DpsResponseClaimInfo(category, playerKey, row)
+                candidate = safe and candidate or nil
+                if type(candidate) ~= "string" or candidate == "" then
+                    claimable = false
+                elseif authority == nil or candidate < authority then
+                    authority = candidate
+                end
+            end
+        end
+    end
+    claimable = claimable and count > 0
+    return claimable, claimable and authority or nil
+end
+
 function DPS.HashCacheStats()
     local out = {}
     for key, value in pairs(dpsHashCache.stats) do out[key] = value end
@@ -2304,8 +2793,21 @@ function DPS.HashCacheStats()
             end
         end
     end
-    out.digest = dpsHashCache.initialized
+    out.digest = dpsHashCache.initialized and out.dirtyBuckets == 0
+        and #DpsDigest.pending == 0
         and table.concat(dpsHashCache.hashes or {}, ",") or nil
+    out.pendingChanges = #DpsDigest.pending
+    out.pending = DpsDigest.job ~= nil or out.dirtyBuckets > 0 or out.pendingChanges > 0
+    out.claimBucketsReady = 0
+    for bucket = 1, DPS_BUCKETS do
+        if DpsDigest.claimReady[bucket] then
+            out.claimBucketsReady = out.claimBucketsReady + 1
+        end
+    end
+    out.phase = DpsDigest.job and DpsDigest.job.phase
+        or #DpsDigest.pending > 0 and "changes"
+        or out.dirtyBuckets > 0 and "buckets"
+        or dpsHashCache.initialized and "ready" or "cold"
     return out
 end
 
@@ -2313,7 +2815,10 @@ function DPS.ResponseBucketClaimInfo(bucket)
     bucket = tonumber(bucket)
     if not bucket or bucket ~= math.floor(bucket)
         or bucket < 1 or bucket > DPS_BUCKETS then return false end
-    CachedDpsSyncHash()
+    -- A bucket of a digest that is not ready cannot be claimed.
+    if CachedDpsSyncHash() == nil or not DpsDigest.claimReady[bucket] then
+        return false
+    end
     return dpsHashCache.responseClaimable[bucket] == true,
         dpsHashCache.responseAuthority[bucket]
 end
