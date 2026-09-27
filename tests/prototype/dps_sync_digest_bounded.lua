@@ -272,5 +272,98 @@ do
  check(wlrq:find(D.GetSyncHashUncached(),1,true)~=nil,'8: the request carries the canonical DPS digest')
 end
 
+-- The digest owner's budgets, for sections 9 and 10 (test-only access).
+local Digest
+for i=1,200 do
+ local n,v=debug.getupvalue(pump,i)
+ if n==nil then break end
+ if n=='DpsDigest' then Digest=v;break end
+end
+
+-- 9. The claim walk: a row the walk already passed is changed in place (a
+-- record-scoped metadata change, as owner/realm enrichment does). The walk
+-- starts that bucket again, so the published claim matches the uncached
+-- claim instead of keeping the evidence it read before the change.
+do
+ check(type(Digest)=='table','9: fixture: the digest owner is reachable')
+ check(UntilReady(40000),'9: setup: the digest is ready')
+ for _=1,20000 do if Stats().claimBucketsReady==8 then break end;H.Advance(.05,.05) end
+ local target
+ for b=1,8 do if D.ResponseBucketClaimInfoUncached(b) then target=b;break end end
+ -- At the default size every bucket is claimable here. At other sizes no
+ -- bucket may be, and then this section has nothing to exercise: it says so
+ -- instead of passing silently.
+ if N==240 then check(target~=nil,'9: fixture: some bucket is claimable') end
+ if not target then print('DSD 9 NOT EXERCISED: no claimable bucket at N='..N) end
+ if target then
+  local function StoreRows() return rawget(rawget(NexusDB,'authorityBundle'),'dpsCapture').characterBest end
+  Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,{scope='test'})
+  D.GetSyncHash()
+  check(UntilReady(40000),'9: setup: the digest is ready again')
+  local mutated
+  for _=1,20000 do
+   local job=Digest.claimJob
+   if job and job.bucket==target and job.count>=1 and job.key~=nil then
+    local entryKey=job.key
+    local sep=entryKey:find('|',1,true)
+    local cat,key=entryKey:sub(1,sep-1),entryKey:sub(sep+1)
+    local row=StoreRows()[cat][key]
+    check(row~=nil,'9: fixture: the walked row exists')
+    row.level=0
+    Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,{scope='metadata',category=cat,
+     player=row.player,ownerKey=row.ownerKey,realm=row.realm,characterKey=key})
+    mutated=entryKey;break
+   end
+   H.Advance(.05,.05)
+  end
+  check(mutated~=nil,'9: setup: a walked row was changed during the claim walk')
+  for _=1,20000 do
+   local s=Stats()
+   if s.claimBucketsReady==8 and s.dirtyBuckets==0 and Phase()=='ready' then break end
+   H.Advance(.05,.05)
+  end
+  local c1,a1=D.ResponseBucketClaimInfo(target)
+  local c2,a2=D.ResponseBucketClaimInfoUncached(target)
+  check(c1==c2 and a1==a2,'9: the claim after the walk matches the uncached claim: '
+   ..tostring(c1)..'/'..tostring(a1)..' vs '..tostring(c2)..'/'..tostring(a2))
+  check(D.GetSyncHash()==D.GetSyncHashUncached(),'9: the digest is canonical')
+ end
+end
+
+-- 10. Ordinary DPS traffic does not hold Sync back: with existing rows
+-- improving at 2 and 10 records per second (no catalog commit), a changed
+-- bucket within the one-call size is rebuilt in the same update, so the Sync
+-- gate is never closed on the hashes (as before the bounded digest). The
+-- bounded pump's unit budget is lowered for this section so that, at this
+-- store size, a bucket rebuild through that pump takes several updates, as it
+-- does at about 2000 builds; the immediate rebuild must not depend on it.
+do
+ local units=Digest.UNITS_PER_PUMP
+ Digest.UNITS_PER_PUMP=16
+ check(UntilReady(40000),'10: setup: the digest is ready')
+ for _=1,400 do if Nexus.StartupStatus().syncGate=='open' then break end;H.Advance(.05,.05) end
+ check(Nexus.StartupStatus().syncGate=='open','10: setup: the Sync gate is open: '..tostring(Nexus.StartupStatus().syncGate))
+ local n=0
+ for _,period in ipairs({10,2}) do
+  local notReady,accepted,stale=0,0,0
+  for i=1,600 do
+   if i%period==0 then
+    n=n+1
+    local name='Filler'..(1+n%N)
+    if fx:Receive(name,'dummy',{dps=90000+n,ts=time()-1}) then accepted=accepted+1 end
+   end
+   H.Advance(.05,.05)
+   if Nexus.StartupStatus().syncGate=='hashes-not-ready' then notReady=notReady+1 end
+   local digest=D.GetSyncHash()
+   if digest~=nil and digest~=D.GetSyncHashUncached() then stale=stale+1 end
+  end
+  print('DSD traffic','period',period,'accepted',accepted,'hashes-not-ready frames',notReady,'of 600')
+  check(accepted>=600/period-1,'10: fixture: records accepted at period '..period..': '..accepted)
+  check(notReady==0,'10: the Sync gate is never closed on the hashes at '..(20/period)..' records/s: '..notReady..' of 600 frames')
+  check(stale==0,'10: no stale digest at '..(20/period)..' records/s: '..stale)
+ end
+ Digest.UNITS_PER_PUMP=units
+end
+
 check(#H.actions==0,'zero gameplay mutation')
 print('PASS dps_sync_digest_bounded: bounded preparation, canonical digest, nothing partial or stale advertised, Sync waits checks='..checks)

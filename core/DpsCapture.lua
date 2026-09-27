@@ -2128,7 +2128,7 @@ end
 -- claim, as for any unsafe bucket).
 local DpsDigest = {
     KEYS_PER_PUMP=4096, ROWS_PER_PUMP=256, CLAIMS_PER_PUMP=8,
-    UNITS_PER_PUMP=2048, ONE_CALL_VALUES=8, ONE_CALL_BYTES=2048,
+    UNITS_PER_PUMP=2048, ONE_CALL_VALUES=1024, ONE_CALL_BYTES=131072,
     job=nil, bucketJob=nil, claimJob=nil, bucketVersion={}, bucketShape={},
     claimReady={}, pending={}, pendingSet={}, bucketOf={},
 }
@@ -2550,7 +2550,10 @@ function DpsDigest.PumpClaims(budget)
     local used = 0
     while used < budget do
         local job = DpsDigest.claimJob
-        if job and job.shape ~= (DpsDigest.bucketShape[job.bucket] or 0) then
+        -- A new key (shape) or an in-place change of a row already walked
+        -- (version) makes the job's evidence stale: start the bucket again.
+        if job and (job.shape ~= (DpsDigest.bucketShape[job.bucket] or 0)
+            or job.version ~= (DpsDigest.bucketVersion[job.bucket] or 0)) then
             job, DpsDigest.claimJob = nil, nil
         end
         if not job then
@@ -2560,6 +2563,7 @@ function DpsDigest.PumpClaims(budget)
             end
             if not bucket then return true end
             job = {bucket=bucket, key=nil, shape=DpsDigest.bucketShape[bucket] or 0,
+                version=DpsDigest.bucketVersion[bucket] or 0,
                 claimable=true, authority=nil, count=0}
             DpsDigest.claimJob = job
         end
@@ -2641,16 +2645,42 @@ function DpsDigest.PumpBuckets()
     return true, units > 0
 end
 
-function DpsDigest.SmallBucket(entries)
+-- The number of values and bytes of a bucket, or nil when it is larger
+-- than maxValues or maxBytes (the scan stops there).
+function DpsDigest.BucketSize(entries, maxValues, maxBytes)
     local count, bytes = 0, 0
     for _, value in pairs(entries or {}) do
         count = count + 1
         bytes = bytes + #tostring(value)
-        if count > DpsDigest.ONE_CALL_VALUES or bytes > DpsDigest.ONE_CALL_BYTES then
-            return false
+        if count > maxValues or bytes > maxBytes then return nil end
+    end
+    return count, bytes
+end
+
+-- Changed buckets are rebuilt inside this call while their total stays within
+-- ONE_CALL_VALUES values and ONE_CALL_BYTES bytes: the per-record cost the
+-- synchronous digest had, so ordinary DPS traffic never holds Sync back.
+-- Larger or remaining buckets stay for the bounded bucket pump. Returns
+-- whether no bucket is still changed, and whether anything was rebuilt.
+function DpsDigest.RebuildSmallDirty()
+    local values, bytes, rebuilt = 0, 0, false
+    for bucket = 1, DPS_BUCKETS do
+        if dpsHashCache.dirty[bucket] then
+            local count, size = DpsDigest.BucketSize(dpsHashCache.entries[bucket],
+                DpsDigest.ONE_CALL_VALUES - values, DpsDigest.ONE_CALL_BYTES - bytes)
+            if count then
+                RebuildDpsBucket(bucket)
+                if DpsDigest.bucketJob and DpsDigest.bucketJob.bucket == bucket then
+                    DpsDigest.bucketJob = nil
+                end
+                values, bytes, rebuilt = values + count, bytes + size, true
+            end
         end
     end
-    return true
+    for bucket = 1, DPS_BUCKETS do
+        if dpsHashCache.dirty[bucket] then return false, rebuilt end
+    end
+    return true, rebuilt
 end
 
 local function OnDpsRevision(_, revision, detail)
@@ -2695,19 +2725,10 @@ local function CachedDpsSyncHash()
         return nil
     end
     if #DpsDigest.pending > 0 then return nil end
-    local rebuilt = false
-    for bucket = 1, DPS_BUCKETS do
-        if dpsHashCache.dirty[bucket] then
-            -- Only a small changed bucket is rebuilt inside this call; a
-            -- larger one waits for the bounded pump.
-            if not DpsDigest.SmallBucket(dpsHashCache.entries[bucket]) then
-                return nil
-            end
-            RebuildDpsBucket(bucket)
-            DpsDigest.bucketJob = nil
-            rebuilt = true
-        end
-    end
+    -- Only small changed buckets are rebuilt inside this call; the rest wait
+    -- for the bounded pump.
+    local clean, rebuilt = DpsDigest.RebuildSmallDirty()
+    if not clean then return nil end
     if not rebuilt then dpsHashCache.stats.hits = dpsHashCache.stats.hits + 1 end
     return table.concat(dpsHashCache.hashes, ",")
 end
@@ -2722,9 +2743,11 @@ function DPS.PumpSyncHash()
         return DpsDigest.PumpJob()
     end
     local applied = DpsDigest.PumpPending(DpsDigest.CLAIMS_PER_PUMP)
+    local quick = false
+    if applied then _, quick = DpsDigest.RebuildSmallDirty() end
     local ready, progressed = DpsDigest.PumpBuckets()
     ready = ready and applied
-    progressed = progressed or not applied
+    progressed = progressed or quick or not applied
     if ready then
         -- Readiness is the digest; claims follow within their own budget.
         local claimsDone = DpsDigest.PumpClaims(DpsDigest.CLAIMS_PER_PUMP)
