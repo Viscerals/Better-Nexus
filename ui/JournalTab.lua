@@ -944,6 +944,15 @@ local function ShowSelectorTooltip(selector)
     if not besidePicker then return end
     local gap = 4
     local left, right = wishlistPicker:GetLeft(), wishlistPicker:GetRight()
+    if not (left and right) then
+        -- Picker layout not resolved yet (it was just shown). Its TOPLEFT is
+        -- the selector's BOTTOMLEFT, and the hovered selector is laid out.
+        local selectorLeft = selector:GetLeft()
+        if selectorLeft then
+            left = selectorLeft * (selector:GetEffectiveScale() or 1) / (wishlistPicker:GetEffectiveScale() or 1)
+            right = left + (wishlistPicker:GetWidth() or 0)
+        end
+    end
     local screenRight = UIParent:GetRight() or UIParent:GetWidth() or 0
     -- Tooltip width in UIParent units (the picker is a scale-1 UIParent child).
     local width = (GameTooltip:GetWidth() or 0) * (GameTooltip:GetEffectiveScale() or 1)

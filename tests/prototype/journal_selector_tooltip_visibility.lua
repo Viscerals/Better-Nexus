@@ -12,10 +12,19 @@
 --     SetClampedToScreen(true); native tooltips are clamped);
 --   * GameTooltip: SetOwner(owner, "ANCHOR_TOP") puts the tooltip BOTTOM at
 --     the owner TOP; "ANCHOR_RIGHT" (3.3.5) puts the tooltip BOTTOMLEFT at the
---     owner TOPRIGHT; "ANCHOR_NONE" uses the explicit SetPoint calls. Its size
---     comes from a word-wrap model (38 characters per wrapped line, 17 units a
---     line, 10 units of padding, 268 units wide when a line wraps), calibrated
---     roughly against the native C3 screenshot;
+--     owner TOPRIGHT; "ANCHOR_NONE" keeps any earlier points (conservative:
+--     the code must clear them) and uses the explicit SetPoint calls. Its size
+--     is computed by Show() from the current lines with a word-wrap model (38
+--     characters per wrapped line, 17 units a line, 10 units of padding, 268
+--     units wide when a line wraps), calibrated roughly against the native C3
+--     screenshot; before Show() GetWidth answers the previous tooltip's size;
+--   * scale: every modeled frame has the effective scale UI_SCALE, and
+--     GameTooltip has UI_SCALE * TIP_SCALE (both 1 unless a case sets them).
+--     GameTooltip sizes and offsets are in its own units, TIP_SCALE times
+--     larger in UIParent units. UIParent stays 1920 x 1080 of its own units;
+--   * deferred layout: in one case the picker's GetLeft/GetRight/GetTop/
+--     GetBottom/GetCenter answer nil after SetPoint until the next rendered
+--     frame (render()), as for a frame whose layout is not yet resolved;
 --   * draw order: the higher strata draws above; in the same strata the
 --     higher frame level draws above. GameTooltip is TOOLTIP strata, level 1;
 --     the picker is TOOLTIP strata, level 50, so the picker draws above it.
@@ -37,13 +46,18 @@ dofile=originalDofile
 assert(H)
 local T=dofile('tests/prototype/startup_support.lua')
 local A=Nexus.GameAdapter
-local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
+-- A failure reports the line that called check, not this line.
+local checks=0;local function check(v,m) if not v then error(m,2) end;checks=checks+1 end
 
 ------------------------------------------------------------------------
 -- Geometry model
 ------------------------------------------------------------------------
 local SW,SH=1920,1080
 local PAD,CHARS,LINE_H,WRAP_W=10,38,17,268
+local UI_SCALE,TIP_SCALE=1,1
+local function setScales(ui,tip) UI_SCALE,TIP_SCALE=ui,tip end
+local deferLayout,layoutPending=false,false
+local function render() layoutPending=false end
 local regionMethods
 do
  local index=getmetatable(UIParent).__index
@@ -93,15 +107,16 @@ function Rect(f,depth)
  if f==UIParent then return {l=0,r=SW,b=0,t=SH} end
  if not f or not modeled(f) or #f.points==0 then return nil end
  local hc,vc={},{}
+ local s=f==GameTooltip and TIP_SCALE or 1
  for _,p in ipairs(f.points)do
   local point,rel,relPoint,x,y=parse(f,p)
   local rr=Rect(rel,depth);if not rr then return nil end
   local ax=({l=rr.l,r=rr.r,c=(rr.l+rr.r)/2})[hpart(relPoint)]
   local ay=({t=rr.t,b=rr.b,m=(rr.t+rr.b)/2})[vpart(relPoint)]
-  hc[hpart(point)]=ax+x;vc[vpart(point)]=ay+y
+  hc[hpart(point)]=ax+x*s;vc[vpart(point)]=ay+y*s
  end
- local l,r=span(hc,'l','r','c',f.width or 0)
- local b,t=span(vc,'b','t','m',f.height or 0)
+ local l,r=span(hc,'l','r','c',(f.width or 0)*s)
+ local b,t=span(vc,'b','t','m',(f.height or 0)*s)
  if not l or not b then return nil end
  if clamped[f] then
   if r>SW then l,r=l-(r-SW),SW end
@@ -112,7 +127,9 @@ function Rect(f,depth)
  return {l=l,r=r,b=b,t=t}
 end
 H.ModelRect=Rect
--- Geometry reads answer from the model for modeled frames only.
+-- Geometry reads answer from the model for modeled frames only, in the
+-- frame's own units (GameTooltip: divided by TIP_SCALE).
+local function own(self,v) return self==GameTooltip and v/TIP_SCALE or v end
 for name,fn in pairs({
  GetLeft=function(r) return r.l end,GetRight=function(r) return r.r end,
  GetTop=function(r) return r.t end,GetBottom=function(r) return r.b end,
@@ -120,17 +137,32 @@ for name,fn in pairs({
 })do
  local original=regionMethods[name]
  regionMethods[name]=function(self,...)
+  if self==picker and layoutPending then return nil end
   local r=modeled(self) and Rect(self)
-  if r then return fn(r) end
+  if r then
+   if self==GameTooltip then r={l=own(self,r.l),r=own(self,r.r),b=own(self,r.b),t=own(self,r.t)} end
+   return fn(r)
+  end
   return original(self,...)
  end
 end
 local originalWidth,originalHeight=regionMethods.GetWidth,regionMethods.GetHeight
 regionMethods.GetWidth=function(self)
- local r=modeled(self) and Rect(self);if r then return r.r-r.l end;return originalWidth(self)
+ local r=modeled(self) and Rect(self);if r then return own(self,r.r-r.l) end;return originalWidth(self)
 end
 regionMethods.GetHeight=function(self)
- local r=modeled(self) and Rect(self);if r then return r.t-r.b end;return originalHeight(self)
+ local r=modeled(self) and Rect(self);if r then return own(self,r.t-r.b) end;return originalHeight(self)
+end
+local originalScale=regionMethods.GetEffectiveScale
+regionMethods.GetEffectiveScale=function(self)
+ if modeled(self) then return UI_SCALE*(self==GameTooltip and TIP_SCALE or 1) end
+ return originalScale(self)
+end
+-- Deferred layout: a new picker anchor is unresolved until the next frame.
+local basePoint=regionMethods.SetPoint
+function picker:SetPoint(...)
+ if deferLayout then layoutPending=true end
+ return basePoint(self,...)
 end
 
 -- GameTooltip model. Mutators that would change its layering are recorded.
@@ -141,7 +173,7 @@ local baseShow,baseHide=regionMethods.Show,regionMethods.Hide
 function tt:SetOwner(owner,anchor)
  tipCalls.owner=tipCalls.owner+1
  self.owner,self.anchor,self.lines=owner,anchor,{}
- self.points={}
+ if anchor~='ANCHOR_NONE' then self.points={} end
  if anchor=='ANCHOR_TOP' then self.points={{'BOTTOM',owner,'TOP',0,0}}
  elseif anchor=='ANCHOR_RIGHT' then self.points={{'BOTTOMLEFT',owner,'TOPRIGHT',0,0}}
  elseif anchor~='ANCHOR_NONE' then error('MODEL: unmodeled tooltip anchor '..tostring(anchor)) end
@@ -258,6 +290,9 @@ end
 local function tipRect(label)
  check(tt:IsShown(),label..': tooltip is shown')
  local r=Rect(tt);check(r,label..': tooltip position resolves in the model')
+ -- Leftover points from an earlier anchor would stretch the tooltip.
+ check(math.abs((r.r-r.l)-tt.width*TIP_SCALE)<1e-6 and math.abs((r.t-r.b)-tt.height*TIP_SCALE)<1e-6,
+  label..': tooltip keeps its own size (no conflicting anchor points, '..fmt(r)..')')
  return r
 end
 local function selectorTipBesidePicker(label)
@@ -283,7 +318,7 @@ local function textClearOfPicker(label)
  local r,p=tipRect(label),Rect(picker)
  print('PICKER_TIP',label,'anchor',tt.anchor,'tooltip',fmt(r),'picker',fmt(p))
  check(onScreen(r),label..': tooltip lies on the screen')
- check(not intersects(inset(r,PAD),p),label..': tooltip text area must not intersect the open picker')
+ check(not intersects(inset(r,PAD*TIP_SCALE),p),label..': tooltip text area must not intersect the open picker')
 end
 local function layeringUntouched(label)
  check(#tipCalls.layering==0,label..': GameTooltip strata, level, parent, scale and clamp are never changed ('..table.concat(tipCalls.layering,',')..')')
@@ -351,14 +386,11 @@ leave(selector);check(not tt:IsShown(),'toggle: leaving hides the tooltip')
 close()
 unchangedSince(before,'toggle pass')
 
--- 4. Cleanup: close by another path, hide the journal, reopen.
-open();enter(row('Plan A').nameButton)
-local owners=tipCalls.owner
-Nexus.JournalTab.RefreshAssociations()
-check(tt:GetOwner()~=selector,'a row tooltip is not taken over by the selector')
-leave(row('Plan A').nameButton)
+-- 4. Cleanup: hide the journal, reopen. (Closing the picker under a row or
+-- Unassign tooltip is checked in section 6, where the clicks may assign.)
+open()
 enter(selector);selectorTipBesidePicker('before journal hide')
-owners=tipCalls.owner
+local owners=tipCalls.owner
 journal:Hide()
 local panelHide=NexusLoadoutAssociationPanel:GetScript('OnHide')
 panelHide(NexusLoadoutAssociationPanel) -- the client runs a child's OnHide when its parent hides
@@ -379,16 +411,42 @@ local p=open()
 local pr=Rect(p)
 print('RIGHT_EDGE','picker',fmt(pr),'room right',SW-pr.r,'room left',pr.l)
 check(SW-pr.r<WRAP_W,'SETUP: the picker lacks room on its right')
-enter(selector);local r=selectorTipBesidePicker('right edge, picker open')
+-- A short tooltip first: the selector must measure its own tooltip after
+-- Show(), not the previous tooltip's size.
+enter(row('Plan A').gear);check(tt.lines[1].text=='Edit wishlist' and SW-pr.r>=tt:GetWidth()+4,'SETUP: the gear tooltip would fit right of the picker')
+leave(row('Plan A').gear)
+enter(selector);local r=selectorTipBesidePicker('right edge, picker open after a gear tooltip')
 check(r.r<=pr.l,'right edge: the tooltip sits left of the picker')
 leave(selector)
 selector:Click();enter(selector);selectorTipTop('right edge, picker closed')
 selector:Click();selectorTipBesidePicker('right edge, toggled open under the mouse');leave(selector);close()
+-- The picker's position is not yet resolved when the click opens it under
+-- the mouse: the side comes from the selector's left edge and picker width.
+deferLayout=true
+enter(selector);selectorTipTop('right edge, deferred layout, picker closed')
+selector:Click()
+check(picker:IsShown() and picker:GetLeft()==nil and picker:GetRight()==nil,'MODEL: the picker position is unknown right after the click')
+r=selectorTipBesidePicker('right edge, deferred layout, toggled open under the mouse')
+check(r.r<=Rect(picker).l,'right edge, deferred layout: the tooltip sits left of the picker')
+render();deferLayout=false
+leave(selector);close()
 -- The default placement uses the right side.
 place(15,125);open();enter(selector)
 r=selectorTipBesidePicker('default placement side')
 check(r.l>=Rect(picker).r,'default placement: the tooltip sits right of the picker')
 leave(selector);close()
+-- UI scale 0.75 and a tooltip scale of 1.25 (for example a tooltip-scale
+-- addon): the tooltip width is converted into UIParent units. Here the
+-- converted width does not fit right of the picker, the unconverted width
+-- and the inverted conversion would.
+place(SW-300-805,125);setScales(0.75,1.25)
+p=open();pr=Rect(p)
+print('SCALED','picker',fmt(pr),'room right',SW-pr.r,'tooltip own width',WRAP_W,'in UIParent units',WRAP_W*TIP_SCALE)
+check(SW-pr.r<WRAP_W*TIP_SCALE+4 and SW-pr.r>=WRAP_W+4 and SW-pr.r>=WRAP_W/TIP_SCALE+4,
+ 'SETUP: only the converted width lacks room on the right')
+enter(selector);r=selectorTipBesidePicker('scaled tooltip, picker open')
+check(r.r<=pr.l,'scaled tooltip: the tooltip sits left of the picker')
+leave(selector);close();setScales(1,1)
 unchangedSince(before,'right-edge pass')
 layeringUntouched('right-edge pass')
 
@@ -401,8 +459,12 @@ check(#H.actions==baseActions,'no gameplay action before the selection checks')
 local rolled=H.Clone(H.perks.serverBuildSlots[101].echoes)
 H.perks.serverBuildSlots[103]={name='Plan C',verified=false,echoes=H.Clone(rolled)}
 H.Notify();A.Poll()
-open();row('Plan C').nameButton:Click()
+open();local planC=row('Plan C').nameButton
+enter(planC);planC:Click()
 check(not picker:IsShown() and A.AssignedWishlist().name=='Plan C','a row click assigns exactly that row and closes the picker')
+check(tt:IsShown() and tt:GetOwner()~=selector and tt.lines[1].text=='Assign Wishlist',
+ 'closing the picker under a row tooltip does not hand the tooltip to the selector')
+leave(planC)
 check(Nexus.Store.State().loadoutWishlists[2].slot==103,'the stored assignment keeps the clicked server slot')
 open()
 local marked={}
@@ -429,6 +491,12 @@ for _,m in ipairs(messages)do if m:find('wishlist changed; refresh and try again
 check(refused,'a stale row is refused with "wishlist changed; refresh and try again"')
 check(picker:IsShown(),'a refused selection keeps the picker open')
 check(T.Equal(storedBefore,Nexus.Store.State().loadoutWishlists[2]),'a refused selection keeps the stored assignment')
+-- Unassign clicked while its own tooltip is shown.
+enter(picker.clearRow);picker.clearRow:Click()
+check(not picker:IsShown() and A.AssignedWishlist().state=='unassigned','Unassign clears the assignment and closes the picker')
+check(tt:IsShown() and tt:GetOwner()~=selector and tt.lines[1].text=='Unassign Wishlist',
+ 'closing the picker under the Unassign tooltip does not hand the tooltip to the selector')
+leave(picker.clearRow)
 close()
 check(#H.actions==baseActions and H.Count('orb-spend')==0,'no gameplay action or Orb spend in the whole test')
 layeringUntouched('end')
