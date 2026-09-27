@@ -1630,41 +1630,69 @@ function DPS.CommunityEligibilityCursorResult(cursor)
     return cursor.eligibility
 end
 
--- Legacy repair first builds the normal exact-fingerprint eligibility index,
--- then makes one second bounded pass over represented DPS rows. Each call
--- advances at most one stored row and returns only its existing table
--- reference; the repair owner materializes evidence for one candidate at a
--- time. Ineligible rows remain visible to its bounded reason accounting.
+-- Legacy repair makes one finite pass over represented DPS rows. Its scope is
+-- the set of stored keys captured when the pass begins (one walk of the two
+-- character-best buckets, keys only). Each call then advances at most one
+-- captured key and returns the row stored under that key NOW, so a row that
+-- was replaced, removed or re-keyed later is read as it is, never through a
+-- stale mutable iterator. A DPS revision after the capture does not end the
+-- pass: the cursor records it (`changed`), and the repair owner covers newer
+-- rows with a follow-up pass. A replaced store or revision owner ends it.
+-- The exact-fingerprint eligibility index is still warmed first while the DPS
+-- revision holds still; the repair itself does not read that index, so a
+-- revision during the warm-up only skips it (readers rebuild it on demand).
 function DPS.BeginLegacyQualificationCursor()
     local revisionSource, revision = CurrentDpsRevision()
+    local store = CharacterBestStore()
+    local keys = {}
+    for _, category in ipairs({"dummy", "lk"}) do
+        local list, bucket = {}, store[category]
+        if type(bucket) == "table" then
+            for key in pairs(bucket) do list[#list + 1] = key end
+        end
+        keys[category] = list
+    end
     local eligibilityCursor = DPS.BeginCommunityEligibilityCursor()
     local eligibility = eligibilityCursor.phase == "done"
         and DPS.CommunityEligibilityCursorResult(eligibilityCursor) or nil
     return {
         revisionSource=revisionSource,revision=revision,
-        store=CharacterBestStore(),eligibilityCursor=eligibilityCursor,
+        store=store,keys=keys,index=0,eligibilityCursor=eligibilityCursor,
         eligibility=eligibility,
         phase=eligibility and "dummy" or "eligibility",
-        key=nil,scanned=0,materialized=0,
+        scanned=0,materialized=0,changed=false,eligibilitySkipped=false,
     }
 end
 
-local function LegacyQualificationCursorCurrent(cursor)
+-- False when the pass's source is gone (store or revision owner replaced).
+-- Records a newer DPS revision of the same source as `changed`.
+local function LegacyQualificationCursorObserve(cursor)
     local revisionSource, revision = CurrentDpsRevision()
-    return cursor.revisionSource == revisionSource
-        and cursor.revision == revision
-        and cursor.store == CharacterBestStore()
+    if cursor.store ~= CharacterBestStore()
+        or cursor.revisionSource ~= revisionSource then
+        return false
+    end
+    if cursor.revision ~= revision then cursor.changed = true end
+    return true
 end
 
 function DPS.LegacyQualificationCursorNext(cursor)
     if type(cursor) ~= "table" then return nil, true, "invalid cursor" end
     if cursor.phase == "done" then return nil, true end
-    if not LegacyQualificationCursorCurrent(cursor) then
-        return nil, true, "DPS changed"
+    if not LegacyQualificationCursorObserve(cursor) then
+        return nil, true, "DPS source replaced"
     end
     if cursor.phase == "eligibility" then
-        local done, err = DPS.CommunityEligibilityCursorNext(
-            cursor.eligibilityCursor)
+        local done, err = false, nil
+        if not cursor.changed then
+            done, err = DPS.CommunityEligibilityCursorNext(
+                cursor.eligibilityCursor)
+        end
+        if cursor.changed or err == "DPS changed" then
+            cursor.eligibilitySkipped = true
+            cursor.phase, cursor.index = "dummy", 0
+            return nil, false
+        end
         if err then return nil, true, err end
         if done then
             cursor.eligibility = DPS.CommunityEligibilityCursorResult(
@@ -1672,19 +1700,17 @@ function DPS.LegacyQualificationCursorNext(cursor)
             if type(cursor.eligibility) ~= "table" then
                 return nil, true, "eligibility unavailable"
             end
-            cursor.phase, cursor.key = "dummy", nil
+            cursor.phase, cursor.index = "dummy", 0
         end
         return nil, false
     end
 
     local category = cursor.phase
-    local bucket = type(cursor.store[category]) == "table"
-        and cursor.store[category] or {}
-    local key, row = next(bucket, cursor.key)
-    cursor.key = key
+    cursor.index = cursor.index + 1
+    local key = cursor.keys[category][cursor.index]
     if key == nil then
         if category == "dummy" then
-            cursor.phase, cursor.key = "lk", nil
+            cursor.phase, cursor.index = "lk", 0
         else
             cursor.phase = "done"
             return nil, true
@@ -1692,6 +1718,8 @@ function DPS.LegacyQualificationCursorNext(cursor)
         return nil, false
     end
     cursor.scanned = cursor.scanned + 1
+    local bucket = cursor.store[category]
+    local row = type(bucket) == "table" and bucket[key] or nil
     local fingerprint = type(row) == "table" and row.fingerprint or nil
     if type(fingerprint) == "string" and fingerprint ~= "" then
         cursor.materialized = cursor.materialized + 1
@@ -1702,12 +1730,35 @@ function DPS.LegacyQualificationCursorNext(cursor)
     return nil, false
 end
 
+-- False once the pass's DPS store or revision owner was replaced (a
+-- compaction or migration can replace the store without a DPS revision).
+function DPS.LegacyQualificationCursorSourceCurrent(cursor)
+    return type(cursor) == "table" and LegacyQualificationCursorObserve(cursor)
+end
+
+-- The row stored under a captured key right now, or nil when it was removed
+-- or re-keyed or the store was replaced. The repair owner compares it with the
+-- row it scanned before any write.
+function DPS.LegacyQualificationCurrentRow(cursor, category, key)
+    if type(cursor) ~= "table" or cursor.store ~= CharacterBestStore()
+        or (category ~= "dummy" and category ~= "lk") or key == nil then
+        return nil
+    end
+    local bucket = cursor.store[category]
+    return type(bucket) == "table" and bucket[key] or nil
+end
+
+-- A completed pass reports the DPS revision its scope was captured at
+-- (`coveredRevision`) and whether a newer revision arrived during it.
 function DPS.LegacyQualificationCursorResult(cursor)
     if type(cursor) ~= "table" or cursor.phase ~= "done"
-        or not LegacyQualificationCursorCurrent(cursor) then return nil end
+        or not LegacyQualificationCursorObserve(cursor) then return nil end
     return {
         scanned=tonumber(cursor.scanned) or 0,
         materialized=tonumber(cursor.materialized) or 0,
+        coveredRevision=cursor.revision,
+        changed=cursor.changed == true,
+        eligibilitySkipped=cursor.eligibilitySkipped == true,
     }
 end
 
