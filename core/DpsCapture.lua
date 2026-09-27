@@ -912,48 +912,6 @@ StoredEchoes = function(row, locked)
     return NormalizeEchoes(row[locked and "lockedEchoes" or "echoes"])
 end
 
--- Locked perks can arrive from the server after a combat record is committed.
--- Backfill this character's public rows once the API becomes ready so the
--- metadata is not permanently lost just because GetLockedPerks was late.
-local function BackfillLocalLockedRows()
-    if not (Adapter and Adapter.LockedOwned) then return false end
-    local locked = Adapter.LockedOwned()
-    local snap = NormalizeEchoes(locked and locked.bySpell and (function()
-        local out = {}
-        for spellId, count in pairs(locked.bySpell) do
-            out[#out + 1] = { spellId = spellId, count = count }
-        end
-        return out
-    end)() or nil)
-    if not snap then return false end
-
-    local localName = (UnitName and UnitName("player")) or "?"
-    local me = CurrentCharacterKey(localName)
-    local legacyMe = PlayerKey(localName)
-    local changed = false
-    local changedRows = {}
-    for _, category in ipairs({ "dummy", "lk" }) do
-        local rows = CharacterBestStore()[category]
-        local row = rows[me] or rows[legacyMe]
-        if row and LockedKey(StoredEchoes(row, true)) ~= LockedKey(snap) then
-            row.lockedEchoes = snap
-            ReferenceEvidence(row)
-            changed = true
-            changedRows[#changedRows + 1] = row
-        end
-    end
-    -- Keep the established bucket-hash format compatible with older clients.
-    -- Instead of changing the hash schema, proactively rebroadcast only the
-    -- locally enriched winning row. Updated peers can merge this metadata into
-    -- an equal record; older peers still receive all core DPS/build data.
-    if changed and Sync and Sync.BroadcastDpsRecord then
-        for _, row in ipairs(changedRows) do
-            pcall(Sync.BroadcastDpsRecord, row)
-        end
-    end
-    return changed
-end
-
 local migratedLockedBaseline = false
 local LOCKED_MIGRATION_VERSION = 1
 
@@ -2275,18 +2233,12 @@ end
 function DPS.GetSyncHash()
     MigrateLocalLockedBaseline()
     MigrateLegacyLeaderboard()
-    if BackfillLocalLockedRows() then
-        BumpDps("locked metadata backfilled", {scope="metadata"})
-    end
     return CachedDpsSyncHash()
 end
 
 function DPS.GetSyncHashUncached()
     MigrateLocalLockedBaseline()
     MigrateLegacyLeaderboard()
-    if BackfillLocalLockedRows() then
-        BumpDps("locked metadata backfilled", {scope="metadata"})
-    end
     return ComputeDpsSyncHash()
 end
 
@@ -2923,9 +2875,6 @@ function DPS.GetDpsBoard(category)
     MigrateLegacyLeaderboard()
     if RepairCurrentCharacterClass() then
         BumpDps("local class repaired", {scope="metadata"})
-    end
-    if BackfillLocalLockedRows() then
-        BumpDps("locked metadata backfilled", {scope="metadata"})
     end
     local out, seenPlayer = {}, {}
     for _, row in pairs(CharacterBestStore()[category] or {}) do
