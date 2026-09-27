@@ -219,8 +219,17 @@ function EchoWeaver.DecideNexus(state)
             banishEligible=not c.isGuaranteed and c.banishEligible~=false,
             freezeEligible=not c.isGuaranteed and c.freezeEligible~=false}
         local wanted=id and (outstanding[id] or 0)>0
+        -- A different quality tier of a wished family is not taken in place
+        -- of the requested tier, but it is on the Wishlist: say so rather
+        -- than "not on Wishlist". Explanation only; the value is unchanged.
+        local family=c.family
+        if family==nil and id and state.catalog and state.catalog.familyOf then
+            family=state.catalog.familyOf[id]
+        end
+        local otherTier=family~=nil and plan.wishedFamilies and plan.wishedFamilies[family]
         annotations[i]=isFrozen and "frozen" or c.isGuaranteed and "guaranteed"
-            or wanted and "wanted" or requested[id] and "target satisfied" or "filler"
+            or wanted and "wanted" or requested[id] and "target satisfied"
+            or otherTier and "wrong quality" or "filler"
         deltas[i]=wanted and (100+(tonumber(c.quality) or 0)*2) or -15
     end
     local charges,refused=state.charges or {},state.searchRefused or {}
