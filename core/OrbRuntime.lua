@@ -486,27 +486,54 @@ function M.Start(value)
     local a,e=M.Prepare("assigned");if not a then return nil,e end
     return M.Confirm(a.token)
 end
+-- The receipt's loadout against the current read. UNKNOWN: the client has not
+-- received its build-slot data since it loaded, so a slot of 0 is only its
+-- load-time default, not an observed change. Nothing is decided or persisted
+-- on it; the action waits for the server's slot. Any other slot in that state
+-- came from the server's active-slot push and is an observation.
+local function loadoutCheck(s,p)
+    if p.loadoutChanged or p.originalSlot==nil then return "CHANGED" end
+    if s.context.slotKnown==false then
+        local slot=s.context.slot
+        if slot~=nil and slot~=0 and slot~=p.originalSlot then return "CHANGED" end
+        return "UNKNOWN"
+    end
+    if p.originalSlot~=s.context.slot then return "CHANGED" end
+    return "SAME"
+end
+-- Read-only record of the settlement requirement that the last attempt did
+-- not meet, for the status text. Session only; it authorizes nothing.
+local function unmet(gate,detail)
+    run.settleGate={gate=gate,detail=detail};return false
+end
 local function finishResult(s,p)
+    run.settleGate=nil
     -- Ownership responses do not identify the originating loadout. Once that
     -- boundary changes, even an exact replacement delta can belong elsewhere.
     -- Keep this uncertainty across Recheck, return-to-slot, and reload.
-    if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+    local loadout=loadoutCheck(s,p)
+    if loadout=="UNKNOWN" then return unmet("loadout-unknown") end
+    if loadout=="CHANGED" then
         if not p.loadoutChanged then p.loadoutChanged=true;savePending() end
         pause("The original loadout cannot be verified after a loadout change or an incomplete older receipt. Ownership responses do not identify the original loadout. Pending exposure is retained; no retry is allowed.")
-        return false
+        return unmet("loadout")
     end
     -- Neither a new table nor an Orb decrement proves a result. Require the
     -- original offer and a selection observed within that offer's lifecycle.
     if not p.offerKey or not p.selectionAttempted or not p.selectedKey
         or not (p.choiceMayHaveBeenSent or p.choiceObserved)
-        or not p.offeredKeys or not p.offeredKeys[p.selectedKey] then return false end
-    if p.restored and not p.baselineStamp then p.baselineStamp=s.grantStamp;return false end
+        or not p.offeredKeys or not p.offeredKeys[p.selectedKey] then return unmet("choice") end
+    if p.restored and not p.baselineStamp then p.baselineStamp=s.grantStamp;return unmet("fresh") end
     local fresh=s.grantStamp>(p.restored and p.baselineStamp or p.selectionStamp or p.beforeStamp)
-    if s.offerPending or #s.board>0 or s.hostPending then return false end
-    if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed during the operation. Resolve the result manually.");return false end
-    if s.charges~=p.chargesBefore-1 then return false end
+    if s.offerPending then return unmet("offer") end
+    if s.hostPending then return unmet("host") end
+    if #s.board>0 then return unmet("board") end
+    if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed during the operation. Resolve the result manually.");return unmet("locked") end
+    if s.charges~=p.chargesBefore-1 then
+        return unmet("charges",{expected=p.chargesBefore-1,observed=s.charges})
+    end
     local gained,status=P.SingleGain(p.before,p.removed,s.granted)
-    if status=="WAIT" then return false end
+    if status=="WAIT" then return unmet("ownership") end
     if status=="CONFIRMED" and gained==p.removed then
         -- Even a source-removal observation followed by an equal-content
         -- snapshot can be a reordered stale response. The supported API has
@@ -514,11 +541,11 @@ local function finishResult(s,p)
         if p.selectedKey==p.removed then
             pause("The same-ID, same-quality result is indistinguishable from stale ownership data. The client supplies no correlated completion evidence. Pending exposure is retained; no retry is allowed.")
         end
-        return false
+        return unmet("same-id")
     end
-    if not fresh then return false end
+    if not fresh then return unmet("fresh") end
     if status~="CONFIRMED" or (p.selectedKey and gained~=p.selectedKey) then
-        pause("Echo ownership does not match the expected replacement. No further Orb will be spent.");return false
+        pause("Echo ownership does not match the expected replacement. No further Orb will be spent.");return unmet("mismatch")
     end
     if not p.spendConfirmed then run.spent=run.spent+1;p.spendConfirmed=true;run.reserved=0 end
     run.recent[#run.recent+1]={removed=p.removed,obtained=gained,at=now()}
@@ -641,9 +668,10 @@ local function recoverObserve(s,p)
     -- finishResult owns the loadout-boundary pause. Nothing is observed or
     -- recorded across it: the watcher is bound to the original loadout only, as
     -- the live owner's context is.
-    if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+    local loadout=loadoutCheck(s,p)
+    if loadout~="SAME" then
         if type(B.Unwatch)=="function" then B.Unwatch() end
-        return "LOADOUT",false
+        return loadout=="UNKNOWN" and "LOADOUT_UNKNOWN" or "LOADOUT",false
     end
     local observing=type(B.Watch)=="function" and B.Watch(s,onRecoveryChoice)==true
     if s.lockedKey~=p.lockedKey then return "PERMANENT_CHANGED",observing end
@@ -724,9 +752,28 @@ local RECOVERY_TEXT={
     WAIT_OFFER_BLIND="The earlier Orb action is unresolved and no Orb offer is open. This client cannot observe a manual choice, so Nexus cannot confirm the earlier action if its offer opens later."..KEPT..NO_EXIT,
     PERMANENT_CHANGED="Locked Echoes changed since the earlier Orb action. Nexus cannot confirm that action."..KEPT..NO_EXIT,
     LOADOUT="The original loadout of the earlier Orb action cannot be verified. Nexus cannot confirm that action."..KEPT..NO_EXIT,
+    LOADOUT_UNKNOWN="An earlier Orb action is unresolved. The game has not yet sent this character's build-slot data since it loaded, so Nexus cannot check the original loadout yet. Nexus is waiting, read-only, and records nothing until then: if an Orb offer is open, a choice made in it now cannot be recorded for the earlier action. Nothing will be sent.",
     UNOBSERVABLE="The earlier Orb action ended while Nexus could not observe it. The game gives no record of which choice belonged to it, so Nexus cannot confirm it, and Recheck cannot settle it. The record, its spending exposure, and the block on new Orb runs and ordinary rolling are kept. Nothing is retried, refunded or deleted."..NO_EXIT,
 }
+-- WAIT_RESULT names the settlement requirement that the last read did not
+-- meet (run.settleGate), so the text does not promise that a fresh ownership
+-- response settles an action that something else holds.
+local WAIT_RESULT_GATE={
+    ownership="A choice for the earlier Orb action is recorded. Echo ownership does not show the chosen Echo yet. Nexus is waiting for an ownership response that shows it. Recheck requests one. Nothing will be sent.",
+    offer="A choice for the earlier Orb action is recorded. The game still reports an open Orb offer. Nexus is waiting, read-only, until it closes. Nothing will be sent.",
+    host="A choice for the earlier Orb action is recorded. Another game action is still in flight. Nexus is waiting, read-only, until it ends. Nothing will be sent.",
+    board="A choice for the earlier Orb action is recorded, but an Echo choice is open in the game. Nexus checks the result only while no Echo choice is open; Recheck cannot close it. Taking an Echo from that choice changes your Echoes, and Nexus then cannot confirm the earlier action."..KEPT,
+    charges="A choice for the earlier Orb action is recorded, but the Orb balance shown is %s and the record requires %s (one Orb less than before the action). Recheck asks the game for the current balance. While the balance differs, Nexus cannot confirm the action."..KEPT,
+}
 local function recoveryReason(kind,observing,s,p,proposed)
+    local gate=run.settleGate
+    if kind=="WAIT_RESULT" and gate and WAIT_RESULT_GATE[gate.gate] then
+        local text=WAIT_RESULT_GATE[gate.gate]
+        if gate.gate=="charges" then
+            text=text:format(tostring(gate.detail and gate.detail.observed),tostring(gate.detail and gate.detail.expected))
+        end
+        return text
+    end
     if not observing and kind=="OFFER_OPEN" then return RECOVERY_TEXT.OFFER_OPEN_BLIND end
     if not observing and kind=="WAIT_OFFER" then return RECOVERY_TEXT.WAIT_OFFER_BLIND end
     if kind=="OFFER_OPEN" and proposed then
@@ -739,7 +786,7 @@ end
 -- Truthful reason for callers that Orb mode blocks (ordinary rolling, build-slot
 -- and permanent-slot changes). subject: what is blocked, e.g. "Ordinary rolling".
 -- Text only: it changes no block.
-local CAN_PROGRESS={CHECKING=true,UNREADABLE=true,WAIT_RESULT=true}
+local CAN_PROGRESS={CHECKING=true,UNREADABLE=true,WAIT_RESULT=true,LOADOUT_UNKNOWN=true}
 local CAN_PROGRESS_OBSERVING={OFFER_OPEN=true,WAIT_OFFER=true}
 function M.BlockReason(subject)
     subject=type(subject)=="string" and subject or "This action"
@@ -780,7 +827,8 @@ function M.Pump(passive)
             if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
             if finishResult(s,p) then return end
             if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
-            run.recovery={kind=kind,observing=observing,proposed=proposed==true or nil}
+            run.recovery={kind=kind,observing=observing,proposed=proposed==true or nil,
+                gate=kind=="WAIT_RESULT" and run.settleGate and copy(run.settleGate) or nil}
             setState("RECOVERY",recoveryReason(kind,observing,s,p,proposed))
             return
         end
@@ -793,7 +841,7 @@ function M.Pump(passive)
             if run.state~="STOPPED" then pause("The active loadout or assigned Wishlist changed. The original operation stays pending; Resume requires settlement and a resolved assignment.") end
         end
         if p then
-            if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+            if loadoutCheck(s,p)~="SAME" then
                 finishResult(s,p);return
             end
             if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed; no further Orb action will be submitted.");return end
