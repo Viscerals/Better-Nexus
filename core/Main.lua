@@ -99,6 +99,14 @@ end
 
 Nexus.RetryAutoLock = RetryAutoLock
 
+-- Read-only: the automation runtime's own record of an automatic action that
+-- has no confirmed result ("submitted", "uncertain" or "expired"), or nil.
+-- It authorizes nothing; the Orb window uses it for wording only.
+function Nexus.PendingIntentState()
+    local runtime = Automation()
+    return runtime and runtime.PendingIntentState and runtime.PendingIntentState() or nil
+end
+
 -- Only disables the existing session master switch. It never enables actions.
 function Nexus.DisableOrdinaryAutomation()
     local runtime=Automation()

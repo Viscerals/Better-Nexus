@@ -401,7 +401,10 @@ local function preflight(automatic,m)
         -- hostPending is any client latch (select, banish, freeze, reroll,
         -- lock, unlock), live or watchdog-released: one fact, one sentence.
         local latch=Nexus.GameAdapter.UnconfirmedLatch and Nexus.GameAdapter.UnconfirmedLatch()
-        local unconfirmed=inFlight or latch or m.s.hostPending
+        -- An automatic action whose latch already cleared can still wait for
+        -- its result (submitted, uncertain or expired intent): the same fact.
+        local intent=Nexus.PendingIntentState and Nexus.PendingIntentState()
+        local unconfirmed=inFlight or latch or m.s.hostPending or intent~=nil
         local causes={}
         if unconfirmed then
             causes[#causes+1]="The last Echo action has no confirmed result yet."
