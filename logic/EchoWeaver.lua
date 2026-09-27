@@ -226,7 +226,24 @@ function EchoWeaver.DecideNexus(state)
         if family==nil and id and state.catalog and state.catalog.familyOf then
             family=state.catalog.familyOf[id]
         end
-        local otherTier=family~=nil and plan.wishedFamilies and plan.wishedFamilies[family]
+        -- Only when the card's quality differs from every requested tier of
+        -- that family: a same-quality variant is not a quality difference.
+        local otherTier=false
+        local target=family~=nil and plan.wishedFamilies and plan.wishedFamilies[family]
+            and plan.targets and plan.targets[family]
+        if target then
+            local cardQ=tonumber(c.quality)
+            if cardQ==nil and id and state.catalog and state.catalog.rows and state.catalog.rows[id] then
+                cardQ=tonumber(state.catalog.rows[id].quality)
+            end
+            otherTier=cardQ~=nil
+            for _,tier in ipairs(target.qualityTiers or {}) do
+                if tonumber(tier.q)==cardQ then otherTier=false end
+            end
+            if not target.qualityTiers or #target.qualityTiers==0 then
+                otherTier=cardQ~=nil and tonumber(target.wishedQuality)~=cardQ
+            end
+        end
         annotations[i]=isFrozen and "frozen" or c.isGuaranteed and "guaranteed"
             or wanted and "wanted" or requested[id] and "target satisfied"
             or otherTier and "wrong quality" or "filler"

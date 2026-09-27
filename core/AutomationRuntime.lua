@@ -997,8 +997,11 @@ local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets
         local copies = targetEntry.copies
         if id and row and fam and copies then
             local q = tonumber(row.quality) or 0
+            -- designTarget: appended from the design, not a row of the
+            -- plan itself; it does not make an untyped plan typed.
             entries[#entries + 1] = {
                 spellId=id,quality=q,stacks=copies,family=fam,locked=true,
+                designTarget=true,
             }
             local target = WritableTarget(fam)
             if target then
@@ -1086,8 +1089,13 @@ local function StrategyWishlistKey(wishlist)
     local entryParts = {}
     for index, entry in ipairs(type(wishlist.entries) == "table"
         and wishlist.entries or {}) do
-        entryParts[index] = KeyPart(type(entry) == "table"
-            and entry.spellId or nil)
+        -- Roles and copies are compiled into the plan (Strategy.Compile's
+        -- locked-target counts and explicit-roles signal), so a role-only
+        -- change must not reuse the old plan.
+        entryParts[index] = type(entry) == "table" and table.concat({
+            KeyPart(entry.spellId), KeyPart(entry.stacks),
+            KeyPart(entry.locked), KeyPart(entry.sourceRole)}, ":")
+            or KeyPart(nil)
     end
     return table.concat({
         table.concat(familyParts, ","),
