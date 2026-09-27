@@ -9,6 +9,9 @@ local MAX_ENTRIES = 20
 local MAX_SOURCE_BYTES = 64
 local MAX_MESSAGE_BYTES = 2000
 local recording = false
+-- Errors recorded since this load. The history lists newest last, so these
+-- are its newest entries; everything before them was retained from earlier.
+local sessionRecorded = 0
 
 local function SafeText(value, fallback)
     if value == nil then return "nil" end
@@ -136,6 +139,7 @@ function Errors.Record(source, value)
     end)
     recording = false
     if not ok then return false, SafeText(err, "error history write failed") end
+    sessionRecorded = sessionRecorded + 1
     return true
 end
 
@@ -190,6 +194,13 @@ end
 
 function Errors.Limit()
     return MAX_ENTRIES
+end
+
+-- How many errors were recorded since this load: the newest entries of
+-- History. It can exceed the MAX_ENTRIES that History retains, and Clear does
+-- not reset it, so a reader caps it at the number of entries it holds.
+function Errors.SessionCount()
+    return sessionRecorded
 end
 
 function Errors.SafeText(value)
