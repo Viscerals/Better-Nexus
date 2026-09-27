@@ -588,7 +588,7 @@ function M.Start(value,tracked)
         -- checks (Prepare, Confirm) still run.
         value=tonumber(value)
         if not draft.tracking then return nil,"The maximum changed. Review it, then press Start again." end
-        if not integer(value,1,10000) then return nil,"Choose a maximum, or press Max, before starting." end
+        if not integer(value,1,TRACK_CAP) then return nil,"Choose a maximum, or press Max, before starting." end
         local a,e=M.Prepare("assigned",value);if not a then return nil,e end
         return M.Confirm(a.token)
     end
@@ -1192,7 +1192,8 @@ function M.BlocksOrdinary()
     end
     return run and (run.running or run.pending~=nil or (run.state=="PAUSED" or run.state=="LIMIT")) or false
 end
--- Display snapshot. One adapter read per call; it authorizes nothing (every
+-- Display snapshot. One adapter read per call (plus passive balance reads for
+-- the balance line and the maximum draft); it authorizes nothing (every
 -- action reads again). detail=true adds the source list for Advanced.
 function M.Status(detail)
     init();local m,err,failed=inspect();local a=m and m.assignment or failed or assigned()
