@@ -854,14 +854,18 @@ end
 
 local function CompletePairCursor(cursor)
     local summary = cursor.summary
-    summary.count = (summary.dummy > 0 and 1 or 0)
-        + (summary.lk > 0 and 1 or 0)
-    summary.best = math.max(summary.dummy, summary.lk)
     local pair = cursor.result[1]
     if pair then
+        -- #26: every number a card or detail shows comes from ONE character's
+        -- real pair. Per-category maxima can belong to two characters.
+        summary.dummy = pair.dummyDps
+        summary.lk = pair.lkDps
         summary.average = pair.average
         summary.pair = pair
     end
+    summary.count = (summary.dummy > 0 and 1 or 0)
+        + (summary.lk > 0 and 1 or 0)
+    summary.best = math.max(summary.dummy, summary.lk)
     cursor.phase = "done"
 end
 
