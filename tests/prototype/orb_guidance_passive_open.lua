@@ -45,23 +45,48 @@ local function Snapshot(H,M)
  },' | ')
 end
 
--- 1. Start refusal: each present cause is named; nothing combined or vague.
+-- 1. Start refusal: each present cause is named. While an action has no
+-- confirmed result, a shown choice or offer is only reported: no "choose"
+-- or "finish" instruction that could repeat an action already sent.
+local function NoImperative(why)
+ local l=why:lower()
+ return not l:find('choose',1,true) and not l:find('finish',1,true)
+  and not l:find('retry',1,true) and not l:find('start a new',1,true)
+end
+local function Leads(why,first,second)
+ local a,b=why:find(first,1,true),why:find(second,1,true)
+ return a~=nil and b~=nil and a<b
+end
 do
  local H,M,A,O=Fresh()
  H.OrbPlan()
  H.Board({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}})
  H.Notify();A.Poll()
  local why=tostring(M.Status().startReason)
- check(why:find('Echo choice is open in the game window',1,true)~=nil,'an open Echo choice is named: '..why)
+ check(why:find('Choose the open Echo choice in the game window first',1,true)~=nil,
+  'a genuinely unanswered choice keeps its instruction: '..why)
  check(not why:find('Resolve the current Echo action',1,true),'the old combined sentence is gone')
+ -- The same board while a choice latch has no result.
  H.perks.pendingSelectSpellId=410002;H.Notify();A.Poll()
  why=tostring(M.Status().startReason)
- check(why:find('waiting for the game to confirm',1,true)~=nil,'an unconfirmed action is named too: '..why)
- check(why:find('Echo choice is open',1,true)~=nil,'and both stay listed: '..why)
+ check(why:find('has no confirmed result',1,true)~=nil,'the unconfirmed action is named: '..why)
+ check(why:find('An Echo choice is shown',1,true)~=nil,'the board is reported as an observation: '..why)
+ check(Leads(why,'has no confirmed result','An Echo choice is shown'),'and the waiting status leads: '..why)
+ check(NoImperative(why),'with no instruction to choose, finish, retry or start again: '..why)
  check(M.Status().canStart==false,'Start stays refused (the condition is unchanged)')
+ -- The watchdog releases the stuck latch: still no confirmed result.
+ for _=1,24 do H.Advance(.5) end
+ check(not A.InFlight(),'fixture: the watchdog released the latch')
+ why=tostring(M.Status().startReason)
+ check(why:find('has no confirmed result',1,true)~=nil and NoImperative(why),
+  'an expired watchdog is not a result: no instruction either: '..why)
  H.perks.pendingSelectSpellId=nil;H.Board(nil);O.offer=true;H.Notify();A.Poll()
  why=tostring(M.Status().startReason)
- check(why:find('An Orb offer is open',1,true)~=nil,'an open Orb offer is named: '..why)
+ check(why:find('Finish the open Orb offer in the game window first',1,true)~=nil,'an open Orb offer keeps its instruction: '..why)
+ H.perks.pendingSelectSpellId=410002;H.Notify();A.Poll()
+ why=tostring(M.Status().startReason)
+ check(why:find('An Orb offer is shown',1,true)~=nil and NoImperative(why),
+  'with an unconfirmed action the offer is only reported: '..why)
 end
 
 -- 2. An active approved run waiting for its result: with and without

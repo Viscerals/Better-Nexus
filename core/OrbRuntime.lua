@@ -392,14 +392,25 @@ local function preflight(automatic,m)
     if m.s.charges<1 then return nil,"No confirmed Orbs are available." end
     if m.s.autoAccept then return nil,"Turn off the game's automatic Echo acceptance first." end
     -- The same condition as before; the refusal names each cause that is
-    -- actually present instead of one combined sentence.
+    -- actually present. While an action has no confirmed result (a live or
+    -- watchdog-released latch, or the game still processing), a visible
+    -- offer or choice is only reported: telling the player to choose or
+    -- finish it could repeat an action that may already have been sent.
     local inFlight=Nexus.GameAdapter.InFlight()
     if m.s.hostPending or #m.s.board>0 or m.s.offerPending or inFlight then
+        -- hostPending is any client latch (select, banish, freeze, reroll,
+        -- lock, unlock), live or watchdog-released: one fact, one sentence.
+        local latch=Nexus.GameAdapter.UnconfirmedLatch and Nexus.GameAdapter.UnconfirmedLatch()
+        local unconfirmed=inFlight or latch or m.s.hostPending
         local causes={}
-        if m.s.offerPending then causes[#causes+1]="An Orb offer is open in the game; finish it in the game window." end
-        if #m.s.board>0 then causes[#causes+1]="An Echo choice is open in the game window; choose it first." end
-        if m.s.hostPending then causes[#causes+1]="The game is still processing the last Echo action." end
-        if inFlight then causes[#causes+1]="Nexus is waiting for the game to confirm the last Echo action." end
+        if unconfirmed then
+            causes[#causes+1]="The last Echo action has no confirmed result yet."
+            if m.s.offerPending then causes[#causes+1]="An Orb offer is shown." end
+            if #m.s.board>0 then causes[#causes+1]="An Echo choice is shown." end
+        else
+            if m.s.offerPending then causes[#causes+1]="Finish the open Orb offer in the game window first." end
+            if #m.s.board>0 then causes[#causes+1]="Choose the open Echo choice in the game window first." end
+        end
         return nil,"Orb mode cannot start yet. "..table.concat(causes," ")
     end
     if Nexus.GameAdapter.RivalDetected() then return nil,"Disable the other Echo automation addon before starting Orb mode." end
