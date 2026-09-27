@@ -624,14 +624,13 @@ function Identity.CanAdoptSavedMirror(record, currentOwnerKey)
         and LocalOwnsLegacyEvidence(record, current)
 end
 
-function Identity.SanitizeText(value, maxBytes)
-    local ok, text = pcall(tostring, value)
-    text = ok and tostring(text or "") or "unprintable"
-    if not Identity.ValidUtf8(text) then return "invalid" end
-    text = text:gsub("[%c|]", " "):gsub("%s+", " ")
-        :gsub("^%s+", ""):gsub("%s+$", "")
-    if not SafeSequence(text, true) then return "invalid" end
-    local limit = tonumber(maxBytes) or 96
+-- The longest prefix of text within maxBytes that does not end inside a
+-- UTF-8 sequence: a character that crosses the cap is left out whole. Valid
+-- input always gives valid output. Input that is already invalid is cut by
+-- the same rule and is not repaired.
+function Identity.Utf8Prefix(text, maxBytes)
+    text = tostring(text or "")
+    local limit = math.max(0, math.floor(tonumber(maxBytes) or 0))
     if #text <= limit then return text end
     local start = limit
     while start > 0 and text:byte(start) >= 0x80
@@ -642,4 +641,14 @@ function Identity.SanitizeText(value, maxBytes)
     local last = start + width - 1 <= limit and start + width - 1
         or start - 1
     return text:sub(1, math.max(0, last))
+end
+
+function Identity.SanitizeText(value, maxBytes)
+    local ok, text = pcall(tostring, value)
+    text = ok and tostring(text or "") or "unprintable"
+    if not Identity.ValidUtf8(text) then return "invalid" end
+    text = text:gsub("[%c|]", " "):gsub("%s+", " ")
+        :gsub("^%s+", ""):gsub("%s+$", "")
+    if not SafeSequence(text, true) then return "invalid" end
+    return Identity.Utf8Prefix(text, tonumber(maxBytes) or 96)
 end
