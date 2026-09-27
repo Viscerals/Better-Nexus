@@ -36,6 +36,21 @@ local function Settle(ok,why,ticket)
  return ok,why
 end
 local function Full(C) return C.SaturationSummary() or {} end
+-- The retention run after a start-up has no fixed completion time: a busy
+-- catalog (for example DPS compaction holding the maintenance slot) makes the
+-- owner retry after 5, 10, 20, 40 s and so on. Wait, bounded, until it has no
+-- scheduled or running enforcement and no catalog candidate is open; the
+-- business clock does not move, and the data checks that follow still decide
+-- the outcome. A missing request leaves nothing to wait for; a run that never
+-- finishes fails here.
+local function RetentionSettled(seconds)
+ for _=1,math.floor(seconds/0.05) do
+  if not Nexus.Scheduler.Pending('data-retention.enforce')
+   and not Nexus.BuildCatalog.RootState().candidate then return true end
+  H.Advance(.05,.05)
+ end
+ return false
+end
 local function ChatCount(text)
  local n=0;for _,line in ipairs(H.chat)do if tostring(line):find(text,1,true) then n=n+1 end end;return n
 end
@@ -113,6 +128,7 @@ local db4={settingsVersion=5,accountCharacters={},settings={},chars={},community
 for i=1,2048 do db4.communityRetentionEvictions['old-'..i]=1700000000+i end
 for i=1,2048 do db4.communityBuilds['b-'..i]=Record('b-'..i,{autoDps=i<=10}) end
 C=Boot(db4);Run(30)
+check(RetentionSettled(600),'fixture: the retention run after start-up finishes')
 check(Nexus.StartupStatus().state=='ready' and C.Status().barrierCount==2048 and C.Status().buildIdentityCount==2048,
  'fixture: both categories are full and the catalog is admitted')
 check(Count((Bundle().dataRetention or {}).markerFirstSeen)==2048,'every legacy marker is first observed now')
@@ -120,6 +136,7 @@ ok,why=C.Put(Record('fresh-1'),{source='sync'})
 check(ok==false and why=='ROOT_SLOT_LIMIT','a new build is refused while full')
 clock=clock+31*DAY
 C=Reload();Run(30)
+check(RetentionSettled(600),'the retention run after the reload finishes')
 check(C.Status().barrierCount==0 and Count((Bundle().dataRetention or {}).markerFirstSeen)==0,
  'after 30 days the legacy markers aged out and their first observations left with them')
 released=Nexus.DataRetention.ReleaseSupersededAutoBuild('b-1')
