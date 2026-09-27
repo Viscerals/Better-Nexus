@@ -141,6 +141,8 @@ local function ModelSignatures(model)
             showPerformance=showPerformance,
             layoutRevision=layoutKey,
             assignment=model.assignment,
+            orbGuidance=model.orbGuidance,
+            paused=model.paused,
         }),
         performance = Signature({
             performance=type(model.progress) == "table" and model.progress.performance or nil,
@@ -663,6 +665,7 @@ local function EnsureFrame()
     statusText:SetPoint("TOPLEFT", 2, -1)
     statusText:SetSize(276, 14)
     statusText:SetJustifyH("LEFT")
+    frame._rollStatus = statusText
 
     for i = 1, 3 do
         local fs = rollArea:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -671,6 +674,28 @@ local function EnsureFrame()
         fs:SetJustifyH("LEFT")
         cardTexts[i] = fs
     end
+
+    -- Passive navigation only: it opens the Orb window, which reads and
+    -- shows state. It starts, resumes, approves and spends nothing.
+    local orbsBtn = CreateFrame("Button", nil, rollArea, "UIPanelButtonTemplate")
+    orbsBtn:SetSize(84, 16)
+    orbsBtn:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -2, 0)
+    orbsBtn:SetText("Open Orbs...")
+    orbsBtn:SetScript("OnClick", function()
+        if Nexus.OrbPanel and Nexus.OrbPanel.Show then Nexus.OrbPanel.Show() end
+    end)
+    orbsBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Orbs / Lost Memories", 1, 0.82, 0)
+        GameTooltip:AddLine("Opens the Orb window to inspect it. It starts or spends nothing.", 0.85, 0.85, 0.85, true)
+        for _, b in ipairs(self.blockers or {}) do
+            GameTooltip:AddLine(tostring(b.text), 1, 0.6, 0.4, true)
+        end
+        GameTooltip:Show()
+    end)
+    orbsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    orbsBtn:Hide()
+    frame._orbsBtn = orbsBtn
 
     recText = rollArea:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     recText:SetPoint("TOPLEFT", 2, -64)
@@ -1584,7 +1609,9 @@ local function ApplyModel(model, signatures)
             local complete = total > 0 and owned >= total
                 and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
             local cards = type(model.cards) == "table" and model.cards or {}
+            local guide = type(model.orbGuidance) == "table" and model.orbGuidance or nil
             local activeRoll = #cards > 0 or SafeText(model.recommendation) ~= ""
+                or (guide and SafeText(guide.text) ~= "") or false
             local noBuild = total <= 0 or not pr.wishlistName
             local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
             local statusVisible = ss and (ss.tier or ss.mode or ss.ash
@@ -1622,7 +1649,10 @@ local function ApplyModel(model, signatures)
         and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
     local cards = type(model.cards) == "table" and model.cards or {}
     local recommendation = SafeText(model.recommendation)
-    local activeRoll = #cards > 0 or recommendation ~= ""
+    local guide = type(model.orbGuidance) == "table" and model.orbGuidance or nil
+    -- With no build, the setup view already names the missing Wishlist.
+    local guideText = (guide and total > 0 and name) and SafeText(guide.text) or ""
+    local activeRoll = #cards > 0 or recommendation ~= "" or guideText ~= ""
     local noBuild = total <= 0 or not name
     local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
     local statusVisible = ss and (ss.tier or ss.mode or ss.ash or ss.gain or ss.intensity ~= nil) and true or false
@@ -1666,12 +1696,27 @@ local function ApplyModel(model, signatures)
     frame._rollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, statusVisible and -98 or -39)
     if activeRoll then
         local activeSlot = tonumber(pr.activeSlot) or 0
-        statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
+        -- Auto stays ON while paused; the heading must not say it is acting.
+        if model.auto and model.paused then
+            statusText:SetText("|cffffd100Auto ON — paused|r")
+        elseif #cards == 0 and recommendation == "" then
+            statusText:SetText("|cff7fd5ffRoll status|r")
+        else
+            statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
+        end
         for i = 1, 3 do
             local c = cards[i]
             cardTexts[i]:SetText(type(c) == "table" and SafeText(c.text) or "")
         end
-        recText:SetText(recommendation)
+        recText:SetText(recommendation ~= "" and recommendation or guideText)
+    end
+    if frame._orbsBtn then
+        frame._orbsBtn.blockers = guide and guide.blockers or nil
+        if activeRoll and guide and guide.openOrbs and total > 0 and name then
+            statusText:SetWidth(186);frame._orbsBtn:Show()
+        else
+            statusText:SetWidth(276);frame._orbsBtn:Hide()
+        end
     end
 
     missingNamesCache = type(pr.missing) == "table" and pr.missing or {}

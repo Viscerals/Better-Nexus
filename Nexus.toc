@@ -19,6 +19,7 @@ logic\Strategy.lua
 logic\Ratchet.lua
 logic\EchoWeaver.lua
 logic\OrbPolicy.lua
+logic\OrbGuidance.lua
 logic\Policy.lua
 core\Revisions.lua
 core\Identity.lua
