@@ -83,22 +83,42 @@ local function Run(label,shape)
  H.perks.serverBuildSlots[upload[2]]={name=upload[3],verified=false,echoes=rows}
  Settle()
  local after=Progress()
- local uploadedLocked=0
- for _,e in ipairs(upload[4]) do for _,id in ipairs(L) do if e.spellId==id then uploadedLocked=uploadedLocked+1 end end end
- return before,after,uploadedLocked,H
+ local function LockedRows(up) local n=0;for _,e in ipairs(up[4]) do for _,id in ipairs(L) do if e.spellId==id then n=n+1 end end end;return n end
+ local uploadedLocked=LockedRows(upload)
+ local second
+ if shape.twice then
+  -- A second save that changes nothing: the rows stay on the server plan.
+  local again=assert(A.GetLoadoutWishlist(1),label..': the assignment resolves again')
+  check(E.OpenForWishlist(again,1),label..': the editor reopens the plan')
+  local data2=ctrl.PrepareApply('Synthetic Plan')
+  check(data2~=nil,label..': the plan can be saved again')
+  local a1=#H.actions
+  ctrl.AcceptApply(data2)
+  for _=1,10 do H.Advance(.5) end
+  local up2
+  for i=a1+1,#H.actions do if H.actions[i][1]=='upload' then up2=H.actions[i] end end
+  check(up2~=nil,label..': the second save uploads')
+  Settle()
+  second={uploadedLocked=LockedRows(up2),rows=#up2[4],progress=Progress()}
+ end
+ return before,after,uploadedLocked,H,second
 end
 
 -- 1. The plan explicitly asks for ordinary copies of the two locked Echoes
 -- and has no locked targets. The save uploads those ordinary rows, and the
 -- plan still needs them afterwards: the same 2 missing of 10.
 do
- local before,after,uploaded=Run('ordinary-of-locked',{ordinaryLocked=true,design='empty'})
+ local before,after,uploaded,_,second=Run('ordinary-of-locked',{ordinaryLocked=true,design='empty',twice=true})
  check(before.total==10 and before.lockedMissing==2,
   'fixture: before the save the two ordinary copies are needed: '..tostring(before.total)..' / '..before.lockedMissing)
  check(uploaded==2,'the save uploads them as ordinary rows: '..uploaded)
  check(after.total==before.total and after.missing==before.missing and after.lockedMissing==2,
   'after a save that changed nothing the plan means the same: total '..tostring(after.total)
   ..' missing '..after.missing..' (was '..tostring(before.total)..' / '..before.missing..')')
+ check(second.uploadedLocked==2 and second.rows==10,
+  'a second unchanged save keeps both ordinary rows on the server plan: '..second.uploadedLocked..' of '..second.rows)
+ check(second.progress.total==10 and second.progress.lockedMissing==2,
+  'and the plan still means the same: '..tostring(second.progress.total)..' / '..second.progress.lockedMissing)
 end
 
 -- 2. The same ids are wanted both as ordinary copies and as locked targets.
@@ -128,6 +148,68 @@ do
  check(before.total==8 and before.missing==0,'fixture: untyped plan credits current locks: '..tostring(before.total))
  check(uploaded==0,'the untyped draft does not upload the locked ids: '..uploaded)
  check(after.total==8 and after.missing==0,'and reads the same after the save: '..tostring(after.total))
+end
+
+-- 5./6. The two other writers of a save: a NEW plan created for the active
+-- Saved Build, and a first-run plan (no active Saved Build). Both record the
+-- uploaded rows as ordinary.
+local function Fresh(activeSlot)
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+ local H=dofile('tests/prototype/harness.lua')
+ local active={}
+ for _,id in ipairs(W) do active[#active+1]={spellId=id,quality=Q(id),stacks=1,locked=false} end
+ for _,id in ipairs(U) do active[#active+1]={spellId=id,quality=Q(id),stacks=1,locked=false} end
+ for _,id in ipairs(L) do active[#active+1]={spellId=id,quality=Q(id),stacks=1,locked=true} end
+ H.perks.serverBuildSlots=activeSlot>0 and {[1]={name='Synthetic Active',verified=true,echoes=active}} or {}
+ H.perks.serverActiveSlot=activeSlot
+ local granted={}
+ for _,id in ipairs(W) do granted[H.names[id]]={{spellId=id,quality=Q(id)}} end
+ for _,id in ipairs(U) do granted[H.names[id]]={{spellId=id,quality=Q(id)}} end
+ H.granted=granted
+ H.locked={};for _,id in ipairs(L) do H.locked[#H.locked+1]={spellId=id,stacks=1} end
+ H.Boot()
+ local A,E=Nexus.GameAdapter,Nexus.WishlistEditor
+ H.Notify();A.Poll();Nexus.RequestRecompute();for _=1,6 do H.Advance(.5) end
+ local ctrl
+ for i=1,200 do local n,v=debug.getupvalue(E.DebugDraftState,i);if n==nil then break end;if n=='wishlistController' then ctrl=v end end
+ return H,A,E,ctrl
+end
+local function Typed(record)
+ if type(record)~='table' or tonumber(record.lockEvidenceVersion)~=1 then return false end
+ for _,e in ipairs(record.echoes or {}) do if e.locked~=false then return false end end
+ return #(record.echoes or {})>0
+end
+local function SaveNew(H,E,ctrl,name,echoes)
+ E.NewWishlist()
+ check(ctrl.LoadPendingEchoes(echoes,false,nil),name..': fixture: the draft is loaded')
+ local data=ctrl.PrepareApply(name)
+ check(data~=nil,name..': the new plan can be saved')
+ local a0=#H.actions
+ ctrl.AcceptApply(data)
+ for _=1,10 do H.Advance(.5) end
+ local up
+ for i=a0+1,#H.actions do if H.actions[i][1]=='upload' then up=H.actions[i] end end
+ check(up~=nil,name..': the new plan uploads')
+ return up
+end
+do
+ local H,A,E,ctrl=Fresh(1)
+ local echoes={}
+ for _,id in ipairs(W) do echoes[#echoes+1]={spellId=id,quality=Q(id),stacks=1,locked=false} end
+ for _,id in ipairs(L) do echoes[#echoes+1]={spellId=id,quality=Q(id),stacks=1,locked=false} end
+ SaveNew(H,E,ctrl,'New Plan',echoes)
+ check(Typed(Nexus.Store.State().loadoutWishlists[1]),
+  'a new plan saved for the active Saved Build records its rows as ordinary')
+end
+do
+ local H,A,E,ctrl=Fresh(0)
+ local echoes={}
+ for _,id in ipairs(W) do echoes[#echoes+1]={spellId=id,quality=Q(id),stacks=1,locked=false} end
+ SaveNew(H,E,ctrl,'First Plan',echoes)
+ local state=Nexus.Store.State()
+ check(Typed(state.loadoutWishlists and state.loadoutWishlists[1]),
+  'a first-run plan records its rows as ordinary on the slot-1 association')
+ check(Typed(state.firstRunWishlist),'and on the first-run record')
 end
 
 print('PASS role_save_keeps_explicit_ordinary checks='..checks)
