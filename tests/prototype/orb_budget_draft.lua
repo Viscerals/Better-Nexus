@@ -316,14 +316,28 @@ do
  f.start:Click()
  check(M.Status().limit==44 and SavedMax()==1,'the reviewed 44 is approved, not the newer 60, and nothing is saved')
 end
--- A prepared tracking draft whose balance became unknown: the refresh that
--- empties the amount also disables Start (canStart needs the same confirmed
--- Orb read), so an empty tracked amount cannot be armed through the window.
+-- A prepared tracking draft whose balance became unknown: after a refresh
+-- Start is disabled (canStart needs the same confirmed Orb read).
 do
  local H,M,A,O,f=Finished()
  f.start:Click();Leave(f);O.known=false;Tick(f)
  check(Shown(f)=='' and f.start:GetText()=='Start new run' and not f.start:IsEnabled(),'unavailable amount: confirmation withdrawn and Start disabled')
  check(Draft(M).tracking and Approval(M)==nil,'the draft still follows the balance; no approval')
+end
+-- The same prepared tracking draft reviewed again with a stale enabled
+-- button (close/reopen cancelled the confirmation; the balance became
+-- unknown or zero before the next refresh): refused with the balance
+-- reason, nothing armed, changed or called.
+for _,case in ipairs({{'unknown',function(O) O.known=false end,'which is not available'},{'zero',function(O) O.charges=0 end,'balance is 0'}}) do
+ local H,M,A,O,f=Finished()
+ f.start:Click();f:Hide();Nexus.OrbPanel.Show();Tick(f)
+ check(f.start:GetText()=='Start new run' and f.start:IsEnabled() and Shown(f)=='44','fixture ('..case[1]..'): the prepared draft, confirmation cancelled, Start offered')
+ local calls0,saved0=Ser(calls),Ser(Saved())
+ case[2](O)
+ f.start:Click()
+ check(f.notice:GetText():find(case[3],1,true) and not f.notice:GetText():find('press Max',1,true),case[1]..': refused with the balance reason: '..f.notice:GetText())
+ check(f.start:GetText()=='Start new run' and Draft(M).tracking and Draft(M).text==nil,case[1]..': not armed; the draft still follows the balance')
+ check(Ser(calls)==calls0 and Ser(Saved())==saved0 and Approval(M)==nil,case[1]..': no call, no saved change, no approval')
 end
 -- An amount above 10,000 is not armed.
 do

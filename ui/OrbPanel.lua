@@ -258,7 +258,15 @@ local function ensure()
             UI.Refresh()
             local amount=frame.limit:GetText();local v=tonumber(amount)
             if v==nil or v<1 or v>10000 or v~=math.floor(v) then
-                notify(nil,"Enter a whole-number maximum from 1 to 10,000, or press Max. Nothing was started.")
+                -- A draft that follows the balance has no amount of its own:
+                -- name the balance, not typing or Max.
+                local d=Nexus.OrbRuntime.LimitDraft()
+                local why="Enter a whole-number maximum from 1 to 10,000, or press Max. Nothing was started."
+                if d.tracking and d.text==nil then
+                    why=d.value==0 and "The confirmed Orb balance is 0. Nothing was started."
+                        or "The maximum follows the confirmed Orb balance, which is not available. Nothing was started."
+                end
+                notify(nil,why)
                 return
             end
             confirmNewRun=true;confirmAmount=amount;UI.Refresh();return
