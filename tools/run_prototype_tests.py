@@ -99,6 +99,7 @@ NAMES += ['quickstart_layout_fit']
 NAMES += ['assignment_picker_selected_marker']
 NAMES += ['support_report_errors']
 NAMES += ['orb_recovery_slot_and_gate']
+NAMES += ['journal_selector_tooltip_visibility']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

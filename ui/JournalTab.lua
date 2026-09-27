@@ -926,6 +926,57 @@ local function OpenServerWishlistDesigner(linked)
     end)
 end
 
+-- The selector sits in the Journal header near the screen top, so its tall
+-- ANCHOR_TOP tooltip does not fit above it and the screen clamp moves it down
+-- over the picker area. The open picker (TOOLTIP strata, higher level) then
+-- covers the warning. While the picker is open, place the tooltip beside the
+-- picker instead: right when there is room, else on the side with more room.
+-- GameTooltip strata, level and parent are not changed.
+local function ShowSelectorTooltip(selector)
+    local besidePicker = wishlistPicker and wishlistPicker:IsShown()
+    GameTooltip:SetOwner(selector, besidePicker and "ANCHOR_NONE" or "ANCHOR_TOP")
+    GameTooltip:AddLine("Automation Wishlist", 0.35, 0.8, 1)
+    GameTooltip:AddLine("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown. "
+        .. ASSIGN_NOTE, 0.82, 0.82, 0.82, true)
+    GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, 0.82, 0.25, true)
+    GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, 0.82, 0.25, true)
+    GameTooltip:Show()
+    if not besidePicker then return end
+    local gap = 4
+    local left, right = wishlistPicker:GetLeft(), wishlistPicker:GetRight()
+    if not (left and right) then
+        -- Picker layout not resolved yet (it was just shown). Its TOPLEFT is
+        -- the selector's BOTTOMLEFT, and the hovered selector is laid out.
+        local selectorLeft = selector:GetLeft()
+        if selectorLeft then
+            left = selectorLeft * (selector:GetEffectiveScale() or 1) / (wishlistPicker:GetEffectiveScale() or 1)
+            right = left + (wishlistPicker:GetWidth() or 0)
+        end
+    end
+    local screenRight = UIParent:GetRight() or UIParent:GetWidth() or 0
+    -- Tooltip width in UIParent units (the picker is a scale-1 UIParent child).
+    local width = (GameTooltip:GetWidth() or 0) * (GameTooltip:GetEffectiveScale() or 1)
+        / (UIParent:GetEffectiveScale() or 1)
+    local roomRight = right and (screenRight - right) or math.huge
+    local roomLeft = left or 0
+    GameTooltip:ClearAllPoints()
+    if roomRight < width + gap and roomLeft > roomRight then
+        GameTooltip:SetPoint("TOPRIGHT", wishlistPicker, "TOPLEFT", -gap, 0)
+    else
+        GameTooltip:SetPoint("TOPLEFT", wishlistPicker, "TOPRIGHT", gap, 0)
+    end
+end
+
+-- The picker opens and closes on a selector click while the mouse stays on
+-- the selector: place its shown tooltip again for the new picker state.
+local function RefreshSelectorTooltip()
+    local selector = associationPanel and associationPanel.selector
+    if selector and selector:IsVisible() and GameTooltip:IsShown()
+        and GameTooltip:GetOwner() == selector then
+        ShowSelectorTooltip(selector)
+    end
+end
+
 local function EnsureAssociationPanel(journal)
     if not journal then return nil end
     if not associationPanel then
@@ -1009,13 +1060,7 @@ local function EnsureAssociationPanel(journal)
         associationPanel.design:SetScript("OnLeave", function() GameTooltip:Hide() end)
         associationPanel.selector:SetScript("OnEnter", function(self)
             if self.SetBackdropBorderColor then self:SetBackdropBorderColor(0.42, 0.72, 0.95, 1) end
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Automation Wishlist", 0.35, 0.8, 1)
-            GameTooltip:AddLine("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown. "
-                .. ASSIGN_NOTE, 0.82, 0.82, 0.82, true)
-            GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, 0.82, 0.25, true)
-            GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, 0.82, 0.25, true)
-            GameTooltip:Show()
+            ShowSelectorTooltip(self)
         end)
         associationPanel.selector:SetScript("OnLeave", function(self)
             if self.SetBackdropBorderColor then self:SetBackdropBorderColor(0.25, 0.31, 0.38, 0.95) end
@@ -1042,7 +1087,10 @@ local function HideRowButtons()
 end
 
 HideWishlistPicker = function()
-    if wishlistPicker then wishlistPicker:Hide() end
+    if wishlistPicker and wishlistPicker:IsShown() then
+        wishlistPicker:Hide()
+        RefreshSelectorTooltip()
+    end
 end
 
 -- Display only: which picker row is the resolved assignment. The resolver
@@ -1256,6 +1304,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
         row:Show()
     end
     wishlistPicker:Show()
+    RefreshSelectorTooltip()
 end
 
 local function RefreshAssociationRows()
