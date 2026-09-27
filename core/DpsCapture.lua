@@ -2127,7 +2127,7 @@ end
 -- ready it cannot be claimed (the responder answers without an exclusive
 -- claim, as for any unsafe bucket).
 local DpsDigest = {
-    KEYS_PER_PUMP=4096, ROWS_PER_PUMP=256, CLAIMS_PER_PUMP=32,
+    KEYS_PER_PUMP=4096, ROWS_PER_PUMP=256, CLAIMS_PER_PUMP=8,
     UNITS_PER_PUMP=2048, ONE_CALL_VALUES=8, ONE_CALL_BYTES=2048,
     job=nil, bucketJob=nil, claimJob=nil, bucketVersion={}, bucketShape={},
     claimReady={}, pending={}, pendingSet={}, bucketOf={},

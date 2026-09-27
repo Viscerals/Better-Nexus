@@ -15,7 +15,7 @@
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local N=tonumber(os.getenv('DSD_N') or '') or 240
-local CLAIMS_PER_PUMP=32
+local CLAIMS_PER_PUMP=8
 local checks=0
 local function check(v,m) if not v then error(m,2) end;checks=checks+1 end
 
