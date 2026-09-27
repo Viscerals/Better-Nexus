@@ -13,7 +13,7 @@
 --
 -- Assertions count operations and scheduled work; no wall-clock threshold.
 -- Modeled inputs, stated where used: a continuously open Sync receive window
--- (section 8) and a refused catalog publication (section 9, fault injection
+-- (sections 8 and 8c) and a refused catalog publication (section 9, fault injection
 -- at the catalog boundary). LRP_N sets the number of filler characters for
 -- the main boot (default 240; the preserved large case, 2000, runs outside the
 -- inventory because its start-up alone exceeds the per-test time limit).
@@ -309,8 +309,16 @@ local passFrames=0
 local changes,maxLag,refreshedWhilePending={},0,0
 local lastShown=ShownAlpha()
 local maxScheduled=0
+-- Gap between the end of one pass and the start of the next (seconds).
+local minGap,prevFinished,prevStarted=math.huge,base.lastPassFinishedAt,base.lastPassStartedAt
 local function Observe(i)
- if Stats().pending then passFrames=passFrames+1 end
+ local st=Stats()
+ if st.pending then passFrames=passFrames+1 end
+ if st.lastPassStartedAt~=prevStarted then
+  if prevFinished and st.lastPassStartedAt then minGap=math.min(minGap,st.lastPassStartedAt-prevFinished) end
+  prevStarted=st.lastPassStartedAt
+ end
+ prevFinished=st.lastPassFinishedAt
  local shown=ShownAlpha()
  if shown~=lastShown then
   lastShown=shown
@@ -336,12 +344,13 @@ s=Stats()
 local completed=(s.passesCompleted or 0)-(base.passesCompleted or 0)
 print('LRP sustained','N',N,'passes',completed,'restarts',s.restarts-base.restarts,'jobs',s.jobs-base.jobs,
  'activeFrames',passFrames,'of',(SUSTAIN+6)*FPS,'maxLagFrames',maxLag,'refreshedWhilePending',refreshedWhilePending,
- 'maxScheduledFollowUps',maxScheduled,'coalesced',s.followUpsCoalesced,'deferred',s.deferredRequests,
+ 'maxScheduledFollowUps',maxScheduled,'minGap',string.format('%.2f',minGap),'coalesced',s.followUpsCoalesced,'deferred',s.deferredRequests,
  'lastPassActive',string.format('%.2f',s.lastPassDuration or -1))
 check(s.restarts==base.restarts,'2: a newer DPS revision does not discard the pass: restarts '..(s.restarts-base.restarts))
 check(completed>=2,'2: passes complete under sustained updates: '..tostring(completed))
 check(maxScheduled<=1,'6: at most one follow-up is ever scheduled: '..maxScheduled)
 check(passFrames<=0.6*(SUSTAIN+6)*FPS,'4: the fairness gap keeps the repair off most frames under sustained input: '..passFrames..'/'..(SUSTAIN+6)*FPS)
+check(minGap>=5-1/FPS and minGap<math.huge,'6: a pass starts no sooner than the minimum fairness gap (5 s) after the previous one: '..tostring(minGap))
 check(maxLag<=math.floor(5.5*FPS),'7: the HUD shows each new DPS value within the bounded lag (frames): '..tostring(maxLag))
 check(refreshedWhilePending>=1,'7: including while the repair is pending: '..refreshedWhilePending)
 check(LegacyRecovered().n==K-1,'2: no duplicate legacy build: '..LegacyRecovered().n)
@@ -424,6 +433,30 @@ do
  check(ShownAlpha()==alphaDps,'8: after the window: the HUD shows the current value')
 end
 check(Settle(40*FPS),'8: repair settles')
+
+------------------------------------------------------------------------
+-- 8c. A receive window that closes early (modeled: Sync reports an open
+-- window for 1 s only) after a refresh was deferred: an update just after
+-- the close is shown at once, not when the earlier deferral would expire.
+do
+ local sync=Nexus.Sync
+ local isReceiving,timeLeft=sync.IsReceiving,sync.ReceiveTimeLeft
+ local t0=GetTime()
+ sync.IsReceiving=function() return GetTime()<t0+1 end
+ sync.ReceiveTimeLeft=function() return GetTime()<t0+1 and 60 or 0 end
+ local deferredAt,updateAt=math.floor(FPS/2),math.floor(1.5*FPS)
+ local target,seenAt
+ Frames(12*FPS,function(i)
+  if i==deferredAt then AlphaImproves('early close: deferred') end
+  if i==updateAt then AlphaImproves('early close: after');target=alphaDps end
+  if target and not seenAt and ShownAlpha()==target then seenAt=i end
+ end)
+ sync.IsReceiving,sync.ReceiveTimeLeft=isReceiving,timeLeft
+ print('LRP earlyclose','updateAt',updateAt,'shownAt',tostring(seenAt))
+ check(seenAt and seenAt-updateAt<=30,'8c: after an early window close the pending refresh is pulled earlier: lag '
+  ..tostring(seenAt and seenAt-updateAt)..' frames')
+end
+check(Settle(40*FPS),'8c: repair settles')
 
 ------------------------------------------------------------------------
 -- 9b. The saved root is replaced mid-pass: the pass is abandoned, nothing is
