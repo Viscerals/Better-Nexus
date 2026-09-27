@@ -391,7 +391,17 @@ local function preflight(automatic,m)
     end
     if m.s.charges<1 then return nil,"No confirmed Orbs are available." end
     if m.s.autoAccept then return nil,"Turn off the game's automatic Echo acceptance first." end
-    if m.s.hostPending or #m.s.board>0 or m.s.offerPending or Nexus.GameAdapter.InFlight() then return nil,"Resolve the current Echo action before starting Orb mode." end
+    -- The same condition as before; the refusal names each cause that is
+    -- actually present instead of one combined sentence.
+    local inFlight=Nexus.GameAdapter.InFlight()
+    if m.s.hostPending or #m.s.board>0 or m.s.offerPending or inFlight then
+        local causes={}
+        if m.s.offerPending then causes[#causes+1]="An Orb offer is open in the game; finish it in the game window." end
+        if #m.s.board>0 then causes[#causes+1]="An Echo choice is open in the game window; choose it first." end
+        if m.s.hostPending then causes[#causes+1]="The game is still processing the last Echo action." end
+        if inFlight then causes[#causes+1]="Nexus is waiting for the game to confirm the last Echo action." end
+        return nil,"Orb mode cannot start yet. "..table.concat(causes," ")
+    end
     if Nexus.GameAdapter.RivalDetected() then return nil,"Disable the other Echo automation addon before starting Orb mode." end
     local capacity=0;local permitted={}
     for _,r in ipairs(m.sources) do
