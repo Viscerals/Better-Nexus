@@ -12,6 +12,9 @@ local config,run,approval,frame,configOwner
 -- editFrom: the tracking flag before the current typing, for Escape.
 local draft
 local TRACK_CAP=1000
+-- The finished run whose next-run draft was already created (memory only).
+-- Later reviews of that draft do not create it again.
+local preparedFor
 local advancing=false
 local passiveDepth=0
 local OFFER_TIMEOUT,RESULT_TIMEOUT=10,12
@@ -120,7 +123,7 @@ local function init()
     -- A saved maximum is kept as saved, whatever its value or origin. Only a
     -- genuinely absent (or unusable) one starts a draft that follows the
     -- confirmed balance. Nothing is written here.
-    draft={tracking=config.maxOrbs==nil}
+    draft={tracking=config.maxOrbs==nil};preparedFor=nil
     run={state="IDLE",reason="Choose a maximum, then Start to use safe surplus copies for the assigned Wishlist.",running=false,spent=0,reserved=0,limit=0,recent={}}
     if type(config.pending)=="table" then
         run.pending=copy(config.pending);run.pending.restored=true;run.pending.since=now()
@@ -400,7 +403,13 @@ end
 function M.NewRunDraft()
     init()
     if run.running or run.pending or run.state~="FINISHED" then return nil,"Only a finished run can be followed by a new one." end
-    draft={tracking=true};approval=nil
+    -- Once per finished run: a later review of the same new-run draft keeps
+    -- it as it is (a typed amount, or Max tracking).
+    if preparedFor==run then return true end
+    -- Checked before anything is replaced: a refusal changes nothing.
+    local v=trackedLimit()
+    if not v or v<1 then return nil,"A new run needs a confirmed Orb balance above zero. Your maximum was not changed." end
+    draft={tracking=true};preparedFor=run;approval=nil
     return true
 end
 function M.SetRecycle(enabled)

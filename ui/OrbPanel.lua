@@ -250,14 +250,26 @@ local function ensure()
         if s.state=="FINISHED" and not confirmNewRun then
             -- The explicit preparation of a new run: its draft follows the
             -- confirmed balance again; the amount is shown for review.
-            frame.limit:ClearFocus();Nexus.OrbRuntime.NewRunDraft()
-            confirmNewRun=true;confirmAmount=nil;UI.Refresh();confirmAmount=frame.limit:GetText()
-            if confirmAmount=="" then
-                confirmNewRun=false;confirmAmount=nil
-                notify(nil,"The maximum follows the confirmed Orb balance, which is not available. Nothing was started.")
+            -- A refusal (for example a balance that became unknown after the
+            -- render) arms nothing and changes nothing.
+            frame.limit:ClearFocus()
+            local prepared,why=Nexus.OrbRuntime.NewRunDraft()
+            if not prepared then notify(nil,why);return end
+            UI.Refresh()
+            local amount=frame.limit:GetText();local v=tonumber(amount)
+            if v==nil or v<1 or v~=math.floor(v) then
+                notify(nil,"Enter a whole-number maximum from 1 to 10,000, or press Max. Nothing was started.")
                 return
             end
-            UI.Refresh();return
+            confirmNewRun=true;confirmAmount=amount;UI.Refresh();return
+        end
+        -- The Confirm click checks the reviewed amount itself: an amount
+        -- changed since the review (typed, or not yet refreshed) needs a new
+        -- review, whatever the refresh timing.
+        if confirmNewRun and frame.limit:GetText()~=confirmAmount then
+            confirmNewRun=false;confirmAmount=nil
+            notify(nil,"The maximum changed. Review it, then press Start new run again.")
+            return
         end
         confirmNewRun=false;confirmAmount=nil
         if s.running or s.state=="PAUSED" then notify(primary(nil));return end
