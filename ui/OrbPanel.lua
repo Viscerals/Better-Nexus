@@ -257,7 +257,7 @@ local function ensure()
             if not prepared then notify(nil,why);return end
             UI.Refresh()
             local amount=frame.limit:GetText();local v=tonumber(amount)
-            if v==nil or v<1 or v~=math.floor(v) then
+            if v==nil or v<1 or v>10000 or v~=math.floor(v) then
                 notify(nil,"Enter a whole-number maximum from 1 to 10,000, or press Max. Nothing was started.")
                 return
             end

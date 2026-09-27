@@ -33,11 +33,13 @@ local function SavedMax() local s=Saved();return s and s.maxOrbs end
 local WATCH={'Start','Resume','Pause','Stop','Recheck','Prepare','Confirm','PrepareLimitIncrease','ConfirmLimit',
  'UseAssignedWishlist','Exclude','ClearExclusions','SetRecycle','SetSource','SuggestSources','SetLimit'}
 local calls,writes={},0
+-- The unwrapped entry points, for test-only upvalue reads.
+local ORIG={}
 local function Watch(M)
  calls={}
  for _,n in ipairs(WATCH) do
   local real=M[n]
-  if real then M[n]=function(...) calls[n]=(calls[n] or 0)+1;return real(...) end end
+  if real then ORIG[n]=real;M[n]=function(...) calls[n]=(calls[n] or 0)+1;return real(...) end end
  end
  -- Writes that change this character's saved Orb data (preferences and
  -- receipt). Other Store writers (for example the assignment read) are not
@@ -230,7 +232,14 @@ end
 -- 10b. The new-run draft is created once; later reviews review that same
 -- draft. A refused preparation changes nothing. The Confirm click itself
 -- checks that the amount is still the one reviewed.
-local function Approval(M) for i=1,300 do local n,v=debug.getupvalue(M.Confirm,i);if n==nil then return nil end;if n=='approval' then return v end end end
+-- The runtime's pending approval, read from the unwrapped Confirm.
+local function Approval(M)
+ local fn=ORIG.Confirm or M.Confirm
+ local found=false
+ for i=1,300 do local n,v=debug.getupvalue(fn,i);if n==nil then break end;if n=='approval' then found=true;if v~=nil then return v end end end
+ assert(found,'fixture: the approval upvalue is readable')
+ return nil
+end
 local function Finished()
  local H,M,A,O=Fresh()
  H.OrbPlan({{spellId=410002,quality=2,stacks=2}});O.charges=10
@@ -297,6 +306,39 @@ for _,case in ipairs({{'unknown',function(O) O.known=false end},{'malformed',fun
  check(Ser({saved=Saved(),limit=M.Status().limit,spent=M.Status().spent,state=M.Status().state})==before,case[1]..': saved data, usage and state unchanged')
  Tick(f);f.start:Click()
  check(Draft(M).tracking and Shown(f)=='44',case[1]..': a later successful preparation creates the new draft')
+end
+-- The balance changes between arming and Confirm with no refresh: the box
+-- still shows the reviewed amount, and exactly that amount is approved.
+do
+ local H,M,A,O,f=Finished()
+ f.start:Click();check(Shown(f)=='44','fixture: 44 under review')
+ O.charges=60
+ f.start:Click()
+ check(M.Status().limit==44 and SavedMax()==1,'the reviewed 44 is approved, not the newer 60, and nothing is saved')
+end
+-- A prepared tracking draft whose balance became unknown: the refresh that
+-- empties the amount also disables Start (canStart needs the same confirmed
+-- Orb read), so an empty tracked amount cannot be armed through the window.
+do
+ local H,M,A,O,f=Finished()
+ f.start:Click();Leave(f);O.known=false;Tick(f)
+ check(Shown(f)=='' and f.start:GetText()=='Start new run' and not f.start:IsEnabled(),'unavailable amount: confirmation withdrawn and Start disabled')
+ check(Draft(M).tracking and Approval(M)==nil,'the draft still follows the balance; no approval')
+end
+-- An amount above 10,000 is not armed.
+do
+ local H,M,A,O,f=Finished()
+ f.start:Click();Type(f,'20000');Leave(f);Tick(f)
+ local calls0=Ser(calls)
+ f.start:Click()
+ check(f.start:GetText()=='Start new run' and f.notice:GetText():find('from 1 to 10,000',1,true) and Ser(calls)==calls0,'20000 is not armed for review')
+end
+-- The oracle itself: a prepared approval is visible through Approval().
+do
+ local H,M,A,O,f=Finished()
+ check(Approval(M)==nil,'fixture: no approval')
+ assert(ORIG.Prepare('assigned',5))
+ check(Approval(M)~=nil,'the approval oracle sees a prepared approval (not vacuous)')
 end
 -- The next separate finished run: its first preparation resets once.
 do
