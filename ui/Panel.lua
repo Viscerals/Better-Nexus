@@ -1675,6 +1675,10 @@ local function ApplyModel(model, signatures)
     -- With no build, the setup view already names the missing Wishlist.
     local guideText = (guide and total > 0 and name) and SafeText(guide.text) or ""
     local activeRoll = #cards > 0 or recommendation ~= "" or guideText ~= ""
+    -- The roll body: an unresolved Orb run's own reason first, else the
+    -- recommendation (which carries an Orb pause reason), else the guidance.
+    local bodyText = (guide and guide.state == "orb-run" and guideText ~= "") and guideText
+        or (recommendation ~= "" and recommendation or guideText)
     local noBuild = total <= 0 or not name
     local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
     local statusVisible = ss and (ss.tier or ss.mode or ss.ash or ss.gain or ss.intensity ~= nil) and true or false
@@ -1701,10 +1705,11 @@ local function ApplyModel(model, signatures)
                     and #pr.unknownTomes or 0,
                 orbButton=(activeRoll and guide and guide.openOrbs
                     and total > 0 and name) and true or false,
-                -- Rows for the Orb guidance when it is the body text.
-                guidanceRows=(guideText ~= "" and (recommendation == ""
-                    or guide.state == "orb-run"))
-                    and Nexus.LayoutMetrics.TextRows(guideText, 248, fontScale)
+                -- Rows for the body while it shows the Orb guidance or,
+                -- with the Open Orbs button, the Orb pause reason.
+                guidanceRows=(guideText ~= "" and (bodyText == guideText
+                    or guide.openOrbs))
+                    and Nexus.LayoutMetrics.TextRows(bodyText, 248, fontScale)
                     or 0,
                 cardRows=#cards > 0,
             })
@@ -1731,6 +1736,10 @@ local function ApplyModel(model, signatures)
             statusText:SetText("|cffffd100Auto ON — paused|r")
         elseif #cards == 0 and recommendation == "" then
             statusText:SetText("|cff7fd5ffRoll status|r")
+        elseif guide and guide.openOrbs and guideText ~= "" then
+            -- With the Orb guidance and its button: the short form, which
+            -- stays one line at every font scale.
+            statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Slot " .. activeSlot) or "|cff888888Preview|r")
         else
             statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
         end
@@ -1740,8 +1749,7 @@ local function ApplyModel(model, signatures)
         end
         -- An unresolved Orb action's own reason is more specific than the
         -- general pause text; otherwise the recommendation stays first.
-        recText:SetText((guide and guide.state == "orb-run" and guideText ~= "") and guideText
-            or (recommendation ~= "" and recommendation or guideText))
+        recText:SetText(bodyText)
     end
     if frame._orbsBtn then
         frame._orbsBtn.blockers = guide and guide.blockers or nil

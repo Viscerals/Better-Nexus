@@ -88,6 +88,27 @@ do
  check(why:find('An Orb offer is shown',1,true)~=nil and NoImperative(why),
   'with an unconfirmed action the offer is only reported: '..why)
 end
+-- An automatic Take whose latch cleared on the same board: the automation
+-- runtime records the action as uncertain. No latch and no in-flight action
+-- remain, but the action still has no confirmed result, so the board is
+-- only reported (the HUD says "Waiting..." for the same record).
+do
+ local H,M,A,O=Fresh()
+ H.OrbPlan()
+ SlashCmdList.NEXUS('auto')
+ H.Board({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}})
+ H.Notify();A.Poll()
+ for _=1,8 do Nexus.RequestRecompute();H.Advance(.25) end
+ check(H.Count('take')==1 and H.perks.pendingSelectSpellId==410002,'fixture: Auto took the wanted card: '..H.Count('take'))
+ H.perks.pendingSelectSpellId=nil;H.Notify();A.Poll()
+ for _=1,4 do Nexus.RequestRecompute();H.Advance(.25) end
+ check(Nexus.PendingIntentState()=='uncertain','fixture: the automation runtime records it as uncertain: '..tostring(Nexus.PendingIntentState()))
+ check(not A.InFlight() and not A.UnconfirmedLatch(),'fixture: no latch and no in-flight action remain')
+ local why=tostring(M.Status().startReason)
+ check(Leads(why,'has no confirmed result','An Echo choice is shown') and NoImperative(why),
+  'an uncertain automatic action: the board is only reported: '..why)
+ check(M.Status().canStart==false,'Start stays refused')
+end
 
 -- 2. An active approved run waiting for its result: with and without
 -- opening the Orb window, identical steps give identical outcomes.

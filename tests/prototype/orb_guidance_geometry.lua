@@ -73,7 +73,7 @@ local function Boot(orbService,opt)
  end)
  if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then _G.NexusQuickStart:Hide();H.Advance(.2) end
  assert(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Synthetic Plan',Plan(),opt.design or {}))
- SlashCmdList.NEXUS('auto')
+ if opt.auto~=false then SlashCmdList.NEXUS('auto') end
  for _=1,6 do Nexus.RequestRecompute();H.Advance(.4) end
 end
 local idle={IsStateKnown=function() return true end,IsOfferPending=function() return false end,
@@ -89,14 +89,19 @@ local function Scale(s)
  return layout
 end
 local function Top(region) local _,_,_,_,y=region:GetPoint(1);return -y end
-local function Fit(label,expectButton)
+local function Fit(label,expectButton,withCards)
  for _,s in ipairs(SCALES) do
   local layout=Scale(s)
   local btn,head,rec,area=NexusPanel._orbsBtn,NexusPanel._rollStatus,NexusPanel._rollRec,NexusPanel._rollStatus:GetParent()
   local g=(Nexus.Panel._lastModel or {}).orbGuidance or {}
   local tag=label..' @'..s
   check(g.text~=nil,tag..': fixture: guidance text is shown: '..tostring(g.state))
-  check(rec:GetText()==g.text,tag..': fixture: the body shows the guidance text')
+  local m0=Nexus.Panel._lastModel or {}
+  if withCards then
+   check(#(m0.cards or {})>0 and rec:GetText()==m0.recommendation,tag..': fixture: cards, and the body shows the recommendation')
+  else
+   check(rec:GetText()==g.text,tag..': fixture: the body shows the guidance text')
+  end
   check(btn:IsShown()==expectButton,tag..': the button is '..(expectButton and 'shown' or 'hidden'))
   local recBottom=Top(rec)+rec:GetHeight()
   check(Top(rec)>=Top(head)+head:GetHeight(),tag..': the body starts below the heading')
@@ -141,6 +146,16 @@ do
  Fit('waiting',false)
 end
 do Boot(stateless);Fit('longest Orb-state reason',true) end
+-- The Orb-state pause with a board shown: cards, the pause reason as the
+-- recommendation body, the button, and the heading (Auto OFF: the
+-- preview/active heading; Auto ON: "Auto ON — paused").
+for _,auto in ipairs({false,true}) do
+ Boot(stateless,{auto=auto,rolled=40})
+ H.Board({{spellId=200016,quality=0},{spellId=200015,quality=0},{spellId=200014,quality=0}});H.Notify()
+ for _=1,6 do Nexus.RequestRecompute();H.Advance(.4) end
+ check(((Nexus.Panel._lastModel or {}).orbGuidance or {}).state=='orb-state','fixture: the Orb-state guidance with a board')
+ Fit('Orb-state with cards, Auto '..(auto and 'ON' or 'OFF'),true,true)
+end
 
 -- An earlier Orb action unresolved after a reload: the Orb runtime's own
 -- recovery reason (about 200 characters) is the HUD body, with the button.

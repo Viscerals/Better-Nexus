@@ -142,7 +142,11 @@ end
 local function Keep(label,setup)
  local H,M,A,O=Fresh()
  setup(H,M,A,O)
+ -- A reload replaces the runtime table: observe the current one.
+ M=Nexus.OrbRuntime
  local L=Locals(M)
+ check(L.run and L.config and (L.run.running or L.run.pending~=nil),
+  label..': fixture: a running or pending operation is observed: '..tostring(L.run and L.run.state))
  local function Snap()
   local r=L.run
   return Ser({limit=r.limit,spent=r.spent,reserved=r.reserved,state=r.state,running=r.running,
@@ -171,6 +175,9 @@ Keep('restored receipt',function(H,M,A,O)
  assert(loadfile('core/OrbAdapter.lua'))('Nexus',{})
  assert(loadfile('core/OrbRuntime.lua'))('Nexus',{})
  H.M=Nexus.OrbRuntime
+ -- The runtime loads the saved receipt lazily; BlocksOrdinary is the read
+ -- path the HUD already calls. It restores the run without Status().
+ assert(H.M.BlocksOrdinary(),'fixture: the restored receipt blocks ordinary rolling')
 end)
 
 print('PASS orb_draft_approval_preserved checks='..checks)
