@@ -227,6 +227,93 @@ do
  f.start:Click();check(M.Status().limit==5 and N('Start')==starts+1,'the new run is approved for the reviewed 5')
 end
 
+-- 10b. The new-run draft is created once; later reviews review that same
+-- draft. A refused preparation changes nothing. The Confirm click itself
+-- checks that the amount is still the one reviewed.
+local function Approval(M) for i=1,300 do local n,v=debug.getupvalue(M.Confirm,i);if n==nil then return nil end;if n=='approval' then return v end end end
+local function Finished()
+ local H,M,A,O=Fresh()
+ H.OrbPlan({{spellId=410002,quality=2,stacks=2}});O.charges=10
+ local f=Nexus.OrbPanel.Show();Watch(M);Tick(f)
+ Type(f,'1');Leave(f);f.start:Click()
+ H.Offer({{spellId=410001,quality=1},{spellId=410003,quality=0},{spellId=410008,quality=1}})
+ H.Result(410001,1)
+ assert(M.Status().state=='FINISHED','fixture: finished at its limit')
+ O.charges=44;Tick(f)
+ assert(Shown(f)=='1' and not Draft(M).tracking,'fixture: the typed 1 is the draft')
+ return H,M,A,O,f
+end
+-- Prepare the new draft (44) -> type 10 -> refresh -> review again: 10.
+do
+ local H,M,A,O,f=Finished()
+ local starts=N('Start')
+ f.start:Click();check(Shown(f)=='44' and Draft(M).tracking and f.start:GetText()=='Confirm new run','fixture: the new draft follows the balance (44)')
+ Type(f,'10');Leave(f);Tick(f)
+ check(f.start:GetText()=='Start new run','the edited amount withdraws the confirmation')
+ f.start:Click()
+ check(Shown(f)=='10' and not Draft(M).tracking,'reviewing again keeps the typed 10 (the draft is not created again): '..Shown(f))
+ check(f.start:GetText()=='Confirm new run' and f.status:GetText():find('up to 10 Orb',1,true),'10 is shown for review')
+ f:Hide();Nexus.OrbPanel.Show();Tick(f)
+ check(Shown(f)=='10' and not Draft(M).tracking and f.start:GetText()=='Start new run','close/reopen keeps the typed 10; only the confirmation is cancelled')
+ f.start:Click();check(Shown(f)=='10' and f.start:GetText()=='Confirm new run','review again after reopening: still 10')
+ check(N('Start')==starts and Approval(M)==nil,'no run and no approval before Confirm')
+ f.start:Click()
+ check(M.Status().limit==10 and N('Start')==starts+1,'Confirm approves the reviewed 10: '..tostring(M.Status().limit))
+end
+-- The amount changes and Confirm is clicked before any refresh: refused.
+do
+ local H,M,A,O,f=Finished()
+ f.start:Click();check(f.start:GetText()=='Confirm new run' and Shown(f)=='44','fixture: 44 under review')
+ local starts,prepares,spends=N('Start'),N('Prepare'),H.Count('orb-spend')
+ Type(f,'12') -- still focused; no refresh before the click
+ f.start:Click()
+ check(N('Start')==starts and N('Prepare')==prepares and H.Count('orb-spend')==spends and M.Status().state=='FINISHED',
+  'the stale confirmation starts nothing')
+ check(f.notice:GetText():find('The maximum changed',1,true) and f.start:GetText()=='Start new run','it is withdrawn with the reason')
+ check(Shown(f)=='12' and not Draft(M).tracking,'the typed 12 stays for its own review')
+end
+-- A tracked amount changes: the new amount is reviewed, still tracking.
+do
+ local H,M,A,O,f=Finished()
+ f.start:Click();check(Shown(f)=='44','fixture: 44 under review')
+ O.charges=30;Tick(f);check(f.start:GetText()=='Start new run','the changed balance withdraws the confirmation')
+ f.start:Click();check(Shown(f)=='30' and Draft(M).tracking and f.start:GetText()=='Confirm new run','the new 30 is reviewed; the draft still follows the balance')
+ f.start:Click()
+ check(M.Status().limit==30 and SavedMax()==1,'Confirm approves 30 without saving it as a typed amount')
+end
+-- Preparation with a stale enabled button: the balance became unknown,
+-- malformed or zero after the render. Nothing changes.
+for _,case in ipairs({{'unknown',function(O) O.known=false end},{'malformed',function(O) O.charges=-1 end},{'zero',function(O) O.charges=0 end}}) do
+ local H,M,A,O,f=Finished()
+ check(f.start:IsEnabled() and f.start:GetText()=='Start new run','fixture ('..case[1]..'): Start new run offered')
+ local before=Ser({saved=Saved(),limit=M.Status().limit,spent=M.Status().spent,state=M.Status().state})
+ local calls0=Ser(calls)
+ case[2](O)
+ f.start:Click()
+ check(Shown(f)=='1' and not Draft(M).tracking and Draft(M).text==nil,case[1]..': the typed 1 and its mode are kept')
+ check(f.start:GetText()=='Start new run' and f.notice:GetText():find('confirmed Orb balance',1,true),case[1]..': refused with the reason, not armed: '..f.notice:GetText())
+ check(Approval(M)==nil and Ser(calls)==calls0,case[1]..': no approval and no lifecycle call')
+ O.known=true;O.charges=44
+ check(Ser({saved=Saved(),limit=M.Status().limit,spent=M.Status().spent,state=M.Status().state})==before,case[1]..': saved data, usage and state unchanged')
+ Tick(f);f.start:Click()
+ check(Draft(M).tracking and Shown(f)=='44',case[1]..': a later successful preparation creates the new draft')
+end
+-- The next separate finished run: its first preparation resets once.
+do
+ local H,M,A,O,f=Finished()
+ f.start:Click();Type(f,'1');Leave(f);Tick(f);f.start:Click();f.start:Click()
+ check(M.Status().limit==1 and M.Status().running,'fixture: the second run (1) started')
+ -- A replacement that differs from the spent source (no same-ID ambiguity).
+ local cards={{spellId=410008,quality=1},{spellId=410003,quality=0},{spellId=410005,quality=0}}
+ H.Offer(cards)
+ local took;for _,a in ipairs(H.actions) do if a[1]=='take' then took=a[2] end end
+ local q;for _,c in ipairs(cards) do if c.spellId==took then q=c.quality end end
+ H.Result(took,q)
+ check(M.Status().state=='FINISHED','fixture: the second run finished')
+ O.charges=40;Tick(f);check(Shown(f)=='1' and not Draft(M).tracking,'its typed 1 stays until the next preparation')
+ f.start:Click();check(Draft(M).tracking and Shown(f)=='40','the first preparation after this run follows the balance again')
+end
+
 -- 11. An assignment refresh keeps the draft and its mode.
 do
  local H,M,A,O=Fresh()
