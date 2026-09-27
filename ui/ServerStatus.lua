@@ -9,7 +9,10 @@ Nexus.ServerStatus = M
 local rootFrame
 local scanner
 local elapsed = 0
-local hideHooked = false
+-- #33: the frames that already carry the OnShow hook. The client chains
+-- hooks and never removes them, so the guard is the frame OBJECT, not a flag
+-- that a world entry resets. Weak keys: a frame the game discards is not kept.
+local hookedFrames = setmetatable({}, { __mode = "k" })
 -- The exact widget THIS module hid, or nil. Holding the frame rather than a
 -- flag answers both questions at once: whether we are the reason something is
 -- hidden, and WHICH something. It is deliberately not cleared when the world
@@ -321,8 +324,9 @@ local function ApplyVisibility()
     end
 
     local hookTarget = rootFrame
-    if hookTarget and not hideHooked and type(hookTarget.HookScript) == "function" then
-        hideHooked = true
+    if hookTarget and not hookedFrames[hookTarget]
+        and type(hookTarget.HookScript) == "function" then
+        hookedFrames[hookTarget] = true
         hookTarget:HookScript("OnShow", function(self)
             -- The same question as above: a widget that comes back while no
             -- replacement can display is left where the game put it.
@@ -340,7 +344,6 @@ function M.Init()
     scanner:RegisterEvent("PLAYER_ENTERING_WORLD")
     scanner:SetScript("OnEvent", function()
         rootFrame = nil
-        hideHooked = false
     end)
     scanner:SetScript("OnUpdate", function(_, dt)
         elapsed = elapsed + (tonumber(dt) or 0)
@@ -452,7 +455,6 @@ end
 
 function M.Rescan()
     rootFrame = nil
-    hideHooked = false
     cachedSignature = ""
     local found = FindFrames()
     ApplyVisibility()

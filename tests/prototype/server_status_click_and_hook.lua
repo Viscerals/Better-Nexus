@@ -8,6 +8,10 @@
 -- not known offline, so no child handler is ever invoked; the menu opens
 -- only through HardmodeFrame itself, and fails closed when it is absent.
 --
+-- #33: the OnShow hook that keeps the stock HUD hidden is installed once per
+-- frame OBJECT. The client chains hooks and never removes them, so a hook
+-- added again on every world entry kept stacking on the same frame.
+--
 -- The real module in a synthetic host (the server_hud_handoff shape).
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 
@@ -117,6 +121,27 @@ do
  check(#printed==1,'the player is told why: '..#printed)
  status.OpenHardcoreMenu()
  check(#printed==1,'and told only once per session: '..#printed)
+end
+
+-- 3. #33: world entries on the SAME stock frame keep exactly one hook.
+do
+ local root=StockFrame()
+ local _,tick,enterWorld=Host(root,nil)
+ tick()
+ check(root.hookInstalls==1,'fixture: the first scan installs the hook: '..root.hookInstalls)
+ for _=1,6 do enterWorld();tick() end
+ check(root.hookInstalls==1,'six world entries add no hook to the same frame: '..root.hookInstalls)
+ Nexus.ServerStatus.Rescan()
+ check(root.hookInstalls==1,'nor does a rescan: '..root.hookInstalls)
+ root:Hide();root.hookRuns=0;root:Show()
+ check(root.hookRuns==1,'one show runs the hook once: '..root.hookRuns)
+ check(root.shown==false,'and the hook still hides the stock HUD while Nexus replaces it')
+ -- A NEW frame object (the game rebuilt it) gets its own single hook.
+ local rebuilt=StockFrame()
+ ProjectEbonholdPlayerRunFrame=rebuilt
+ enterWorld();tick();enterWorld();tick()
+ check(rebuilt.hookInstalls==1,'a rebuilt frame is hooked once: '..rebuilt.hookInstalls)
+ check(root.hookInstalls==1,'and the old frame gains nothing: '..root.hookInstalls)
 end
 
 print=realPrint
