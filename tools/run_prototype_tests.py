@@ -102,6 +102,7 @@ NAMES += ['orb_recovery_slot_and_gate']
 NAMES += ['journal_selector_tooltip_visibility']
 NAMES += ['legacy_repair_progress_fairness','legacy_repair_boot_cases']
 NAMES += ['hud_quality_labels']
+NAMES += ['wishlist_scroll_clamp']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
