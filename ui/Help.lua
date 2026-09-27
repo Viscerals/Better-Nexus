@@ -58,7 +58,7 @@ The addon uses its normal live sharing network. Do not flood it or test malforme
 
 1. Open /nexus orbs. Its Wishlist is the same assignment shown in the main panel. Use My Builds or the Wishlist Editor if none is assigned.
 2. Check missing rolled copies, locked-target limits, and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
-3. Enter the maximum Orbs. Start explicitly approves that maximum and automatic use of eligible surplus copies, including safe recycling. Opening the window approves nothing.
+3. Choose the maximum Orbs. Until you enter an amount it follows your confirmed Orb balance, up to 1000; Max returns to that. An amount you enter stays until you change it. Start explicitly approves the maximum shown and automatic use of eligible surplus copies, including safe recycling. Opening the window approves nothing.
 4. One Start continues after each confirmed result. It stops at target completion, the maximum, insufficient balance, no safe source, or uncertainty. Locked and required copies stay protected. Advanced provides optional exclusions and read-only Recheck.
 5. Changing the active loadout, assignment or targets pauses new actions. An already-submitted operation remains bound to its original target. After it settles, explicit Resume adopts the new target and retains all usage against the same maximum.
 

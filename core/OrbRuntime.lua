@@ -4,6 +4,14 @@ Nexus=Nexus or {}
 local M={};Nexus.OrbRuntime=M
 local P=assert(Nexus.OrbPolicy);local B=assert(Nexus.GameAdapter.Orbs)
 local config,run,approval,frame,configOwner
+-- The unapproved maximum draft. Memory only: it is never saved, and it is
+-- rebuilt only when the preferences of another character or row load.
+-- tracking=true: the draft follows the confirmed Orb balance, up to
+-- TRACK_CAP (a suggestion ceiling only; typed limits keep 1-10,000).
+-- text: what the player typed and has not saved yet (nil when nothing).
+-- editFrom: the tracking flag before the current typing, for Escape.
+local draft
+local TRACK_CAP=1000
 local advancing=false
 local passiveDepth=0
 local OFFER_TIMEOUT,RESULT_TIMEOUT=10,12
@@ -107,15 +115,19 @@ local function init()
     local state=Nexus.Store and Nexus.Store.State and Nexus.Store.State()
     local c=state and state.orbRefinement or {}
     config={name=c.name or "No Wishlist selected",entries=copy(c.entries or {}),sources=copy(c.sources or {}),
-        excluded=copy(c.excluded or {}),recycle=c.recycle==true,maxOrbs=integer(c.maxOrbs,1,10000) and c.maxOrbs or 10,
+        excluded=copy(c.excluded or {}),recycle=c.recycle==true,maxOrbs=integer(c.maxOrbs,1,10000) and c.maxOrbs or nil,
         pending=copy(c.pending),fingerprint=c.fingerprint,selectedSlot=c.selectedSlot,origin=c.origin}
+    -- A saved maximum is kept as saved, whatever its value or origin. Only a
+    -- genuinely absent (or unusable) one starts a draft that follows the
+    -- confirmed balance. Nothing is written here.
+    draft={tracking=config.maxOrbs==nil}
     run={state="IDLE",reason="Choose a maximum, then Start to use safe surplus copies for the assigned Wishlist.",running=false,spent=0,reserved=0,limit=0,recent={}}
     if type(config.pending)=="table" then
         run.pending=copy(config.pending);run.pending.restored=true;run.pending.since=now()
         run.pending.refreshRequested=false;run.pending.baselineStamp=nil;run.pending.recoverySerial=nil;run.pending.recoveryMatched=nil
         run.state="RECOVERY";run.reason="An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open."
         run.recovery={kind="CHECKING",observing=false}
-        run.spent=run.pending.spent or 0;run.reserved=run.pending.spendConfirmed and 0 or 1;run.limit=run.pending.limit or config.maxOrbs
+        run.spent=run.pending.spent or 0;run.reserved=run.pending.spendConfirmed and 0 or 1;run.limit=run.pending.limit or config.maxOrbs or 0
         -- Start the read-only recovery pump now. A manual choice made before the
         -- player opens the Orb window can then still be observed.
         run.recoveryFastUntil=now()+RECOVERY_FAST_WINDOW
@@ -330,7 +342,66 @@ function M.SetLimit(n)
     init();n=tonumber(n)
     if not integer(n,1,10000) then return nil,"Choose a whole-number Orb limit from 1 to 10,000." end
     if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,"Use Increase limit while paused, or finish this run first." end
-    local before=copy(config);config.maxOrbs=n;return changedConfig(before)
+    local before=copy(config);config.maxOrbs=n
+    local ok,err=changedConfig(before)
+    -- A saved typed maximum is the player's own amount: tracking stops.
+    if ok then draft={tracking=false} end
+    return ok,err
+end
+-- The tracked amount from the passive, bounded balance read (no request).
+-- Only a confirmed balance counts; zero stays zero.
+local function trackedLimit()
+    local n,state,reason=B.Balance()
+    if state=="confirmed" and integer(n,0) then return math.min(n,TRACK_CAP),state end
+    return nil,state or "unknown",reason
+end
+-- Read-only view of the unapproved maximum draft. value is nil when the draft
+-- follows a balance that is not confirmed, or when the typed text is not a
+-- valid maximum.
+function M.LimitDraft()
+    init()
+    local d={tracking=draft.tracking==true,text=draft.text,saved=config.maxOrbs,cap=TRACK_CAP}
+    if d.tracking then d.value,d.balanceState,d.reason=trackedLimit()
+    elseif draft.text~=nil then
+        local n=tonumber(draft.text);d.value=integer(n,1,10000) and n or nil
+    else d.value=config.maxOrbs end
+    return d
+end
+-- The player typed into the maximum (including the same number, a partial
+-- or an empty text): tracking stops and the text is kept in memory until it
+-- is saved (Enter or Start) or cancelled (Escape). Nothing is written. An
+-- unapproved preview is obsolete.
+function M.EditLimitText(text)
+    if not editable() then return nil,"The maximum is fixed during this run." end
+    if draft.editFrom==nil then draft.editFrom=draft.tracking==true end
+    draft.tracking=false;draft.text=tostring(text or "");approval=nil
+    return true
+end
+-- Escape: the typed text is discarded and the draft is what it was before.
+function M.CancelLimitEdit()
+    init()
+    if draft.editFrom~=nil then draft.tracking=draft.editFrom end
+    draft.text=nil;draft.editFrom=nil
+    return true
+end
+-- Max: the unapproved draft follows the confirmed balance again (up to
+-- TRACK_CAP) until the player types another amount or starts. It is not a
+-- snapshot. Checked again here; on refusal the draft is unchanged. Nothing is
+-- written, started or approved.
+function M.TrackBalance()
+    if not editable() then return nil,"The maximum is fixed during this run. Nothing was changed." end
+    local v=trackedLimit()
+    if not v or v<1 then return nil,"Max needs a confirmed Orb balance above zero. Your maximum was not changed." end
+    draft={tracking=true};approval=nil
+    return true
+end
+-- The explicit preparation of a new run after a finished one: the new draft
+-- follows the confirmed balance again. Only a settled FINISHED run qualifies.
+function M.NewRunDraft()
+    init()
+    if run.running or run.pending or run.state~="FINISHED" then return nil,"Only a finished run can be followed by a new one." end
+    draft={tracking=true};approval=nil
+    return true
 end
 function M.SetRecycle(enabled)
     if not editable() then return nil,"Recycling permission is fixed during this run." end
@@ -429,11 +500,15 @@ local function preflight(automatic,m)
     if capacity<1 then return nil,"No safe surplus copies are available. Required and locked copies remain protected." end
     m.permitted=permitted;m.capacity=capacity;return m
 end
-function M.Prepare(mode)
+function M.Prepare(mode,reviewed)
     init();if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,busyReason("A new Orb run","An Orb run is already active or unresolved. Stop/settle it before starting another.") end
     local automatic=mode=="assigned"
     local m,err=preflight(automatic);if not m then return nil,err end
-    local limit=mode=="single" and 1 or config.maxOrbs
+    -- The reviewed amount, else the current draft: the tracked balance (up to
+    -- TRACK_CAP), a valid typed amount, or the saved maximum. The preview
+    -- returns it for review; Confirm refuses if the balance changed.
+    local limit=mode=="single" and 1 or (reviewed or M.LimitDraft().value)
+    if not integer(limit,1,10000) then return nil,"Choose a maximum, or press Max, before starting." end
     approval={token={},model=m,entries=copy(config.entries),sources=copy(m.permitted),
         excluded=copy(config.excluded),recycle=automatic or config.recycle,automatic=automatic,
         binding=binding(m.assignment),limit=limit,created=now()}
@@ -504,8 +579,19 @@ function M.Confirm(token)
         reason="Approved. Preparing one Orb replacement."})
     approval=nil;ensureFrame();M.Pump();return true
 end
-function M.Start(value)
+function M.Start(value,tracked)
     init()
+    if tracked then
+        -- The amount shown to the player while the draft follows the balance.
+        -- It is approved as shown: never replaced by a newer balance read at
+        -- the click, and not saved as a typed maximum. The existing fresh
+        -- checks (Prepare, Confirm) still run.
+        value=tonumber(value)
+        if not draft.tracking then return nil,"The maximum changed. Review it, then press Start again." end
+        if not integer(value,1,10000) then return nil,"Choose a maximum, or press Max, before starting." end
+        local a,e=M.Prepare("assigned",value);if not a then return nil,e end
+        return M.Confirm(a.token)
+    end
     if value~=nil then local ok,e=M.SetLimit(value);if not ok then return nil,e end end
     local a,e=M.Prepare("assigned");if not a then return nil,e end
     return M.Confirm(a.token)
@@ -1117,6 +1203,7 @@ function M.Status(detail)
     r.config.name=a.name or "No assigned Wishlist";r.config.entries=copy(a.entries or {})
     r.config.pending=nil
     r.charges,r.balanceState,r.balanceReason=B.Balance()
+    r.limitDraft=M.LimitDraft()
     if m then
         r.charges=m.s.charges;r.progress=P.Progress(assert(P.Normalize(a.entries)),m.s)
         r.sourceCount=#m.sources

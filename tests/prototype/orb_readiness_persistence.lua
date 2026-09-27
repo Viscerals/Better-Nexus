@@ -61,7 +61,8 @@ local function Key()return S.CurrentOwnerKey()end
 local owner,realWrite=Services()
 local f=Nexus.OrbPanel.Show()
 local function Snapshot()Nexus.OrbPanel.Refresh();return f.snapshot end
-local function Click(limit)f.limit:SetText(tostring(limit));f.start:Click();return f.notice:GetText()end
+-- The player types the maximum (focus, then text), as in the client.
+local function Click(limit)f.limit:SetFocus();f.limit:SetText(tostring(limit));f.limit:ClearFocus();f.start:Click();return f.notice:GetText()end
 
 -- 1. Readable assignment and ownership, NO durable row (the reproduced baseline case).
 assert(NexusDB.chars[Key()]==nil and type(S.State())=='table','fixture: readable state, no durable row')
@@ -107,11 +108,11 @@ print('PASS persistence lost after a spend: a failed save keeps the unresolved e
 Fresh();name='ProbeTester';owner,realWrite=Services();f=Nexus.OrbPanel.Show()
 ProjectEbonhold.OrbService.ConfirmSpend=function()stats.mutations=stats.mutations+1;return false end -- the server refuses
 assert(NexusDB.chars[Key()]==nil,'fixture: no row')
-Nexus.OrbRuntime.Start()                            -- no limit value: the first write is the pre-spend receipt
+Nexus.OrbRuntime.Start(3,true)                      -- the tracked balance as shown, not saved: the first write is the pre-spend receipt
 assert(type(NexusDB.chars[Key()])=='table','the receipt write created the row')
 assert(Nexus.OrbRuntime.Stop())
 s=Snapshot()
-assert(s.state=='STOPPED' and s.limit==10,'the stopped run stays shown after the row appeared: '..tostring(s.state)..' limit='..tostring(s.limit))
+assert(s.state=='STOPPED' and s.limit==3,'the stopped run stays shown after the row appeared: '..tostring(s.state)..' limit='..tostring(s.limit))
 print('PASS finished run keeps its state when its first write created the row')
 
 -- 3. Each unusable state: Start disabled with its reason; the click sends nothing and writes nothing.
@@ -145,16 +146,19 @@ for _,case in ipairs({{'transient success',function()return true end},{'writer f
  assert(Snapshot().canStart==true,'fixture: display cannot foresee a failing writer')
  local notice=Click(4)
  assert(stats.mutations==0 and notice:find('Could not preserve Orb preferences/recovery state',1,true),case[1]..': refused: '..notice)
- assert(NexusDB.chars[Key()]==nil and Nexus.OrbRuntime.Status().config.maxOrbs==10,case[1]..': no row, and the refused limit is not shown as saved')
+ assert(NexusDB.chars[Key()]==nil and Nexus.OrbRuntime.Status().config.maxOrbs==nil,case[1]..': no row, and the refused limit is not shown as saved')
 end
 print('PASS transient success and writer failure: no spend, preferences unchanged')
 
 -- 5. Character change: each character writes only its own row.
 Fresh();name='ProbeTester';owner,realWrite=Services();f=Nexus.OrbPanel.Show()
 assert(Nexus.OrbRuntime.SetLimit(5))
+assert(Nexus.OrbRuntime.EditLimitText('77'),'fixture: an unsaved typed amount for the first character')
 local first=Key()
 name='OtherTester'
-assert(Nexus.OrbRuntime.Status().config.maxOrbs==10,'the other character does not inherit the first character preferences')
+assert(Nexus.OrbRuntime.Status().config.maxOrbs==nil,'the other character does not inherit the first character preferences')
+local other=Nexus.OrbRuntime.LimitDraft()
+assert(other.text==nil and other.tracking==true,'nor its unsaved maximum draft: the other character starts from its own (absent) maximum')
 assert(Nexus.OrbRuntime.SetLimit(6))
 assert(NexusDB.chars[first].orbRefinement.maxOrbs==5 and NexusDB.chars[Key()].orbRefinement.maxOrbs==6,'each character row holds its own limit')
 name='ProbeTester'

@@ -1,7 +1,8 @@
 local H=dofile('tests/prototype/orbs_support.lua');local M,O=H.M,H.O
 H.OrbPlan({{spellId=410002,quality=2,stacks=2}});local f=Nexus.OrbPanel.Show()
 O.charges=0;Nexus.OrbPanel.Refresh()
-assert(f.balance:GetText()=='Confirmed Orb balance: 0' and not f.start:IsEnabled())
+-- The first line is the balance; a second line describes the maximum draft.
+assert(f.balance:GetText():find('^Confirmed Orb balance: 0') and not f.balance:GetText():find('^Confirmed Orb balance: 0%d') and not f.start:IsEnabled())
 assert(not M.Start() and #H.actions==0,'zero resources block without a test spend')
 O.known=false;Nexus.OrbPanel.Refresh()
 assert(f.balance:GetText():find('loading',1,true) and not f.balance:GetText():find('balance: 0',1,true) and not f.start:IsEnabled())
