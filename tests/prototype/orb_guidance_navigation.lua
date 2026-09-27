@@ -203,6 +203,10 @@ end
 -- button still only opens the window, which reads the current state.
 local function RenderThenClick(click)
  Boot({pendingRolls=0})
+ -- The saved decision log carries a wall-clock "t" (date("%H:%M:%S"); the
+ -- harness maps date to os.date). The two runs compared below boot at
+ -- different real times, so the clock is pinned for both.
+ date=function() return '00:00:00' end
  check(View().button,'fixture: the button is shown')
  local calls={}
  Count(Nexus.OrbRuntime,{'Start','Resume','Pause','Stop','Recheck','Prepare','Confirm','SetLimit','SetSource',
