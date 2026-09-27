@@ -110,6 +110,7 @@ NAMES += ['view_refresh_refusal_once']
 NAMES += ['utf8_safe_truncation']
 NAMES += ['hud_quality_labels']
 NAMES += ['wishlist_scroll_clamp']
+NAMES += ['role_save_keeps_explicit_ordinary']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

@@ -1238,19 +1238,29 @@ function Controller.New(options)
                 notify("|cffff6060Nexus:|r Wishlist uploaded, but local designed targets could not be saved. Your draft is preserved.")
                 return false, commitReason or "local_save_incomplete"
             end
+            -- The uploaded rows are exactly the plan's ORDINARY rows (locked
+            -- targets are the committed design). Record them with that role:
+            -- stored without it, an explicit ordinary row became untyped, and
+            -- a save that changed nothing let current locks count for
+            -- ordinary copies the plan still asks for.
+            local recorded = {}
+            for index, echo in ipairs(echoes) do
+                recorded[index] = {spellId=echo.spellId, quality=echo.quality,
+                    stacks=echo.stacks, locked=false}
+            end
             local associated, associationReason = true, nil
             if state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
                 associated, associationReason = Adapter.UpdateWishlistAssociationAfterSave(
-                    state.editingContext.loadoutSlot, slot, name, echoes, designTargets)
+                    state.editingContext.loadoutSlot, slot, name, recorded, designTargets)
             elseif state.createTargetContext and Adapter.SetLoadoutWishlistIdentity then
                 associated, associationReason = Adapter.SetLoadoutWishlistIdentity(
-                    state.createTargetContext.loadoutSlot, name, echoes, designTargets)
+                    state.createTargetContext.loadoutSlot, name, recorded, designTargets)
                 if associated then notify("|cff4dff80Nexus:|r assigned '" .. tostring(name)
                     .. "' to " .. tostring(state.createTargetContext.loadoutName
                         or "the active Saved Build") .. ".") end
             elseif Adapter.SetFirstLoadoutWishlistIdentity then
-                associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
+                associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
             end
             if associated ~= true then
                 state.applyRetry = nil
