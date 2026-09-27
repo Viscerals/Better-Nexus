@@ -1459,8 +1459,9 @@ function DPS.GetCommunityEligibility()
 end
 
 -- Narrow synchronous reader for detail consumers. The eligibility index is the
--- sole owner of pair-authorized category maxima; callers must not reconstruct
--- the same summary from identity-stripped Leaderboard presentation rows.
+-- sole owner of the pair-authorized summary (one character's real pair);
+-- callers must not reconstruct the same summary from identity-stripped
+-- Leaderboard presentation rows.
 function DPS.GetCommunityQualification(fingerprint)
     if type(fingerprint) ~= "string" or fingerprint == "" then return nil end
     EnsureIdentityIndex()

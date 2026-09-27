@@ -104,6 +104,7 @@ NAMES += ['legacy_repair_progress_fairness','legacy_repair_boot_cases']
 NAMES += ['dps_sync_digest_bounded']
 NAMES += ['dps_locked_history_preserved']
 NAMES += ['dps_receive_envelope']
+NAMES += ['community_card_dps_pair']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
