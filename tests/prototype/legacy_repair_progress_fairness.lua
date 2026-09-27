@@ -441,18 +441,28 @@ check(Settle(40*FPS),'8: repair settles')
 do
  local sync=Nexus.Sync
  local isReceiving,timeLeft=sync.IsReceiving,sync.ReceiveTimeLeft
+ -- Start with no receive deferral in progress: one refresh with the window
+ -- closed (modeled) ends the earlier one.
+ sync.IsReceiving=function() return false end
+ sync.ReceiveTimeLeft=function() return 0 end
+ AlphaImproves('early close: setup')
+ for _=1,2*FPS do if ShownAlpha()==alphaDps then break end;Frames(1) end
+ check(ShownAlpha()==alphaDps,'8c: setup: a refresh ran with the window closed')
+ Frames(FPS)
  local t0=GetTime()
  sync.IsReceiving=function() return GetTime()<t0+1 end
  sync.ReceiveTimeLeft=function() return GetTime()<t0+1 and 60 or 0 end
  local deferredAt,updateAt=math.floor(FPS/2),math.floor(1.5*FPS)
- local target,seenAt
+ local deferred,target,firstSeenAt,seenAt
  Frames(12*FPS,function(i)
-  if i==deferredAt then AlphaImproves('early close: deferred') end
+  if i==deferredAt then AlphaImproves('early close: deferred');deferred=alphaDps end
   if i==updateAt then AlphaImproves('early close: after');target=alphaDps end
+  if not firstSeenAt and ShownAlpha()==deferred then firstSeenAt=i end
   if target and not seenAt and ShownAlpha()==target then seenAt=i end
  end)
  sync.IsReceiving,sync.ReceiveTimeLeft=isReceiving,timeLeft
- print('LRP earlyclose','updateAt',updateAt,'shownAt',tostring(seenAt))
+ print('LRP earlyclose','deferredAt',deferredAt,'firstSeenAt',tostring(firstSeenAt),'updateAt',updateAt,'shownAt',tostring(seenAt))
+ check(firstSeenAt==nil or firstSeenAt>=FPS,'8c: setup: the open window deferred the first refresh: shown at frame '..tostring(firstSeenAt))
  check(seenAt and seenAt-updateAt<=30,'8c: after an early window close the pending refresh is pulled earlier: lag '
   ..tostring(seenAt and seenAt-updateAt)..' frames')
 end
