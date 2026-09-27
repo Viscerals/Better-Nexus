@@ -3619,6 +3619,12 @@ local function ReceiveRecord(record, transportSender, relayed)
         return RejectReceive("schema")
     end
     local incomingLocked = NormalizeEchoes(rawLocked)
+    -- #22: a received record is held to the same 79 ordinary / 6 locked /
+    -- 85 total envelope as a local capture. A loadout outside it cannot be
+    -- held in the game, so it is neither stored nor listed nor relayed.
+    if not CaptureEnvelopeVerdict(echoes, incomingLocked) then
+        return RejectReceive("integrity")
+    end
 
     MigrateLegacyLeaderboard()
     local bucket = CharacterBestStore()[category]
