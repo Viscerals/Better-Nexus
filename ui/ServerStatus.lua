@@ -422,70 +422,12 @@ function M.SetMode(mode)
     if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
 end
 
-local function CollectClickableChildren(frame, out, seen, depth)
-    out = out or {}
-    seen = seen or {}
-    depth = depth or 0
-    if not frame or seen[frame] or depth > 8 then return out end
-    seen[frame] = true
-
-    if type(frame.GetScript) == "function" then
-        local ok, onClick = pcall(frame.GetScript, frame, "OnClick")
-        if ok and type(onClick) == "function" then
-            out[#out + 1] = frame
-        end
-    end
-
-    if type(frame.GetChildren) == "function" then
-        local ok, children = pcall(function() return { frame:GetChildren() } end)
-        if ok then
-            for i = 1, #children do
-                CollectClickableChildren(children[i], out, seen, depth + 1)
-            end
-        end
-    end
-    return out
-end
-
-local function ClickServerDifficultyControl()
-    if not rootFrame then FindFrames() end
-    if not rootFrame then return false end
-
-    local buttons = CollectClickableChildren(rootFrame)
-    local rootLeft = type(rootFrame.GetLeft) == "function" and rootFrame:GetLeft() or nil
-    local rootBottom = type(rootFrame.GetBottom) == "function" and rootFrame:GetBottom() or nil
-    local rootWidth = type(rootFrame.GetWidth) == "function" and rootFrame:GetWidth() or 0
-    local rootHeight = type(rootFrame.GetHeight) == "function" and rootFrame:GetHeight() or 0
-
-    table.sort(buttons, function(a, b)
-        local function score(btn)
-            local x, y = nil, nil
-            if type(btn.GetCenter) == "function" then x, y = btn:GetCenter() end
-            local sx, sy = 0, 0
-            if x and rootLeft and rootWidth > 0 then sx = (x - rootLeft) / rootWidth end
-            if y and rootBottom and rootHeight > 0 then sy = (y - rootBottom) / rootHeight end
-            -- The stock Hardcore skull control is the upper-right clickable
-            -- child of ProjectEbonholdPlayerRunFrame. Prefer that location.
-            return sx * 100 + sy * 25
-        end
-        return score(a) > score(b)
-    end)
-
-    for i = 1, #buttons do
-        local button = buttons[i]
-        local ok, onClick = pcall(button.GetScript, button, "OnClick")
-        if ok and type(onClick) == "function" then
-            local clicked = pcall(onClick, button, "LeftButton")
-            if clicked then
-                local hard = _G.HardmodeFrame
-                if hard and type(hard.IsShown) == "function" and hard:IsShown() then
-                    return true
-                end
-            end
-        end
-    end
-    return false
-end
+-- #32: the Hardcore menu opens only through HardmodeFrame itself. The stock
+-- run frame's Hardcore control has no identity Nexus can prove, and calling
+-- a stock child's OnClick to find out what it does would run an unrelated
+-- control whenever the layout put it first. No stock click handler is ever
+-- invoked from here; without HardmodeFrame the call fails closed.
+local hardcoreUnavailableNoted = false
 
 function M.OpenHardcoreMenu()
     local hard = _G.HardmodeFrame
@@ -493,21 +435,17 @@ function M.OpenHardcoreMenu()
         if type(hard.Hide) == "function" then pcall(hard.Hide, hard) end
         return true
     end
-
-    -- Use the stock Project Ebonhold button's own click handler first. The
-    -- server initializes and opens its Hardcore panel through this control;
-    -- simply calling HardmodeFrame:Show() bypasses that setup on some clients.
-    if ClickServerDifficultyControl() then return true end
-
-    -- Safe fallback for clients where the panel is already initialized but the
-    -- stock child button cannot be resolved.
-    hard = _G.HardmodeFrame
     if hard and type(hard.Show) == "function" then
         local ok = pcall(hard.Show, hard)
         if ok then
             if type(hard.Raise) == "function" then pcall(hard.Raise, hard) end
             return true
         end
+    end
+    if not hardcoreUnavailableNoted and type(print) == "function" then
+        hardcoreUnavailableNoted = true
+        pcall(print, "|cff7fd5ffNexus:|r The Hardcore menu is not available yet. "
+            .. "Open it from the Project Ebonhold HUD.")
     end
     return false
 end
