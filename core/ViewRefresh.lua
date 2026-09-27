@@ -6,13 +6,27 @@ local ViewRefresh = {}
 Nexus.ViewRefresh = ViewRefresh
 
 local REFRESH_KEY = "ui.data-views.refresh"
+-- Longest a receive window may hold the data views back. During continuous
+-- Sync activity they refresh from committed data at least this often.
+local MAX_RECEIVE_DEFER = 5
 local initialized = false
 local schedulerReady = false
 local deferredCommunity = false
 local communityOwnsDeferred = false
 local deferredLeaderboard = false
 local deferredPanel = false
+local deferredSince = nil
 local RefreshViews
+
+local function Clock()
+    if type(GetTime) == "function" then
+        local ok, value = pcall(GetTime)
+        value = ok and tonumber(value) or nil
+        if value and value == value and value < math.huge
+            and value > -math.huge then return value end
+    end
+    return 0
+end
 
 local function RecordError(source, err)
     local errors = Nexus and Nexus.Errors
@@ -94,7 +108,10 @@ local function RunRefreshViews()
     -- the receive window closes instead of rebuilding the same represented
     -- state for every packet group.
     local receiving, remaining = ReceiveState()
-    if receiving and CanDefer() then
+    local now = Clock()
+    if receiving and deferredSince == nil then deferredSince = now end
+    local deferLeft = deferredSince and (deferredSince + MAX_RECEIVE_DEFER - now) or 0
+    if receiving and CanDefer() and deferLeft > 0 then
         local community = Nexus.CommunityBuilds
         if community and (type(community.MarkDataDirty) == "function"
             or type(community.Refresh) == "function") then
@@ -115,18 +132,19 @@ local function RunRefreshViews()
         if Nexus.Panel and type(Nexus.Panel.Refresh) == "function" then
             deferredPanel = true
         end
-        ScheduleAfterReceive(remaining)
+        ScheduleAfterReceive(math.min(remaining, deferLeft))
         return true
     end
+    -- The window closed, or it has held the views back for MAX_RECEIVE_DEFER:
+    -- refresh now from committed data. A still-open window starts its next
+    -- bounded deferral from here.
+    deferredSince = receiving and now or nil
 
     local hadDeferred = deferredCommunity or deferredLeaderboard or deferredPanel
-    local repairReady, repairState = RequestLegacyRepair(
-        hadDeferred and "sync" or "refresh")
-    if repairReady and (repairState == "scheduled"
-        or repairState == "coalesced") and CanDefer() then
-        ScheduleAfterReceive(0)
-        return true
-    end
+    -- Maintenance is requested, never waited for: the views show committed,
+    -- admitted data only, and a repair publishes its recovered builds itself
+    -- when its pass completes.
+    RequestLegacyRepair(hadDeferred and "sync" or "refresh")
     if hadDeferred then
         local refreshCommunity = deferredCommunity and not communityOwnsDeferred
         local refreshLeaderboard, refreshPanel = deferredLeaderboard, deferredPanel
@@ -171,6 +189,11 @@ function ViewRefresh.Request()
     local scheduler = Nexus.Scheduler
     if initialized and schedulerReady and scheduler
         and type(scheduler.After) == "function" then
+        -- Coalesce onto a refresh that is already scheduled; rescheduling it
+        -- here would push it later with every revision and could starve it.
+        if type(scheduler.Pending) == "function" and scheduler.Pending(REFRESH_KEY) then
+            return true
+        end
         return scheduler.After(REFRESH_KEY, 0.05, RefreshViews)
     end
     RefreshViews()
