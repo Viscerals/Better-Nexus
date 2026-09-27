@@ -448,7 +448,8 @@ function M.OpenHardcoreMenu()
     if not hardcoreUnavailableNoted and type(print) == "function" then
         hardcoreUnavailableNoted = true
         pcall(print, "|cff7fd5ffNexus:|r The Hardcore menu is not available yet. "
-            .. "Open it from the Project Ebonhold HUD.")
+            .. "Choose 'Use Server Difficulty / Soul Ash HUD' in the Nexus menu "
+            .. "and open it from the server HUD.")
     end
     return false
 end
