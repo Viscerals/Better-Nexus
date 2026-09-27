@@ -618,7 +618,8 @@ local function RenderIdlePanel(plan, owned, slots, catalog, staticContext,
     if Nexus.OrbGuidance then
         model.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
             model.progress, runtime and runtime.PendingIntentState and runtime.PendingIntentState(),
-            plan and not plan.advisorOnly))
+            plan and not plan.advisorOnly,
+            {skipHorizon = runtime and runtime.WorldLeaving and runtime.WorldLeaving() or false}))
     end
     RenderPanel(model)
 end
