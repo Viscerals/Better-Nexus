@@ -116,6 +116,10 @@ f.max:Click();check(Draft(M).tracking and Shown(f)=='60','Max follows the curren
 O.charges=45;Tick(f);check(Shown(f)=='45','Max keeps following the balance down')
 O.charges=70;Tick(f);check(Shown(f)=='70','and up')
 check(SavedMax()==10 and writes==1,'Max writes nothing; the saved maximum is kept')
+-- Max while the box still has keyboard focus (a click does not take it):
+-- the tracked amount is shown and a Start would approve it, not the typing.
+Type(f,'11');f.max:Click()
+check(Draft(M).tracking and Shown(f)=='70' and not f.limit:HasFocus(),'Max with the box focused: tracking, the tracked amount shown')
 -- Typing the same number is still the player's own amount.
 Type(f,'70');Leave(f);check(not Draft(M).tracking,'typing the same number stops tracking')
 O.charges=80;Tick(f);check(Shown(f)=='70','the same-number entry stays')
@@ -212,6 +216,7 @@ do
  Tick(f);check(Shown(f)=='1' and not Draft(M).tracking,'before a new run the typed amount stays')
  f:Hide();Nexus.OrbPanel.Show();Tick(f);check(Shown(f)=='1','reopening is not a new run')
  local starts=N('Start')
+ Type(f,'7') -- still focused when the player clicks Start new run
  f.start:Click()
  check(Draft(M).tracking and Shown(f)==tostring(O.charges),'preparing a new run returns the draft to the balance: '..Shown(f))
  check(f.start:GetText()=='Confirm new run' and f.status:GetText():find('up to '..Shown(f)..' Orb',1,true),'the amount is shown for review')

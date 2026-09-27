@@ -237,7 +237,9 @@ local function ensure()
         if self.settingText or not self.editable then return end
         if userInput==true or self:HasFocus() then Nexus.OrbRuntime.EditLimitText(self:GetText()) end
     end)
-    frame.max=button(frame,268,-188,48,"Max",function()notify(Nexus.OrbRuntime.TrackBalance())end)
+    -- A button click does not take keyboard focus from the box: release it
+    -- first, so the refresh shows the tracked amount instead of old typing.
+    frame.max=button(frame,268,-188,48,"Max",function()frame.limit:ClearFocus();notify(Nexus.OrbRuntime.TrackBalance())end)
     frame.max:SetScript("OnEnter",function(self)
         if GameTooltip then GameTooltip:SetOwner(self,"ANCHOR_TOP");GameTooltip:SetText(MAX_TIP,1,1,1,1,true);GameTooltip:Show()end
     end)
@@ -248,8 +250,14 @@ local function ensure()
         if s.state=="FINISHED" and not confirmNewRun then
             -- The explicit preparation of a new run: its draft follows the
             -- confirmed balance again; the amount is shown for review.
-            Nexus.OrbRuntime.NewRunDraft()
-            confirmNewRun=true;confirmAmount=nil;UI.Refresh();confirmAmount=frame.limit:GetText();UI.Refresh();return
+            frame.limit:ClearFocus();Nexus.OrbRuntime.NewRunDraft()
+            confirmNewRun=true;confirmAmount=nil;UI.Refresh();confirmAmount=frame.limit:GetText()
+            if confirmAmount=="" then
+                confirmNewRun=false;confirmAmount=nil
+                notify(nil,"The maximum follows the confirmed Orb balance, which is not available. Nothing was started.")
+                return
+            end
+            UI.Refresh();return
         end
         confirmNewRun=false;confirmAmount=nil
         if s.running or s.state=="PAUSED" then notify(primary(nil));return end
