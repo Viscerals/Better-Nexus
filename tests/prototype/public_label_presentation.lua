@@ -12,7 +12,7 @@
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
-local NOTE='|cff999999Owner identity has not been established.|r'
+local NOTE='|cff999999Owner identity not established.|r'
 -- No generated provenance decoration in a readable name.
 local function Clean(text)
  return type(text)=='string' and not text:find('legacy/unverified',1,true)
@@ -22,12 +22,17 @@ end
 -- No active WoW formatting: every "|" is an escaped "||".
 local function Inert(text) return type(text)=='string' and text:gsub('||',''):find('|',1,true)==nil end
 -- Conservative fit (the 7.0 px per character, 17 px per line model of
--- quickstart_layout_fit.lua): the note is fully visible in a description box.
-local function NoteFits(box,label)
+-- quickstart_layout_fit.lua): the note takes one line of a description box
+-- and at least one line of the description stays visible, at the box's
+-- current width and at its narrowest layout width (minWidth).
+local function NoteFits(box,label,minWidth)
  local visible=#NOTE:gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')
- local w,h=box:GetWidth(),box:GetHeight()
- local lines=math.ceil(visible*7.0/w)
- check(w>0 and lines*17<=h,label..': the note fits ('..visible..' characters, '..lines..' line(s) in '..w..'x'..h..')')
+ local h=box:GetHeight()
+ for _,w in ipairs({box:GetWidth(),minWidth or box:GetWidth()}) do
+  local lines=math.ceil(visible*7.0/w)
+  check(w>0 and lines==1 and lines*17+17<=h,label..': the note fits on one line and leaves a description line ('
+   ..visible..' characters, '..lines..' line(s) in '..w..'x'..h..')')
+ end
 end
 
 local fx,H
@@ -55,8 +60,11 @@ do
  local unicode=Row({player='Ærøn',realm='ebonhold',ownerKey='ærøn@ebonhold',relaySender='Relayer-Ebonhold'})
  local hostile=Row({player='Ev|cffff0000il|r',realm='ebonhold',relaySender='Relayer-Ebonhold'})
  local missing=Row({realm='ebonhold',relaySender='Relayer-Ebonhold'})
- local rows,summary=I.PresentPublicRecords({verified,kiralyl,mengooE,mengooF,alphaF,full,unicode,hostile,missing},'player')
- check(summary.shadowed==0 and #rows==9,'without shadowing every record is presented: '..#rows)
+ -- A stored realm with whitespace: OwnerKey accepts it (whitespace removed),
+ -- but the name must not carry the raw control character.
+ local tabRealm=Row({player='Tabby',realm='Ebon\thold',relaySender='Relayer-Ebonhold'})
+ local rows,summary=I.PresentPublicRecords({verified,kiralyl,mengooE,mengooF,alphaF,full,unicode,hostile,missing,tabRealm},'player')
+ check(summary.shadowed==0 and #rows==10,'without shadowing every record is presented: '..#rows)
  check(verified.displayPlayer=='Alpha-ebonhold' and verified.publicIdentityKey=='verified:alpha@ebonhold'
   and verified.publicIdentityVerified==true,'established owner: readable label, exact identity: '..tostring(verified.displayPlayer))
  check(kiralyl.displayPlayer=='Kiralyl-ebonhold','owner not established: the readable name and realm only: '..tostring(kiralyl.displayPlayer))
@@ -68,7 +76,8 @@ do
   and alphaF.publicIdentityKey~=verified.publicIdentityKey,'a relayed record never takes the verified identity of the same short name')
  check(full.displayPlayer=='Kiralyl-Ebonhold','a stated full player name is shown as stated: '..tostring(full.displayPlayer))
  check(unicode.displayPlayer=='Ærøn-ebonhold','UTF-8 names are kept: '..tostring(unicode.displayPlayer))
- check(Clean(hostile.displayPlayer) and Inert(hostile.displayPlayer),'hostile text: no raw tuple and no active formatting: '..tostring(hostile.displayPlayer))
+ check(hostile.displayPlayer=='Unknown-ebonhold' and Inert(hostile.displayPlayer),'hostile name: the safe fallback, no active formatting: '..tostring(hostile.displayPlayer))
+ check(tabRealm.displayPlayer=='Unknown','a realm with a control character never reaches the name (display escaping refuses it): '..tostring(tabRealm.displayPlayer))
  check(missing.displayPlayer==nil and missing.publicIdentityKey:find('^legacy|nil:0:|') ~= nil,'missing name: no label (the view falls back), no raw key printed')
  for _,r in ipairs({verified,kiralyl,mengooE,mengooF,alphaF,full,unicode,hostile}) do
   check(Clean(r.displayPlayer) and Inert(r.displayPlayer),'no generated decoration: '..tostring(r.displayPlayer))
@@ -227,7 +236,8 @@ do
   check(author=='by Kiralyl-ebonhold','detail heading for '..id..': '..tostring(author))
   check(desc:sub(1,#NOTE)==NOTE and desc:find('Synthetic relayed build',1,true),'detail for '..id..': the note, then the description')
  end
- NoteFits(frame._detailPanel.desc,'Community detail')
+ -- Narrowest Community detail: 290 px (ui/LayoutMetrics.lua) less 20 px of padding (RefreshLayout).
+ NoteFits(frame._detailPanel.desc,'Community detail',270)
  local alpha
  for id in pairs(cards) do if id==fx.players[2].buildId then alpha=id end end
  local sel,author,desc=Open(alpha)
