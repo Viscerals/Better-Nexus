@@ -406,6 +406,12 @@ local function ControlWidth(name, label, scale, available)
     local base = CONTROL_BASE[name] or 80
     local estimated = #tostring(label or "") * 6 * scale + 22
     local maximum = name == "search" and 320 or 240
+    if name == "qualified" then
+        -- A 22 px check box and a gap before its label, sized for the wider
+        -- (7 px per character) text model so the fixed label always fits.
+        estimated = 26 + #tostring(label or "") * 7 * scale
+        maximum = 380
+    end
     return math.min(available, math.max(base, math.min(maximum,estimated)))
 end
 
