@@ -116,6 +116,7 @@ NAMES += ['automation_tier_annotation']
 NAMES += ['orb_guidance_navigation','orb_guidance_passive_open']
 NAMES += ['orb_draft_approval_preserved','orb_guidance_geometry']
 NAMES += ['orb_budget_draft']
+NAMES += ['community_dps_filter']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

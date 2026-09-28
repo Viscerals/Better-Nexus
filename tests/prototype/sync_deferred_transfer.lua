@@ -136,7 +136,7 @@ assert(AcceptedWrites(B,idA)==writesA and AcceptedWrites(A,idB)==writesB,'repeat
 B.e.Nexus.CommunityBuilds.Show()
 local frame=assert(B.e.NexusCommunityBuildsFrame)
 if frame._scopeBtn:IsEnabled()then frame._scopeBtn:Click()end
-if frame._qualifiedBtn:GetText()~='All Shared'then frame._qualifiedBtn:Click()end
+if frame._qualifiedBtn:GetChecked() then frame._qualifiedBtn:Click() end -- no DPS-record requirement
 frame._searchBox:SetText('NEXUS-TEST-PAIR-A-TO-B')
 frame._searchBox:GetScript('OnTextChanged')(frame._searchBox,true)
 P.Until(function()
