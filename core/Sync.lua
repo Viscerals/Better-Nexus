@@ -1742,11 +1742,16 @@ function Responder.Admission.Defer(fields)
         local promotes = fields.stamp == prior.stamp
             and fields.direct == true and prior.direct ~= true
             and fields.digest == prior.digest
+        -- The owner's answer that states the locked set supersedes a held
+        -- answer for the same content without it (never the reverse).
+        local enriches = fields.stamp == prior.stamp
+            and fields.direct == true and fields.digest == prior.digest
+            and fields.rolesKnown == true and prior.rolesKnown ~= true
         if fields.stamp < prior.stamp then
             Responder.NoteContextOutcome(fields.context, "duplicate", "stale")
             return "duplicate"
         end
-        if fields.stamp == prior.stamp and not promotes then
+        if fields.stamp == prior.stamp and not promotes and not enriches then
             local same = fields.digest == prior.digest
             Responder.NoteContextOutcome(fields.context,
                 same and "duplicate" or "rejected",
@@ -1775,7 +1780,7 @@ function Responder.Admission.Defer(fields)
     local entry = {
         key=key,kind=fields.kind,id=fields.id,stamp=fields.stamp,
         owner=fields.owner,direct=fields.direct == true,digest=fields.digest,
-        sender=fields.sender,context=fields.context,run=fields.run,
+        rolesKnown=fields.rolesKnown == true,sender=fields.sender,context=fields.context,run=fields.run,
         settle=fields.settle,enqueuedAt=current,
         expiresAt=current + PENDING_MAX_AGE,
         scope=Responder.Admission.Scope(),
@@ -2525,7 +2530,8 @@ end
 -- 200-local limit.
 Responder.Caps = {
     code="WLCP", token="lv1", ttl=900, advertiseInterval=300, maxPeers=128,
-    peers={}, count=0, nonce=nil, lastAdvert=nil,
+    readvertiseSpacing=30, readvertise=false,
+    peers={}, count=0, seen={}, seenCount=0, nonce=nil, lastAdvert=nil,
     outcomes={}, outcomeCount=0,
 }
 Responder.LockedRoleOutcomes = Responder.Caps.outcomes
@@ -2556,6 +2562,9 @@ function Responder.NoteCapability(sender, advertised, nonce)
         if entry then caps.peers[key] = nil; caps.count = caps.count - 1 end
         return true
     end
+    -- A peer we did not know, or one with a new session nonce (it restarted),
+    -- may not know our capability either: our next request states it again.
+    if not entry or entry.nonce ~= tostring(nonce) then caps.readvertise = true end
     if not entry then
         if caps.count >= caps.maxPeers then
             local oldest, stamp
@@ -2582,13 +2591,37 @@ function Responder.PeerSupportsLockedRoles(requester)
     return true
 end
 
+-- Activity from a peer without a current capability entry (a new peer, or
+-- one that restarted and lost ours): our next request states the capability
+-- again, not earlier than readvertiseSpacing after the last advertisement.
+-- Once per peer per ttl, so an older peer that never advertises does not
+-- keep the shorter spacing.
+function Responder.NotePeerActivity(sender)
+    local caps = Responder.Caps
+    if Responder.PeerSupportsLockedRoles(sender) then return end
+    local key = NormalizePeerName(sender)
+    if not key or key == "" then return end
+    local stamp = caps.seen[key]
+    if stamp and Now() - stamp <= caps.ttl then return end
+    if not stamp then
+        if caps.seenCount >= caps.maxPeers then caps.seen, caps.seenCount = {}, 0 end
+        caps.seenCount = caps.seenCount + 1
+    end
+    caps.seen[key] = Now()
+    caps.readvertise = true
+end
+
 -- Enqueued just before one of our own requests, with a copy of that
--- request's metadata: the same queue, route and Sync-mode permission. At most
--- once per interval; nothing is sent on its own schedule.
+-- request's metadata: the same queue, route and Sync-mode permission. Once
+-- per interval, or again after readvertiseSpacing when a new or restarted
+-- peer was seen; nothing is sent on its own schedule.
 function Responder.AdvertiseCapability(metadata)
     local caps = Responder.Caps
     local current = Now()
-    if caps.lastAdvert and current - caps.lastAdvert < caps.advertiseInterval then
+    local since = caps.lastAdvert and current - caps.lastAdvert or nil
+    local due = since == nil or since >= caps.advertiseInterval
+        or (caps.readvertise and since >= caps.readvertiseSpacing)
+    if not due then
         return false
     end
     local copy = {}
@@ -2599,7 +2632,7 @@ function Responder.AdvertiseCapability(metadata)
     local message = string.format("%s|%s|%s|%s", caps.code, MyName(),
         caps.token, caps.Nonce())
     local queued = Transport.EnqueueControl(message, copy)
-    if queued then caps.lastAdvert = current end
+    if queued then caps.lastAdvert = current; caps.readvertise = false end
     return queued and true or false
 end
 
@@ -3900,6 +3933,7 @@ local function CommitReceivedBuild(payload, transportSender, context,
             owner=payloadOwner or "",direct=directOwner == true,
             digest=tostring(HashText(replacementFingerprint) or "") .. "|"
                 .. tostring(HashText(payload.link) or ""),
+            rolesKnown=type(payload.lockedRoles) == "table",
             sender=transportSender,context=context,
             settle=function(accepted)
                 if type(onComplete) == "function" then onComplete(accepted) end
@@ -4441,6 +4475,7 @@ function Sync.HandleIncoming(text, sender)
     pcall(Sync.NoteChannelTraffic)
     local accepted,reason=Inbound.HandleIncoming(text,sender)
     if accepted and Nexus.SyncWire then Nexus.SyncWire.ObservePeer(sender) end
+    if accepted then pcall(Responder.NotePeerActivity, sender) end
     return accepted,reason
 end
 

@@ -24,13 +24,16 @@ local function Payload(peer,extra,e)
  for k,v in pairs(extra or {}) do p[k]=v end
  return p
 end
-local function Deliver(peer,p)
+-- via, optional: a relay that forwards the owner's payload (the transport
+-- sender is then not the owner).
+local function Deliver(peer,p,via)
  local N=peer.e.Nexus
+ local from=via or SENDER
  local b64=N.Codec.Base64Encode(N.Codec.JSONEncode(p))
  local size,chunks=150,{}
  for i=1,#b64,size do chunks[#chunks+1]=b64:sub(i,i+size-1) end
  for i,chunk in ipairs(chunks) do
-  N.Sync.HandleIncoming(string.format('WLRB|%s|%s|%d|%d/%d|%s',SENDER,p.id,p.m,i,#chunks,chunk),SENDER)
+  N.Sync.HandleIncoming(string.format('WLRB|%s|%s|%d|%d/%d|%s',from,p.id,p.m,i,#chunks,chunk),from)
  end
  -- Admission may be deferred: wait for the stored row, within a bound.
  for _=1,1500 do
@@ -177,6 +180,90 @@ do
  P.Advance(905)
  local payload=AnswerTo('Cap1-Ebonhold',nil)
  check(payload.lv==nil,'an expired capability gives an ordinary-only answer')
+end
+
+-- 9. Promotion: a relay stated the locked set; the owner's own answer for
+-- the same revision replaces the relay's record. Provenance comes first:
+-- roles that only the relay stated are not carried into the owner-verified
+-- record (unknown, not zero); the owner's full answer then completes it.
+do
+ P.Boot({'Newpeer','Rel'},5,nil,{released={nil,true}})
+ local N=P.A.e.Nexus
+ local base=Payload(P.A,{})
+ local function With(extra) local c={};for k,v in pairs(base) do c[k]=v end;for k,v in pairs(extra) do c[k]=v end;return c end
+ local relayed=Deliver(P.A,With({lv=1,le={{200085,1,1}}}),'Relay-Ebonhold')
+ check(relayed and Key(relayed.lockedEchoes)=='200085:1:1','fixture: the relay-stated locked set is stored')
+ check(relayed.relaySender~=nil or relayed.claimedOwnerKey~=nil,'fixture: the relay copy is not owner-verified')
+ Deliver(P.A,With({}))
+ -- Admission may be deferred: wait for the promotion, within a bound.
+ for _=1,1500 do local r=N.BuildCatalog.Get(base.id);if r and r.relaySender==nil and r.claimedOwnerKey==nil then break end;P.Step() end
+ local promoted=N.BuildCatalog.Get(base.id)
+ check(promoted and promoted.relaySender==nil and promoted.claimedOwnerKey==nil,'fixture: the owner answer promoted the record')
+ check(promoted and Unknown(promoted),'promotion: relay-only roles are not carried into the owner record: '..Key(promoted and promoted.lockedEchoes))
+ Deliver(P.A,With({lv=1,le={{200085,1,1}}}))
+ for _=1,1500 do if N.BuildCatalog.Get(base.id).lockedAuthorityProven==true then break end;P.Step() end
+ local full=N.BuildCatalog.Get(base.id)
+ check(full.lockedAuthorityProven==true and Key(full.lockedEchoes)=='200085:1:1','the full answer from the owner completes the owner record: '..tostring(full.lockedAuthorityProven)..' '..Key(full.lockedEchoes))
+end
+
+-- 10. Held admission: the owner's ordinary-only answer and then its full
+-- answer for the same revision both wait in the admission queue. The full
+-- answer supersedes the held partial one (it is not dropped as a duplicate or
+-- an integrity conflict); the reverse order keeps the full answer.
+do
+ local function Send(peer,p)
+  local N=peer.e.Nexus
+  local b64=N.Codec.Base64Encode(N.Codec.JSONEncode(p))
+  local chunks={}
+  for i=1,#b64,150 do chunks[#chunks+1]=b64:sub(i,i+149) end
+  for i,chunk in ipairs(chunks) do
+   N.Sync.HandleIncoming(string.format('WLRB|%s|%s|%d|%d/%d|%s',SENDER,p.id,p.m,i,#chunks,chunk),SENDER)
+  end
+ end
+ local function Held(first,second)
+  P.Boot({'Newpeer','Rel'},5,nil,{released={nil,true}})
+  local N=P.A.e.Nexus
+  local stats=N.Sync.Stats()
+  local superseded0=stats.admissionSuperseded or 0
+  local base=Payload(P.A,{})
+  local function With(extra) local c={};for k,v in pairs(base) do c[k]=v end;for k,v in pairs(extra) do c[k]=v end;return c end
+  -- An earlier build keeps the catalog busy, so both answers are held.
+  Send(P.A,Payload(P.A,{}))
+  Send(P.A,With(first));Send(P.A,With(second))
+  local held=N.BuildCatalog.Get(base.id)==nil
+  for _=1,3000 do local r=N.BuildCatalog.Get(base.id);if r and r.lockedAuthorityProven==true then break end;P.Step() end
+  return N.BuildCatalog.Get(base.id),held,(stats.admissionSuperseded or 0)-superseded0
+ end
+ local row,held,superseded=Held({},{lv=1,le={{200085,1,1}}})
+ check(held,'fixture: neither answer was stored at once (both held)')
+ check(row and row.lockedAuthorityProven==true and Key(row.lockedEchoes)=='200085:1:1','held partial then full: the locked set is stored: '..Key(row and row.lockedEchoes))
+ check(superseded==1,'the held partial answer was superseded: '..superseded)
+ row,held,superseded=Held({lv=1,le={{200085,1,1}}},{})
+ check(held,'fixture: reverse order held too')
+ check(row and row.lockedAuthorityProven==true and Key(row.lockedEchoes)=='200085:1:1','held full then partial: the locked set is kept: '..Key(row and row.lockedEchoes))
+ check(superseded==0,'held full then partial: the held full answer is not superseded: '..superseded)
+end
+
+-- 11. A newer revision never inherits the old revision's locked rows: the
+-- owner's full answer for one revision, then its ordinary-only answer for a
+-- newer revision (unknown), then a full answer for that newer revision
+-- (its own set, not the old one).
+do
+ P.Boot({'Newpeer','Rel'},5,nil,{released={nil,true}})
+ local N=P.A.e.Nexus
+ local base=Payload(P.A,{})
+ local function With(extra) local c={};for k,v in pairs(base) do c[k]=v end;for k,v in pairs(extra) do c[k]=v end;return c end
+ local function Wait(pred) for _=1,3000 do if pred(N.BuildCatalog.Get(base.id)) then break end;P.Step() end;return N.BuildCatalog.Get(base.id) end
+ Deliver(P.A,With({lv=1,le={{200085,1,1},{200086,2,1}}}))
+ local old=Wait(function(r) return r and r.lockedAuthorityProven==true end)
+ check(Key(old.lockedEchoes)=='200085:1:1,200086:2:1','fixture: the first revision holds its stated locked set')
+ Deliver(P.A,With({m=base.m+60}))
+ local newer=Wait(function(r) return r and r.lastModified==base.m+60 end)
+ check(newer.lastModified==base.m+60,'fixture: the newer revision is stored')
+ check(Unknown(newer),'a newer ordinary-only revision has unknown roles, not the old rows: '..Key(newer.lockedEchoes))
+ Deliver(P.A,With({m=base.m+60,lv=1,le={{200087,1,2}}}))
+ local full=Wait(function(r) return r and r.lockedAuthorityProven==true end)
+ check(Key(full.lockedEchoes)=='200087:1:2','the newer revision takes its own stated set: '..Key(full.lockedEchoes))
 end
 
 -- 8. A read-only (protected) profile hears a full answer: nothing is saved.

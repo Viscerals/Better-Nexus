@@ -2886,7 +2886,7 @@ function Controller.New(options)
         local s = M.ShareStatus(id)
         local partial = s and tonumber(s.lockedRolesOrdinaryOnly) or 0
         if partial > 0 then
-            text = text .. string.format(" %d answer%s went to an older Nexus version with the ordinary targets only; the locked targets need a current version.",
+            text = text .. string.format(" %d answer%s for requesters that did not state locked-target support (for example an older Nexus version) carried the ordinary targets only.",
                 partial, partial == 1 and "" or "s")
         end
         return state, text
