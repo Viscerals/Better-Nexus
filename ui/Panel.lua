@@ -2150,6 +2150,8 @@ function M.SetStatus(status)
     local nextStatus = SafeText(Nexus.UserText and Nexus.UserText.Message(status) or status)
     if SafeText(M._lastModel.status) == nextStatus then return false end
     M._lastModel.status = nextStatus
+    -- Keep the release render (ReleaseRollOnAutoOff) on the current line.
+    if renderState.rawText then renderState.rawText.status = status end
     if renderState.signatures then
         renderState.signatures.status = Signature(nextStatus)
     end
