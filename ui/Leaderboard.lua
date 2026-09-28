@@ -64,7 +64,7 @@ local classFilter = "ALL"
 -- Shown in a detail view when the record's owner is not established (the
 -- name itself carries no provenance text). A statement about identity only:
 -- it says nothing about the record's Echoes, locked targets or DPS.
-local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity has not been established.|r"
+local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity not established.|r"
 
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
     if type(Identity.DisplaySafeText) ~= "function" then return nil end

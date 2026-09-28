@@ -518,8 +518,9 @@ end
 -- Apply one shared public presentation policy to an owned batch of snapshots.
 -- Ambiguous evidence is only shadowed from ordinary public rows when an exact
 -- verified owner with the same short name is already visible; the durable
--- source remains untouched. Distinct builds can opt out of shadowing while
--- still receiving collision-safe author labels.
+-- source remains untouched. Distinct builds can opt out of shadowing; their
+-- rows stay distinct by publicIdentityKey, even where two show the same
+-- readable author name.
 function Identity.PresentPublicRecords(rows, field, options)
     rows = type(rows) == "table" and rows or {}
     local context = Identity.NewPublicPresentation(field, options)
