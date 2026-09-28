@@ -14,8 +14,10 @@
 --   4. a submitted action unconfirmed -> waiting for confirmation
 --   5. an Echo choice is open         -> it is open in the game window
 --   6. rolled targets done, locks left-> Orbs do not fill locked slots
---   7. normal rolls finished (server count 0), rolled targets missing
---                                     -> review Orbs, Open Orbs
+--   7. normal rolls finished (server count 0 at level 80), rolled targets
+--      missing                       -> review Orbs, Open Orbs
+--      (below level 80 a count of 0 is only the gap between level-ups: the
+--      next level brings more normal rolls, so it is "rolling", no text)
 --   8. normal-roll count unknown      -> no text (level 1 and loading screens
 --                                        do not read it on purpose)
 -- An expired watchdog or an expired intent is not a confirmed result.
@@ -87,6 +89,11 @@ function G.Project(obs)
         return Out("locks-only", "Rolled targets are complete. Orbs do not fill locked slots.", false)
     end
     local horizon = tonumber(obs.horizon)
+    -- The end of a pending-roll batch is not the end of the run until level
+    -- 80 (logic/Policy.lua); an unknown level is not proof of it either.
+    if horizon == 0 and (tonumber(obs.level) or 0) < 80 then
+        return Out("rolling", nil, false)
+    end
     if horizon == 0 then
         if rolled and rolled > 0 then
             if obs.orbCapable == false then
@@ -135,6 +142,9 @@ function G.Observe(progress, intent, plan, known)
         end
         if type(A.Board) == "function" then
             local ok, board = pcall(A.Board);obs.board = ok and type(board) == "table"
+        end
+        if type(A.Level) == "function" then
+            local ok, level = pcall(A.Level);if ok then obs.level = tonumber(level) end
         end
         if known.horizonKnown then
             obs.horizon = known.horizon
