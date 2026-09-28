@@ -26,10 +26,16 @@ guide=guide:gsub('%s+',' ')
 
 -- 1. The active Saved Build warning stands before the step that turns Auto ON.
 before(start,'With Auto ON, Nexus may replace that active Saved Build','Click Auto OFF','Help start: warning before the Auto step')
+before(start,'With Auto ON, Nexus may replace that active Saved Build','Click Create Wishlist','Help start: warning before Create Wishlist')
+check(has(start,'Click Create Wishlist for a new or imported plan. It saves the plan and makes it the target of the loadout shown in the editor.'),'Create Wishlist saves and targets (it is not a blank-plan button)')
+check(has(start,'For an existing Wishlist, click Save Wishlist.'),'Save Wishlist is for an existing Wishlist')
 before(rolling,'Automatic save is separate from Take, Banish, Reroll and Freeze.','1. Click Auto OFF','Help rolling: warning before the Auto step')
 before(guide,'### Automatic save and your Saved Build','Click **Auto OFF**','guide: automatic-save section before the Auto step')
 check(has(rolling,'Auto OFF does not turn Nexus off'),'Auto is not addon enablement')
 check(has(trouble,'Hide Nexus Panel') and has(trouble,'only hides the panel'),'hiding the panel is not disabling Nexus')
+check(has(trouble,'only when no action is active or pending: log out to character selection, click AddOns'),'turning Nexus off: guarded, client path')
+check(has(guide,'only when no action is active or pending: log out to character selection'),'guide: turning Nexus off guarded')
+check(has(trouble,'UNVERIFIED hint') and has(guide,'UNVERIFIED hint'),'peer update reports are unverified hints')
 
 -- 2. Max and the budget: Max follows the balance and starts nothing; the
 -- approved maximum is fixed; the manual limit is its own rule.
@@ -56,7 +62,7 @@ end
 
 -- 4. DPS records and locked roles.
 check(has(sharing,'Require both DPS records') and has(sharing,'It is not build quality, outside verification, or finished Sync.'),'both-DPS is availability, not verification')
-check(has(sharing,'shows its locked targets as unknown, not as none'),'unknown locked roles are not zero')
+check(has(sharing,'Nexus treats its locked targets as unknown, not as none'),'unknown locked roles are not zero')
 check(has(guide,'unknown, not as none'),'guide: unknown locked roles are not zero')
 check(has(sharing,'Owner identity not established.') and has(sharing,'It is not proof of identity.'),'readable names are not identity')
 
@@ -64,7 +70,7 @@ check(has(sharing,'Owner identity not established.') and has(sharing,'It is not 
 for label,text in pairs({Help=trouble,guide=guide}) do
  check(has(text,'/nexus report'),label..': report command')
  check(has(text,'before any reload'),label..': capture before reloading')
- check(has(text,'Copy summary') and has(text,'Ctrl+C'),label..': copy the summary')
+ check(has(text,'Copy summary') and has(text,'click in the text') and has(text,'Ctrl+C'),label..': copy the summary (focus the text first)')
  check(has(text,'Prepare report file') and has(text,'only when no action is active or pending'),label..': report file after no pending action')
  check(has(text,'WTF/Account/<ACCOUNT>/SavedVariables/NexusSupport.lua'),label..': report file path')
  check(has(text,'privately; never post it publicly'),label..': private file, never public')
@@ -78,7 +84,7 @@ before(trouble,'Its incidents are kept for this session only.','/reload only whe
 -- 6. Every quoted control label is a real label in the UI source.
 local sources={}
 for _,path in ipairs({'ui/Panel.lua','ui/OrbPanel.lua','ui/SupportReport.lua','ui/CommunityRenderer.lua','ui/Leaderboard.lua',
- 'ui/WishlistRenderer.lua','ui/WishlistEditor.lua','ui/JournalTab.lua','ui/LogViewer.lua','core/UserText.lua'}) do
+ 'ui/WishlistRenderer.lua','ui/WishlistEditor.lua','ui/JournalTab.lua','ui/LogViewer.lua','core/UserText.lua','logic/OrbGuidance.lua'}) do
  local f=assert(io.open(path,'rb'));sources[#sources+1]=f:read('*a');f:close()
 end
 local all=table.concat(sources,'\n')
@@ -91,6 +97,12 @@ for _,label in ipairs({'Wishlist Editor','Create Wishlist','Import','Save Wishli
  -- A string literal or a colour-coded span in the source, not any substring.
  local esc=label:gsub('%p','%%%0')
  check(all:find('"'..esc) or all:find(esc..'"') or all:find('|c%x%x%x%x%x%x%x%x'..esc) or all:find(esc..'|r'),'real label: '..label)
+end
+
+-- Quoted status lines exist as shown (colour codes aside).
+for _,line in ipairs({'Waiting for the game to confirm the last Echo action.','No Echo choice is showing.','Auto ON — paused',
+ 'Owner identity not established.','Not prepared','Updating results...','Status: '}) do
+ check(has(all,line),'real status text: '..line)
 end
 
 -- 7. Conservative fit: no unbreakable token wider than the Help body
