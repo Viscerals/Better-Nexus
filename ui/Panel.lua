@@ -28,6 +28,10 @@ local autoBtn, buildsBtn, leaderboardBtn, menuBtn, versionText, worldStatusBox, 
 local showPerformance = false
 local renderState = {
     committed=false,applying=false,signatures=nil,hadFailure=false,
+    -- The roll block the last committed render showed, while Auto is ON in
+    -- one rolling context: {context=..., cards=bool}, or nil. Memory only,
+    -- one entry; see RollPresentation.
+    roll=nil,
 }
 local renderStats = {
     calls=0, layouts=0, skipped=0, statusOnly=0,
@@ -154,6 +158,48 @@ local function ModelSignatures(model)
     }
 end
 
+-- Keep the roll block's space through an ordinary gap between Echo choices.
+-- Between boards the runtime renders no cards and no recommendation; without
+-- this the block collapsed and the panel resized (moving the title and the
+-- footer buttons) until the next board. The block is reserved only while
+-- Auto is ON with an assigned, unfinished build, and only when the last
+-- committed render showed it in the same context (Wishlist, active slot,
+-- preview, layout metrics). The reserved block shows no old card or
+-- recommendation: its content is cleared. Auto OFF, a finished build, no
+-- build or a context change release it.
+local function RollPresentation(model)
+    local pr = type(model.progress) == "table" and model.progress or {}
+    local name = pr.wishlistName
+    local total = tonumber(pr.total) or 0
+    local owned = tonumber(pr.owned) or 0
+    local complete = total > 0 and owned >= total
+        and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
+    local noBuild = total <= 0 or not name
+    local cards = type(model.cards) == "table" and model.cards or {}
+    local guide = type(model.orbGuidance) == "table" and model.orbGuidance or nil
+    local guideText = (guide and total > 0 and name) and SafeText(guide.text) or ""
+    local hasContent = #cards > 0 or SafeText(model.recommendation) ~= ""
+        or guideText ~= ""
+    local layoutKey = "legacy"
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.RuntimeKey then
+        local ok, key = pcall(Nexus.LayoutMetrics.RuntimeKey,"panel",272,0)
+        if ok then layoutKey = tostring(key) end
+    end
+    local context = table.concat({tostring(name), tostring(pr.activeSlot),
+        pr.isCommunityPreview and "preview" or "own", layoutKey}, "|")
+    local continuing = model.auto == true and not noBuild and not complete
+    local held = continuing and renderState.roll or nil
+    if held and held.context ~= context then held = nil end
+    local reserved = not hasContent and held ~= nil
+    local cardRows = #cards > 0 or (held ~= nil and held.cards == true)
+    return {
+        reserved=reserved,cardRows=cardRows,
+        -- What a successful commit of this render leaves for the next one.
+        nextRoll=continuing and (hasContent or reserved)
+            and {context=context,cards=cardRows} or nil,
+    }
+end
+
 local function ShortName(v, maxChars)
     local s = SafeText(v)
     maxChars = maxChars or 30
@@ -175,6 +221,21 @@ end
 -- below minSize. The tooltip names the full control.
 local AUTO_LABEL = { on = "Auto ON", off = "Auto OFF", unknown = "Auto --",
     inset = 6, minSize = 9, font = "NexusAutoButtonFont" }
+
+-- Auto OFF releases a roll-block reservation at once. The runtime does not
+-- render for a toggle, so the last committed model is rendered again with
+-- the new selection (the ordinary render transaction). Nothing else changes.
+local function ReleaseRollOnAutoOff(auto)
+    if auto or not renderState.roll or type(M._lastModel) ~= "table" then return end
+    local model = DefensiveCopy(M._lastModel)
+    model.auto = false
+    -- A failed render stays a failed render (hidden, counted, retried by the
+    -- next ordinary refresh); it is recorded, not raised into the toggle.
+    local ok, why = pcall(M.Render, model)
+    if not ok and Nexus.Errors and type(Nexus.Errors.Record) == "function" then
+        pcall(Nexus.Errors.Record, "Panel.ReleaseRollOnAutoOff", why)
+    end
+end
 
 local function AutoLabel(auto)
     if auto == nil then return AUTO_LABEL.unknown end
@@ -935,7 +996,8 @@ local function EnsureFrame()
     autoBtn:SetScript("OnClick", function()
         if callbacks and type(callbacks.ToggleAuto) == "function" then
             local ok, state = pcall(callbacks.ToggleAuto)
-            if ok and state ~= nil then autoBtn:SetText(AutoLabel(state and true or false)) end
+            -- The label, and at Auto OFF the release of a reserved roll block.
+            if ok and state ~= nil then M.SetAuto(state and true or false) end
         end
     end)
     autoBtn:SetScript("OnEnter", function(self)
@@ -1367,6 +1429,7 @@ end
 
 function M.SetAuto(auto)
     if autoBtn then autoBtn:SetText(AutoLabel(auto and true or false)) end
+    ReleaseRollOnAutoOff(auto and true or false)
 end
 
 function M.Toggle()
@@ -1616,7 +1679,7 @@ local function RenderBestDps(model, complete, noBuild, activeRoll, statusVisible
     end
 end
 
-local function ApplyModel(model, signatures)
+local function ApplyModel(model, signatures, roll)
     local previousSignatures = renderState.signatures
     if previousSignatures and signatures.layout == previousSignatures.layout then
         local changed = false
@@ -1675,6 +1738,10 @@ local function ApplyModel(model, signatures)
     -- With no build, the setup view already names the missing Wishlist.
     local guideText = (guide and total > 0 and name) and SafeText(guide.text) or ""
     local activeRoll = #cards > 0 or recommendation ~= "" or guideText ~= ""
+    -- The roll block's space: current content, or a reservation through an
+    -- ordinary gap between choices (RollPresentation). Content and actions
+    -- still come only from the current model.
+    local rollBlock = activeRoll or (type(roll) == "table" and roll.reserved) or false
     -- The roll body: an unresolved Orb run's own reason first, else the
     -- recommendation (which carries an Orb pause reason), else the guidance.
     local bodyText = (guide and guide.state == "orb-run" and guideText ~= "") and guideText
@@ -1689,7 +1756,7 @@ local function ApplyModel(model, signatures)
     -- Keep the master Auto control visible for every active offering,
     -- including level 80 and completed-target boards. Toggling Auto off must
     -- never make the control used to turn it back on disappear.
-    local showAutoControl = not noBuild and (activeRoll or (not complete and playerLevel < 80))
+    local showAutoControl = not noBuild and (rollBlock or (not complete and playerLevel < 80))
     local responsiveLayout
     if Nexus.LayoutMetrics then
         local metricsOk, fontScale, uiScale, revision =
@@ -1697,7 +1764,7 @@ local function ApplyModel(model, signatures)
         if metricsOk then
             local layoutOk, candidate = pcall(Nexus.LayoutMetrics.Panel,{
                 width=272,fontScale=fontScale,uiScale=uiScale,
-                revision=revision,activeRoll=activeRoll,
+                revision=revision,activeRoll=rollBlock,
                 statusVisible=statusVisible,noBuild=noBuild,
                 complete=complete,showPerformance=showPerformance,
                 toLockCount=type(pr.toLock) == "table" and #pr.toLock or 0,
@@ -1711,7 +1778,7 @@ local function ApplyModel(model, signatures)
                     or guide.openOrbs))
                     and Nexus.LayoutMetrics.TextRows(bodyText, 248, fontScale)
                     or 0,
-                cardRows=#cards > 0,
+                cardRows=#cards > 0 or (type(roll) == "table" and roll.cardRows) or false,
             })
             if layoutOk and type(candidate) == "table" then
                 responsiveLayout = candidate
@@ -1726,10 +1793,10 @@ local function ApplyModel(model, signatures)
     frame._buildHeaderText:SetText(name and ("|cff7fd5ff" .. ShortName(name, 29) .. "|r" .. (pr.isCommunityPreview and " |cff888888[Preview]|r" or "")) or "|cff7fd5ffNexus|r")
     frame._switchBtn:SetText("My Builds")
 
-    SetVisible(frame._rollArea, activeRoll)
+    SetVisible(frame._rollArea, rollBlock)
     frame._rollArea:ClearAllPoints()
     frame._rollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, statusVisible and -98 or -39)
-    if activeRoll then
+    if rollBlock then
         local activeSlot = tonumber(pr.activeSlot) or 0
         -- Auto stays ON while paused; the heading must not say it is acting.
         if model.auto and model.paused then
@@ -1748,8 +1815,10 @@ local function ApplyModel(model, signatures)
             cardTexts[i]:SetText(type(c) == "table" and SafeText(c.text) or "")
         end
         -- An unresolved Orb action's own reason is more specific than the
-        -- general pause text; otherwise the recommendation stays first.
-        recText:SetText(bodyText)
+        -- general pause text; otherwise the recommendation stays first. A
+        -- reserved block has no current choice: it says so, and no more.
+        recText:SetText(activeRoll and bodyText
+            or "|cff888888No Echo choice is showing.|r")
     end
     if frame._orbsBtn then
         frame._orbsBtn.blockers = guide and guide.blockers or nil
@@ -1774,7 +1843,7 @@ local function ApplyModel(model, signatures)
     -- Collapse the space reserved for Nexus' Soul Ash card whenever the player
     -- uses the server HUD. Live-roll content still gets its own fixed block.
     local contentTop
-    if activeRoll then
+    if rollBlock then
         contentTop = statusVisible and -220 or -161
     else
         contentTop = statusVisible and -103 or -44
@@ -1799,7 +1868,7 @@ local function ApplyModel(model, signatures)
         -- (Create Wishlist is only needed first if no wishlist exists yet),
         -- so it sits right under the instructions instead of sharing a row
         -- with an equally-weighted second option.
-        frame:SetHeight((activeRoll and 428 or 278) - statusHeightReduction)
+        frame:SetHeight((rollBlock and 428 or 278) - statusHeightReduction)
         SetPoint(setupText, "TOP", frame, "TOP", 0, contentTop - 18)
         local assignment=model.assignment or {}
         local restoring=assignment.state=="restoring" or assignment.state=="loading"
@@ -1817,7 +1886,7 @@ local function ApplyModel(model, signatures)
         -- Once a build is complete, progress text stops being the purpose of the
         -- HUD. The panel becomes a compact replacement for the stock difficulty /
         -- Soul Ash tracker, with Nexus navigation and the player's best DPS.
-        frame:SetHeight((showPerformance and (activeRoll and 430 or 286) or (activeRoll and 292 or 168)) - statusHeightReduction)
+        frame:SetHeight((showPerformance and (rollBlock and 430 or 286) or (rollBlock and 292 or 168)) - statusHeightReduction)
         -- completeBadge/completeSubtext were created and toggled everywhere but
         -- never given text anywhere in this file -- when the server-status HUD
         -- has nothing to show (statusVisible false) and Performance is off, the
@@ -1857,7 +1926,7 @@ local function ApplyModel(model, signatures)
         -- most wishlists design zero locked-slot targets, so the extra
         -- height stays reserved only while it's actually needed.
         local toLockExtra = #toLockNamesCache > 0 and 34 or 0
-        frame:SetHeight((showPerformance and (activeRoll and 448 or 325) or (activeRoll and 388 or 267)) - statusHeightReduction + toLockExtra)
+        frame:SetHeight((showPerformance and (rollBlock and 448 or 325) or (rollBlock and 388 or 267)) - statusHeightReduction + toLockExtra)
         SetPoint(progressLabel, "TOPLEFT", frame, "TOPLEFT", 12, contentTop)
         SetPoint(progressValue, "TOPLEFT", frame, "TOPLEFT", 12, contentTop - 17)
         progressValue:SetText(string.format("%d / %d complete", owned, total))
@@ -1995,10 +2064,10 @@ local function ApplyModel(model, signatures)
     return true
 end
 
-local function ApplyCandidate(model, signatures)
+local function ApplyCandidate(model, signatures, roll)
     if not frame.toLockLabel then CreateToLockWidgets(frame) end
     M.ApplyOwnedFonts()
-    return ApplyModel(model, signatures)
+    return ApplyModel(model, signatures, roll)
 end
 
 function M.Render(model)
@@ -2009,6 +2078,11 @@ function M.Render(model)
         candidate.status=Nexus.UserText.Message(candidate.status)
     end
     local signatures = ModelSignatures(candidate)
+    -- The reservation changes the layout, so it is part of its signature.
+    local roll = RollPresentation(candidate)
+    signatures.layout = signatures.layout .. "|roll:"
+        .. (roll.reserved and "reserved" or "content") .. ":"
+        .. (roll.cardRows and "cards" or "none")
     renderStats.calls = renderStats.calls + 1
     EnsureFrame()
 
@@ -2022,7 +2096,7 @@ function M.Render(model)
     local previousModel = M._lastModel
     renderState.applying = true
     frame:Hide()
-    local ok, result = pcall(ApplyCandidate, candidate, signatures)
+    local ok, result = pcall(ApplyCandidate, candidate, signatures, roll)
     renderState.applying = false
     if not ok or result == false then
         M._lastModel = previousModel
@@ -2041,6 +2115,9 @@ function M.Render(model)
 
     M._lastModel = candidate
     renderState.signatures = signatures
+    -- Only a successful render decides the next reservation; a failed one
+    -- leaves the last committed state as it was.
+    renderState.roll = roll.nextRoll
     renderState.committed = true
     renderStats.commits = renderStats.commits + 1
     if renderState.hadFailure then
