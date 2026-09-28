@@ -124,7 +124,14 @@ check(NexusPanel:IsShown() and Same(reopened,base) and Content().body==NOTHING,'
 -- 3. Auto OFF releases the reservation: the existing inactive layout; Auto ON
 -- again in the same gap does not bring back a released reservation.
 do
- SlashCmdList.NEXUS('auto');H.Advance(.5)
+ -- A status line set after the gap render stays current through the
+ -- release render (checked before the runtime renders again).
+ Nexus.Panel.SetStatus('Test status line after the gap render')
+ local current=Nexus.Panel._lastModel.status
+ SlashCmdList.NEXUS('auto')
+ check(Nexus.Panel._lastModel.status==current and Nexus.Panel._lastModel.auto==false,
+  'the release render keeps the current status line: '..tostring(Nexus.Panel._lastModel.status))
+ H.Advance(.5)
  local off=Geo()
  check(not Nexus.RecomputeStats().autoEnabled and not off.roll and off.h<base.h,'Auto OFF between boards: the roll block is released: '..Show(off))
  SlashCmdList.NEXUS('auto');H.Advance(.5)
