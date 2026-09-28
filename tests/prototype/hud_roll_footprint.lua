@@ -134,6 +134,15 @@ do
  check(Same(Geo(),base),'the next board restores the roll block')
  local last=Answer();H.Advance(.5);Grant(last[2]);H.Advance(.4)
  check(Same(Geo(),base),'and the gap after it is reserved again')
+ -- The Auto button (not only the command) releases it too.
+ NexusPanel._autoBtn:Click();H.Advance(.5)
+ local clicked=Geo()
+ check(not Nexus.RecomputeStats().autoEnabled and not clicked.roll and clicked.h==off.h,'the Auto button OFF in the gap releases the block: '..Show(clicked))
+ NexusPanel._autoBtn:Click();H.Advance(.5)
+ check(Nexus.RecomputeStats().autoEnabled,'the Auto button turns Auto ON again')
+ Offer(Fresh());H.Advance(1.2)
+ local last2=Answer();H.Advance(.5);Grant(last2[2]);H.Advance(.4)
+ check(Same(Geo(),base),'fixture: reserved gap again before the next section')
 end
 
 -- 4. A loading screen while the last Take is unanswered: the runtime's real
@@ -186,11 +195,12 @@ do
  Nexus.RequestRecompute();H.Advance(.5)
  Offer(Fresh());H.Advance(1.2)
  check(Geo().roll and #Content().cards==3,'the next board shows the roll block again')
+ local last=Answer();H.Advance(.5);Grant(last[2]);H.Advance(.4)
+ check(Same(Geo(),base) and Content().body==NOTHING,'in the new context the next gap is reserved again')
 end
 
 -- 7. A new assignment in the gap is another context: released.
 do
- local last=Answer();H.Advance(.5);Grant(last[2]);H.Advance(.4)
  check(Same(Geo(),base),'fixture: reserved gap before the new assignment')
  local other={}
  for i=20,31 do other[#other+1]={spellId=200000+i,quality=i%4,stacks=1} end
@@ -209,9 +219,12 @@ do
  Offer(BOARDS[1]);H.Advance(1.2)
  check(Takes()=='200001','fixture: the last needed Echo is taken')
  local last=Answer();H.Advance(.5);Grant(last[2]);H.Advance(.6)
- local c=Content()
- check(c.body~=NOTHING and (NexusPanel._rollArea:IsShown()==false or c.body~=''),
-  'a finished build is not held open by a reservation: roll='..tostring(NexusPanel._rollArea:IsShown())..' body=['..c.body..']')
+ local badge=false
+ for _,r in ipairs(NexusPanel.regions or {}) do
+  if r.GetText and r:IsShown() and Plain(r:GetText())=='Wishlist complete' then badge=true end
+ end
+ check(badge,'fixture: the build is finished (the complete layout is shown)')
+ check(not NexusPanel._rollArea:IsShown(),'a finished build is not held open by a reservation: roll='..tostring(NexusPanel._rollArea:IsShown())..' body=['..Content().body..']')
 end
 
 print('PASS hud_roll_footprint checks='..checks)

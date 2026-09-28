@@ -32,6 +32,9 @@ local renderState = {
     -- one rolling context: {context=..., cards=bool}, or nil. Memory only,
     -- one entry; see RollPresentation.
     roll=nil,
+    -- The committed model's status and recommendation before the user-text
+    -- conversion (it is not idempotent), for a render of that same model.
+    rawText=nil,
 }
 local renderStats = {
     calls=0, layouts=0, skipped=0, statusOnly=0,
@@ -196,7 +199,7 @@ local function RollPresentation(model)
         reserved=reserved,cardRows=cardRows,
         -- What a successful commit of this render leaves for the next one.
         nextRoll=continuing and (hasContent or reserved)
-            and {context=context,cards=cardRows} or nil,
+            and {context=context,cards=cardRows,reserved=reserved} or nil,
     }
 end
 
@@ -226,8 +229,13 @@ local AUTO_LABEL = { on = "Auto ON", off = "Auto OFF", unknown = "Auto --",
 -- render for a toggle, so the last committed model is rendered again with
 -- the new selection (the ordinary render transaction). Nothing else changes.
 local function ReleaseRollOnAutoOff(auto)
-    if auto or not renderState.roll or type(M._lastModel) ~= "table" then return end
+    local roll = renderState.roll
+    if auto or not (roll and roll.reserved) or type(M._lastModel) ~= "table" then
+        return
+    end
     local model = DefensiveCopy(M._lastModel)
+    local rawText = renderState.rawText or {}
+    model.status, model.recommendation = rawText.status, rawText.recommendation
     model.auto = false
     -- A failed render stays a failed render (hidden, counted, retried by the
     -- next ordinary refresh); it is recorded, not raised into the toggle.
@@ -2073,6 +2081,7 @@ end
 function M.Render(model)
     if type(model) ~= "table" then return false end
     local candidate = DefensiveCopy(model)
+    local rawText = {status=candidate.status,recommendation=candidate.recommendation}
     if Nexus.UserText then
         candidate.recommendation=Nexus.UserText.Message(candidate.recommendation)
         candidate.status=Nexus.UserText.Message(candidate.status)
@@ -2118,6 +2127,7 @@ function M.Render(model)
     -- Only a successful render decides the next reservation; a failed one
     -- leaves the last committed state as it was.
     renderState.roll = roll.nextRoll
+    renderState.rawText = rawText
     renderState.committed = true
     renderStats.commits = renderStats.commits + 1
     if renderState.hadFailure then
