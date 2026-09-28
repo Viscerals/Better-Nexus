@@ -151,6 +151,9 @@ do
  check(p.projectionPending==true,'fixture: the unchecked projection is pending')
  check(not frame._emptyState:IsShown() and frame._resultText:GetText():find('Updating results',1,true),
   'pending: no "no builds match" text, the result line says it is updating')
+ -- A scroll re-binds the last rows; the empty text must not come back.
+ Nexus.CommunityBuilds.ScrollTo(0)
+ check(Diag().projectionPending==true and not frame._emptyState:IsShown(),'pending after a scroll: still no "no builds match" text')
  Settle()
  check(Remote(Shown())=='Nodps' and not frame._emptyState:IsShown(),'settled: the build without records is shown')
  search:SetText('');search:GetScript('OnTextChanged')(search,true)
