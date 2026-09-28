@@ -99,6 +99,14 @@ end
 
 Nexus.RetryAutoLock = RetryAutoLock
 
+-- Read-only: the automation runtime's own record of an automatic action that
+-- has no confirmed result ("submitted", "uncertain" or "expired"), or nil.
+-- It authorizes nothing; the Orb window uses it for wording only.
+function Nexus.PendingIntentState()
+    local runtime = Automation()
+    return runtime and runtime.PendingIntentState and runtime.PendingIntentState() or nil
+end
+
 -- Only disables the existing session master switch. It never enables actions.
 function Nexus.DisableOrdinaryAutomation()
     local runtime=Automation()
@@ -601,17 +609,27 @@ end
 local function RenderIdlePanel(plan, owned, slots, catalog, staticContext,
     lockedOverride)
     local settings = Store.Settings()
-    local okAuto = AutoAllowed()
-    RenderPanel({
+    local okAuto, autoWhy = AutoAllowed()
+    local runtime = Automation()
+    local auto = (runtime and runtime.AutoEnabled()) or false
+    local model = {
         status = StatusLine(),
         cards = {},
         recommendation = "",
         progress = BuildPanelProgress(plan, owned, slots, catalog,
             staticContext, lockedOverride),
         level = Adapter.Level(),
-        auto = (Automation() and Automation().AutoEnabled()) or false,
+        auto = auto,
+        paused = auto and not okAuto and autoWhy and tostring(autoWhy) or nil,
         version = Nexus.VERSION,
-    })
+    }
+    if Nexus.OrbGuidance then
+        model.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
+            model.progress, runtime and runtime.PendingIntentState and runtime.PendingIntentState(),
+            plan and not plan.advisorOnly,
+            {skipHorizon = runtime and runtime.WorldLeaving and runtime.WorldLeaving() or false}))
+    end
+    RenderPanel(model)
 end
 
 ------------------------------------------------------------------------

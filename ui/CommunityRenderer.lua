@@ -6,6 +6,11 @@ Nexus.CommunityInternals = Nexus.CommunityInternals or {}
 
 local Renderer = {}
 
+-- Shown in a detail view when the record's owner is not established (the
+-- name itself carries no provenance text). A statement about identity only:
+-- it says nothing about the record's Echoes, locked targets or DPS.
+local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity not established.|r"
+
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
     local identity = Nexus and Nexus.Identity
     if not (identity and type(identity.DisplaySafeText) == "function") then
@@ -536,7 +541,7 @@ function Renderer.New(options)
         PlaceCommunityBox(scopeBtn,boxes.scope)
         PlaceCommunityBox(myBuildsBtn,boxes.mine)
         PlaceCommunityBox(classDropBtn,boxes.class)
-        PlaceCommunityBox(qualifiedBtn,boxes.qualified)
+        PlaceCommunityBox(frame._qualifiedBox,boxes.qualified)
         PlaceCommunityBox(sortToggle,boxes.sort)
         PlaceCommunityBox(frame._actionLabel,boxes.actionLabel)
         PlaceCommunityBox(syncBtn,boxes.sync)
@@ -594,7 +599,7 @@ function Renderer.New(options)
             labels={
                 search="Search title, author, or description",
                 scope="All Shared",mine="My Builds",
-                class="Current Class Only",qualified="Both DPS records",
+                class="Current Class Only",qualified="Require both DPS records",
                 sort="Sort: Highest DPS",sync="Listening...",
                 share="Share Build",
             },
@@ -1510,8 +1515,13 @@ local function RefreshDetailPanel(buildId)
     detailPanel.author:SetText("by " .. displayAuthor)
     local displayDescription = build.displayDescription
         or DisplayRemoteText(build.description or "", 4000, true, true)
-    detailPanel.desc:SetText((displayDescription ~= "" and displayDescription)
-        or "|cff666666(no description)|r")
+    displayDescription = (displayDescription ~= "" and displayDescription)
+        or "|cff666666(no description)|r"
+    -- The byline carries no provenance text; the detail says it.
+    if build.publicIdentityVerified == false then
+        displayDescription = OWNER_NOT_ESTABLISHED .. "\n" .. displayDescription
+    end
+    detailPanel.desc:SetText(displayDescription)
 
     -- Link field: always show the box so anyone can copy; only show Save
     -- button for the build's owner. Hide label/box entirely when there's no
@@ -2365,30 +2375,48 @@ local function EnsureFrame()
     StyleDropdownPanel(dropPanel)
     dropPanel:Hide()
 
-    qualifiedBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-    qualifiedBtn:SetSize(112,22)
-    qualifiedBtn:SetPoint("LEFT",classDropBtn,"RIGHT",6,0)
+    -- The DPS-record qualifier: one check box with a fixed label. Checked
+    -- requires both records; unchecked imposes no DPS-record requirement.
+    -- The browsing scope stays on the All Shared / My Builds buttons. The
+    -- check always shows the saved filter (M.Refresh), never a guess.
+    local qualifiedBox = CreateFrame("Button",nil,frame)
+    qualifiedBox:SetSize(196,22)
+    qualifiedBox:SetPoint("LEFT",classDropBtn,"RIGHT",6,0)
+    frame._qualifiedBox = qualifiedBox
+    qualifiedBtn = CreateFrame("CheckButton",nil,qualifiedBox,"UICheckButtonTemplate")
+    qualifiedBtn:SetSize(22,22)
+    qualifiedBtn:SetPoint("LEFT",qualifiedBox,"LEFT",0,0)
     frame._qualifiedBtn = qualifiedBtn
-    qualifiedBtn:SetScript("OnClick",function()
+    local qualifiedLabel = qualifiedBox:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    qualifiedLabel:SetPoint("LEFT",qualifiedBtn,"RIGHT",2,0)
+    qualifiedLabel:SetJustifyH("LEFT")
+    qualifiedLabel:SetText("Require both DPS records")
+    frame._qualifiedLabel = qualifiedLabel
+    local function ToggleQualified()
         local filters = FilterSettings()
         ControllerInstance().SetFilter("qualifiedOnly",
             filters.qualifiedOnly == false)
         ControllerInstance().ClearSelection()
         CloseDropdowns()
         M.Refresh()
-    end)
-    qualifiedBtn:SetScript("OnEnter",function(self)
+    end
+    local function QualifiedTip(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Both DPS records",1,0.82,0.2)
-        GameTooltip:AddLine("Requires both Training Dummy and Lich King records. This is record availability, not a verdict on build quality. Turn off to include missing records.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine("Require both DPS records",1,0.82,0.2)
+        GameTooltip:AddLine("Checked: show only builds with both a Training Dummy and a Lich King record that this client has. Unchecked: no DPS-record requirement.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine("This is record availability, not proof of build quality, not verified outside the game, and not a sign that Sync has finished.",0.8,0.8,0.8,true)
         GameTooltip:Show()
-    end)
-    qualifiedBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    end
+    for _, control in ipairs({qualifiedBtn,qualifiedBox}) do
+        control:SetScript("OnClick",ToggleQualified)
+        control:SetScript("OnEnter",QualifiedTip)
+        control:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    end
 
     local sorts={{key="dps",label="Highest DPS"},{key="recent",label="Newest"},{key="title",label="Name"}}
     sortToggle = CreateFrame("Button",nil,frame)
     sortToggle:SetSize(126,22)
-    sortToggle:SetPoint("LEFT",qualifiedBtn,"RIGHT",6,0)
+    sortToggle:SetPoint("LEFT",frame._qualifiedBox,"RIGHT",6,0)
     frame._sortToggle = sortToggle
     StyleSelectorButton(sortToggle)
     sortPanel = CreateFrame("Frame","NexusBuildSortPanel",UIParent)
@@ -2765,8 +2793,7 @@ function M.Refresh()
         end
     end
     if qualifiedBtn then
-        qualifiedBtn:SetText(fs.qualifiedOnly == false
-            and "All Shared" or "Both DPS records")
+        qualifiedBtn:SetChecked(fs.qualifiedOnly ~= false)
     end
     if scopeBtn and myBuildsBtn then
         if fs.scope == "mine" then
@@ -2813,6 +2840,11 @@ function M.Refresh()
         and controller.HasPendingSavedLoadoutImport()
     if importPending then
         refreshDirty = true
+        -- The rows still shown are the last published ones, not the result
+        -- of the current filters.
+        if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
+        if frame._emptyState then frame._emptyState:Hide() end
+        frame._resultsStale = true
         viewDiagnostic.projectionPending = false
         viewDiagnostic.projectionError = false
         viewDiagnostic.projectionCurrent = false
@@ -2828,6 +2860,13 @@ function M.Refresh()
     if type(builds) ~= "table" then
         if projectionError == "pending" then
             refreshDirty = true
+            if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
+            -- "No builds match the current ... filters" belongs to the last
+            -- published result, not to the filters now being prepared.
+            if frame._emptyState then frame._emptyState:Hide() end
+            -- Until the next publication (a scroll or resize re-binds the
+            -- last rows, but must not show their empty text again).
+            frame._resultsStale = true
             viewDiagnostic.projectionPending = true
             viewDiagnostic.projectionError = false
             viewDiagnostic.projectionCurrent = false
@@ -2878,6 +2917,7 @@ function M.Refresh()
         if page > 1 then prevPageBtn:Enable() else prevPageBtn:Disable() end
         if page < pageCount then nextPageBtn:Enable() else nextPageBtn:Disable() end
     end
+    frame._resultsStale = false
     if resultText then
         local first = projectionSummary and projectionSummary.first or 0
         local last = projectionSummary and projectionSummary.last or #builds
@@ -3090,7 +3130,7 @@ function M.Refresh()
         msg = total == 0
             and "No builds yet.\n\nPost a build from your active Echo Wishlist, or press Sync Now to find builds from other players."
             or  "No builds match the current scope, class, DPS-record, or search filters."
-        if frame._emptyState then
+        if frame._emptyState and not frame._resultsStale then
             frame._emptyState:SetText(msg)
             frame._emptyState:Show()
         end

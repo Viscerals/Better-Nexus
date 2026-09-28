@@ -32,12 +32,18 @@ local function notify(ok,err)
     if frame then frame.notice:SetText(err or (ok and "" or "No change."))end
     UI.Refresh()
 end
-local function primary(limit)
+local function primary(limit,tracked)
     local s=Nexus.OrbRuntime.Status()
     if s.running then return Nexus.OrbRuntime.Pause()end
     if s.state=="PAUSED" then return Nexus.OrbRuntime.Resume()end
-    return Nexus.OrbRuntime.Start(limit)
+    return Nexus.OrbRuntime.Start(limit,tracked)
 end
+-- The maximum box shows the draft; a refresh sets it without counting as
+-- typing (OnTextChanged ignores changes made here).
+local function showLimit(value)
+    local e=frame.limit;e.settingText=true;e:SetText(value);e.settingText=nil;e.shownDraft=value
+end
+local MAX_TIP="Follow your confirmed Orb balance, up to 1000, until you enter another amount or start the run. This does not spend Orbs."
 local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="Waiting for the Orb offer",
     WAIT_RESULT="Waiting for result confirmation",PAUSED="Paused",STOPPED="Stopped",COMPLETE="Targets complete",
     ROLLED_COMPLETE="Rolled targets complete",LIMIT="Maximum reached",OUT_OF_ORBS="No Orbs remain",
@@ -48,6 +54,9 @@ local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="
 -- been refilled with the configured maximum. One press there would start a new
 -- spending run. The first press only arms it; the second press starts it.
 local confirmNewRun=false
+-- The maximum shown when the new run was armed. A different amount (for
+-- example a tracked balance that changed) needs a new review.
+local confirmAmount=nil
 
 -- Read-only Orb history window. It renders one fixed row pool, reads only the
 -- page it shows plus the operation whose details are open, and performs no Orb
@@ -137,14 +146,35 @@ local function refresh()
         or a.note or "Assign a Wishlist through My Builds to begin.")
     local permanent=s.progress and s.progress.permanentMissing
     frame.permanent:SetText(permanent and permanent>0 and (permanent.." locked target copies remain. Orbs cannot change locked Echo slots.")or "")
-    frame.balance:SetText(s.charges~=nil and ("Confirmed Orb balance: "..s.charges)
-        or ("Orb balance: "..(s.balanceState or "unknown")..". "..(s.balanceReason or "")))
-    if s.state~="FINISHED" then confirmNewRun=false end
+    local d=s.limitDraft or {}
+    local mode=""
+    if not busy then
+        if d.tracking then
+            mode=d.value~=nil and ("\nMaximum follows this balance (up to "..tostring(d.cap or 1000)..") until you enter another amount.")
+                or "\nMaximum follows the confirmed balance; unavailable until it is confirmed."
+        elseif d.text~=nil and d.value==nil then
+            mode="\nEnter a whole-number maximum from 1 to 10,000, or press Max."
+        end
+    end
+    frame.balance:SetText((s.charges~=nil and ("Confirmed Orb balance: "..s.charges)
+        or ("Orb balance: "..(s.balanceState or "unknown")..". "..(s.balanceReason or "")))..mode)
+    if s.state~="FINISHED" then confirmNewRun=false;confirmAmount=nil end
+    editLimit(not busy)
+    local shown
+    if busy then shown=tostring(s.limit)
+    elseif d.text~=nil then shown=d.text
+    else shown=d.value~=nil and tostring(d.value) or "" end
+    if not frame.limit:HasFocus() and frame.limit:GetText()~=shown then showLimit(shown) end
+    -- Max: only an editable draft with a confirmed balance above zero. The
+    -- click checks again.
+    enable(frame.max,not busy and (tonumber(s.charges) or 0)>0 and s.balanceState=="confirmed")
+    if confirmNewRun and confirmAmount~=nil and frame.limit:GetText()~=confirmAmount then
+        confirmNewRun=false;confirmAmount=nil
+        frame.notice:SetText("The maximum changed. Review it, then press Start new run again.")
+    end
     frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume"
         or (s.state=="FINISHED" and (confirmNewRun and "Confirm new run" or "Start new run") or "Start")))
-    editLimit(not busy)
-    if not frame.limit:HasFocus()then frame.limit:SetText(tostring(busy and s.limit or s.config.maxOrbs))end
-    frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or s.config.maxOrbs)
+    frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or (shown~="" and shown or "-"))
         ..(s.reserved>0 and ("; unresolved exposure: "..s.reserved)or ""))
     local reason=(s.running or s.pending or s.state=="PAUSED")and s.reason or (s.startReason or s.reason)
     frame.status:SetText((phases[s.state]or s.state).."\n"..(reason or s.error or ""))
@@ -192,22 +222,79 @@ local function ensure()
         elseif Nexus.WishlistEditor then Nexus.WishlistEditor.Show()end
     end)
     frame.targets=text(frame,20,-82,580,26);frame.permanent=text(frame,20,-112,580,28);frame.balance=text(frame,20,-144,580,34)
-    text(frame,20,-190,225,24,"Maximum Orbs this run:")
-    frame.limit=CreateFrame("EditBox",nil,frame,"InputBoxTemplate");frame.limit:SetSize(65,25);frame.limit:SetPoint("TOPLEFT",225,-188)
+    frame.limitLabel=text(frame,20,-190,170,24,"Maximum Orbs this run:")
+    frame.limit=CreateFrame("EditBox",nil,frame,"InputBoxTemplate");frame.limit:SetSize(65,25);frame.limit:SetPoint("TOPLEFT",196,-188)
     frame.limit:SetFrameLevel(32);frame.limit:SetAutoFocus(false);frame.limit:SetNumeric(true);frame.limit:SetMaxLetters(5)
     frame.limit:SetScript("OnEditFocusGained",function(self)if not self.editable or not frame:IsShown()then self:ClearFocus()end end)
     frame.limit:SetScript("OnEnterPressed",function(self)
         if not self.editable then self:ClearFocus();return end
         local ok,err=Nexus.OrbRuntime.SetLimit(tonumber(self:GetText()));self:ClearFocus();notify(ok,err)
     end)
-    frame.limit:SetScript("OnEscapePressed",function(self)self:ClearFocus();UI.Refresh()end)
-    frame.start=button(frame,326,-188,120,"Start",function()
-        if Nexus.OrbRuntime.Status().state=="FINISHED" and not confirmNewRun then
-            confirmNewRun=true;UI.Refresh();return
-        end
-        confirmNewRun=false;notify(primary(tonumber(frame.limit:GetText())))
+    frame.limit:SetScript("OnEscapePressed",function(self)Nexus.OrbRuntime.CancelLimitEdit();self:ClearFocus();UI.Refresh()end)
+    -- Typing (also the same number, a partial or an empty text) is the
+    -- player's own amount. A refresh setting the box, or focus alone, is not.
+    frame.limit:SetScript("OnTextChanged",function(self,userInput)
+        if self.settingText or not self.editable then return end
+        if userInput==true or self:HasFocus() then Nexus.OrbRuntime.EditLimitText(self:GetText()) end
     end)
-    frame.stop=button(frame,461,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
+    -- A button click does not take keyboard focus from the box: release it
+    -- first, so the refresh shows the tracked amount instead of old typing.
+    frame.max=button(frame,268,-188,48,"Max",function()frame.limit:ClearFocus();notify(Nexus.OrbRuntime.TrackBalance())end)
+    frame.max:SetScript("OnEnter",function(self)
+        if GameTooltip then GameTooltip:SetOwner(self,"ANCHOR_TOP");GameTooltip:SetText(MAX_TIP,1,1,1,1,true);GameTooltip:Show()end
+    end)
+    frame.max:SetScript("OnLeave",function()if GameTooltip then GameTooltip:Hide()end end)
+    frame.max.tooltip=MAX_TIP
+    frame.start=button(frame,334,-188,126,"Start",function()
+        local s=Nexus.OrbRuntime.Status()
+        if s.state=="FINISHED" and not confirmNewRun then
+            -- The explicit preparation of a new run: its draft follows the
+            -- confirmed balance again; the amount is shown for review.
+            -- A refusal (for example a balance that became unknown after the
+            -- render) arms nothing and changes nothing.
+            frame.limit:ClearFocus()
+            local prepared,why=Nexus.OrbRuntime.NewRunDraft()
+            if not prepared then notify(nil,why);return end
+            UI.Refresh()
+            local amount=frame.limit:GetText();local v=tonumber(amount)
+            if v==nil or v<1 or v>10000 or v~=math.floor(v) then
+                -- A draft that follows the balance has no amount of its own:
+                -- name the balance, not typing or Max.
+                local d=Nexus.OrbRuntime.LimitDraft()
+                local why="Enter a whole-number maximum from 1 to 10,000, or press Max. Nothing was started."
+                if d.tracking and d.text==nil then
+                    why=d.value==0 and "The confirmed Orb balance is 0. Nothing was started."
+                        or "The maximum follows the confirmed Orb balance, which is not available. Nothing was started."
+                end
+                notify(nil,why)
+                return
+            end
+            confirmNewRun=true;confirmAmount=amount;UI.Refresh();return
+        end
+        -- The Confirm click checks the reviewed amount itself: an amount
+        -- changed since the review (typed, or not yet refreshed) needs a new
+        -- review, whatever the refresh timing.
+        if confirmNewRun and frame.limit:GetText()~=confirmAmount then
+            confirmNewRun=false;confirmAmount=nil
+            notify(nil,"The maximum changed. Review it, then press Start new run again.")
+            return
+        end
+        confirmNewRun=false;confirmAmount=nil
+        if s.running or s.state=="PAUSED" then notify(primary(nil));return end
+        -- Start uses the amount shown, never a newer balance read at the click.
+        local d=s.limitDraft or {}
+        local shown=frame.limit:GetText()
+        local n=tonumber(shown)
+        if n==nil or n<1 or n~=math.floor(n) then
+            notify(nil,d.tracking and "The maximum follows the confirmed Orb balance, which is not available. Nothing was started."
+                or "Enter a whole-number maximum from 1 to 10,000, or press Max. Nothing was started.")
+            return
+        end
+        -- Still the tracked amount this window showed: approve it as shown.
+        -- Any other text is the player's own amount (the existing path).
+        notify(primary(n,d.tracking and d.text==nil and shown==frame.limit.shownDraft))
+    end)
+    frame.stop=button(frame,470,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
     frame.approval=text(frame,20,-221,580,37,"Start approves this maximum and automatic use of eligible surplus copies, including safe recycling. Ordinary Automation will turn OFF.")
     frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,580,24)
     frame.closeNotice=text(frame,20,-393,580,20,CLOSE_NOTICE)
@@ -229,11 +316,11 @@ local function ensure()
     button(af,285,-151,85,"Previous",function()sourcePage=math.max(1,sourcePage-1);UI.Refresh()end)
     button(af,380,-151,85,"Next",function()sourcePage=sourcePage+1;UI.Refresh()end)
     frame.assignmentNote=text(af,5,-180,565,31)
-    frame.mutations={frame.start,frame.stop,frame.assigned,frame.clearExclusions}
+    frame.mutations={frame.start,frame.stop,frame.assigned,frame.clearExclusions,frame.max}
     for _,r in ipairs(frame.sourceRows)do frame.mutations[#frame.mutations+1]=r.exclude end
     inactiveControls()
     frame:SetScript("OnShow",function()UI.Refresh()end)
-    frame:SetScript("OnHide",function()editLimit(false);confirmNewRun=false end)
+    frame:SetScript("OnHide",function()editLimit(false);confirmNewRun=false;confirmAmount=nil end)
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
     frame:Hide();UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbPanel"
 end

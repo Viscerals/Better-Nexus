@@ -2938,6 +2938,17 @@ local function AnyLatch()
     return false
 end
 
+-- Read-only, for display: true while ANY client latch is set, including one
+-- the watchdog declared dead. An expired watchdog is not a confirmed result.
+function A.UnconfirmedLatch()
+    local p = PerksTbl()
+    if not p then return false end
+    for _, field in pairs(LATCH_FIELDS) do
+        if p[field] ~= nil then return true end
+    end
+    return false
+end
+
 -- stuck-latch watchdog: the client's latches have NO timeout and some
 -- refusals arrive with no reply at all (a user-clicked freeze the server
 -- ignores would otherwise halt automation forever). A latch stuck >10s is

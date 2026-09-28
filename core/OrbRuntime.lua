@@ -4,6 +4,17 @@ Nexus=Nexus or {}
 local M={};Nexus.OrbRuntime=M
 local P=assert(Nexus.OrbPolicy);local B=assert(Nexus.GameAdapter.Orbs)
 local config,run,approval,frame,configOwner
+-- The unapproved maximum draft. Memory only: it is never saved, and it is
+-- rebuilt only when the preferences of another character or row load.
+-- tracking=true: the draft follows the confirmed Orb balance, up to
+-- TRACK_CAP (a suggestion ceiling only; typed limits keep 1-10,000).
+-- text: what the player typed and has not saved yet (nil when nothing).
+-- editFrom: the tracking flag before the current typing, for Escape.
+local draft
+local TRACK_CAP=1000
+-- The finished run whose next-run draft was already created (memory only).
+-- Later reviews of that draft do not create it again.
+local preparedFor
 local advancing=false
 local passiveDepth=0
 local OFFER_TIMEOUT,RESULT_TIMEOUT=10,12
@@ -107,15 +118,19 @@ local function init()
     local state=Nexus.Store and Nexus.Store.State and Nexus.Store.State()
     local c=state and state.orbRefinement or {}
     config={name=c.name or "No Wishlist selected",entries=copy(c.entries or {}),sources=copy(c.sources or {}),
-        excluded=copy(c.excluded or {}),recycle=c.recycle==true,maxOrbs=integer(c.maxOrbs,1,10000) and c.maxOrbs or 10,
+        excluded=copy(c.excluded or {}),recycle=c.recycle==true,maxOrbs=integer(c.maxOrbs,1,10000) and c.maxOrbs or nil,
         pending=copy(c.pending),fingerprint=c.fingerprint,selectedSlot=c.selectedSlot,origin=c.origin}
+    -- A saved maximum is kept as saved, whatever its value or origin. Only a
+    -- genuinely absent (or unusable) one starts a draft that follows the
+    -- confirmed balance. Nothing is written here.
+    draft={tracking=config.maxOrbs==nil};preparedFor=nil
     run={state="IDLE",reason="Choose a maximum, then Start to use safe surplus copies for the assigned Wishlist.",running=false,spent=0,reserved=0,limit=0,recent={}}
     if type(config.pending)=="table" then
         run.pending=copy(config.pending);run.pending.restored=true;run.pending.since=now()
         run.pending.refreshRequested=false;run.pending.baselineStamp=nil;run.pending.recoverySerial=nil;run.pending.recoveryMatched=nil
         run.state="RECOVERY";run.reason="An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open."
         run.recovery={kind="CHECKING",observing=false}
-        run.spent=run.pending.spent or 0;run.reserved=run.pending.spendConfirmed and 0 or 1;run.limit=run.pending.limit or config.maxOrbs
+        run.spent=run.pending.spent or 0;run.reserved=run.pending.spendConfirmed and 0 or 1;run.limit=run.pending.limit or config.maxOrbs or 0
         -- Start the read-only recovery pump now. A manual choice made before the
         -- player opens the Orb window can then still be observed.
         run.recoveryFastUntil=now()+RECOVERY_FAST_WINDOW
@@ -330,7 +345,72 @@ function M.SetLimit(n)
     init();n=tonumber(n)
     if not integer(n,1,10000) then return nil,"Choose a whole-number Orb limit from 1 to 10,000." end
     if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,"Use Increase limit while paused, or finish this run first." end
-    local before=copy(config);config.maxOrbs=n;return changedConfig(before)
+    local before=copy(config);config.maxOrbs=n
+    local ok,err=changedConfig(before)
+    -- A saved typed maximum is the player's own amount: tracking stops.
+    if ok then draft={tracking=false} end
+    return ok,err
+end
+-- The tracked amount from the passive, bounded balance read (no request).
+-- Only a confirmed balance counts; zero stays zero.
+local function trackedLimit()
+    local n,state,reason=B.Balance()
+    if state=="confirmed" and integer(n,0) then return math.min(n,TRACK_CAP),state end
+    return nil,state or "unknown",reason
+end
+-- Read-only view of the unapproved maximum draft. value is nil when the draft
+-- follows a balance that is not confirmed, or when the typed text is not a
+-- valid maximum.
+function M.LimitDraft()
+    init()
+    local d={tracking=draft.tracking==true,text=draft.text,saved=config.maxOrbs,cap=TRACK_CAP}
+    if d.tracking then d.value,d.balanceState,d.reason=trackedLimit()
+    elseif draft.text~=nil then
+        local n=tonumber(draft.text);d.value=integer(n,1,10000) and n or nil
+    else d.value=config.maxOrbs end
+    return d
+end
+-- The player typed into the maximum (including the same number, a partial
+-- or an empty text): tracking stops and the text is kept in memory until it
+-- is saved (Enter or Start) or cancelled (Escape). Nothing is written. An
+-- unapproved preview is obsolete.
+function M.EditLimitText(text)
+    if not editable() then return nil,"The maximum is fixed during this run." end
+    if draft.editFrom==nil then draft.editFrom=draft.tracking==true end
+    draft.tracking=false;draft.text=tostring(text or "");approval=nil
+    return true
+end
+-- Escape: the typed text is discarded and the draft is what it was before.
+function M.CancelLimitEdit()
+    init()
+    if draft.editFrom~=nil then draft.tracking=draft.editFrom end
+    draft.text=nil;draft.editFrom=nil
+    return true
+end
+-- Max: the unapproved draft follows the confirmed balance again (up to
+-- TRACK_CAP) until the player types another amount or starts. It is not a
+-- snapshot. Checked again here; on refusal the draft is unchanged. Nothing is
+-- written, started or approved.
+function M.TrackBalance()
+    if not editable() then return nil,"The maximum is fixed during this run. Nothing was changed." end
+    local v=trackedLimit()
+    if not v or v<1 then return nil,"Max needs a confirmed Orb balance above zero. Your maximum was not changed." end
+    draft={tracking=true};approval=nil
+    return true
+end
+-- The explicit preparation of a new run after a finished one: the new draft
+-- follows the confirmed balance again. Only a settled FINISHED run qualifies.
+function M.NewRunDraft()
+    init()
+    if run.running or run.pending or run.state~="FINISHED" then return nil,"Only a finished run can be followed by a new one." end
+    -- Once per finished run: a later review of the same new-run draft keeps
+    -- it as it is (a typed amount, or Max tracking).
+    if preparedFor==run then return true end
+    -- Checked before anything is replaced: a refusal changes nothing.
+    local v=trackedLimit()
+    if not v or v<1 then return nil,"A new run needs a confirmed Orb balance above zero. Your maximum was not changed." end
+    draft={tracking=true};preparedFor=run;approval=nil
+    return true
 end
 function M.SetRecycle(enabled)
     if not editable() then return nil,"Recycling permission is fixed during this run." end
@@ -391,7 +471,31 @@ local function preflight(automatic,m)
     end
     if m.s.charges<1 then return nil,"No confirmed Orbs are available." end
     if m.s.autoAccept then return nil,"Turn off the game's automatic Echo acceptance first." end
-    if m.s.hostPending or #m.s.board>0 or m.s.offerPending or Nexus.GameAdapter.InFlight() then return nil,"Resolve the current Echo action before starting Orb mode." end
+    -- The same condition as before; the refusal names each cause that is
+    -- actually present. While an action has no confirmed result (a live or
+    -- watchdog-released latch, or the game still processing), a visible
+    -- offer or choice is only reported: telling the player to choose or
+    -- finish it could repeat an action that may already have been sent.
+    local inFlight=Nexus.GameAdapter.InFlight()
+    if m.s.hostPending or #m.s.board>0 or m.s.offerPending or inFlight then
+        -- hostPending is any client latch (select, banish, freeze, reroll,
+        -- lock, unlock), live or watchdog-released: one fact, one sentence.
+        local latch=Nexus.GameAdapter.UnconfirmedLatch and Nexus.GameAdapter.UnconfirmedLatch()
+        -- An automatic action whose latch already cleared can still wait for
+        -- its result (submitted, uncertain or expired intent): the same fact.
+        local intent=Nexus.PendingIntentState and Nexus.PendingIntentState()
+        local unconfirmed=inFlight or latch or m.s.hostPending or intent~=nil
+        local causes={}
+        if unconfirmed then
+            causes[#causes+1]="The last Echo action has no confirmed result yet."
+            if m.s.offerPending then causes[#causes+1]="An Orb offer is shown." end
+            if #m.s.board>0 then causes[#causes+1]="An Echo choice is shown." end
+        else
+            if m.s.offerPending then causes[#causes+1]="Finish the open Orb offer in the game window first." end
+            if #m.s.board>0 then causes[#causes+1]="Choose the open Echo choice in the game window first." end
+        end
+        return nil,"Orb mode cannot start yet. "..table.concat(causes," ")
+    end
     if Nexus.GameAdapter.RivalDetected() then return nil,"Disable the other Echo automation addon before starting Orb mode." end
     local capacity=0;local permitted={}
     for _,r in ipairs(m.sources) do
@@ -405,11 +509,15 @@ local function preflight(automatic,m)
     if capacity<1 then return nil,"No safe surplus copies are available. Required and locked copies remain protected." end
     m.permitted=permitted;m.capacity=capacity;return m
 end
-function M.Prepare(mode)
+function M.Prepare(mode,reviewed)
     init();if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,busyReason("A new Orb run","An Orb run is already active or unresolved. Stop/settle it before starting another.") end
     local automatic=mode=="assigned"
     local m,err=preflight(automatic);if not m then return nil,err end
-    local limit=mode=="single" and 1 or config.maxOrbs
+    -- The reviewed amount, else the current draft: the tracked balance (up to
+    -- TRACK_CAP), a valid typed amount, or the saved maximum. The preview
+    -- returns it for review; Confirm refuses if the balance changed.
+    local limit=mode=="single" and 1 or (reviewed or M.LimitDraft().value)
+    if not integer(limit,1,10000) then return nil,"Choose a maximum, or press Max, before starting." end
     approval={token={},model=m,entries=copy(config.entries),sources=copy(m.permitted),
         excluded=copy(config.excluded),recycle=automatic or config.recycle,automatic=automatic,
         binding=binding(m.assignment),limit=limit,created=now()}
@@ -480,33 +588,71 @@ function M.Confirm(token)
         reason="Approved. Preparing one Orb replacement."})
     approval=nil;ensureFrame();M.Pump();return true
 end
-function M.Start(value)
+function M.Start(value,tracked)
     init()
+    if tracked then
+        -- The amount shown to the player while the draft follows the balance.
+        -- It is approved as shown: never replaced by a newer balance read at
+        -- the click, and not saved as a typed maximum. The existing fresh
+        -- checks (Prepare, Confirm) still run.
+        value=tonumber(value)
+        if not draft.tracking then return nil,"The maximum changed. Review it, then press Start again." end
+        if not integer(value,1,TRACK_CAP) then return nil,"Choose a maximum, or press Max, before starting." end
+        local a,e=M.Prepare("assigned",value);if not a then return nil,e end
+        return M.Confirm(a.token)
+    end
     if value~=nil then local ok,e=M.SetLimit(value);if not ok then return nil,e end end
     local a,e=M.Prepare("assigned");if not a then return nil,e end
     return M.Confirm(a.token)
 end
+-- The receipt's loadout against the current read. UNKNOWN: the client has not
+-- received its build-slot data since it loaded, so a slot of 0 is only its
+-- load-time default, not an observed change. Nothing is decided or persisted
+-- on it; the action waits for the server's slot. Any other slot in that state
+-- came from the server's active-slot push and is an observation.
+local function loadoutCheck(s,p)
+    if p.loadoutChanged or p.originalSlot==nil then return "CHANGED" end
+    if s.context.slotKnown==false then
+        local slot=s.context.slot
+        if slot~=nil and slot~=0 and slot~=p.originalSlot then return "CHANGED" end
+        return "UNKNOWN"
+    end
+    if p.originalSlot~=s.context.slot then return "CHANGED" end
+    return "SAME"
+end
+-- Read-only record of the settlement requirement that the last attempt did
+-- not meet, for the status text. Session only; it authorizes nothing.
+local function unmet(gate,detail)
+    run.settleGate={gate=gate,detail=detail};return false
+end
 local function finishResult(s,p)
+    run.settleGate=nil
     -- Ownership responses do not identify the originating loadout. Once that
     -- boundary changes, even an exact replacement delta can belong elsewhere.
     -- Keep this uncertainty across Recheck, return-to-slot, and reload.
-    if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+    local loadout=loadoutCheck(s,p)
+    if loadout=="UNKNOWN" then return unmet("loadout-unknown") end
+    if loadout=="CHANGED" then
         if not p.loadoutChanged then p.loadoutChanged=true;savePending() end
         pause("The original loadout cannot be verified after a loadout change or an incomplete older receipt. Ownership responses do not identify the original loadout. Pending exposure is retained; no retry is allowed.")
-        return false
+        return unmet("loadout")
     end
     -- Neither a new table nor an Orb decrement proves a result. Require the
     -- original offer and a selection observed within that offer's lifecycle.
     if not p.offerKey or not p.selectionAttempted or not p.selectedKey
         or not (p.choiceMayHaveBeenSent or p.choiceObserved)
-        or not p.offeredKeys or not p.offeredKeys[p.selectedKey] then return false end
-    if p.restored and not p.baselineStamp then p.baselineStamp=s.grantStamp;return false end
+        or not p.offeredKeys or not p.offeredKeys[p.selectedKey] then return unmet("choice") end
+    if p.restored and not p.baselineStamp then p.baselineStamp=s.grantStamp;return unmet("fresh") end
     local fresh=s.grantStamp>(p.restored and p.baselineStamp or p.selectionStamp or p.beforeStamp)
-    if s.offerPending or #s.board>0 or s.hostPending then return false end
-    if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed during the operation. Resolve the result manually.");return false end
-    if s.charges~=p.chargesBefore-1 then return false end
+    if s.offerPending then return unmet("offer") end
+    if s.hostPending then return unmet("host") end
+    if #s.board>0 then return unmet("board") end
+    if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed during the operation. Resolve the result manually.");return unmet("locked") end
+    if s.charges~=p.chargesBefore-1 then
+        return unmet("charges",{expected=p.chargesBefore-1,observed=s.charges})
+    end
     local gained,status=P.SingleGain(p.before,p.removed,s.granted)
-    if status=="WAIT" then return false end
+    if status=="WAIT" then return unmet("ownership") end
     if status=="CONFIRMED" and gained==p.removed then
         -- Even a source-removal observation followed by an equal-content
         -- snapshot can be a reordered stale response. The supported API has
@@ -514,11 +660,11 @@ local function finishResult(s,p)
         if p.selectedKey==p.removed then
             pause("The same-ID, same-quality result is indistinguishable from stale ownership data. The client supplies no correlated completion evidence. Pending exposure is retained; no retry is allowed.")
         end
-        return false
+        return unmet("same-id")
     end
-    if not fresh then return false end
+    if not fresh then return unmet("fresh") end
     if status~="CONFIRMED" or (p.selectedKey and gained~=p.selectedKey) then
-        pause("Echo ownership does not match the expected replacement. No further Orb will be spent.");return false
+        pause("Echo ownership does not match the expected replacement. No further Orb will be spent.");return unmet("mismatch")
     end
     if not p.spendConfirmed then run.spent=run.spent+1;p.spendConfirmed=true;run.reserved=0 end
     run.recent[#run.recent+1]={removed=p.removed,obtained=gained,at=now()}
@@ -641,9 +787,10 @@ local function recoverObserve(s,p)
     -- finishResult owns the loadout-boundary pause. Nothing is observed or
     -- recorded across it: the watcher is bound to the original loadout only, as
     -- the live owner's context is.
-    if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+    local loadout=loadoutCheck(s,p)
+    if loadout~="SAME" then
         if type(B.Unwatch)=="function" then B.Unwatch() end
-        return "LOADOUT",false
+        return loadout=="UNKNOWN" and "LOADOUT_UNKNOWN" or "LOADOUT",false
     end
     local observing=type(B.Watch)=="function" and B.Watch(s,onRecoveryChoice)==true
     if s.lockedKey~=p.lockedKey then return "PERMANENT_CHANGED",observing end
@@ -724,9 +871,28 @@ local RECOVERY_TEXT={
     WAIT_OFFER_BLIND="The earlier Orb action is unresolved and no Orb offer is open. This client cannot observe a manual choice, so Nexus cannot confirm the earlier action if its offer opens later."..KEPT..NO_EXIT,
     PERMANENT_CHANGED="Locked Echoes changed since the earlier Orb action. Nexus cannot confirm that action."..KEPT..NO_EXIT,
     LOADOUT="The original loadout of the earlier Orb action cannot be verified. Nexus cannot confirm that action."..KEPT..NO_EXIT,
+    LOADOUT_UNKNOWN="An earlier Orb action is unresolved. The game has not yet sent this character's build-slot data since it loaded, so Nexus cannot check the original loadout yet. Nexus is waiting, read-only, and records nothing until then: if an Orb offer is open, a choice made in it now cannot be recorded for the earlier action. Nothing will be sent.",
     UNOBSERVABLE="The earlier Orb action ended while Nexus could not observe it. The game gives no record of which choice belonged to it, so Nexus cannot confirm it, and Recheck cannot settle it. The record, its spending exposure, and the block on new Orb runs and ordinary rolling are kept. Nothing is retried, refunded or deleted."..NO_EXIT,
 }
+-- WAIT_RESULT names the settlement requirement that the last read did not
+-- meet (run.settleGate), so the text does not promise that a fresh ownership
+-- response settles an action that something else holds.
+local WAIT_RESULT_GATE={
+    ownership="A choice for the earlier Orb action is recorded. Echo ownership does not show the chosen Echo yet. Nexus is waiting for an ownership response that shows it. Recheck requests one. Nothing will be sent.",
+    offer="A choice for the earlier Orb action is recorded. The game still reports an open Orb offer. Nexus is waiting, read-only, until it closes. Nothing will be sent.",
+    host="A choice for the earlier Orb action is recorded. Another game action is still in flight. Nexus is waiting, read-only, until it ends. Nothing will be sent.",
+    board="A choice for the earlier Orb action is recorded, but an Echo choice is open in the game. Nexus checks the result only while no Echo choice is open; Recheck cannot close it. Taking an Echo from that choice changes your Echoes, and Nexus then cannot confirm the earlier action."..KEPT,
+    charges="A choice for the earlier Orb action is recorded, but the Orb balance shown is %s and the record requires %s (one Orb less than before the action). Recheck asks the game for the current balance. While the balance differs, Nexus cannot confirm the action."..KEPT,
+}
 local function recoveryReason(kind,observing,s,p,proposed)
+    local gate=run.settleGate
+    if kind=="WAIT_RESULT" and gate and WAIT_RESULT_GATE[gate.gate] then
+        local text=WAIT_RESULT_GATE[gate.gate]
+        if gate.gate=="charges" then
+            text=text:format(tostring(gate.detail and gate.detail.observed),tostring(gate.detail and gate.detail.expected))
+        end
+        return text
+    end
     if not observing and kind=="OFFER_OPEN" then return RECOVERY_TEXT.OFFER_OPEN_BLIND end
     if not observing and kind=="WAIT_OFFER" then return RECOVERY_TEXT.WAIT_OFFER_BLIND end
     if kind=="OFFER_OPEN" and proposed then
@@ -739,7 +905,7 @@ end
 -- Truthful reason for callers that Orb mode blocks (ordinary rolling, build-slot
 -- and permanent-slot changes). subject: what is blocked, e.g. "Ordinary rolling".
 -- Text only: it changes no block.
-local CAN_PROGRESS={CHECKING=true,UNREADABLE=true,WAIT_RESULT=true}
+local CAN_PROGRESS={CHECKING=true,UNREADABLE=true,WAIT_RESULT=true,LOADOUT_UNKNOWN=true}
 local CAN_PROGRESS_OBSERVING={OFFER_OPEN=true,WAIT_OFFER=true}
 function M.BlockReason(subject)
     subject=type(subject)=="string" and subject or "This action"
@@ -780,7 +946,8 @@ function M.Pump(passive)
             if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
             if finishResult(s,p) then return end
             if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
-            run.recovery={kind=kind,observing=observing,proposed=proposed==true or nil}
+            run.recovery={kind=kind,observing=observing,proposed=proposed==true or nil,
+                gate=kind=="WAIT_RESULT" and run.settleGate and copy(run.settleGate) or nil}
             setState("RECOVERY",recoveryReason(kind,observing,s,p,proposed))
             return
         end
@@ -793,7 +960,7 @@ function M.Pump(passive)
             if run.state~="STOPPED" then pause("The active loadout or assigned Wishlist changed. The original operation stays pending; Resume requires settlement and a resolved assignment.") end
         end
         if p then
-            if p.loadoutChanged or p.originalSlot==nil or p.originalSlot~=s.context.slot then
+            if loadoutCheck(s,p)~="SAME" then
                 finishResult(s,p);return
             end
             if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed; no further Orb action will be submitted.");return end
@@ -1034,7 +1201,8 @@ function M.BlocksOrdinary()
     end
     return run and (run.running or run.pending~=nil or (run.state=="PAUSED" or run.state=="LIMIT")) or false
 end
--- Display snapshot. One adapter read per call; it authorizes nothing (every
+-- Display snapshot. One adapter read per call (plus passive balance reads for
+-- the balance line and the maximum draft); it authorizes nothing (every
 -- action reads again). detail=true adds the source list for Advanced.
 function M.Status(detail)
     init();local m,err,failed=inspect();local a=m and m.assignment or failed or assigned()
@@ -1045,6 +1213,7 @@ function M.Status(detail)
     r.config.name=a.name or "No assigned Wishlist";r.config.entries=copy(a.entries or {})
     r.config.pending=nil
     r.charges,r.balanceState,r.balanceReason=B.Balance()
+    r.limitDraft=M.LimitDraft()
     if m then
         r.charges=m.s.charges;r.progress=P.Progress(assert(P.Normalize(a.entries)),m.s)
         r.sourceCount=#m.sources

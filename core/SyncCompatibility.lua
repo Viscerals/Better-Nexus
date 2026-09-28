@@ -160,6 +160,9 @@ function Compatibility.New(options)
         if dps and dps.GetSyncHash then
             local ok, value = pcall(dps.GetSyncHash)
             if ok and value then return tostring(value) end
+            -- Not ready (or failed): no digest is advertised; a request waits
+            -- in its "preparing" state. "0" would claim an empty store.
+            return nil
         end
         return "0"
     end

@@ -578,6 +578,20 @@ function Inbound.New(options)
             return acceptPeer(protocolSender, parts[3])
         end
 
+        -- WLCP|sender|caps|nonce: advertised support for a representation
+        -- (docs/P1_7_LOCKED_ROLE_WIRE.md). It is noted for this transport
+        -- sender only and grants nothing else.
+        if codes.capability and code == codes.capability then
+            local caps, nonce = parts[3], parts[4]
+            if #parts ~= 4 or type(caps) ~= "string" or #caps > 64
+                or not caps:match("^[%w,_%-]+$") or type(nonce) ~= "string"
+                or #nonce < 6 or #nonce > 16 or not nonce:match("^[%l%d]+$") then
+                return rejectIncoming("invalid capability")
+            end
+            if type(options.noteCapability) ~= "function" then return false end
+            return options.noteCapability(protocolSender, caps, nonce) and true or false
+        end
+
         if code == codes.request then
             if #parts < 2 or #parts > 6
                 or (parts[3] ~= nil and parts[3] ~= ""

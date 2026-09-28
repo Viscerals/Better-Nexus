@@ -565,12 +565,11 @@ function Controller.New(options)
 
     function M.ClampScroll(count, visible)
         count, visible = math.max(0, tonumber(count) or 0), math.max(0, tonumber(visible) or 0)
-        if state.scrollOffset >= count then
-            local nextOffset = math.max(0, count - visible)
-            if state.scrollOffset ~= nextOffset then
-                state.scrollOffset = nextOffset
-                TouchPresentation()
-            end
+        -- #63: never past the last full window.
+        local lastFull = math.max(0, count - visible)
+        if state.scrollOffset > lastFull then
+            state.scrollOffset = lastFull
+            TouchPresentation()
         end
         return state.scrollOffset
     end
@@ -590,12 +589,11 @@ function Controller.New(options)
 
     function M.ClampPick(count, visible)
         count, visible = math.max(0, tonumber(count) or 0), math.max(0, tonumber(visible) or 0)
-        if state.pickOffset >= count then
-            local nextOffset = math.max(0, count - visible)
-            if state.pickOffset ~= nextOffset then
-                state.pickOffset = nextOffset
-                TouchPresentation()
-            end
+        -- #63: never past the last full window.
+        local lastFull = math.max(0, count - visible)
+        if state.pickOffset > lastFull then
+            state.pickOffset = lastFull
+            TouchPresentation()
         end
         return state.pickOffset
     end
@@ -1240,19 +1238,29 @@ function Controller.New(options)
                 notify("|cffff6060Nexus:|r Wishlist uploaded, but local designed targets could not be saved. Your draft is preserved.")
                 return false, commitReason or "local_save_incomplete"
             end
+            -- The uploaded rows are exactly the plan's ORDINARY rows (locked
+            -- targets are the committed design). Record them with that role:
+            -- stored without it, an explicit ordinary row became untyped, and
+            -- a save that changed nothing let current locks count for
+            -- ordinary copies the plan still asks for.
+            local recorded = {}
+            for index, echo in ipairs(echoes) do
+                recorded[index] = {spellId=echo.spellId, quality=echo.quality,
+                    stacks=echo.stacks, locked=false}
+            end
             local associated, associationReason = true, nil
             if state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
                 associated, associationReason = Adapter.UpdateWishlistAssociationAfterSave(
-                    state.editingContext.loadoutSlot, slot, name, echoes, designTargets)
+                    state.editingContext.loadoutSlot, slot, name, recorded, designTargets)
             elseif state.createTargetContext and Adapter.SetLoadoutWishlistIdentity then
                 associated, associationReason = Adapter.SetLoadoutWishlistIdentity(
-                    state.createTargetContext.loadoutSlot, name, echoes, designTargets)
+                    state.createTargetContext.loadoutSlot, name, recorded, designTargets)
                 if associated then notify("|cff4dff80Nexus:|r assigned '" .. tostring(name)
                     .. "' to " .. tostring(state.createTargetContext.loadoutName
                         or "the active Saved Build") .. ".") end
             elseif Adapter.SetFirstLoadoutWishlistIdentity then
-                associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
+                associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
             end
             if associated ~= true then
                 state.applyRetry = nil

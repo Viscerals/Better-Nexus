@@ -191,10 +191,18 @@ function EchoWeaver.DecideNexus(state)
     -- Permanent locked ownership must be known before subtracting copies.
     if locked and locked.synced == false then return Wait("waiting for locked Echo state") end
     local requested, outstanding, total = {}, {}, 0
+    local lockedTargets = plan.lockedRequestedCounts or {}
     for id,n in pairs(plan.requestedCounts or {}) do
         requested[id]=Count(n)
-        local have = Count(owned.bySpell and owned.bySpell[id])
-            + Count(locked and locked.bySpell and locked.bySpell[id])
+        local lockedHave = Count(locked and locked.bySpell and locked.bySpell[id])
+        -- With explicit roles a current lock covers only the plan's LOCKED
+        -- targets of that Echo; an ordinary target needs an ordinary copy.
+        -- (A held rolled copy still counts toward a locked target it will
+        -- become, so lock acquisition is neither dropped nor doubled.)
+        if plan.explicitRoles then
+            lockedHave = math.min(lockedHave, Count(lockedTargets[id]))
+        end
+        local have = Count(owned.bySpell and owned.bySpell[id]) + lockedHave
         outstanding[id]=math.max(0,requested[id]-have)
         total=total+outstanding[id]
     end
@@ -211,8 +219,34 @@ function EchoWeaver.DecideNexus(state)
             banishEligible=not c.isGuaranteed and c.banishEligible~=false,
             freezeEligible=not c.isGuaranteed and c.freezeEligible~=false}
         local wanted=id and (outstanding[id] or 0)>0
+        -- A different quality tier of a wished family is not taken in place
+        -- of the requested tier, but it is on the Wishlist: say so rather
+        -- than "not on Wishlist". Explanation only; the value is unchanged.
+        local family=c.family
+        if family==nil and id and state.catalog and state.catalog.familyOf then
+            family=state.catalog.familyOf[id]
+        end
+        -- Only when the card's quality differs from every requested tier of
+        -- that family: a same-quality variant is not a quality difference.
+        local otherTier=false
+        local target=family~=nil and plan.wishedFamilies and plan.wishedFamilies[family]
+            and plan.targets and plan.targets[family]
+        if target then
+            local cardQ=tonumber(c.quality)
+            if cardQ==nil and id and state.catalog and state.catalog.rows and state.catalog.rows[id] then
+                cardQ=tonumber(state.catalog.rows[id].quality)
+            end
+            otherTier=cardQ~=nil
+            for _,tier in ipairs(target.qualityTiers or {}) do
+                if tonumber(tier.q)==cardQ then otherTier=false end
+            end
+            if not target.qualityTiers or #target.qualityTiers==0 then
+                otherTier=cardQ~=nil and tonumber(target.wishedQuality)~=cardQ
+            end
+        end
         annotations[i]=isFrozen and "frozen" or c.isGuaranteed and "guaranteed"
-            or wanted and "wanted" or requested[id] and "target satisfied" or "filler"
+            or wanted and "wanted" or requested[id] and "target satisfied"
+            or otherTier and "wrong quality" or "filler"
         deltas[i]=wanted and (100+(tonumber(c.quality) or 0)*2) or -15
     end
     local charges,refused=state.charges or {},state.searchRefused or {}

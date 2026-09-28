@@ -997,8 +997,11 @@ local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets
         local copies = targetEntry.copies
         if id and row and fam and copies then
             local q = tonumber(row.quality) or 0
+            -- designTarget: appended from the design, not a row of the
+            -- plan itself; it does not make an untyped plan typed.
             entries[#entries + 1] = {
                 spellId=id,quality=q,stacks=copies,family=fam,locked=true,
+                designTarget=true,
             }
             local target = WritableTarget(fam)
             if target then
@@ -1086,8 +1089,13 @@ local function StrategyWishlistKey(wishlist)
     local entryParts = {}
     for index, entry in ipairs(type(wishlist.entries) == "table"
         and wishlist.entries or {}) do
-        entryParts[index] = KeyPart(type(entry) == "table"
-            and entry.spellId or nil)
+        -- Roles and copies are compiled into the plan (Strategy.Compile's
+        -- locked-target counts and explicit-roles signal), so a role-only
+        -- change must not reuse the old plan.
+        entryParts[index] = type(entry) == "table" and table.concat({
+            KeyPart(entry.spellId), KeyPart(entry.stacks),
+            KeyPart(entry.locked), KeyPart(entry.sourceRole)}, ":")
+            or KeyPart(nil)
     end
     return table.concat({
         table.concat(familyParts, ","),
@@ -2212,7 +2220,22 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             -- The selection, as on the board path: a hold is shown in the
             -- status line, never as a button that reads OFF.
             auto = autoEnabled,
+            paused = nil,
             version = Nexus.VERSION }
+        if autoEnabled then
+            -- Between boards the same pause stays visible (read-only gate).
+            local gateOk, gateWhy = true, nil
+            if Adapter.OrdinaryBoardAllowed then gateOk, gateWhy = Adapter.OrdinaryBoardAllowed() end
+            if not heldOk then model.paused = tostring(heldWhy)
+            elseif not gateOk then model.paused = tostring(gateWhy) end
+        end
+        if Nexus.OrbGuidance then
+            model.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
+                model.progress, (actionIntent and (actionIntent.state == "submitted"
+                or actionIntent.state == "uncertain" or actionIntent.state == "expired")
+                and actionIntent.state or nil),
+            plan and not plan.advisorOnly, {skipHorizon = actionHold.worldLeaving == true}))
+        end
         FinishPhase(preparePerformance, "overlayPrepare", prepareStarted)
         MeasurePhase("overlayRender", RenderPanel, model)
         return
@@ -2453,8 +2476,17 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         level = level,
         recommendation = recommendation,
         auto = autoEnabled,
+        -- Auto stays ON; this only says it is not acting now, and why.
+        paused = autoEnabled and not okAuto and tostring(autoWhy) or nil,
         version = Nexus.VERSION,
     }
+    if Nexus.OrbGuidance then
+        panelModel.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
+            panelModel.progress, (actionIntent and (actionIntent.state == "submitted"
+                or actionIntent.state == "uncertain" or actionIntent.state == "expired")
+                and actionIntent.state or nil),
+            plan and not plan.advisorOnly, {horizon = horizon, horizonKnown = true}))
+    end
     FinishPhase(overlayPerformance, "overlayPrepare", overlayStarted)
     MeasurePhase("overlayRender", RenderPanel, panelModel)
 
@@ -3319,6 +3351,16 @@ end
     function M.RequestRecompute() return RequestRecompute() end
     function M.RequestStepAt(when) return RequestStepAt(when) end
     function M.StatusLine() return statusLine end
+    -- Read-only: "submitted" or "uncertain" while an automatic action waits
+    -- for its result (HUD guidance only; it authorizes nothing).
+    function M.PendingIntentState()
+        local state = actionIntent and actionIntent.state
+        -- An expired intent is not a confirmed one: it still counts.
+        if state == "submitted" or state == "uncertain" or state == "expired" then return state end
+        return nil
+    end
+    -- Read-only: true between a loading screen's start and its world entry.
+    function M.WorldLeaving() return actionHold.worldLeaving == true end
     function M.AutoEnabled() return autoEnabled end
     function M.AutoAllowed() return AutoAllowed() end
     function M.ToggleAuto()

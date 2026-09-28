@@ -52,11 +52,14 @@ local CODE_DELETE     = "WLRD"
 local CODE_DPS        = "WLDS" -- legacy build-id DPS
 local CODE_DPS2       = "WLD2" -- exact-set DPS chunks
 local CODE_PRESENCE   = "WLNP" -- lightweight Nexus peer/version presence
+-- WLCP: locked-role wire capability (docs/P1_7_LOCKED_ROLE_WIRE.md).
+-- Released peers drop this unknown code before parsing it. (No new chunk
+-- local: the main chunk is at Lua's 200-local limit.)
 local PEER_PROTOCOL_CODES = {
     [CODE_BUILD]=true, [CODE_INDEX]=true, [CODE_LOADOUT_REQ]=true,
     [CODE_LOADOUT_CLAIM]=true, [CODE_REQUEST]=true, [CODE_CLAIM]=true,
     [CODE_BUCKET_CLAIM]=true, [CODE_DELETE]=true, [CODE_DPS]=true,
-    [CODE_DPS2]=true, [CODE_PRESENCE]=true,
+    [CODE_DPS2]=true, [CODE_PRESENCE]=true, WLCP=true,
 }
 local CHAT_LIMIT      = 255    -- WoW SendChatMessage hard cap
 local CHAT_SAFETY     = 8      -- conservative margin
@@ -1546,7 +1549,17 @@ function Sync.GetShareStatus(id)
     local status = id ~= nil and Operation.shareById[tostring(id)]
         or Operation.latestShare
     if type(status) ~= "table" then return nil end
-    return Operation.Copy(status)
+    local copy = Operation.Copy(status)
+    -- Responses prepared for this build that carried its locked targets, and
+    -- those that carried the ordinary targets only (older requesters).
+    -- Prepared is not received: nothing here claims peer storage.
+    local roles = type(copy) == "table" and Responder.LockedRoleOutcomes
+        and Responder.LockedRoleOutcomes[tostring(copy.id)] or nil
+    if roles then
+        copy.lockedRolesFull = roles.full
+        copy.lockedRolesOrdinaryOnly = roles.ordinaryOnly
+    end
+    return copy
 end
 
 -- DeleteWireMessage, the WLRD encoder, was removed with its last caller. The
@@ -1729,11 +1742,16 @@ function Responder.Admission.Defer(fields)
         local promotes = fields.stamp == prior.stamp
             and fields.direct == true and prior.direct ~= true
             and fields.digest == prior.digest
+        -- The owner's answer that states the locked set supersedes a held
+        -- answer for the same content without it (never the reverse).
+        local enriches = fields.stamp == prior.stamp
+            and fields.direct == true and fields.digest == prior.digest
+            and fields.rolesKnown == true and prior.rolesKnown ~= true
         if fields.stamp < prior.stamp then
             Responder.NoteContextOutcome(fields.context, "duplicate", "stale")
             return "duplicate"
         end
-        if fields.stamp == prior.stamp and not promotes then
+        if fields.stamp == prior.stamp and not promotes and not enriches then
             local same = fields.digest == prior.digest
             Responder.NoteContextOutcome(fields.context,
                 same and "duplicate" or "rejected",
@@ -1762,7 +1780,7 @@ function Responder.Admission.Defer(fields)
     local entry = {
         key=key,kind=fields.kind,id=fields.id,stamp=fields.stamp,
         owner=fields.owner,direct=fields.direct == true,digest=fields.digest,
-        sender=fields.sender,context=fields.context,run=fields.run,
+        rolesKnown=fields.rolesKnown == true,sender=fields.sender,context=fields.context,run=fields.run,
         settle=fields.settle,enqueuedAt=current,
         expiresAt=current + PENDING_MAX_AGE,
         scope=Responder.Admission.Scope(),
@@ -2499,6 +2517,171 @@ function Responder.ResolveBuild(build)
     return build
 end
 
+------------------------------------------------------------------------
+-- Locked-role wire capability (#73; docs/P1_7_LOCKED_ROLE_WIRE.md)
+------------------------------------------------------------------------
+-- A peer states "lv1" in WLCP|sender|caps|nonce next to its own requests.
+-- The state is memory only, keyed by the transport sender (the inbound owner
+-- has already required that the message's sender field is that sender), and
+-- expires; a reload clears it. It is advertised support for the
+-- representation, never trusted authorship: every owner, provenance, size
+-- and semantic check of a transfer stays unchanged. No version string is read.
+-- All state and helpers live in one table: the main chunk is at Lua's
+-- 200-local limit.
+Responder.Caps = {
+    code="WLCP", token="lv1", ttl=900, advertiseInterval=300, maxPeers=128,
+    readvertiseSpacing=30, readvertise=false,
+    peers={}, count=0, seen={}, seenCount=0, nonce=nil, lastAdvert=nil,
+    outcomes={}, outcomeCount=0,
+}
+Responder.LockedRoleOutcomes = Responder.Caps.outcomes
+
+function Responder.Caps.Nonce()
+    local caps = Responder.Caps
+    if not caps.nonce then
+        -- From the clocks, not math.random: taking random numbers here would
+        -- shift every later random draw (for example request IDs).
+        local wall = type(time) == "function" and tonumber(time()) or 0
+        local up = math.floor((tonumber(Now()) or 0) * 1000)
+        caps.nonce = string.format("s%07x%06x", wall % 268435456, up % 16777216)
+    end
+    return caps.nonce
+end
+
+function Responder.NoteCapability(sender, advertised, nonce)
+    local caps = Responder.Caps
+    local key = NormalizePeerName(sender)
+    if not key or key == "" then return false end
+    local supports = false
+    for token in tostring(advertised or ""):gmatch("[^,]+") do
+        if token == caps.token then supports = true end
+    end
+    local entry = caps.peers[key]
+    if not supports then
+        -- The peer now states no support (for example after a downgrade).
+        if entry then caps.peers[key] = nil; caps.count = caps.count - 1 end
+        return true
+    end
+    -- A peer we did not know, or one with a new session nonce (it restarted),
+    -- may not know our capability either: our next request states it again.
+    if not entry or entry.nonce ~= tostring(nonce) then caps.readvertise = true end
+    if not entry then
+        if caps.count >= caps.maxPeers then
+            local oldest, stamp
+            for name, value in pairs(caps.peers) do
+                if not stamp or value.at < stamp then oldest, stamp = name, value.at end
+            end
+            if oldest then caps.peers[oldest] = nil; caps.count = caps.count - 1 end
+        end
+        caps.count = caps.count + 1
+    end
+    caps.peers[key] = {lv=1, nonce=tostring(nonce), at=Now()}
+    return true
+end
+
+function Responder.PeerSupportsLockedRoles(requester)
+    local caps = Responder.Caps
+    local key = type(requester) == "string" and NormalizePeerName(requester)
+    local entry = key and caps.peers[key]
+    if not entry then return false end
+    if Now() - entry.at > caps.ttl then
+        caps.peers[key] = nil; caps.count = caps.count - 1
+        return false
+    end
+    return true
+end
+
+-- Activity from a peer without a current capability entry (a new peer, or
+-- one that restarted and lost ours): our next request states the capability
+-- again, not earlier than readvertiseSpacing after the last advertisement.
+-- Once per peer per ttl, so an older peer that never advertises does not
+-- keep the shorter spacing.
+function Responder.NotePeerActivity(sender)
+    local caps = Responder.Caps
+    if Responder.PeerSupportsLockedRoles(sender) then return end
+    local key = NormalizePeerName(sender)
+    if not key or key == "" then return end
+    local stamp = caps.seen[key]
+    if stamp and Now() - stamp <= caps.ttl then return end
+    if not stamp then
+        if caps.seenCount >= caps.maxPeers then caps.seen, caps.seenCount = {}, 0 end
+        caps.seenCount = caps.seenCount + 1
+    end
+    caps.seen[key] = Now()
+    caps.readvertise = true
+end
+
+-- Enqueued just before one of our own requests, with a copy of that
+-- request's metadata: the same queue, route and Sync-mode permission. Once
+-- per interval, or again after readvertiseSpacing when a new or restarted
+-- peer was seen; nothing is sent on its own schedule.
+function Responder.AdvertiseCapability(metadata)
+    local caps = Responder.Caps
+    local current = Now()
+    local since = caps.lastAdvert and current - caps.lastAdvert or nil
+    local due = since == nil or since >= caps.advertiseInterval
+        or (caps.readvertise and since >= caps.readvertiseSpacing)
+    if not due then
+        return false
+    end
+    local copy = {}
+    for key, value in pairs(type(metadata) == "table" and metadata or {}) do
+        copy[key] = value
+    end
+    copy.requestId = "caps-" .. caps.Nonce()
+    local message = string.format("%s|%s|%s|%s", caps.code, MyName(),
+        caps.token, caps.Nonce())
+    local queued = Transport.EnqueueControl(message, copy)
+    if queued then caps.lastAdvert = current; caps.readvertise = false end
+    return queued and true or false
+end
+
+-- The record's own locked-role state: its complete locked set (possibly
+-- empty) when known, or nil when unknown. Inline slot-4 rows are the older
+-- representation and are never restated.
+function Responder.Caps.KnownLockedRoles(build)
+    if type(build) ~= "table" then return nil end
+    for _, echo in ipairs(build.echoes or {}) do
+        if echo.locked then return nil end
+    end
+    if type(build.lockedEchoes) == "table" and #build.lockedEchoes > 0 then
+        return build.lockedEchoes
+    end
+    if build.lockedAuthorityProven == true then return {} end
+    return nil
+end
+
+-- A response states the locked set only to a requester that advertised the
+-- capability, and only when this record knows it: a relay never
+-- reconstructs roles it did not receive.
+function Responder.LockedRolesFor(build, responseContext)
+    local requester = type(responseContext) == "table"
+        and responseContext.requester or nil
+    if not requester or not Responder.PeerSupportsLockedRoles(requester) then
+        return nil
+    end
+    return Responder.Caps.KnownLockedRoles(build)
+end
+
+-- Bounded per-build counts of prepared responses for records with locked
+-- targets: with them, or ordinary targets only (an older requester).
+function Responder.NoteLockedRoleOutcome(build, lockedRoles)
+    local caps = Responder.Caps
+    local known = caps.KnownLockedRoles(build)
+    if not known or #known == 0 then return end
+    local key = tostring(build.id or "")
+    if key == "" then return end
+    local entry = caps.outcomes[key]
+    if not entry then
+        if caps.outcomeCount >= 64 then return end
+        entry = {full=0, ordinaryOnly=0}
+        caps.outcomes[key] = entry
+        caps.outcomeCount = caps.outcomeCount + 1
+    end
+    if lockedRoles then entry.full = entry.full + 1
+    else entry.ordinaryOnly = entry.ordinaryOnly + 1 end
+end
+
 function Responder.PrepareBuild(build, responseMode, responseContext, source)
     build = Responder.ResolveBuild(build)
     if not RelayEligible(build, source) then return nil, "relay unauthorized" end
@@ -2513,7 +2696,9 @@ function Responder.PrepareBuild(build, responseMode, responseContext, source)
     if responseMode then
         Reconciler.NoteStat("buildSerializations", 1)
     end
-    local payload = CompactEncode(build)
+    local lockedRoles = responseMode
+        and Responder.LockedRolesFor(build, responseContext) or nil
+    local payload = CompactEncode(build, lockedRoles)
     local json = Codec.JSONEncode(payload)
     local b64 = Codec.Base64Encode(json)
     if #b64 > MAX_BYTES then
@@ -2542,6 +2727,7 @@ function Responder.PrepareBuild(build, responseMode, responseContext, source)
         version=Operation.ShareVersion(build),
     }
     PreparedWireCost(prepared, responseMode, false)
+    if responseMode then Responder.NoteLockedRoleOutcome(build, lockedRoles) end
     return prepared
 end
 
@@ -3441,7 +3627,8 @@ end
 -- Incoming
 ------------------------------------------------------------------------
 
-local function ShouldStore(id, lastMod, author, ownerKey, transportSender)
+local function ShouldStore(id, lastMod, author, ownerKey, transportSender,
+        incomingFingerprint, incomingRolesKnown)
     if not AllowsRemoteRevision(author, lastMod, id) then
         return false, "retention floor"
     end
@@ -3471,6 +3658,19 @@ local function ShouldStore(id, lastMod, author, ownerKey, transportSender)
         return true, "loadout"
     end
     if (tonumber(lastMod) or 0) > known then return true, "updated" end
+    -- The same revision with its locked roles stated may complete a record
+    -- that arrived ordinary-only (roles unknown). It never replaces known
+    -- roles, and the ordinary content must be the same.
+    -- docs/P1_7_LOCKED_ROLE_WIRE.md
+    if incomingRolesKnown and existing
+        and (tonumber(lastMod) or 0) == known
+        and existing.lockedAuthorityProven ~= true
+        and not (type(existing.lockedEchoes) == "table"
+            and #existing.lockedEchoes > 0)
+        and type(incomingFingerprint) == "string"
+        and existing.fingerprint == incomingFingerprint then
+        return true, "roles"
+    end
     return false, "duplicate"
 end
 
@@ -3503,6 +3703,18 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
         ownerVerified=ownerVerified and true or false,
         relaySender=not ownerVerified and relaySender or nil,
     }
+    -- Locked roles only as the payload states them (lv=1): the complete set,
+    -- possibly empty. Without that statement they stay unknown (no field),
+    -- never zero and never taken from an earlier revision.
+    if type(payload.lockedRoles) == "table" then
+        local rows = {}
+        for _, echo in ipairs(payload.lockedRoles) do
+            rows[#rows + 1] = {spellId=echo.spellId, quality=echo.quality,
+                stacks=echo.stacks, locked=true}
+        end
+        record.lockedEchoes = rows
+        record.lockedAuthorityProven = true
+    end
     local function Complete(stored, storedAs)
         if not stored then return false, storedAs end
         if storedAs == "baseline" then
@@ -3616,7 +3828,8 @@ local function CommitReceivedBuild(payload, transportSender, context,
         allowed, why = true, "owner-verified"
     else
         allowed, why = ShouldStore(payload.id, payload.lastModified,
-            payload.author, payload.ownerKey, transportSender)
+            payload.author, payload.ownerKey, transportSender,
+            replacementFingerprint, payload.lockedRoles ~= nil)
     end
     if not allowed then
         if why == "deleted" then
@@ -3720,6 +3933,7 @@ local function CommitReceivedBuild(payload, transportSender, context,
             owner=payloadOwner or "",direct=directOwner == true,
             digest=tostring(HashText(replacementFingerprint) or "") .. "|"
                 .. tostring(HashText(payload.link) or ""),
+            rolesKnown=type(payload.lockedRoles) == "table",
             sender=transportSender,context=context,
             settle=function(accepted)
                 if type(onComplete) == "function" then onComplete(accepted) end
@@ -3940,7 +4154,11 @@ Inbound = InboundFactory.New({
         dpsLegacy=CODE_DPS,
         dps=CODE_DPS2,
         build=CODE_BUILD,
+        capability="WLCP",
     },
+    noteCapability=function(sender, caps, nonce)
+        return Responder.NoteCapability(sender, caps, nonce)
+    end,
     peerCodes=PEER_PROTOCOL_CODES,
     bucketCount=BUILD_BUCKETS,
     maxWireBytes=MAX_WIRE_BYTES,
@@ -4209,6 +4427,10 @@ Session = SessionFactory.New({
     enqueueControl=function(message, metadata)
         return Transport.EnqueueControl(message, metadata)
     end,
+    -- Our locked-role capability, next to our own requests only.
+    advertiseCapability=function(metadata)
+        return Responder.AdvertiseCapability(metadata)
+    end,
     cancelRequest=function(requestId, requester)
         return Transport.CancelRequest(requestId, requester)
     end,
@@ -4253,6 +4475,7 @@ function Sync.HandleIncoming(text, sender)
     pcall(Sync.NoteChannelTraffic)
     local accepted,reason=Inbound.HandleIncoming(text,sender)
     if accepted and Nexus.SyncWire then Nexus.SyncWire.ObservePeer(sender) end
+    if accepted then pcall(Responder.NotePeerActivity, sender) end
     return accepted,reason
 end
 

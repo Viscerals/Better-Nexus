@@ -1,119 +1,53 @@
-# Nexus P1.6 — Experimental player guide
+# Nexus — player guide (experimental)
 
-Nexus helps you work toward an Echo build: create or import a Wishlist, follow
-recommendations or enable selected automatic actions, share builds, and compare
-recorded DPS. This continuation simplifies **Orbs / Lost Memories** around the
-assigned Wishlist and one explicit Start. It retains the P1.5.1 source, result
-confirmation, and read-only Recheck safeguards.
-
-**Real-resource Orb testing is not approved for this replacement.** Native
-capabilities, notification order, and quality-consumption behavior remain
-unverified. Bounded native Help, assignment-persistence, and controlled Sync tests
-are authorized separately for this exact build. All spending remains prohibited.
-Any real-resource test requires a separate user decision.
-
-This is an experimental prototype, not a stable release. Check the exact package
-build label and checksum supplied beside the ZIP. Never substitute an older
-package merely because it has the same addon version number.
+Nexus helps you work toward an Echo build: plan a Wishlist, follow roll
+recommendations or let Auto act for you, refine with Orbs, share builds and
+compare recorded DPS. This is an experimental build, not a stable release.
+The same guide is in the game: `/nexus help`.
 
 ## Install and roll back
 
-Close WoW. Back up the old `Interface/AddOns/Nexus` folder and matching `WTF`
-folder outside the client. Replace only the addon folders; do not merge packages,
-reset SavedVariables, or delete unresolved Wishlists.
+Close WoW. Back up `Interface/AddOns/Nexus` and your matching `WTF` folder
+outside the game folder. Replace only the addon folders; do not merge packages,
+reset SavedVariables or delete Wishlists.
 
-The ZIP contains TWO folders, and both go into `Interface/AddOns`:
+The ZIP contains TWO folders. Both go into `Interface/AddOns`:
 
 | Folder | Installed path | What it is |
 | --- | --- | --- |
 | `Nexus` | `Interface/AddOns/Nexus/Nexus.toc` | the addon (not a nested Nexus/Nexus folder) |
 | `NexusSupport` | `Interface/AddOns/NexusSupport/NexusSupport.toc` | storage only, so a support report can be written to its own file |
 
-`NexusSupport` has no gameplay logic and loads only when you ask for a report
-file. Nexus runs normally without it; the Copy summary route stays available.
-The report file it creates is
-`WTF/Account/<ACCOUNT>/SavedVariables/NexusSupport.lua`, which is NOT the
-`NexusSupport.lua` that ships inside the addon folder. A new component needs the
-normal closed-client installation and restart before WoW registers its file.
+`NexusSupport` has no gameplay logic. Nexus runs without it; only the report
+file needs it. Check the build label and checksum published beside the ZIP.
 
-Disable any other Echo-picking addon before using Nexus automation. While Nexus
-detects one, it pauses automation and Orb mode.
-Keep Automation OFF for the initial navigation/save test.
+Turn off any other Echo-picking addon; while Nexus detects one, it pauses Auto
+and Orb mode.
 
-To roll back, close WoW and restore matching old code and old saved data together.
-Local backups cannot undo spent currency, Orbs, changed owned Echoes, or builds
-already sent to peers. Do not roll back while a server-side Orb offer is unresolved.
+To roll back: close WoW and restore the old addon and the matching old saved
+data together. A backup cannot undo spent Orbs, changed Echoes or builds already
+sent to other players. Do not roll back while an Orb result is unresolved.
 
-## Reopenable Help
+## Get started
 
-`/nexus help` opens a read-only, seven-page guide. `/nexus guide` and
-`/nexus tutorial` open the same guide; they do not start automation or a compulsory
-walkthrough. Help is available during loading. The main menu and Welcome screen
-also provide **Help / Getting Started**.
+Before you create or assign a Wishlist with Auto ON, read **Automatic save and
+your Saved Build** below. Auto starts OFF each session.
 
-Pages: Getting started; Wishlists and permanent targets; Rolling and settings;
-Shared builds and DPS; Orbs / Lost Memories; Loading and troubleshooting; About.
-
-## Normal setup
-
-1. Open **Wishlists** or `/nexus editor`.
-2. Create a plan or import a Wishlist code. Import opens a draft.
-3. Review exact qualities and copy counts, including permanent-slot targets.
-4. Save the Wishlist, then assign it to the intended Saved Build/loadout.
-   Assigning only chooses the target; by itself it does not change the Saved
-   Build.
-5. Check recommendations with Auto OFF before enabling Automation and its
-   individual actions. With Auto ON, Nexus may replace the active Saved Build;
-   see **Automatic save and your Saved Build** below.
+1. Open the Wishlist Editor: click **...** on the Nexus panel, then
+   **Wishlist Editor**, or type `/nexus editor`. To use a Wishlist code, click
+   **Import** and paste it. Import opens a draft.
+2. Check exact qualities, copy counts and the planned locked Echo targets.
+3. Click **Create Wishlist** for a new or imported plan. It saves the plan and
+   makes it the target of the loadout shown in the editor. For an existing
+   Wishlist, click **Save Wishlist**.
+4. To target another Saved Build: in **My Builds**, select the intended Saved
+   Build and choose the Wishlist with the Wishlist selector. Assigning only
+   chooses the target; by itself it does not change the Saved Build.
+5. Read **Automatic save and your Saved Build** below before you turn Auto ON.
 
 A Wishlist is a desired plan; you do not have to own it already. **Saved Builds**
-are server slots. **Active Loadout** is the currently selected server loadout.
-**Build Library** browses locally known shared/saved records. These are not the
-same storage or action.
-
-### Copies, permanent targets, and Freeze
-
-The supported plan is up to **79 rolled copies + 6 permanent-slot copies**, not
-85 ordinary picks. Duplicate copies and different qualities count separately.
-
-- Current permanent (Locked) Echoes are what you own in permanent slots.
-- Permanent-slot targets are the plan's intended copies for those slots.
-- A Frozen offer is temporarily retained by the game's Freeze action.
-- Lock position controls only the draggable overlay's position.
-
-Unmarked imports use matching current permanent Echoes by default when they form
-an exact valid split. Existing confirmed plans are not rewritten when ownership
-changes. When matching is insufficient, the editor offers explicit target choice.
-Opening or confirming targets never locks or unlocks owned Echoes.
-
-`/nexus currentlocks on|off` controls that default for future unresolved plans.
-Nexus's optional permanent-role import markers are not claimed compatible with
-every native importer. Do not manually change permanent slots merely to match
-sorted diagnostic display order.
-
-Optional automatic permanent-slot changes require both the master Automation
-permission and the separate permanent-slot option, plus real game capability,
-ownership, and safety checks. Orb refinement never changes permanent slots.
-
-### Rolling recommendations
-
-Ordinary rolling uses EchoWeaver, the rolling engine that Nexus maintains
-itself. Snapshot activation and genuinely confirmed
-saved-build guarantees remain distinct from random Designed/Wishlist rolling.
-Neither a prediction nor a submitted action proves future delivery or ownership.
-
-`/nexus reroll on|off` and `/nexus freeze on|off` set individual permissions;
-neither enables the master switch. Ordinary Take/Banish/Freeze/Reroll are blocked
-while an Orb run owns an action or the game reports an active/unknown Orb offer.
-
-**EXTRA COPIES** replaces “TO SHED”: rolled copies beyond exact Wishlist targets,
-including unrequested or different-quality copies. Target 2/current 5 means 3
-extras. It is not a delete action and does not promise a later replacement.
-In save comparisons, “fewer requested copies” is distinct from “extra copies.”
-
-“Waiting for current Echo data” is an ownership-readiness condition, not the
-shared-build channel status. Do not force that state or repeatedly reload to
-mask a lost response. Record the build and exact sequence for support.
+are server slots. **Active Loadout** is the selected server loadout. **Build
+Library** shows shared records known to this client. They are different things.
 
 ### Automatic save and your Saved Build
 
@@ -137,185 +71,202 @@ individual Echo, and Orb investment is not part of the comparison.
 The check does not wait for a new run. At level 80 after a finished run,
 turning Auto ON or changing the assigned Wishlist makes Nexus check again right
 away, so a replacement can follow within seconds. Saving edits to the assigned
-Wishlist can also lead to a replacement without a new run. Assigning by itself
-changes nothing; the save that may follow is the automatic save described here.
+Wishlist can also lead to a replacement without a new run.
 
 Example: your Saved Build holds an Echo you value. The next completed run loses
 one requested copy but gains three other requested copies. That is +2 overall
 Wishlist progress, so Nexus may save the new run over the old build. The save
 itself spends no Orbs, but Orbs already spent on the replaced Echo are not
 recovered, and Nexus cannot bring that Echo back. The save does not mean the
-lost Echo was judged worthless, or that you approved that individual trade.
+lost Echo was judged worthless.
 
 Nexus cannot undo a completed server save. There is no separate automatic-save
 switch: Auto OFF stops it. Auto starts OFF each session; keep it OFF if you want
 Nexus to leave the current Saved Build untouched.
 
+## Auto and rolling
+
+1. Review recommendations with Auto OFF first.
+2. Click **Auto OFF** on the Nexus panel to turn Auto ON only after reading the
+   automatic-save section above. Auto is a permission for your enabled
+   automatic actions. Auto OFF does not turn Nexus off, stop sharing or hide the
+   panel.
+3. Set actions: `/nexus reroll on|off` and `/nexus freeze on|off`. They do not
+   turn Auto on.
+
+Reading the panel: **Needed**, **Target already met**, **Not on Wishlist** and
+**Different quality from target** describe the current choice. **EXTRA COPIES**
+are rolled copies above exact targets: target 2, current 5 means 3 extras. The
+display deletes nothing.
+
+When it is blocked:
+
+- “Waiting for the game to confirm the last Echo action.” — an action was sent
+  and has no confirmed result yet. Do not choose again or reload; wait.
+- “No Echo choice is showing.” — no choice is on screen now. It does not mean the
+  run is finished, and it is not a reason to retry.
+- “Auto ON — paused” — Auto stays ON but is not acting; point at the **...**
+  button to see the reason in its Status line.
+- “Waiting for current Echo data” — waiting for ownership data, not Sync status.
+- Ordinary rolling stays paused during active or unknown Orb offers.
+
+## Wishlists and locked targets
+
+A plan holds up to **79 rolled copies + 6 locked Echo copies** (85 total).
+Counts are copies. Each quality is a different target; a lower-quality copy does
+not count for a higher-quality target.
+
+- Currently locked Echoes are what you have. Locked Echo targets are what the
+  plan wants.
+- **Create Wishlist** saves a new plan (and makes it the loadout's target);
+  **Save Wishlist** saves an existing one. **Unassign Wishlist** keeps the
+  Wishlist.
+- If the editor asks, choose the locked targets and click
+  **Confirm locked targets & edit** (or **& assign**). Confirming locks nothing.
+- A Frozen offer is kept temporarily by the game's Freeze action; it is not a
+  locked slot.
+- Automatic locked-slot changes need Auto, their separate option, ownership and
+  safety checks. Orbs never change locked slots.
+- `/nexus currentlocks on|off`: whether future imports without locked markers
+  use your matching currently locked Echoes by default.
+
 ## Orbs / Lost Memories
 
-Open `/nexus orbs` or **Orbs / Lost Memories** in the main menu. Merely opening
-it cannot spend an Orb. The mode is OFF by default and does not start on login,
-resource arrival, import, ordinary Auto, or reopening its window.
+Orbs refine rolled Echoes toward the assigned Wishlist, one Orb per replacement.
+They cannot create or replace locked slots; a run stops when rolled targets are
+complete. Opening the window, **Open Orbs...**, Help and **Max** spend nothing.
 
-1. Check the assigned Wishlist, missing rolled copies, permanent-target limits,
-   and confirmed Orb balance. Unknown or loading is never shown as zero.
-2. Enter the maximum Orbs for this run. The initial default of 10 is not consent.
-3. **Start** approves that maximum and automatic use of eligible surplus copies,
-   including safe unwanted replacements and recycling after confirmation.
-4. The run continues after each confirmed result. Use Pause or Stop when needed.
-   Advanced contains optional source exclusions and a read-only Recheck.
+1. Open `/nexus orbs`, **Orbs / Lost Memories** in the **...** menu, or
+   **Open Orbs...** on the panel (shown with Orb guidance). Check the assigned Wishlist, missing copies and
+   the confirmed Orb balance. Loading is never a zero balance.
+2. Set the maximum. Until you type an amount it follows your confirmed balance,
+   up to 1000. Typing stops that; **Max** returns to following the balance. A
+   typed amount is a whole number from 1 to 10,000. A maximum saved by an
+   earlier version is kept.
+3. Click **Start**. Start approves the maximum shown and automatic use of eligible
+   surplus copies, including safe recycling. It turns ordinary Auto OFF; it does
+   not turn it back ON. The approved maximum does not change during the run.
+4. The run continues after each confirmed result and stops at completion, the
+   maximum, low balance, no safe source or uncertainty.
 
-The main panel, Wishlist tools, and Orb view use the same assignment. There is no
-second Orb target selector. If no assignment exists, use My Builds or the editor.
-A known assignment shows **Restoring assigned Wishlist...** while active identity
-is unavailable. Duplicate names and reordered slots cannot replace its exact
-saved contents. An absent server mirror is explained; the saved plan is retained.
-Server-list absence alone is not proof of deletion.
-
-The controller requests **one Orb per replacement**, observes the actual offer,
-chooses the first missing exact target in your ordered list or an approved safe
-fallback, and waits for the observed offer/selection lifecycle, exact ownership
-change, and charge/result confirmation before
-another spend. It does not use the ordinary EchoWeaver planner on Orb boards.
-
-Required exact rolled copies, granted copies needed for future permanent targets,
-and permanent copies are protected. One granted copy cannot satisfy both roles.
-The candidate
-source follows the lowest-quality-family sacrifice rule. A
-source that could ambiguously refer to a permanent copy or multiple qualities
-of the same ID is conservatively
-excluded. Some apparently extra copies may therefore be unavailable as sources.
-The run can stop with an unmet target when no safe surplus source remains.
-
-Rolled targets and permanent targets are separate. Orbs do not create or replace
-permanent slots; the run stops when rolled targets are complete, even when the
-plan still has permanent targets you do not own.
-
-**Starting turns ordinary Automation OFF; finishing never turns it back ON.**
-The game's auto-accept and competing pickers must be off. Unknown or unavailable
-client capabilities disable the affected Orb action with the missing capability
-named. Tome-dependent availability uses discovered/observed Echo evidence and a
-known disable-state answer; spellbook knowledge is not used as a substitute.
-
-### Pause, Stop, uncertainty, and budgets
+Login, reconnect, new resources or reload never restart spending. Unknown
+client capabilities disable only Orb mode. The Orb window's **Help** button
+opens this Orb section in `/nexus help`.
 
 Closing the window does not stop an approved run. Use Pause or Stop.
 
-- Pause/Stop prevents new submissions. It cannot undo an accepted spend.
-- A submitted result may settle passively while paused or stopped.
-- A pending offer remains available in the game's normal interface.
-- Active loadout, assignment, or target changes pause new submissions. The
-  original pending operation keeps its original target until settlement.
-- Explicit Resume adopts the new resolved assignment, recalculates protection,
-  and retains the same maximum and all confirmed/unresolved usage. It cannot
-  replay an ambiguous or already-attempted selection.
-- The compact main-panel row provides progress and Pause/Resume/Stop while the
-  detailed window is closed.
-- The maximum cannot be edited during an active or paused run.
-- Confirmed usage and unresolved spending exposure both count against the cap.
-- A missing response never makes the allowance available for another spend.
-- Offer/result timeouts permit one bounded read-only refresh, then pause.
-- Recheck requests charge/ownership data; it never submits a choice or spends.
-- On reload/reconnect the run does not resume. A saved pending-operation marker
-  is passive recovery evidence, not a restart instruction.
+After a finished run, click **Start new run**, review the maximum, then click
+**Confirm new run**. If the maximum changes, press Start new run again.
 
-The same ID and quality can be removed and received again without a net count
-change. The supported API cannot distinguish that result from stale ownership.
-Nexus pauses with a specific reason and retains pending ownership and exposure.
-A new table, lower charge count, or uncorrelated selection-result notice cannot
-resolve that ambiguity. Recheck does not establish proof by returning the same
-contents. No automatic retry is made. A same-ID result at a different quality
-can settle when its exact state change and original offer/selection are observed.
-Do not clear the recovery marker to force another run.
+When it is blocked:
 
-Changing the active loadout during a pending operation also prevents reliable
-confirmation: ownership responses do not identify their originating loadout.
-The pending receipt and exposure remain, including after returning to the old
-loadout, Recheck, Stop or reload. A matching snapshot from a different loadout
-cannot permit another spend. Assignment changes within the same loadout still
-permit passive settlement when the original offer, selection and exact result
-are confirmed.
+- Pause/Stop prevents new submissions; it cannot undo an accepted spend, and a
+  pending result may still settle.
+- Changing the active loadout, assignment or targets pauses new actions; Resume
+  adopts the new target and keeps the same maximum.
+- **Recheck** (Advanced) only asks for balance and ownership data. It is not a
+  replay or a fix; it can request confirming data, but pressing it does not
+  clear a record.
+- An unresolved Orb result keeps its spending exposure and blocks new Orb runs
+  and ordinary rolling. Relogging, reloading, changing builds, returning to the
+  old loadout or pressing controls again does not clear it. Nexus never retries,
+  refunds or deletes it. Do not clear saved data.
+- The one manual case: after a reload, if that action's offer is still open in
+  the game's offer window and matches the saved record, choose in that window.
+  Nexus confirms it only from the exact matching result, and only for the Echo
+  it proposed (the Orb window names it). An action that ended unobserved cannot
+  be confirmed; no exit from that block exists yet.
 
-## Community, DPS, Sync, and loading
+## Shared builds, DPS and Sync
 
-**Share Build** is different from saving a Wishlist or a server Saved Build.
-Read delete/stop-sharing confirmations. A shared listing being removed does not
-necessarily remove your server build or Wishlist.
+1. Click **Build Library**. The scope button switches between **All Shared** and
+   **My Builds**.
+2. **Require both DPS records** — checked: only builds with both a Training Dummy
+   and a Lich King record this client holds. Unchecked: no such requirement;
+   other filters still apply. A record is availability, not build quality,
+   outside verification or finished Sync. While a change applies, the list says
+   **Updating results...**
+3. **Copy into Editor** creates a draft; it does not activate or spend.
+   **Share Build** sends a listing; it is separate from saving a Wishlist or a
+   Saved Build.
 
-**Both DPS records** means the required Training Dummy and Lich King records are
-present; it is not a “good build” judgment. The combined ranking uses its highest
-single eligible result; a shown average does not set that rank. DPS capture uses
-Details! and supported events. Read-only Echo lists with attached results remain
-protected.
+- **Stop Sharing** removes the listing on this client; removal on other clients
+  is not confirmed. Stop Sharing, administrator removal and deleting from My
+  Builds are different actions; read each confirmation. Removing a shared
+  listing does not delete your server build or Wishlist.
+- Names show the player and realm a record states; they are not proof of
+  identity. A record whose owner is not established says
+  “Owner identity not established.” in its details. Two records can show the
+  same name.
+- Locked targets on shared builds: players on this version receive them when
+  both sides support them. Older versions receive the ordinary targets only; your
+  Share status counts those answers. For a build from an older version, Nexus
+  treats its locked targets as unknown, not as none; no locked row is shown. A received build is not always ready to
+  copy. Sent does not prove that another player stored it.
+- Leaderboard tabs: **Training Dummy**, **Lich King**, **Both records** (ranked
+  by the highest single result). DPS capture needs Details!.
+- **Sync Now** asks for shared data; preparing, sent, receiving and finished are
+  different states. Do not flood the sharing network.
 
-Sync preparing, request sent, receiving, and completed are distinct. Request
-sent does not prove peer convergence. **Removing expired requests** is queue
-housekeeping. Nexus participates in its normal live sharing channel, so testing
-is not network-isolated. Do not flood or send deliberately malformed traffic.
-Older PR #68 receivers cannot fully represent the locked-bearing build format.
+## Report a problem
 
-The loading panel shows the actual step and progress where a denominator exists.
-A percentage is for that step, not a made-up overall percentage or ETA.
-`/nexus loading` reopens it. Local Wishlist/rolling/Orb tools need their local
-state and capabilities, not completed Community loading. Shared views and their
-services retain their own readiness gates.
+No report/logs or requested details = your support request will be ignored
+until provided.
 
-## Commands and diagnostic reports
+If something goes wrong, do not reload, relog, spend Orbs, reroll or change
+builds to recreate it. Do not clear logs or reset saved data.
 
-- `/nexus help`, `/nexus guide`, `/nexus tutorial`: read-only guide.
-- `/nexus orbs`: open refinement controls; does not spend.
-- `/nexus loading`: show startup progress.
-- `/nexus panel`: main panel visibility.
-- `/nexus editor`: Wishlist editor.
-- `/nexus status`: concise build and state.
-- `/nexus sync`: request shared data through the existing manual route.
-- `/nexus log errors`: recorded errors.
-- `/nexus perf`: runtime performance observations, not DPS.
-- `/nexus prototype`: implementation/provenance details.
+1. Type `/nexus report` when the problem happens, before any reload. Its
+   incidents are kept for this session only.
+2. Click **Copy summary**, click in the text, press Ctrl+A, then Ctrl+C, and
+   paste it.
+3. Add your exact build (`/nexus update` shows it), what happened versus what you
+   expected, and Auto ON or OFF. Provide any additional logs requested.
 
-**Prepare full diagnostic report** builds paged text. **Select this page** selects
-only the current page; copy pages in order. Large reports may take a moment.
-Start support reports with a build label, action, expected/actual behavior, and a
-small relevant error screenshot. Do not publish full player backups by default.
-Advanced raw reason codes remain for support; do not use reset/anchor/restore
-commands as generic fixes without understanding their effects.
+Report file (private): click **Prepare report file** and wait until it says the
+report is prepared. WoW writes the file only when you reload, log out or exit.
+`/reload` only when no action is active or pending. Then send this file
+privately; never post it publicly:
 
-## Verification and remaining limitations
+`WTF/Account/<ACCOUNT>/SavedVariables/NexusSupport.lua`
 
-This continuation uses synthetic services and real Nexus adapters/controllers/UI handlers
-under the established LuaJIT 2.1 / Lua 5.1 Windows route. It uses no Lua 5.4
-compatibility shims. These tests are not native WoW verification or the complete
-upstream regression campaign. See the delivered source/package test receipts
-and focused independent review for exact results, counts, hashes, and limitations.
+It is not the `NexusSupport.lua` inside the addon folder. Both Nexus and
+NexusSupport must be installed and enabled.
 
-New Orb capability discovery, source choice, action/result reconciliation, and
-UI interaction must be verified in the actual client before relying on them.
-No real Orb was spent to produce this package. Source compatibility with a
-reference is not proof of the server's behavior, universal API availability,
-or native safety/performance. This package does not authorize a spending test.
+If reporting fails: if the window says “Not prepared”, or logs are unavailable,
+say so and send what you have. Copy summary works without NexusSupport. You are
+not asked for logs that a broken reporting feature cannot create. Do not post
+full SavedVariables or account details publicly.
 
-The original videos, data-recovery history, native timing, full peer convergence,
-and historical-backup recovery are not retroactively resolved by these offline
-passes. Stop for unexpected character actions, persistent uncertainty, missing
-data, errors, or severe stalls. Preserve evidence rather than deleting fields.
+## Commands
 
-Detailed historical notes are in the source archive under docs, not duplicated
-as old install instructions here. The source review and tests remain available
-with the exact experimental ZIP. Native results are recorded separately against
-the exact package; an offline pass is not native confirmation.
+- `/nexus help` (also `/nexus guide`, `/nexus tutorial`, and **Help / Getting
+  Started** in the **...** menu and the Welcome window): this guide, also during
+  loading.
+- `/nexus report`: support report.
+- `/nexus editor`: Wishlist Editor.
+- `/nexus orbs`: Orb window; does not spend.
+- `/nexus panel`: show or hide the panel. Hiding does not turn Nexus off. To
+  turn Nexus off, only when no action is active or pending: log out to
+  character selection, click **AddOns**, untick Nexus, and log in again.
+- `/nexus loading`: startup progress (a percentage is for the current step only).
+- `/nexus status`, `/nexus update`, `/nexus sync`, `/nexus log errors`,
+  `/nexus perf` (timing, not DPS), `/nexus prototype` (build details).
 
-## Stop Sharing result text
+**Prepare full diagnostic report** (in the log viewer, `/nexus log`) builds a
+paged report:
+**Select this page**, then copy pages in order. Advanced commands (flags,
+undemote, anchor, restore, err) are troubleshooting tools, not generic fixes.
 
-Stop Sharing reports whether local removal was refused, is waiting for its
-accepted catalog operation, or has completed. The record remains present while
-local removal is pending. Queue admission alone does not prove local removal.
-Local removal does not prove removal on another client.
+Update notices come from release information shipped in this package (the
+**...** button then shows **!**). Another player's client can report a newer test
+build; Nexus shows that only as an UNVERIFIED hint. No notice does not mean your
+build is the latest. Nexus never downloads or installs anything.
 
-Remote withdrawal remains unavailable with the current Sync protocol. A local
-removal can finish while its withdrawal is not queued. The panel states this
-limit. No automatic removal retry or resource spending is added.
+## Status and limits
 
-The Stop Sharing confirmation stays above the Build Library. Closing or
-reopening the Library keeps that confirmation bound to the original record.
-Cancel or Escape dismisses it without removal. The shared popup slot returns
-to its prior layer when the confirmation closes.
+This is an experimental prerelease. Offline tests use synthetic game services;
+they are not native WoW verification. Native Orb behavior, native timing,
+full peer convergence and older data recovery are not established. Stop for
+unexpected actions, persistent uncertainty, errors or severe stalls, and
+report them as above. Detailed history is in the source archive under `docs`.

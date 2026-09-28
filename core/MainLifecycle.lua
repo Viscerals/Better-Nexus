@@ -673,6 +673,19 @@ function Lifecycle.New(options)
             RecordError("BuildHashCache.Pump", ready)
             return false
         end
+        -- The DPS digest is the second hash on WLRQ and in every response:
+        -- it is prepared in the same slot, in bounded steps, and Sync waits
+        -- for both.
+        local dps = Nexus and Nexus.DpsCapture
+        if type(dps) == "table" and type(dps.PumpSyncHash) == "function" then
+            local dpsOk, dpsReady, dpsProgressed = pcall(dps.PumpSyncHash)
+            if not dpsOk then
+                RecordError("DpsCapture.PumpSyncHash", dpsReady)
+                return false
+            end
+            return ready == true and dpsReady == true,
+                progressed == true or dpsProgressed == true
+        end
         return ready == true, progressed == true
     end
 

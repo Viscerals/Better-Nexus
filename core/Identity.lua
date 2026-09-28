@@ -443,10 +443,11 @@ local function VerifiedPublicLabel(record, field, ownerKey)
     return PublicBaseName(record, field) .. "-" .. tostring(realm or "unknown")
 end
 
-local function SafePublicToken(value, maxBytes)
-    return PublicTyped(value, maxBytes)
-end
-
+-- A record without an established owner shows its readable name (with the
+-- realm it states, where valid). The complete ambiguity/provenance tuple stays
+-- in publicIdentityKey (PublicRecordKey) and in the record's own fields; it
+-- is not printed in names. publicIdentityVerified=false lets a detail view
+-- say in plain words that the owner is not established.
 local function AmbiguousPublicLabel(record, field)
     local base = PublicBaseName(record, field)
     local raw = record[field]
@@ -458,16 +459,7 @@ local function AmbiguousPublicLabel(record, field)
             and Identity.OwnerKey(base, record.realm) and record.realm or nil
         if realm and realm:lower() ~= "unknown" then base = base .. "-" .. realm end
     end
-    local discriminator = table.concat({
-        SafePublicToken(record.id, 96),
-        SafePublicToken(record.buildId, 96),
-        SafePublicToken(raw, 80),
-        SafePublicToken(record.realm, 96),
-        SafePublicToken(record.ownerKey, 177),
-        SafePublicToken(record.claimedOwnerKey, 177),
-        SafePublicToken(record.relaySender, 80),
-    }, "|")
-    return base .. " (legacy/unverified " .. discriminator .. ")"
+    return base
 end
 
 function Identity.NewPublicPresentation(field, options)
@@ -526,8 +518,9 @@ end
 -- Apply one shared public presentation policy to an owned batch of snapshots.
 -- Ambiguous evidence is only shadowed from ordinary public rows when an exact
 -- verified owner with the same short name is already visible; the durable
--- source remains untouched. Distinct builds can opt out of shadowing while
--- still receiving collision-safe author labels.
+-- source remains untouched. Distinct builds can opt out of shadowing; their
+-- rows stay distinct by publicIdentityKey, even where two show the same
+-- readable author name.
 function Identity.PresentPublicRecords(rows, field, options)
     rows = type(rows) == "table" and rows or {}
     local context = Identity.NewPublicPresentation(field, options)
@@ -624,14 +617,13 @@ function Identity.CanAdoptSavedMirror(record, currentOwnerKey)
         and LocalOwnsLegacyEvidence(record, current)
 end
 
-function Identity.SanitizeText(value, maxBytes)
-    local ok, text = pcall(tostring, value)
-    text = ok and tostring(text or "") or "unprintable"
-    if not Identity.ValidUtf8(text) then return "invalid" end
-    text = text:gsub("[%c|]", " "):gsub("%s+", " ")
-        :gsub("^%s+", ""):gsub("%s+$", "")
-    if not SafeSequence(text, true) then return "invalid" end
-    local limit = tonumber(maxBytes) or 96
+-- The longest prefix of text within maxBytes that does not end inside a
+-- UTF-8 sequence: a character that crosses the cap is left out whole. Valid
+-- input always gives valid output. Input that is already invalid is cut by
+-- the same rule and is not repaired.
+function Identity.Utf8Prefix(text, maxBytes)
+    text = tostring(text or "")
+    local limit = math.max(0, math.floor(tonumber(maxBytes) or 0))
     if #text <= limit then return text end
     local start = limit
     while start > 0 and text:byte(start) >= 0x80
@@ -642,4 +634,14 @@ function Identity.SanitizeText(value, maxBytes)
     local last = start + width - 1 <= limit and start + width - 1
         or start - 1
     return text:sub(1, math.max(0, last))
+end
+
+function Identity.SanitizeText(value, maxBytes)
+    local ok, text = pcall(tostring, value)
+    text = ok and tostring(text or "") or "unprintable"
+    if not Identity.ValidUtf8(text) then return "invalid" end
+    text = text:gsub("[%c|]", " "):gsub("%s+", " ")
+        :gsub("^%s+", ""):gsub("%s+$", "")
+    if not SafeSequence(text, true) then return "invalid" end
+    return Identity.Utf8Prefix(text, tonumber(maxBytes) or 96)
 end

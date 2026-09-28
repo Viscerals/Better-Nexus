@@ -7,7 +7,7 @@ if type(Nexus.MainInternals) ~= "table" then Nexus.MainInternals = {} end
 local ViewModel = {}
 Nexus.MainInternals.ViewModel = ViewModel
 
-local QUALITY_NAMES = { [0]="Common", [1]="Uncommon", [2]="Rare", [3]="Epic" }
+local QUALITY_NAMES = { [0]="Common", [1]="Uncommon", [2]="Rare", [3]="Epic", [4]="Legendary" }
 local function QualityName(quality)
     return QUALITY_NAMES[quality] or ("q" .. quality)
 end

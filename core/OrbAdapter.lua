@@ -22,12 +22,22 @@ local function call(t,k,...)
     if type(t)~="table" or type(t[k])~="function" then return false,nil end
     return pcall(t[k],...)
 end
+-- Whether the client has received its build-slot data since it loaded. Until
+-- the first build-slot reply the client keeps GetServerBuildSlots() nil and its
+-- active slot at the load-time default 0 ("none"), which is no observation of
+-- the server's slot. nil: this client cannot say (no getter), as before.
+local function slotKnown(svc)
+    if type(svc)~="table" or type(svc.GetServerBuildSlots)~="function" then return nil end
+    local ok,slots=pcall(svc.GetServerBuildSlots)
+    return ok and type(slots)=="table"
+end
 local function ctx(pe,svc,orb)
     local s=A.AutomationSignature and A.AutomationSignature() or {}
     local owned=A.Owned and A.Owned() or {}
     return {pe=pe,svc=svc,orb=orb,guid=UnitGUID and UnitGUID("player"),
         generation=owned.generation,level=A.Level and A.Level(),
-        active=s.activeSlot,slot=pe and pe.Perks and pe.Perks.serverActiveSlot}
+        active=s.activeSlot,slot=pe and pe.Perks and pe.Perks.serverActiveSlot,
+        slotKnown=slotKnown(svc)}
 end
 local function same(a,b)
     return type(a)=="table" and type(b)=="table" and a.pe==b.pe and a.svc==b.svc

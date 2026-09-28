@@ -12,7 +12,16 @@ local SCHEMA_VERSION = 1
 local STORAGE_VERSION = 1
 local CURSOR_VERSION = 1
 local SCHEDULER_KEY = "legacy-qualification-repair"
+local FOLLOWUP_KEY = "legacy-qualification-repair.follow-up"
 local BATCH_SIZE = 25
+-- Fairness: after a pass in this session, the next one starts no sooner than
+-- this many seconds, or the previous pass's own active time if longer. Under
+-- sustained DPS input the repair therefore works on at most about half of the
+-- frames, and every pass still completes.
+local MIN_FOLLOWUP_GAP = 5
+-- Active time counts consecutive working pumps; a longer pause between two
+-- pumps (a wait for catalog admission, a hidden client) is not work.
+local MAX_PUMP_INTERVAL = 0.25
 local VALID_CLASS = {
     WARRIOR=true,PALADIN=true,HUNTER=true,ROGUE=true,PRIEST=true,
     DEATHKNIGHT=true,SHAMAN=true,MAGE=true,WARLOCK=true,DRUID=true,
@@ -22,6 +31,11 @@ local runtime = {
     scanned=0,affected=0,recoverable=0,recovered=0,reused=0,rejected=0,
     published=0,restarts=0,failures=0,lastReason="none",pending=false,
     completedDpsRevision=nil,
+    passesCompleted=0,stalePasses=0,changedSkipped=0,followUps=0,
+    followUpsCoalesced=0,deferredRequests=0,followUpPending=false,
+    lastPassStartedAt=nil,lastPassFinishedAt=nil,lastPassDuration=nil,
+    lastPassElapsed=nil,
+    nextPassNotBefore=nil,
     deferredNoCatalog=0,deferredNoDps=0,deferredOneCategory=0,
     deferredDurationOrCategory=0,deferredBuildIdCollision=0,
     deferredInsufficientEvidence=0,deferredUnauthorizedOwner=0,
@@ -29,6 +43,9 @@ local runtime = {
     deferredCatalogWrite=0,
 }
 local active
+-- The revision owner and saved root the completed revision belongs to. Kept
+-- out of `runtime`, which Stats() copies: only scalars are reported.
+local completedSource, completedDatabase
 
 local REASON_FIELD = {
     ["no-catalog"]="deferredNoCatalog",
@@ -311,6 +328,22 @@ local function CurrentDpsRevision()
         and revisions.Get(revisions.DPS_CHANGED) or nil
 end
 
+-- Revision numbers are session-local counters of one owner; a number is only
+-- comparable with one read from the same owner.
+local function RevisionSource()
+    return Nexus.Revisions
+end
+
+local function Clock()
+    if type(GetTime) == "function" then
+        local ok, value = pcall(GetTime)
+        value = ok and tonumber(value) or nil
+        if value and value == value and value < math.huge
+            and value > -math.huge then return value end
+    end
+    return 0
+end
+
 local function NewJob(database, reason, restorePending, countPending)
     local dps = Nexus.DpsCapture
     if not (dps and type(dps.BeginLegacyQualificationCursor) == "function") then
@@ -331,7 +364,8 @@ local function NewJob(database, reason, restorePending, countPending)
         database=database,reason=reason or "requested",cursor=cursor,
         pairs={},phase="scan",pairKey=nil,changed=pending,work=0,
         recoverable=pending,recovered=pending,reused=0,rejected=0,
-        dpsRevision=CurrentDpsRevision(),
+        dpsRevision=CurrentDpsRevision(),revisionSource=RevisionSource(),
+        startedAt=Clock(),stale=false,skippedChanged=0,activeSeconds=0,
     }
 end
 
@@ -383,8 +417,32 @@ local function RollbackRejected(job)
     end
 end
 
+-- Each scanned candidate row must still be the row stored under its captured
+-- key when it is classified; a replaced, removed or re-keyed row is left for
+-- the follow-up pass instead of being recovered from a stale snapshot.
+local function PairCurrent(job, pair)
+    local dps = Nexus.DpsCapture
+    if not (dps and type(dps.LegacyQualificationCurrentRow) == "function") then
+        return false
+    end
+    for _, category in ipairs({"dummy", "lk"}) do
+        local item = pair[category]
+        if item and dps.LegacyQualificationCurrentRow(
+            job.cursor, item.category, item.key) ~= item.row then
+            return false
+        end
+    end
+    return true
+end
+
 local function ClassifyPair(job, fingerprint, pair)
     local catalog = Nexus.BuildCatalog
+    if not PairCurrent(job, pair) then
+        job.stale = true
+        job.skippedChanged = job.skippedChanged + 1
+        runtime.changedSkipped = runtime.changedSkipped + 1
+        return
+    end
     if not (pair.dummy and pair.lk) then
         Reject(job, "one-category")
         return
@@ -501,10 +559,19 @@ local function Finish(job)
     meta.workUnits=nil
     meta.pendingWrites=nil
     meta.requestedDpsRevision=nil
-    meta.completedDpsRevision=CurrentDpsRevision() or 0
-    runtime.completedDpsRevision=CurrentDpsRevision()
+    -- Only the generation this pass covered is complete, and only when every
+    -- candidate in its scope was classified. A newer revision that arrived
+    -- during the pass, or a skipped changed candidate, stays for the
+    -- follow-up pass; a pass that skipped anything stamps nothing.
+    if (tonumber(job.skippedChanged) or 0) == 0 then
+        meta.completedDpsRevision=job.dpsRevision or 0
+        runtime.completedDpsRevision=job.dpsRevision
+        completedSource=job.revisionSource
+        completedDatabase=job.database
+    end
     meta.lastResult={
         schema=SCHEMA_VERSION,recoverable=job.recoverable,
+        coveredDpsRevision=job.dpsRevision,followUp=job.stale == true,
         recovered=job.recovered,reused=job.reused,rejected=job.rejected,
         published=published or 0,reason="complete",
         deferredNoCatalog=job.deferredNoCatalog or 0,
@@ -522,11 +589,64 @@ local function Finish(job)
     return true
 end
 
+-- One coalesced follow-up covers every DPS change that arrived during or after
+-- a pass. It starts no sooner than the fairness gap after the previous pass;
+-- an already scheduled follow-up is kept, never pushed later.
+local function FollowUpGap()
+    return math.max(MIN_FOLLOWUP_GAP, tonumber(runtime.lastPassDuration) or 0)
+end
+
+local function ScheduleFollowUp()
+    runtime.followUpPending = true
+    local scheduler = Nexus.Scheduler
+    if scheduler and type(scheduler.Pending) == "function"
+        and scheduler.Pending(FOLLOWUP_KEY) then
+        runtime.followUpsCoalesced = runtime.followUpsCoalesced + 1
+        return true
+    end
+    local due = (tonumber(runtime.lastPassFinishedAt) or Clock()) + FollowUpGap()
+    runtime.nextPassNotBefore = due
+    local scheduled, why = scheduler and type(scheduler.After) == "function"
+        and scheduler.After(FOLLOWUP_KEY, math.max(0, due - Clock()), function()
+            Repair.Request("follow-up")
+        end)
+    if not scheduled then
+        runtime.failures = runtime.failures + 1
+        runtime.lastReason = "schedule-failed"
+        return false, why or "legacy repair scheduler unavailable"
+    end
+    runtime.followUps = runtime.followUps + 1
+    return true
+end
+
+local function PassEnded(job, completed)
+    local finished = Clock()
+    runtime.lastPassFinishedAt = finished
+    runtime.lastPassElapsed = math.max(0,
+        finished - (tonumber(job.startedAt) or finished))
+    runtime.lastPassDuration = tonumber(job.activeSeconds) or 0
+    if completed then runtime.passesCompleted = runtime.passesCompleted + 1 end
+    local newer = job.stale == true or (tonumber(job.skippedChanged) or 0) > 0
+        or job.dpsRevision ~= CurrentDpsRevision()
+        or job.revisionSource ~= RevisionSource()
+    -- A pass that could not finish (publication refused, cursor lost) is
+    -- retried by the same bounded follow-up; Request starts nothing while the
+    -- catalog authority is exhausted.
+    if newer or not completed then
+        if completed then runtime.stalePasses = runtime.stalePasses + 1 end
+        ScheduleFollowUp()
+    else
+        runtime.followUpPending = false
+    end
+end
+
 function Repair.Pump(limit)
     if not active then return true end
     limit = math.max(1,math.min(tonumber(limit) or BATCH_SIZE,BATCH_SIZE))
     runtime.pumps = runtime.pumps + 1
     local work = 0
+    local pumping, pumpedAt = active, Clock()
+    local worked = false
     while active and work < limit do
         work = work + 1
         if active.phase == "catalog-pending" then
@@ -539,12 +659,30 @@ function Repair.Pump(limit)
         local root = catalog and type(catalog.RootState) == "function"
             and catalog.RootState() or nil
         if type(root) == "table" and root.candidate == true then break end
-        if active.dpsRevision ~= CurrentDpsRevision() then
+        worked = true
+        if active.database ~= NexusDB then
+            -- The saved root was replaced: this pass's scope and progress
+            -- record belong to the old one. It is abandoned; nothing is
+            -- stamped, and the one follow-up starts over on the current root.
+            RollbackRejected(active)
+            runtime.failures = runtime.failures + 1
+            runtime.lastReason = "SOURCE_DRIFT"
+            active = nil;runtime.pending = false
+            runtime.lastPassFinishedAt = Clock()
+            ScheduleFollowUp()
+            break
+        end
+        -- A newer DPS revision no longer discards the pass: its captured scope
+        -- still completes, each candidate is revalidated before a write, and
+        -- one follow-up pass covers what changed.
+        if active.dpsRevision ~= CurrentDpsRevision() then active.stale = true end
+        if active.phase == "classify"
+            and type(Nexus.DpsCapture.LegacyQualificationCursorSourceCurrent) == "function"
+            and not Nexus.DpsCapture.LegacyQualificationCursorSourceCurrent(active.cursor) then
+            -- The DPS store was replaced after the scan (possibly without a
+            -- DPS revision): no captured row can be revalidated any more.
+            -- Start over on the current store instead of skipping them all.
             local database = active.database
-            -- Rejections have no durable side effect. Discard the abandoned
-            -- pass's diagnostic totals before its replacement reclassifies
-            -- the same rows, otherwise hash iteration order can double-count
-            -- whichever rejection happened to precede the restart.
             RollbackRejected(active)
             runtime.restarts = runtime.restarts + 1
             active = NewJob(database, "restart", true, false)
@@ -556,6 +694,8 @@ function Repair.Pump(limit)
             local item, done, err = Nexus.DpsCapture.LegacyQualificationCursorNext(
                 active.cursor)
             if err then
+                -- The DPS store or revision owner was replaced: the captured
+                -- scope no longer describes the stored rows. Start over.
                 local database = active.database
                 RollbackRejected(active)
                 runtime.restarts = runtime.restarts + 1
@@ -572,6 +712,8 @@ function Repair.Pump(limit)
                     runtime.failures=runtime.failures+1
                     runtime.lastReason="cursor-incomplete"
                     active=nil;runtime.pending=false
+                    runtime.lastPassFinishedAt=Clock()
+                    ScheduleFollowUp()
                     break
                 end
                 runtime.scanned = runtime.scanned + result.scanned
@@ -588,6 +730,7 @@ function Repair.Pump(limit)
                     runtime.lastReason=tostring(why or "finish-failed")
                 end
                 active=nil;runtime.pending=false
+                PassEnded(completed, ok == true)
                 break
             else
                 ClassifyPair(active, fingerprint, pair)
@@ -603,6 +746,13 @@ function Repair.Pump(limit)
     end
     runtime.workUnits=runtime.workUnits+work
     runtime.maxWork=math.max(runtime.maxWork,work)
+    if worked and pumping.lastPumpAt then
+        local interval = pumpedAt - pumping.lastPumpAt
+        if interval > 0 and interval <= MAX_PUMP_INTERVAL then
+            pumping.activeSeconds = (tonumber(pumping.activeSeconds) or 0) + interval
+        end
+    end
+    pumping.lastPumpAt = pumpedAt
     return active == nil
 end
 
@@ -638,6 +788,17 @@ function Repair.Request(reason)
         runtime.lastReason="read-only-saved-data"
         return true,"read-only"
     end
+    -- An exhausted catalog authority refuses every write until a fresh
+    -- session: a pass could only fail again, so none starts (fail closed, as
+    -- before follow-ups existed). The catalog state is the observable cause.
+    local catalog=Nexus.BuildCatalog
+    local root=catalog and type(catalog.RootState)=="function"
+        and catalog.RootState() or nil
+    if type(root)=="table" and root.state=="AUTHORITY_GENERATION_EXHAUSTED" then
+        runtime.followUpPending=false
+        runtime.lastReason="GENERATION_EXHAUSTED"
+        return true,"catalog-exhausted"
+    end
     local meta,metaError=Meta(database)
     if not meta then return false,metaError end
     local revision=CurrentDpsRevision()
@@ -647,10 +808,22 @@ function Repair.Request(reason)
     -- one bounded idempotent pass instead of trusting a coincidentally equal
     -- counter from an older session.
     if runtime.completedDpsRevision ~= nil
+        and completedSource == RevisionSource()
+        and completedDatabase == database
         and tonumber(runtime.completedDpsRevision)==tonumber(revision)
         and meta.inProgress ~= true then
+        runtime.followUpPending=false
         runtime.lastReason="current"
         return true,"current"
+    end
+    -- Fairness: a pass does not start straight after the previous one. The
+    -- request is folded into the one scheduled follow-up instead.
+    if reason ~= "follow-up" and runtime.lastPassFinishedAt ~= nil
+        and Clock() < runtime.lastPassFinishedAt + FollowUpGap() then
+        runtime.deferredRequests=runtime.deferredRequests+1
+        local ok,scheduleWhy=ScheduleFollowUp()
+        if not ok then return false,scheduleWhy end
+        return true,"deferred"
     end
     local job,why=NewJob(database,reason,true,true)
     if not job then runtime.failures=runtime.failures+1; return false,why end
@@ -661,6 +834,8 @@ function Repair.Request(reason)
     meta.pendingWrites=job.changed
     meta.requestedDpsRevision=revision
     active=job;runtime.pending=true
+    runtime.followUpPending=false
+    runtime.lastPassStartedAt=job.startedAt
     local scheduler=Nexus.Scheduler
     local scheduled,scheduleError=scheduler and scheduler.After
         and scheduler.After(SCHEDULER_KEY,0,ScheduledPump)

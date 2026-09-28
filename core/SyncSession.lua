@@ -502,14 +502,20 @@ function Session.New(options)
                     myName(), tostring(buildId))
             local transportRequestId = contextual and requestId
                 or "loadout-" .. tostring(buildId)
+            local metadata = {
+                requester=myName(),
+                requestId=transportRequestId,
+                buildId=tostring(buildId),queueClass="request",
+                enqueuedAt=now(),expiresAt=now() + maxReceiveAge,
+                manualGrant=grant,
+            }
+            -- Our locked-role capability travels just before our request,
+            -- under its metadata (same queue, route and permission).
+            if type(options.advertiseCapability) == "function" then
+                pcall(options.advertiseCapability, metadata)
+            end
             local queued, queueWhy = (options.enqueueControl or options.enqueue)(
-                wire, {
-                    requester=myName(),
-                    requestId=transportRequestId,
-                    buildId=tostring(buildId),queueClass="request",
-                    enqueuedAt=now(),expiresAt=now() + maxReceiveAge,
-                    manualGrant=grant,
-                })
+                wire, metadata)
             if not queued then
                 -- Queue pressure is transient; an invalid maximum-field wire is
                 -- deterministic and must not retry forever every 1.5 seconds.
@@ -609,6 +615,9 @@ function Session.New(options)
                 length, requestLimit, form)
             return false, string.format("sync request too long (%d>%d bytes)",
                 length, requestLimit), "oversize"
+        end
+        if type(options.advertiseCapability) == "function" then
+            pcall(options.advertiseCapability, metadata)
         end
         local queued, why = (options.enqueueControl or options.enqueue)(message, metadata)
         if not queued then

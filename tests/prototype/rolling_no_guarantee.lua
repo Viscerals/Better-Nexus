@@ -89,7 +89,14 @@ assert(both.outstanding==1 and both.annotations[1]=='target satisfied' and both.
 local doubled=Copies({[1001]=2},{[1001]=2})
 assert(doubled.outstanding==1,'surplus copies never reduce another target')
 local sibling=Copies({[1011]=2},{},{{spellId=1011},{spellId=1003},{spellId=1004}})
-assert(sibling.outstanding==3 and sibling.annotations[1]=='filler','a different-quality sibling neither satisfies nor counts as the requested exact Echo')
+-- The sibling's family is wished at another quality: it is explained as a
+-- different quality, not as "not on Wishlist"; it still counts for nothing
+-- and is not a wanted card.
+assert(sibling.outstanding==3 and sibling.annotations[1]=='wrong quality'
+ and sibling.deltas[1]==-15 and sibling.type=='take' and sibling.spellId==1011
+ and sibling.reasonCode=='RESOURCE_EXHAUSTED_FALLBACK',
+ 'a different-quality sibling neither satisfies nor counts as the requested exact Echo: '
+ ..tostring(sibling.type)..' '..tostring(sibling.spellId)..' '..tostring(sibling.reasonCode))
 print('PASS exact copies and quality; rolled and locked ownership each subtract once')
 
 -- 5. Observed board state is kept; it is not an inferred future roll.
