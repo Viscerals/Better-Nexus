@@ -77,7 +77,7 @@ ui/WishlistOverlay.lua|17815|681adc48|tree
 ui/QuickStart.lua|9226|a8eca2b3|tree
 ui/CommunityRenderer.lua|141148|46c2e512|copy
 ui/CommunityBuilds.lua|16051|5b69c37b|tree
-ui/Leaderboard.lua|63723|5b392cc8|tree
+ui/Leaderboard.lua|63723|5b392cc8|copy
 ui/Nameplate.lua|6351|bc4a3ba0|tree
 ui/Changelog.lua|6394|b515014d|tree
 core/AutomationRuntime.lua|175336|3803ef25|copy

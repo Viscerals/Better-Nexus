@@ -61,11 +61,6 @@ local NEUTRAL_CLASS_ICON = "Interface\\Icons\\INV_Misc_Note_01"
 local CLASS_ORDER = {"ALL","DEATHKNIGHT","DRUID","HUNTER","MAGE","PALADIN","PRIEST","ROGUE","SHAMAN","WARLOCK","WARRIOR"}
 local classFilter = "ALL"
 
--- Shown in a detail view when the record's owner is not established (the
--- name itself carries no provenance text). A statement about identity only:
--- it says nothing about the record's Echoes, locked targets or DPS.
-local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity has not been established.|r"
-
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
     if type(Identity.DisplaySafeText) ~= "function" then return nil end
     return Identity.DisplaySafeText(
@@ -766,13 +761,8 @@ local function RenderDetail(row)
     end
     local displayDescription=DisplayRemoteText(
         b.description or "",4000,true,true)
-    displayDescription=(displayDescription and displayDescription~="")
-        and displayDescription or "No build description provided."
-    -- The row's name carries no provenance text; the detail says it.
-    if row.publicIdentityVerified==false then
-        displayDescription=OWNER_NOT_ESTABLISHED.."\n"..displayDescription
-    end
-    detail.desc:SetText(displayDescription)
+    detail.desc:SetText((displayDescription and displayDescription~="")
+        and displayDescription or "No build description provided.")
     local lockedResolution=ResolveRowLocked(row)
     local locked=lockedResolution.status=="ok"
         and lockedResolution.lockedEchoes or nil

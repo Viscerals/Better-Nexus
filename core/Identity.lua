@@ -443,10 +443,11 @@ local function VerifiedPublicLabel(record, field, ownerKey)
     return PublicBaseName(record, field) .. "-" .. tostring(realm or "unknown")
 end
 
-local function SafePublicToken(value, maxBytes)
-    return PublicTyped(value, maxBytes)
-end
-
+-- A record without an established owner shows its readable name (with the
+-- realm it states, where valid). The complete ambiguity/provenance tuple stays
+-- in publicIdentityKey (PublicRecordKey) and in the record's own fields; it
+-- is not printed in names. publicIdentityVerified=false lets a detail view
+-- say in plain words that the owner is not established.
 local function AmbiguousPublicLabel(record, field)
     local base = PublicBaseName(record, field)
     local raw = record[field]
@@ -458,16 +459,7 @@ local function AmbiguousPublicLabel(record, field)
             and Identity.OwnerKey(base, record.realm) and record.realm or nil
         if realm and realm:lower() ~= "unknown" then base = base .. "-" .. realm end
     end
-    local discriminator = table.concat({
-        SafePublicToken(record.id, 96),
-        SafePublicToken(record.buildId, 96),
-        SafePublicToken(raw, 80),
-        SafePublicToken(record.realm, 96),
-        SafePublicToken(record.ownerKey, 177),
-        SafePublicToken(record.claimedOwnerKey, 177),
-        SafePublicToken(record.relaySender, 80),
-    }, "|")
-    return base .. " (legacy/unverified " .. discriminator .. ")"
+    return base
 end
 
 function Identity.NewPublicPresentation(field, options)
