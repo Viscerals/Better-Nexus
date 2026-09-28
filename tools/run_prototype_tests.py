@@ -120,6 +120,7 @@ NAMES += ['community_dps_filter']
 NAMES += ['sync_locked_roles_wire','sync_locked_roles_payload','community_update_roles']
 NAMES += ['public_label_presentation']
 NAMES += ['hud_roll_footprint']
+NAMES += ['help_action_first']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
