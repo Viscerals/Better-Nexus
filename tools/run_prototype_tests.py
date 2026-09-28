@@ -117,6 +117,7 @@ NAMES += ['orb_guidance_navigation','orb_guidance_passive_open']
 NAMES += ['orb_draft_approval_preserved','orb_guidance_geometry']
 NAMES += ['orb_budget_draft']
 NAMES += ['community_dps_filter']
+NAMES += ['sync_locked_roles_wire','sync_locked_roles_payload','community_update_roles']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

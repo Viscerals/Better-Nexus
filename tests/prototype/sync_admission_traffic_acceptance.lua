@@ -140,7 +140,9 @@ check((timing.updates or 0)==0 and (timing.slices or 0)==0,
 -- correction: one loadout recovery request per summary and the reconciliation
 -- request. An accepted record, a committed record and a transmitted packet
 -- stay separate events.
-local allowed={WLLQ=true,WLRQ=true}
+-- WLCP: the locked-role capability advertised next to our own request
+-- (docs/P1_7_LOCKED_ROLE_WIRE.md), at most once per interval.
+local allowed={WLLQ=true,WLRQ=true,WLCP=true}
 local outbound={}
 for _,packet in ipairs(H.sent)do
  local text=(packet.text or ''):gsub('||','|'):gsub('^P%d+:','')
@@ -150,5 +152,6 @@ for _,packet in ipairs(H.sent)do
 end
 check((outbound.WLBI or 0)==0 and (outbound.WLBD or 0)==0,
  'no build payload was transmitted by committing received records')
+check((outbound.WLCP or 0)<=1+math.floor(H.now/300),'at most one capability advertisement per 300 s: '..tostring(outbound.WLCP)..' in '..math.floor(H.now)..' s')
 print(string.format('PASS sync_admission_traffic_acceptance: %d/%d committed before their own deadlines; worst %ds; %d batches, largest %d; worst update %d slices checks=%d',
  #final.committed,sent,math.floor(worst),batches,largestBatch,worstFrameSlices,checks))
