@@ -584,7 +584,7 @@ function Inbound.New(options)
         if codes.capability and code == codes.capability then
             local caps, nonce = parts[3], parts[4]
             if #parts ~= 4 or type(caps) ~= "string" or #caps > 64
-                or not caps:match("^[%w,]+$") or type(nonce) ~= "string"
+                or not caps:match("^[%w,_%-]+$") or type(nonce) ~= "string"
                 or #nonce < 6 or #nonce > 16 or not nonce:match("^[%l%d]+$") then
                 return rejectIncoming("invalid capability")
             end

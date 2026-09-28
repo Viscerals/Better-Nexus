@@ -34,7 +34,12 @@ local function Manifest()
 end
 function P.VerifyReleased(path,mapped)
  local entry=Manifest()[path]
- if not entry then return end
+ if not entry then
+  -- Test support may be loaded from the current tree; a product file must
+  -- be one the released TOC loads.
+  if path:sub(1,6)=='tests/' then return end
+  error('released peer loads a file the released build does not have: '..path)
+ end
  local f=assert(io.open(mapped,'rb'));local text=f:read('*a');f:close()
  local plain=text:gsub('\r','')
  if #plain~=entry.size or Fnv1a(text)~=entry.digest then
@@ -46,10 +51,31 @@ end
 -- Build slots; opts.roots[i] is a directory whose files replace the product
 -- files of the same relative path for peer i (for example a released build's
 -- files); opts.tocs[i] is the TOC that peer loads.
+local NewPeer
 function P.Boot(names,rows,configure,opts)
  opts=opts or {}
  local peers={}
- for i,name in ipairs(names) do
+ for i,name in ipairs(names) do peers[i]=NewPeer(i,name,rows,configure,opts) end
+ P.A,P.B,P.trace,P.before,P.hold=peers[1],peers[2],{},nil,nil
+ P.setup={names=names,rows=rows,opts=opts}
+ return peers[1],peers[2]
+end
+-- A reload of one peer: a new runtime from that peer's own saved data (and
+-- the same options); the other peer keeps running. Its outbound cursor
+-- continues after the packets it already sent.
+function P.Rejoin(i)
+ local old=i==1 and P.A or P.B
+ local saved=old.e.NexusDB
+ local s=P.setup
+ local peer=NewPeer(i,s.names[i],s.rows,function(_,db)
+  for k in pairs(db) do db[k]=nil end
+  for k,v in pairs(saved) do db[k]=v end
+ end,s.opts)
+ if i==1 then P.A=peer else P.B=peer end
+ return peer
+end
+NewPeer=function(i,name,rows,configure,opts)
+ do
   local e={};for k,v in pairs(_G)do e[k]=v end;e._G=e
   local released=opts.released and opts.released[i]
   local root=released and P.RELEASED or (opts.roots and opts.roots[i])
@@ -65,7 +91,13 @@ function P.Boot(names,rows,configure,opts)
    if released then P.VerifyReleased((path:gsub('\\','/')),mapped) end
    local f,why=loadfile(mapped);if f then setfenv(f,e)end;return f,why
   end
-  e.io={open=function(path,...)return io.open(Path(path),...)end,lines=function(path,...)return io.lines(Path(path),...)end,write=io.write,read=io.read,stdout=io.stdout,stderr=io.stderr}
+  e.io={open=function(path,...)return io.open(Path(path),...)end,
+   lines=function(path,...)
+    -- The released TOC decides which files load: it is checked too.
+    if released and path=='Nexus.toc' then P.VerifyReleased(path,Path(path)) end
+    return io.lines(Path(path),...)
+   end,
+   write=io.write,read=io.read,stdout=io.stdout,stderr=io.stderr}
   e.dofile=function(path)return assert(e.loadfile(path))()end
   local H=e.dofile('tests/prototype/harness.lua')
   e.UnitName=function()return name,'Ebonhold'end
@@ -77,10 +109,8 @@ function P.Boot(names,rows,configure,opts)
    or {[102]={name='NEXUS-TEST-'..name,verified=false,echoes={{spellId=200001,quality=1,stacks=3}}}}
   T.Load();H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
   T.Until(H,function()return e.Nexus.StartupStatus().state=='ready' and e.Nexus.BuildCatalog.ManualPreparationStatus().ready end)
-  peers[i]={e=e,H=H,T=T,name=name..'-Ebonhold',cursor=#H.sent}
+  return {e=e,H=H,T=T,name=name..'-Ebonhold',cursor=#H.sent}
  end
- P.A,P.B,P.trace,P.before,P.hold=peers[1],peers[2],{},nil,nil
- return peers[1],peers[2]
 end
 function P.Channel(q,text,sender)
  q.H.Fire('CHAT_MSG_CHANNEL',text,sender,nil,'1. '..q.e.Nexus.Sync.ChannelName(),nil,nil,nil,nil,q.e.Nexus.Sync.ChannelName())

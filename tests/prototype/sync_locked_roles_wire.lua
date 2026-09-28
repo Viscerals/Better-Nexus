@@ -145,6 +145,14 @@ do
  local got=Get(P.B,id)
  check(Key(got.echoes)==ORDINARY,'released -> new: the ordinary targets arrive: '..Key(got.echoes))
  check(Unknown(got),'released -> new: the locked roles stay unknown, not zero')
+ -- A released peer never advertises: its traffic may cause one more
+ -- advertisement, not one per request.
+ local function Caps() local n=0;for _,t in ipairs(P.trace) do if t.from==P.B.name and t.code=='WLCP' then n=n+1 end end;return n end
+ local function Reqs() local n=0;for _,t in ipairs(P.trace) do if t.from==P.B.name and t.code=='WLRQ' then n=n+1 end end;return n end
+ local req0=Reqs()
+ for _=1,5 do P.B.e.Nexus.Sync.RequestSync();P.Advance(40) end
+ check(Reqs()-req0>=3,'fixture: several requests to a released peer within 300 s: '..(Reqs()-req0))
+ check(Caps()<=2,'a released peer does not keep the shorter re-advertisement spacing: '..Caps())
 end
 
 -- 4. Enrichment, duplicates, a partial answer and a newer revision.
@@ -183,7 +191,11 @@ do
  for _=1,600 do P.Step() end
  local kept=Get(P.B,idFour)
  check(Key(kept.lockedEchoes)==LOCKED and kept.lockedAuthorityProven==true,'an ordinary-only answer for the same revision does not erase the known roles')
- -- A newer revision answered ordinary-only: unknown roles, no inherited rows.
+ -- A newer revision: the stored roles are what the answers for that
+ -- revision state, never the old revision's record. The bridge carries every
+ -- owner packet to this peer, and this peer is itself a capable requester,
+ -- so both forms may arrive here; sync_locked_roles_payload 11 fixes the
+ -- order (full, newer ordinary-only, newer full) with crafted packets.
  local edited=P.A.e.Nexus.CommunityBuilds.EditBuild(idFour,'Locked roles four (edited)','Edited description',nil)
  check(edited,'fixture: the owner edits the build')
  P.Until(function() local r=Get(P.A,idFour);return r and r.lastModified>stamp end)
@@ -191,7 +203,19 @@ do
  Ask(P.A,'Delta-Ebonhold',idFour,false)
  local okNewer=pcall(P.Until,function() local r=Get(P.B,idFour);return r and r.lastModified==newer end,4000)
  check(okNewer,'fixture: the newer revision arrives')
- check(Unknown(Get(P.B,idFour)),'the newer ordinary-only revision has unknown roles, not the old rows: '..Key(Get(P.B,idFour).lockedEchoes))
+ local statedSet
+ for _,payload in ipairs(Payloads(P.A,idFour)) do
+  if payload.m==newer and payload.lv==1 then
+   local r={};for _,x in ipairs(payload.le or {}) do r[#r+1]={spellId=x[1],quality=x[2],stacks=x[3]} end
+   statedSet=Key(r)
+  end
+ end
+ local last=Get(P.B,idFour)
+ if statedSet then
+  check(last.lockedAuthorityProven==true and Key(last.lockedEchoes)==statedSet,'the newer revision holds the set its own answer stated: '..Key(last.lockedEchoes))
+ else
+  check(Unknown(last),'the newer ordinary-only revision has unknown roles, not the old rows: '..Key(last.lockedEchoes))
+ end
  -- Out of order: the older full answer replayed afterwards is ignored.
  local replayed=0
  for _,t in ipairs(P.trace) do
@@ -204,7 +228,7 @@ do
  check(replayed>=1,'fixture: older answers were replayed: '..replayed)
  for _=1,200 do P.Step() end
  local final=Get(P.B,idFour)
- check(final.lastModified==newer and Unknown(final),'an older full answer replayed later does not bring back the old rows')
+ check(final.lastModified==newer and Key(final.lockedEchoes)==Key(last.lockedEchoes) and final.lockedAuthorityProven==last.lockedAuthorityProven,'an older full answer replayed later does not bring back the old rows')
 end
 
 -- 5. Sync Off: no capability advertisement (and no request) is sent.
@@ -222,19 +246,45 @@ do
  check(fromA<=2,'the capability is advertised at most once per interval: '..fromA)
 end
 
--- 6. Several requests within the interval: exactly one advertisement.
+-- 6. Several requests within the interval: the login advertisement, at most
+-- one more after first contact with the other peer (it may have missed
+-- ours), then none for later requests in the interval.
 do
  P.Boot({'Alpha','Bravo'},5)
  for _=1,400 do P.Step() end
  local function Count(code) local n=0;for _,t in ipairs(P.trace) do if t.from==P.A.name and t.code==code then n=n+1 end end;return n end
- local caps0,req0=Count('WLCP'),Count('WLRQ')
+ local req0=Count('WLRQ')
+ for _=1,2 do
+  P.A.e.Nexus.Sync.RequestSync()
+  P.Advance(40)
+ end
+ local caps1,req1=Count('WLCP'),Count('WLRQ')
  for _=1,3 do
   P.A.e.Nexus.Sync.RequestSync()
   P.Advance(40)
  end
- local req,caps=Count('WLRQ')-req0,Count('WLCP')-caps0
- check(req>=2,'fixture: several state requests went out within 300 s: '..req)
- check(caps==0 and Count('WLCP')==1,'one advertisement per interval, however many requests: '..Count('WLCP')..' for '..Count('WLRQ')..' requests')
+ local req=Count('WLRQ')-req0
+ check(req>=3 and Count('WLRQ')>req1,'fixture: several state requests went out within 300 s, some after first contact: '..req)
+ check(caps1<=2 and Count('WLCP')==caps1,'at most one advertisement after first contact, then none within the interval: '..caps1..' then '..Count('WLCP')..' for '..Count('WLRQ')..' requests')
+end
+
+-- 7. The responder reloads after the requester's last advertisement: the
+-- responder's capability table is empty, the requester's advertisement
+-- interval has not passed. The restarted peer's own traffic makes the
+-- requester state its capability again, so its next answer is full.
+do
+ P.Boot({'Alpha','Bravo'},5,nil,{slots={Slots('Alpha',MIXED),nil}})
+ for _=1,400 do P.Step() end
+ local function BravoCaps() local n=0;for _,t in ipairs(P.trace) do if t.from==P.B.name and t.code=='WLCP' then n=n+1 end end;return n end
+ check(BravoCaps()>=1,'fixture: Bravo advertised at login')
+ local before=BravoCaps()
+ P.Rejoin(1) -- Alpha reloads: its capability table starts empty
+ P.Advance(20)
+ local id=Share(P.A,'Locked roles seven')
+ P.Until(function() return P.Full(P.B,id) end)
+ local got=Get(P.B,id)
+ check(Key(got.lockedEchoes)==LOCKED and got.lockedAuthorityProven==true,'the answer after the reload carries the locked targets: '..Key(got.lockedEchoes))
+ check(BravoCaps()>before,'Bravo stated its capability again after Alpha restarted')
 end
 
 print('PASS sync_locked_roles_wire checks='..checks)

@@ -21,9 +21,10 @@ and cannot tell "none" from "not sent".
 | --- | --- |
 | Message | `WLCP|<sender>|<caps>|<nonce>`. `caps` is a comma list; `lv1` means "understands locked-role payload version 1". `nonce` identifies the sender's current session (6 to 16 lowercase letters or digits). |
 | Released peers | test.9049 drops any unknown code before parsing (`if not peerCodes[code] then return false end`), so `WLCP` is ignored and never rejected. |
-| When sent | Only together with our own state request (`WLRQ`) or loadout request (`WLLQ`), through the same control queue, the same Sync-mode checks and the same route. At most once per 300 s per session. Never on its own schedule; Sync Off sends nothing. |
+| When sent | Only together with our own state request (`WLRQ`) or loadout request (`WLLQ`), through the same control queue, the same Sync-mode checks and the same route. Once per 300 s. Again after at least 30 s when a peer that has no current entry in our table was active (at most once per peer per 900 s, so an older peer that never advertises does not keep the shorter spacing), or when a peer advertised a new nonce (it restarted and lost our capability). Never on its own schedule; Sync Off sends nothing. The advertisement uses one control-queue slot just before the request. |
+| Limit | A responder that restarts loses our entry. If our table still has a current entry for it and it sends no advertisement (it makes no request, for example in Manual mode), we do not advertise again early: its answers to us are ordinary-only until our next periodic advertisement (at most 300 s). A later full answer for the same revision completes the record. |
 | Accepted from | The transport sender only, and only when the message's sender field is that same sender. Malformed messages, unknown tokens and other peers' messages establish nothing. |
-| Peer state | Memory only, keyed by the transport sender: `{lv=1, nonce, at}`. Lifetime 900 s from the last advertisement; at most 128 peers (the oldest is dropped). A new nonce replaces the entry. A reload clears all entries. No version string is read. |
+| Peer state | Memory only, keyed by the transport sender: `{lv=1, nonce, at}`. Lifetime 900 s from the last advertisement; at most 128 peers (the oldest is dropped). A new nonce replaces the entry and makes us advertise again. A reload clears all entries. No version string is read. The nonce is not a security token: after a peer downgrades, answers may still state the locked set for up to 900 s; released decoders ignore it. |
 | Meaning | Advertised support for the representation only. It is not trusted authorship and not valid data: owner, sender, provenance, size and semantic checks stay unchanged. |
 
 ## Payload (full build, `WLRB`)
@@ -75,6 +76,15 @@ itself states the roles.
   duplicate, as today).
 - A newer revision replaces the record; it never inherits the previous
   revision's locked rows.
+- Promotion to the owner's verified record: locked roles that only a relay
+  stated are not carried into the owner-verified record when the owner's
+  own answer does not state them (they become unknown); the owner's full
+  answer then completes it. Provenance comes first.
+- Held admission: when the owner's ordinary-only answer and then its full
+  answer for the same revision (same content) both wait in the admission
+  queue, the full answer replaces the held partial one. A held full answer
+  is never replaced by a partial one. The content digest does not include
+  the role state.
 - Copy into Editor is unchanged and conservative: a known empty set without
   rows is not taken as "none" there (the resolver needs rows or its own
   evidence), so it stays unavailable rather than zero.
