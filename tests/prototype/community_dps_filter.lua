@@ -86,7 +86,13 @@ local function Expect(list,label)
  end
  return d,shown
 end
-local function Click(b) assert(b:IsVisible() and b:IsEnabled(),'visible enabled control');b:Click() end
+-- The client flips a check box's own check before its OnClick runs; the
+-- harness does not, so a check box click here does the same.
+local function Click(b)
+ assert(b:IsVisible() and b:IsEnabled(),'visible enabled control')
+ if b.kind=='CheckButton' then b:SetChecked(not b:GetChecked()) end
+ b:Click()
+end
 local function Checked() return frame._qualifiedBtn:GetChecked()==true end
 -- The controller's filter, as the window's diagnostic reads it from the
 -- controller (not from the check box).
@@ -131,6 +137,25 @@ check(frame._resultText:GetText():find('Updating results',1,true)~=nil,
 check(not Checked() and Filter()==false,'and the check already shows the requested filter')
 Expect(UNCHECKED,'after the pending state')
 check(not frame._resultText:GetText():find('Updating results',1,true),'the published result replaces the pending text')
+
+-- 3b. From an empty checked result: while the unchecked projection is
+-- pending, the list does not say that no build matches the current filters.
+do
+ Click(box);Expect(CHECKED,'fixture: checked again')
+ local search=frame._searchBox
+ search:SetText('Nodps');search:GetScript('OnTextChanged')(search,true)
+ Settle()
+ check(Remote(Shown())=='' and frame._emptyState:IsShown(),'checked with a search for the build without records: empty result shown')
+ Click(box)
+ local p=Diag()
+ check(p.projectionPending==true,'fixture: the unchecked projection is pending')
+ check(not frame._emptyState:IsShown() and frame._resultText:GetText():find('Updating results',1,true),
+  'pending: no "no builds match" text, the result line says it is updating')
+ Settle()
+ check(Remote(Shown())=='Nodps' and not frame._emptyState:IsShown(),'settled: the build without records is shown')
+ search:SetText('');search:GetScript('OnTextChanged')(search,true)
+ Expect(UNCHECKED,'search cleared, unchecked')
+end
 
 -- 4. Refresh, close/reopen and the scope controls keep the filter.
 Nexus.CommunityBuilds.Refresh();check(not Checked() and Filter()==false,'refresh keeps the unchecked filter')

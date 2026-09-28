@@ -2833,6 +2833,7 @@ function M.Refresh()
         -- The rows still shown are the last published ones, not the result
         -- of the current filters.
         if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
+        if frame._emptyState then frame._emptyState:Hide() end
         viewDiagnostic.projectionPending = false
         viewDiagnostic.projectionError = false
         viewDiagnostic.projectionCurrent = false
@@ -2849,6 +2850,9 @@ function M.Refresh()
         if projectionError == "pending" then
             refreshDirty = true
             if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
+            -- "No builds match the current ... filters" belongs to the last
+            -- published result, not to the filters now being prepared.
+            if frame._emptyState then frame._emptyState:Hide() end
             viewDiagnostic.projectionPending = true
             viewDiagnostic.projectionError = false
             viewDiagnostic.projectionCurrent = false
