@@ -6,6 +6,11 @@ Nexus.CommunityInternals = Nexus.CommunityInternals or {}
 
 local Renderer = {}
 
+-- Shown in a detail view when the record's owner is not established (the
+-- name itself carries no provenance text). A statement about identity only:
+-- it says nothing about the record's Echoes, locked targets or DPS.
+local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity has not been established.|r"
+
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
     local identity = Nexus and Nexus.Identity
     if not (identity and type(identity.DisplaySafeText) == "function") then
@@ -1510,8 +1515,13 @@ local function RefreshDetailPanel(buildId)
     detailPanel.author:SetText("by " .. displayAuthor)
     local displayDescription = build.displayDescription
         or DisplayRemoteText(build.description or "", 4000, true, true)
-    detailPanel.desc:SetText((displayDescription ~= "" and displayDescription)
-        or "|cff666666(no description)|r")
+    displayDescription = (displayDescription ~= "" and displayDescription)
+        or "|cff666666(no description)|r"
+    -- The byline carries no provenance text; the detail says it.
+    if build.publicIdentityVerified == false then
+        displayDescription = OWNER_NOT_ESTABLISHED .. "\n" .. displayDescription
+    end
+    detailPanel.desc:SetText(displayDescription)
 
     -- Link field: always show the box so anyone can copy; only show Save
     -- button for the build's owner. Hide label/box entirely when there's no
