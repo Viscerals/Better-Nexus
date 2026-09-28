@@ -462,18 +462,29 @@ local function HardcoreShown()
     return ok and shown or false
 end
 
+-- An error raised inside the stock toggle is still reported, not swallowed.
+local function ReportError(err)
+    local handler = type(geterrorhandler) == "function" and geterrorhandler() or nil
+    if type(handler) == "function" then pcall(handler, err) end
+end
+
 function M.OpenHardcoreMenu()
     local wasShown = HardcoreShown()
     local onClick, button = HardcoreControl()
     if onClick then
         -- The stock toggle: opens with a fresh request, or closes when open.
-        if pcall(onClick, button, "LeftButton") and HardcoreShown() ~= wasShown then
+        -- What counts is whether the panel changed, even if the toggle
+        -- raised after showing it.
+        local ok, err = pcall(onClick, button, "LeftButton")
+        if not ok then ReportError(err) end
+        if HardcoreShown() ~= wasShown then return true end
+    end
+    if wasShown then
+        -- Closing needs no identified control; nothing is requested or built.
+        if pcall(function() local hard = _G.HardmodeFrame; hard:Hide() end)
+            and not HardcoreShown() then
             return true
         end
-    elseif wasShown then
-        -- Closing needs no identified control; nothing is requested or built.
-        local hard = _G.HardmodeFrame
-        if pcall(hard.Hide, hard) and not HardcoreShown() then return true end
     end
     if not hardcoreUnavailableNoted and type(print) == "function" then
         hardcoreUnavailableNoted = true

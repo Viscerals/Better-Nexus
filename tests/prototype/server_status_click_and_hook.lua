@@ -110,6 +110,8 @@ local function Host(root)
  NexusDB={soulAshHudMode='nexus'}
  Nexus={Panel={VisibilityFacts=function() return {exists=true,shown=true,wanted=true,ready=true,committed=true} end}}
  UIParent={};EbonholdIntensityData=nil;HardmodeFrame=nil;ProjectEbonhold=nil
+ reportedErrors={}
+ geterrorhandler=function() return function(err) reportedErrors[#reportedErrors+1]=tostring(err) end end
  ProjectEbonholdPlayerRunFrame=root
  local frames={}
  function CreateFrame(kind,name,parent)
@@ -194,6 +196,10 @@ do
   {'a ProjectEbonhold table that raises',function(root,clicks)
     ProjectEbonhold=setmetatable({},{__index=function() error('hostile') end})
    end,{}},
+  {'a button whose GetParent raises',function(root,clicks)
+    local _,skull=Ebonhold(root,clicks)
+    skull.GetParent=function() error('hostile parent') end
+   end,{}},
  }
  for _,c in ipairs(cases) do
   local clicks={};printed={}
@@ -227,7 +233,37 @@ do
  check(status.OpenHardcoreMenu()==false and HardmodeFrame.shown==false,'and is not reopened without the control')
 end
 
--- 5. #33: world entries on the SAME stock frame keep exactly one hook.
+-- 5. The stock toggle raises part-way. What counts is the panel: opened is
+-- opened, and the error still reaches the client's error handler; a toggle
+-- that raises without closing an open panel is backed by a plain Hide; a
+-- hostile HardmodeFrame in that path raises nothing out of the call.
+do
+ local clicks={};printed={}
+ local root=StockFrame()
+ local status=Host(root)
+ local pe,skull=Ebonhold(root,clicks)
+ skull.scripts.OnClick=function() pe.Toggle();error('after show') end
+ check(status.OpenHardcoreMenu()==true and HardmodeFrame.shown==true,'a toggle that raises after showing still counts as opened')
+ check(#reportedErrors==1 and reportedErrors[1]:find('after show',1,true),'and its error is reported: '..#reportedErrors)
+ check(#printed==0,'with no misleading notice: '..#printed)
+ skull.scripts.OnClick=function() error('before hide') end
+ check(status.OpenHardcoreMenu()==true and HardmodeFrame.shown==false,'a toggle that raises while open is backed by Hide')
+ check(#reportedErrors==2,'and that error is reported too: '..#reportedErrors)
+end
+do
+ local clicks={};printed={}
+ local root=StockFrame()
+ local status=Host(root)
+ HardmodeFrame=setmetatable({},{__index=function(_,k)
+  if k=='IsShown' then return function() return true end end
+  error('hostile frame')
+ end})
+ local ok,res=pcall(status.OpenHardcoreMenu)
+ check(ok and res==false,'a hostile HardmodeFrame raises nothing out of the call: '..tostring(res))
+ check(#printed==1,'and the player is told once: '..#printed)
+end
+
+-- 6. #33: world entries on the SAME stock frame keep exactly one hook.
 do
  local root=StockFrame()
  local _,tick,enterWorld=Host(root)
