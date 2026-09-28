@@ -425,23 +425,64 @@ function M.SetMode(mode)
     if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
 end
 
--- #32: the Hardcore menu opens only through HardmodeFrame itself. The stock
--- run frame's Hardcore control has no identity Nexus can prove, and calling
--- a stock child's OnClick to find out what it does would run an unrelated
--- control whenever the layout put it first. No stock click handler is ever
--- invoked from here; without HardmodeFrame the call fails closed.
+-- #32: no stock click handler is found by searching. Project Ebonhold creates
+-- HardmodeFrame only inside its own toggle, which also asks the server for the
+-- current tier and Soul Ash pool and rebuilds the panel; it publishes the one
+-- control that runs that toggle as ProjectEbonhold.HardmodeButton, a child of
+-- the run HUD's header. Nexus calls that control's handler and nothing else,
+-- and only when the button really sits in ProjectEbonholdPlayerRunFrame.
+-- HardmodeFrame:Show() alone would open nothing before the first toggle and
+-- show stale data after it, so it is never used to open the panel.
 local hardcoreUnavailableNoted = false
 
+-- The published Hardcore control, or nil. Every read of the foreign tables is
+-- protected: another addon can replace these globals with anything.
+local function HardcoreControl()
+    local ok, onClick, button = pcall(function()
+        local pe = _G.ProjectEbonhold
+        if type(pe) ~= "table" then return nil end
+        local b = pe.HardmodeButton
+        local root = _G.ProjectEbonholdPlayerRunFrame
+        if type(b) ~= "table" or type(root) ~= "table" then return nil end
+        local header = b:GetParent()
+        if type(header) ~= "table" or header:GetParent() ~= root then return nil end
+        local fn = b:GetScript("OnClick")
+        if type(fn) ~= "function" then return nil end
+        return fn, b
+    end)
+    if not ok then return nil end
+    return onClick, button
+end
+
+local function HardcoreShown()
+    local ok, shown = pcall(function()
+        local hard = _G.HardmodeFrame
+        return type(hard) == "table" and hard:IsShown() and true or false
+    end)
+    return ok and shown or false
+end
+
+-- An error raised inside the stock toggle is still reported, not swallowed.
+local function ReportError(err)
+    local handler = type(geterrorhandler) == "function" and geterrorhandler() or nil
+    if type(handler) == "function" then pcall(handler, err) end
+end
+
 function M.OpenHardcoreMenu()
-    local hard = _G.HardmodeFrame
-    if hard and type(hard.IsShown) == "function" and hard:IsShown() then
-        if type(hard.Hide) == "function" then pcall(hard.Hide, hard) end
-        return true
+    local wasShown = HardcoreShown()
+    local onClick, button = HardcoreControl()
+    if onClick then
+        -- The stock toggle: opens with a fresh request, or closes when open.
+        -- What counts is whether the panel changed, even if the toggle
+        -- raised after showing it.
+        local ok, err = pcall(onClick, button, "LeftButton")
+        if not ok then ReportError(err) end
+        if HardcoreShown() ~= wasShown then return true end
     end
-    if hard and type(hard.Show) == "function" then
-        local ok = pcall(hard.Show, hard)
-        if ok then
-            if type(hard.Raise) == "function" then pcall(hard.Raise, hard) end
+    if wasShown then
+        -- Closing needs no identified control; nothing is requested or built.
+        if pcall(function() local hard = _G.HardmodeFrame; hard:Hide() end)
+            and not HardcoreShown() then
             return true
         end
     end
