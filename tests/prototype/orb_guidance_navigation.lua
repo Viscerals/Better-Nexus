@@ -22,7 +22,8 @@ do
  F.Boot(F.Database({}),function(h) h.playerLevel=60 end)
  local G=assert(Nexus.OrbGuidance,'the guidance module is loaded')
  local function P(obs) return G.Project(obs) end
- local base={plan=true,ordinaryAllowed=true,horizon=0,rolledMissing=4,lockMissing=0}
+ -- Level 80: no later level-up brings more normal rolls.
+ local base={plan=true,ordinaryAllowed=true,horizon=0,rolledMissing=4,lockMissing=0,level=80}
  local function With(t) local o={};for k,v in pairs(base) do o[k]=v end;for k,v in pairs(t) do o[k]=v end;return o end
  local r=P(base)
  check(r.state=='finished' and r.openOrbs and r.text:find('Normal rolls finished',1,true),'finished with rolled targets missing: review Orbs')
@@ -53,6 +54,14 @@ do
  check(r.state=='no-plan' and not r.openOrbs,'no assigned Wishlist: named, no readiness claim')
  r=P(With({horizon=0,rolledMissing=false}))
  check(r.state=='finished-unknown' and not r.openOrbs,'finished with unknown progress promises nothing')
+ -- Below level 80 a server count of 0 is only the gap between level-ups: the
+ -- next level brings more normal rolls. Not "finished", no Orb advice.
+ r=P(With({level=40}))
+ check(r.state=='rolling' and not r.openOrbs and r.text==nil,'level 40, server count 0: not "finished", no Orb advice: '..r.state)
+ r=P(With({level=40,orbCapable=false}))
+ check(r.state=='rolling' and r.text==nil,'level 40 without Orb mode: no "finished" either: '..r.state)
+ r=P(With({level=false}))
+ check(r.state=='rolling' and not r.openOrbs and r.text==nil,'an unknown level is not proof of the end of the run: '..r.state)
 end
 
 ------------------------------------------------------------------------
@@ -126,6 +135,13 @@ do
  local v=View()
  check(v.state=='finished-no-orbs' and not v.button,'no Orb service: named, no Orb button: '..tostring(v.state))
  check(tostring(v.text):find('does not expose Orb mode',1,true)~=nil,'the text says so: '..tostring(v.text))
+end
+do
+ -- Level 40 between level-ups: the server count is 0 until the next level.
+ -- The real HUD must not say "Normal rolls finished" or offer Open Orbs.
+ Boot({level=40,pendingRolls=0})
+ local v=View()
+ check(v.state=='rolling' and v.text==nil and not v.button,'level 40, server count 0: no "finished" text and no Orb button: '..tostring(v.state)..' / '..tostring(v.text))
 end
 do
  -- Level 1: the game's roll count is not read on purpose; no Orb text and
