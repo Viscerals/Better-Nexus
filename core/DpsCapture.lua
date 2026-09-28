@@ -2412,7 +2412,10 @@ function DpsDigest.PumpJob()
             if not bucket then
                 DpsDigest.Publish(job)
                 stats.maxUnitsPerPump = math.max(stats.maxUnitsPerPump, units)
-                return true, true
+                -- Changes queued during the job are applied by the next
+                -- pumps (DPS.PumpSyncHash); until then the digest is not
+                -- readable, so this pump does not report it ready.
+                return #DpsDigest.pending == 0, true
             end
             job.bucketDirty[bucket] = nil
             job.hashJob = DpsDigest.NewBucketJob(bucket,
