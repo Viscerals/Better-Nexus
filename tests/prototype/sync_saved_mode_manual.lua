@@ -50,7 +50,9 @@ P.Advance(3);B.e.Nexus.Sync.RequestSync()
 P.Until(function()return P.Full(A,peerId)~=nil end,6000)
 local codes=FromA(mark)
 check(#codes>0,'Manual Sync Now sends')
-Only(codes,{WLRQ=true,WLLQ=true},'Manual Sync Now')
+-- WLCP travels with our own request under the same manual grant
+-- (docs/P1_7_LOCKED_ROLE_WIRE.md).
+Only(codes,{WLRQ=true,WLLQ=true,WLCP=true},'Manual Sync Now')
 check(B.e.Nexus.BuildCatalog.Get(hiddenId)==nil,'Manual Sync Now: unrelated answers stay unauthorized; the other peer did not get the record held by this side')
 check(P.Full(A,peerId)~=nil,'Manual Sync Now completes: the missing record is received with its Echo list')
 P.Until(function()return A.e.Nexus.SyncModePolicy.ActiveManualGrant()==nil end,12000)

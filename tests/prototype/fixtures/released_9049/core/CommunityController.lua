@@ -2814,7 +2814,7 @@ function Controller.New(options)
     -- One truthful sentence for the latest Share, read from the existing
     -- outcome and the existing Sync operation status. It states no timing and
     -- no percentage, and never calls retained work failed. Returns state, text.
-    local function BaseShareStatusText(id)
+    function M.ShareStatusText(id)
         local s = M.ShareStatus(id)
         if not s then return nil end
         local name = type(s.title) == "string" and s.title ~= ""
@@ -2875,21 +2875,6 @@ function Controller.New(options)
         end
         return "saved", "Saved " .. name .. " locally — not queued: "
             .. tostring(s.queueReason or "Sync unavailable"):gsub("%.+$", "") .. "."
-    end
-
-    -- The base sentence, plus the locked-target limit when some answers for
-    -- this build went to older versions with its ordinary targets only
-    -- (docs/P1_7_LOCKED_ROLE_WIRE.md). Prepared answers, not peer receipt.
-    function M.ShareStatusText(id)
-        local state, text = BaseShareStatusText(id)
-        if not state then return state, text end
-        local s = M.ShareStatus(id)
-        local partial = s and tonumber(s.lockedRolesOrdinaryOnly) or 0
-        if partial > 0 then
-            text = text .. string.format(" %d answer%s went to an older Nexus version with the ordinary targets only; the locked targets need a current version.",
-                partial, partial == 1 and "" or "s")
-        end
-        return state, text
     end
 
     -- The approved draft of a Share whose local save failed, for the form.
@@ -3408,18 +3393,12 @@ function Controller.New(options)
         if not wl or not wl.entries or #wl.entries == 0 then
             return false, "no active wishlist"
         end
-        -- The same role reading as Share. Before, every Wishlist entry became
-        -- an ordinary row and the previous revision's lockedEchoes stayed
-        -- beside them, so a role change was lost and stale locked rows would
-        -- travel with the new revision (docs/P1_7_LOCKED_ROLE_WIRE.md).
-        local okRoles, echoes, lockedEchoes = pcall(ShareRoles, wl, WishlistEchoes(wl))
-        if not okRoles then return false, "Echo roles cannot be read" end
-        if not echoes then return false, lockedEchoes end
+        local echoes = {}
+        for _, e in ipairs(wl.entries) do
+            echoes[#echoes+1] = { spellId=e.spellId, quality=e.quality, stacks=e.stacks or 1 }
+        end
         local candidate = ShallowCopy(b)
         candidate.echoes = echoes
-        candidate.lockedEchoes = #lockedEchoes > 0 and lockedEchoes or nil
-        candidate.lockedAuthorityProven = nil
-        candidate.lockedFingerprint = nil
         local identityOk, identityErr = RefreshBuildIdentity(candidate)
         if not identityOk then return false, identityErr end
         candidate.lastModified = NextStamp(b.lastModified or b.postedAt)

@@ -56,7 +56,10 @@ local function Boot(opts)
  local transport=assert(Upvalue('EnqueueControl'),'fixture: the real transport instance')
  local real=transport.EnqueueControl
  transport.EnqueueControl=function(payload,metadata)
-  if type(metadata)=='table' and metadata.queueClass=='request' then
+  -- Requests only: the locked-role capability (WLCP) travels next to a
+  -- request under a copy of its metadata (docs/P1_7_LOCKED_ROLE_WIRE.md).
+  if type(metadata)=='table' and metadata.queueClass=='request'
+   and not tostring(payload):find('^WLCP|') then
    state.calls[#state.calls+1]={payload=payload,requestId=metadata.requestId}
    if state.fullQueue then return false,'sync queue full' end
   end
