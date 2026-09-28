@@ -2834,6 +2834,7 @@ function M.Refresh()
         -- of the current filters.
         if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
         if frame._emptyState then frame._emptyState:Hide() end
+        frame._resultsStale = true
         viewDiagnostic.projectionPending = false
         viewDiagnostic.projectionError = false
         viewDiagnostic.projectionCurrent = false
@@ -2853,6 +2854,9 @@ function M.Refresh()
             -- "No builds match the current ... filters" belongs to the last
             -- published result, not to the filters now being prepared.
             if frame._emptyState then frame._emptyState:Hide() end
+            -- Until the next publication (a scroll or resize re-binds the
+            -- last rows, but must not show their empty text again).
+            frame._resultsStale = true
             viewDiagnostic.projectionPending = true
             viewDiagnostic.projectionError = false
             viewDiagnostic.projectionCurrent = false
@@ -2903,6 +2907,7 @@ function M.Refresh()
         if page > 1 then prevPageBtn:Enable() else prevPageBtn:Disable() end
         if page < pageCount then nextPageBtn:Enable() else nextPageBtn:Disable() end
     end
+    frame._resultsStale = false
     if resultText then
         local first = projectionSummary and projectionSummary.first or 0
         local last = projectionSummary and projectionSummary.last or #builds
@@ -3115,7 +3120,7 @@ function M.Refresh()
         msg = total == 0
             and "No builds yet.\n\nPost a build from your active Echo Wishlist, or press Sync Now to find builds from other players."
             or  "No builds match the current scope, class, DPS-record, or search filters."
-        if frame._emptyState then
+        if frame._emptyState and not frame._resultsStale then
             frame._emptyState:SetText(msg)
             frame._emptyState:Show()
         end
