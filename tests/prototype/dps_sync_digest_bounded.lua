@@ -37,11 +37,15 @@ local resolve=Ev.Resolve
 local inPump,perPump,maxPerPump,pumps=false,0,0,0
 Ev.Resolve=function(...) if inPump then perPump=perPump+1 end;return resolve(...) end
 local pump=D.PumpSyncHash
+-- Readiness contract: when a pump reports ready, the digest is readable in
+-- the same frame (the Sync gate opens on that report and reads it at once).
+local readyWithoutHash=0
 D.PumpSyncHash=function(...)
  inPump,perPump=true,0
  local ready,progressed=pump(...)
  inPump=false;pumps=pumps+1
  if perPump>maxPerPump then maxPerPump=perPump end
+ if ready and D.GetSyncHash()==nil then readyWithoutHash=readyWithoutHash+1 end
  return ready,progressed
 end
 
@@ -366,4 +370,22 @@ do
 end
 
 check(#H.actions==0,'zero gameplay mutation')
+-- 10. A record change queued in the job's last (hash) phase: the job
+-- publishes its snapshot with that change still pending. The pump that
+-- publishes must not report ready before the change is applied, or Sync
+-- reads no digest in the frame it was told the digest is ready.
+do
+ Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,{scope='test'})
+ D.GetSyncHash()
+ local sawHash=false
+ for _=1,4000 do if Phase()=='hash' then sawHash=true;break end;H.Advance(.05,.05) end
+ check(sawHash,'10: setup: the job reached its hash phase')
+ check(fx:Receive('Filler4','lk',{dps=70004,ts=time()-1}),'10: setup: Filler4 update accepted')
+ local before=readyWithoutHash
+ check(UntilReady(20000),'10: the digest becomes ready')
+ check(readyWithoutHash==before,'10: no pump reported ready while the digest was unreadable: '..(readyWithoutHash-before))
+ check(D.GetSyncHash()==D.GetSyncHashUncached(),'10: the digest includes the change (canonical)')
+end
+check(readyWithoutHash==0,'readiness contract over the whole test: '..readyWithoutHash..' ready report(s) without a digest')
+
 print('PASS dps_sync_digest_bounded: bounded preparation, canonical digest, nothing partial or stale advertised, Sync waits checks='..checks)
