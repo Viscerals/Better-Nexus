@@ -7,20 +7,20 @@ local HELP_LEVEL=40
 local pages={
  {id="start",title="Getting started",text=[[This is an experimental build. Back up your Nexus folder and WTF with WoW closed before testing. Reading this guide never spends, assigns, activates, or sends a Sync request.
 
-1. Open the Wishlist Editor: click ... on the Nexus panel, then Wishlist Editor, or type /nexus editor. Click Create Wishlist, or click Import and paste a Wishlist code. Import opens a draft.
-2. Check exact qualities, copy counts and the planned locked Echo targets. Click Save Wishlist.
-3. In My Builds, select the intended Saved Build and assign the Wishlist to it. Assigning only chooses the target; by itself it does not change the Saved Build.
+Before you turn Auto ON: With Auto ON, Nexus may replace that active Saved Build with a better finished run; at level 80 after a finished run, that can happen right after you turn Auto ON or change the assignment. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. It treats the slot as a working copy, not a protected archive. Keep Auto OFF if you want it left unchanged. Auto starts OFF each session.
 
-Before you turn Auto ON: With Auto ON, Nexus may replace that active Saved Build with a better finished run; at level 80 after a finished run, that can happen right after you turn Auto ON or change the assignment. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. It treats the slot as a working copy, not a protected archive. Keep Auto OFF if you want it left unchanged.
-
-4. Review the recommendations with Auto OFF first. Click Auto OFF only when you accept that warning; it then shows Auto ON.
+1. Open the Wishlist Editor: click ... on the Nexus panel, then Wishlist Editor, or type /nexus editor. To use a Wishlist code, click Import and paste it. Import opens a draft.
+2. Check exact qualities, copy counts and the planned locked Echo targets.
+3. Click Create Wishlist for a new or imported plan. It saves the plan and makes it the target of the loadout shown in the editor. For an existing Wishlist, click Save Wishlist.
+4. To target another Saved Build: in My Builds, select the intended Saved Build and assign the Wishlist to it (click the Wishlist selector and choose the Wishlist). Assigning only chooses the target; by itself it does not change the Saved Build.
+5. Review the recommendations with Auto OFF first. Click Auto OFF only when you accept the warning above; it then shows Auto ON.
 
 Words: A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Nexus treats no future random Echo roll as guaranteed.]]},
  {id="wishlists",title="Wishlists and locked targets",text=[[Before you edit: a plan holds up to 79 rolled copies and 6 locked Echo copies (85 total). Counts are copies, not names or rows. Each quality is a different target; a lower-quality copy does not count for a higher-quality target.
 
-1. Open the Wishlist Editor (/nexus editor). Import opens a draft; nothing is kept until you click Save Wishlist.
+1. Open the Wishlist Editor (/nexus editor). Import opens a draft; nothing is kept until you click Create Wishlist (new plan) or Save Wishlist (existing Wishlist).
 2. If the editor asks for locked targets, choose them, then click Confirm locked targets & edit (or & assign). You do not need to own the plan already.
-3. Click Save Wishlist to keep the plan. In My Builds, Assign Wishlist chooses which Wishlist a loadout uses; Unassign Wishlist keeps the Wishlist.
+3. Create Wishlist saves a new plan and makes it the target of the loadout shown in the editor; Save Wishlist saves an existing one. In My Builds, the Wishlist selector chooses which Wishlist a Saved Build uses; Unassign Wishlist keeps the Wishlist.
 
 Locked Echoes and targets: Currently locked Echoes are what you actually have. Locked Echo targets are what the plan wants. A Frozen offer is a temporary offered card kept by the game's Freeze action; it is not a locked Echo slot. Opening or confirming targets does not lock/unlock anything. Automatic locked-Echo slot changes require both Automation and their separate option, plus ownership and safety checks.
 
@@ -36,30 +36,30 @@ Better means Wishlist progress, not Orb investment or keeping every individual E
 2. Choose actions: /nexus reroll on|off and /nexus freeze on|off. They change those permissions, not the Auto button.
 3. Watch the panel. Take chooses a needed offer. Banish removes an eligible offer. Reroll asks for new choices when enabled. Freeze keeps an eligible offered card.
 
-Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [G] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none.
+Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. Priority numbers in advanced diagnostics are not DPS or percentages. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [G] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none. These symbols are not network or loading states.
 
-When it is blocked: "Waiting for the game to confirm the last Echo action." means an action was sent and has no confirmed result yet. Do not choose again or reload; wait. "No Echo choice is showing." means only that no choice is on screen now. It does not mean the run is finished, and it is not a reason to retry. "Auto ON — paused" means Auto stays ON but is not acting; the reason is shown. Waiting for current Echo data means automatic choices wait for ownership confirmation; it is not Sync status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
+When it is blocked: "Waiting for the game to confirm the last Echo action." means an action was sent and has no confirmed result yet. Do not choose again or reload; wait. "No Echo choice is showing." means only that no choice is on screen now. It does not mean the run is finished, and it is not a reason to retry. "Auto ON — paused" means Auto stays ON but is not acting; point at the ... button to see the reason in its Status line. Waiting for current Echo data means automatic choices wait for ownership confirmation; it is not Sync status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
  {id="sharing",title="Shared builds and DPS",text=[[1. Click Build Library on the Nexus panel. Use the scope button to switch between All Shared and My Builds.
 2. Require both DPS records: when checked, only builds with both a Training Dummy and a Lich King record that this client holds are listed. When unchecked, that requirement is off; other filters still apply. A record shows what this client holds. It is not build quality, outside verification, or finished Sync. While a filter change is applied, the list says Updating results...
 3. Copy into Editor creates a draft; it does not activate or spend. Share Build sends a listing to other users; it is separate from saving a Wishlist or a server Saved Build.
 
-Removing: Stop Sharing, an administrator removing a shared record, and deleting from My Builds are different actions. Read each confirmation. Stop Sharing removes the listing here; removal on other clients is not confirmed.
+Removing: Stop Sharing, an administrator removing a shared record, and deleting from My Builds are different actions. Read each confirmation. Stop Sharing removes the listing here; removal on other clients is not confirmed. Removing a shared listing does not delete your server build or Wishlist.
 
 Names: a name shows the player and realm the record states. It is not proof of identity. When a record's owner is not established, its details say "Owner identity not established." Two different records can show the same name.
 
-Locked targets on shared builds: players on this version receive a build's locked targets when both sides support them. Older versions receive the ordinary targets only; your Share status counts those answers. A build from an older version shows its locked targets as unknown, not as none. A received build is not always ready to copy. Sent does not prove that another player stored it.
+Locked targets on shared builds: players on this version receive a build's locked targets when both sides support them. Older versions receive the ordinary targets only; your Share status counts those answers. For a build from an older version, Nexus treats its locked targets as unknown, not as none; no locked row is shown. A received build is not always ready to copy. Sent does not prove that another player stored it.
 
 Leaderboard: Training Dummy, Lich King and Both records tabs. Both records ranks by the highest single result; an average is display-only. DPS capture needs Details! and its supported events.
 
 Sync Now asks for shared builds and records. Preparing, request sent, receiving updates, and finished are distinct. Do not flood the sharing network or send test traffic.]]},
  {id="orbs",title="Orbs / Lost Memories",text=[[Before you start: Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace locked Echo slots, and it stops when rolled targets are complete. Opening the window, Open Orbs..., Help and Max spend nothing.
 
-1. Open /nexus orbs, Orbs / Lost Memories in the ... menu, or Open Orbs... on the Nexus panel. Check the assigned Wishlist, missing rolled copies and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
+1. Open /nexus orbs, Orbs / Lost Memories in the ... menu, or Open Orbs... on the Nexus panel (shown with Orb guidance). Check the assigned Wishlist, missing rolled copies and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
 2. Set the maximum. Until you type an amount, it follows your confirmed Orb balance, up to 1000. Typing an amount stops that; Max returns to following the balance. A typed amount must be a whole number from 1 to 10,000. A maximum saved by an earlier version is kept.
-3. Click Start. Start approves the maximum shown and automatic use of eligible surplus copies, including safe recycling. Locked and required copies stay protected. The approved maximum does not change during the run.
+3. Click Start. Start approves the maximum shown and automatic use of eligible surplus copies, including safe recycling. Starting disables ordinary Automation; it does not automatically re-enable it. Locked and required copies stay protected. The approved maximum does not change during the run.
 4. Watch the run. It continues after each confirmed result and stops at target completion, the maximum, insufficient balance, no safe source, or uncertainty.
 
-Starting disables ordinary Automation; it does not automatically re-enable it. The game's auto-accept and other addons' pickers must be off.
+The game's auto-accept and other addons' pickers must be off. Unknown client capabilities disable only Orb mode. Login, reconnect, new resources or reload never restart spending.
 
 Closing the window does not stop an approved run. Use Pause or Stop. The main Nexus panel keeps compact progress and Pause/Resume/Stop.
 
@@ -67,14 +67,14 @@ After a finished run: click Start new run, review the maximum, then click Confir
 
 When it is blocked: Pause/Stop prevents new submissions, not a spend already accepted; a pending result may still settle. Changing the active loadout, assignment or targets pauses new actions; Resume adopts the new target and keeps the same maximum. Advanced has optional exclusions and Recheck. Recheck only asks for balance and ownership data; it is not a replay or a fix.
 
-Unresolved result: an Orb action without a confirmed result keeps its spending exposure and blocks new Orb runs and ordinary rolling. Relogging, reloading, changing builds, returning to the old loadout, Resume, Recheck or pressing controls again do not clear it. Nexus never retries, refunds, or deletes it. Do not clear saved data.
+Unresolved result: an Orb action without a confirmed result keeps its spending exposure and blocks new Orb runs and ordinary rolling. Relogging, reloading, changing builds, returning to the old loadout, Resume or pressing controls again do not clear it. Recheck can request the confirming data; pressing it does not clear the record. Nexus never retries, refunds, or deletes it. Do not clear saved data.
 
 Only one manual case can confirm it: after a reload, if that action's offer is still open in the game's offer window and matches the saved record, choose in that window. Nexus confirms the action only from the exact matching result. If Nexus had proposed an Echo, only that same Echo can be confirmed; the Orb window names it. If the action ended while Nexus could not observe it, it cannot be confirmed. No exit from that block exists yet.]]},
  {id="troubleshooting",title="Problems and bug reports",text=[[If something goes wrong: do not reload, relog, spend Orbs, reroll or change builds to recreate it. Do not clear logs or reset saved data.
 
 Report a problem. No report/logs or requested details = your support request will be ignored until provided.
 1. Type /nexus report when the problem happens, before any reload. Its incidents are kept for this session only.
-2. Click Copy summary. Press Ctrl+A, then Ctrl+C, and paste it into your report.
+2. Click Copy summary, click in the text, press Ctrl+A, then Ctrl+C, and paste it into your report.
 3. Add your exact build (/nexus update shows it), what happened versus what you expected, and Auto ON or OFF. Provide any additional logs requested.
 
 Report file (private): click Prepare report file and wait until it says the report is prepared. WoW writes the file only when you reload, log out or exit. /reload only when no action is active or pending. Then send this file privately; never post it publicly:
@@ -85,7 +85,7 @@ If reporting fails: if the window says "Not prepared", or logs are unavailable, 
 
 Loading: the loading panel shows the current step and elapsed time; a percentage is for that step only. /nexus loading reopens it. Gray Build Library/Leaderboard tabs mean shared views are not ready yet.
 
-Turning things off: Hide Nexus Panel (... menu) or /nexus panel only hides the panel. Auto OFF only stops automatic actions. Neither turns Nexus off; to disable it, use the game's AddOns list and reload.
+Turning things off: Hide Nexus Panel (... menu) or /nexus panel only hides the panel. Auto OFF only stops automatic actions. Neither turns Nexus off. To turn Nexus off, only when no action is active or pending: log out to character selection, click AddOns, untick Nexus, and log in again.
 
 Commands:
 /nexus help - this guide, also during loading
@@ -99,9 +99,9 @@ Commands:
 /nexus log errors - recorded errors
 /nexus perf - timing diagnostics (not DPS)
 
-More diagnostics: Prepare full diagnostic report builds a paged report. Select this page and copy pages in order; it does not put every page on the clipboard.
+More diagnostics: /nexus log opens the log viewer. Prepare full diagnostic report builds a paged report. Select this page and copy pages in order; it does not put every page on the clipboard.
 
-Updates: Nexus shows an update notice only from release information shipped inside this package. No notice does not mean your build is the latest. Nexus never downloads or installs.]]},
+Updates: update notices come from release information shipped inside this package; the ... button then shows !. Another player's client can report a newer test build; Nexus shows that only as an UNVERIFIED hint. No notice does not mean your build is the latest. Nexus never downloads or installs.]]},
  {id="about",title="About and advanced details",text=[[Ordinary rolling and Orb decisions come from EchoWeaver, the rolling engine that Nexus maintains itself. Orb decisions use EchoWeaver's source, target and fallback rules with Nexus's exact-quality, locked-role, approval, budget and confirmation safeguards.
 
 EchoWeaver has no runtime dependency on another addon. Source and reuse notices are in THIRD_PARTY.md. Neither algorithm is claimed mathematically optimal or universally safe without matching client evidence.

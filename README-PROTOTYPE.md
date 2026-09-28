@@ -30,15 +30,20 @@ sent to other players. Do not roll back while an Orb result is unresolved.
 
 ## Get started
 
+Before you create or assign a Wishlist with Auto ON, read **Automatic save and
+your Saved Build** below. Auto starts OFF each session.
+
 1. Open the Wishlist Editor: click **...** on the Nexus panel, then
-   **Wishlist Editor**, or type `/nexus editor`. Click **Create Wishlist**, or
-   **Import** and paste a Wishlist code. Import opens a draft.
+   **Wishlist Editor**, or type `/nexus editor`. To use a Wishlist code, click
+   **Import** and paste it. Import opens a draft.
 2. Check exact qualities, copy counts and the planned locked Echo targets.
-   Click **Save Wishlist**.
-3. In **My Builds**, select the intended Saved Build and assign the Wishlist to
-   it. Assigning only chooses the target; by itself it does not change the Saved
-   Build.
-4. Read **Automatic save and your Saved Build** below before you turn Auto ON.
+3. Click **Create Wishlist** for a new or imported plan. It saves the plan and
+   makes it the target of the loadout shown in the editor. For an existing
+   Wishlist, click **Save Wishlist**.
+4. To target another Saved Build: in **My Builds**, select the intended Saved
+   Build and choose the Wishlist with the Wishlist selector. Assigning only
+   chooses the target; by itself it does not change the Saved Build.
+5. Read **Automatic save and your Saved Build** below before you turn Auto ON.
 
 A Wishlist is a desired plan; you do not have to own it already. **Saved Builds**
 are server slots. **Active Loadout** is the selected server loadout. **Build
@@ -100,7 +105,8 @@ When it is blocked:
   and has no confirmed result yet. Do not choose again or reload; wait.
 - “No Echo choice is showing.” — no choice is on screen now. It does not mean the
   run is finished, and it is not a reason to retry.
-- “Auto ON — paused” — Auto stays ON but is not acting; the reason is shown.
+- “Auto ON — paused” — Auto stays ON but is not acting; point at the **...**
+  button to see the reason in its Status line.
 - “Waiting for current Echo data” — waiting for ownership data, not Sync status.
 - Ordinary rolling stays paused during active or unknown Orb offers.
 
@@ -112,6 +118,9 @@ not count for a higher-quality target.
 
 - Currently locked Echoes are what you have. Locked Echo targets are what the
   plan wants.
+- **Create Wishlist** saves a new plan (and makes it the loadout's target);
+  **Save Wishlist** saves an existing one. **Unassign Wishlist** keeps the
+  Wishlist.
 - If the editor asks, choose the locked targets and click
   **Confirm locked targets & edit** (or **& assign**). Confirming locks nothing.
 - A Frozen offer is kept temporarily by the game's Freeze action; it is not a
@@ -128,7 +137,7 @@ They cannot create or replace locked slots; a run stops when rolled targets are
 complete. Opening the window, **Open Orbs...**, Help and **Max** spend nothing.
 
 1. Open `/nexus orbs`, **Orbs / Lost Memories** in the **...** menu, or
-   **Open Orbs...** on the panel. Check the assigned Wishlist, missing copies and
+   **Open Orbs...** on the panel (shown with Orb guidance). Check the assigned Wishlist, missing copies and
    the confirmed Orb balance. Loading is never a zero balance.
 2. Set the maximum. Until you type an amount it follows your confirmed balance,
    up to 1000. Typing stops that; **Max** returns to following the balance. A
@@ -139,6 +148,10 @@ complete. Opening the window, **Open Orbs...**, Help and **Max** spend nothing.
    not turn it back ON. The approved maximum does not change during the run.
 4. The run continues after each confirmed result and stops at completion, the
    maximum, low balance, no safe source or uncertainty.
+
+Login, reconnect, new resources or reload never restart spending. Unknown
+client capabilities disable only Orb mode. The Orb window's **Help** button
+opens this Orb section in `/nexus help`.
 
 Closing the window does not stop an approved run. Use Pause or Stop.
 
@@ -152,7 +165,8 @@ When it is blocked:
 - Changing the active loadout, assignment or targets pauses new actions; Resume
   adopts the new target and keeps the same maximum.
 - **Recheck** (Advanced) only asks for balance and ownership data. It is not a
-  replay or a fix.
+  replay or a fix; it can request confirming data, but pressing it does not
+  clear a record.
 - An unresolved Orb result keeps its spending exposure and blocks new Orb runs
   and ordinary rolling. Relogging, reloading, changing builds, returning to the
   old loadout or pressing controls again does not clear it. Nexus never retries,
@@ -178,15 +192,16 @@ When it is blocked:
 
 - **Stop Sharing** removes the listing on this client; removal on other clients
   is not confirmed. Stop Sharing, administrator removal and deleting from My
-  Builds are different actions; read each confirmation.
+  Builds are different actions; read each confirmation. Removing a shared
+  listing does not delete your server build or Wishlist.
 - Names show the player and realm a record states; they are not proof of
   identity. A record whose owner is not established says
   “Owner identity not established.” in its details. Two records can show the
   same name.
 - Locked targets on shared builds: players on this version receive them when
   both sides support them. Older versions receive the ordinary targets only; your
-  Share status counts those answers. A build from an older version shows its
-  locked targets as unknown, not as none. A received build is not always ready to
+  Share status counts those answers. For a build from an older version, Nexus
+  treats its locked targets as unknown, not as none; no locked row is shown. A received build is not always ready to
   copy. Sent does not prove that another player stored it.
 - Leaderboard tabs: **Training Dummy**, **Lich King**, **Both records** (ranked
   by the highest single result). DPS capture needs Details!.
@@ -203,7 +218,8 @@ builds to recreate it. Do not clear logs or reset saved data.
 
 1. Type `/nexus report` when the problem happens, before any reload. Its
    incidents are kept for this session only.
-2. Click **Copy summary**. Press Ctrl+A, then Ctrl+C, and paste it.
+2. Click **Copy summary**, click in the text, press Ctrl+A, then Ctrl+C, and
+   paste it.
 3. Add your exact build (`/nexus update` shows it), what happened versus what you
    expected, and Auto ON or OFF. Provide any additional logs requested.
 
@@ -224,23 +240,28 @@ full SavedVariables or account details publicly.
 
 ## Commands
 
-- `/nexus help` (also `/nexus guide`, `/nexus tutorial`): this guide, also during loading.
+- `/nexus help` (also `/nexus guide`, `/nexus tutorial`, and **Help / Getting
+  Started** in the **...** menu and the Welcome window): this guide, also during
+  loading.
 - `/nexus report`: support report.
 - `/nexus editor`: Wishlist Editor.
 - `/nexus orbs`: Orb window; does not spend.
-- `/nexus panel`: show or hide the panel. Hiding does not turn Nexus off; to
-  disable Nexus, use the game's AddOns list and reload.
+- `/nexus panel`: show or hide the panel. Hiding does not turn Nexus off. To
+  turn Nexus off, only when no action is active or pending: log out to
+  character selection, click **AddOns**, untick Nexus, and log in again.
 - `/nexus loading`: startup progress (a percentage is for the current step only).
 - `/nexus status`, `/nexus update`, `/nexus sync`, `/nexus log errors`,
   `/nexus perf` (timing, not DPS), `/nexus prototype` (build details).
 
-**Prepare full diagnostic report** (in the log viewer) builds a paged report:
+**Prepare full diagnostic report** (in the log viewer, `/nexus log`) builds a
+paged report:
 **Select this page**, then copy pages in order. Advanced commands (flags,
 undemote, anchor, restore, err) are troubleshooting tools, not generic fixes.
 
-Update notices come only from release information shipped in this package. No
-notice does not mean your build is the latest. Nexus never downloads or
-installs anything.
+Update notices come from release information shipped in this package (the
+**...** button then shows **!**). Another player's client can report a newer test
+build; Nexus shows that only as an UNVERIFIED hint. No notice does not mean your
+build is the latest. Nexus never downloads or installs anything.
 
 ## Status and limits
 

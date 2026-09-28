@@ -79,8 +79,12 @@ check(has(start,'right after you turn Auto ON or change the assignment.'),'Help:
 check(has(start,'Saving edits to the assigned Wishlist can also lead to a replacement without a new run.'),'Help: a saved edit can lead to a replacement')
 check(has(start,'working copy, not a protected archive'),'Help: working copy, not archive')
 check(has(start,'A Wishlist is a desired plan') and has(start,'Saved Builds are server slots'),'Help distinguishes Wishlist from Saved Build')
-local stepAssign=start:find('3. In My Builds',1,true);local stepAuto=start:find('With Auto ON',1,true)
-check(stepAssign and stepAuto and stepAuto>stepAssign and stepAuto-stepAssign<400,'warning sits next to the assignment step')
+-- The warning stands before the steps it qualifies: Create Wishlist (which
+-- also makes the plan a loadout's target) and assigning a Saved Build.
+local stepCreate=start:find('Click Create Wishlist',1,true)
+local stepAssign=start:find('select the intended Saved Build and assign the Wishlist to it',1,true)
+local stepAuto=start:find('With Auto ON',1,true)
+check(stepCreate and stepAssign and stepAuto and stepAuto<stepCreate and stepAuto<stepAssign,'warning stands before the create and assignment steps')
 -- The warning comes before the step that turns Auto ON, not only after it.
 local stepAutoOn=start:find('Click Auto OFF',1,true)
 check(stepAutoOn and stepAuto<stepAutoOn,'warning precedes the instruction that turns Auto ON')
