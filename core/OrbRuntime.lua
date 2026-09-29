@@ -648,7 +648,12 @@ local function finishResult(s,p)
     if s.hostPending then return unmet("host") end
     if #s.board>0 then return unmet("board") end
     if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed during the operation. Resolve the result manually.");return unmet("locked") end
-    if s.charges~=p.chargesBefore-1 then
+    -- The one-Orb decrement proves the spend. Once it was observed with this
+    -- action's offer (spendConfirmed, kept in the receipt), the later total
+    -- balance says nothing about this action: an Orb gained or spent afterwards
+    -- must not hold it forever. The balance never settles it either; only the
+    -- exact ownership result below does.
+    if not p.spendConfirmed and s.charges~=p.chargesBefore-1 then
         return unmet("charges",{expected=p.chargesBefore-1,observed=s.charges})
     end
     local gained,status=P.SingleGain(p.before,p.removed,s.granted)

@@ -58,6 +58,13 @@ content evidence, one-Orb charge change, no unresolved offer/choice/host action,
 and unchanged permanent ownership. These are local evidence checks; no native
 server correlation capability is invented.
 
+The one-Orb charge change is required once. When it was already observed with
+the action's offer (`spendConfirmed` in the saved receipt), settlement does not
+require the player's later total Orb balance to stay one less than before the
+action: an Orb gained or spent later for another reason must not hold the action
+forever. A later balance change is not completion evidence. Every other
+requirement above still applies, and only the exact ownership result settles it.
+
 ## Persistence and interruption
 
 Only configuration, explicit choices, and passive unresolved-operation evidence
@@ -91,8 +98,9 @@ the original slot does not settle the action. A client without
 `GetServerBuildSlots()` keeps the plain slot comparison. While a recorded choice waits for its result (`WAIT_RESULT`), the
 status names the settlement requirement that the last read did not meet (a
 fresh ownership response, the chosen Echo in ownership, an open offer or
-another game action, an open Echo choice, or an Orb balance other than one
-less than before the action). Naming it changes no requirement.
+another game action, an open Echo choice, or, while the spend is not yet
+confirmed, an Orb balance other than one less than before the action). Naming it
+changes no requirement.
 
 Character/run/service/loadout change pauses the run. Resume rechecks the original
 context, targets, owner, and budget. A budget increase needs a new approval token
