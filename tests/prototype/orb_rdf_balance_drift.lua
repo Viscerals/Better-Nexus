@@ -42,7 +42,7 @@ local function Deliver(H,A,O,granted,keep)
  keep=keep or {}
  if not keep.latch then H.perks.pendingSelectSpellId=nil end
  if not keep.offer then O.offer=false end
- H.perks.currentChoice=keep.board and H.Clone(keep.board) or (keep.offer and H.perks.currentChoice or nil)
+ H.perks.currentChoice=keep.board and H.Clone(keep.board) or (keep.offer and not keep.noBoard and H.perks.currentChoice or nil)
  H.granted=granted;H.Notify();A.Poll();H.Advance(.5)
 end
 local function Rechecks(H,M,n)for _=1,n or 1 do H.now=H.now+4;M.Recheck();H.Advance(.5)end end
@@ -206,14 +206,42 @@ do
  Deliver(H,A,O,Owned(H,source,410002,2));Rechecks(H,M,1)
  Held(H,M,calls,'F locked changed')
 end
--- G. The recorded offer is still open.
+-- G. The game still reports the Orb offer as open, while no choice board is
+-- shown (so the board requirement cannot be what holds it).
+do
+ local H,M,A,O,source,calls=Stuck()
+ O.charges=O.charges+1
+ Deliver(H,A,O,Owned(H,source,410002,2),{offer=true,noBoard=true});Rechecks(H,M,1)
+ check(#(H.perks.currentChoice or {})==0 and O.offer==true,'G setup: offer flag set, no board')
+ Held(H,M,calls,'G offer open','offer')
+end
+-- G2. The recorded offer is still shown: with a moved balance the recovery does
+-- not tie it to the saved action, and nothing settles while it is open.
 do
  local H,M,A,O,source,calls=Stuck()
  O.charges=O.charges+1
  Deliver(H,A,O,Owned(H,source,410002,2),{offer=true});Rechecks(H,M,1)
- -- An open offer with a moved balance is not tied to the saved action (the
- -- recovery reports it unmatched); the settlement also waits for it to close.
- Held(H,M,calls,'G offer open','offer|OFFER_UNMATCHED')
+ Held(H,M,calls,'G2 offer shown','OFFER_UNMATCHED')
+end
+-- L. The same session, no loading screen: Orb income while the running run
+-- waits for its result. The balance alone confirms nothing; the exact result
+-- settles the operation once, and the run then continues within its limit.
+do
+ local H,M,A,O=Fresh()
+ Loadouts(H,A)
+ assert(M.Start(3));local source=O.source
+ H.Offer();H.Advance(.5)
+ check(Receipt().spendConfirmed==true and Receipt().choiceObserved==true and M.Status().running,'L setup: running, spend confirmed, choice sent')
+ O.charges=O.charges+1;H.Advance(2)
+ local log=M.RunLog()
+ check(M.Status().pending and log.entries[1] and log.entries[1].state~='confirmed' and H.Count('orb-spend')==1,
+  'L: Orb income alone confirms nothing and starts nothing')
+ Deliver(H,A,O,Owned(H,source,410002,2));H.Advance(1)
+ log=M.RunLog()
+ check(log.entries[1].state=='confirmed' and log.entries[1].obtained=='410002:2','L: the exact result confirms operation 1: '..tostring(log.entries[1].state))
+ local confirmed=0;for _,e in ipairs(log.entries)do if e.state=='confirmed' then confirmed=confirmed+1 end end
+ check(confirmed==1 and H.Count('take')==1,'L: confirmed exactly once, one choice')
+ check(H.Count('orb-spend')<=2 and M.Status().spent+M.Status().reserved<=3,'L: at most the next approved Orb follows, within the limit')
 end
 -- H. A game action is still in flight.
 do

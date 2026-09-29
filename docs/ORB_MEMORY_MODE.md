@@ -58,8 +58,8 @@ content evidence, one-Orb charge change, no unresolved offer/choice/host action,
 and unchanged permanent ownership. These are local evidence checks; no native
 server correlation capability is invented.
 
-The one-Orb charge change is required once. When it was already observed with
-the action's offer (`spendConfirmed` in the saved receipt), settlement does not
+The one-Orb charge change is required once. When it was already observed while
+the action's Orb offer was pending (`spendConfirmed` in the saved receipt), settlement does not
 require the player's later total Orb balance to stay one less than before the
 action: an Orb gained or spent later for another reason must not hold the action
 forever. A later balance change is not completion evidence. Every other
