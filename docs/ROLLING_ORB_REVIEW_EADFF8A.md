@@ -396,10 +396,12 @@ Facts:
   rolling is blocked for that whole session. Nexus has no remedy for it.
 - The one state request call that the repository already uses is
   `OrbService.RequestCharges()`. Only `OrbAdapter.RequestRefresh()` calls it.
-  `RequestRefresh()` has two callers, both inside Orb mode: the Orb window's
-  Recheck, and the live pending path of a Nexus-owned Orb action, once per
+  `RequestRefresh()` has three callers, all inside Orb mode: the Orb window's
+  Recheck, the live pending path of a Nexus-owned Orb action, once per
   offer or result timeout (`core/OrbRuntime.lua`, `B.RequestRefresh()` in
-  `Pump`). The ordinary rolling path never calls it. The repository holds no
+  `Pump`), and passive recovery after a reload, once per load when the exact
+  recorded result is already shown and only a newer ownership response is
+  missing (added after this review). The ordinary rolling path never calls it. The repository holds no
   evidence that `RequestCharges()` makes `IsStateKnown()` true. No other state
   request call exists in the repository. None was invented.
 

@@ -153,6 +153,9 @@ do
  local requests=O.requests
  H.Advance(1)
  check(M.Status().recovery.gate and M.Status().recovery.gate.gate=='offer','A4: the offer is still open after the reload')
+ local text=M.Status().reason
+ check(text:find('Desired A',1,true)~=nil and text:find('different Echo',1,true)~=nil and text:find('will not choose or spend',1,true)~=nil,
+  'A4: while the recorded offer is open after the reload, the status names the Echo to choose: '..text)
  check(calls.pick(410002)==true,'A4: the player chooses');H.Advance(.5)
  H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false
  H.granted=Owned(H,source,410002,2);H.Notify();A.Poll();H.Advance(1)
@@ -196,6 +199,23 @@ do
  check(s.pending and s.reason:find('/reload',1,true)==nil and s.reason:find('Session interrupted',1,true)~=nil,
   'B4: once the game no longer holds the choice, the /reload advice is gone: '..s.reason)
 end
+-- B5. Another pause reason is never replaced by the hint: the assigned
+-- Wishlist changes during the loading screen.
+do
+ local H,M,A,O=LostReply()
+ local ok=A.SetLoadoutWishlistIdentity(1,'First',{{spellId=410004,quality=3,stacks=1}})
+ H.Notify();A.Poll();H.Advance(8)
+ local reason=M.Status().reason
+ check(ok and reason:find('assigned Wishlist changed',1,true)~=nil,'B5 setup: the assignment change pauses the run: '..tostring(ok)..' / '..reason)
+ check(reason:find('/reload',1,true)==nil,'B5: the held-choice text does not replace another pause reason: '..reason)
+end
+-- B6. The game still holds the choice, but no Orb offer is owed any more:
+-- no /reload advice (it would not open an offer).
+do
+ local H,M,A,O=LostReply()
+ O.offer=false;H.Advance(8)
+ check(M.Status().reason:find('/reload',1,true)==nil,'B6: without an owed offer there is no /reload advice: '..M.Status().reason)
+end
 -- B2. The game holds a different choice: not this action's; no hint.
 do
  local H,M,A,O=LostReply()
@@ -211,5 +231,29 @@ do
  assert(M.Start(3));H.Offer();H.Advance(40)
  local s=M.Status()
  check(s.pending and s.reason:find('/reload',1,true)==nil,'B3: without a loading screen there is no /reload hint: '..s.reason)
+end
+-- C2. The report line from a failing or hostile Orb owner: bounded, no
+-- control bytes, and never the reason the summary is lost.
+do
+ local H,M,A,O=Fresh()
+ local runtime=Nexus.OrbRuntime;local real=runtime.RecoveryView
+ local POISON='SENTINEL'..string.char(1)..string.char(10)..string.char(7)..'|cffff0000|r'..string.rep('Z',300)
+ runtime.RecoveryView=function()return {pending=true,restored=POISON,state=POISON,recovery=POISON,gate=POISON,
+  spendConfirmed=POISON,choiceSent=POISON,choiceObserved=true,selectedKey=POISON,removed=POISON,
+  loadoutChanged=POISON,pickInFlight=POISON,autoRefresh=POISON} end
+ local summary=Nexus.SupportReport.Summary()
+ local first=OrbLine(summary);local second=summary:match('Orb action:[^\n]*\n([^\n]*)')
+ check(first and second,'C2: the poisoned view still gives the two Orb lines')
+ for _,l in ipairs({first,second})do
+  check(not l:find('[%z\1-\31]') and #l<400 and not l:find(string.rep('Z',30),1,true),'C2: bounded, no control bytes: '..#l)
+ end
+ check(second:find('spend confirmed=no',1,true) and second:find('game pick in flight=unknown',1,true)
+  and second:find('automatic refresh=not requested',1,true) and first:find('in this session',1,true),
+  'C2: a non-boolean flag is never reported as yes: '..first..' / '..second)
+ runtime.RecoveryView=function()error('hostile owner')end
+ check(OrbLine(Nexus.SupportReport.Summary())=='Orb action: not available (the Orb owner did not answer)','C2: a throwing owner gives the not-available line')
+ runtime.RecoveryView=function()return setmetatable({},{__index=function()error('hostile index')end})end
+ check(OrbLine(Nexus.SupportReport.Summary())=='Orb action: not available (the Orb owner did not answer)','C2: a hostile answer gives the not-available line')
+ runtime.RecoveryView=real
 end
 print('PASS Orb RDF follow-ups: one automatic read-only refresh after reload, /reload hint for a held game choice, Orb action in the support report checks='..checks)

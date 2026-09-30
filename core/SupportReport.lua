@@ -681,7 +681,6 @@ function M.Summary(selection)
             context[#context + 1] = line
         end
     end
-    for _, line in ipairs(M.OrbLines()) do context[#context + 1] = line end
     local errorView = errorHistoryView()
     if not errorView then
         context[#context + 1] = "Recorded Lua errors: not available (the error owner did not answer)"
@@ -696,6 +695,8 @@ function M.Summary(selection)
                 .. errorLine(errorView.history[errorView.total], errorOrigin(errorView, 1))
         end
     end
+    -- After the Lua error line, so a nearly full summary keeps that first.
+    for _, line in ipairs(M.OrbLines()) do context[#context + 1] = line end
     local omitted = 0
     for _, line in ipairs(context) do
         local size = #escape(line) + 1
