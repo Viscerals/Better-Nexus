@@ -139,6 +139,7 @@ do
  H.granted=Owned(H,source,410004,3);H.Notify();A.Poll()
  H.Advance(10)
  check(M.Status().pending and O.requests==requests,'A3: no automatic request when the ownership is not the recorded result')
+ check(M.Status().reason:find('asked the game once',1,true)==nil,'A3: the status does not claim a request that was not made: '..M.Status().reason)
  H.now=H.now+4;M.Recheck();H.Advance(1)
  check(M.Status().pending and M.Status().reason:find('does not match',1,true)~=nil,'A3: Recheck shows the mismatch; the action stays unresolved')
  NothingSent(H,calls,'A3')
@@ -182,6 +183,18 @@ do
  H.granted=Owned(H,source,410002,2);H.Notify();A.Poll();H.Advance(1)
  s=M.Status()
  check(M.RunLog().entries[1].state=='confirmed' and s.reason:find('still waiting for its reply',1,true)==nil,'B1: the late reply confirms it; the hint is gone: '..s.reason)
+end
+-- B4. The game's reply clears its latch, but the ownership response has not
+-- arrived: the /reload advice is withdrawn at once.
+do
+ local H,M,A,O=LostReply()
+ H.Advance(8)
+ check(M.Status().reason:find('/reload',1,true)~=nil,'B4 setup: the held-choice text is shown')
+ H.holdGrantedResponse=true
+ H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false;H.Notify();A.Poll();H.Advance(1)
+ local s=M.Status()
+ check(s.pending and s.reason:find('/reload',1,true)==nil and s.reason:find('Session interrupted',1,true)~=nil,
+  'B4: once the game no longer holds the choice, the /reload advice is gone: '..s.reason)
 end
 -- B2. The game holds a different choice: not this action's; no hint.
 do
