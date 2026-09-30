@@ -4201,6 +4201,17 @@ function A.AutomationSignature()
     }
 end
 
+-- The Orb read path reads the game state several times a second and keeps
+-- only the Echo reconciliation and its active-slot generation. It runs the
+-- same reconciliation as AutomationSignature, and nothing of the rest of that
+-- five-second check (the character-row comparison through the Store mutation
+-- entry, the bag scan for a Tome, the settings), whose results it discarded.
+function A.EchoActiveSlotGeneration()
+    local echoOk = ReconcileEchoState(false, "fallback")
+    if not echoOk then return nil end
+    return echoGenerations.activeSlot
+end
+
 -- Manual-training capture: returns and clears the last user-clicked
 -- action (SelectPerk/BanishPerk/FreezePerk/RequestReroll + its argument).
 function A.ConsumeUserAction()

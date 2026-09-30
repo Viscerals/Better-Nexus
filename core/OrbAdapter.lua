@@ -31,12 +31,15 @@ local function slotKnown(svc)
     local ok,slots=pcall(svc.GetServerBuildSlots)
     return ok and type(slots)=="table"
 end
+-- Every read: the Echo reconciliation only, not the five-second fallback
+-- signature (GameAdapter.EchoActiveSlotGeneration). The reconciliation stays
+-- for its effect: Echo changes (slot, owned, locked) are seen at this read.
 local function ctx(pe,svc,orb)
-    local s=A.AutomationSignature and A.AutomationSignature() or {}
+    local active=A.EchoActiveSlotGeneration and A.EchoActiveSlotGeneration() or nil
     local owned=A.Owned and A.Owned() or {}
     return {pe=pe,svc=svc,orb=orb,guid=UnitGUID and UnitGUID("player"),
         generation=owned.generation,level=A.Level and A.Level(),
-        active=s.activeSlot,slot=pe and pe.Perks and pe.Perks.serverActiveSlot,
+        active=active,slot=pe and pe.Perks and pe.Perks.serverActiveSlot,
         slotKnown=slotKnown(svc)}
 end
 local function same(a,b)

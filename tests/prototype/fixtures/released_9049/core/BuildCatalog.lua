@@ -414,27 +414,23 @@ local function NewCounters()
     return {totals=totals, maxPerPump=maxPerPump, pumps=0}
 end
 
--- A budget is exhausted once any counter reaches its slice. Charge is the only
--- writer of a budget and never lowers a counter, so it records the first
--- crossing in `exhausted` (not a counter name), and Exhausted, checked before
--- every unit of work, reads it instead of scanning every counter.
 local function NewBudget()
-    local budget = {exhausted=false}
+    local budget = {}
     for _, key in ipairs(COUNTER_KEYS) do budget[key] = 0 end
     return budget
 end
 
 local function Exhausted(budget)
-    return budget.exhausted
+    for _, key in ipairs(COUNTER_KEYS) do
+        local slice = SLICE[key]
+        if slice and budget[key] >= slice then return true end
+    end
+    return false
 end
 
 local function Charge(work, key, amount)
     amount = amount or 1
-    local budget = work.budget
-    local used = budget[key] + amount
-    budget[key] = used
-    local slice = SLICE[key]
-    if slice and used >= slice then budget.exhausted = true end
+    work.budget[key] = work.budget[key] + amount
     local totals = work.counters.totals
     totals[key] = totals[key] + amount
     work.progress = true
