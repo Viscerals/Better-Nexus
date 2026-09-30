@@ -237,7 +237,10 @@ function O.Read()
     local s={known=true,charges=charges,offerPending=pending,board=board,boardKey=table.concat(parts,","),
         granted=granted,locked=locks,grantStamp=observations.serial,grantedKey=sig,lockedKey=signature(locks),
         hostPending=host,autoAccept=auto,catalog=rows,context=ctx(pe,svc,orb),at=GetTime and GetTime() or 0,
-        selectionSerial=selectionSerial,selection=copy(selection)}
+        selectionSerial=selectionSerial,selection=copy(selection),
+        -- The Echo whose choice the game still holds unanswered (its own pick
+        -- latch), or nil. Read only; used for the status text.
+        selectInFlight=tonumber(pe.Perks.pendingSelectSpellId)}
     return s
 end
 function O.SameContext(a,b) return same(a,b) end

@@ -201,10 +201,12 @@ do
 end
 
 -- B. WAIT_RESULT names the unmet requirement. Each case keeps the hold and
--- sends nothing; the control settles.
+-- sends nothing; the control settles. Income after a spend already confirmed
+-- with its offer does not hold the action (see orb_rdf_balance_drift): it
+-- settles like the control. The charges gate is covered in B2.
 local CASES={
  {name='control'},
- {name='income',gate='charges',text='the Orb balance shown is 10 and the record requires 9'},
+ {name='income',settles=true},
  {name='board',gate='board',text='an Echo choice is open in the game'},
  {name='noreply',gate='fresh',text='Recheck requests one'},
  {name='notyet',gate='ownership',text='does not show the chosen Echo yet'},
@@ -225,8 +227,8 @@ for _,case in ipairs(CASES)do
  if case.name=='board' then H.Board({{spellId=410005,quality=0},{spellId=410006,quality=3},{spellId=410008,quality=1}}) end
  H.Notify();A.Poll();H.Advance(.5);Rechecks(H,M,3)
  local s=M.Status()
- if case.name=='control' then
-  check(s.state=='STOPPED' and not s.pending and s.spent==1,'B control: the exact result settles: '..tostring(s.reason))
+ if case.name=='control' or case.settles then
+  check(s.state=='STOPPED' and not s.pending and s.spent==1,'B '..case.name..': the exact result settles: '..tostring(s.reason))
  else
   check(s.state=='RECOVERY' and s.pending and s.recovery.kind=='WAIT_RESULT','B '..case.name..': the hold stays in WAIT_RESULT')
   check(s.recovery.gate and s.recovery.gate.gate==case.gate,
@@ -239,16 +241,23 @@ for _,case in ipairs(CASES)do
  check(H.Count('orb-spend')==1 and H.Count('take')==1,'B '..case.name..': nothing else sent')
 end
 -- B2. A stale client balance: Recheck asks the game for the balance, and the
--- exact result then settles. The charges text does not claim otherwise.
+-- exact result then settles. The charges text does not claim otherwise. The
+-- balance is the spend proof only while the spend is not confirmed yet: the
+-- offer arrives before the client's balance push, so Nexus does not choose and
+-- the player chooses in the game.
 do
  local H,M,A,O=Fresh()
- H.OrbPlan();H.Approve(2,false);H.Offer()
+ H.OrbPlan();H.Approve(2,false)
+ O.offer=true;H.Board({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}});M.Pump()
+ assert(H.Count('take')==0 and H.service.SelectPerk(410002)==true,'B2 setup: the player chooses');H.Advance(.5)
+ check(Receipt().spendConfirmed==false and Receipt().choiceObserved==true and Receipt().selectedKey=='410002:2',
+  'B2 setup: the choice is observed; the spend is not confirmed by the balance yet')
  local source=O.source
  H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false
  local out=H.Clone(H.granted);local removed=false
  for _,es in pairs(out)do for i=#es,1,-1 do if not removed and es[i].spellId==source then table.remove(es,i);removed=true end end end
  assert(removed);out['Desired A']={{spellId=410002,quality=2}};H.granted=out
- local real=O.charges;O.charges=real+1 -- the client still shows the balance before the spend
+ local real=O.charges-1 -- the server balance after the spend; the client still shows the balance before it
  M=Reload(H)
  H.Notify();A.Poll();H.Advance(.5)
  local s=M.Status()

@@ -21,7 +21,11 @@ local OFFER_TIMEOUT,RESULT_TIMEOUT=10,12
 -- Passive recovery after a reload reads at the normal cadence while evidence can
 -- still arrive soon, then at a slow cadence. It never submits anything.
 local RECOVERY_FAST_WINDOW,RECOVERY_SLOW_INTERVAL=60,5
-local ensureFrame
+-- After a loading screen, how long the game may still hold this action's
+-- choice before the status says so (its reply can still arrive late).
+local HELD_CHOICE_DELAY=5
+local SESSION_INTERRUPTED="Session interrupted. Orb spending will not restart automatically."
+local ensureFrame,heldChoiceHint
 local function copy(t)
     if type(t)~="table" then return t end
     local r={};for k,v in pairs(t) do r[k]=copy(v) end;return r
@@ -547,7 +551,7 @@ ensureFrame=function()
         -- A restored receipt is already passive. Keep its recovery explanation.
         if run.pending and run.pending.restored and not run.running then return end
         if run.running or run.pending then
-            run.running=false;setState("PAUSED","Session interrupted. Orb spending will not restart automatically.")
+            run.running=false;setState("PAUSED",SESSION_INTERRUPTED);run.worldPausedAt=now()
             if run.pending then savePending() else release() end
         end
     end)
@@ -648,7 +652,12 @@ local function finishResult(s,p)
     if s.hostPending then return unmet("host") end
     if #s.board>0 then return unmet("board") end
     if s.lockedKey~=p.lockedKey then pause("Locked Echoes changed during the operation. Resolve the result manually.");return unmet("locked") end
-    if s.charges~=p.chargesBefore-1 then
+    -- The one-Orb decrement proves the spend. Once it was observed with this
+    -- action's offer (spendConfirmed, kept in the receipt), the later total
+    -- balance says nothing about this action: an Orb gained or spent afterwards
+    -- must not hold it forever. The balance never settles it either; only the
+    -- exact ownership result below does.
+    if not p.spendConfirmed and s.charges~=p.chargesBefore-1 then
         return unmet("charges",{expected=p.chargesBefore-1,observed=s.charges})
     end
     local gained,status=P.SingleGain(p.before,p.removed,s.granted)
@@ -662,7 +671,9 @@ local function finishResult(s,p)
         end
         return unmet("same-id")
     end
-    if not fresh then return unmet("fresh") end
+    -- exact: ownership already shows the recorded choice; only a response newer
+    -- than the baseline is missing (recovery may ask for one, read-only).
+    if not fresh then return unmet("fresh",{exact=status=="CONFIRMED" and gained==p.selectedKey}) end
     if status~="CONFIRMED" or (p.selectedKey and gained~=p.selectedKey) then
         pause("Echo ownership does not match the expected replacement. No further Orb will be spent.");return unmet("mismatch")
     end
@@ -809,7 +820,10 @@ local function recoverObserve(s,p)
             if not observeLifecycle(s,p) then return "PAUSED",observing end
         end
         -- Recorded choice evidence is never discarded by a later classification.
-        if sameOffer and oneOrb and hasChoiceEvidence(p) then return "WAIT_RESULT",observing end
+        -- A spend already confirmed with this offer does not need the balance
+        -- to stay one Orb less (see finishResult): the same recorded offer then
+        -- still belongs to the action, and the status names the recorded Echo.
+        if sameOffer and (oneOrb or p.spendConfirmed) and hasChoiceEvidence(p) then return "WAIT_RESULT",observing end
         -- Tie an open offer to the saved action only on exact evidence: one Orb
         -- less than the receipt and ownership equal to the receipt, with or
         -- without the named source. A recorded offer must also be the same offer.
@@ -879,17 +893,31 @@ local RECOVERY_TEXT={
 -- response settles an action that something else holds.
 local WAIT_RESULT_GATE={
     ownership="A choice for the earlier Orb action is recorded. Echo ownership does not show the chosen Echo yet. Nexus is waiting for an ownership response that shows it. Recheck requests one. Nothing will be sent.",
-    offer="A choice for the earlier Orb action is recorded. The game still reports an open Orb offer. Nexus is waiting, read-only, until it closes. Nothing will be sent.",
+    -- %s: the recorded Echo. Only that Echo can confirm the action, so the
+    -- text names it while the recorded offer is open (for example after the
+    -- /reload that ended a held game choice).
+    offer="A choice for the earlier Orb action is recorded: %s. The game still reports its Orb offer as open. If you have not chosen in the game's offer window since the reload, choose %s there; a different Echo cannot confirm this action. Nexus then waits, read-only, for the matching result. Nexus will not choose or spend.",
     host="A choice for the earlier Orb action is recorded. Another game action is still in flight. Nexus is waiting, read-only, until it ends. Nothing will be sent.",
     board="A choice for the earlier Orb action is recorded, but an Echo choice is open in the game. Nexus checks the result only while no Echo choice is open; Recheck cannot close it. Taking an Echo from that choice changes your Echoes, and Nexus then cannot confirm the earlier action."..KEPT,
     charges="A choice for the earlier Orb action is recorded, but the Orb balance shown is %s and the record requires %s (one Orb less than before the action). Recheck asks the game for the current balance. While the balance differs, Nexus cannot confirm the action."..KEPT,
 }
+-- The first ownership read after a reload already showed the recorded choice,
+-- and recovery asked the game once for a newer response (see M.Pump).
+local WAIT_FRESH_ASKED="A choice for the earlier Orb action is recorded, and Echo ownership already shows the chosen Echo. Nexus needs an ownership response newer than its first read after the reload, and asked the game once for one. Recheck requests one more. No Orb and no choice will be sent."
 local function recoveryReason(kind,observing,s,p,proposed)
     local gate=run.settleGate
+    if kind=="WAIT_RESULT" and gate and gate.gate=="fresh" and gate.detail and gate.detail.exact and run.autoRefreshAt then
+        return WAIT_FRESH_ASKED
+    end
     if kind=="WAIT_RESULT" and gate and WAIT_RESULT_GATE[gate.gate] then
         local text=WAIT_RESULT_GATE[gate.gate]
         if gate.gate=="charges" then
             text=text:format(tostring(gate.detail and gate.detail.observed),tostring(gate.detail and gate.detail.expected))
+        elseif gate.gate=="offer" then
+            local id=p and tonumber(tostring(p.selectedKey):match("^(%d+):"))
+            local row=id and s and s.catalog and s.catalog[id]
+            local name=row and row.name or ("Echo "..tostring(p and p.selectedKey))
+            text=text:format(name,name)
         end
         return text
     end
@@ -923,6 +951,27 @@ function M.BlockReason(subject)
     if run.state=="PAUSED" or run.state=="LIMIT" then return subject.." is blocked: an Orb run is paused. Press Stop in /nexus orbs to end that run." end
     return nil
 end
+-- A loading screen paused this run while the game still holds this action's
+-- choice unanswered: the game's own latch then refuses every choice in its
+-- offer window until a /reload. Say so, and name the recorded Echo, because
+-- only that Echo can confirm the action afterwards. Text only: it changes no
+-- state, requirement or block, and it replaces only the loading-screen text.
+local HELD_CHOICE="The game is still waiting for its reply to the earlier Orb choice (%s), so its offer window cannot take a choice now. /reload ends that wait. After /reload, if the offer is still open, choose %s in the game's offer window; Nexus then waits for the matching result. A different Echo cannot confirm this action."..KEPT.." Nexus will not choose or spend."
+heldChoiceHint=function(s,p)
+    if run.running or run.state~="PAUSED" or not run.worldPausedAt then return end
+    local id=p.selectedKey and tonumber(tostring(p.selectedKey):match("^(%d+):"))
+    local row=id and s.catalog and s.catalog[id]
+    local text=HELD_CHOICE:format(row and row.name or ("Echo "..tostring(p.selectedKey)),row and row.name or ("Echo "..tostring(p.selectedKey)))
+    local held=id and p.selectionAttempted and (p.choiceMayHaveBeenSent or p.choiceObserved)
+        and s.offerPending and s.selectInFlight==id and now()-run.worldPausedAt>=HELD_CHOICE_DELAY
+    -- run.heldText: the exact hint shown, so it is withdrawn even if the Echo
+    -- name read for it changes; any other pause reason is never replaced.
+    if held and (run.reason==SESSION_INTERRUPTED or (run.heldText and run.reason==run.heldText)) then
+        run.heldText=text;setState("PAUSED",text)
+    elseif not held and run.heldText and run.reason==run.heldText then
+        run.heldText=nil;setState("PAUSED",SESSION_INTERRUPTED)
+    end
+end
 function M.Pump(passive)
     init();if advancing or (not run.running and not run.pending) then return end
     passive=passive==true or passiveDepth>0
@@ -938,6 +987,8 @@ function M.Pump(passive)
             return
         end
         if not s then pause(err);return end
+        -- Read before any check can pause, so the report never shows a stale value.
+        run.pickInFlight=s.selectInFlight~=nil
         if p and p.restored then
             if p.guid~=s.context.guid then pause("The earlier Orb action belongs to another character.");return end
             if not p.baselineStamp then p.baselineStamp=s.grantStamp end
@@ -946,6 +997,16 @@ function M.Pump(passive)
             if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
             if finishResult(s,p) then return end
             if run.pauseSerial~=mark then run.recovery={kind="PAUSED",observing=observing};return end
+            -- After a reload the player can choose before Nexus has read
+            -- anything: the first ownership read then already shows the exact
+            -- result and is not newer than the baseline. When that is the only
+            -- missing requirement, ask the game ONCE per load for a newer
+            -- ownership response: the read-only Recheck request. It sends no
+            -- Orb and no choice, and settlement stays in finishResult.
+            local gate=run.settleGate
+            if gate and gate.gate=="fresh" and gate.detail and gate.detail.exact and not run.autoRefreshAt then
+                run.autoRefreshAt=now();B.RequestRefresh()
+            end
             run.recovery={kind=kind,observing=observing,proposed=proposed==true or nil,
                 gate=kind=="WAIT_RESULT" and run.settleGate and copy(run.settleGate) or nil}
             setState("RECOVERY",recoveryReason(kind,observing,s,p,proposed))
@@ -972,6 +1033,7 @@ function M.Pump(passive)
                 pause("The Orb balance changed unexpectedly. No further action will be submitted.");return
             end
             if finishResult(s,p) then return end
+            heldChoiceHint(s,p)
             if not run.running or passive then return end
             if not entriesStillMatch() then pause("The selected Wishlist changed; resolve the pending offer manually.");return end
             if p.selectionAttempted then
@@ -1192,6 +1254,25 @@ function M.Recheck()
     if not success then return nil,"The read-only refresh failed; no new action was requested." end
     if not ok then return nil,err end
     return true,"Requested an Orb/ownership refresh. No Orb or choice was submitted."
+end
+-- Read-only view of the unresolved Orb action for the support report: scalars
+-- only, no names. It writes nothing and authorizes nothing. Like
+-- BlocksOrdinary, its init() can start the read-only recovery of a saved
+-- receipt that nothing had loaded yet.
+function M.RecoveryView()
+    if not config then
+        local st=Nexus.Store and Nexus.Store.State and Nexus.Store.State()
+        if not (type(st)=="table" and type(st.orbRefinement)=="table" and st.orbRefinement.pending) then return {pending=false} end
+    end
+    init()
+    local p=run and run.pending
+    if not p then return {pending=false,state=run and run.state} end
+    local gate=run.settleGate
+    return {pending=true,restored=p.restored==true,state=run.state,
+        recovery=p.restored and run.recovery and run.recovery.kind or nil,gate=gate and gate.gate or nil,
+        spendConfirmed=p.spendConfirmed==true,choiceSent=p.choiceMayHaveBeenSent==true,choiceObserved=p.choiceObserved==true,
+        selectedKey=p.selectedKey,removed=p.removed,loadoutChanged=p.loadoutChanged==true,
+        pickInFlight=run.pickInFlight,autoRefresh=run.autoRefreshAt~=nil}
 end
 function M.BlocksOrdinary()
     if not config then

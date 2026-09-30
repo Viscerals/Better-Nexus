@@ -574,6 +574,44 @@ local function errorOrigin(view, rank)
     return rank <= view.session and "this session" or "earlier session"
 end
 
+-- The unresolved Orb action, if any: the recovery state and the requirement
+-- that the last read did not meet, so a report shows why an Orb action (and
+-- ordinary rolling) is held. Scalars from OrbRuntime.RecoveryView; no names.
+function M.OrbLines()
+    local unavailable = {"Orb action: not available (the Orb owner did not answer)"}
+    -- Every read of the owner and of its answer is protected, as for the
+    -- other owners here: a failing Orb owner must not take the report away.
+    local ok, lines = pcall(function()
+        local runtime = Nexus.OrbRuntime
+        if not (type(runtime) == "table" and type(runtime.RecoveryView) == "function") then
+            return {"Orb action: not available"}
+        end
+        local view = runtime.RecoveryView()
+        if type(view) ~= "table" then return unavailable end
+        if view.pending ~= true then return {"Orb action: none unresolved"} end
+        local function yes(value) return value == true and "yes" or "no" end
+        local choice = {}
+        if view.choiceSent == true then choice[#choice + 1] = "sent" end
+        if view.choiceObserved == true then choice[#choice + 1] = "observed" end
+        local inFlight = view.pickInFlight
+        return {
+            "Orb action: unresolved " .. (view.restored == true and "after a reload" or "in this session")
+                .. "; state=" .. safeText(view.state or "unknown", 24)
+                .. "; recovery=" .. safeText(view.recovery or "none", 24)
+                .. "; waiting for=" .. safeText(view.gate or "none", 24),
+            "  spend confirmed=" .. yes(view.spendConfirmed)
+                .. "; choice=" .. (#choice > 0 and table.concat(choice, ",") or "none")
+                .. "; selected=" .. safeText(view.selectedKey or "none", 24)
+                .. "; source=" .. safeText(view.removed or "none", 24)
+                .. "; game pick in flight=" .. (type(inFlight) == "boolean" and yes(inFlight) or "unknown")
+                .. "; loadout change recorded=" .. yes(view.loadoutChanged)
+                .. "; automatic refresh=" .. (view.autoRefresh == true and "requested" or "not requested"),
+        }
+    end)
+    if ok and type(lines) == "table" then return lines end
+    return unavailable
+end
+
 function M.Summary(selection)
     local support = Nexus and Nexus.SupportIncidents
     -- Protected like every other owner read here: an incident owner that
@@ -657,6 +695,8 @@ function M.Summary(selection)
                 .. errorLine(errorView.history[errorView.total], errorOrigin(errorView, 1))
         end
     end
+    -- After the Lua error line, so a nearly full summary keeps that first.
+    for _, line in ipairs(M.OrbLines()) do context[#context + 1] = line end
     local omitted = 0
     for _, line in ipairs(context) do
         local size = #escape(line) + 1
@@ -903,13 +943,14 @@ function M.Step(job)
             end},
             {name = "orb", build = function()
                 local out = {"-- Orb history (diagnostic copy; it restores nothing) --"}
+                for _, line in ipairs(M.OrbLines()) do out[#out + 1] = line end
                 local runtime = Nexus.OrbRuntime
                 if not (runtime and type(runtime.RunLog) == "function") then
-                    return {out[1], "not available"}
+                    out[#out + 1] = "not available";return out
                 end
                 local view = runtime.RunLog("current", 1, job.extended and 40 or 8)
                 if not view or not view.runId then
-                    return {out[1], "no run in this session"}
+                    out[#out + 1] = "no run in this session";return out
                 end
                 out[#out + 1] = "run=" .. safeText(view.runId, 24)
                     .. "; state=" .. safeText(view.state, 32)

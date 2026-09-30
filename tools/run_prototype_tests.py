@@ -121,6 +121,8 @@ NAMES += ['sync_locked_roles_wire','sync_locked_roles_payload','community_update
 NAMES += ['public_label_presentation']
 NAMES += ['hud_roll_footprint']
 NAMES += ['help_action_first']
+NAMES += ['orb_rdf_balance_drift']
+NAMES += ['orb_rdf_recovery_followups']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
