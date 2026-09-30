@@ -271,17 +271,30 @@ do
  check(M.Status().reason:find('same-ID',1,true)~=nil,'J: reported as the same-ID ambiguity')
 end
 -- K. No fresh ownership response: the exact result was already visible at the
--- first read after the reload. It settles only after a fresh read-only
--- ownership response (Recheck), never from the balance.
-do
- local H,M,A,O,source,calls=Stuck({inSession=function(H,M,A,O,src)
+-- first read after the reload. It settles only from an ownership response
+-- newer than that read, never from the balance. Recovery asks for one once,
+-- read-only (orb_rdf_recovery_followups); K2 keeps the hold when the game does
+-- not answer, and a Recheck then settles it.
+local function FirstReadHasResult(hold)
+ return Stuck({inSession=function(H,M,A,O,src)
   O.charges=O.charges+1
   H.granted=Owned(H,src,410002,2);H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil
+  H.holdGrantedResponse=hold
   -- the offer flag is still set in this session, so nothing settles before the reload
  end})
+end
+do
+ local H,M,A,O,source,calls=FirstReadHasResult(false)
+ local requests=O.requests
  O.offer=false;H.Advance(1)
- Held(H,M,calls,'K no fresh response','fresh')
- Rechecks(H,M,1)
- Settled(H,M,calls,'K after one fresh ownership response')
+ Settled(H,M,calls,'K after the one automatic ownership refresh')
+ check(O.requests-requests==1,'K: settled through exactly one read-only request (requests='..(O.requests-requests)..')')
+end
+do
+ local H,M,A,O,source,calls=FirstReadHasResult(true)
+ O.offer=false;H.Advance(5)
+ Held(H,M,calls,'K2 no fresh response','fresh')
+ H.holdGrantedResponse=false;Rechecks(H,M,1)
+ Settled(H,M,calls,'K2 after one fresh ownership response')
 end
 print('PASS Orb balance drift after a confirmed spend: the exact result settles once; balance alone never does; every other hold kept checks='..checks)

@@ -65,6 +65,17 @@ action: an Orb gained or spent later for another reason must not hold the action
 forever. A later balance change is not completion evidence. Every other
 requirement above still applies, and only the exact ownership result settles it.
 
+`spendConfirmed` is client-side evidence, not a server confirmation. The game
+client lowers its own Orb count and marks an offer as owed when the spend is
+called, before the server answers, and Nexus reads those two values. The
+server's evidence is the offer it then shows (three choices, recorded in the
+receipt) and the ownership that follows the choice. Settlement therefore still
+needs the recorded offer, the recorded choice and the exact fresh ownership
+delta. Without the later balance check, the balance can no longer show that
+the server charged exactly one Orb: a moved balance can make Nexus's usage count
+differ by one from the server's charge, but it cannot change which Echo result
+settles the action.
+
 ## Persistence and interruption
 
 Only configuration, explicit choices, and passive unresolved-operation evidence
@@ -101,6 +112,28 @@ fresh ownership response, the chosen Echo in ownership, an open offer or
 another game action, an open Echo choice, or, while the spend is not yet
 confirmed, an Orb balance other than one less than before the action). Naming it
 changes no requirement.
+
+After a reload the player can choose in the game before Nexus has read the game
+state. The first ownership read then already shows the recorded choice, but it
+is not newer than the recovery baseline. When that is the only missing
+requirement, recovery asks the game once per load for a newer ownership
+response: the same read-only request as Recheck. It sends no Orb and no choice
+and changes no requirement. If no newer response arrives, the status says that
+the request was made and that Recheck requests one more.
+
+A loading screen pauses a running Orb action ("Session interrupted"). When the
+choice that Nexus sent before it gets no reply, the game keeps its own latch for
+that choice and refuses every choice in its offer window until a /reload. If
+the game still holds this action's choice five seconds after the loading screen,
+the status says so, names the recorded Echo, and says that /reload ends the
+wait and that only that Echo can confirm the action afterwards. It is text only.
+
+The support summary and the prepared support report state the unresolved Orb
+action, if any: whether it was restored after a reload, the recovery state, the
+settlement requirement that the last read did not meet, whether the spend and the
+choice are recorded, the selected and source Echo keys, whether the game still
+holds a choice, whether a loadout change is recorded, and whether the automatic
+refresh was requested. It contains no names and changes nothing.
 
 Character/run/service/loadout change pauses the run. Resume rechecks the original
 context, targets, owner, and budget. A budget increase needs a new approval token
