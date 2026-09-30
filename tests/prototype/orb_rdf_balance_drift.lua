@@ -215,13 +215,23 @@ do
  check(#(H.perks.currentChoice or {})==0 and O.offer==true,'G setup: offer flag set, no board')
  Held(H,M,calls,'G offer open','offer')
 end
--- G2. The recorded offer is still shown: with a moved balance the recovery does
--- not tie it to the saved action, and nothing settles while it is open.
+-- G2. The recorded offer is still shown and the balance moved: the offer
+-- still belongs to the action (spend confirmed, choice recorded), nothing
+-- settles while it is open, and the status names the Echo to choose.
 do
  local H,M,A,O,source,calls=Stuck()
  O.charges=O.charges+1
  Deliver(H,A,O,Owned(H,source,410002,2),{offer=true});Rechecks(H,M,1)
- Held(H,M,calls,'G2 offer shown','OFFER_UNMATCHED')
+ Held(H,M,calls,'G2 offer shown','offer')
+ check(M.Status().recovery.kind=='WAIT_RESULT' and M.Status().reason:find('Desired A',1,true)~=nil
+  and M.Status().reason:find('different Echo',1,true)~=nil,'G2: waits for the recorded offer and names its Echo: '..M.Status().reason)
+end
+-- G3. A different offer with a moved balance is still not tied to the action.
+do
+ local H,M,A,O,source,calls=Stuck()
+ O.charges=O.charges+1
+ H.Board({{spellId=410004,quality=3},{spellId=410005,quality=0},{spellId=410006,quality=3}});H.Advance(1)
+ Held(H,M,calls,'G3 other offer','OFFER_UNMATCHED')
 end
 -- L. The same session, no loading screen: Orb income while the running run
 -- waits for its result. The balance alone confirms nothing; the exact result

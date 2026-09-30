@@ -820,7 +820,10 @@ local function recoverObserve(s,p)
             if not observeLifecycle(s,p) then return "PAUSED",observing end
         end
         -- Recorded choice evidence is never discarded by a later classification.
-        if sameOffer and oneOrb and hasChoiceEvidence(p) then return "WAIT_RESULT",observing end
+        -- A spend already confirmed with this offer does not need the balance
+        -- to stay one Orb less (see finishResult): the same recorded offer then
+        -- still belongs to the action, and the status names the recorded Echo.
+        if sameOffer and (oneOrb or p.spendConfirmed) and hasChoiceEvidence(p) then return "WAIT_RESULT",observing end
         -- Tie an open offer to the saved action only on exact evidence: one Orb
         -- less than the receipt and ownership equal to the receipt, with or
         -- without the named source. A recorded offer must also be the same offer.

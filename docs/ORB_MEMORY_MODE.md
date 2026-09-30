@@ -130,7 +130,9 @@ the game still holds this action's choice five seconds after the loading screen,
 the status says so, names the recorded Echo, and says that /reload ends the
 wait and that only that Echo can confirm the action afterwards. After the
 reload, while the recorded offer is still open, the recovery status names the
-same Echo. It is text only.
+same Echo, also when the Orb balance moved after a confirmed spend (the same
+recorded offer still belongs to the action). It is text only; any other offer
+stays unmatched.
 
 The support summary and the prepared support report state the unresolved Orb
 action, if any: whether it was restored after a reload, the recovery state, the
