@@ -4,9 +4,9 @@
 -- in one session was no longer proven to be that plan's and its assignment
 -- update was lost. Required: the editor's proven binding follows its own
 -- successful save (the identity checks are unchanged); an explicit Unassign
--- or reassignment made while the editor is open stays authoritative. Each
--- row checks the uploaded contents and the stored first-run/slot assignment
--- contents.
+-- or reassignment made while the editor is open stays authoritative, for the
+-- first-run plan and for numbered Saved Builds alike. Each row checks the
+-- uploaded contents and the stored first-run/slot assignment contents.
 -- Synthetic server and mirrors only; real editor buttons, controller and
 -- adapter.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
@@ -125,6 +125,14 @@ local function FirstRunWorld(slots)
  local c,l=CreatePlan('First plan',201172);MirrorAt(108,l);closeEditor()
  SlashCmdList.NEXUS('editor')
  check(Ctx().name=='First plan' and Bound('first'),'fixture: the first-run plan is open and bound')
+end
+-- Six declared Saved Builds; slot 6 active; slots 1 and 6 assigned.
+local function LoadoutWorld()
+ Boot({maxSlots=6,active=6,slots=Slots6()})
+ Assign(1,'W-One',E1);Assign(6,'W-Six',E6);H.Notify();A.Poll();H.Advance(1)
+ SlashCmdList.NEXUS('editor')
+ check(Ctx().loadoutSlot==6 and Ctx().name=='W-Six' and Bound(6),'fixture: Saved Build 6 and W-Six are open and bound')
+ return Assignment(1)
 end
 local function FirstRunIs(copies,label)
  check(Copies(Stored('first'),201172)==copies and Copies(Stored(1),201172)==copies
@@ -248,4 +256,55 @@ c,l=CreatePlan('Second plan',201174);MirrorAt(109,l)
 check(l[2]==0 and Stored('first').name=='Second plan' and Stored(1).name=='Second plan','N1: the second Create is a new plan with the proven handoff')
 closeEditor()
 
+-- L1. Saved Build 6 of 6: repeated saves in one session update only slot 6.
+one=LoadoutWorld()
+for copies=2,4 do
+ local last=Saved(201173,copies,'L1 save '..copies)
+ check(last[2]==106 and Copies(Stored(6),201173)==copies and Stored(6).name=='W-Six','L1 save '..copies..': slot 6 holds the saved contents')
+ check(Bound(6) and Same(Assignment(1),one) and not Stored('first'),'L1: bound; slot 1 and the first-run plan unchanged')
+end
+-- L2. Saved Build 6 given W-Free in the Journal while W-Six is open.
+check(A.SetLoadoutWishlist(6,107),'L2: Saved Build 6 explicitly given W-Free')
+local six=Assignment(6)
+local heard,realPrint={},print
+print=function(...) heard[#heard+1]=table.concat({tostring((...))},' ');realPrint(...) end
+local last=Saved(201173,5,'L2 stale')
+print=realPrint
+local said=table.concat(heard,' / ')
+check(said:find('that choice is kept',1,true) and not said:find('assignment failed',1,true),'L2: the save reports success and keeps the newer choice: '..said)
+check(last[2]==106,'L2: the stale save still updates the W-Six server Wishlist')
+check(Same(Assignment(6),six) and Copies(Stored(6),201174)==1,'L2: Saved Build 6 keeps W-Free')
+check(Same(Assignment(1),one) and not Stored('first'),'L2: slot 1 and the first-run plan unchanged')
+-- L3. Reopening shows the newer choice; its saves update it.
+closeEditor();SlashCmdList.NEXUS('editor')
+check(Ctx().loadoutSlot==6 and Ctx().name=='W-Free' and Bound(6),'L3: reopening opens W-Free for Saved Build 6')
+last=Saved(201174,2,'L3')
+check(last[2]==107 and Copies(Stored(6),201174)==2 and Bound(6),'L3: Saved Build 6 holds the saved W-Free')
+Saved(201174,3,'L3 again');check(Copies(Stored(6),201174)==3,'L3: and the next save in the session')
+closeEditor()
+-- L4. Saved Build 6 unassigned while W-Six is open.
+one=LoadoutWorld()
+check(A.ClearLoadoutWishlist(6),'L4: explicit Unassign of Saved Build 6')
+Saved(201173,2,'L4 stale')
+check(Stored(6)==nil and Same(Assignment(1),one) and not Stored('first'),'L4: the stale save does not undo the Unassign')
+closeEditor()
+-- L5. A failed save keeps the binding; the next save updates slot 6.
+one=LoadoutWorld()
+submit=H.service.UploadServerBuildSlot
+H.service.UploadServerBuildSlot=function() return false end
+selected(201173).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup()
+check(Copies(Stored(6),201173)==1 and Bound(6),'L5: a refused save writes nothing')
+H.service.UploadServerBuildSlot=submit
+Saved(201173,3,'L5 next');check(Copies(Stored(6),201173)==3 and Bound(6) and Same(Assignment(1),one),'L5: the next save updates slot 6 only')
+closeEditor()
+-- L6. A key-only Saved Build assignment: proven by key, then by identity.
+Boot({maxSlots=6,active=6,slots=Slots6()})
+Assign(6,'W-Six',E6)
+check(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(s) s.loadoutWishlists[6].assignmentId=nil end),'L6 setup: identity removed')
+H.Notify();A.Poll();H.Advance(1)
+SlashCmdList.NEXUS('editor')
+check(Ctx().name=='W-Six' and Ctx().assignmentId==nil,'L6: the key-only assignment is open')
+Saved(201173,2,'L6 first');check(Copies(Stored(6),201173)==2 and Bound(6),'L6: the first save updates it and binds')
+Saved(201173,3,'L6 second');check(Copies(Stored(6),201173)==3 and Bound(6),'L6: the second save updates it too')
+closeEditor()
 print('PASS wishlist editor binding checks='..checks)

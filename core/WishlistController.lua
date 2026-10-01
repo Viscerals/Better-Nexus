@@ -1294,8 +1294,20 @@ function Controller.New(options)
             local associated, associationReason = true, nil
             if state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
-                associated, associationReason = Adapter.UpdateWishlistAssociationAfterSave(
-                    state.editingContext.loadoutSlot, slot, name, recorded, designTargets)
+                -- The open editor's binding goes with the save: a Saved
+                -- Build given another Wishlist, or unassigned, while the
+                -- editor was open keeps that newer choice.
+                local context, assignmentId, key = state.editingContext
+                associated, associationReason, assignmentId, key =
+                    Adapter.UpdateWishlistAssociationAfterSave(
+                        context.loadoutSlot, slot, name, recorded, designTargets, context)
+                if associated then
+                    RebindAfterSave(assignmentId, key)
+                elseif associationReason == "assignment_changed" then
+                    associated = true
+                    notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved. Its Saved Build was given "
+                        .. "another Wishlist, or unassigned, while the editor was open; that choice is kept.")
+                end
             elseif state.createTargetContext and Adapter.SetLoadoutWishlistIdentity then
                 associated, associationReason = Adapter.SetLoadoutWishlistIdentity(
                     state.createTargetContext.loadoutSlot, name, recorded, designTargets)

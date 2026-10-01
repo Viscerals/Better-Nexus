@@ -1883,6 +1883,26 @@ function WishlistRoles.FirstRunHandoff(state)
         and handoff.assignmentId == first.assignmentId
 end
 
+-- Whether a stored loadout assignment is still the one an editor opened:
+-- the same assignment identity; for records saved before identities, the
+-- same content key, or the same server slot for the oldest shapes, exactly
+-- as ResolveAssociation resolved them. A changed or removed assignment is
+-- the player's newer choice.
+function WishlistRoles.SameAssignment(saved, opened)
+    if type(opened) ~= "table" then return false end
+    if type(saved) == "number" or type(saved) == "string" then
+        return tonumber(saved) ~= nil and tonumber(saved) == tonumber(opened.slot)
+    end
+    if type(saved) ~= "table" then return false end
+    if saved.assignmentId ~= nil or opened.assignmentId ~= nil then
+        return saved.assignmentId == opened.assignmentId
+    end
+    if type(saved.key) == "string" and saved.key ~= "" then
+        return saved.key == opened.key
+    end
+    return tonumber(saved.slot) ~= nil and tonumber(saved.slot) == tonumber(opened.slot)
+end
+
 function WishlistRoles.ReplaceFirstRun(state, record)
     -- Prove ownership before stamping the replacement. An explicit picker
     -- change must keep its existing bootstrap handoff on the same target.
@@ -2142,7 +2162,7 @@ function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
 end
 
 
-function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets)
+function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets, opened)
     loadoutSlot, wishlistSlot = PositiveInteger(loadoutSlot), PositiveInteger(wishlistSlot)
     -- Slot 0 is the first-run context, never a numbered loadout association.
     -- Refuse invalid identifiers before clearing its durable assignment.
@@ -2160,14 +2180,25 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
         slot=wishlistSlot, name=name, echoes=echoes,designTargets=designTargets,
     })
     if not record then return false end
+    local changed = false
     if not UpdateStoreState(function(state)
+        -- An editor's save re-records only the assignment it opened (`opened`
+        -- is its binding). One changed or removed while it was open is kept.
+        local current = type(state.loadoutWishlists) == "table"
+            and state.loadoutWishlists[loadoutSlot] or nil
+        if opened ~= nil and not WishlistRoles.SameAssignment(current, opened) then
+            changed = true
+            return
+        end
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
         state.firstRunWishlist = nil
     end) then return false end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    return true
+    -- The identity this save stamped, for the editor that holds this plan.
+    return true, nil, record.assignmentId, record.key
 end
 
 -- How many removals stay recoverable at once. A later removal must never
