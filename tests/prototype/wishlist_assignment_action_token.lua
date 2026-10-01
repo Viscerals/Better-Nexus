@@ -393,6 +393,39 @@ check(Stored('first').assignmentId==P10.assignmentId and Copies(Stored('first'),
  and Stored(1) and Stored(1).assignmentId==P10.assignmentId,'T10b: the restored first-run plan and its handoff are kept')
 closeEditor()
 
+-- T10c: Saved Build 6's own assignment unassigned and restored (same
+-- identity and contents, new token) during the upload.
+one=LoadoutWorld()
+local S10=Rec(6)
+local submit10c=H.service.UploadServerBuildSlot
+H.service.UploadServerBuildSlot=function(slot,name,entries)
+ local ok=submit10c(slot,name,entries)
+ assert(A.ClearLoadoutWishlist(6) and A.RestoreForgottenWishlistPlan({assignmentId=S10.id}))
+ return ok
+end
+said10=Heard(function() selected(201173).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup() end)
+H.service.UploadServerBuildSlot=submit10c
+check(said10:find('was uploaded, but its assignment',1,true),'T10c: the save says the restored choice is kept: '..said10)
+check(SameRec(Rec(6),S10) and Copies(Stored(6),201173)==1 and Same(Assignment(1),one),'T10c: the restored assignment is kept (identity and contents)')
+closeEditor()
+-- T10d: a new Wishlist for the unassigned Saved Build 6; Saved Build 6 is
+-- given W-Free during the Create upload.
+Boot({maxSlots=6,active=6,slots=Slots6()})
+Assign(1,'W-One',E1);H.Notify();A.Poll();H.Advance(1)
+SlashCmdList.NEXUS('editor')
+local submit10d=H.service.UploadServerBuildSlot
+H.service.UploadServerBuildSlot=function(slot,name,entries)
+ local ok=submit10d(slot,name,entries)
+ assert(A.SetLoadoutWishlist(6,107))
+ return ok
+end
+NexusWishlistNameInput:SetText('Racing plan')
+for _,f in ipairs(H.frames)do if f.kind=='Button' and f:IsVisible() and f.status and f.data and f.data.spellId==201172 then f:Click();break end end
+said10=Heard(function() button('Create Wishlist'):Click();H.AcceptPopup() end)
+H.service.UploadServerBuildSlot=submit10d
+check(said10:find('was uploaded, but its assignment',1,true) and Stored(6).name=='W-Free','T10d: the Create keeps the W-Free given meanwhile: '..said10)
+closeEditor()
+
 -- T11. ABA on the first-run plan: Forget and Restore bring back the same
 -- identity while a Saved Build editor is open; its save keeps the plan.
 Boot({maxSlots=6,active=6,slots=Slots6()})
