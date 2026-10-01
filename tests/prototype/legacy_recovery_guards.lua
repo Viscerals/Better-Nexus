@@ -265,6 +265,42 @@ do
  end
 end
 
+-- 5b. The two lowest-level invariants, exercised on the real functions.
+-- Attach never overwrites an existing entry, whatever the caller checked.
+do
+ local H=S.Start(S.Current(),S.Legacy())
+ local P=S.Seam()
+ local snapshot=assert(P.Snapshot(S.Legacy()))
+ local _,existing=S.Entry(S.Legacy())
+ existing.value.flag='kept'
+ NexusDB[STORE]={version=1,entries={[snapshot.digest]=existing}}
+ local text=F.Serialize(NexusDB[STORE])
+ local undo={}
+ local ok,why=P.Attach(NexusDB,snapshot,undo)
+ check(ok==false and why=='ARCHIVE_CONFLICT','attach: an existing entry is refused, never overwritten: '..tostring(why))
+ check(F.Serialize(NexusDB[STORE])==text and next(undo)==nil,'attach: the store is byte-identical and nothing is queued for rollback')
+end
+-- The real verified nil write: a global that ignores the write is a
+-- DISPOSITION_FAILED, the entry is rolled back and the legacy stays.
+do
+ local legacy=S.Legacy()
+ local H=S.Start(S.Current(),legacy)
+ local code=S.Code(H)
+ local held=WishlistRealizerDB
+ local previous=getmetatable(_G)
+ rawset(_G,'WishlistRealizerDB',nil)
+ setmetatable(_G,{__index=function(_,key) if key=='WishlistRealizerDB' then return held end end,
+  __newindex=function(table,key,value) if key~='WishlistRealizerDB' then rawset(table,key,value) end end})
+ local before=F.Serialize(NexusDB)
+ local out=S.Plain(S.Say(H,'legacy keep '..code))
+ setmetatable(_G,previous)
+ rawset(_G,'WishlistRealizerDB',held)
+ check(out:find('DISPOSITION_FAILED',1,true),'dispose: a write that does not take is DISPOSITION_FAILED: '..out)
+ check(F.Serialize(NexusDB)==before and WishlistRealizerDB==held and held==legacy,'dispose: the entry is rolled back and the legacy is intact')
+ out=S.Plain(S.Say(H,'legacy keep '..code))
+ check(WishlistRealizerDB==nil and out:find('preserved',1,true),'dispose: a retry with a working global succeeds: '..out)
+end
+
 -- 6. A crash image: the process stops after the entry is attached and before
 -- the legacy global is released. The saved file then holds both. The next
 -- start-up refuses again and the same recovery completes without a duplicate.

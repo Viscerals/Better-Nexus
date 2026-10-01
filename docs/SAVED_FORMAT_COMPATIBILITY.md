@@ -42,6 +42,39 @@ From the build after test.9035:
 - **The empty placeholder is accepted as a first admission.** When the bundle holds exactly the empty placeholder and the saved format is an accepted 3 to 5, the Store builds its data wrapper as a first admission does. Start-up adds only the usual missing defaults; no saved value is changed or removed. Any other invalid wrapper still fails, and so does the placeholder for any other format. The placeholder stays in the saved bundle until a later catalog save replaces the bundle; until then each start-up builds the wrapper again in the same way, which changes nothing else.
 - **Start-up failures state their cause.** A failed start-up keeps its failure code (for example `STORE_INVALID`). `/nexus status` (and any command while start-up has failed) adds one line with the retained facts: stage, cause, detail, owner, a bounded one-line error, the selection row, and the saved-format verdict. These are session-only. Reading them binds, retries and writes nothing.
 
+## Older Nexus data next to your current data (`WishlistRealizerDB`)
+
+Older Nexus builds kept their saved data in a second saved variable, `WishlistRealizerDB`. When a profile holds current data and a separate, non-empty `WishlistRealizerDB`, start-up stops at `STORE_LEGACY_DISPOSITION_PENDING` with `LEGACY_DISPOSITION_REAUTH_REQUIRED` and the legacy class `FOREIGN_BLOCK`. Nexus does not guess which data is yours. It does not delete, import or merge anything. A receipt that an earlier start-up recorded (`nexusStoreMigrations.wishlistRealizerDB`, for example `decision = "noLegacy"`) is not permission to discard the older data.
+
+| Case | Behavior |
+|---|---|
+| No `WishlistRealizerDB` | Unchanged. |
+| `WishlistRealizerDB` is the current root (alias) | Unchanged. One verified nil write. |
+| Distinct, empty `WishlistRealizerDB` | Unchanged. Kept as it is; it grants nothing. |
+| No current data, a non-empty `WishlistRealizerDB` | Unchanged. It becomes the current root. |
+| Future format, invalid or non-plain current data | Unchanged. |
+| Current data and a distinct, non-empty `WishlistRealizerDB` | Start-up stops, as before. **New:** the player can keep the current setup and preserve the older data, with an explicit confirmation. |
+
+### Keep my current setup and preserve the older data
+
+1. Type `/nexus legacy`. It reads and writes nothing. It shows what was found (tables, bytes) and a 12-character code that belongs to this exact older data.
+2. Type `/nexus legacy keep <code>` with that code.
+3. Type `/reload`. Nexus starts with the current setup. The session is not resumed in place.
+
+| Step of the confirmation | What it checks or does |
+|---|---|
+| Inputs | The legacy table, the current root, its authority bundle and its migration receipt are the same ones the offer was made for, and the legacy value has the same digest. Any difference is `INPUT_DRIFT`; type `/reload` and review again. |
+| Copy | The legacy value is copied in full, verified equal, and stored under `nexusLegacyPreservationV1.entries[<digest>]` in your saved data. This store is separate from the current data and non-authoritative. Sync, Wishlists, assignments, Community and the catalog never read it. |
+| Release | Only after the copy is verified, `WishlistRealizerDB` is released with one verified nil write. |
+| Rollback | If any later step fails, the call removes only what it added and leaves `WishlistRealizerDB` in place. |
+| Untouched | The current authority, characters, settings and the old receipt. |
+
+Refusals change nothing. `NO_OFFER`, `CODE_MISMATCH`, `INPUT_DRIFT`, `LEGACY_NOT_PRESERVABLE` (a metatable, a cycle, a shared table, a function, a non-finite number, a key that is not a string, number or boolean), `PRESERVATION_CAPACITY` (more than 16 levels, 65,536 tables, 16,384 bytes in one string, 256 bytes in one key, 4 MiB in all, or four entries already stored), `ARCHIVE_MALFORMED`, `ARCHIVE_FUTURE`, `ARCHIVE_CONFLICT` (an entry with this digest holds a different value; entries are never overwritten), `PRESERVATION_FAILED` and `DISPOSITION_FAILED`. An equal entry left by an interrupted earlier attempt is reused, not duplicated.
+
+If the game stops before the saved data is written, the file still holds the refusal state. The same refusal returns and the same steps work again.
+
+Evidence limit: the offline tests round-trip synthetic data through serialized saved text. They are not a native game save and reload.
+
 ## Character rows
 
 Formats 3 to 5 keep each character's row under the plain character name (`chars["Name"]`). This build uses `chars["name@realm"]`. The first write for a character copies the plain-name row to `name@realm` only when ownership is established:
