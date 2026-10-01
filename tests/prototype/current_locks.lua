@@ -54,6 +54,9 @@ check(ao==79 and al==6 and T.Equal(remembered,Nexus.Store.State().wishlistRoleCh
 H.locked=H.Clone(original);H.Notify()
 check(E.ResolveAndAssignWishlist(candidate(),1),'actual local assignment works')
 check(A.GetLoadoutWishlist(1)~=nil,'association resolvable')
+-- An Assign made while the editor is open is authoritative; the editor is
+-- reopened before saving (005-CORRECTION-02 assignment action tokens).
+check(E.OpenForWishlist(candidate(),1),'reopen after the explicit assignment')
 button('Save Wishlist'):Click();H.AcceptPopup()
 check(not E.IsApplyPending(),'save has completed')
 local action=H.actions[#H.actions];check(action and action[1]=='upload' and #action[4]==79,'only ordinary79 uploaded')

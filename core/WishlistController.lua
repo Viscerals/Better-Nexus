@@ -1309,9 +1309,9 @@ function Controller.New(options)
             or (destination == "first" and "the first-run Wishlist")
             or ("Saved Build " .. tostring(destination))
         notify("|cffffd200Nexus:|r Not saved: " .. label .. " was assigned, unassigned or restored "
-            .. "in the Echo Journal while the editor was open, and that choice is kept. Nothing was "
-            .. "uploaded or assigned; your edits are still shown. Close and reopen the editor to edit "
-            .. "the current Wishlist.")
+            .. "while the editor was open, and that choice is kept. Nothing was uploaded or "
+            .. "assigned; your edits are still shown. Close and reopen the editor to edit the "
+            .. "current Wishlist.")
     end
 
     local function TryApply(slot, name, echoes, guard)
@@ -1327,7 +1327,8 @@ function Controller.New(options)
             return false, "stale_confirmation"
         end
         -- An Assign, Unassign or Restore of the destination this save would
-        -- assign, made after the editor bound it, is authoritative: nothing
+        -- assign (in the Echo Journal, My Builds or the editor's own assign
+        -- buttons), made after the editor bound it, is authoritative: nothing
         -- is uploaded, and the editor must be reopened. Checked again inside
         -- each writer.
         local destination, bound = SaveDestination()
@@ -1367,7 +1368,7 @@ function Controller.New(options)
                 -- Only if a destination changed after the check above.
                 associated = true
                 notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' was uploaded, but its assignment "
-                    .. "was changed in the Echo Journal while the editor was open; that choice is kept.")
+                    .. "was changed while the editor was open; that choice is kept.")
             end
             if state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
