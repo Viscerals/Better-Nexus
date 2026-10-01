@@ -1030,7 +1030,16 @@ function M.Pump(passive)
                 p.spendConfirmed=true;run.spent=run.spent+1;run.reserved=0
                 local ok,e=savePending();if not ok then pause(e);return end
             elseif s.charges~=p.chargesBefore and s.charges~=p.chargesBefore-1 then
-                pause("The Orb balance changed unexpectedly. No further action will be submitted.");return
+                -- Before the one-Orb decrement was seen with this action's
+                -- offer, the spend outcome is unknown: hold. Once it was
+                -- (spendConfirmed), a later balance change says nothing about
+                -- this action (finishResult): pause continuation once and let
+                -- the exact ownership result below settle it. The balance
+                -- never settles it.
+                if not p.spendConfirmed then
+                    pause("The Orb balance changed unexpectedly. No further action will be submitted.");return
+                end
+                if run.running then pause("The Orb balance changed unexpectedly. No further action will be submitted.") end
             end
             if finishResult(s,p) then return end
             heldChoiceHint(s,p)
