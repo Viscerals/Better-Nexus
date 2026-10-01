@@ -5,7 +5,12 @@
 -- owner already holds d and t, and an in-progress step with no bar otherwise.
 local T=dofile('tests/prototype/startup_support.lua')
 local H=dofile('tests/prototype/harness.lua')
-NexusDB=T.Profile(150,40);T.Load()
+NexusDB=T.Profile(150,40)
+-- Rows that genuinely need the start-up identity repair (needsFullBuild true
+-- -> false), so catalog work holds Community startup back. A row that only
+-- lacks the field is current and is no longer rewritten (d741e69).
+for _,row in pairs(NexusDB.communityBuilds) do row.needsFullBuild=true end
+T.Load()
 debugprofilestop=nil
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')

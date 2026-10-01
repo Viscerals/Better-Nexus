@@ -54,8 +54,8 @@ Saved Build makes it your current loadout. Saving writes your current Echoes
 into the slot you selected and **replaces what that slot held**. Check the
 selected slot before you save; Nexus cannot undo a save or bring back the old
 contents. Nexus never loads a Saved Build for you. Its only save is the
-automatic save with Auto ON (below). Creating, importing or assigning a
-Wishlist saves only a plan; it changes no Saved Build.
+automatic save with Auto ON (below). Creating or importing a Wishlist saves
+only a plan. Assigning a Wishlist changes no Saved Build.
 
 A Wishlist is a desired plan; you do not have to own it already. **Saved Builds**
 are server slots. **Active Loadout** is the selected server loadout. **Build
