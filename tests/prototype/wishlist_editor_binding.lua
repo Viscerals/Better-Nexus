@@ -307,4 +307,20 @@ check(Ctx().name=='W-Six' and Ctx().assignmentId==nil,'L6: the key-only assignme
 Saved(201173,2,'L6 first');check(Copies(Stored(6),201173)==2 and Bound(6),'L6: the first save updates it and binds')
 Saved(201173,3,'L6 second');check(Copies(Stored(6),201173)==3 and Bound(6),'L6: the second save updates it too')
 closeEditor()
+-- L7. A Wishlist opened explicitly for Saved Build 6 (the Journal picker's
+-- editor path): its save assigns it there, as before.
+local function Candidate(slot) for _,c in ipairs(A.GetWishlistCandidates())do if c.slot==slot then return c end end end
+one=LoadoutWorld();closeEditor()
+check(Nexus.WishlistEditor.OpenForWishlist(Candidate(107),6) and Ctx().name=='W-Free' and Ctx().loadoutSlot==6,'L7: W-Free opened for Saved Build 6')
+Saved(201174,2,'L7')
+check(Stored(6).name=='W-Free' and Copies(Stored(6),201174)==2 and Bound(6) and Same(Assignment(1),one),'L7: the save assigns W-Free to Saved Build 6 only')
+Saved(201174,3,'L7 again');check(Copies(Stored(6),201174)==3,'L7: and the next save in the session updates it')
+closeEditor()
+-- L8. The same explicit open; Saved Build 6 is unassigned before the save.
+one=LoadoutWorld();closeEditor()
+check(Nexus.WishlistEditor.OpenForWishlist(Candidate(107),6),'L8: W-Free opened for Saved Build 6')
+check(A.ClearLoadoutWishlist(6),'L8: explicit Unassign of Saved Build 6')
+Saved(201174,2,'L8 stale')
+check(Stored(6)==nil and Same(Assignment(1),one),'L8: the stale save does not assign W-Free')
+closeEditor()
 print('PASS wishlist editor binding checks='..checks)

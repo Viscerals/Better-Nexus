@@ -1883,24 +1883,19 @@ function WishlistRoles.FirstRunHandoff(state)
         and handoff.assignmentId == first.assignmentId
 end
 
--- Whether a stored loadout assignment is still the one an editor opened:
--- the same assignment identity; for records saved before identities, the
--- same content key, or the same server slot for the oldest shapes, exactly
--- as ResolveAssociation resolved them. A changed or removed assignment is
--- the player's newer choice.
-function WishlistRoles.SameAssignment(saved, opened)
-    if type(opened) ~= "table" then return false end
+-- A stored loadout assignment as an editor binds it: its assignment
+-- identity; for records saved before identities, its content key or (oldest
+-- shapes) its server slot, as ResolveAssociation reads them. "none" when the
+-- Saved Build holds no assignment.
+function WishlistRoles.AssignmentToken(saved)
+    if saved == nil or saved == false then return "none" end
     if type(saved) == "number" or type(saved) == "string" then
-        return tonumber(saved) ~= nil and tonumber(saved) == tonumber(opened.slot)
+        return "slot:" .. tostring(tonumber(saved))
     end
-    if type(saved) ~= "table" then return false end
-    if saved.assignmentId ~= nil or opened.assignmentId ~= nil then
-        return saved.assignmentId == opened.assignmentId
-    end
-    if type(saved.key) == "string" and saved.key ~= "" then
-        return saved.key == opened.key
-    end
-    return tonumber(saved.slot) ~= nil and tonumber(saved.slot) == tonumber(opened.slot)
+    if type(saved) ~= "table" then return "invalid" end
+    if saved.assignmentId ~= nil then return "id:" .. tostring(saved.assignmentId) end
+    if type(saved.key) == "string" and saved.key ~= "" then return "key:" .. saved.key end
+    return "slot:" .. tostring(tonumber(saved.slot))
 end
 
 function WishlistRoles.ReplaceFirstRun(state, record)
@@ -2064,6 +2059,14 @@ function A.GetLoadoutWishlist(loadoutSlot)
     return resolved
 end
 
+-- What the Saved Build holds now, as an open editor binds it.
+function A.LoadoutAssignmentToken(loadoutSlot)
+    local state = Store and Store.State and Store.State()
+    local links = type(state) == "table" and state.loadoutWishlists or nil
+    return WishlistRoles.AssignmentToken(type(links) == "table"
+        and links[tonumber(loadoutSlot)] or nil)
+end
+
 function A.GetLoadoutWishlistSlot(loadoutSlot)
     local c = A.GetLoadoutWishlist(loadoutSlot)
     return c and tonumber(c.slot) or nil
@@ -2182,11 +2185,12 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     if not record then return false end
     local changed = false
     if not UpdateStoreState(function(state)
-        -- An editor's save re-records only the assignment it opened (`opened`
-        -- is its binding). One changed or removed while it was open is kept.
+        -- `opened` is an editor's binding: what this Saved Build held when
+        -- the editor opened or last saved. An assignment changed or removed
+        -- since then is the player's newer choice and is kept.
         local current = type(state.loadoutWishlists) == "table"
             and state.loadoutWishlists[loadoutSlot] or nil
-        if opened ~= nil and not WishlistRoles.SameAssignment(current, opened) then
+        if opened ~= nil and WishlistRoles.AssignmentToken(current) ~= opened then
             changed = true
             return
         end

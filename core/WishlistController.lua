@@ -925,6 +925,11 @@ function Controller.New(options)
             assignmentId=wishlist.assignmentId,
             loadoutSlot = tonumber(loadoutSlot),
             loadoutName = tostring(wishlist.loadoutName or ""),
+            -- What that Saved Build holds now: a save re-records its
+            -- assignment only while this is unchanged.
+            boundAssignment = tonumber(loadoutSlot) and Adapter
+                and Adapter.LoadoutAssignmentToken
+                and Adapter.LoadoutAssignmentToken(loadoutSlot) or nil,
         }
         M.LoadPendingEchoes(wishlist.echoes or {}, false,wishlist.designTargets)
         return true
@@ -1244,13 +1249,17 @@ function Controller.New(options)
 
     -- A save stamps a new assignment identity on the plan it updated. The
     -- open editor still holds that same plan, so its binding follows the new
-    -- identity: the next save in this session is proven by the unchanged
-    -- checks above. A new plan (no editing context) is not bound.
+    -- identity (and, for a Saved Build, what it now holds): the next save in
+    -- this session is proven by the unchanged checks. A new plan (no editing
+    -- context) is not bound.
     local function RebindAfterSave(assignmentId, key)
         local context = state.editingContext
         if context and assignmentId ~= nil then
             context.assignmentId = assignmentId
             if key ~= nil then context.key = key end
+            if context.loadoutSlot and Adapter.LoadoutAssignmentToken then
+                context.boundAssignment = Adapter.LoadoutAssignmentToken(context.loadoutSlot)
+            end
         end
     end
 
@@ -1300,7 +1309,8 @@ function Controller.New(options)
                 local context, assignmentId, key = state.editingContext
                 associated, associationReason, assignmentId, key =
                     Adapter.UpdateWishlistAssociationAfterSave(
-                        context.loadoutSlot, slot, name, recorded, designTargets, context)
+                        context.loadoutSlot, slot, name, recorded, designTargets,
+                        context.boundAssignment)
                 if associated then
                     RebindAfterSave(assignmentId, key)
                 elseif associationReason == "assignment_changed" then
