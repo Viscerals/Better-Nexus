@@ -126,7 +126,7 @@ NAMES += ['orb_rdf_recovery_followups']
 NAMES += ['orb_read_signature_cost','catalog_budget_exhausted']
 NAMES += ['hud_assignment_reads','poll_tome_pending_idle','catalog_idle_frames']
 NAMES += ['perf_lifecycle_phases']
-NAMES += ['sync_scalar_root_reject','tome_toggle_snapshot_isolation','startup_identity_repair_noop']
+NAMES += ['sync_scalar_root_reject','tome_toggle_snapshot_isolation','startup_identity_repair_noop','panel_annotation_labels']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
