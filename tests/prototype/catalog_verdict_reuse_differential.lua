@@ -9,8 +9,10 @@
 -- in-place evidence-pool edit, an evidence append, an owner change, a failed
 -- publication and an exhausted generation counter. Edits are injected at a
 -- mutation phase, not at a frame, so both routes are edited at the same
--- logical point.
+-- logical point; single-slice pacing (no profile clock) makes the slice
+-- boundaries, and so the injection points, deterministic.
 -- Real TOC boot, real catalog; synthetic records only.
+dofile('tests/prototype/startup_support.lua').SingleSlicePacing()
 local F=dofile('tests/prototype/format5_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local clock=1790000000
@@ -61,6 +63,8 @@ local function Run(reuse,size,plan)
  for i=1,255 do local n,v=debug.getupvalue(C.DebugStats,i);if not n then break end;if n=='ST' then ST=v end end
  assert(ST,'catalog state')
  local inject
+ -- While set, the catalog's own pumps (only) see another player name.
+ local ownerWindow=false
  local pump=C.PumpRootAdmission
  C.PumpRootAdmission=function(...)
   local h=ST.candidate
@@ -73,7 +77,10 @@ local function Run(reuse,size,plan)
    inject.done=true;inject.handle=h;inject.fn(ST,h)
    around=inject.after
   end
+  local realUnitName=UnitName
+  if ownerWindow then UnitName=function() return 'Otherplayer' end end
   local results={pump(...)}
+  UnitName=realUnitName
   if around then around() end
   if inject and inject.done and inject.untilHandleEnds and not inject.restored and ST.candidate~=inject.handle then
    inject.restored=true;inject.untilHandleEnds()
@@ -82,6 +89,7 @@ local function Run(reuse,size,plan)
  end
  for _=1,200 do H.Advance(.05,.05) end
  local env={H=H,C=C,ST=ST,Record=Record,serial=0}
+ function env.OwnerWindow(open) ownerWindow=open end
  local function Settle(tickets)
   for _=1,20000 do
    local open=false
@@ -223,6 +231,11 @@ local plan={
   e.Inject('mutation-capture',function() NexusDB.authorityBundle.communityBuilds['b-12'].title='Edited before capture' end)
   return e.Batch(e.New(1))
  end},
+ {label='in-place key addition before the capture',run=function(e)
+  e.Inject('mutation-capture',function() NexusDB.authorityBundle.communityBuilds['b-15'].probeExtra='added' end)
+  return e.Batch(e.New(1))
+ end},
+ Batch('one-row after key addition',1),
  {label='in-place edit during the walk',run=function(e)
   e.Inject('rows',function() NexusDB.authorityBundle.communityBuilds['b-13'].title='Edited during walk' end)
   local outcome=e.Batch(e.New(1));e.Settle();return outcome
@@ -250,11 +263,12 @@ local plan={
  Batch('one-row after evidence append',1),
  Batch('one-row reuse after evidence append',1),
  {label='owner change during the walk',run=function(e)
-  local realUnitName
-  e.Inject('mutation-capture',function() realUnitName=UnitName;UnitName=function() return 'Otherplayer' end end,
-   nil,'index',function() UnitName=realUnitName end)
+  -- The catalog's pumps see another owner from the capture until the
+  -- index phase (the whole row walk); nothing else does.
+  e.Inject('mutation-capture',function() e.OwnerWindow(true) end,
+   nil,'index',function() e.OwnerWindow(false) end)
   local outcome=e.Batch(e.New(1))
-  if e.injection and not e.injection.restored then UnitName=realUnitName end
+  e.OwnerWindow(false)
   return outcome
  end},
  Batch('one-row after owner change',1),
@@ -289,7 +303,7 @@ local function Committed(label)
 end
 for _,label in ipairs({'one-row first after admission','one-row','eight-row','one-row after single Put',
  'one-row after removal marker','one-row again','one-row after overlay removal','one-row reuse again',
- 'in-place edit before the capture','one-row after drift','one-row reuse after drift','in-place evidence-pool edit',
+ 'in-place edit before the capture','in-place key addition before the capture','one-row after key addition','one-row after drift','one-row reuse after drift','in-place evidence-pool edit',
  'one-row after pool edit','one-row after evidence append','one-row reuse after evidence append',
  'owner change during the walk','one-row after owner change','one-row reuse after owner change',
  'one-row after failed publication','one-row reuse after failed publication'}) do
@@ -304,6 +318,7 @@ for _,label in ipairs({'one-row first after admission','one-row after overlay re
  check(S[label].reuses==0,label..': no verdict was reused (no reuse source or another owner): '..S[label].reuses)
 end
 check(S['in-place edit before the capture'].mism>0,'the row edited before the capture was walked, not reused')
+check(S['in-place key addition before the capture'].mism>0,'the row given a new key before the capture was walked, not reused')
 check(S['in-place evidence-pool edit'].mism>0,'rows whose pool entry was edited were walked, not reused')
 local mixed=S['duplicate, stale, hostile and valid members'].outcome
 check(mixed[2] and mixed[2].committed==false and mixed[2].reason=='DUPLICATE_BATCH_MEMBER','the duplicate member is refused')

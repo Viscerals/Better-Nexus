@@ -6,7 +6,9 @@
 -- other verdict is reused. Work is measured by the mutation's own work
 -- counters (`rows` is charged once per walked row and once per row in
 -- finalisation) and by the catalog's debug statistics.
--- Real TOC boot, real catalog; synthetic records only.
+-- Real TOC boot, real catalog; synthetic records only. Single-slice pacing
+-- (no profile clock) keeps the slice boundaries deterministic.
+dofile('tests/prototype/startup_support.lua').SingleSlicePacing()
 local F=dofile('tests/prototype/format5_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local clock=1790000000
