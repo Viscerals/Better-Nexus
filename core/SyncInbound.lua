@@ -278,6 +278,13 @@ function Inbound.New(options)
             log("RX", "REJECT '%s': JSON decode failed", tostring(buildId))
             return false
         end
+        -- A valid JSON scalar root (number, true, string) is not a record.
+        if type(data) ~= "table" then
+            noteOutcome(context, "rejected", "schema")
+            noteMalformed()
+            log("RX", "REJECT '%s': validation failed", tostring(buildId))
+            return false
+        end
         -- Retain the established rejection of pre-rename placeholder records.
         if tostring(data.a or data.author or ""):lower() == "wr team" then
             noteOutcome(context, "rejected", "schema")
@@ -418,6 +425,9 @@ function Inbound.New(options)
         if type(record) == "table" then
             record, schemaReason = validateDpsPayload(record)
         end
+        -- A scalar root, or a validator result that is not a record, is the
+        -- ordinary schema rejection.
+        if type(record) ~= "table" then record = nil end
         if not record then
             noteDpsRejection(schemaReason or "schema")
             noteMalformed()
