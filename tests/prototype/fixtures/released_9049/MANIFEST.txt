@@ -7,7 +7,7 @@ data/Release.lua|3262|13b84c9a|tree
 data/DefaultProfile.lua|4051|75bf1d74|tree
 data/BundledBuilds.lua|586|36c9eee7|tree
 logic/Version.lua|4786|1a062824|tree
-core/UserText.lua|8134|90e4253b|tree
+core/UserText.lua|8134|90e4253b|copy
 core/Performance.lua|14178|4bdf6c75|copy
 core/StutterAlertIntegration.lua|5304|4ef7e6ca|copy
 core/EchoCatalogSource.lua|6036|fb5d8f5d|tree
