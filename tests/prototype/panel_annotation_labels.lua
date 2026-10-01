@@ -1,5 +1,6 @@
 -- Every annotation word that EchoWeaver gives a board card is shown to the
--- player as a label, not as the raw word (BN-FULL-REVIEW-PRIVATE-BUILD-003).
+-- player as a label, not as the raw word; "guaranteed" is stated by the
+-- card's "[Guaranteed offer]" prefix (BN-FULL-REVIEW-PRIVATE-BUILD-003).
 -- be19854 showed "target satisfied" and "frozen" raw because UserText mapped
 -- only the older word "target met". Real EchoWeaver decision, real Readout.
 local H=dofile('tests/prototype/harness.lua');H.Boot()
@@ -26,4 +27,8 @@ for word in pairs(emitted) do
 end
 -- Guaranteed cards keep their existing prefix.
 check(R.CardLine({spellId=1,name='Echo',quality=2,isGuaranteed=true},'wanted'):find('[Guaranteed offer]',1,true),'guaranteed prefix kept')
+do
+ local line=R.CardLine({spellId=1,name='Echo',quality=2,isGuaranteed=true},'guaranteed')
+ check(line:find('[Guaranteed offer]',1,true) and not line:find('guaranteed',1,true),'a guaranteed card does not repeat the raw word: '..line)
+end
 print('PASS panel annotation labels; '..checks..' checks')

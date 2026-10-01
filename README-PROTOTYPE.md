@@ -55,7 +55,7 @@ into the slot you selected and **replaces what that slot held**. Check the
 selected slot before you save; Nexus cannot undo a save or bring back the old
 contents. Nexus never loads a Saved Build for you. Its only save is the
 automatic save with Auto ON (below). Creating or importing a Wishlist saves
-only a plan. Assigning a Wishlist changes no Saved Build.
+only a plan. Assigning a Wishlist by itself changes no Saved Build.
 
 A Wishlist is a desired plan; you do not have to own it already. **Saved Builds**
 are server slots. **Active Loadout** is the selected server loadout. **Build
@@ -112,20 +112,23 @@ Nexus to leave the current Saved Build untouched.
 
 On an ordinary Echo choice, in this order (current behavior). **Needed** means
 an offer of the exact Echo and quality that still has missing copies: the
-Wishlist's copies minus the copies you have, rolled and locked.
+Wishlist's copies minus the copies you have, rolled and locked (with locked
+targets, locked copies count only up to those targets). Picks are **very few**
+when 6 or fewer remain, or no more than the missing copies. Picks are **few**
+when 18 or fewer remain, or the missing copies are at least a third of them.
 
 - All targets complete: Nexus takes an available offer. It can be outside the
   Wishlist.
-- No offer is still needed: **Reroll** comes first, when Reroll is allowed and
-  you have one.
+- No offer is still needed: **Reroll** comes first, when Reroll is allowed, you
+  have one and fewer than two offers are frozen.
 - A needed offer is shown: Nexus takes it. **Freeze** is used only in some
-  cases: the remaining picks are very few compared with the missing copies, at
-  least two copies are still missing, Freeze is allowed, and a Banish is
-  available to search further. Nexus then takes the next needed offer, or the
-  frozen one.
-- No offer is needed and Reroll is not possible: when the remaining picks are
-  few compared with the missing copies, Nexus **banishes** an offer that is not
-  needed and not frozen. Otherwise, or with no Banish left, it takes an
+  cases: picks are very few, at least two copies are still missing, Freeze is
+  allowed and charged, and a Banish is available to search further. After a
+  Freeze, Nexus takes another needed offer if one is shown. While picks stay
+  very few and a Banish is left, it banishes an offer that is not needed.
+  Otherwise it takes the frozen offer.
+- No offer is needed and Reroll is not possible: when picks are few, Nexus
+  **banishes** an offer that is not needed and not frozen. Otherwise, or with no Banish left, it takes an
   available offer, which can be outside the Wishlist.
 
 Nexus does not keep rerolls back for later in a run. These rules are not a

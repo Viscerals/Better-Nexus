@@ -2,7 +2,7 @@
 -- (number, true, string) is a malformed record, not a handler error
 -- (BN-FULL-REVIEW-PRIVATE-BUILD-003, audit F1). The real receiver gets the
 -- real wire text; nothing is stored and the ordinary rejection is counted.
--- Controls: a valid table root still reaches the ordinary record checks.
+-- Control: a decoded table without a record takes the same ordinary rejection.
 local H=dofile('tests/prototype/harness.lua');H.Boot()
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local S,Codec,C=Nexus.Sync,Nexus.Codec,Nexus.BuildCatalog

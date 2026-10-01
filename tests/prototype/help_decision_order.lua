@@ -26,10 +26,10 @@ local function Decide(o)
  local outstanding={[NEEDED]=o.missing or 0,[MET]=0}
  local total=(o.missing or 0)
  local choices={}
- for i,id in ipairs(o.board) do choices[i]={echoID=id,quality=2,index=i,selectable=true} end
+ for i,id in ipairs(o.board) do choices[i]={echoID=id,quality=2,index=i,selectable=true,frozen=o.frozen and o.frozen[i] or nil} end
  return W.Decide({objective={requestedCounts=requested,outstandingCounts=outstanding,outstandingTotal=total},
   remainingPicks=o.left,
-  board={choices=choices,capabilities={canSelect=true,canBanish=true,canFreeze=o.freeze~=false,canReroll=o.reroll~=false}},
+  board={choices=choices,twoFrozenRerollProhibited=o.twoFrozen,capabilities={canSelect=true,canBanish=true,canFreeze=o.freeze~=false,canReroll=o.reroll~=false}},
   resources={banishesRemaining=o.banishes or 3,freezesRemaining=1,rerollsRemaining=o.rerolls or 3},
   commonBoardRerollEnabled=o.reroll~=false,policy=W.NEXUS_POLICY})
 end
@@ -53,11 +53,27 @@ d=Decide({missing=1,left=4,board={OTHER1,NEEDED,OTHER2}})
 check(d.action=='SELECT','one copy missing: no Freeze: '..tostring(d.action))
 d=Decide({missing=3,left=150,board={OTHER1,MET,OTHER2},rerolls=3})
 check(d.action=='REROLL','many picks left: Reroll is not kept back: '..tostring(d.action))
+-- Review cases (fixed pressure limits, the frozen-needed branch, two frozen).
+d=Decide({missing=1,left=18,board={OTHER1,MET,OTHER2},reroll=false})
+check(d.action=='BANISH','18 picks is "few" even with one copy missing: Banish: '..tostring(d.action))
+d=Decide({missing=1,left=19,board={OTHER1,MET,OTHER2},reroll=false})
+check(d.action=='SELECT','19 picks and one missing copy is not "few": take an available offer: '..tostring(d.action))
+d=Decide({missing=3,left=4,board={NEEDED,OTHER1,OTHER2},frozen={true}})
+check(d.action=='BANISH','only a frozen needed offer, very few picks, Banish left: Banish an offer not needed: '..tostring(d.action))
+d=Decide({missing=1,left=200,board={NEEDED,OTHER1,OTHER2},frozen={true}})
+check(d.action=='SELECT' and d.echoID==NEEDED,'only a frozen needed offer, many picks: take the frozen offer: '..tostring(d.action))
+d=Decide({missing=3,left=4,board={NEEDED,OTHER1,NEEDED},frozen={true}})
+check(d.action=='SELECT' and d.index==3,'after a Freeze, another needed offer is taken: '..tostring(d.action))
+d=Decide({missing=3,left=30,board={OTHER1,MET,OTHER2},twoFrozen=true})
+check(d.action~='REROLL','two frozen offers: no Reroll: '..tostring(d.action))
 
 -- 2. The text states those rules, in that order, without the old absolutes.
 for label,text in pairs({Help=rolling,guide=guide}) do
  check(has(text,'All targets complete: Nexus takes an available offer. It can be outside the Wishlist.'),label..': fallback when targets are complete')
- check(has(text,'No offer is still needed: Reroll comes first, when Reroll is allowed and you have one.'),label..': Reroll first when nothing needed')
+ check(has(text,'No offer is still needed: Reroll comes first, when Reroll is allowed, you have one and fewer than two offers are frozen.'),label..': Reroll first when nothing needed')
+ check(has(text,'Picks are very few when 6 or fewer remain, or no more than the missing copies.'),label..': "very few" uses the real limits')
+ check(has(text,'Picks are few when 18 or fewer remain, or the missing copies are at least a third of them.'),label..': "few" uses the real limits')
+ check(has(text,'After a Freeze, Nexus takes another needed offer if one is shown. While picks stay very few and a Banish is left, it banishes an offer that is not needed. Otherwise it takes the frozen offer.'),label..': the frozen-needed branch')
  check(has(text,'Freeze is used only in some cases'),label..': Freeze is conditional')
  check(has(text,'which can be outside the Wishlist'),label..': fallback outside the Wishlist')
  check(has(text,'Nexus does not keep rerolls back for later in a run.'),label..': no reserved rerolls')
@@ -76,6 +92,7 @@ for label,text in pairs({Help=start,guide=guide}) do
  check(has(text:upper(),'REPLACES WHAT THAT SLOT HELD'),label..': saving replaces the slot')
  check(has(text,'Nexus cannot undo a save'),label..': no undo')
  check(has(text,'Nexus never loads a Saved Build for you'),label..': Nexus does not load')
+ check(has(text,'Assigning a Wishlist by itself changes no Saved Build.'),label..': assignment by itself changes nothing')
  before(text,'Saving writes your current Echoes','saves only a plan',label..': warning before the plan-only note')
 end
 check(has(start,'What Nexus is for:'),'Help: plain purpose for a newcomer')
