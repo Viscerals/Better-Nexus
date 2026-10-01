@@ -25,7 +25,7 @@ core/DataCompaction.lua|45727|a9070bf9|tree
 core/BuildCatalog.lua|319811|e97ac271|copy
 core/DataRetention.lua|53099|8acce751|tree
 core/BuildHashCache.lua|20954|467065af|tree
-core/Store.lua|114813|39cde2bf|tree
+core/Store.lua|114813|39cde2bf|copy
 core/Errors.lua|6592|b8405cea|copy
 core/SupportIncidents.lua|13769|c8464efd|tree
 core/SupportReport.lua|49645|07bcc9f9|copy
@@ -82,7 +82,7 @@ ui/Nameplate.lua|6351|bc4a3ba0|tree
 ui/Changelog.lua|6394|b515014d|tree
 core/AutomationRuntime.lua|175336|3803ef25|copy
 core/MainLifecycle.lua|67677|9629052b|copy
-core/MainCommands.lua|3985|5a56a21a|tree
+core/MainCommands.lua|3985|5a56a21a|copy
 core/MainViewModel.lua|17566|c771e519|copy
 core/MainDiagnostics.lua|50511|fa417a47|copy
 core/Main.lua|57013|e344538e|copy

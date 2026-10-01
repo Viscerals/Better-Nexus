@@ -1152,9 +1152,62 @@ EnsureMainCommands = function()
                 or "Preparing local saved data; controls unlock after validation completes.")
             local line = status and status.state=="failed" and StartupFailureLine(status)
             if line then Print(line) end
+            if status and status.reason=="LEGACY_DISPOSITION_REAUTH_REQUIRED" then
+                local lifecycle=Lifecycle()
+                local recovery=lifecycle and lifecycle.LegacyRecoveryStatus and lifecycle.LegacyRecoveryStatus()
+                if recovery and recovery.state=="preserved" then
+                    Print("Older data is preserved. Type /reload to start Nexus with your current setup.")
+                else
+                    Print("Older saved data needs your decision. Type /nexus legacy to review it. Nothing is deleted unless you confirm.")
+                end
+            end
         end,
         prepare=function() return Store.Settings() end,
         callbacks={
+            -- Explicit keep-current / preserve-legacy recovery. Answered before
+            -- the initialization gate (see MainCommands). The coordinator owns
+            -- every decision; this only words the result.
+            legacy=function(_,normalized)
+                local lifecycle=Lifecycle()
+                if not (lifecycle and lifecycle.LegacyRecoveryOffer) then
+                    Print("No older-data decision is waiting.")
+                    return
+                end
+                local code=normalized:match("^legacy%s+keep%s+(%S+)%s*$")
+                if normalized~="legacy" and not normalized:match("^legacy%s+keep%s*$") and not code then
+                    Print("Use /nexus legacy to review older saved data, then /nexus legacy keep <code>.")
+                    return
+                end
+                local result
+                if code then
+                    result=lifecycle.ConfirmLegacyRecovery(code)
+                else
+                    result=lifecycle.LegacyRecoveryOffer()
+                end
+                local state=result.state
+                if state=="notWaiting" then
+                    Print("No older-data decision is waiting.")
+                elseif state=="offer" then
+                    Print("Older saved data (WishlistRealizerDB) was found next to your current data. Your current setup is unchanged. Nothing is deleted, imported or merged.")
+                    Print(string.format("Found: %d tables, %d bytes. Code: %s",
+                        tonumber(result.tables) or 0, tonumber(result.bytes) or 0, tostring(result.code)))
+                    Print("To keep your current setup and store the older data in a separate archive inside your saved data, type: /nexus legacy keep "..tostring(result.code))
+                    Print("Then type /reload.")
+                elseif state=="blocked" then
+                    Print("The older saved data cannot be kept automatically ("..tostring(result.reason).."). Nothing was changed. Your current setup is unchanged.")
+                elseif state=="alreadyPreserved" or (state=="preserved" and not code) then
+                    Print("Older data is already preserved. Type /reload to start Nexus with your current setup.")
+                elseif state=="preserved" then
+                    Print("Older data preserved separately (code "..tostring(result.code).."). Your current setup is unchanged. Type /reload to start Nexus with it.")
+                else
+                    Print("Older data was not changed: "..tostring(result.reason)..".")
+                    if result.reason=="INPUT_DRIFT" then
+                        Print("The saved data changed. Type /reload, then /nexus legacy again.")
+                    elseif result.reason=="NO_OFFER" or result.reason=="CODE_MISMATCH" then
+                        Print("Type /nexus legacy for the current code.")
+                    end
+                end
+            end,
             orbs=function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end,
             report=function()
                 -- This command exists for a broken install, so it says

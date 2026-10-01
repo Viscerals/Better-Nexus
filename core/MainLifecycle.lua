@@ -1356,6 +1356,29 @@ function Lifecycle.New(options)
     end
 
     local M = {}
+    -- Explicit keep-current / preserve-legacy recovery. Pass-throughs to the
+    -- bootstrap coordinator that waits on the decision; neither pumps, binds
+    -- or resumes it. An error inside the coordinator is reported, not thrown.
+    local function LegacyRecovery(method, ...)
+        local coordinator = bootstrapCoordinator
+        if coordinator == nil or type(coordinator[method]) ~= "function" then
+            return {state="notWaiting"}
+        end
+        local ok, result = pcall(coordinator[method], coordinator, ...)
+        if not ok or type(result) ~= "table" then
+            return {state="failed", reason="PRESERVATION_FAILED"}
+        end
+        return result
+    end
+    function M.LegacyRecoveryStatus()
+        local result = LegacyRecovery("LegacyRecoveryStatus")
+        return result.state == "failed" and {state="none"} or result
+    end
+    function M.LegacyRecoveryOffer() return LegacyRecovery("LegacyRecoveryOffer") end
+    function M.ConfirmLegacyRecovery(code)
+        return LegacyRecovery("ConfirmLegacyRecovery", code)
+    end
+
     function M.Initialize() return Initialize() end
     function M.IsInitialized() return initialized end
     function M.OnEvent(...) return OnEvent(...) end

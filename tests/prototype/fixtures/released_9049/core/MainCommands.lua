@@ -53,13 +53,6 @@ function Commands.New(options)
             Invoke("report",nil,early)
             return
         end
-        -- The older-data decision is answered BEFORE the initialization gate:
-        -- the player who needs it is exactly the one whose start-up stopped on
-        -- it. It reads or writes nothing unless the coordinator waits on it.
-        if early=="legacy" or early:match("^legacy%s") then
-            Invoke("legacy",nil,early)
-            return
-        end
         if not isInitialized() then
             if type(notInitialized) == "function" then notInitialized() end
             return

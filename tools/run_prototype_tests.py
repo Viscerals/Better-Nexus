@@ -131,6 +131,7 @@ NAMES += ['orb_live_balance_drift','wishlist_save_slot_safety']
 NAMES += ['wishlist_editor_binding']
 NAMES += ['wishlist_assignment_action_token']
 NAMES += ['catalog_verdict_reuse','catalog_verdict_reuse_differential']
+NAMES += ['legacy_recovery_flow','legacy_recovery_guards','legacy_recovery_unchanged']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
