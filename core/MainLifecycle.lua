@@ -801,17 +801,6 @@ function Lifecycle.New(options)
             end
         end
         manualTiming.driveSlices = (manualTiming.driveSlices or 0) + priorSlices
-        -- Nothing to admit: the owner-agreeing admitted root serves and no
-        -- candidate exists. A slice would return at once and report ready, so
-        -- this update records the same idle observation and pumps nothing
-        -- (no status, pump result or root-state tables on every idle frame).
-        if initial.ready then
-            manualTiming.catalogPhase, manualTiming.catalogKind =
-                initial.phase, initial.kind
-            manualTiming.catalogPumps, manualTiming.catalogWork =
-                initial.pumps, initial.work
-            return true
-        end
         local catalogReady, spent = false, priorSlices
         for slice=1,MANUAL_SLICES do
             -- The cap counts every preparation slice this update has spent,
@@ -821,6 +810,18 @@ function Lifecycle.New(options)
             local timed = started ~= nil and before ~= nil and before >= started
             if timed and before-started >= MANUAL_MS then break end
             if not timed and spent+1 > 1 then break end
+            -- Nothing to admit: the owner-agreeing admitted root serves and no
+            -- candidate exists. The slice would return at once and report
+            -- ready, so this update records the same idle observation and
+            -- pumps nothing (no status, pump result or root-state tables on
+            -- every idle frame). The allowance checks above still decide first.
+            if initial.ready then
+                manualTiming.catalogPhase, manualTiming.catalogKind =
+                    initial.phase, initial.kind
+                manualTiming.catalogPumps, manualTiming.catalogWork =
+                    initial.pumps, initial.work
+                return true
+            end
             local status = describe()
             if status.binding ~= initial.binding
                 or status.generation ~= initial.generation then break end

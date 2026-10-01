@@ -67,7 +67,10 @@ local PATH_ORDER = {
 local PATHS = {}
 for _, name in ipairs(PATH_ORDER) do PATHS[name] = true end
 local AGGREGATE_ONLY = {}
+-- Only automation.phase.* compete for the dominant phase of automation.step.
+local STEP_PHASES = {}
 for _, name in ipairs(PATH_ORDER) do
+    if name:find("automation.phase.", 1, true) == 1 then STEP_PHASES[name] = true end
     if name:find("automation.phase.", 1, true) == 1
         or name:find("lifecycle.phase.", 1, true) == 1
         or name:find("hud.phase.", 1, true) == 1
@@ -270,7 +273,7 @@ function Performance.Finish(name, startedAt, classifications)
     if not finishedAt then return false end
     local elapsed = finishedAt - startedAt
     if elapsed < 0 then return false end
-    if activeAutomationStep and AGGREGATE_ONLY[name]
+    if activeAutomationStep and STEP_PHASES[name]
         and elapsed > activeStepDominantMs then
         activeStepDominantName = name
         activeStepDominantMs = elapsed

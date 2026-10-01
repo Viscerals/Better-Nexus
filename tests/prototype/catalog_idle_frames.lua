@@ -62,6 +62,12 @@ check(status.syncGateCatalogReady==true,'Sync sees the catalog ready: '..tostrin
 local timing=Nexus.manualSyncTiming
 check(timing.catalogPhase==nil and timing.catalogKind==nil and timing.catalogPumps==0 and timing.catalogWork==0,
  'the idle observation is recorded: '..tostring(timing.catalogKind)..' '..tostring(timing.catalogPumps))
+-- Each idle update records it again (as the idle slice did), so an older
+-- observation never stays on /nexus peer debug.
+timing.catalogPhase,timing.catalogKind,timing.catalogPumps,timing.catalogWork='rows','mutation',7,9
+H.Advance(.05)
+check(timing.catalogPhase==nil and timing.catalogKind==nil and timing.catalogPumps==0 and timing.catalogWork==0,
+ 'one idle update replaces an older observation: '..tostring(timing.catalogKind)..' '..tostring(timing.catalogPumps))
 
 -- 2. A received build: still admitted through slices and committed.
 local donor
@@ -80,6 +86,35 @@ check(calls.pump>0,'pending frames pump admission slices: '..calls.pump)
 Frames(20)
 check(calls.pump==0 and calls.root==0,'after the commit the frames are idle again: '..calls.pump..' '..calls.root)
 check(Nexus.StartupStatus().syncGateCatalogReady==true and timing.catalogKind==nil,'idle again: ready, no catalog work shown')
+
+-- 3. The allowance still decides first. A write commits inside this update's
+-- preparation window (before the batch runs), and that window takes 5 ms, over
+-- the 2 ms allowance. As on test.9053, the update does not report the catalog
+-- ready; the next update does.
+local storeIndex,rawStore
+for i=1,255 do local n,v=debug.getupvalue(runUpdate,i);if not n then break end
+ if n=='PumpStoreMutationSlice' then storeIndex,rawStore=i,v end end
+check(storeIndex~=nil,'the lifecycle store slice is found')
+local second=H.Clone(donor);second.id='received-idle-2';second.title='Received idle 2';second.author='Remote-Realm'
+local ok2,why2,ticket2=C.Put(second)
+check(ok2==nil and why2=='ROOT_MUTATION_PENDING','fixture: a second write is pending: '..tostring(why2))
+local realClock,offset=debugprofilestop,0
+check(type(realClock)=='function','fixture: a profiler clock')
+debugprofilestop=function() return realClock()+offset end
+debug.setupvalue(runUpdate,storeIndex,function(...)
+ rawStore(...)
+ local guard=0
+ while ticket2.state=='pending' and guard<100000 do raw.PumpRootAdmission();guard=guard+1 end
+ offset=offset+5
+end)
+H.Advance(.05)
+debug.setupvalue(runUpdate,storeIndex,rawStore)
+debugprofilestop=realClock
+check(ticket2.state=='committed','fixture: the write committed inside the preparation window')
+check(Nexus.StartupStatus().syncGateCatalogReady==false,
+ 'over the allowance: not reported ready in this update (as on test.9053): '..tostring(Nexus.StartupStatus().syncGate))
+H.Advance(.05)
+check(Nexus.StartupStatus().syncGateCatalogReady==true,'the next update reports the catalog ready')
 
 for name in pairs(wrapped) do C[name]=raw[name] end
 print('PASS idle catalog frames pump nothing; a received build is still admitted; '..checks..' checks')

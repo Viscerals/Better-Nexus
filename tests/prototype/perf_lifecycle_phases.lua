@@ -124,6 +124,15 @@ for _,row in ipairs(summary.rows) do
  check(row.count>=0 and row.totalMs>=0 and row.maxMs>=0,'non-negative values')
  seen[row.name]=true
 end
+local byName={};for _,row in ipairs(summary.rows) do byName[row.name]=row end
+for name,parent in pairs({['lifecycle.phase.catalog']='lifecycle.update',['automation.update']='lifecycle.update',
+ ['gameadapter.poll']='automation.update',['hud.phase.view-model']='hud.prepare',['hud.phase.assignment']='hud.prepare'}) do
+ check(byName[name] and byName[name].parent==parent,'summary declares '..name..' inside '..parent)
+end
+for _,name in ipairs({'lifecycle.update','automation.step','hud.prepare','panel.render','lifecycle.loading-status','sync.incoming'}) do
+ check(byName[name] and byName[name].parent==nil,'summary declares no parent for '..name)
+end
+check(byName['lifecycle.update'].count==Stats('lifecycle.update').count,'summary counts are the aggregates')
 check(#summary.counters<=8,'bounded counters')
 for _,c in ipairs(summary.counters) do
  check(type(c.name)=='string' and c.name:match('^[%l%.%-]+$') and type(c.value)=='number' and c.value>=0,'counter '..tostring(c.name))

@@ -2617,6 +2617,12 @@ function A.AssignedWishlist()
         if row.locked then permanent[row.spellId]=(permanent[row.spellId] or 0)+(row.stacks or 1) end
     end
     local targets=w.designTargets
+    -- Read from the Store.State snapshot. AutomationRuntime reads this subtree
+    -- live because WishlistController.LockDesignTargets hands out the live
+    -- per-slot table. Its callers (ApplyCommittedTargets, PlanLockCommit) only
+    -- read it, and CommitLockDesignTargets stores a new table inside the
+    -- mutation entry, so the snapshot holds the same targets. A future caller
+    -- that edits that table in place must do so through the mutation entry.
     if targets==nil then targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key] end
     if targets~=nil then
         A._assignmentTargetModel=A._assignmentTargetModel or Nexus.WishlistModel.New()
