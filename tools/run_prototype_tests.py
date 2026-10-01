@@ -124,6 +124,7 @@ NAMES += ['help_action_first']
 NAMES += ['orb_rdf_balance_drift']
 NAMES += ['orb_rdf_recovery_followups']
 NAMES += ['orb_read_signature_cost','catalog_budget_exhausted']
+NAMES += ['hud_assignment_reads','poll_tome_pending_idle','catalog_idle_frames']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

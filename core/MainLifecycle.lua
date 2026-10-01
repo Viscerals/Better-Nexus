@@ -801,6 +801,17 @@ function Lifecycle.New(options)
             end
         end
         manualTiming.driveSlices = (manualTiming.driveSlices or 0) + priorSlices
+        -- Nothing to admit: the owner-agreeing admitted root serves and no
+        -- candidate exists. A slice would return at once and report ready, so
+        -- this update records the same idle observation and pumps nothing
+        -- (no status, pump result or root-state tables on every idle frame).
+        if initial.ready then
+            manualTiming.catalogPhase, manualTiming.catalogKind =
+                initial.phase, initial.kind
+            manualTiming.catalogPumps, manualTiming.catalogWork =
+                initial.pumps, initial.work
+            return true
+        end
         local catalogReady, spent = false, priorSlices
         for slice=1,MANUAL_SLICES do
             -- The cap counts every preparation slice this update has spent,

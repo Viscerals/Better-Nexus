@@ -1804,7 +1804,9 @@ local function SelectWishlistCandidate(wishlistSlot, candidate)
     return nil, "wishlist data is unavailable; waiting for the server mirror"
 end
 
-local function ResolveAssociation(loadoutSlot)
+-- `slots` is optional: a caller that already read the slot projection in the
+-- same call passes it, so the server slots are not projected again.
+local function ResolveAssociation(loadoutSlot, slots)
     loadoutSlot = tonumber(loadoutSlot)
     if not loadoutSlot then return nil end
     local state = Store and Store.State and Store.State()
@@ -1829,7 +1831,7 @@ local function ResolveAssociation(loadoutSlot)
         return nil
     end
 
-    local candidates = LiveWishlistCandidates(A.Slots())
+    local candidates = LiveWishlistCandidates(slots or A.Slots())
     local wantedKey = saved.key
     if wantedKey and wantedKey ~= "" then
         return WishlistRoles.ResolveSaved(saved,candidates)
@@ -1855,11 +1857,11 @@ end
 -- wishlist target so Nexus can guide their very first 1-80 run. This is a
 -- temporary account-local association and is replaced naturally once the
 -- player has a real Saved Build selected.
-local function ResolveFirstRunWishlist()
+local function ResolveFirstRunWishlist(slots)
     local state = Store and Store.State and Store.State()
     local saved = state and state.firstRunWishlist
     if type(saved) ~= "table" then return nil end
-    return WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(A.Slots()))
+    return WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(slots or A.Slots()))
 end
 
 function A.GetFirstRunWishlist()
@@ -2495,10 +2497,12 @@ function A.ServerWishlistDeletionSupport()
         reason = "this client build exposes no Wishlist deletion call"}
 end
 
-function A.Wishlist()
+-- `slots` is optional: AssignedWishlist passes the projection it read in the
+-- same call. Every other caller reads the current slots here.
+function A.Wishlist(slots)
     projectionStatus.wishlist.calls = projectionStatus.wishlist.calls + 1
     A._wishlistNote = nil
-    local slots = A.Slots()
+    if slots == nil then slots = A.Slots() end
     if not slots or slots.activeKnown==false then
         local saved = Store and Store.State and Store.State()
         local known = saved and (saved.firstRunWishlist
@@ -2509,7 +2513,7 @@ function A.Wishlist()
     local activeSlot = slots and tonumber(slots.activeSlot) or 0
     local maxSlots = slots and (tonumber(slots.maxSlots) or 5) or 5
     if activeSlot < 1 or activeSlot > maxSlots then
-        local starter = ResolveFirstRunWishlist()
+        local starter = ResolveFirstRunWishlist(slots)
         if starter then
             if WishlistRequiresLockEvidence(starter) then
                 A._wishlistNote = "Wishlist needs locked targets. Open the Wishlist Editor to choose and confirm them."
@@ -2531,7 +2535,7 @@ function A.Wishlist()
         A._wishlistNote = "Choose or create a wishlist to begin your first run."
         return nil
     end
-    local linked = ResolveAssociation(activeSlot)
+    local linked = ResolveAssociation(activeSlot, slots)
     if linked then
         local status, resolvedKey, reason
         linked, status, resolvedKey, reason = ResolveWishlistEvidence(linked, slots)
@@ -2556,7 +2560,7 @@ function A.Wishlist()
     -- publishes a real populated active loadout. This is the only automatic
     -- hand-off; ambiguous stored associations remain unresolved.
     local starter = IsPopulatedLoadout(activeSlot, slots)
-        and ResolveFirstRunWishlist() or nil
+        and ResolveFirstRunWishlist(slots) or nil
     if starter then
         local record = StoredWishlistRecord(starter)
         if record then
@@ -2580,14 +2584,17 @@ function A.WishlistNote() return A._wishlistNote end
 -- Orb controller. Local permanent designs are part of the assigned target,
 -- even when the server stores only the 79 rolled copies. No Orb-only cache
 -- or name match can replace this authority.
+-- The HUD runs this for every preparation. It reads the server slots once and
+-- passes that projection to Wishlist, and reads the character row through the
+-- Store read (Store.State), as Wishlist does: no Store mutation entry, which
+-- would compare the whole row with the read snapshot on every call.
 function A.AssignedWishlist()
     local slots=A.Slots()
-    local _,live=UpdateStoreState(function(row)return row end)
-    local state=type(live)=="table" and live or (Store and Store.State and Store.State() or {})
+    local state=Store and Store.State and Store.State() or {}
     local active=slots and tonumber(slots.activeSlot)
     local saved=active and active>0 and state.loadoutWishlists and state.loadoutWishlists[active]
         or state.firstRunWishlist
-    local w=A.Wishlist()
+    local w=A.Wishlist(slots)
     local result={state="unassigned",activeSlot=active,owner=Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey(),
         note=A.WishlistNote(),name=type(saved)=="table" and saved.name or nil}
     if not slots or slots.activeKnown==false then
@@ -2881,7 +2888,10 @@ end
 -- otherwise never expire).
 local function ReconcileTomePending()
     local st = Store and Store.State()
-    if not st or not st.tomeTogglePending then return end
+    -- Every shaped row has this map, usually empty. With nothing pending the
+    -- update below changes nothing, so the poll does not enter the Store
+    -- mutation entry (a whole-row comparison) five times a second for it.
+    if not st or not st.tomeTogglePending or next(st.tomeTogglePending) == nil then return end
     local cat = A.Catalog()
     local svc = PS()
     if not cat or not svc then return end
