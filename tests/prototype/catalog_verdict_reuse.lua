@@ -19,7 +19,7 @@ local function Record(id,extra)
  return r
 end
 local H,C,ST
-local lastHandle
+local lastHandle,onRows
 local function Boot(count)
  local db={settingsVersion=5,accountCharacters={},settings={},chars={},communityBuilds={}}
  for i=1,count do db.communityBuilds['b-'..i]=Record('b-'..i,{lastModified=i}) end
@@ -31,6 +31,7 @@ local function Boot(count)
  local pump=C.PumpRootAdmission
  C.PumpRootAdmission=function(...)
   if ST.candidate then lastHandle=ST.candidate end
+  if onRows and ST.candidate and ST.candidate.phase=='rows' then local f=onRows;onRows=nil;f() end
   return pump(...)
  end
  for _=1,200 do H.Advance(.05,.05) end
@@ -85,4 +86,17 @@ check(slots==50 and walked==8,'an eight-row batch walks only its eight rows: '..
 walked,slots=Batch(nil,{Record('b-7',{lastModified=500,title='Changed b-7'})})
 check(slots==50 and walked==1,'an update walks only the updated row: '..walked..'/'..slots)
 check(C.Get('b-7') and C.Get('b-7').title=='Changed b-7','the update is published')
+-- 5. A row the previous mutation readmitted (the b-7 update) is walked by
+-- the next one. A verdict walked while the evidence owner failed is not
+-- reusable either: the batch after it walks those rows again.
+local evidence=Nexus.LoadoutEvidence
+local real=evidence.PublicOrdinaryCompleteness
+onRows=function() evidence.PublicOrdinaryCompleteness=function() error('injected evidence failure') end end
+walked,slots=Batch(1)
+evidence.PublicOrdinaryCompleteness=real
+check(slots==51 and walked==2,'the batch after an update walks its own row and the readmitted one: '..walked..'/'..slots)
+walked,slots=Batch(1)
+check(slots==52 and walked==3,'the next batch also walks both rows walked while the owner failed: '..walked..'/'..slots)
+walked,slots=Batch(1)
+check(slots==53 and walked==1,'after that only its own row: '..walked..'/'..slots)
 print('PASS catalog verdict reuse checks='..checks)
