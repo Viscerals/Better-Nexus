@@ -145,17 +145,21 @@ is not known to the addon. Hidden server rules are not recorded.
 
 ### Measured overhead (offline, LuaJIT, not a WoW client)
 
-See `adaptive-policy-010/` receipts for the run. Per decision cycle the recorder
-costs about 0.03 ms of CPU in isolation (`roll_recorder_unit`), and about
-0.05 to 0.09 ms per board inside the full runtime loop, with about 9 KiB of
-allocation per board. `/nexus perf` lists `rolltrace.decision`, `rolltrace.intent`
-and `rolltrace.after`.
+One decision cycle (record, outcome updates, after-observation) costs about
+0.03 ms of CPU in isolation (`roll_recorder_unit`). Inside the full runtime loop
+(poll, step, decision, panel, intent; fake game services) an A/B run with
+recording on and off measured about 0.05 to 0.09 ms per board of added CPU, within
+the noise of the 1 ms clock, and about 9 KiB of added allocation per board. The
+policy decision itself costs about 0.03 ms. The measurement is
+offline on one machine and is not a WoW client figure. `/nexus perf` lists
+`rolltrace.decision`, `rolltrace.intent` and `rolltrace.after` for the live client.
 
 ## Tests
 
 `adaptive_policy_rules` (rules, fallback, purity, safety sweep),
 `adaptive_policy_parity` (750 study-made replay vectors),
-`roll_recorder_unit` (privacy, bounds, flags, failure, linkage, overhead),
+`roll_recorder_unit` (privacy, bounds including the worst-case record, flags, failure,
+linkage, overhead),
 `roll_recorder_runtime` (real runtime, selector at a safe boundary, loading,
 equivalence with the recorder on, off, failing and absent, commands, read-only
 root). Existing tests that asserted the released decision are pinned to

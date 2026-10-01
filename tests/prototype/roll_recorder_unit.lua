@@ -90,6 +90,9 @@ for _,secret in ipairs(SECRETS)do
 end
 -- Flags on offers, and eligibility digits.
 Fresh()
+R.Decision(Ctx({cards={{spellId=1001},{spellId=2001,quality=0},{spellId=1002,quality=2}}}))
+check(Records()[1].of=='1001.-.;2001.0.;1002.2.','an unknown quality is recorded as unknown, not as 0: '..Records()[1].of)
+Fresh()
 local flagged=Ctx({cards={{spellId=1001,quality=1,isGuaranteed=true},{spellId=2001,quality=0,isFrozen=true,banishEligible=false},
  {spellId=1002,quality=2,isCarried=true,justFrozen=true,freezeEligible=false,selectable=false}}})
 R.Decision(flagged)

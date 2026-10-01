@@ -149,7 +149,7 @@ local function OfferText(board)
         if card.banishEligible == false then flags = flags .. "b" end
         if card.freezeEligible == false then flags = flags .. "f" end
         if card.selectable == false then flags = flags .. "u" end
-        parts[i] = Int(card.spellId) .. "." .. Int(card.quality) .. "." .. flags
+        parts[i] = Int(card.spellId) .. "." .. (card.quality == nil and "-" or Int(card.quality)) .. "." .. flags
     end
     return table.concat(parts, ";")
 end
