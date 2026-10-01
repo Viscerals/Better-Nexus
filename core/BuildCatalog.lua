@@ -279,6 +279,7 @@ local ST = {
         cursorRowsInspected=0, maxCursorRowsPerCall=0,
         cursorCopyNodes=0, cursorCopyBytes=0, cursorCopyPending=0,
         maxCursorCopyNodesPerCall=0, maxCursorCopyBytesPerCall=0,
+        rowWalks=0, verdictReuses=0, reuseCompareMismatches=0,
     },
 }
 
@@ -972,15 +973,27 @@ end
 -- Resolve pool-only evidence through the shared evidence owner. The catalog
 -- never touches the evidence store itself; a resolved record is re-proved
 -- under the same semantic envelope as inline evidence.
-local function ResolveEvidence(known, options)
+-- `reads`, when given, receives every pool read and its outcome, which a
+-- later mutation re-runs before it reuses the verdict (Candidate.Reuse.Try).
+-- The second result is true when the pool could not be read reliably (no
+-- evidence owner, or a failing read): such a verdict is never reused.
+local function ResolveEvidence(known, options, reads)
     local evidence = Nexus and Nexus.LoadoutEvidence
-    if not (evidence and type(evidence.Resolve) == "function") then return nil end
+    if not (evidence and type(evidence.Resolve) == "function") then
+        return nil, known.evidenceKey ~= nil or known.lockedEvidenceKey ~= nil
+    end
+    local unstable = false
     local rows = {}
     local candidateOptions = options and options.candidateEvidence
         and {useCandidate=true} or nil
     if type(known.evidenceKey) == "string" and known.evidenceKey ~= "" then
         local ok, resolved = pcall(evidence.Resolve, known.evidenceKey, nil,
             candidateOptions)
+        if not ok then unstable = true end
+        if reads then
+            reads[#reads + 1] = {key=known.evidenceKey, options=candidateOptions,
+                resolved=ok and type(resolved) == "table"}
+        end
         if ok and type(resolved) == "table" then
             for _, row in ipairs(resolved) do
                 rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
@@ -993,6 +1006,11 @@ local function ResolveEvidence(known, options)
         if candidateOptions then lockedOptions.useCandidate = true end
         local ok, resolved = pcall(evidence.Resolve, known.lockedEvidenceKey, nil,
             lockedOptions)
+        if not ok then unstable = true end
+        if reads then
+            reads[#reads + 1] = {key=known.lockedEvidenceKey, options=lockedOptions,
+                resolved=ok and type(resolved) == "table"}
+        end
         if ok and type(resolved) == "table" then
             for _, row in ipairs(resolved) do
                 rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
@@ -1000,7 +1018,7 @@ local function ResolveEvidence(known, options)
             end
         end
     end
-    return #rows > 0 and rows or nil
+    return #rows > 0 and rows or nil, unstable
 end
 
 local function SemanticOf(rows)
@@ -1013,16 +1031,18 @@ local function SemanticOf(rows)
     return {ordinary=ordinary, locked=locked, total=total}
 end
 
+-- The second result is true when the evidence owner was unavailable or
+-- failed: such a verdict is never reused.
 local function Completeness(snapshotLike)
     local evidence = Nexus and Nexus.LoadoutEvidence
     if not (evidence and type(evidence.OrdinaryCompleteness) == "function") then
-        return {complete=false, reason="unavailable", echoCount=0}
+        return {complete=false, reason="unavailable", echoCount=0}, true
     end
     local resolver = type(evidence.PublicOrdinaryCompleteness) == "function"
         and evidence.PublicOrdinaryCompleteness or evidence.OrdinaryCompleteness
     local ok, verdict = pcall(resolver, snapshotLike)
-    if ok and type(verdict) == "table" then return verdict end
-    return {complete=false, reason="malformed", echoCount=0}
+    if ok and type(verdict) == "table" then return verdict, false end
+    return {complete=false, reason="malformed", echoCount=0}, true
 end
 
 -- Derive every authority field from the admitted source. Input claims such as
@@ -1100,8 +1120,13 @@ local function BuildSnapshot(walker, slot, source, options)
     -- resolves independently: an absent inline array is replaced by its own
     -- reference, and the union is re-proved against the semantic envelope.
     local wantsInline, wantsLockedRole = #inline == 0, #lockedArray == 0
+    -- Every evidence-pool read of this walk and its outcome are recorded; a
+    -- later mutation re-runs them before it reuses the verdict.
+    walker.poolReads = walker.poolReads or {}
     if wantsInline or wantsLockedRole then
-        local resolvedRows = ResolveEvidence(known, options)
+        local resolvedRows, unstable = ResolveEvidence(known, options,
+            walker.poolReads)
+        if unstable then walker.poolUnstable = true end
         for _, row in ipairs(resolvedRows or {}) do
             local isLocked = row.origin == "lockedArray"
             if (isLocked and wantsLockedRole) or (not isLocked and wantsInline) then
@@ -1152,11 +1177,21 @@ local function BuildSnapshot(walker, slot, source, options)
     -- The evidence owner classifies completeness from the exact admitted
     -- inline record, including a cross-role row, so its fixed reason is
     -- preserved instead of being reduced to "unavailable".
-    local verdict = Completeness({
+    local verdict, completenessUnstable = Completeness({
         echoes=#inline > 0 and inline or (hadInline and {} or nil),
         fingerprint=snapshot.fingerprint,
         evidenceKey=#inline == 0 and snapshot.evidenceKey or nil,
     })
+    if completenessUnstable then walker.poolUnstable = true end
+    -- With no inline rows, completeness resolves the reference from the
+    -- committed pool (Evidence.OrdinaryCompleteness); "unresolved" is the
+    -- only outcome of a failed read.
+    if #inline == 0 and type(snapshot.evidenceKey) == "string"
+        and snapshot.evidenceKey ~= "" then
+        walker.poolReads[#walker.poolReads + 1] = {key=snapshot.evidenceKey,
+            options=nil, resolved=not (type(verdict) == "table"
+                and verdict.reason == "unresolved")}
+    end
     local complete = type(verdict) == "table" and verdict.complete == true
     local computedFingerprint = OrdinaryFingerprint(ordinary)
     if complete and type(snapshot.fingerprint) == "string"
@@ -2468,7 +2503,8 @@ function Candidate.PumpBundle(handle, work)
 end
 
 function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
-                               existingHandle, bundleOverrides, publishPlan)
+                               existingHandle, bundleOverrides, publishPlan,
+                               verdictReuse)
     local generation, why = Generation.Next(ST, "durableBundleGeneration")
     if not generation then return nil, why end
     local overrides = {}
@@ -2504,6 +2540,13 @@ function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
     handle.sessionTombstones = setmetatable({}, {__mode="k"})
     handle.sessionBarriers = setmetatable({}, {__mode="k"})
     handle.put = nil
+    -- Ordinary Put and PutBatch (never deferred repair, maintenance or a
+    -- removal): capture the final bundle's witness before the row walk, so
+    -- that unchanged rows may reuse the published verdicts (ProcessRows).
+    handle.captureFirst = verdictReuse == true and not deferred
+    handle.earlyWitness, handle.sourceWitness = nil, nil
+    handle.reuseSetup, handle.reuse, handle.reusableKeys = nil, nil, nil
+    handle.rowsOwnerKey = nil
     handle.bundleBuilder = Candidate.NewBundle(ST.db, ST.durableBundle,
         generation, overrides, nil, items)
     handle.sessionCopy = {source=ST.sessionTombstones,
@@ -3405,6 +3448,7 @@ local function AdmitSlot(handle, slot, work)
         slot.admissionOptions = handle.mode == "mutation"
             and {candidateEvidence=true} or {}
         slot.walker = NewWalker(raw, slot.admissionOptions)
+        ST.debugStats.rowWalks = ST.debugStats.rowWalks + 1
         Charge(work, "rows", 1)
     end
     local status = WalkRow(slot.walker, work)
@@ -3413,12 +3457,246 @@ local function AdmitSlot(handle, slot, work)
         slot.admissionOptions or {})
 end
 
+------------------------------------------------------------------------
+-- Row verdict reuse (ordinary Put and PutBatch mutations only).
+--
+-- A verdict published by the previous root P is reused for a row this
+-- mutation does not touch when every input of that verdict is proven
+-- unchanged; anything uncertain is walked in full, as before.
+-- * P was published by a capture-first mutation (reuseBasis): its witness
+--   was captured before its row walk and verified after it, so each of its
+--   verdicts was derived from exactly the witnessed source.
+-- * The mutation-start source verify proved the live bundle equal to P's
+--   witness; this mutation captured its own witness before this walk, and
+--   its final witness-verify covers the walk.
+-- * The row's raw tables are the same identities as in P's verdict, and
+--   their witnessed subtrees are equal in P's witness and this capture.
+-- * Every evidence-pool read of the verdict's walk is re-run and gives the
+--   same outcome. The pool is content-addressed and self-verifying
+--   (Evidence.Resolve accepts an entry only when its canonical fingerprint
+--   is the key), so a read that resolves again yields the same rows; an
+--   entry edited in place no longer resolves and the row is walked.
+-- * No removal or retention marker (session state, owner), and the owner key
+--   equals the one P's walk used. Database, bundle, map, baseline, binding
+--   and evidence revision identities are bound by the token (TokenDrifted at
+--   mutation start and at publication).
+------------------------------------------------------------------------
+
+Candidate.Reuse = {enabled=true}
+
+function Candidate.Reuse.RootNodes(witness)
+    local nodes = {}
+    for _, root in ipairs(type(witness) == "table" and witness.roots or {}) do
+        if type(root) == "table" and type(root.edge) == "table"
+            and root.edge.kind == "table" then
+            nodes[root.name] = root.edge.node
+        end
+    end
+    return nodes
+end
+
+function Candidate.Reuse.Setup(handle)
+    handle.reuseSetup = true
+    handle.reusableKeys = {}
+    handle.rowsOwnerKey = CurrentOwnerKey()
+    local root = handle.originalRoot
+    -- A candidate evidence store that is still being copied answers reads
+    -- from a partial view and advances its copy on every read: no reuse.
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    if not (evidence and type(evidence.CandidateStorePending) == "function")
+        or evidence.CandidateStorePending() then
+        return
+    end
+    if not (Candidate.Reuse.enabled and handle.earlyWitness == true
+        and type(root) == "table" and root.reuseBasis == true
+        and type(root.reusableKeys) == "table" and type(root.rows) == "table"
+        and root.reuseOwnerKey ~= nil and root.reuseOwnerKey == handle.rowsOwnerKey
+        and type(root.token) == "table"
+        and type(root.token.sourceWitness) == "table"
+        and type(handle.sourceWitness) == "table") then
+        return
+    end
+    local touched = {}
+    for _, item in ipairs(handle.items or {}) do
+        if type(item.slot) ~= "table" or item.slot.key == nil then return end
+        touched[item.slot.key] = true
+        for _, write in ipairs(item.writes or {}) do
+            if write.id ~= nil then
+                local typedKey = TypedKey(write.id)
+                if not typedKey then return end
+                touched[typedKey] = true
+            end
+        end
+    end
+    handle.reuse = {root=root, touched=touched,
+        oldWitness=root.token.sourceWitness, newWitness=handle.sourceWitness,
+        oldRoots=Candidate.Reuse.RootNodes(root.token.sourceWitness),
+        newRoots=Candidate.Reuse.RootNodes(handle.sourceWitness)}
+end
+
+-- The witness edges of one raw row in both witnesses, or nil when either is
+-- absent or of another kind.
+function Candidate.Reuse.RowEdges(reuse, rootName, id)
+    local oldRoot, newRoot = reuse.oldRoots[rootName], reuse.newRoots[rootName]
+    local oldRecord = oldRoot and reuse.oldWitness.nodes[oldRoot]
+    local newRecord = newRoot and reuse.newWitness.nodes[newRoot]
+    if type(oldRecord) ~= "table" or type(newRecord) ~= "table" then return nil end
+    return oldRecord.edges[id], newRecord.edges[id]
+end
+
+function Candidate.Reuse.SameEdge(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" then return false end
+    if left.kind ~= right.kind then return false end
+    if left.kind == "table" then return nil end
+    if left.value == right.value then return true end
+    return left.kind == "number" and left.value ~= left.value
+        and right.value ~= right.value
+end
+
+-- A resumable comparison of one row's witnessed subtrees: equal node
+-- identities, counts, metatable edges and every edge. Charged per node and
+-- per edge against the slice allowance.
+function Candidate.Reuse.NewCompare(reuse, slot)
+    local compare = {reuse=reuse, frames={}, oldToNew={}, newToOld={}}
+    for _, pair in ipairs({{"communityBuilds", slot.overlay}, {"bundledBuilds", slot.bundled}}) do
+        local oldEdge, newEdge = Candidate.Reuse.RowEdges(reuse, pair[1], slot.id)
+        if pair[2] == nil then
+            if oldEdge ~= nil or newEdge ~= nil then return nil end
+        else
+            if oldEdge == nil or newEdge == nil then return nil end
+            local same = Candidate.Reuse.SameEdge(oldEdge, newEdge)
+            if same == false then return nil end
+            if same == nil then
+                compare.frames[#compare.frames + 1] = {old=oldEdge.node, new=newEdge.node}
+            end
+        end
+    end
+    return compare
+end
+
+function Candidate.Reuse.PumpCompare(compare, work)
+    local old, new = compare.reuse.oldWitness.nodes, compare.reuse.newWitness.nodes
+    while true do
+        local frame = compare.frames[#compare.frames]
+        if not frame then return "equal" end
+        if Exhausted(work.budget) then return "pending" end
+        if not frame.opened then
+            frame.opened = true
+            local mapped, reverse = compare.oldToNew[frame.old], compare.newToOld[frame.new]
+            if mapped ~= nil or reverse ~= nil then
+                if mapped ~= frame.new or reverse ~= frame.old then return "different" end
+                compare.frames[#compare.frames] = nil
+            else
+                local oldRecord, newRecord = old[frame.old], new[frame.new]
+                if type(oldRecord) ~= "table" or type(newRecord) ~= "table"
+                    or not rawequal(oldRecord.identity, newRecord.identity)
+                    or oldRecord.count ~= newRecord.count then
+                    return "different"
+                end
+                if oldRecord.metatable ~= nil or newRecord.metatable ~= nil then
+                    return "different"
+                end
+                compare.oldToNew[frame.old], compare.newToOld[frame.new] = frame.new, frame.old
+                frame.oldRecord, frame.newRecord = oldRecord, newRecord
+                Charge(work, "nodes", 1)
+            end
+        else
+            local key, oldEdge = next(frame.oldRecord.edges, frame.cursor)
+            if key == nil then
+                compare.frames[#compare.frames] = nil
+            else
+                frame.cursor = key
+                Charge(work, "edges", 1)
+                local same = Candidate.Reuse.SameEdge(oldEdge, frame.newRecord.edges[key])
+                if same == false then return "different" end
+                if same == nil then
+                    compare.frames[#compare.frames + 1] = {
+                        old=oldEdge.node, new=frame.newRecord.edges[key].node}
+                end
+            end
+        end
+    end
+end
+
+-- Re-run the recorded pool reads; true when every outcome is the same.
+function Candidate.Reuse.SameReads(reads, work)
+    if type(reads) ~= "table" then return false end
+    if #reads == 0 then return true end
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    if not (evidence and type(evidence.Resolve) == "function") then return false end
+    for _, read in ipairs(reads) do
+        local ok, resolved = pcall(evidence.Resolve, read.key, nil, read.options)
+        if not ok then return false end
+        local again = type(resolved) == "table"
+        Charge(work, "evidenceRows", again and math.max(1, #resolved) or 1)
+        if again ~= read.resolved then return false end
+    end
+    return true
+end
+
+function Candidate.Reuse.CopyVerdict(verdict)
+    local copy = {}
+    for key, value in pairs(verdict) do copy[key] = value end
+    return copy
+end
+
+-- A reused verdict, "pending", or nil when the row must be walked.
+function Candidate.Reuse.Try(handle, slot, work)
+    local reuse = handle.reuse
+    local compare = slot.reuseCompare
+    if not compare then
+        Charge(work, "nodes", 1)
+        if CurrentOwnerKey() ~= handle.rowsOwnerKey
+            or reuse.touched[slot.key] or not reuse.root.reusableKeys[slot.key]
+            or slot.tombstone ~= nil or slot.barrier ~= nil then
+            return nil
+        end
+        local previous = reuse.root.rows[slot.key]
+        if type(previous) ~= "table" or previous.tombstone ~= nil
+            or previous.barrier ~= nil
+            or not rawequal(previous.overlayRaw, slot.overlay)
+            or not rawequal(previous.bundledRaw, slot.bundled) then
+            return nil
+        end
+        compare = Candidate.Reuse.NewCompare(reuse, slot)
+        if not compare then
+            ST.debugStats.reuseCompareMismatches = ST.debugStats.reuseCompareMismatches + 1
+            return nil
+        end
+        compare.previous = previous
+        slot.reuseCompare = compare
+    end
+    local state = Candidate.Reuse.PumpCompare(compare, work)
+    if state == "pending" then return "pending" end
+    slot.reuseCompare = nil
+    if state == "equal" and not Candidate.Reuse.SameReads(
+        reuse.root.reusableKeys[slot.key], work) then
+        state = "different"
+    end
+    if state ~= "equal" then
+        ST.debugStats.reuseCompareMismatches = ST.debugStats.reuseCompareMismatches + 1
+        return nil
+    end
+    ST.debugStats.verdictReuses = ST.debugStats.verdictReuses + 1
+    return Candidate.Reuse.CopyVerdict(compare.previous)
+end
+
 local function ProcessRows(handle, work)
+    if handle.captureFirst and not handle.reuseSetup then Candidate.Reuse.Setup(handle) end
     while handle.rowIndex <= handle.slotCount do
         if Exhausted(work.budget) then return "pending" end
         local slot = handle.slotVector[handle.rowIndex]
-        local verdict = AdmitSlot(handle, slot, work)
-        if not verdict then return "pending" end
+        local verdict, reused
+        if handle.reuse and slot.walker == nil then
+            verdict = Candidate.Reuse.Try(handle, slot, work)
+            if verdict == "pending" then return "pending" end
+            reused = verdict ~= nil
+        end
+        if not verdict then
+            verdict = AdmitSlot(handle, slot, work)
+            if not verdict then return "pending" end
+        end
+        local walker = slot.walker
         slot.walker = nil
         if slot.barrier ~= nil then
             verdict.barrier = ClassifyBarrier(slot.barrier, slot, work)
@@ -3431,6 +3709,21 @@ local function ProcessRows(handle, work)
             and handle.mutationStates[slot.key] or nil
         if verdict.snapshot and mutationState == "READMITTED" then
             verdict.state = mutationState
+        end
+        -- Reusable by the next ordinary mutation (with the pool reads to
+        -- re-run): reused here, or an admitted verdict of the row walker (an
+        -- invalid row's reason can depend on key order) with a reliable pool
+        -- and no removal or retention marker or readmission state. A row this
+        -- mutation readmits is therefore walked again by the next one.
+        if handle.reusableKeys then
+            if reused then
+                handle.reusableKeys[slot.key] = handle.reuse.root.reusableKeys[slot.key]
+            elseif walker ~= nil and verdict.snapshot ~= nil
+                and not walker.poolUnstable
+                and slot.tombstone == nil and slot.barrier == nil
+                and mutationState == nil then
+                handle.reusableKeys[slot.key] = walker.poolReads or {}
+            end
         end
         handle.verdicts[slot.key] = verdict
         handle.rowIndex = handle.rowIndex + 1
@@ -3756,6 +4049,15 @@ local function PublishRoot(handle)
     end
     handle.token = CaptureToken(db, handle.finalBundle,
         handle.sourceWitness, future, handle.mode == "mutation")
+    -- A capture-first root is a reuse source for the next ordinary mutation,
+    -- bound to the owner its row walk saw (unchanged at publication).
+    local reuseBasis, reusableKeys, reuseOwnerKey = nil, nil, nil
+    if handle.earlyWitness == true and type(handle.reusableKeys) == "table" then
+        reuseBasis, reusableKeys = true, handle.reusableKeys
+        if handle.rowsOwnerKey ~= nil and handle.rowsOwnerKey == CurrentOwnerKey() then
+            reuseOwnerKey = handle.rowsOwnerKey
+        end
+    end
     local catalogRoot = {
         generation=future.generation, token=handle.token, rows=handle.verdicts,
         slots=handle.slots, slotVector=handle.slotVector, slotCount=handle.slotCount,
@@ -3764,6 +4066,7 @@ local function PublishRoot(handle)
         catalogVersion=handle.catalogVersion,
         schemaVersion=handle.metaVersion or STORAGE_SCHEMA_VERSION,
         migrated=handle.needsMigration, redundantRemoved=#handle.prune,
+        reuseBasis=reuseBasis, reusableKeys=reusableKeys, reuseOwnerKey=reuseOwnerKey,
     }
     local durableGeneration = tonumber(handle.finalBundle.transactionGeneration)
         or ST.durableBundleGeneration
@@ -4022,7 +4325,42 @@ local function PumpAdmission(handle)
         else
             local configured, why = Candidate.ConfigureMutationAdmission(handle)
             if not configured then result = AdmissionFail(handle, why)
-            else result = "ok" end
+            else
+                if handle.captureFirst then handle.phase = "mutation-capture" end
+                result = "ok"
+            end
+        end
+    end
+    if handle.phase == "mutation-capture" and result ~= "pending" then
+        -- Ordinary Put and PutBatch capture the final bundle's witness before
+        -- the row walk; the final witness-verify then spans the walk, so every
+        -- verdict this root publishes was derived from the witnessed source.
+        handle.witnessHandle = handle.witnessHandle
+            or Witness.NewCapture(handle.finalBundle)
+        local remaining = {edges=SLICE.edges - work.budget.edges,
+            nodes=SLICE.nodes - work.budget.nodes,
+            bytes=SLICE.bytesInspected - work.budget.bytesInspected}
+        local witnessResult = remaining.edges > 0 and remaining.nodes > 0
+            and remaining.bytes > 0
+            and Witness.Pump(handle.witnessHandle, remaining)
+            or {state="pending", edges=0, nodes=0, bytes=0}
+        if (witnessResult.edges or 0) > 0 then
+            Charge(work, "edges", witnessResult.edges)
+        end
+        if (witnessResult.nodes or 0) > 0 then
+            Charge(work, "nodes", witnessResult.nodes)
+        end
+        if (witnessResult.bytes or 0) > 0 then
+            Charge(work, "bytesInspected", witnessResult.bytes)
+        end
+        if witnessResult.state == "failed" then
+            result = AdmissionFail(handle, witnessResult.reason)
+        elseif witnessResult.state == "complete" then
+            handle.sourceWitness = handle.witnessHandle.witness
+            handle.witnessHandle, handle.earlyWitness = nil, true
+            handle.phase, result = "collect", "ok"
+        else
+            result = "pending"
         end
     end
     if handle.phase == "capture" then
@@ -4581,6 +4919,15 @@ function Catalog.DebugStats()
     stats.retainedRoots = RetainedRootCount()
     stats.cursorFamilyCap = #CURSOR_FAMILIES
     return stats
+end
+
+-- Test and diagnostics switch: false keeps the capture-first route of
+-- ordinary Put and PutBatch but walks every row (the full-rebuild oracle).
+-- Returns the previous setting.
+function Catalog.DebugSetVerdictReuse(enabled)
+    local previous = Candidate.Reuse.enabled
+    Candidate.Reuse.enabled = enabled ~= false
+    return previous
 end
 
 function Catalog.SchemaVersion()
@@ -5158,7 +5505,14 @@ end
 
 function Candidate.BeginAdmissionBundle(handle)
     if handle.mode == "mutation" then
-        handle.phase = "witness-capture"
+        if handle.earlyWitness then
+            -- Captured before the row walk (mutation-capture); verify it now.
+            handle.witnessHandle = Witness.BeginVerify(handle.sourceWitness,
+                handle.finalBundle)
+            handle.phase = "witness-verify"
+        else
+            handle.phase = "witness-capture"
+        end
         return true
     end
     if handle.bundleClass ~= "absent" and not handle.needsMigration then
@@ -5523,7 +5877,8 @@ local function DetachedVerdict(verdict)
 end
 
 local function CommitBatch(root, items, reason, deferred, notifyScope,
-                           existingHandle, bundleOverrides, counterPlan)
+                           existingHandle, bundleOverrides, counterPlan,
+                           verdictReuse)
     local drift = TokenDrifted(root.token)
     if drift then
         EvidenceCancelCandidate()
@@ -5578,7 +5933,8 @@ local function CommitBatch(root, items, reason, deferred, notifyScope,
     end
     Generation.PrepareReceiptRecords(items)
     local handle, handleWhy = Candidate.NewMutation(root, items, reason,
-        deferred, notifyScope, existingHandle, bundleOverrides, publishPlan)
+        deferred, notifyScope, existingHandle, bundleOverrides, publishPlan,
+        verdictReuse)
     if not handle then
         EvidenceCancelCandidate()
         return false, handleWhy
@@ -5596,10 +5952,10 @@ local function CommitBatch(root, items, reason, deferred, notifyScope,
 end
 
 local function CommitSlot(root, slot, verdict, rawWrites, reason, deferred,
-                          receiptRecords)
+                          receiptRecords, verdictReuse)
     return CommitBatch(root, {{slot=slot, verdict=verdict, writes=rawWrites,
         receiptRecords=receiptRecords}},
-        reason, deferred)
+        reason, deferred, nil, nil, nil, nil, verdictReuse)
 end
 
 local function SlotFor(root, id)
@@ -5830,7 +6186,8 @@ function Candidate.PumpPutPreparation(handle, work)
             if not handle.ticket then return "prepared" end
             local claim, storedAs = put.claim, put.storedAs
             local outcome, commitWhy = CommitBatch(put.root, {put.item},
-                "build put", handle.deferred, nil, handle)
+                "build put", handle.deferred, nil, handle, nil, nil,
+                not handle.deferred)
             if type(outcome) ~= "table" then
                 return Candidate.FinishPreparedPutWithoutCommit(handle, false,
                     commitWhy)
@@ -5936,7 +6293,7 @@ local function PutInternal(record, options, claim, deferred)
     end
     local put = handle.put
     local ok, commitWhy = CommitSlot(root, put.item.slot, put.item.verdict,
-        put.item.writes, "build put", deferred)
+        put.item.writes, "build put", deferred, nil, not deferred)
     if type(ok) == "table" and ok.state == "pending" then
         ST.candidate.claim = put.claim
         ST.candidate.completion = "put"
@@ -6021,7 +6378,8 @@ function Candidate.PumpBatchPutPreparation(handle, work)
     end
     if #batch.items == 0 then return "noop" end
     local outcome, commitWhy = CommitBatch(handle.originalRoot, batch.items,
-        "receiver batch", handle.deferred, handle.notifyScope, handle)
+        "receiver batch", handle.deferred, handle.notifyScope, handle, nil, nil,
+        not handle.deferred)
     if type(outcome) ~= "table" then
         return "failed", commitWhy or "ROOT_CONSTRUCTION_FAILED"
     end

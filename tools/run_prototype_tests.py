@@ -130,6 +130,7 @@ NAMES += ['sync_scalar_root_reject','tome_toggle_snapshot_isolation','startup_id
 NAMES += ['orb_live_balance_drift','wishlist_save_slot_safety']
 NAMES += ['wishlist_editor_binding']
 NAMES += ['wishlist_assignment_action_token']
+NAMES += ['catalog_verdict_reuse','catalog_verdict_reuse_differential']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

@@ -141,11 +141,13 @@ check(C.Get(firstId)~=nil and C.Get(secondId)~=nil,'both records survive a reloa
 -- 3. Boundary schedules: a rebind requested in each phase of the Share's
 -- mutation that falls on a frame boundary under single-slice pacing ends with
 -- the record served and no drift invalidation. (The collect, sort, finalize
--- and bundle phases complete inside one frame here.) The put-prepare and
--- rows phases come before the publish plan is computed, so they also pass on
--- the defective code: they are controls. index, witness-capture and
--- witness-verify reproduce the defect there.
-for _,phase in ipairs({'put-prepare','rows','index','witness-capture','witness-verify'})do
+-- and bundle phases complete inside one frame here.) The put-prepare,
+-- mutation-capture and rows phases come before the publish plan is computed,
+-- so they also pass on the defective code: they are controls. index and
+-- witness-verify reproduce the defect there. (An ordinary Put captures its
+-- witness in mutation-capture, before the row walk, since 006; it has no
+-- separate witness-capture phase.)
+for _,phase in ipairs({'put-prepare','mutation-capture','rows','index','witness-verify'})do
  local title='DRIFT-'..phase:upper():gsub('%W','')
  Boot({[102]={name=title,verified=false,echoes=Rows(78,6)}})
  local b=Run(title,phase)

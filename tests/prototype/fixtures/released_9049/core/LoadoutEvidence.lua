@@ -415,12 +415,6 @@ function Evidence.CandidateOpen()
     return candidate ~= nil
 end
 
--- Read-only: an open candidate whose detached store is not complete yet.
--- Candidate-view reads then still copy entries and see a partial view.
-function Evidence.CandidateStorePending()
-    return candidate ~= nil and candidate.store == nil
-end
-
 function Evidence.Init(database)
     candidate = nil
     detachedStore, detachedSource, detachedSourceSet = nil, nil, false

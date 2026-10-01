@@ -19,7 +19,7 @@ logic/OrbPolicy.lua|6535|cca27eff|tree
 logic/Policy.lua|69306|30c74a86|tree
 core/Revisions.lua|2435|0df23a6d|tree
 core/Identity.lua|27428|4979f88c|copy
-core/LoadoutEvidence.lua|48460|fdae8921|tree
+core/LoadoutEvidence.lua|48460|fdae8921|copy
 core/CandidateEvidence.lua|39893|640a6567|copy
 core/DataCompaction.lua|45727|a9070bf9|tree
 core/BuildCatalog.lua|319811|e97ac271|copy
@@ -67,7 +67,7 @@ ui/SupportReport.lua|11984|ecbfbde8|tree
 ui/LayoutMetrics.lua|18032|91443aaa|copy
 ui/Readout.lua|3501|3a97c7b5|copy
 ui/ServerStatus.lua|20384|c0358043|copy
-ui/LoadingStatus.lua|14543|fae34e27|tree
+ui/LoadingStatus.lua|14543|fae34e27|copy
 ui/Panel.lua|93389|79e98674|copy
 ui/JournalTab.lua|72752|933ffa0f|copy
 ui/LogViewer.lua|19992|2951da02|tree
