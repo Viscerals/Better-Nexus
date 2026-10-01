@@ -1214,13 +1214,27 @@ function Controller.New(options)
         return true,nil,fresh
     end
 
-    -- A genuine first run: the server's slot data is known and no Saved
-    -- Build is active yet. Only then may a save without a loadout context
-    -- write the first-run plan and its slot-1 handoff.
-    local function GenuineFirstRun()
+    -- Whether a save without a loadout context belongs to the first-run
+    -- plan: the opened Wishlist is that plan (same assignment identity), or
+    -- the first-run plan is the current target by the Echo Journal's rule
+    -- (no active Saved Build in the declared range, or an empty one; see
+    -- ui/JournalTab.lua). Slot data that is not loaded yet proves neither;
+    -- the second result then says so.
+    local function FirstRunOwnsSave()
+        local context = state.editingContext
+        local root = Store.State and Store.State()
+        local first = type(root) == "table" and root.firstRunWishlist
+        if context and context.assignmentId ~= nil and type(first) == "table"
+            and first.assignmentId == context.assignmentId then
+            return true
+        end
         local slots = Adapter and Adapter.Slots and Adapter.Slots()
-        return type(slots) == "table" and slots.activeKnown ~= false
-            and tonumber(slots.activeSlot) == 0
+        if type(slots) ~= "table" or slots.activeKnown == false then return false, true end
+        local active = tonumber(slots.activeSlot) or 0
+        local maxSlots = tonumber(slots.maxSlots) or 5
+        local row = slots.bySlot and slots.bySlot[active]
+        local populated = row and type(row.echoes) == "table" and #row.echoes > 0
+        return active < 1 or active > maxSlots or not populated
     end
 
     local function TryApply(slot, name, echoes, guard)
@@ -1271,15 +1285,20 @@ function Controller.New(options)
                 if associated then notify("|cff4dff80Nexus:|r assigned '" .. tostring(name)
                     .. "' to " .. tostring(state.createTargetContext.loadoutName
                         or "the active Saved Build") .. ".") end
-            elseif Adapter.SetFirstLoadoutWishlistIdentity and GenuineFirstRun() then
-                associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
             else
-                -- No loadout context and not a first run: an unassigned
-                -- Wishlist, or an active Saved Build this editor did not
-                -- open. The save assigns nothing; it never falls back to
-                -- the slot-1 assignment or the first-run plan.
-                notify("|cffffd200Nexus:|r '" .. tostring(name)
-                    .. "' saved. It is not assigned to a Saved Build; assign it in My Builds if you want.")
+                -- No loadout context. It is the first-run plan's save only
+                -- by FirstRunOwnsSave; otherwise (an unassigned Wishlist while
+                -- a Saved Build is active) it assigns nothing and never falls
+                -- back to slot 1 or to the first-run plan.
+                local firstRun, unloaded = FirstRunOwnsSave()
+                if firstRun and Adapter.SetFirstLoadoutWishlistIdentity then
+                    associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
+                else
+                    notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved. "
+                        .. (unloaded and "Saved Build data is not loaded yet, so it is not assigned."
+                            or "No Saved Build was open in the editor, so it is not assigned.")
+                        .. " To assign it, use the Wishlist selector in My Builds.")
+                end
             end
             if associated ~= true then
                 state.applyRetry = nil

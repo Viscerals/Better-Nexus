@@ -2096,10 +2096,16 @@ function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
     if not record then return false, "invalid wishlist" end
     local mirrored = StoredWishlistRecord(record)
     if not UpdateStoreState(function(state)
+        -- Slot 1 receives the handoff only when it holds no assignment or
+        -- holds the proven handoff of the current first-run plan
+        -- (WishlistRoles.FirstRunHandoff). Another assignment there is never
+        -- replaced; the first-run plan alone is then updated.
+        local handoff = WishlistRoles.FirstRunHandoff(state)
+        local current = type(state.loadoutWishlists) == "table" and state.loadoutWishlists[1] or nil
         WishlistRoles.StampAssignment(state,record)
         mirrored.assignmentId=record.assignmentId
         state.loadoutWishlists = state.loadoutWishlists or {}
-        state.loadoutWishlists[1] = record
+        if current == nil or handoff then state.loadoutWishlists[1] = record end
         state.firstRunWishlist = mirrored
     end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
