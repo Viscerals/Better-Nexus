@@ -976,7 +976,10 @@ function Controller.New(options)
     function M.BeginShow()
         local slots = Adapter and Adapter.Slots and Adapter.Slots()
         local active = slots and tonumber(slots.activeSlot) or 0
-        if active >= 1 and active <= 5 then
+        -- The Saved Builds the server declares (Slots() uses 5 when it
+        -- declares nothing), not a fixed five.
+        local maxSlots = slots and (tonumber(slots.maxSlots) or 5) or 5
+        if active >= 1 and active <= maxSlots then
             local ok, mode = M.SelectLoadout(active)
             return ok, mode, mode == "new"
         end
@@ -1211,6 +1214,15 @@ function Controller.New(options)
         return true,nil,fresh
     end
 
+    -- A genuine first run: the server's slot data is known and no Saved
+    -- Build is active yet. Only then may a save without a loadout context
+    -- write the first-run plan and its slot-1 handoff.
+    local function GenuineFirstRun()
+        local slots = Adapter and Adapter.Slots and Adapter.Slots()
+        return type(slots) == "table" and slots.activeKnown ~= false
+            and tonumber(slots.activeSlot) == 0
+    end
+
     local function TryApply(slot, name, echoes, guard)
         -- An upload may be delayed by the service's spacing guard. The confirmed
         -- draft must still be current BEFORE sending, not merely before opening
@@ -1259,8 +1271,15 @@ function Controller.New(options)
                 if associated then notify("|cff4dff80Nexus:|r assigned '" .. tostring(name)
                     .. "' to " .. tostring(state.createTargetContext.loadoutName
                         or "the active Saved Build") .. ".") end
-            elseif Adapter.SetFirstLoadoutWishlistIdentity then
+            elseif Adapter.SetFirstLoadoutWishlistIdentity and GenuineFirstRun() then
                 associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
+            else
+                -- No loadout context and not a first run: an unassigned
+                -- Wishlist, or an active Saved Build this editor did not
+                -- open. The save assigns nothing; it never falls back to
+                -- the slot-1 assignment or the first-run plan.
+                notify("|cffffd200Nexus:|r '" .. tostring(name)
+                    .. "' saved. It is not assigned to a Saved Build; assign it in My Builds if you want.")
             end
             if associated ~= true then
                 state.applyRetry = nil
