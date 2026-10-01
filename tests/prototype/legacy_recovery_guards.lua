@@ -371,6 +371,7 @@ do
  setmetatable(_G,previous)
  rawset(_G,'WishlistRealizerDB',nil)
  check(out:find('ROLLBACK_INCOMPLETE',1,true) and out:find('nothing is lost',1,true),'double fault: named, and nothing is lost: '..out)
+ check(not out:find('was not changed',1,true),'double fault: the answer does not claim the data was unchanged: '..out)
  local entry=NexusDB[STORE] and NexusDB[STORE].entries[P.Snapshot(S.Legacy()).digest]
  check(entry and F.Serialize(entry.value)==F.Serialize(S.Legacy()),'double fault: the complete copy is kept in the archive')
 end
@@ -398,11 +399,39 @@ do
  local P=S.Seam();local real=P.Offer
  P.Offer=function() error('injected recovery error') end
  local before=Nexus.Errors.SessionCount()
+ local saved=F.Serialize(NexusDB)
  local out=S.Plain(S.Say(H,'legacy'))
  P.Offer=real
  check(out:find('PRESERVATION_FAILED',1,true),'error: the command reports a refusal: '..out)
- check(Nexus.Errors.SessionCount()==before+1 and tostring(Nexus.lastError):find('injected recovery error',1,true),
-  'error: the failure is recorded: '..tostring(Nexus.lastError))
+ check(tostring(Nexus.lastError):find('injected recovery error',1,true),
+  'error: the failure is recorded in session memory: '..tostring(Nexus.lastError))
+ check(Nexus.Errors.SessionCount()==before and F.Serialize(NexusDB)==saved,
+  'error: nothing persistent was written (no error history in the root)')
+end
+
+-- 5g. The read-only check is LIVE: a root that becomes read-only after the
+-- offer (its format marker is edited) is no longer a candidate.
+do
+ local legacy=S.Legacy()
+ local H,code=Offered(legacy)
+ NexusDB.settingsVersion=99
+ local before=F.Serialize(NexusDB)
+ local out=S.Plain(S.Say(H,'legacy keep '..code))
+ check(out:find('No older-data decision is waiting',1,true),'live check: a root that became read-only is not recovered: '..out)
+ check(F.Serialize(NexusDB)==before and WishlistRealizerDB==legacy,'live check: nothing changed')
+end
+
+-- 5h. The entry cap counts every table together, not each table alone.
+do
+ local ok,why,detail
+ -- 60,000 tables of 9 entries: 540,000 entries plus 60,000 table keys exceed
+ -- the cap together, while the data (about 3.8 MB) stays under the 4 MiB bound,
+ -- so only the entry cap can refuse it. No single table is anywhere near it.
+ local many={};for t=1,60000 do local sub={};for i=1,9 do sub[i]=true end many[t]=sub end
+ local snapshot
+ snapshot,why,detail=S.Seam().Snapshot(many)
+ check(snapshot==nil and why=='PRESERVATION_CAPACITY' and tostring(detail):find('more than 524288 entries',1,true),
+  'entry cap: 60,000 small tables exceed the cap together: '..tostring(why)..' '..tostring(detail))
 end
 
 -- 6. A crash image: the process stops after the entry is attached and before

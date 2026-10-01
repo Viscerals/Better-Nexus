@@ -1366,7 +1366,9 @@ function Lifecycle.New(options)
         end
         local ok, result = pcall(coordinator[method], coordinator, ...)
         if not ok or type(result) ~= "table" then
-            RecordError("Store.LegacyRecovery." .. method, ok and "non-table result" or result)
+            -- Session memory only, as for every Store failure: a persistent
+            -- diagnostic write must not touch a root that is waiting on this.
+            RecordStoreError(ok and "non-table result" or result)
             return {state="failed", reason="PRESERVATION_FAILED"}
         end
         return result

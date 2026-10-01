@@ -1202,10 +1202,12 @@ EnsureMainCommands = function()
                 elseif state=="preserved" then
                     Print("Older data preserved separately (code "..tostring(result.code).."). Your current setup is unchanged. Type /reload to start Nexus with it.")
                 else
-                    Print("Older data was not changed: "..tostring(result.reason)..".")
                     if result.reason=="ROLLBACK_INCOMPLETE" then
-                        Print("The older data is safe in the archive, but the older copy could not be put back. Type /reload; nothing is lost.")
-                    elseif result.reason=="INPUT_DRIFT" then
+                        Print("The older data is safe in the archive, but the older copy could not be put back (ROLLBACK_INCOMPLETE). Type /reload; nothing is lost.")
+                    else
+                        Print("Older data was not changed: "..tostring(result.reason)..".")
+                    end
+                    if result.reason=="INPUT_DRIFT" then
                         Print("The saved data changed. Type /reload, then /nexus legacy again.")
                     elseif result.reason=="NO_OFFER" or result.reason=="CODE_MISMATCH" then
                         Print("Type /nexus legacy for the current code.")

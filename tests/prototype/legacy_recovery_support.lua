@@ -3,15 +3,17 @@
 -- boot through format5_support; synthetic data only; no profile is read.
 local F=dofile('tests/prototype/format5_support.lua')
 local S={F=F,STORE='nexusLegacyPreservationV1'}
-local base
--- A committed format-2 current profile (authority bundle present).
-function S.Current()
- if not base then
-  F.Boot(F.Database({version=2}))
-  assert(Nexus.StartupStatus().coreReady,'fixture: the base profile starts')
-  base=F.Serialize(NexusDB)
+local bases={}
+-- A committed current profile (authority bundle present). Format 2 by default;
+-- 3 to 5 are the formats an earlier line wrote and this build reads after a check.
+function S.Current(version)
+ version=version or 2
+ if not bases[version] then
+  F.Boot(F.Database({version=version}))
+  assert(Nexus.StartupStatus().coreReady,'fixture: the base profile of format '..version..' starts')
+  bases[version]=F.Serialize(NexusDB)
  end
- local db=assert(loadstring('return '..base))()
+ local db=assert(loadstring('return '..bases[version]))()
  -- The receipt a reporter's profile retains: completed, decision noLegacy.
  db.nexusStoreMigrations={wishlistRealizerDB={version=1,completed=true,decision='noLegacy'}}
  return db

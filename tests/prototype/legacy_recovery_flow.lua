@@ -15,18 +15,8 @@ local F=dofile('tests/prototype/format5_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local STORE='nexusLegacyPreservationV1'
 
-local base
-do
- F.Boot(F.Database({version=2}))
- check(Nexus.StartupStatus().coreReady,'fixture: the base profile starts')
- base=F.Serialize(NexusDB)
-end
-local function Current()
- local db=assert(loadstring('return '..base))()
- -- The receipt a reporter's profile retains: completed, decision noLegacy.
- db.nexusStoreMigrations={wishlistRealizerDB={version=1,completed=true,decision='noLegacy'}}
- return db
-end
+local S=dofile('tests/prototype/legacy_recovery_support.lua')
+local function Current() return S.Current() end
 local function Legacy()
  return {settingsVersion=1,
   chars={LegacyAlt={loadoutWishlists={[1]={slot=1,name='Old plan',echoes={{spellId=300001,quality=2,stacks=1}}}},note='legacy'}},
@@ -146,5 +136,24 @@ out=Plain(Say(H5,'legacy keep '..restored))
 check(WishlistRealizerDB==nil,'restored legacy: released after the existing entry is verified: '..out)
 local n=0;for _ in pairs(NexusDB[STORE].entries)do n=n+1 end
 check(n==1 and F.Serialize(NexusDB[STORE].entries[keys[1]])==entryBefore,'restored legacy: one entry, not overwritten')
+
+-- 8. The formats an earlier line wrote (3 to 5), read here after a check, are
+-- recovered exactly like format 2: refusal, offer, confirmation, reload.
+for _,format in ipairs({3,4,5}) do
+ local db=S.Current(format)
+ local fixture=Legacy()
+ local H8=Start(db,fixture)
+ local status=Nexus.StartupStatus()
+ check(status.reason=='LEGACY_DISPOSITION_REAUTH_REQUIRED' and status.failure.legacyClass=='FOREIGN_BLOCK'
+  and status.failure.formatClass=='known' and status.failure.formatVersion==format,
+  'format '..format..': refused as a known format: '..tostring(status.reason)..'/'..tostring(status.failure and status.failure.formatClass))
+ local code8=Plain(Say(H8,'legacy')):match('/nexus legacy keep (%x+)')
+ check(code8 and #code8==12,'format '..format..': an offer is made')
+ Say(H8,'legacy keep '..code8)
+ check(WishlistRealizerDB==nil and NexusDB[STORE]~=nil,'format '..format..': recovered')
+ check(NexusDB.settingsVersion==format,'format '..format..': the saved format marker is not changed')
+ F.Boot((assert(loadstring('return '..F.Serialize(NexusDB)))()))
+ check(Nexus.StartupStatus().coreReady and WishlistRealizerDB==nil,'format '..format..': the reload starts with the current setup')
+end
 
 print('PASS legacy_recovery_flow: refusal, read-only offer, bound code, full-value preservation, unchanged authority, offline literal reload round trip (not a native reload), repeated start-up checks='..checks)
