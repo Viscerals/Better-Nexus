@@ -359,4 +359,52 @@ check(Stored(3) and Stored(3).name=='First plan' and Token(3)~=t,'T9: promoted t
 Refused(201172,'T9 stale')
 check(Stored(3).name=='First plan' and Copies(Stored(3),201172)==1,'T9: the promoted assignment is kept')
 closeEditor()
+-- T10. A destination changed while the upload is in flight (after the check
+-- before the upload): each writer's own check inside the mutation keeps the
+-- newer choice; the editor adopts nothing.
+-- T10a: Saved Build 6 given W-Free during the upload.
+one=LoadoutWorld()
+local submit10=H.service.UploadServerBuildSlot
+H.service.UploadServerBuildSlot=function(slot,name,entries)
+ local ok=submit10(slot,name,entries)
+ assert(A.SetLoadoutWishlist(6,107))
+ return ok
+end
+local bound10=BoundToken(6)
+local said10=Heard(function() selected(201173).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup() end)
+H.service.UploadServerBuildSlot=submit10
+check(said10:find('was uploaded, but its assignment',1,true) and not said10:find('assignment failed',1,true),'T10a: the save says the newer choice is kept: '..said10)
+check(Stored(6).name=='W-Free' and Same(Assignment(1),one) and BoundToken(6)==bound10,'T10a: Saved Build 6 keeps W-Free; the editor adopts nothing')
+closeEditor()
+-- T10b: the same first-run plan forgotten and restored (same identity, new
+-- token) during the upload.
+FirstRunWorld()
+local P10=Stored('first')
+local submit10b=H.service.UploadServerBuildSlot
+H.service.UploadServerBuildSlot=function(slot,name,entries)
+ local ok=submit10b(slot,name,entries)
+ assert(A.ForgetWishlistPlan({associationIndex=1}) and A.RestoreForgottenWishlistPlan({}))
+ return ok
+end
+said10=Heard(function() selected(201172).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup() end)
+H.service.UploadServerBuildSlot=submit10b
+check(said10:find('was uploaded, but its assignment',1,true),'T10b: the save says the restored choice is kept: '..said10)
+check(Stored('first').assignmentId==P10.assignmentId and Copies(Stored('first'),201172)==1
+ and Stored(1) and Stored(1).assignmentId==P10.assignmentId,'T10b: the restored first-run plan and its handoff are kept')
+closeEditor()
+
+-- T11. ABA on the first-run plan: Forget and Restore bring back the same
+-- identity while a Saved Build editor is open; its save keeps the plan.
+Boot({maxSlots=6,active=6,slots=Slots6()})
+Assign(6,'W-Six',E6)
+check(A.SetFirstLoadoutWishlistIdentity('Plan P',H.Clone(E1)),'T11 setup: a first-run plan with its slot-1 handoff')
+H.Notify();A.Poll();H.Advance(1)
+local P=Stored('first')
+SlashCmdList.NEXUS('editor')
+check(Ctx().loadoutSlot==6,'T11: Saved Build 6 is open')
+check(A.ForgetWishlistPlan({associationIndex=1}) and not Stored('first'),'T11: Forget removes the handoff and the first-run pointer')
+check(A.RestoreForgottenWishlistPlan({}) and Stored('first') and Stored('first').assignmentId==P.assignmentId,'T11: Restore brings back the same identity')
+Saved(201173,2,'T11 save')
+check(Copies(Stored(6),201173)==2 and Stored('first') and Stored('first').assignmentId==P.assignmentId,'T11: Saved Build 6 saves; the restored first-run plan stays')
+closeEditor()
 print('PASS wishlist assignment action token checks='..checks)
