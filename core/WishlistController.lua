@@ -925,11 +925,13 @@ function Controller.New(options)
             assignmentId=wishlist.assignmentId,
             loadoutSlot = tonumber(loadoutSlot),
             loadoutName = tostring(wishlist.loadoutName or ""),
-            -- What that Saved Build holds now: a save re-records its
-            -- assignment only while this is unchanged.
+            -- What that Saved Build and the first-run plan hold now: a save
+            -- does not undo a choice made after this (see TryApply).
             boundAssignment = tonumber(loadoutSlot) and Adapter
                 and Adapter.LoadoutAssignmentToken
                 and Adapter.LoadoutAssignmentToken(loadoutSlot) or nil,
+            boundFirstRun = tonumber(loadoutSlot) and Adapter
+                and Adapter.FirstRunToken and Adapter.FirstRunToken() or nil,
         }
         M.LoadPendingEchoes(wishlist.echoes or {}, false,wishlist.designTargets)
         return true
@@ -1250,8 +1252,8 @@ function Controller.New(options)
     -- A save stamps a new assignment identity on the plan it updated. The
     -- open editor still holds that same plan, so its binding follows the new
     -- identity (and, for a Saved Build, what it now holds): the next save in
-    -- this session is proven by the unchanged checks. A new plan (no editing
-    -- context) is not bound.
+    -- this session is proven by the unchanged checks. The first-run binding
+    -- stays as it was at open. A new plan (no editing context) is not bound.
     local function RebindAfterSave(assignmentId, key)
         local context = state.editingContext
         if context and assignmentId ~= nil then
@@ -1310,7 +1312,8 @@ function Controller.New(options)
                 associated, associationReason, assignmentId, key =
                     Adapter.UpdateWishlistAssociationAfterSave(
                         context.loadoutSlot, slot, name, recorded, designTargets,
-                        context.boundAssignment)
+                        context.boundAssignment and {assignment=context.boundAssignment,
+                            firstRun=context.boundFirstRun, key=context.key} or nil)
                 if associated then
                     RebindAfterSave(assignmentId, key)
                 elseif associationReason == "assignment_changed" then

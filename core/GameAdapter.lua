@@ -1883,19 +1883,40 @@ function WishlistRoles.FirstRunHandoff(state)
         and handoff.assignmentId == first.assignmentId
 end
 
--- A stored loadout assignment as an editor binds it: its assignment
--- identity; for records saved before identities, its content key or (oldest
--- shapes) its server slot, as ResolveAssociation reads them. "none" when the
--- Saved Build holds no assignment.
+-- A stored assignment as an editor binds it: its assignment identity; for
+-- records saved before identities, its server slot (which ResolveAssociation's
+-- read-time upgrade of the oldest shapes keeps), else its content key. "none"
+-- when nothing is assigned.
 function WishlistRoles.AssignmentToken(saved)
     if saved == nil or saved == false then return "none" end
-    if type(saved) == "number" or type(saved) == "string" then
-        return "slot:" .. tostring(tonumber(saved))
+    if type(saved) == "table" and saved.assignmentId ~= nil then
+        return "id:" .. tostring(saved.assignmentId)
     end
-    if type(saved) ~= "table" then return "invalid" end
-    if saved.assignmentId ~= nil then return "id:" .. tostring(saved.assignmentId) end
-    if type(saved.key) == "string" and saved.key ~= "" then return "key:" .. saved.key end
-    return "slot:" .. tostring(tonumber(saved.slot))
+    local slot
+    if type(saved) == "table" then slot = tonumber(saved.slot) else slot = tonumber(saved) end
+    if slot then return "slot:" .. tostring(slot) end
+    if type(saved) == "table" and type(saved.key) == "string" and saved.key ~= "" then
+        return "key:" .. saved.key
+    end
+    return "invalid"
+end
+
+-- The first-run plan as an editor binds it; false is an explicit Unassign.
+function WishlistRoles.FirstRunToken(first)
+    if first == false then return "unassigned" end
+    return WishlistRoles.AssignmentToken(first)
+end
+
+-- Whether a stored assignment names the server Wishlist an editor saves:
+-- the same name and server slot; without a slot, the same name and the
+-- editor's content key.
+function WishlistRoles.SameServerWishlist(saved, wishlistSlot, name, key)
+    if type(saved) ~= "table" or tostring(saved.name or "") ~= tostring(name or "") then
+        return false
+    end
+    local slot = tonumber(saved.slot)
+    if slot ~= nil then return slot == tonumber(wishlistSlot) end
+    return key ~= nil and saved.key == key
 end
 
 function WishlistRoles.ReplaceFirstRun(state, record)
@@ -2067,6 +2088,14 @@ function A.LoadoutAssignmentToken(loadoutSlot)
         and links[tonumber(loadoutSlot)] or nil)
 end
 
+-- What the first-run plan is now, as an open editor binds it.
+function A.FirstRunToken()
+    local state = Store and Store.State and Store.State()
+    local first = nil
+    if type(state) == "table" then first = state.firstRunWishlist end
+    return WishlistRoles.FirstRunToken(first)
+end
+
 function A.GetLoadoutWishlistSlot(loadoutSlot)
     local c = A.GetLoadoutWishlist(loadoutSlot)
     return c and tonumber(c.slot) or nil
@@ -2165,7 +2194,7 @@ function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
 end
 
 
-function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets, opened)
+function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets, binding)
     loadoutSlot, wishlistSlot = PositiveInteger(loadoutSlot), PositiveInteger(wishlistSlot)
     -- Slot 0 is the first-run context, never a numbered loadout association.
     -- Refuse invalid identifiers before clearing its durable assignment.
@@ -2185,19 +2214,27 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     if not record then return false end
     local changed = false
     if not UpdateStoreState(function(state)
-        -- `opened` is an editor's binding: what this Saved Build held when
-        -- the editor opened or last saved. An assignment changed or removed
-        -- since then is the player's newer choice and is kept.
+        -- `binding` is an open editor's: what this Saved Build held when the
+        -- editor opened or last saved (`assignment`), the first-run plan when
+        -- it opened (`firstRun`) and its content key (`key`). A Saved Build
+        -- given another Wishlist, or unassigned, since then keeps that newer
+        -- choice; given this same server Wishlist again, it receives this
+        -- save. A first-run plan chosen since the editor opened is kept.
         local current = type(state.loadoutWishlists) == "table"
             and state.loadoutWishlists[loadoutSlot] or nil
-        if opened ~= nil and WishlistRoles.AssignmentToken(current) ~= opened then
+        if type(binding) == "table"
+            and WishlistRoles.AssignmentToken(current) ~= binding.assignment
+            and not WishlistRoles.SameServerWishlist(current, wishlistSlot, name, binding.key) then
             changed = true
             return
         end
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
-        state.firstRunWishlist = nil
+        if type(binding) ~= "table"
+            or WishlistRoles.FirstRunToken(state.firstRunWishlist) == binding.firstRun then
+            state.firstRunWishlist = nil
+        end
     end) then return false end
     if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
