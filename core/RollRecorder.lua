@@ -22,9 +22,14 @@ Nexus.RollRecorder = R
 R.SCHEMA = 1
 R.HISTORY = "rollTrace"
 -- Fixed work and size bounds. CAP lives in DiagnosticLogs (the ring owner).
+-- The targets text gets recordBytes minus reserveBytes. Every other text field has
+-- its own cap; their worst case after all later updates is about 990 bytes
+-- (decision-time fields about 360, lifecycle 240, ownership changes about 195,
+-- after offers 54, confirmation basis 73, fate 40, charges 20, survival 12).
 R.LIMITS = {
     targets = 32,        -- exact Wishlist targets kept per decision
     recordBytes = 2048,  -- string bytes of one saved record
+    reserveBytes = 1000, -- worst case of every field except the targets (see below)
     ioBytes = 240,       -- action lifecycle text per decision
     deltaEntries = 16,   -- ownership changes kept per decision
     detailBytes = 48,    -- boundary detail text
@@ -216,7 +221,7 @@ local function TargetText(ctx, ids, count, ordinaryOut)
     local ordinary = owned and owned.bySpell or {}
     local held = locked and locked.bySpell or {}
     local parts, used, kept = {}, 0, 0
-    local budget = R.LIMITS.recordBytes - 700
+    local budget = R.LIMITS.recordBytes - R.LIMITS.reserveBytes
     for i = 1, math.min(count, R.LIMITS.targets) do
         local id = ids[i]
         local own = Int(ordinary[id])
@@ -390,7 +395,7 @@ function R.Intent(id, state, reason, info)
                 if not s then return nil end
                 p = {s = s, n = tonumber(n), run = Session().run}
             else
-                p.lastReason = tostring(reason or "")
+                p.lastReason = Clip(reason, 40)
             end
             info = type(info) == "table" and info or {}
             local text = Clip(tostring(state) .. ":" .. tostring(reason or "") .. "@"

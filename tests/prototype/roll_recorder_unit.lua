@@ -129,6 +129,33 @@ for i,r in ipairs(kept)do
 end
 check(R.Status().retained==#kept and R.Status().cap==256,'status reports retention and cap')
 
+-- Worst case: the longest value in every field, then every later update. The record stays
+-- within its byte bound, and the byte budget of the targets (not only their count) is enforced.
+Fresh()
+local worst=Ctx({targets=40,cards={{spellId=1234567,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false},
+ {spellId=1234568,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false},
+ {spellId=1234569,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false}}})
+worst.plan.requestedCounts={};worst.owned={synced=true,bySpell={}}
+for i=1,40 do worst.plan.requestedCounts[1230000+i]=85;worst.owned.bySpell[1230000+i]=85;worst.catalog.rows[1230000+i]=Row({cap=85,lever=1234567}) end
+worst.action={type='freeze',index=3,spellId=1234569,reasonCode=string.rep('R',120),policyId='adaptive-0-settle-live1',policyProfile='group-protected-neutral-1',policyRequested='released',fallbackReason='SELECTOR_UNKNOWN'}
+worst.charges={banish=100,reroll=100,freeze=100,trustworthy=true}
+worst.state={pending=true,ordinaryBoardAllowed=false,allowBanish=false,allowReroll=false,allowFreeze=false,canFreeze=false,searchRefused={banish=true,reroll=true}}
+id=R.Decision(worst)
+for i=1,40 do R.Intent(id,'uncertain',string.rep('x',90),{elapsed=99999.9,mutation=true}) end
+local grown={synced=true,bySpell={}};for i=1,40 do grown.bySpell[1230000+i]=0 end
+R.After({basis=string.rep('b',90),board=worst.board,owned=grown,charges=worst.charges})
+record=Records()[1]
+local worstBytes=Flat(record)
+check(worstBytes<=2048,'the worst-case record, after every update, stays within 2048 string bytes: '..worstBytes)
+check(record.tn==40 and record.inc and record.inc:find('io',1,true),'the worst case is flagged, not silent')
+-- The byte budget bounds the targets text even under a smaller limit.
+Fresh()
+local saved=R.LIMITS.recordBytes;R.LIMITS.recordBytes=1100
+R.Decision(Ctx({targets=32}))
+record=Records()[1];R.LIMITS.recordBytes=saved
+local entries=0;for _ in record.tg:gmatch('[^;]+')do entries=entries+1 end
+check(#record.tg<=100 and entries<32 and record.inc and record.inc:find('tg',1,true),'the targets text obeys its byte budget: '..#record.tg..' bytes, '..entries..' of 32 entries')
+
 -- 4. Truncation and incompleteness are marked, never silent.
 Fresh()
 R.Decision(Ctx({targets=60}))

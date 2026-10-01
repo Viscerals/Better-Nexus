@@ -154,6 +154,24 @@ end
 a=Decide({cards=Cards({spellId=101,isGuaranteed=true},901,902)})
 W.Decide=realDecide
 check(a.policyId=='released-nexus-1' and a.fallbackReason=='ACTION_INVALID' and a.type~='freeze','a Freeze of a guaranteed offer is refused: '..Line(a)..' '..tostring(a.fallbackReason))
+-- Identity, selectability and the two-held Reroll rule are checked by the final validation too.
+local function Forced(response,cards)
+ local first=true
+ W.Decide=function(input) if first then first=false;return response end;return realDecide(input) end
+ local got=Decide({cards=cards})
+ W.Decide=realDecide
+ return got
+end
+a=Forced({action='SELECT',echoID=999,index=1,reasonCode='SELECT_OUTSTANDING_WISHLIST'},Cards(101,901,902))
+check(a.fallbackReason=='ACTION_INVALID','a Take whose Echo is not the offer at its index is refused: '..tostring(a.fallbackReason))
+a=Forced({action='REROLL',reasonCode='REROLL_COMMON_UNWANTED_BOARD'},Cards({spellId=901,isFrozen=true},{spellId=902,isFrozen=true},903))
+check(a.fallbackReason=='ACTION_INVALID','a Reroll with two held offers is refused: '..tostring(a.fallbackReason))
+a=Forced({action='REROLL',reasonCode='REROLL_COMMON_UNWANTED_BOARD'},Cards(901,902,903))
+check(a.fallbackReason==nil and a.type=='reroll','a valid forced Reroll passes the final validation: '..Line(a))
+local unselectable=P.State({catalog=catalog,plan=base,horizon=50,cards=Cards(101,102,901),charges={trustworthy=true,banish=2,freeze=1,reroll=2},allowBanish=true,allowReroll=true,allowFreeze=true})
+unselectable.board.cards[1].selectable=false
+a=Nexus.Policy.Decide(unselectable)
+check(a.type=='take' and a.spellId==102 and a.policyId==W.POLICY.ADAPTIVE and a.fallbackReason==nil,'an unselectable needed offer is not useful: the adaptive policy itself takes the selectable one, no pair Freeze: '..Line(a)..' '..tostring(a.fallbackReason))
 W.Decide=function(input) calls=calls+1;if calls%2==1 then error('boom') end;return realDecide(input) end
 calls=0
 a=Decide({cards=Cards(101,102,901)})

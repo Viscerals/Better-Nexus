@@ -114,7 +114,20 @@ SlashCmdList.NEXUS('policy released');H.Advance(5)
 check(Nexus.RollingStatusLines()[1]:find('applies at the next safe action boundary',1,true),'the selector waits while the crossed intent is unresolved: '..Nexus.RollingStatusLines()[1])
 check(#H.actions==sent,'and nothing is replayed after the selector change')
 
--- 4. Run boundary and reload linkage.
+-- 4a. A run boundary (the level returning from 80 to 1) ends the open decision and starts a new run id.
+H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5)
+SlashCmdList.NEXUS('auto');H.Advance(1.5)
+local runBefore=Decisions()[1].run
+H.playerLevel=80;H.Advance(1);H.playerLevel=1;H.Advance(2)
+local boundary,fateRun
+for _,r in ipairs(Trace())do
+ if r.k=='B' and r.kind=='run' then boundary=r end
+ if r.fate=='interrupted:run' then fateRun=true end
+end
+check(boundary and boundary.run~=runBefore,'a run boundary is recorded with a new run id')
+check(fateRun,'the open decision of the dead run is marked interrupted')
+
+-- 4. Reload linkage.
 H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5)
 local sessions=0
 for _,r in ipairs(Trace())do if r.k=='B' and r.kind=='session' then sessions=sessions+1 end end
@@ -202,5 +215,18 @@ check(Nexus.MainInternals.SavedFormatClassV1()=='future','the saved root is read
 check(rawget(db,'rollTraceLog')==nil and F.Serialize(db)==before,'no roll record is written into a read-only saved root')
 check(#Nexus.DiagnosticLogs.Snapshot('rollTrace')>=2,'the session still keeps its own record')
 check(Nexus.Store.Settings().rollingPolicy=='adaptive','the read-only session runs the shipped default strategy')
+-- A valid saved choice is honored in a read-only session; an invalid one is not copied; a saved recording-off is honored.
+for _,case in ipairs({{'released','released',true},{'banana','adaptive',true},{'adaptive','adaptive',false}})do
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+ local d2=F.Database({version=6,mutate=function(d)d.settingsVersion=6;d.settings.rollingPolicy=case[1];if not case[3] then d.settings.rollTrace=false end end})
+ local h2=F.Boot(d2,function(h)h.pendingRolls=30 end)
+ check(Nexus.Store.Settings().rollingPolicy==case[2],'read-only root: saved selector '..case[1]..' -> '..tostring(Nexus.Store.Settings().rollingPolicy))
+ check(Nexus.Store.Settings().rollTrace==(case[3] and true or false),'read-only root: saved recording switch '..tostring(case[3]))
+end
+-- A read-only root with a saved recording-off writes and keeps nothing.
+Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+local offDb=F.Database({version=6,mutate=function(d)d.settingsVersion=6;d.settings.rollTrace=false;d.settings.autoPick=true;d.settings.autoFreeze=true end})
+H=F.Boot(offDb,function(h)h.pendingRolls=30 end);Plan();H.Board(TWO);H.Notify();H.Advance(.5);SlashCmdList.NEXUS('auto');H.Advance(1.5)
+check(#Nexus.DiagnosticLogs.Snapshot('rollTrace')==0 and rawget(offDb,'rollTraceLog')==nil,'saved recording-off in a read-only root: nothing is recorded anywhere')
 
 print('PASS roll recorder runtime checks='..checks)
