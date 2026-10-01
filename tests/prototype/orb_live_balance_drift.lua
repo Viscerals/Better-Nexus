@@ -98,8 +98,14 @@ for _,drift in ipairs({2,-1}) do
 end
 
 -- Negative controls: drift after the confirmed spend, then one requirement fails.
--- A. Ownership result missing (unchanged ownership).
-do local H,M,A,O=Live(2);H.Notify();A.Poll();H.Advance(2);Held(H,M,'A no result') end
+-- A. The offer closes and the latch clears, but ownership is unchanged (a
+-- stale or missing result): held by the same-ID gate, without settling.
+-- (Nothing gained yet with the source gone is control C.)
+do
+ local H,M,A,O=Live(2);Deliver(H,A,O,H.Clone(H.granted));H.Advance(2)
+ check(not O.offer and #(H.perks.currentChoice or {})==0 and H.perks.pendingSelectSpellId==nil,'A setup: offer closed, no board, no latch')
+ Held(H,M,'A unchanged ownership')
+end
 -- B. A different Echo is gained than the recorded choice.
 do
  local H,M,A,O,source=Live(2);Deliver(H,A,O,Owned(H,source,410004,3))
@@ -153,5 +159,6 @@ do
  O.charges=O.charges+2;H.Advance(1)
  Deliver(H,A,O,Owned(H,source,410002,2));H.Advance(1)
  Held(H,M,'J spend not confirmed')
+ check(M.Status().reason:find('balance changed unexpectedly',1,true)~=nil,'J: held by the unconfirmed-drift hold: '..tostring(M.Status().reason))
 end
 print('PASS live Orb balance drift after a confirmed spend: exact result settles once, continuation paused, every other hold kept checks='..checks)
