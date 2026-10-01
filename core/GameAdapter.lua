@@ -2878,8 +2878,15 @@ function A.ToggleLever(leverId, wantDisabled)
     if cur == (wantDisabled and true or false) then return false, "already" end
     local ok = SafeCall(svc.ToggleTomeEcho, lv.members[1])
     if ok then
-        pending[leverId] = { t = GetTime(), want = wantDisabled and true or false }
-        UpdateStoreState(function(state) state.tomeTogglePending = pending end)
+        -- `pending` belongs to the read snapshot. The entry is written into
+        -- the owner's own map, so no snapshot table becomes durable state.
+        local entry = { t = GetTime(), want = wantDisabled and true or false }
+        UpdateStoreState(function(state)
+            local durable = type(state.tomeTogglePending) == "table"
+                and state.tomeTogglePending or {}
+            durable[leverId] = entry
+            state.tomeTogglePending = durable
+        end)
         leverProjectionRevision = leverProjectionRevision + 1
         return true
     end
