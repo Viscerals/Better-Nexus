@@ -1215,18 +1215,23 @@ function Controller.New(options)
     end
 
     -- Whether a save without a loadout context belongs to the first-run
-    -- plan: the opened Wishlist is that plan (same assignment identity), or
-    -- the first-run plan is the current target by the Echo Journal's rule
-    -- (no active Saved Build in the declared range, or an empty one; see
-    -- ui/JournalTab.lua). Slot data that is not loaded yet proves neither;
-    -- the second result then says so.
+    -- plan. An opened existing Wishlist does only when it is that plan (same
+    -- assignment identity; the content key when neither has one): saving
+    -- another Wishlist never takes over the first-run target. A new plan
+    -- does when the first-run plan is the current target by the Echo
+    -- Journal's rule (no active Saved Build in the declared range, or an
+    -- empty one; see ui/JournalTab.lua). Slot data that is not loaded yet
+    -- proves neither; the second result then says so.
     local function FirstRunOwnsSave()
         local context = state.editingContext
-        local root = Store.State and Store.State()
-        local first = type(root) == "table" and root.firstRunWishlist
-        if context and context.assignmentId ~= nil and type(first) == "table"
-            and first.assignmentId == context.assignmentId then
-            return true
+        if context then
+            local root = Store.State and Store.State()
+            local first = type(root) == "table" and root.firstRunWishlist
+            if type(first) ~= "table" then return false end
+            if context.assignmentId ~= nil or first.assignmentId ~= nil then
+                return first.assignmentId == context.assignmentId
+            end
+            return context.key ~= nil and first.key == context.key
         end
         local slots = Adapter and Adapter.Slots and Adapter.Slots()
         if type(slots) ~= "table" or slots.activeKnown == false then return false, true end
@@ -1287,12 +1292,14 @@ function Controller.New(options)
                         or "the active Saved Build") .. ".") end
             else
                 -- No loadout context. It is the first-run plan's save only
-                -- by FirstRunOwnsSave; otherwise (an unassigned Wishlist while
-                -- a Saved Build is active) it assigns nothing and never falls
-                -- back to slot 1 or to the first-run plan.
+                -- by FirstRunOwnsSave; otherwise (another existing Wishlist,
+                -- or a new plan while a Saved Build is active) it assigns
+                -- nothing and never falls back to slot 1 or the first-run plan.
                 local firstRun, unloaded = FirstRunOwnsSave()
                 if firstRun and Adapter.SetFirstLoadoutWishlistIdentity then
                     associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
+                    if associated then notify("|cff4dff80Nexus:|r '" .. tostring(name)
+                        .. "' is the first-run Wishlist target (used until a Saved Build with Echoes is active).") end
                 else
                     notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved. "
                         .. (unloaded and "Saved Build data is not loaded yet, so it is not assigned."

@@ -7,10 +7,11 @@
 -- Required: opening selects the active Saved Build the server declares;
 -- saving changes only the edited Wishlist's own assignment; slot 1 is never
 -- replaced unless it holds nothing or the proven first-run handoff; an
--- unassigned Wishlist saved while a Saved Build is active assigns nothing;
--- the first-run plan is the target exactly when the Echo Journal shows it
--- (no active Saved Build in the declared range, or an empty one) or when the
--- opened Wishlist is that plan; unknown slot data assigns nothing.
+-- saving another existing Wishlist assigns nothing, in every state; a new
+-- plan becomes the first-run target exactly when the Echo Journal shows the
+-- first-run plan (no active Saved Build in the declared range, or an empty
+-- one); an edit of the first-run plan itself (same identity) updates it;
+-- unknown slot data assigns nothing.
 -- Synthetic server and mirrors only; real editor, controller and adapter.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local H,A
@@ -190,6 +191,7 @@ SlashCmdList.NEXUS('editor');NexusWishlistEditorSwitchButton:Click();menuRow('W-
 H.perks.serverActiveSlot=0;H.Notify();A.Poll();H.Advance(1)
 n,last=SaveEdit(201174);Mirror(107,'W-Free',last[4])
 check(Same(Assignment(1),one),'3c: slot 1 keeps W-One')
+check(not FirstRun(),'3c: saving the unassigned W-Free does not make it the first-run target')
 -- 3d. An empty active Saved Build in range: New Wishlist sets the first-run
 -- plan, which the Journal and the HUD use for that slot; slot 1 (empty) gets
 -- the handoff because it held nothing.
@@ -241,4 +243,41 @@ local rows=H.Clone(H.perks.serverBuildSlots);rows[1]={name='One',verified=true,e
 H.perks.serverBuildSlots=rows;H.perks.serverActiveSlot=1;H.Notify();A.Poll();H.Advance(1)
 n,last=SaveEdit(201172);Mirror(last[2],last[3],last[4])
 check(FirstRun().key~=before5.key and Same(Assignment(1),FirstRun()),'M1-E: the opened first-run plan and its handoff receive the edit')
+closeEditor()
+-- 5. In first-run states, saving another existing Wishlist assigns nothing
+-- (review probes P1-P3).
+-- P1: after an explicit Unassign of the first-run plan, an edit of that
+-- Wishlist does not restore the assignment.
+Boot({maxSlots=6,active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
+SlashCmdList.NEXUS('editor')
+local cp,lp=CreatePlan('First plan',201172);check(cp==1,'P1 setup: created');Mirror(lp[2],lp[3],lp[4])
+check(FirstRun() and FirstRun().name=='First plan','P1 setup: first-run plan')
+closeEditor()
+check(A.ClearFirstRunWishlist(),'P1 setup: explicit Unassign')
+local slot1=Assignment(1)
+SlashCmdList.NEXUS('editor');NexusWishlistEditorSwitchButton:Click();menuRow('First plan'):Click()
+check(Ctx().name=='First plan','P1: the unassigned former plan is open')
+n,last=SaveEdit(201172);Mirror(last[2],last[3],last[4])
+check(not FirstRun() and Same(Assignment(1),slot1),'P1: the edit does not undo the Unassign')
+closeEditor()
+-- P2: the first-run plan and its handoff exist; an edit of the unassigned
+-- W-Free does not take over the first-run target or the handoff.
+Boot({maxSlots=6,active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
+SlashCmdList.NEXUS('editor')
+cp,lp=CreatePlan('First plan',201172);Mirror(lp[2],lp[3],lp[4]);closeEditor()
+local firstBefore,handoffBefore=FirstRun(),Assignment(1)
+check(firstBefore and Same(handoffBefore,firstBefore),'P2 setup: first-run plan with its proven handoff')
+SlashCmdList.NEXUS('editor');NexusWishlistEditorSwitchButton:Click();menuRow('W-Free'):Click()
+check(Ctx().name=='W-Free','P2: W-Free is open')
+n,last=SaveEdit(201174);Mirror(107,'W-Free',last[4])
+check(Same(FirstRun(),firstBefore) and Same(Assignment(1),handoffBefore),'P2: the first-run plan and its handoff are unchanged')
+closeEditor()
+-- P3: Saved Build 1 populated but unassigned, no active slot: an edit of
+-- W-Free assigns nothing to slot 1.
+Boot({maxSlots=5,active=0,slots={[1]={name='One',verified=true,echoes=E1},[107]={name='W-Free',verified=false,echoes=EF}}})
+SlashCmdList.NEXUS('editor');NexusWishlistEditorSwitchButton:Click();menuRow('W-Free'):Click()
+n,last=SaveEdit(201174);Mirror(107,'W-Free',last[4])
+check(Assignment(1)==nil and not FirstRun(),'P3: no assignment for slot 1 and no first-run target')
+H.perks.serverActiveSlot=1;H.Notify();A.Poll();H.Advance(1)
+check(Assignment(1)==nil,'P3: still none after Saved Build 1 becomes active')
 print('PASS wishlist save slot safety checks='..checks)
