@@ -3,9 +3,11 @@
 -- editor kept the old one, so the second save of an existing first-run plan
 -- in one session was no longer proven to be that plan's and its assignment
 -- update was lost. Required: the editor's proven binding follows its own
--- successful save (the identity checks are unchanged); an explicit Unassign
--- or reassignment made while the editor is open stays authoritative, for the
--- first-run plan and for numbered Saved Builds alike. Each row checks the
+-- successful save (the identity checks are unchanged); an explicit Assign,
+-- Unassign or Restore made while the editor is open -- also of the same plan
+-- -- stays authoritative, for the first-run plan and for numbered Saved
+-- Builds alike: the stale save uploads nothing, keeps that choice, says so
+-- and keeps the edits in the editor (005-CORRECTION-02). Each row checks the
 -- uploaded contents and the stored first-run/slot assignment contents.
 -- Synthetic server and mirrors only; real editor buttons, controller and
 -- adapter.
@@ -118,6 +120,35 @@ local function Saved(id,copies,label)
  check(Sent(last,id)==copies,label..': the upload holds '..copies..' copies')
  return last
 end
+-- Chat notices printed while fn runs.
+local function Heard(fn)
+ local heard,realPrint={},print
+ print=function(...) heard[#heard+1]=tostring((...));realPrint(...) end
+ local ok,err=pcall(fn)
+ print=realPrint
+ assert(ok,err)
+ return table.concat(heard,' / ')
+end
+-- Press Save in an editor whose destination was assigned, unassigned or
+-- restored meanwhile: nothing is uploaded or assigned, the notice says why,
+-- and the edits stay in the editor.
+-- Copies of one Echo in the editor's draft (its own controller).
+local function DraftCopies(id)
+ local show=Nexus.WishlistEditor.Show
+ for i=1,255 do local n,v=debug.getupvalue(show,i);if not n then break end
+  if n=='wishlistController' then return Copies({echoes=v.CanonicalEchoes()},id) end end
+ error('editor controller not found')
+end
+local function Refused(id,label)
+ local before,pending=Uploads(),DraftCopies(id)
+ local said=Heard(function() selected(id).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup() end)
+ check(Uploads()==before,label..': nothing is uploaded')
+ check(said:find('Not saved:',1,true) and said:find('that choice is kept',1,true)
+  and not said:find('assignment failed',1,true),label..': the notice says why: '..said)
+ check(DraftCopies(id)==pending+1 and not Nexus.WishlistEditor.IsApplyPending(),
+  label..': the edits stay in the editor; nothing is pending')
+ return said
+end
 -- An existing first-run plan, open in the editor (no active Saved Build).
 local function FirstRunWorld(slots)
  Boot({maxSlots=6,active=0,slots=slots or {[107]={name='W-Free',verified=false,echoes=EF}}})
@@ -197,9 +228,9 @@ closeEditor()
 FirstRunWorld()
 Saved(201172,2,'F6 first');FirstRunIs(2,'F6 first')
 check(A.ClearFirstRunWishlist(),'F6: explicit Unassign')
-Saved(201172,3,'F6 stale')
+Refused(201172,'F6 stale')
 check(Stored('first')==false and Stored(1)==nil,'F6: the stale save does not undo the Unassign')
-Saved(201172,4,'F6 stale again')
+Refused(201172,'F6 stale again')
 check(Stored('first')==false and Stored(1)==nil,'F6: nor does a later save')
 closeEditor();SlashCmdList.NEXUS('editor')
 check(Ctx().name==nil,'F6: reopening opens a new draft, not the unassigned plan')
@@ -212,7 +243,7 @@ Saved(201172,2,'F7 first')
 check(A.SetFirstRunWishlist(107),'F7: W-Free selected as the first-run plan')
 local free,handoff=Assignment(1),Stored('first')
 check(handoff.name=='W-Free' and free and free.name=='W-Free','F7 setup: W-Free with its handoff')
-Saved(201172,3,'F7 stale')
+Refused(201172,'F7 stale')
 check(Stored('first').name=='W-Free' and Copies(Stored('first'),201174)==1 and Same(Assignment(1),free),
  'F7: the stale save leaves the selected W-Free and its handoff')
 closeEditor()
@@ -223,7 +254,7 @@ check(Stored(1) and Stored(1).name=='First plan','F8 setup: the empty slot 1 hol
 Saved(201172,2,'F8 first');FirstRunIs(2,'F8 first')
 check(A.SetLoadoutWishlist(1,107),'F8: Saved Build 1 explicitly given W-Free')
 local one=Assignment(1)
-Saved(201172,3,'F8 stale')
+Refused(201172,'F8 stale')
 check(Same(Assignment(1),one) and Copies(Stored(1),201174)==1 and not Stored('first'),
  'F8: slot 1 keeps W-Free; the stale save restores no first-run plan')
 closeEditor()
@@ -266,26 +297,20 @@ end
 -- L2. Saved Build 6 given W-Free in the Journal while W-Six is open.
 check(A.SetLoadoutWishlist(6,107),'L2: Saved Build 6 explicitly given W-Free')
 local six=Assignment(6)
-local heard,realPrint={},print
-print=function(...) heard[#heard+1]=table.concat({tostring((...))},' ');realPrint(...) end
-local last=Saved(201173,5,'L2 stale')
-print=realPrint
-local said=table.concat(heard,' / ')
-check(said:find('that choice is kept',1,true) and not said:find('assignment failed',1,true),'L2: the save reports success and keeps the newer choice: '..said)
-check(last[2]==106,'L2: the stale save still updates the W-Six server Wishlist')
+Refused(201173,'L2 stale')
 check(Same(Assignment(6),six) and Copies(Stored(6),201174)==1,'L2: Saved Build 6 keeps W-Free')
 check(Same(Assignment(1),one) and not Stored('first'),'L2: slot 1 and the first-run plan unchanged')
 -- L3. Reopening shows the newer choice; its saves update it.
 closeEditor();SlashCmdList.NEXUS('editor')
 check(Ctx().loadoutSlot==6 and Ctx().name=='W-Free' and Bound(6),'L3: reopening opens W-Free for Saved Build 6')
-last=Saved(201174,2,'L3')
+local last=Saved(201174,2,'L3')
 check(last[2]==107 and Copies(Stored(6),201174)==2 and Bound(6),'L3: Saved Build 6 holds the saved W-Free')
 Saved(201174,3,'L3 again');check(Copies(Stored(6),201174)==3,'L3: and the next save in the session')
 closeEditor()
 -- L4. Saved Build 6 unassigned while W-Six is open.
 one=LoadoutWorld()
 check(A.ClearLoadoutWishlist(6),'L4: explicit Unassign of Saved Build 6')
-Saved(201173,2,'L4 stale')
+Refused(201173,'L4 stale')
 check(Stored(6)==nil and Same(Assignment(1),one) and not Stored('first'),'L4: the stale save does not undo the Unassign')
 closeEditor()
 -- L5. A failed save keeps the binding; the next save updates slot 6.
@@ -320,7 +345,7 @@ closeEditor()
 one=LoadoutWorld();closeEditor()
 check(Nexus.WishlistEditor.OpenForWishlist(Candidate(107),6),'L8: W-Free opened for Saved Build 6')
 check(A.ClearLoadoutWishlist(6),'L8: explicit Unassign of Saved Build 6')
-Saved(201174,2,'L8 stale')
+Refused(201174,'L8 stale')
 check(Stored(6)==nil and Same(Assignment(1),one),'L8: the stale save does not assign W-Free')
 closeEditor()
 -- L8b. Opened for an unassigned Saved Build 6: the first save assigns it;
@@ -331,18 +356,9 @@ check(Nexus.WishlistEditor.OpenForWishlist(Candidate(107),6),'L8b: W-Free opened
 Saved(201174,2,'L8b first')
 check(Stored(6) and Stored(6).name=='W-Free' and Copies(Stored(6),201174)==2,'L8b: the first save assigns W-Free')
 check(A.ClearLoadoutWishlist(6),'L8b: explicit Unassign after that save')
-Saved(201174,3,'L8b stale')
+Refused(201174,'L8b stale')
 check(Stored(6)==nil and Same(Assignment(1),one),'L8b: the next save keeps the Unassign')
 closeEditor()
--- Chat notices printed while fn runs.
-local function Heard(fn)
- local heard,realPrint={},print
- print=function(...) heard[#heard+1]=tostring((...));realPrint(...) end
- local ok,err=pcall(fn)
- print=realPrint
- assert(ok,err)
- return table.concat(heard,' / ')
-end
 -- L9. The oldest assignment shapes (a bare server slot; a record without a
 -- key) are re-recorded by a save, with no false "choice is kept" notice.
 for _,shape in ipairs({'bare slot','record without key'}) do
@@ -361,25 +377,26 @@ for _,shape in ipairs({'bare slot','record without key'}) do
  closeEditor()
 end
 -- L10. The same W-Six chosen again for Saved Build 6 while it is open
--- (directly, or after an Unassign): that choice receives the save and the
--- plan stays editable.
+-- (directly, or after an Unassign) is an explicit choice: the stale save is
+-- refused, the chosen assignment stays resolvable, and the reopened editor
+-- saves it.
 for _,variant in ipairs({'re-pick','Unassign then re-pick'}) do
  one=LoadoutWorld()
  Saved(201173,2,'L10 '..variant..' first')
  if variant=='Unassign then re-pick' then check(A.ClearLoadoutWishlist(6),'L10: Unassign') end
  check(A.SetLoadoutWishlist(6,106),'L10 '..variant..': W-Six chosen again')
- local said=Heard(function() Saved(201173,3,'L10 '..variant) end)
- check(not said:find('that choice is kept',1,true),'L10 '..variant..': no false notice')
- check(Stored(6).name=='W-Six' and Copies(Stored(6),201173)==3 and Bound(6) and Same(Assignment(1),one),'L10 '..variant..': Saved Build 6 holds the saved W-Six')
+ local repicked=Assignment(6)
+ Refused(201173,'L10 '..variant)
+ check(Same(Assignment(6),repicked) and Copies(Stored(6),201173)==2 and Same(Assignment(1),one),'L10 '..variant..': Saved Build 6 keeps the chosen W-Six')
  local linked=A.GetLoadoutWishlist(6)
  check(linked and linked.slot==106 and not linked.mirrorUnavailable,'L10 '..variant..': the assignment still resolves to its server Wishlist')
  closeEditor();SlashCmdList.NEXUS('editor')
- Saved(201173,4,'L10 '..variant..' reopened')
- check(Copies(Stored(6),201173)==4,'L10 '..variant..': the reopened plan saves')
+ Saved(201173,3,'L10 '..variant..' reopened')
+ check(Copies(Stored(6),201173)==3 and Bound(6),'L10 '..variant..': the reopened plan saves')
  closeEditor()
 end
 -- L11. A save held by the spacing guard; Saved Build 6 is given W-Free
--- before the retry: the retry uploads, W-Free is kept, the save succeeds.
+-- before the retry: the retry uploads nothing and W-Free is kept.
 one=LoadoutWorld()
 Saved(201173,2,'L11 first')
 selected(201173).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup()
@@ -389,9 +406,8 @@ check(Uploads()==u1 and Nexus.WishlistEditor.IsApplyPending(),'L11: the next sav
 check(A.SetLoadoutWishlist(6,107),'L11: Saved Build 6 given W-Free')
 six=Assignment(6)
 local said=Heard(function() H.Advance(4) end)
-local u2,l2=Uploads()
-check(u2==u1+1 and l2[2]==106 and Sent(l2,201173)==4,'L11: the retry uploads W-Six')
-check(said:find('that choice is kept',1,true) and not said:find('assignment failed',1,true) and not Nexus.WishlistEditor.IsApplyPending(),'L11: the retried save succeeds and says so')
+check(Uploads()==u1 and not Nexus.WishlistEditor.IsApplyPending(),'L11: the held save is not uploaded; nothing stays pending')
+check(said:find('Not saved:',1,true) and not said:find('assignment failed',1,true),'L11: the notice says why: '..said)
 check(Same(Assignment(6),six) and Same(Assignment(1),one),'L11: Saved Build 6 keeps W-Free; slot 1 unchanged')
 closeEditor()
 -- L12. A first-run plan chosen while a Saved Build editor is open (the
@@ -415,18 +431,18 @@ Saved(201173,2,'L12 control')
 check(Stored('first')==nil and Copies(Stored(6),201173)==2,'L12 control: the earlier first-run plan is ended, as before')
 closeEditor()
 -- L13. The same W-Six chosen again while a save waits for the spacing
--- guard and before the server shows the previous save: the retried save
--- is received.
+-- guard (before the server shows the previous save): the held save is
+-- refused and the chosen W-Six kept.
 one=LoadoutWorld()
 selected(201173).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup()
 local u3=Uploads()
 selected(201173).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup()
 check(Uploads()==u3 and Nexus.WishlistEditor.IsApplyPending(),'L13: the next save waits for the spacing guard')
 check(A.SetLoadoutWishlist(6,106) and Copies(Stored(6),201173)==1,'L13: W-Six chosen again with the contents the server still shows')
+local repicked13=Assignment(6)
 said=Heard(function() H.Advance(4) end)
-local u4,l4=Uploads()
-check(u4==u3+1 and Sent(l4,201173)==3 and not said:find('that choice is kept',1,true),'L13: the retry uploads with no notice')
-check(Stored(6).name=='W-Six' and Copies(Stored(6),201173)==3 and Same(Assignment(1),one),'L13: Saved Build 6 receives the retried save')
+check(Uploads()==u3 and said:find('Not saved:',1,true) and not Nexus.WishlistEditor.IsApplyPending(),'L13: the held save is refused')
+check(Same(Assignment(6),repicked13) and Same(Assignment(1),one),'L13: Saved Build 6 keeps the chosen W-Six')
 closeEditor()
 -- L14. After an Unassign, the player restores an older retained version of
 -- W-Six (same name and server slot, other contents): a stale save keeps it.
@@ -437,8 +453,8 @@ check(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(s)
  local e={record=H.Clone(older),loadoutSlot=6,source='unassign'};s.forgottenWishlists={e};s.forgottenWishlist=e end),'L14 setup: an older retained version')
 check(A.ClearLoadoutWishlist(6),'L14: explicit Unassign')
 check(A.RestoreForgottenWishlistPlan({key='201173:5'}) and Stored(6) and Stored(6).key=='201173:5','L14: the older version restored to Saved Build 6')
-said=Heard(function() Saved(201173,3,'L14 stale') end)
-check(said:find('that choice is kept',1,true) and Stored(6).key=='201173:5' and Stored(6).assignmentId=='assigned:90','L14: the stale save keeps the restored version')
+Refused(201173,'L14 stale')
+check(Stored(6).key=='201173:5' and Stored(6).assignmentId=='assigned:90','L14: the stale save keeps the restored version')
 check(Same(Assignment(1),one),'L14: slot 1 unchanged')
 closeEditor()
 -- L15. A different server Wishlist with the same name (server slot 109)
@@ -449,7 +465,7 @@ Assign(1,'W-One',E1);Assign(6,'W-Six',E6);H.Notify();A.Poll();H.Advance(1)
 SlashCmdList.NEXUS('editor')
 check(Ctx().name=='W-Six' and Ctx().slot==106,'L15: W-Six (server slot 106) is open')
 check(A.SetLoadoutWishlist(6,109),'L15: the other W-Six (server slot 109) given to Saved Build 6')
-said=Heard(function() Saved(201173,2,'L15 stale') end)
-check(said:find('that choice is kept',1,true) and Stored(6).slot==109,'L15: the stale save keeps the other W-Six')
+Refused(201173,'L15 stale')
+check(Stored(6).slot==109,'L15: the stale save keeps the other W-Six')
 closeEditor()
 print('PASS wishlist editor binding checks='..checks)

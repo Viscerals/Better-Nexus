@@ -1907,19 +1907,85 @@ function WishlistRoles.FirstRunToken(first)
     return WishlistRoles.AssignmentToken(first)
 end
 
--- Whether a stored assignment names the server Wishlist an editor saves,
--- with contents that editor held (opened or uploaded in its session): the
--- same name, the same server slot when one is recorded, and a held content
--- key. An older version the player restored is not one of them.
-function WishlistRoles.SameServerWishlist(saved, wishlistSlot, name, held, key)
-    if type(saved) ~= "table" or saved.key == nil
-        or tostring(saved.name or "") ~= tostring(name or "") then
-        return false
+-- Assignment action tokens: one opaque token per assignment destination (a
+-- numbered Saved Build index, or "first" for the first-run plan), separate
+-- from plan identity and contents. Every write to a destination replaces its
+-- token: each explicit Assign, Unassign (also of an empty destination),
+-- Restore and Forget, a re-pick of the same plan, the automatic promotion,
+-- and an editor's own save. An editor binds a snapshot when it opens; its
+-- save writes a destination only while that destination's token is still the
+-- bound one, and adopts only the tokens that save installed. Session memory
+-- only: an editor does not survive a reload, so nothing is persisted and no
+-- token comes back from retained data. Bound to the owner and database
+-- identity; a change of either starts a new epoch with fresh tokens.
+local assignmentActions = {epoch = 0, serial = 0, tokens = {}}
+
+local function AssignmentActions()
+    local actions = assignmentActions
+    local owner = Store and type(Store.CurrentOwnerKey) == "function"
+        and Store.CurrentOwnerKey() or nil
+    if actions.epoch == 0 or actions.owner ~= owner or actions.db ~= NexusDB then
+        actions.epoch = actions.epoch + 1
+        actions.owner, actions.db = owner, NexusDB
+        actions.tokens = {}
     end
-    local slot = tonumber(saved.slot)
-    if slot ~= nil and slot ~= tonumber(wishlistSlot) then return false end
-    if type(held) == "table" then return held[saved.key] == true end
-    return saved.key == key
+    return actions
+end
+
+local function ActionDestination(destination)
+    if destination == "first" then return "first" end
+    return tonumber(destination)
+end
+
+function WishlistRoles.ActionToken(destination)
+    local actions = AssignmentActions()
+    local key = ActionDestination(destination)
+    if key == nil then return nil end
+    return actions.tokens[key] or ("e" .. actions.epoch .. ":0")
+end
+
+-- Whether a bound snapshot still holds this destination's current token.
+function WishlistRoles.ActionUnchanged(bound, destination)
+    local key = ActionDestination(destination)
+    if type(bound) ~= "table" or key == nil then return false end
+    local token = type(bound.tokens) == "table" and bound.tokens[key]
+        or ("e" .. tostring(bound.epoch) .. ":0")
+    return token == WishlistRoles.ActionToken(destination)
+end
+
+-- Inside a write: may it write `destination`? Without a bound snapshot (an
+-- explicit action) yes; for an editor save only while the token is unchanged.
+function WishlistRoles.MayWrite(bound, destination)
+    return bound == nil or WishlistRoles.ActionUnchanged(bound, destination)
+end
+
+-- Inside a write that wrote `destination`: replace its token and record the
+-- new one in `installed` (the result an editor's save returns).
+function WishlistRoles.Wrote(installed, destination)
+    local key = ActionDestination(destination)
+    if key == nil then return nil end
+    local actions = AssignmentActions()
+    actions.serial = actions.serial + 1
+    local token = "e" .. actions.epoch .. ":" .. actions.serial
+    actions.tokens[key] = token
+    if installed then installed[key] = token end
+    return token
+end
+
+-- A bounded copy of every destination's current token, for an editor to bind.
+function A.AssignmentActionSnapshot()
+    local actions = AssignmentActions()
+    local tokens = {}
+    for key, token in pairs(actions.tokens) do tokens[key] = token end
+    return {epoch = actions.epoch, tokens = tokens}
+end
+
+function A.AssignmentActionToken(destination)
+    return WishlistRoles.ActionToken(destination)
+end
+
+function A.AssignmentActionUnchanged(bound, destination)
+    return WishlistRoles.ActionUnchanged(bound, destination)
 end
 
 function WishlistRoles.ReplaceFirstRun(state, record)
@@ -1928,7 +1994,11 @@ function WishlistRoles.ReplaceFirstRun(state, record)
     local handoff = WishlistRoles.FirstRunHandoff(state)
     WishlistRoles.StampAssignment(state,record)
     state.firstRunWishlist = record
-    if handoff then state.loadoutWishlists[1] = WishlistRoles.CopyDesign(record) end
+    WishlistRoles.Wrote(nil, "first")
+    if handoff then
+        state.loadoutWishlists[1] = WishlistRoles.CopyDesign(record)
+        WishlistRoles.Wrote(nil, 1)
+    end
 end
 
 function A.SetFirstRunWishlist(wishlistSlot, candidate)
@@ -1960,10 +2030,12 @@ function A.ClearFirstRunWishlist()
         -- Equal names or contents cannot identify an unrelated assignment.
         if WishlistRoles.FirstRunHandoff(state) then
             state.loadoutWishlists[1] = nil
+            WishlistRoles.Wrote(nil, 1)
         end
         -- False records an explicit first-run Unassign. Nil still means that
         -- an older assignment may be waiting for its active-loadout identity.
         state.firstRunWishlist = false
+        WishlistRoles.Wrote(nil, "first")
     end) then return false end
     MarkWishlistProjectionDirty()
     return true
@@ -2104,7 +2176,7 @@ function A.GetLoadoutWishlistSlot(loadoutSlot)
     return c and tonumber(c.slot) or nil
 end
 
-function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets)
+function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets, bound)
     loadoutSlot = tonumber(loadoutSlot)
     local slots = A.Slots()
     if not slots or not loadoutSlot or loadoutSlot < 1
@@ -2116,14 +2188,23 @@ function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets)
     end
     local record = StoredWishlistRecord({name=name, echoes=echoes,designTargets=designTargets})
     if not record then return false, "invalid wishlist" end
+    -- `bound`: an editor's snapshot (WishlistRoles.MayWrite); each written
+    -- destination is checked on its own and its new token returned.
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
+        if not WishlistRoles.MayWrite(bound, loadoutSlot) then changed = true; return end
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
-        state.firstRunWishlist = nil
+        WishlistRoles.Wrote(installed, loadoutSlot)
+        if WishlistRoles.MayWrite(bound, "first") then
+            state.firstRunWishlist = nil
+            WishlistRoles.Wrote(installed, "first")
+        end
     end) then return false, "store unavailable" end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    return true
+    return true, nil, record.assignmentId, record.key, installed
 end
 
 -- Bootstrap for a genuinely brand-new character: no Saved Build exists yet
@@ -2146,11 +2227,15 @@ end
 --     leveling 1-79), A.Wishlist() reads ONLY this, via
 --     ResolveFirstRunWishlist -- ResolveAssociation is never even reached
 --     yet since there's no active slot to resolve.
-function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
+function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets, bound)
     local record = StoredWishlistRecord({name=name, echoes=echoes,designTargets=designTargets})
     if not record then return false, "invalid wishlist" end
     local mirrored = StoredWishlistRecord(record)
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
+        -- `bound`: an editor's snapshot. The first-run plan and the slot-1
+        -- handoff are separate destinations, each checked on its own.
+        if not WishlistRoles.MayWrite(bound, "first") then changed = true; return end
         -- Slot 1 receives the handoff only when it holds no assignment or
         -- holds the proven handoff of the current first-run plan
         -- (WishlistRoles.FirstRunHandoff). Another assignment there is never
@@ -2160,12 +2245,18 @@ function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
         WishlistRoles.StampAssignment(state,record)
         mirrored.assignmentId=record.assignmentId
         state.loadoutWishlists = state.loadoutWishlists or {}
-        if current == nil or handoff then state.loadoutWishlists[1] = record end
+        if (current == nil or handoff) and WishlistRoles.MayWrite(bound, 1) then
+            state.loadoutWishlists[1] = record
+            WishlistRoles.Wrote(installed, 1)
+        end
         state.firstRunWishlist = mirrored
+        WishlistRoles.Wrote(installed, "first")
     end) then return false, "store unavailable" end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    -- The identity this save stamped, for an editor that holds this plan.
-    return true, nil, mirrored.assignmentId, mirrored.key
+    -- The identity this save stamped and the tokens it installed, for an
+    -- editor that holds this plan.
+    return true, nil, mirrored.assignmentId, mirrored.key, installed
 end
 
 function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
@@ -2190,7 +2281,9 @@ function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
+        WishlistRoles.Wrote(nil, loadoutSlot)
         state.firstRunWishlist = nil
+        WishlistRoles.Wrote(nil, "first")
     end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
     return true
@@ -2215,36 +2308,37 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
         slot=wishlistSlot, name=name, echoes=echoes,designTargets=designTargets,
     })
     if not record then return false end
-    local changed = false
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
-        -- `binding` is an open editor's: what this Saved Build held when the
-        -- editor opened or last saved (`assignment`), the first-run plan when
-        -- it opened (`firstRun`), its content key (`key`) and the contents
-        -- its session held (`held`). A Saved Build given another Wishlist, or
-        -- unassigned, since then keeps that newer choice; given this same
-        -- server Wishlist again (with contents the session held), it receives
-        -- this save. A first-run plan chosen since the editor opened is kept.
+        -- `binding` is an open editor's: its action snapshot (`actions`) and,
+        -- as additional safeguards, what this Saved Build held (`assignment`)
+        -- and the first-run plan (`firstRun`) when it opened. Any Assign,
+        -- Unassign or Restore of this Saved Build since then -- also of the
+        -- same plan -- is kept; so is a first-run plan chosen since then.
         local current = type(state.loadoutWishlists) == "table"
             and state.loadoutWishlists[loadoutSlot] or nil
-        if type(binding) == "table"
-            and WishlistRoles.AssignmentToken(current) ~= binding.assignment
-            and not WishlistRoles.SameServerWishlist(current, wishlistSlot, name,
-                binding.held, binding.key) then
+        local bound = nil
+        if type(binding) == "table" then bound = binding.actions or false end
+        if type(binding) == "table" and (not WishlistRoles.MayWrite(bound, loadoutSlot)
+            or WishlistRoles.AssignmentToken(current) ~= binding.assignment) then
             changed = true
             return
         end
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
-        if type(binding) ~= "table"
-            or WishlistRoles.FirstRunToken(state.firstRunWishlist) == binding.firstRun then
+        WishlistRoles.Wrote(installed, loadoutSlot)
+        if type(binding) ~= "table" or (WishlistRoles.MayWrite(bound, "first")
+            and WishlistRoles.FirstRunToken(state.firstRunWishlist) == binding.firstRun) then
             state.firstRunWishlist = nil
+            WishlistRoles.Wrote(installed, "first")
         end
     end) then return false end
     if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    -- The identity this save stamped, for the editor that holds this plan.
-    return true, nil, record.assignmentId, record.key
+    -- The identity this save stamped and the tokens it installed, for the
+    -- editor that holds this plan.
+    return true, nil, record.assignmentId, record.key, installed
 end
 
 -- How many removals stay recoverable at once. A later removal must never
@@ -2316,6 +2410,7 @@ function A.ClearLoadoutWishlist(loadoutSlot)
         state.loadoutWishlists = state.loadoutWishlists or {}
         local removed = state.loadoutWishlists[loadoutSlot]
         state.loadoutWishlists[loadoutSlot] = nil
+        WishlistRoles.Wrote(nil, loadoutSlot)
         if type(removed) == "table" then
             RememberRemoval(state,
                 {record = removed, loadoutSlot = loadoutSlot, source = "unassign"})
@@ -2430,6 +2525,7 @@ function A.ForgetWishlistPlan(selector)
         end
         if removed == nil then return end
         state.loadoutWishlists[removedIndex] = nil
+        WishlistRoles.Wrote(nil, removedIndex)
         -- The same identity pointed at from first-run state would restore the
         -- record on the next read. It is reconciled in THIS write.
         local first = CandidateFromStoredRecord(state.firstRunWishlist)
@@ -2437,6 +2533,7 @@ function A.ForgetWishlistPlan(selector)
         if first and removedCandidate and first.key == removedCandidate.key
             and first.assignmentId == removedCandidate.assignmentId then
             state.firstRunWishlist = nil
+            WishlistRoles.Wrote(nil, "first")
             firstRunRemoved = true
         end
         RememberRemoval(state, {
@@ -2541,8 +2638,10 @@ function A.RestoreForgottenWishlistPlan(selector)
             if index == nil then full = true; return end
         end
         live.loadoutWishlists[index] = retained.record
+        WishlistRoles.Wrote(nil, index)
         if retained.firstRun and live.firstRunWishlist == nil then
             live.firstRunWishlist = retained.record
+            WishlistRoles.Wrote(nil, "first")
         end
         table.remove(list, chosen.position)
         live.forgottenWishlist = list[1]
@@ -2651,7 +2750,9 @@ function A.Wishlist(slots)
             UpdateStoreState(function(state)
                 state.loadoutWishlists = state.loadoutWishlists or {}
                 state.loadoutWishlists[activeSlot] = record
+                WishlistRoles.Wrote(nil, activeSlot)
                 state.firstRunWishlist = nil
+                WishlistRoles.Wrote(nil, "first")
             end)
             MarkWishlistProjectionDirty()
         end

@@ -820,6 +820,9 @@ function Controller.New(options)
         M.CancelApply()
         state.editingContext = nil
         state.createTargetContext = nil
+        -- Assignment actions as this new draft begins (see TryApply).
+        state.draftActions = Adapter and Adapter.AssignmentActionSnapshot
+            and Adapter.AssignmentActionSnapshot() or nil
         state.awaitingWishlist = nil
         state.pending = {}
         state.pendingLock = {}
@@ -887,6 +890,18 @@ function Controller.New(options)
         return type(candidate) == "table" and DraftModel.TrimName(candidate.title) or ""
     end
 
+    -- Whether a Wishlist identity is the first-run plan: the same assignment
+    -- identity; the content key when neither has one.
+    local function IsFirstRunPlan(identity)
+        local root = Store.State and Store.State()
+        local first = type(root) == "table" and root.firstRunWishlist
+        if type(first) ~= "table" or type(identity) ~= "table" then return false end
+        if identity.assignmentId ~= nil or first.assignmentId ~= nil then
+            return first.assignmentId == identity.assignmentId
+        end
+        return identity.key ~= nil and first.key == identity.key
+    end
+
     function M.BeginWishlist(wishlist, loadoutSlot)
         M.CancelApply()
         state.candidateContext = nil
@@ -932,11 +947,14 @@ function Controller.New(options)
                 and Adapter.LoadoutAssignmentToken(loadoutSlot) or nil,
             boundFirstRun = tonumber(loadoutSlot) and Adapter
                 and Adapter.FirstRunToken and Adapter.FirstRunToken() or nil,
-            -- Contents this session's server Wishlist has held: the opened
-            -- ones and each upload (TryApply).
-            heldKeys = tonumber(loadoutSlot)
-                and (wishlist.key and {[wishlist.key] = true} or {}) or nil,
+            -- Assignment actions as the editor opens, and the destination its
+            -- save assigns: the Saved Build, the first-run plan when this is
+            -- that plan, or none.
+            boundActions = Adapter and Adapter.AssignmentActionSnapshot
+                and Adapter.AssignmentActionSnapshot() or nil,
         }
+        state.editingContext.destination = tonumber(loadoutSlot)
+            or (IsFirstRunPlan(wishlist) and "first" or nil)
         M.LoadPendingEchoes(wishlist.echoes or {}, false,wishlist.designTargets)
         return true
     end
@@ -1235,15 +1253,7 @@ function Controller.New(options)
     -- proves neither; the second result then says so.
     local function FirstRunOwnsSave()
         local context = state.editingContext
-        if context then
-            local root = Store.State and Store.State()
-            local first = type(root) == "table" and root.firstRunWishlist
-            if type(first) ~= "table" then return false end
-            if context.assignmentId ~= nil or first.assignmentId ~= nil then
-                return first.assignmentId == context.assignmentId
-            end
-            return context.key ~= nil and first.key == context.key
-        end
+        if context then return IsFirstRunPlan(context) end
         local slots = Adapter and Adapter.Slots and Adapter.Slots()
         if type(slots) ~= "table" or slots.activeKnown == false then return false, true end
         local active = tonumber(slots.activeSlot) or 0
@@ -1258,7 +1268,16 @@ function Controller.New(options)
     -- identity (and, for a Saved Build, what it now holds): the next save in
     -- this session is proven by the unchanged checks. The first-run binding
     -- stays as it was at open. A new plan (no editing context) is not bound.
-    local function RebindAfterSave(assignmentId, key)
+    -- Of the assignment actions, the editor adopts exactly the tokens its own
+    -- save installed (AdoptActions); nothing else that happened since it
+    -- opened.
+    local function AdoptActions(bound, installed)
+        if type(bound) ~= "table" or type(installed) ~= "table" then return end
+        bound.tokens = bound.tokens or {}
+        for destination, token in pairs(installed) do bound.tokens[destination] = token end
+    end
+
+    local function RebindAfterSave(assignmentId, key, installed)
         local context = state.editingContext
         if context and assignmentId ~= nil then
             context.assignmentId = assignmentId
@@ -1266,7 +1285,33 @@ function Controller.New(options)
             if context.loadoutSlot and Adapter.LoadoutAssignmentToken then
                 context.boundAssignment = Adapter.LoadoutAssignmentToken(context.loadoutSlot)
             end
+            AdoptActions(context.boundActions, installed)
         end
+    end
+
+    -- The destination this save would assign and the actions bound for it:
+    -- an opened Wishlist's own; a new plan's Saved Build, or the first-run
+    -- plan by the Echo Journal's rule (bound when the draft began).
+    local function SaveDestination()
+        local context = state.editingContext
+        if context then return context.destination, context.boundActions end
+        if state.createTargetContext then
+            return state.createTargetContext.loadoutSlot, state.draftActions
+        end
+        if FirstRunOwnsSave() then return "first", state.draftActions end
+        return nil
+    end
+
+    local function NotSavedChanged(destination)
+        local context = state.editingContext or state.createTargetContext
+        local label = context and context.loadoutName ~= nil and tostring(context.loadoutName) ~= ""
+            and ("Saved Build '" .. tostring(context.loadoutName) .. "'")
+            or (destination == "first" and "the first-run Wishlist")
+            or ("Saved Build " .. tostring(destination))
+        notify("|cffffd200Nexus:|r Not saved: " .. label .. " was assigned, unassigned or restored "
+            .. "in the Echo Journal while the editor was open, and that choice is kept. Nothing was "
+            .. "uploaded or assigned; your edits are still shown. Close and reopen the editor to edit "
+            .. "the current Wishlist.")
     end
 
     local function TryApply(slot, name, echoes, guard)
@@ -1280,6 +1325,17 @@ function Controller.New(options)
             state.applyRetry = nil
             notify("|cffff6060Nexus:|r Save cancelled: the editor changed. Review and save again.")
             return false, "stale_confirmation"
+        end
+        -- An Assign, Unassign or Restore of the destination this save would
+        -- assign, made after the editor bound it, is authoritative: nothing
+        -- is uploaded, and the editor must be reopened. Checked again inside
+        -- each writer.
+        local destination, bound = SaveDestination()
+        if destination ~= nil and bound ~= nil and Adapter.AssignmentActionUnchanged
+            and not Adapter.AssignmentActionUnchanged(bound, destination) then
+            state.applyRetry = nil
+            NotSavedChanged(destination)
+            return false, "assignment_changed"
         end
         local ok, err = Adapter.UploadWishlist(slot or 0, name, echoes)
         if ok then
@@ -1307,49 +1363,63 @@ function Controller.New(options)
                     stacks=echo.stacks, locked=false}
             end
             local associated, associationReason = true, nil
-            if state.editingContext and state.editingContext.heldKeys and Adapter.WishlistKey then
-                local uploadedKey = Adapter.WishlistKey(recorded)
-                if uploadedKey ~= nil then state.editingContext.heldKeys[uploadedKey] = true end
+            local function KeptNotice()
+                -- Only if a destination changed after the check above.
+                associated = true
+                notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' was uploaded, but its assignment "
+                    .. "was changed in the Echo Journal while the editor was open; that choice is kept.")
             end
             if state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
-                -- The open editor's binding goes with the save: a Saved
-                -- Build given another Wishlist, or unassigned, while the
-                -- editor was open keeps that newer choice.
-                local context, assignmentId, key = state.editingContext
-                associated, associationReason, assignmentId, key =
+                -- The open editor's binding goes with the save (see the writer).
+                local context, assignmentId, key, installed = state.editingContext
+                associated, associationReason, assignmentId, key, installed =
                     Adapter.UpdateWishlistAssociationAfterSave(
                         context.loadoutSlot, slot, name, recorded, designTargets,
-                        context.boundAssignment and {assignment=context.boundAssignment,
-                            firstRun=context.boundFirstRun, key=context.key,
-                            held=context.heldKeys} or nil)
+                        context.boundActions and {actions=context.boundActions,
+                            assignment=context.boundAssignment,
+                            firstRun=context.boundFirstRun} or nil)
                 if associated then
-                    RebindAfterSave(assignmentId, key)
+                    RebindAfterSave(assignmentId, key, installed)
                 elseif associationReason == "assignment_changed" then
-                    associated = true
-                    notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved. Its Saved Build was given "
-                        .. "another Wishlist, or unassigned, while the editor was open; that choice is kept.")
+                    KeptNotice()
                 end
             elseif state.createTargetContext and Adapter.SetLoadoutWishlistIdentity then
-                associated, associationReason = Adapter.SetLoadoutWishlistIdentity(
-                    state.createTargetContext.loadoutSlot, name, recorded, designTargets)
-                if associated then notify("|cff4dff80Nexus:|r assigned '" .. tostring(name)
+                local createdId, createdKey, installed
+                associated, associationReason, createdId, createdKey, installed = Adapter.SetLoadoutWishlistIdentity(
+                    state.createTargetContext.loadoutSlot, name, recorded, designTargets,
+                    state.draftActions)
+                if associated then
+                    AdoptActions(state.draftActions, installed)
+                    notify("|cff4dff80Nexus:|r assigned '" .. tostring(name)
                     .. "' to " .. tostring(state.createTargetContext.loadoutName
-                        or "the active Saved Build") .. ".") end
+                        or "the active Saved Build") .. ".")
+                elseif associationReason == "assignment_changed" then
+                    KeptNotice()
+                end
             else
                 -- No loadout context. It is the first-run plan's save only
                 -- by FirstRunOwnsSave; otherwise (another existing Wishlist,
                 -- or a new plan while a Saved Build is active) it assigns
                 -- nothing and never falls back to slot 1 or the first-run plan.
                 local firstRun, unloaded = FirstRunOwnsSave()
+                local context = state.editingContext
+                -- An opened Wishlist saves to the first-run plan only when it
+                -- was that plan when the editor bound it.
+                if context and context.destination ~= "first" then firstRun = false end
                 if firstRun and Adapter.SetFirstLoadoutWishlistIdentity then
-                    local assignmentId, key
-                    associated, associationReason, assignmentId, key =
-                        Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
+                    local assignmentId, key, installed
+                    local bound = state.draftActions
+                    if context then bound = context.boundActions end
+                    associated, associationReason, assignmentId, key, installed =
+                        Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets, bound)
                     if associated then
-                        RebindAfterSave(assignmentId, key)
+                        if context then RebindAfterSave(assignmentId, key, installed)
+                        else AdoptActions(state.draftActions, installed) end
                         notify("|cff4dff80Nexus:|r '" .. tostring(name)
                             .. "' is the first-run Wishlist target (used until a Saved Build with Echoes is active).")
+                    elseif associationReason == "assignment_changed" then
+                        KeptNotice()
                     end
                 else
                     notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved. "
