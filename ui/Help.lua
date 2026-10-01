@@ -15,6 +15,10 @@ Before you turn Auto ON: With Auto ON, Nexus may replace that active Saved Build
 4. To target another Saved Build: in My Builds, select the intended Saved Build and assign the Wishlist to it (click the Wishlist selector and choose the Wishlist). Assigning only chooses the target; by itself it does not change the Saved Build.
 5. Review the recommendations with Auto OFF first. Click Auto OFF only when you accept the warning above; it then shows Auto ON.
 
+What Nexus is for: you choose the Echoes you want (a Wishlist). Nexus counts the exact copies still missing and recommends, or with Auto ON performs, Take, Banish, Reroll and Freeze on each Echo choice to work toward them.
+
+Saving and loading Saved Builds: in the game's own build window, loading a Saved Build makes it your current loadout. Saving writes your current Echoes into the slot you selected and REPLACES what that slot held. Check the selected slot before you save; Nexus cannot undo a save or bring back the old contents. Nexus never loads a Saved Build for you. Its only save is the automatic save with Auto ON, described above. Creating, importing or assigning a Wishlist saves only a plan; it changes no Saved Build.
+
 Words: A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Nexus treats no future random Echo roll as guaranteed.]]},
  {id="wishlists",title="Wishlists and locked targets",text=[[Before you edit: a plan holds up to 79 rolled copies and 6 locked Echo copies (85 total). Counts are copies, not names or rows. Each quality is a different target; a lower-quality copy does not count for a higher-quality target.
 
@@ -33,10 +37,17 @@ Nexus-only locked-role markers should be imported in Nexus, not assumed compatib
 Better means Wishlist progress, not Orb investment or keeping every individual Echo. Example: a run that loses 1 requested copy but gains 3 other requested copies is +2 overall. It can replace the Saved Build even when the lost Echo is one you value or obtained with Orbs. The save itself spends no Orbs, and it does not mean that Echo was judged worthless. Nexus cannot undo a completed save or bring back that Echo or the Orbs spent on it; Unassign does not restore a Saved Build. Keep Auto OFF if you want the current Saved Build left untouched. Auto starts OFF each session.
 
 1. Click Auto OFF on the Nexus panel to turn Auto ON. Auto is a permission for your enabled automatic actions. Auto OFF does not turn Nexus off, stop build sharing, or hide the panel.
-2. Choose actions: /nexus reroll on|off and /nexus freeze on|off. They change those permissions, not the Auto button.
-3. Watch the panel. Take chooses a needed offer. Banish removes an eligible offer. Reroll asks for new choices when enabled. Freeze keeps an eligible offered card.
+2. Choose actions: /nexus reroll on|off and /nexus freeze on|off. They change those permissions, not the Auto button. Each one only allows or forbids that action; it does not choose another strategy. When an action is off, Nexus skips that step and uses the next rule below.
+3. Watch the panel. It shows what Nexus recommends now; with Auto ON, Nexus performs it.
 
-Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. Priority numbers in advanced diagnostics are not DPS or percentages. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [G] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none. These symbols are not network or loading states.
+How Nexus chooses on an ordinary Echo choice (current behavior, in this order). Needed means an offer of the exact Echo and quality that still has missing copies: the Wishlist's copies minus the copies you have, rolled and locked.
+- All targets complete: Nexus takes an available offer. It can be outside the Wishlist.
+- No offer is still needed: Reroll comes first, when Reroll is allowed and you have one.
+- A needed offer is shown: Nexus takes it. Freeze is used only in some cases: the remaining picks are very few compared with the missing copies, at least two copies are still missing, Freeze is allowed, and a Banish is available to search further. Nexus then takes the next needed offer, or the frozen one.
+- No offer is needed and Reroll is not possible: when the remaining picks are few compared with the missing copies, Nexus banishes an offer that is not needed and not frozen. Otherwise, or with no Banish left, it takes an available offer, which can be outside the Wishlist.
+Nexus does not keep rerolls back for later in a run. These rules are not a guarantee of any future offer or of a complete build.
+
+Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. Frozen offer is a card kept by Freeze. Priority numbers in advanced diagnostics are not DPS or percentages. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [Guaranteed offer] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none. These symbols are not network or loading states.
 
 When it is blocked: "Waiting for the game to confirm the last Echo action." means an action was sent and has no confirmed result yet. Do not choose again or reload; wait. "No Echo choice is showing." means only that no choice is on screen now. It does not mean the run is finished, and it is not a reason to retry. "Auto ON — paused" means Auto stays ON but is not acting; point at the ... button to see the reason in its Status line. Waiting for current Echo data means automatic choices wait for ownership confirmation; it is not Sync status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
  {id="sharing",title="Shared builds and DPS",text=[[1. Click Build Library on the Nexus panel. Use the scope button to switch between All Shared and My Builds.
@@ -59,7 +70,7 @@ Sync Now asks for shared builds and records. Preparing, request sent, receiving 
 3. Click Start. Start approves the maximum shown and automatic use of eligible surplus copies, including safe recycling. Starting disables ordinary Automation; it does not automatically re-enable it. Locked and required copies stay protected. The approved maximum does not change during the run.
 4. Watch the run. It continues after each confirmed result and stops at target completion, the maximum, insufficient balance, no safe source, or uncertainty.
 
-The game's auto-accept and other addons' pickers must be off. Unknown client capabilities disable only Orb mode. Login, reconnect, new resources or reload never restart spending.
+The game's auto-accept and other addons' pickers must be off. If the game has no Orb service, only Orb mode is unavailable and ordinary rolling still works. If the Orb service exists but Nexus cannot read its state, ordinary rolling waits too. Login, reconnect, new resources or reload never restart spending.
 
 Closing the window does not stop an approved run. Use Pause or Stop. The main Nexus panel keeps compact progress and Pause/Resume/Stop.
 

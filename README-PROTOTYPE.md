@@ -45,6 +45,18 @@ your Saved Build** below. Auto starts OFF each session.
    chooses the target; by itself it does not change the Saved Build.
 5. Read **Automatic save and your Saved Build** below before you turn Auto ON.
 
+What Nexus is for: you choose the Echoes you want (a Wishlist). Nexus counts
+the exact copies still missing and recommends, or with Auto ON performs, Take,
+Banish, Reroll and Freeze on each Echo choice to work toward them.
+
+**Saving and loading Saved Builds.** In the game's own build window, loading a
+Saved Build makes it your current loadout. Saving writes your current Echoes
+into the slot you selected and **replaces what that slot held**. Check the
+selected slot before you save; Nexus cannot undo a save or bring back the old
+contents. Nexus never loads a Saved Build for you. Its only save is the
+automatic save with Auto ON (below). Creating, importing or assigning a
+Wishlist saves only a plan; it changes no Saved Build.
+
 A Wishlist is a desired plan; you do not have to own it already. **Saved Builds**
 are server slots. **Active Loadout** is the selected server loadout. **Build
 Library** shows shared records known to this client. They are different things.
@@ -92,10 +104,37 @@ Nexus to leave the current Saved Build untouched.
    automatic actions. Auto OFF does not turn Nexus off, stop sharing or hide the
    panel.
 3. Set actions: `/nexus reroll on|off` and `/nexus freeze on|off`. They do not
-   turn Auto on.
+   turn Auto on. Each one only allows or forbids that action; it does not
+   choose another strategy. When an action is off, Nexus skips that step and
+   uses the next rule below.
+
+### How Nexus chooses
+
+On an ordinary Echo choice, in this order (current behavior). **Needed** means
+an offer of the exact Echo and quality that still has missing copies: the
+Wishlist's copies minus the copies you have, rolled and locked.
+
+- All targets complete: Nexus takes an available offer. It can be outside the
+  Wishlist.
+- No offer is still needed: **Reroll** comes first, when Reroll is allowed and
+  you have one.
+- A needed offer is shown: Nexus takes it. **Freeze** is used only in some
+  cases: the remaining picks are very few compared with the missing copies, at
+  least two copies are still missing, Freeze is allowed, and a Banish is
+  available to search further. Nexus then takes the next needed offer, or the
+  frozen one.
+- No offer is needed and Reroll is not possible: when the remaining picks are
+  few compared with the missing copies, Nexus **banishes** an offer that is not
+  needed and not frozen. Otherwise, or with no Banish left, it takes an
+  available offer, which can be outside the Wishlist.
+
+Nexus does not keep rerolls back for later in a run. These rules are not a
+guarantee of any future offer or of a complete build.
 
 Reading the panel: **Needed**, **Target already met**, **Not on Wishlist** and
-**Different quality from target** describe the current choice. **EXTRA COPIES**
+**Different quality from target** describe the current choice. **Frozen offer**
+is a card kept by Freeze; **[Guaranteed offer]** is a server-guaranteed offer.
+**EXTRA COPIES**
 are rolled copies above exact targets: target 2, current 5 means 3 extras. The
 display deletes nothing.
 
@@ -149,8 +188,10 @@ complete. Opening the window, **Open Orbs...**, Help and **Max** spend nothing.
 4. The run continues after each confirmed result and stops at completion, the
    maximum, low balance, no safe source or uncertainty.
 
-Login, reconnect, new resources or reload never restart spending. Unknown
-client capabilities disable only Orb mode. The Orb window's **Help** button
+Login, reconnect, new resources or reload never restart spending. If the game
+has no Orb service, only Orb mode is unavailable and ordinary rolling still
+works. If the Orb service exists but Nexus cannot read its state, ordinary
+rolling waits too. The Orb window's **Help** button
 opens this Orb section in `/nexus help`.
 
 Closing the window does not stop an approved run. Use Pause or Stop.
