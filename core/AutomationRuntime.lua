@@ -73,6 +73,11 @@ function AutomationRuntime.New(options)
     local Strategy = assert(options.strategy, "AutomationRuntime requires Strategy")
     local Store = assert(options.store, "AutomationRuntime requires Store")
     boundStore = Store
+    if Nexus.RollRecorder then
+        Nexus.RollRecorder.Configure({
+            enabled = function() return Store.Settings().rollTrace end,
+            now = options.now })
+    end
     local Adapter = assert(options.adapter, "AutomationRuntime requires GameAdapter")
     local Readout = assert(options.readout, "AutomationRuntime requires Readout")
     local DefaultProfile = assert(options.defaultProfile,
@@ -362,7 +367,13 @@ local refusedRerollSig = nil
 -- run boundary or, when a single Take was pending, its own grant. An entry
 -- with no observed leave is not classified and revokes Auto.
 local actionHold = { externalUntil = 0, worldLeaving = false,
-    worldSettleUntil = nil, worldSettle = 3, worldPending = nil }
+    worldSettleUntil = nil, worldSettle = 3, worldPending = nil,
+    -- Rolling-policy selection and the open decision's recorder link. Kept on
+    -- this table: the factory has no free local slot. `set` is false until the
+    -- first read; `inForce` changes only while no action intent exists.
+    rolling = { set = false, inForce = nil, requested = nil, switches = 0,
+        decisionId = nil, sig = nil, sessionMarked = false,
+        lastPolicy = nil, lastFallback = nil } }
 
 -- SAVE state
 local savedThisVisit = false
@@ -2054,6 +2065,14 @@ local function RecordActionLifecycle(intent, state, reason)
     lastActionLifecycle.submittedAt = intent.submittedAt or 0
     lastActionLifecycle.resolvedAt = (state == "prepared" or state == "submitted")
         and 0 or GetTime()
+    do
+        local recorder = Nexus.RollRecorder
+        if recorder and intent.decisionId then
+            recorder.Intent(intent.decisionId, state, reason, {
+                elapsed = GetTime() - (intent.preparedAt or GetTime()),
+                mutation = intent.mutationAttempted and true or false })
+        end
+    end
 end
 
 local function FinishActionIntent(state, reason, keepBlocking)
@@ -2124,6 +2143,8 @@ local function PrepareActionIntent(board, action)
         action=copy,actionKey=ActionKey(copy),
         targetSpellId=targetSpellId,
         decisionRevision=actionDecisionRevision,
+        decisionId=(actionHold.rolling.sig == board.signature)
+            and actionHold.rolling.decisionId or nil,
         preparedAt=now,readyAt=now + ACTION_INTENT_BEAT,
         mutationAttempted=false,state="idle",
     }
@@ -2206,6 +2227,13 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     lastStepContext.boardPresent = board ~= nil
     ResolveActionIntent(board)
     if not board then
+        do
+            local recorder, rolling = Nexus.RollRecorder, actionHold.rolling
+            if recorder and rolling.decisionId then
+                rolling.decisionId, rolling.sig = nil, nil
+                recorder.After({ basis = "board_cleared", owned = owned })
+            end
+        end
         -- A loading-screen hold keeps its reason visible without a board.
         local heldOk, heldWhy = true, nil
         if autoEnabled and actionHold.worldPending then
@@ -2284,8 +2312,26 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     local queue = {entries={}}
     local charges = Adapter.Charges()
     local horizon = Adapter.Horizon()
+    -- Rolling policy selector. It is read every decision but takes effect only
+    -- while no action intent exists, so a policy change never clears, replays
+    -- or re-decides an unresolved intent.
+    do
+        local rolling = actionHold.rolling
+        rolling.requested = settings.rollingPolicy
+        if not rolling.set or actionIntent == nil then
+            if rolling.set and rolling.inForce ~= rolling.requested then
+                rolling.switches = rolling.switches + 1
+                if Nexus.RollRecorder then
+                    Nexus.RollRecorder.Boundary("policy", tostring(rolling.inForce or "default")
+                        .. ">" .. tostring(rolling.requested or "default"))
+                end
+            end
+            rolling.set, rolling.inForce = true, rolling.requested
+        end
+    end
     local state = {
         board = board, owned = owned, locked = locked, charges = charges, plan = plan,
+        rollingPolicy = actionHold.rolling.inForce,
         ordinaryBoardAllowed = not Adapter.OrdinaryBoardAllowed or Adapter.OrdinaryBoardAllowed(),
         allowReroll = settings.autoReroll ~= false,
         allowFreeze = settings.autoFreeze ~= false,
@@ -2325,6 +2371,8 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     }
     FinishPhase(preparePerformance, "boardPrepare", prepareStarted)
     local action = MeasurePhase("policy", Policy.Decide, state)
+    actionHold.rolling.lastPolicy = action.policyId
+    actionHold.rolling.lastFallback = action.fallbackReason
 
     -- ------------------------------------------------------------------
     -- Decision log (manual-training data). One entry per fresh board:
@@ -2345,6 +2393,26 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         end
         if lastLoggedSig ~= board.signature then
             lastLoggedSig = board.signature
+            do
+                -- Automatic local record (core/RollRecorder.lua): the previous
+                -- decision's first observation, then this decision. Observation
+                -- only; it never blocks or changes the action below.
+                local recorder, rolling = Nexus.RollRecorder, actionHold.rolling
+                if recorder then
+                    if not rolling.sessionMarked then
+                        rolling.sessionMarked = true
+                        recorder.Boundary("session", "")
+                    end
+                    recorder.After({ basis = "next_board", board = board, owned = owned, charges = charges })
+                    rolling.decisionId = recorder.Decision({
+                        state = state, action = action, board = board, owned = owned,
+                        locked = locked, plan = plan, catalog = catalog, level = level,
+                        horizon = horizon, charges = charges, disabledLevers = disabledLevers,
+                        activeSlot = slots and slots.activeSlot or 0,
+                        catalogRevision = CatalogRevision() })
+                    rolling.sig = board.signature
+                end
+            end
             local entry = {
                 t = date and date("%H:%M:%S") or "",
                 level = level,
@@ -2885,6 +2953,10 @@ local function ResetRunBoundary()
     if actionIntent then
         FinishActionIntent("superseded", "run_boundary", false)
     end
+    if Nexus.RollRecorder then
+        Nexus.RollRecorder.Boundary("run", "")
+        actionHold.rolling.decisionId, actionHold.rolling.sig = nil, nil
+    end
     actionHold.worldPending = nil -- the dead run's pending action ends here
     lastDecision = nil
     lastLoggedSig = nil
@@ -3369,6 +3441,9 @@ end
             return false
         end
         autoEnabled = not autoEnabled
+        if Nexus.RollRecorder then
+            Nexus.RollRecorder.Boundary("auto", autoEnabled and "on" or "off")
+        end
         if autoEnabled then
             -- Authorization changed, represented data did not. Coalesce one
             -- bounded decision evaluation without invalidating static state.
@@ -3504,7 +3579,14 @@ end
                 end
                 held.label = table.concat(labels, " and ")
             end
+            if Nexus.RollRecorder then
+                Nexus.RollRecorder.Boundary("world_leave", "")
+                actionHold.rolling.decisionId, actionHold.rolling.sig = nil, nil
+            end
             return autoEnabled and "held" or "off"
+        end
+        if event == "PLAYER_ENTERING_WORLD" and Nexus.RollRecorder then
+            Nexus.RollRecorder.Boundary("world_enter", "")
         end
         local closesTransition = event == "PLAYER_ENTERING_WORLD"
             and actionHold.worldLeaving
@@ -3583,6 +3665,19 @@ end
         out.lastFallbackCheckAt = lastFallbackCheckAt
         out.fallbackSeconds = FALLBACK_RECOMPUTE
         return out
+    end
+    -- The rolling-policy selection: what the saved setting asks for, what is
+    -- in force (they differ while an action intent is unresolved), and what
+    -- the last decision actually ran, with the fallback reason if any.
+    function M.RollingPolicyStatus()
+        local rolling = actionHold.rolling
+        local selection = Nexus.EchoWeaver and Nexus.EchoWeaver.PolicySelection
+        local requested = selection and selection(rolling.requested) or tostring(rolling.requested)
+        local inForce = selection and selection(rolling.inForce) or tostring(rolling.inForce)
+        return { requested = requested, inForce = inForce,
+            changePending = rolling.set and requested ~= inForce or false,
+            switches = rolling.switches, lastPolicy = rolling.lastPolicy,
+            lastFallback = rolling.lastFallback }
     end
     function M.EffectiveFlags() return EffectiveFlags() end
     function M.LockDesignTargetsFor(wishlist)

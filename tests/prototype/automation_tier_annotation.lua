@@ -11,6 +11,8 @@
 -- UserText.Annotation. SYNTHETIC family 'Tiered Blade': T1 q1, T2 q2, T3 q3.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local T1,T2,T3,T3b,Y,F=290101,290102,290103,290104,200002,200020
+-- The default policy searches an unwanted board with Banish before Reroll.
+local function Searched(r) return r.action=='reroll' or r.action=='banish' end
 
 local function Run(label,spec)
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
@@ -35,7 +37,7 @@ local function Run(label,spec)
  local log=Nexus.DiagnosticLogs.Snapshot('decision')
  local cards=(log[#log] or {}).cards or {}
  local text=function(i) return Nexus.UserText.Annotation(cards[i] and cards[i].ann) end
- return {action=first and first[1],ann=cards[1] and cards[1].ann,text=text(1),fillerText=text(2),delta=cards[1] and cards[1].delta}
+ return {action=first and first[1],index=first and first[2],ann=cards[1] and cards[1].ann,text=text(1),fillerText=text(2),delta=cards[1] and cards[1].delta}
 end
 
 -- 1. The plan asks for T3; the board offers the lower tier T1 of the same
@@ -43,7 +45,10 @@ end
 -- Wishlist" either.
 do
  local r=Run('higher-target',{requested={T3},offer=T1})
- check(r.action=='reroll','the lower tier is not taken in place of T3 (tier policy): '..tostring(r.action))
+ -- The default policy searches an unwanted board with Banish before Reroll, and its
+ -- Banish never aims at an offer whose quality group still holds a missing target.
+ check(Searched(r),'the lower tier is not taken in place of T3 (tier policy): '..tostring(r.action))
+ check(r.action~='banish' or r.index~=0,'the sibling tier of the missing target is not the Banish victim: '..tostring(r.index))
  check(r.delta==-15,'its value is unchanged: '..tostring(r.delta))
  check(r.text=='Different quality from target','the card says the quality differs: '..tostring(r.text))
  check(r.fillerText=='Not on Wishlist','an Echo whose family is not wished still says Not on Wishlist: '..tostring(r.fillerText))
@@ -58,11 +63,11 @@ end
 -- 3. Mixed tiers with separate counts: T1 and T3 requested, T1 held.
 do
  local r1=Run('mixed-held-tier',{requested={T1,T3},owned={T1},offer=T1})
- check(r1.ann=='target satisfied' and r1.action=='reroll','a held tier is not wanted again: '..tostring(r1.ann))
+ check(r1.ann=='target satisfied' and Searched(r1),'a held tier is not wanted again: '..tostring(r1.ann))
  local r3=Run('mixed-missing-tier',{requested={T1,T3},owned={T1},offer=T3})
  check(r3.ann=='wanted','the missing tier is wanted: '..tostring(r3.ann))
  local r2=Run('mixed-other-tier',{requested={T1,T3},owned={T1},offer=T2})
- check(r2.action=='reroll' and r2.text=='Different quality from target',
+ check(Searched(r2) and r2.text=='Different quality from target',
   'a tier between them is neither taken nor called Not on Wishlist: '..tostring(r2.text))
 end
 
@@ -70,14 +75,14 @@ end
 -- A higher tier is not credited for the lower target, and it is not taken.
 do
  local r=Run('higher-offer',{requested={T1},owned={T1},offer=T3})
- check(r.action=='reroll' and r.text=='Different quality from target','a higher tier is explained, not taken: '..tostring(r.text))
+ check(Searched(r) and r.text=='Different quality from target','a higher tier is explained, not taken: '..tostring(r.text))
 end
 
 -- 5. A second id of the family at the SAME quality as the requested T3 is
 -- not a quality difference: it is not explained as one.
 do
  local r=Run('same-quality-variant',{requested={T3},offer=T3b})
- check(r.action=='reroll','the variant is not taken in place of T3: '..tostring(r.action))
+ check(Searched(r),'the variant is not taken in place of T3: '..tostring(r.action))
  check(r.text~='Different quality from target','and it is not called a different quality: '..tostring(r.text))
 end
 

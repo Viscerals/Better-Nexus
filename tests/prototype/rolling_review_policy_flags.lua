@@ -12,6 +12,10 @@
 -- edited). If that battery changes, this copy must follow; the 864 size is checked.
 -- Fixtures only. No draw odds. No efficiency claim.
 local P=dofile('tests/prototype/policy_adapter.lua');P.Load()
+-- Pinned to the RELEASED policy (released-nexus-1): the rules checked here belong
+-- to it. The default policy is adaptive; see adaptive_policy_*.lua.
+local ReleasedDecide=P.Decide
+P.Decide=function(input)input.rollingPolicy='released';return ReleasedDecide(input)end
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local EchoWeaver=Nexus.EchoWeaver
 local PRODUCTION=EchoWeaver.NEXUS_POLICY

@@ -4,7 +4,7 @@
 # Regenerate: python tools/released_fixture.py build
 Nexus.toc|2136|0ccdc408|copy
 data/Release.lua|3262|13b84c9a|tree
-data/DefaultProfile.lua|4051|75bf1d74|tree
+data/DefaultProfile.lua|4051|75bf1d74|copy
 data/BundledBuilds.lua|586|36c9eee7|tree
 logic/Version.lua|4786|1a062824|tree
 core/UserText.lua|8134|90e4253b|copy
@@ -31,7 +31,7 @@ core/SupportIncidents.lua|13769|c8464efd|tree
 core/SupportReport.lua|49645|07bcc9f9|copy
 core/Scheduler.lua|8581|0d777811|tree
 core/DiagnosticHistory.lua|5013|89abc60a|copy
-core/DiagnosticLogs.lua|17755|1cc78943|tree
+core/DiagnosticLogs.lua|17755|1cc78943|copy
 core/PeerDebug.lua|26643|daf81b86|tree
 core/ViewRefresh.lua|7176|f547a94f|copy
 core/Updates.lua|29849|85f2a35d|tree
@@ -70,7 +70,7 @@ ui/ServerStatus.lua|20384|c0358043|copy
 ui/LoadingStatus.lua|14543|fae34e27|copy
 ui/Panel.lua|93389|79e98674|copy
 ui/JournalTab.lua|72752|933ffa0f|copy
-ui/LogViewer.lua|19992|2951da02|tree
+ui/LogViewer.lua|19992|2951da02|copy
 ui/WishlistRenderer.lua|108125|341e4fba|tree
 ui/WishlistEditor.lua|36634|496aaea5|tree
 ui/WishlistOverlay.lua|17815|681adc48|tree

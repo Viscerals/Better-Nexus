@@ -84,6 +84,16 @@ function Commands.New(options)
             Invoke("rollingOption",context,normalized,{option=option,value=value})
             return
         end
+        local policyValue = normalized:match("^policy%s+(%a+)$")
+        if normalized == "policy" or policyValue then
+            Invoke("policy", context, normalized, policyValue)
+            return
+        end
+        local traceValue = normalized:match("^trace%s+(%a+)$")
+        if normalized == "trace" or traceValue then
+            Invoke("trace", context, normalized, traceValue)
+            return
+        end
         if normalized == "prototype" then Invoke("prototype",context,normalized);return end
         if normalized:sub(1, 6) == "probe " then
             local target = normalized:sub(7):match("^%s*(.-)%s*$")

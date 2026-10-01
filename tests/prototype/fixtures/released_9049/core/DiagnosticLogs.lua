@@ -14,11 +14,8 @@ local DEFINITIONS = {
     runAudit = {key="runAudit", cap=240},
     autoLock = {key="autoLockLog", cap=150},
     uiProbe = {key="uiProbeLog", cap=120},
-    -- Automatic local roll recorder (core/RollRecorder.lua). `explicit`: the
-    -- all-history clear leaves it alone; only its own command clears it.
-    rollTrace = {key="rollTraceLog", cap=256, explicit=true},
 }
-local ORDER = {"decision", "runAudit", "autoLock", "uiProbe", "rollTrace"}
+local ORDER = {"decision", "runAudit", "autoLock", "uiProbe"}
 local META_SCHEMA = 1
 local STORAGE_SCHEMA = 1
 local FUTURE_STORAGE_REASON =
@@ -451,13 +448,11 @@ function Logs.ClearAll()
         -- owns its physical index semantics, so the all-history operation is
         -- refused before changing any array or metadata table.
         for _, name in ipairs(ORDER) do
-            if not DEFINITIONS[name].explicit and FutureHistoryMeta(db, name) then
+            if FutureHistoryMeta(db, name) then
                 return false, FUTURE_STORAGE_REASON
             end
         end
-        for _, name in ipairs(ORDER) do
-            if not DEFINITIONS[name].explicit then ClearUnsafe(name, db) end
-        end
+        for _, name in ipairs(ORDER) do ClearUnsafe(name, db) end
         return true
     end)
 end

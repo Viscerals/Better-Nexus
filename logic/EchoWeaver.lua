@@ -138,6 +138,12 @@ function EchoWeaver.Decide(input)
     local keepBoard = anyRequested
     if policy.rerollIgnoresSatisfiedTargets == true then keepBoard = anyOutstanding end
     if canReroll and Count(resources.rerollsRemaining)>0 and not keepBoard then
+        -- Adaptive-policy option (docs/ADAPTIVE_ROLLING.md). Without it the
+        -- decision is unchanged. It reuses the protected-card, permission and
+        -- resource gates above: `banish` is already false when any is unmet.
+        if policy.banishBeforeReroll == true and banish then
+            return Result("BANISH",trash,"BANISH_BEFORE_REROLL")
+        end
         return Result("REROLL",nil,anyRequested and "REROLL_NO_OUTSTANDING_ON_BOARD" or "REROLL_COMMON_UNWANTED_BOARD")
     end
     if frozen then
@@ -166,6 +172,31 @@ function EchoWeaver.Decide(input)
     return Result("SELECT",legal[1],"LOW_PRESSURE_FALLBACK")
 end
 
+-- Rolling-policy identity. The released planner above stays selectable.
+-- ADAPTIVE is the live variant of the studied adaptive-0-settle candidate
+-- (private study echo-banish-policy-sim 85ec1d2) with its group-protected,
+-- neutral-weight profile. Neutral weight (equal draw weight for every eligible
+-- exact Echo) is an ASSUMPTION of the study, not a measured server rule. Two
+-- study inputs do not exist live and are not invented here: the eligible draw
+-- pool and its weights. Scarcity therefore uses outstanding copies only, and
+-- the Banish victim among equally safe offers is the first one on the board.
+-- That differs from the study only when the study could rank victims by
+-- family pool weight, so this variant has its own ID.
+EchoWeaver.POLICY = {
+    RELEASED = "released-nexus-1",
+    ADAPTIVE = "adaptive-0-settle-live1",
+    PROFILE = "group-protected-neutral-1",
+}
+
+-- Selector values are "adaptive" (the default) and "released" (the explicit
+-- rollback). nil means the default. Any other value is not guessed at: it
+-- runs the released planner and says why.
+function EchoWeaver.PolicySelection(value)
+    if value == nil or value == "adaptive" then return "adaptive" end
+    if value == "released" then return "released" end
+    return "released", "SELECTOR_UNKNOWN"
+end
+
 local LABELS = {
     SELECT_OUTSTANDING_WISHLIST="Take wanted Echo (EchoWeaver)",
     FREEZE_OUTSTANDING_FOR_HIGH_PRESSURE_SEARCH="Freeze wanted Echo before search (EchoWeaver)",
@@ -175,11 +206,17 @@ local LABELS = {
     LOW_PRESSURE_FALLBACK="Take available filler (EchoWeaver)",
     RESOURCE_EXHAUSTED_FALLBACK="Take filler; search unavailable (EchoWeaver)",
     OBJECTIVE_COMPLETE_FALLBACK="Wishlist complete; take filler (EchoWeaver)",
+    BANISH_BEFORE_REROLL="Banish an unwanted Echo before Reroll (EchoWeaver, experimental)",
+    PAIR_FREEZE_SECOND_NEEDED="Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)",
+    SETTLE_HELD_WANTED="Take the held wanted Echo instead of searching (EchoWeaver, experimental)",
 }
 
-function EchoWeaver.DecideNexus(state)
+-- Everything both policies read, built once per decision. Returns nil and a
+-- wait result when a required input is missing or incomplete: that refusal is
+-- the same for both policies.
+local function Prepare(state)
     local annotations, deltas = {}, {}
-    local function Wait(reason) return {type="wait",reason=reason,annotations=annotations,deltas=deltas,planner="echoweaver"} end
+    local function Wait(reason) return nil, {type="wait",reason=reason,annotations=annotations,deltas=deltas,planner="echoweaver"} end
     local plan, owned, board = state.plan, state.owned, state.board
     if state.ordinaryBoardAllowed == false then return Wait("Orb state active or unknown") end
     if not plan or plan.advisorOnly then return Wait("assign a Wishlist") end
@@ -251,20 +288,167 @@ function EchoWeaver.DecideNexus(state)
     end
     local charges,refused=state.charges or {},state.searchRefused or {}
     local trusted=charges.trustworthy==true
-    local decision=EchoWeaver.Decide({
-        objective={requestedCounts=requested,outstandingCounts=outstanding,outstandingTotal=total},
+    return {state=state,requested=requested,outstanding=outstanding,total=total,choices=choices,
+        frozenCount=frozenCount,annotations=annotations,deltas=deltas,charges=charges,trusted=trusted,
+        catalog=state.catalog,
+        canBanish=trusted and state.allowBanish~=false and not refused.banish,
+        canFreeze=trusted and state.canFreeze~=false and state.allowFreeze~=false,
+        canReroll=trusted and state.allowReroll~=false and not refused.reroll}
+end
+
+-- The normalized input of the pure planner. The capability arguments let the
+-- adaptive policy ask the same planner a narrower question (no Freeze, or no
+-- Banish) without a second code path for the safety gates.
+local function PlannerInput(prep, canBanish, canFreeze, policy)
+    local state, charges = prep.state, prep.charges
+    return {
+        objective={requestedCounts=prep.requested,outstandingCounts=prep.outstanding,outstandingTotal=prep.total},
         remainingPicks=state.horizon,
-        board={choices=choices,twoFrozenRerollProhibited=frozenCount>=2,
-            capabilities={canSelect=true,
-                canBanish=trusted and state.allowBanish~=false and not refused.banish,
-                canFreeze=trusted and state.canFreeze~=false and state.allowFreeze~=false,
-                canReroll=trusted and state.allowReroll~=false and not refused.reroll}},
+        board={choices=prep.choices,twoFrozenRerollProhibited=prep.frozenCount>=2,
+            capabilities={canSelect=true,canBanish=canBanish,canFreeze=canFreeze,canReroll=prep.canReroll}},
         resources={banishesRemaining=charges.banish,freezesRemaining=charges.freeze,rerollsRemaining=charges.reroll},
         commonBoardRerollEnabled=state.allowReroll~=false,
-        policy=EchoWeaver.NEXUS_POLICY})
-    local kinds={SELECT="take",FREEZE="freeze",BANISH="banish",REROLL="reroll",BLOCKED="wait"}
-    return {type=kinds[decision.action] or "wait",spellId=decision.echoID,index=decision.index,
+        policy=policy}
+end
+
+local KINDS={SELECT="take",FREEZE="freeze",BANISH="banish",REROLL="reroll",BLOCKED="wait"}
+local function Finish(prep, decision, policyId, profile, requested, fallback)
+    return {type=KINDS[decision.action] or "wait",spellId=decision.echoID,index=decision.index,
         reason=LABELS[decision.reasonCode] or decision.reasonCode,reasonCode=decision.reasonCode,
-        annotations=annotations,deltas=deltas,pressure=decision.pressure,
-        outstanding=total,planner="echoweaver"}
+        annotations=prep.annotations,deltas=prep.deltas,pressure=decision.pressure,
+        outstanding=prep.total,planner="echoweaver",
+        policyId=policyId,policyProfile=profile,policyRequested=requested,fallbackReason=fallback}
+end
+
+local function Released(prep, requested, fallback)
+    local decision=EchoWeaver.Decide(PlannerInput(prep,prep.canBanish,prep.canFreeze,EchoWeaver.NEXUS_POLICY))
+    return Finish(prep,decision,EchoWeaver.POLICY.RELEASED,"none",requested,fallback)
+end
+
+-- A copy of the planner's decision aimed at another offer. Every field the
+-- planner set (pressure, completion advice) is kept.
+local function Redirect(prep, decision, action, index, code)
+    local out={}
+    for key,value in pairs(decision) do out[key]=value end
+    local card=prep.choices[index]
+    out.action,out.echoID,out.index,out.slot=action,card.echoID,card.index,card.index
+    out.reasonCode=code or decision.reasonCode
+    return out
+end
+
+-- Adaptive-0-settle, live variant. Rules, in order:
+--   1. The pure planner decides with Banish-before-Reroll on unwanted boards
+--      and without Freeze (it keeps every permission, resource, pending,
+--      Orb-board and two-held-card Reroll rule).
+--   2. A Take with two useful unheld offers and no held offer becomes a
+--      Freeze of one of them (never the surplus copy of a single needed Echo).
+--   3. A Take or Freeze aims at the useful offer with the most outstanding
+--      copies (neutral weight, so copies per unit weight = copies).
+--   4. A Banish aims at the first unheld, unguaranteed offer that is not
+--      needed and whose quality group holds no needed Echo. With no such
+--      offer the planner decides again without Banish.
+--   5. A Banish with only held useful offers becomes a Take of the held one.
+-- Returns the decision, or nil and a reason when a required input is missing.
+local function Adaptive(prep)
+    local choices, need, charges, state = prep.choices, prep.outstanding, prep.charges, prep.state
+    local familyOf = prep.catalog and type(prep.catalog.familyOf)=="table" and prep.catalog.familyOf or nil
+    local missing = {}
+    for id,count in pairs(need) do
+        if count>0 then
+            local family = familyOf and familyOf[id]
+            if family==nil then return nil,"FAMILY_UNKNOWN" end
+            missing[family]=true
+        end
+    end
+    local held, unheld = {}, {}
+    for i=1,3 do
+        local c=choices[i]
+        if c.selectable and (need[c.echoID] or 0)>0 then
+            local list=c.frozen and held or unheld
+            list[#list+1]=i
+        end
+    end
+    local options={}
+    for key,value in pairs(EchoWeaver.NEXUS_POLICY) do options[key]=value end
+    options.banishBeforeReroll=true
+    local base=EchoWeaver.Decide(PlannerInput(prep,prep.canBanish,false,options))
+    if base.action=="BLOCKED" then return base end
+    local decision=base
+    if base.action=="SELECT" and prep.canFreeze and Count(charges.freeze)>0
+        and Integer(state.horizon,2) and prep.frozenCount==0 and #unheld>=2 then
+        for _,i in ipairs(unheld) do
+            local card=choices[i]
+            for _,j in ipairs(unheld) do
+                if i~=j and card.freezeEligible
+                    and (card.echoID~=choices[j].echoID or need[card.echoID]>=2) then
+                    decision=Redirect(prep,base,"FREEZE",i,"PAIR_FREEZE_SECOND_NEEDED")
+                    break
+                end
+            end
+            if decision~=base then break end
+        end
+    end
+    local action=decision.action
+    if action=="SELECT" or action=="FREEZE" then
+        local list=#unheld>0 and unheld or held
+        local best,bestScore
+        for _,i in ipairs(list) do
+            local c=choices[i]
+            local eligible=action=="SELECT"
+            if action=="FREEZE" and not c.frozen and c.freezeEligible then
+                for _,j in ipairs(unheld) do
+                    if j~=i and (choices[j].echoID~=c.echoID or need[c.echoID]>=2) then eligible=true end
+                end
+            end
+            local score=need[c.echoID]
+            if eligible and (not bestScore or score>bestScore) then best,bestScore=i,score end
+        end
+        if best and best~=decision.index then return Redirect(prep,decision,action,best) end
+        return decision
+    elseif action=="BANISH" then
+        if #held>0 and #unheld==0 then return Redirect(prep,decision,"SELECT",held[1],"SETTLE_HELD_WANTED") end
+        for i=1,3 do
+            local c=choices[i]
+            local family=familyOf and familyOf[c.echoID]
+            if not c.frozen and c.banishEligible and c.selectable and (need[c.echoID] or 0)==0
+                and family~=nil and not missing[family] then
+                if i==decision.index then return decision end
+                return Redirect(prep,decision,"BANISH",i)
+            end
+        end
+        return EchoWeaver.Decide(PlannerInput(prep,false,false,options))
+    end
+    return decision
+end
+
+-- Every action the adaptive policy returns is checked again against the
+-- normalized board, permissions and resources before it leaves this module.
+local function Valid(prep, decision)
+    local action, charges = decision.action, prep.charges
+    if action=="BLOCKED" then return true end
+    if action=="REROLL" then
+        return prep.canReroll and Count(charges.reroll)>0 and prep.frozenCount<2
+    end
+    local card=prep.choices[decision.index or 0]
+    if not card or card.echoID~=decision.echoID or not card.selectable then return false end
+    if action=="SELECT" then return true end
+    if action=="BANISH" then
+        return prep.canBanish and Count(charges.banish)>0 and card.banishEligible and not card.frozen
+    end
+    if action=="FREEZE" then
+        return prep.canFreeze and Count(charges.freeze)>0 and card.freezeEligible and not card.frozen
+    end
+    return false
+end
+
+function EchoWeaver.DecideNexus(state)
+    local prep, waited = Prepare(state)
+    if not prep then return waited end
+    local selection, note = EchoWeaver.PolicySelection(state.rollingPolicy)
+    if selection=="released" then return Released(prep,selection,note) end
+    local ok, decision, why = pcall(Adaptive,prep)
+    if not ok then return Released(prep,selection,"ADAPTIVE_ERROR") end
+    if not decision then return Released(prep,selection,why) end
+    if not Valid(prep,decision) then return Released(prep,selection,"ACTION_INVALID") end
+    return Finish(prep,decision,EchoWeaver.POLICY.ADAPTIVE,EchoWeaver.POLICY.PROFILE,selection,nil)
 end

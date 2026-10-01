@@ -19,7 +19,6 @@ local TABS = {
     { key = "dps",      label = "DPS" },
     { key = "autolock", label = "Slot actions" },
     { key = "perf",     label = "Performance" },
-    { key = "trace",    label = "Roll trace" },
     { key = "errors",   label = "Errors" },
     { key = "peer",     label = "Advanced peer" },
 }
@@ -401,7 +400,7 @@ local function EnsureFrame()
         if type(clearProvider) == "function" then
             ok, result = pcall(clearProvider, activeTab)
         end
-        if activeTab ~= "errors" and activeTab ~= "peer" and activeTab ~= "trace" then
+        if activeTab ~= "errors" and activeTab ~= "peer" then
             activeTab = "state"
         end
         if ok and result ~= false then
@@ -437,7 +436,7 @@ local function EnsureFrame()
     clearButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:SetText("Clear diagnostic history")
-        GameTooltip:AddLine("On Errors, clears only retained errors. On Roll trace, clears only the local roll record. On Advanced peer diagnostics, clears only that session. Other tabs clear retained boards, audits, UI probes, sync events, DPS debug lines, and errors; the local roll record is kept. Settings, builds, and automation are unchanged.", 1, 1, 1, true)
+        GameTooltip:AddLine("On Errors, clears only retained errors. On Advanced peer diagnostics, clears only that session. Other tabs clear retained boards, audits, UI probes, sync events, DPS debug lines, and errors. Settings, builds, and automation are unchanged.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     clearButton:SetScript("OnLeave", function() GameTooltip:Hide() end)

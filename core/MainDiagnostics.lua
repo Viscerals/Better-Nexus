@@ -750,6 +750,9 @@ local function LogText_State()
         "settings: autoPick=%s autoActivate=%s autoBanish=%s autoSave=%s autoDisable=%s autoLockEchoes=%s",
         tostring(s.autoPick), tostring(s.autoActivate), tostring(s.autoBanish),
         tostring(s.autoSave), tostring(s.autoDisable), tostring(s.autoLockEchoes))
+    for _, line in ipairs(Nexus.RollingStatusLines and Nexus.RollingStatusLines() or {}) do
+        out[#out + 1] = line
+    end
     out[#out + 1] = ""
     out[#out + 1] = "PERSISTED VIEW DIAGNOSTICS (bounded sanitized scalars):"
     AddViewSnapshot(out, Nexus.CommunityBuilds, "community")
@@ -985,6 +988,13 @@ local function ClearDiagnosticLogs(tabKey)
         end
         return false
     end
+    if tabKey == "trace" then
+        -- The roll record is cleared only here and by /nexus trace clear.
+        local logs = Nexus.DiagnosticLogs
+        if not (logs and type(logs.Clear) == "function") then return false end
+        local ok, cleared = pcall(logs.Clear, "rollTrace")
+        return ok and cleared == true
+    end
     local durable = Nexus.DiagnosticLogs
     if not (durable and type(durable.ClearAll) == "function") then
         return false
@@ -1034,6 +1044,10 @@ local function LogViewerProvider(tabKey)
     if tabKey == "automation" then return LogText_Automation() end
     if tabKey == "errors" then return LogText_Errors() end
     if tabKey == "perf" then return LogText_Performance() end
+    if tabKey == "trace" then
+        local recorder = Nexus.RollRecorder
+        return recorder and recorder.Export() or "The roll recorder is not loaded."
+    end
     return "unknown tab: " .. tostring(tabKey)
 end
 

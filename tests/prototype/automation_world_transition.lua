@@ -5,7 +5,8 @@
 -- Auto OFF. An action sent before the leave and unresolved at it stays
 -- unresolved and holds automation until player input (scenarios 10-12).
 -- Real runtime, adapter, policy and panel; synthetic game surface.
-local WANT={{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}}
+-- Two copies of the x2 target: both the released and the adaptive policy Freeze one.
+local WANT={{spellId=200001,quality=1},{spellId=200001,quality=1},{spellId=200020,quality=0}}
 local function Boot(before)
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;NexusPanel=nil
  local H=dofile('tests/prototype/harness.lua');H.pendingRolls=2

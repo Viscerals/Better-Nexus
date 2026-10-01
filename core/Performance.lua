@@ -30,6 +30,10 @@ local PATH_ORDER = {
     "automation.phase.overlay-prepare",
     "automation.phase.overlay-render",
     "decision.policy",
+    -- Automatic local roll recorder (core/RollRecorder.lua), observation only.
+    "rolltrace.decision",
+    "rolltrace.intent",
+    "rolltrace.after",
     "sync.update",
     "sync.incoming",
     "dps.update",

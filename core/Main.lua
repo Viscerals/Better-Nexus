@@ -980,6 +980,7 @@ local function CommandStatus()
     end
     Print(string.format("OWNED this run: %d echoes (%s).", owned.distinct or 0,
         owned.synced and "synced" or "not synced yet"))
+    for _, line in ipairs(Nexus.RollingStatusLines and Nexus.RollingStatusLines() or {}) do Print(line) end
 end
 
 local function CommandWishlist()
@@ -1129,10 +1130,36 @@ local function CommandAnchor(settings, argument)
     RequestRecompute()
 end
 
+-- Rolling strategy and local recording lines (status page, /nexus policy,
+-- /nexus trace). Read-only; nothing here changes a setting.
+function Nexus.RollingStatusLines()
+    local lines = {}
+    local runtime = Automation()
+    local status = runtime and runtime.RollingPolicyStatus and runtime.RollingPolicyStatus()
+    if status then
+        local text = "rolling strategy: " .. tostring(status.inForce)
+        if status.changePending then
+            text = text .. " (selected: " .. tostring(status.requested) .. ", applies at the next safe action boundary)"
+        end
+        lines[#lines + 1] = text
+        lines[#lines + 1] = "rolling strategy last decision: " .. tostring(status.lastPolicy or "none")
+            .. (status.lastFallback and (" (fell back to the released policy: " .. tostring(status.lastFallback) .. ")") or "")
+    end
+    local recorder = Nexus.RollRecorder
+    local trace = recorder and recorder.Status and recorder.Status()
+    if trace then
+        lines[#lines + 1] = string.format("roll recording: %s, %s saved records (limit %s), %s failed, %s dropped",
+            trace.enabled and "on (local only)" or "off", tostring(trace.retained or 0), tostring(trace.cap or "?"),
+            tostring(trace.failed), tostring(trace.dropped))
+    end
+    return lines
+end
+
 local function CommandHelp()
     if Nexus.Help then Nexus.Help.Show() end
-    Print("Nexus help: /nexus help | editor | panel | status | loading | orbs")
+    Print("Nexus help: /nexus help | editor | panel | status | loading | orbs | policy | trace")
     Print("Rolling permissions: /nexus reroll on|off, /nexus freeze on|off. Automation is a separate switch.")
+    Print("Rolling strategy: /nexus policy adaptive|released. Local roll record: /nexus trace.")
 end
 
 EnsureMainCommands = function()
@@ -1230,6 +1257,51 @@ EnsureMainCommands = function()
                 if Nexus.LoadingStatus then Nexus.LoadingStatus.Show() end
             end,
             auto=function() CommandAuto() end,
+            -- Rolling strategy selector. The saved setting is written at once;
+            -- the runtime applies it at the next safe action boundary.
+            policy=function(settings,_,value)
+                if value=="adaptive" or value=="released" then
+                    settings.rollingPolicy=value
+                    RequestRecompute()
+                    local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+                    local sessionOnly=type(readOnly)=="function" and readOnly()
+                        and " This session only: saved data is kept unchanged and read-only." or ""
+                    Print("Rolling strategy selected: "..value..". It applies at the next safe action boundary; no pending action is cleared or repeated."..sessionOnly)
+                elseif value~=nil then
+                    Print("Use /nexus policy adaptive|released")
+                end
+                for _,line in ipairs(Nexus.RollingStatusLines()) do Print(line) end
+                if value==nil then
+                    Print("adaptive = experimental strategy (default). released = the earlier strategy. See /nexus help.")
+                end
+            end,
+            -- Automatic local roll record: open it, switch it, or clear it.
+            trace=function(settings,_,value)
+                local recorder=Nexus.RollRecorder
+                if not recorder then Print("The roll recorder is not loaded.") return end
+                if value=="off" or value=="on" then
+                    settings.rollTrace=(value=="on")
+                    local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+                    local sessionOnly=type(readOnly)=="function" and readOnly()
+                        and " This session only: saved data is kept unchanged and read-only." or ""
+                    Print("Local roll recording is now "..value..". Nothing is ever sent from this computer."..sessionOnly)
+                elseif value=="clear" then
+                    local ok=Nexus.DiagnosticLogs and Nexus.DiagnosticLogs.Clear(recorder.HISTORY)
+                    Print(ok and "Local roll record cleared." or "The local roll record could not be cleared.")
+                elseif value~=nil then
+                    Print("Use /nexus trace, /nexus trace on|off|clear")
+                    return
+                end
+                for _,line in ipairs(Nexus.RollingStatusLines()) do Print(line) end
+                if value==nil then
+                    if Nexus.LogViewer then
+                        Nexus.LogViewer.Show("trace")
+                        Print("The Roll trace tab holds the report. Copy each page in order and send it privately, never in public.")
+                    else
+                        Print("log viewer unavailable")
+                    end
+                end
+            end,
             rollingOption=function(settings,_,argument)
                 if not argument or (argument.value~="on" and argument.value~="off") then
                     Print("Use /nexus reroll on|off, /nexus freeze on|off, or /nexus currentlocks on|off")

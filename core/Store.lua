@@ -399,7 +399,7 @@ local ReadOnlyRoot = {
     -- beyond the numeric and list defaults. Anything else in the saved
     -- settings (another addon's Sync controls, unknown fields) is not copied
     -- into the settings the session runs with.
-    BOOLEANS = {updateNotifications=true, useCurrentLocksForUntagged=true},
+    BOOLEANS = {updateNotifications=true, useCurrentLocksForUntagged=true, rollTrace=true},
     ANCHOR_NAMES = 32, TEXT = 128, LEVER_OPT_OUTS = 4096,
     COPY_NODES = 256, COPY_DEPTH = 8,
     -- Bound of a read projection of saved records this build reads (DPS):
@@ -420,6 +420,8 @@ function ReadOnlyRoot.Valid(key, value)
         return type(value) == "boolean"
     elseif key == "updateChannel" then
         return value == "stable" or value == "test"
+    elseif key == "rollingPolicy" then
+        return value == "adaptive" or value == "released"
     elseif key == "lastChangelogSeen" then
         return type(value) == "string" and #value <= ReadOnlyRoot.TEXT
     elseif key == "anchorSpellId" then

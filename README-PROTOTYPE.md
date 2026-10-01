@@ -108,9 +108,52 @@ Nexus to leave the current Saved Build untouched.
    choose another strategy. When an action is off, Nexus skips that step and
    uses the next rule below.
 
-### How Nexus chooses
+### Experimental strategy (the default in this build)
 
-On an ordinary Echo choice, in this order (current behavior). **Needed** means
+This build runs an **experimental** rolling strategy by default. The released
+strategy below stays available: `/nexus policy released` selects it and
+`/nexus policy adaptive` returns to the experiment. A change applies at the next
+safe action boundary and never clears or repeats an action that waits for
+confirmation. `/nexus status` shows the strategy in force.
+
+On an ordinary Echo choice the experiment keeps every permission, charge,
+pending-action and Orb rule of the released strategy and changes these steps:
+
+- Two needed offers shown and none held: it can **Freeze** one so the second is
+  kept. It does not Freeze the extra copy of an Echo when one more copy is all
+  that is needed.
+- Several needed offers: it takes the one with the most missing copies; a tie
+  goes to the first offer shown.
+- No offer needed: it **Banishes before it Rerolls**, when Banish is allowed
+  and charged. It Banishes only an offer that is not needed, not frozen, not
+  guaranteed, and whose quality group holds no needed Echo. If none qualifies,
+  it Rerolls as before.
+- Only held offers are needed: it takes the held offer instead of searching.
+
+It comes from an offline simulation with an equal-draw-odds assumption that is
+not measured in the game (private study, 69,120 synthetic runs: 19.3% complete
+Wishlists against 16.8% for the released strategy; its lead over a simpler
+protected-Banish strategy was not significant). No gain in your game is
+promised. The live version has no draw-pool data, so among equally safe offers
+it Banishes the first one shown. When it cannot use its own rules for one
+choice (for example an Echo's quality group is unknown) it uses the released
+rules for that choice and `/nexus status` says why.
+
+### Local roll record
+
+Nexus records its rolling decisions automatically, on this computer only. It
+keeps Echo ids, counts, the offers, charges, the action chosen and the result
+seen. It keeps no account, character, realm or Wishlist name, no chat and no
+credential, and it sends nothing anywhere. At most 256 records are kept in your
+saved data and the oldest are replaced first; a record says when a part is
+incomplete or cut short. `/nexus trace` opens the **Roll trace** tab: copy each
+page in order and send the text privately, never in public. `/nexus trace off`
+and `/nexus trace on` switch recording; `/nexus trace clear` deletes the record.
+The record is observation only and is not proof of the game's draw odds.
+
+### How the released strategy chooses
+
+On an ordinary Echo choice, in this order (released strategy). **Needed** means
 an offer of the exact Echo and quality that still has missing copies: the
 Wishlist's copies minus the copies you have, rolled and locked (with locked
 targets, locked copies count only up to those targets). Picks are **very few**
