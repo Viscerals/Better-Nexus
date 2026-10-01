@@ -323,6 +323,17 @@ check(A.ClearLoadoutWishlist(6),'L8: explicit Unassign of Saved Build 6')
 Saved(201174,2,'L8 stale')
 check(Stored(6)==nil and Same(Assignment(1),one),'L8: the stale save does not assign W-Free')
 closeEditor()
+-- L8b. Opened for an unassigned Saved Build 6: the first save assigns it;
+-- an Unassign after that save is kept by the next save.
+one=LoadoutWorld();closeEditor()
+check(A.ClearLoadoutWishlist(6),'L8b setup: Saved Build 6 unassigned')
+check(Nexus.WishlistEditor.OpenForWishlist(Candidate(107),6),'L8b: W-Free opened for Saved Build 6')
+Saved(201174,2,'L8b first')
+check(Stored(6) and Stored(6).name=='W-Free' and Copies(Stored(6),201174)==2,'L8b: the first save assigns W-Free')
+check(A.ClearLoadoutWishlist(6),'L8b: explicit Unassign after that save')
+Saved(201174,3,'L8b stale')
+check(Stored(6)==nil and Same(Assignment(1),one),'L8b: the next save keeps the Unassign')
+closeEditor()
 -- Chat notices printed while fn runs.
 local function Heard(fn)
  local heard,realPrint={},print
