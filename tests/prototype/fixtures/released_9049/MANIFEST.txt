@@ -8,8 +8,8 @@ data/DefaultProfile.lua|4051|75bf1d74|tree
 data/BundledBuilds.lua|586|36c9eee7|tree
 logic/Version.lua|4786|1a062824|tree
 core/UserText.lua|8134|90e4253b|tree
-core/Performance.lua|14178|4bdf6c75|tree
-core/StutterAlertIntegration.lua|5304|4ef7e6ca|tree
+core/Performance.lua|14178|4bdf6c75|copy
+core/StutterAlertIntegration.lua|5304|4ef7e6ca|copy
 core/EchoCatalogSource.lua|6036|fb5d8f5d|tree
 logic/Model.lua|31912|5938ef93|tree
 logic/Strategy.lua|5223|384dfcc1|copy
@@ -84,5 +84,5 @@ core/AutomationRuntime.lua|175336|3803ef25|copy
 core/MainLifecycle.lua|67677|9629052b|copy
 core/MainCommands.lua|3985|5a56a21a|tree
 core/MainViewModel.lua|17566|c771e519|copy
-core/MainDiagnostics.lua|50511|fa417a47|tree
+core/MainDiagnostics.lua|50511|fa417a47|copy
 core/Main.lua|57013|e344538e|copy

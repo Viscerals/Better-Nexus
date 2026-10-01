@@ -943,8 +943,6 @@ local function LogText_Performance()
     local out = {
         "PERFORMANCE AGGREGATES -- this session only",
         "Observational milliseconds; no per-call samples or SavedVariables history.",
-        "Times are inclusive: lifecycle.phase.* run inside lifecycle.update and",
-        "hud.phase.* inside hud.prepare, so a sub-step is part of its parent; do not add them.",
         string.format("enabled=%s clockAvailable=%s clockFailures=%d",
             tostring(snapshot.enabled == true),
             tostring(snapshot.clockAvailable == true),

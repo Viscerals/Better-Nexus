@@ -1096,6 +1096,19 @@ function Lifecycle.New(options)
         end
     end
 
+    -- Inclusive sub-step timers inside lifecycle.update (Performance paths
+    -- lifecycle.phase.*, aggregate-only). Begin returns nil while Performance
+    -- is disabled or has no clock; Finish then does nothing.
+    local function PhaseBegin(name)
+        local performance = Nexus.Performance
+        return performance and performance.Begin and performance.Begin(name) or nil
+    end
+    local function PhaseFinish(name, startedAt)
+        if startedAt == nil then return end
+        local performance = Nexus.Performance
+        if performance and performance.Finish then performance.Finish(name, startedAt) end
+    end
+
     local function RunUpdate(elapsed,updateStarted)
         if elapsed and elapsed > LAG_THRESHOLD then
             local now = GetTime and GetTime() or 0
@@ -1143,15 +1156,21 @@ function Lifecycle.New(options)
         -- One authority rebind slice per scheduler turn, before any consumer
         -- reads this frame, so a character-identity change is re-proved by the
         -- coordinator rather than by a read.
+        local phaseStarted = PhaseBegin("lifecycle.phase.rebind")
         PumpAuthorityRebind()
+        PhaseFinish("lifecycle.phase.rebind", phaseStarted)
         -- One post-ready Store mutation slice per turn, before consumer reads.
+        phaseStarted = PhaseBegin("lifecycle.phase.store")
         PumpStoreMutationSlice()
+        PhaseFinish("lifecycle.phase.store", phaseStarted)
         if not communityReady then
             -- Early return before the catalog, hash and adapter gate: those
             -- three were not evaluated in this update.
             syncGate.reason, syncGate.owner = "community-startup", "none"
             syncGate.adapterReady, syncGate.catalogReady, syncGate.hashesReady = nil, nil, nil
+            phaseStarted = PhaseBegin("lifecycle.phase.community")
             PumpCommunityStartup(updateStarted)
+            PhaseFinish("lifecycle.phase.community", phaseStarted)
             local adapter=dependencies.Adapter
             if adapter.Ready() then
                 local automation=EnsureAutomation()
@@ -1159,6 +1178,7 @@ function Lifecycle.New(options)
             end
             return
         end
+        phaseStarted = PhaseBegin("lifecycle.phase.maintenance")
         CompleteSharedWorldEntry()
         if bootstrapCoordinator and bootstrapCoordinator.StartAutomaticMaintenance then
             local ok,result=pcall(bootstrapCoordinator.StartAutomaticMaintenance,bootstrapCoordinator)
@@ -1168,6 +1188,7 @@ function Lifecycle.New(options)
                 RecordStoreError(ok and StoreResultReason(result) or result)
             end
         end
+        PhaseFinish("lifecycle.phase.maintenance", phaseStarted)
         local preparationFinished = StartupClock()
         local preparationElapsed = preparationStarted and preparationFinished
             and preparationFinished >= preparationStarted
@@ -1192,12 +1213,21 @@ function Lifecycle.New(options)
             end
         end
         local catalogReady, buildHashesReady
+        -- The manual batch also runs its hash slices; they are part of
+        -- lifecycle.phase.catalog for that update.
+        phaseStarted = PhaseBegin("lifecycle.phase.catalog")
         if manualOwner then
             buildHashesReady, catalogReady = PumpManualPreparationBatch(manualOwner, preparationElapsed, preparationPumps)
+            PhaseFinish("lifecycle.phase.catalog", phaseStarted)
         else
             catalogReady = PumpCatalogAdmissionBatch(preparationElapsed,
                 preparationPumps)
-            if catalogReady then buildHashesReady = PumpBuildHashCacheSlice() end
+            PhaseFinish("lifecycle.phase.catalog", phaseStarted)
+            if catalogReady then
+                phaseStarted = PhaseBegin("lifecycle.phase.hashes")
+                buildHashesReady = PumpBuildHashCacheSlice()
+                PhaseFinish("lifecycle.phase.hashes", phaseStarted)
+            end
         end
         -- Give one explicitly approved Share the next normal admission turn
         -- before Sync can start another incoming write. This does not pump or
@@ -1205,8 +1235,10 @@ function Lifecycle.New(options)
         local community = Nexus.CommunityBuilds
         local shareGate
         if community and type(community.PumpPendingShare) == "function" then
+            phaseStarted = PhaseBegin("lifecycle.phase.share")
             local ok, pending, submitted = RunIsolatedOwner("CommunityBuilds.PumpPendingShare",
                 community.PumpPendingShare)
+            PhaseFinish("lifecycle.phase.share", phaseStarted)
             if not ok or pending then catalogReady = false end
             if not ok or pending or submitted then buildHashesReady = false end
             -- This one pump serves a pending Share and a pending local removal;
@@ -1234,11 +1266,13 @@ function Lifecycle.New(options)
             -- One transport turn per frame. Prepared manual Share bytes do
             -- not depend on a later catalog/hash candidate. Everything else
             -- retains the full readiness gate and passive expiry handling.
+            phaseStarted = PhaseBegin("lifecycle.phase.transport")
             if adapterReady and type(Nexus.Sync.PumpPreparedShare)=="function" then
                 RunIsolatedOwner("Sync.PumpPreparedShare", Nexus.Sync.PumpPreparedShare, elapsed)
             else
                 RunIsolatedOwner("Sync.Housekeep", Nexus.Sync.Housekeep)
             end
+            PhaseFinish("lifecycle.phase.transport", phaseStarted)
         end
         if not adapterReady then return end
         if syncInitialized and Nexus.Sync and catalogReady and buildHashesReady then
@@ -1287,7 +1321,9 @@ function Lifecycle.New(options)
         -- Presentation never drives readiness. The module throttles snapshots;
         -- any UI failure is isolated from the already executed lifecycle work.
         if Nexus.LoadingStatus and type(Nexus.LoadingStatus.Update)=="function" then
+            local loadingStarted = PhaseBegin("lifecycle.loading-status")
             RunIsolatedOwner("LoadingStatus.Update",Nexus.LoadingStatus.Update)
+            PhaseFinish("lifecycle.loading-status", loadingStarted)
         end
         if started ~= nil then
             local finished = StartupClock()

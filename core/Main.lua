@@ -454,6 +454,17 @@ local function DisplayCall(callback, ...)
     return ok and value or nil
 end
 
+-- Inclusive sub-step timers inside hud.prepare (Performance paths
+-- hud.phase.*, aggregate-only). Nil while Performance is off or has no clock.
+local function HudPhaseBegin(name)
+    local performance = Nexus.Performance
+    return performance and performance.Begin and performance.Begin(name) or nil
+end
+local function HudPhaseFinish(name, startedAt)
+    local performance = startedAt ~= nil and Nexus.Performance
+    if performance and performance.Finish then performance.Finish(name, startedAt) end
+end
+
 -- Main owns every service read used by the adaptive HUD. Panel receives only
 -- this defensive display snapshot and never reaches back into data services
 -- while rendering it.
@@ -465,7 +476,9 @@ local function BuildHudDisplayModel(base)
     if not viewModel then return type(base) == "table" and base or {} end
     local baseSnapshot = type(base) == "table" and base or {}
     local input = {base=baseSnapshot,status=StatusLine()}
+    local phaseStarted = HudPhaseBegin("hud.phase.assignment")
     local assignment=Adapter.AssignedWishlist and DisplayCall(Adapter.AssignedWishlist)
+    HudPhaseFinish("hud.phase.assignment", phaseStarted)
     if assignment then
         input.assignment={state=assignment.state,note=assignment.note,name=assignment.name}
     end
@@ -489,9 +502,11 @@ local function BuildHudDisplayModel(base)
     local progress = type(baseSnapshot.progress) == "table"
         and baseSnapshot.progress or {}
     local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
+    phaseStarted = HudPhaseBegin("hud.phase.projection")
     local projection = capture
         and type(capture.GetSharedHudProjection) == "function"
         and DisplayCall(capture.GetSharedHudProjection, player, echoes) or nil
+    HudPhaseFinish("hud.phase.projection", phaseStarted)
     if type(projection) == "table" then
         -- Detached, read-only records retained by DpsCapture for the current
         -- DPS state; the view model copies them into its snapshot.
@@ -507,7 +522,10 @@ local function BuildHudDisplayModel(base)
             input.performance.dummy.global = dummy.global
             input.performance.lk.global = lk.global
         end
-        return viewModel.BuildHudDisplayModel(input)
+        phaseStarted = HudPhaseBegin("hud.phase.view-model")
+        local model = viewModel.BuildHudDisplayModel(input)
+        HudPhaseFinish("hud.phase.view-model", phaseStarted)
+        return model
     end
     -- Compatibility path for injected facades without the projection. They
     -- receive a copy of the Echo set, never Main's private panel input.
