@@ -1242,6 +1242,18 @@ function Controller.New(options)
         return active < 1 or active > maxSlots or not populated
     end
 
+    -- A save stamps a new assignment identity on the plan it updated. The
+    -- open editor still holds that same plan, so its binding follows the new
+    -- identity: the next save in this session is proven by the unchanged
+    -- checks above. A new plan (no editing context) is not bound.
+    local function RebindAfterSave(assignmentId, key)
+        local context = state.editingContext
+        if context and assignmentId ~= nil then
+            context.assignmentId = assignmentId
+            if key ~= nil then context.key = key end
+        end
+    end
+
     local function TryApply(slot, name, echoes, guard)
         -- An upload may be delayed by the service's spacing guard. The confirmed
         -- draft must still be current BEFORE sending, not merely before opening
@@ -1297,9 +1309,14 @@ function Controller.New(options)
                 -- nothing and never falls back to slot 1 or the first-run plan.
                 local firstRun, unloaded = FirstRunOwnsSave()
                 if firstRun and Adapter.SetFirstLoadoutWishlistIdentity then
-                    associated, associationReason = Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
-                    if associated then notify("|cff4dff80Nexus:|r '" .. tostring(name)
-                        .. "' is the first-run Wishlist target (used until a Saved Build with Echoes is active).") end
+                    local assignmentId, key
+                    associated, associationReason, assignmentId, key =
+                        Adapter.SetFirstLoadoutWishlistIdentity(name, recorded, designTargets)
+                    if associated then
+                        RebindAfterSave(assignmentId, key)
+                        notify("|cff4dff80Nexus:|r '" .. tostring(name)
+                            .. "' is the first-run Wishlist target (used until a Saved Build with Echoes is active).")
+                    end
                 else
                     notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved. "
                         .. (unloaded and "Saved Build data is not loaded yet, so it is not assigned."

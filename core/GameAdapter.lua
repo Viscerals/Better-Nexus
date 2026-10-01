@@ -2109,7 +2109,8 @@ function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
         state.firstRunWishlist = mirrored
     end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
-    return true
+    -- The identity this save stamped, for an editor that holds this plan.
+    return true, nil, mirrored.assignmentId, mirrored.key
 end
 
 function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
