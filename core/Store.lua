@@ -796,19 +796,23 @@ end
 local Preserve = {
     KEY="nexusLegacyPreservationV1", VERSION=1, SOURCE="WishlistRealizerDB",
     TABLES=65536, DEPTH=16, KEY_BYTES=256, STRING_BYTES=16384,
-    BYTES=4194304, ENTRIES=4, CODE=12,
+    BYTES=4194304, ENTRIES=4, CODE=12, KEYS=524288,
 }
 AuthorityBootstrap.Preserve = Preserve
 
 -- One pass: a detached deep copy, plus a digest of a canonical key-sorted
 -- serialization. A metatable, a cycle, a shared table, a function, userdata,
 -- a non-finite number, or a key that is not a string, number or boolean is
--- LEGACY_NOT_PRESERVABLE. A value past a bound is PRESERVATION_CAPACITY.
+-- LEGACY_NOT_PRESERVABLE. A value past a bound is PRESERVATION_CAPACITY. A
+-- refusal returns the reason and a short detail naming what was hit.
 function Preserve.Snapshot(value)
-    if type(value) ~= "table" or getmetatable(value) ~= nil then
-        return nil, "LEGACY_NOT_PRESERVABLE"
+    if type(value) ~= "table" then
+        return nil, "LEGACY_NOT_PRESERVABLE", "a value that is not a table"
     end
-    local tables, bytes, a, b, h = 0, 0, 1, 0, 0
+    if getmetatable(value) ~= nil then
+        return nil, "LEGACY_NOT_PRESERVABLE", "a table with a metatable"
+    end
+    local tables, bytes, keyCount, a, b, h = 0, 0, 0, 1, 0, 0
     local seen = {}
     local function Feed(text)
         for index = 1, #text do
@@ -822,17 +826,19 @@ function Preserve.Snapshot(value)
     local function Scalar(item)
         local kind = type(item)
         if kind == "string" then
-            if #item > Preserve.STRING_BYTES then return false, "PRESERVATION_CAPACITY" end
+            if #item > Preserve.STRING_BYTES then
+                return false, "PRESERVATION_CAPACITY", "a string over " .. Preserve.STRING_BYTES .. " bytes"
+            end
             Feed("s"); Feed(tostring(#item)); Feed(":"); Feed(item)
         elseif kind == "number" then
             if item ~= item or item == math.huge or item == -math.huge then
-                return false, "LEGACY_NOT_PRESERVABLE"
+                return false, "LEGACY_NOT_PRESERVABLE", "a number that is not finite"
             end
             Feed("n"); Feed(string.format("%.17g", item))
         elseif kind == "boolean" then
             Feed(item and "b1" or "b0")
         else
-            return false, "LEGACY_NOT_PRESERVABLE"
+            return false, "LEGACY_NOT_PRESERVABLE", "a value of type " .. kind
         end
         return true
     end
@@ -847,23 +853,33 @@ function Preserve.Snapshot(value)
         return x < y
     end
     local function Copy(source, depth)
-        if depth > Preserve.DEPTH then return nil, "PRESERVATION_CAPACITY" end
-        if seen[source] then return nil, "LEGACY_NOT_PRESERVABLE" end
+        if depth > Preserve.DEPTH then
+            return nil, "PRESERVATION_CAPACITY", "more than " .. Preserve.DEPTH .. " levels"
+        end
+        if seen[source] then
+            return nil, "LEGACY_NOT_PRESERVABLE", "a table that appears twice (shared or a cycle)"
+        end
         seen[source] = true
         tables = tables + 1
-        if tables > Preserve.TABLES then return nil, "PRESERVATION_CAPACITY" end
+        if tables > Preserve.TABLES then
+            return nil, "PRESERVATION_CAPACITY", "more than " .. Preserve.TABLES .. " tables"
+        end
         local keys, count = {}, 0
         for key in pairs(source) do
             if type(key) == "string" and #key > Preserve.KEY_BYTES then
-                return nil, "PRESERVATION_CAPACITY"
+                return nil, "PRESERVATION_CAPACITY", "a key over " .. Preserve.KEY_BYTES .. " bytes"
             end
             count = count + 1
+            keyCount = keyCount + 1
+            if keyCount > Preserve.KEYS then
+                return nil, "PRESERVATION_CAPACITY", "more than " .. Preserve.KEYS .. " entries"
+            end
             keys[count] = key
         end
         for index = 1, count do
             local kind = type(keys[index])
             if kind ~= "string" and kind ~= "number" and kind ~= "boolean" then
-                return nil, "LEGACY_NOT_PRESERVABLE"
+                return nil, "LEGACY_NOT_PRESERVABLE", "a key of type " .. kind
             end
         end
         table.sort(keys, Less)
@@ -872,27 +888,31 @@ function Preserve.Snapshot(value)
         for index = 1, count do
             local key = keys[index]
             local item = source[key]
-            local ok, why = Scalar(key)
-            if not ok then return nil, why end
+            local ok, why, detail = Scalar(key)
+            if not ok then return nil, why, detail end
             Feed("=")
             if type(item) == "table" then
-                if getmetatable(item) ~= nil then return nil, "LEGACY_NOT_PRESERVABLE" end
-                local copied, copyWhy = Copy(item, depth + 1)
-                if copied == nil then return nil, copyWhy end
+                if getmetatable(item) ~= nil then
+                    return nil, "LEGACY_NOT_PRESERVABLE", "a table with a metatable"
+                end
+                local copied, copyWhy, copyDetail = Copy(item, depth + 1)
+                if copied == nil then return nil, copyWhy, copyDetail end
                 out[key] = copied
             else
-                ok, why = Scalar(item)
-                if not ok then return nil, why end
+                ok, why, detail = Scalar(item)
+                if not ok then return nil, why, detail end
                 out[key] = item
             end
             Feed(";")
-            if bytes > Preserve.BYTES then return nil, "PRESERVATION_CAPACITY" end
+            if bytes > Preserve.BYTES then
+                return nil, "PRESERVATION_CAPACITY", "more than " .. Preserve.BYTES .. " bytes in all"
+            end
         end
         Feed("}")
         return out
     end
-    local copied, why = Copy(value, 1)
-    if copied == nil then return nil, why end
+    local copied, why, detail = Copy(value, 1)
+    if copied == nil then return nil, why, detail end
     return {copy=copied, tables=tables, bytes=bytes,
         digest=string.format("%04x%04x%04x%04x", b, a, math.floor(h / 65536), h % 65536)}
 end
@@ -977,7 +997,19 @@ function Preserve.Waiting(C)
         or token.legacyClass ~= "FOREIGN_BLOCK" then
         return nil
     end
+    -- A future, unverified or malformed saved format is read-only AS A WHOLE
+    -- (docs/SAVED_FORMAT_COMPATIBILITY.md): no key is added and nothing is
+    -- released there, so there is no recovery to offer.
+    if type(C.database) ~= "table" or HasFutureSettingsOwner(C.database) then return nil end
     return token
+end
+
+-- A receipt from a newer build, or a malformed one, is not read by this
+-- build's recovery either: it fails closed.
+function Preserve.ReceiptBlocked(C)
+    local class = ClassifyMigrationMarker(C.database)
+    if class == "FUTURE" or class == "MALFORMED" then return "RECEIPT_" .. class end
+    return nil
 end
 
 function Preserve.Unchanged(C, token)
@@ -1003,8 +1035,10 @@ function Preserve.Offer(C)
     if not Preserve.Unchanged(C, token) then
         return {state="blocked", reason="INPUT_DRIFT"}
     end
-    local snapshot, why = Preserve.Snapshot(WishlistRealizerDB)
-    if not snapshot then return {state="blocked", reason=why} end
+    local receipt = Preserve.ReceiptBlocked(C)
+    if receipt then return {state="blocked", reason=receipt} end
+    local snapshot, why, detail = Preserve.Snapshot(WishlistRealizerDB)
+    if not snapshot then return {state="blocked", reason=why, detail=detail} end
     local status, _, entries, count = Preserve.Inspect(C.database)
     if status == "FUTURE" then return {state="blocked", reason="ARCHIVE_FUTURE"} end
     if status == "MALFORMED" then return {state="blocked", reason="ARCHIVE_MALFORMED"} end
@@ -1046,18 +1080,21 @@ function Preserve.Dispose(legacy)
     return WishlistRealizerDB == nil
 end
 
--- Removes only what this recovery added, and puts the legacy global back if
--- it was cleared.
+-- Puts the legacy global back first if it was cleared. Only when it is back
+-- does it remove what this recovery added. If the global will not take the
+-- write, the verified copy is kept (nothing is lost) and false is returned.
 function Preserve.Rollback(db, undo)
+    if undo.legacy ~= nil and WishlistRealizerDB == nil then
+        WishlistRealizerDB = undo.legacy
+        if WishlistRealizerDB == nil then return false end
+    end
     if undo.entries and undo.key and undo.entries[undo.key] ~= nil then
         undo.entries[undo.key] = nil
     end
     if undo.store and rawget(db, Preserve.KEY) == undo.store then
         db[Preserve.KEY] = nil
     end
-    if undo.legacy ~= nil and WishlistRealizerDB == nil then
-        WishlistRealizerDB = undo.legacy
-    end
+    return true
 end
 
 -- Attach, verify, re-check the inputs, dispose. Returns nil, or a reason.
@@ -1091,6 +1128,8 @@ function Preserve.Confirm(C, code)
         or not Preserve.SameBound(offer.bound, Preserve.Bound(C)) then
         return {state="failed", reason="INPUT_DRIFT"}
     end
+    local receipt = Preserve.ReceiptBlocked(C)
+    if receipt then return {state="failed", reason=receipt} end
     local legacy = WishlistRealizerDB
     local snapshot, why = Preserve.Snapshot(legacy)
     if not snapshot then return {state="failed", reason=why} end
@@ -1115,8 +1154,8 @@ function Preserve.Confirm(C, code)
     local ok, failure = pcall(Preserve.Commit, C, snapshot, offer, undo, existing ~= nil)
     if not ok then failure = "PRESERVATION_FAILED" end
     if failure ~= nil then
-        Preserve.Rollback(C.database, undo)
-        return {state="failed", reason=failure}
+        local restored = Preserve.Rollback(C.database, undo)
+        return {state="failed", reason=restored and failure or "ROLLBACK_INCOMPLETE"}
     end
     local shown = snapshot.digest:sub(1, Preserve.CODE)
     C.legacyPreserved = {digest=snapshot.digest, code=shown}

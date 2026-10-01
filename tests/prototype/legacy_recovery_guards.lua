@@ -23,11 +23,12 @@ local function Refuses(H,code,reason,label)
  local out=S.Plain(S.Say(H,'legacy keep '..tostring(code)))
  check(out:find(reason,1,true),label..': '..reason..': '..out)
  check(F.Serialize(NexusDB)==before and WishlistRealizerDB==global,label..': nothing changed')
- check(NexusDB[STORE]==nil or before:find(STORE,1,true),label..': no preservation store was added')
 end
 
--- 1. Input drift after the offer. Each is INPUT_DRIFT, and a new offer is
--- blocked in that session (the player reloads and reviews again).
+-- 1. Input drift after the offer. Each is INPUT_DRIFT. An in-place edit of the
+-- same legacy table may be reviewed again (a new offer, a new code); a
+-- replaced table, root, bundle or receipt blocks a new offer until the player
+-- reloads and reviews again.
 do
  local H,code=Offered(S.Legacy())
  WishlistRealizerDB.extra=1
@@ -86,20 +87,21 @@ do
  local P
  local function Deep(n) local t={};local top=t;for i=2,n do local c={};t.c=c;t=c end return top end
  local cases={
-  {'metatable',function() return setmetatable({a=1},{__index=function() end}) end,'LEGACY_NOT_PRESERVABLE'},
-  {'function value',function() return {a=function() end} end,'LEGACY_NOT_PRESERVABLE'},
-  {'cycle',function() local t={a=1};t.self=t;return t end,'LEGACY_NOT_PRESERVABLE'},
-  {'shared table',function() local x={1};return {a=x,b=x} end,'LEGACY_NOT_PRESERVABLE'},
-  {'NaN',function() return {a=0/0} end,'LEGACY_NOT_PRESERVABLE'},
-  {'infinity',function() return {a=1/0} end,'LEGACY_NOT_PRESERVABLE'},
-  {'table key',function() return {[{}]=1} end,'LEGACY_NOT_PRESERVABLE'},
-  {'nested metatable',function() return {a=setmetatable({},{})} end,'LEGACY_NOT_PRESERVABLE'},
-  {'text instead of a table',function() return 'text' end,'LEGACY_NOT_PRESERVABLE'},
-  {'depth 17',function() return Deep(17) end,'PRESERVATION_CAPACITY'},
-  {'string 16385 bytes',function() return {a=('x'):rep(16385)} end,'PRESERVATION_CAPACITY'},
-  {'key 257 bytes',function() return {[('k'):rep(257)]=1} end,'PRESERVATION_CAPACITY'},
-  {'65537 tables',function() local t={};for i=1,65536 do t[i]={} end return t end,'PRESERVATION_CAPACITY'},
-  {'over 4 MiB',function() local t={};for i=1,300 do t['k'..i]=('v'):rep(16000) end return t end,'PRESERVATION_CAPACITY'},
+  {'metatable',function() return setmetatable({a=1},{__index=function() end}) end,'LEGACY_NOT_PRESERVABLE','a table with a metatable'},
+  {'function value',function() return {a=function() end} end,'LEGACY_NOT_PRESERVABLE','a value of type function'},
+  {'cycle',function() local t={a=1};t.self=t;return t end,'LEGACY_NOT_PRESERVABLE','appears twice'},
+  {'shared table',function() local x={1};return {a=x,b=x} end,'LEGACY_NOT_PRESERVABLE','appears twice'},
+  {'NaN',function() return {a=0/0} end,'LEGACY_NOT_PRESERVABLE','not finite'},
+  {'infinity',function() return {a=1/0} end,'LEGACY_NOT_PRESERVABLE','not finite'},
+  {'table key',function() return {[{}]=1} end,'LEGACY_NOT_PRESERVABLE','a key of type table'},
+  {'nested metatable',function() return {a=setmetatable({},{})} end,'LEGACY_NOT_PRESERVABLE','a table with a metatable'},
+  {'text instead of a table',function() return 'text' end,'LEGACY_NOT_PRESERVABLE','not a table'},
+  {'depth 17',function() return Deep(17) end,'PRESERVATION_CAPACITY','more than 16 levels'},
+  {'string 16385 bytes',function() return {a=('x'):rep(16385)} end,'PRESERVATION_CAPACITY','a string over 16384 bytes'},
+  {'key 257 bytes',function() return {[('k'):rep(257)]=1} end,'PRESERVATION_CAPACITY','a key over 256 bytes'},
+  {'65537 tables',function() local t={};for i=1,65536 do t[i]={} end return t end,'PRESERVATION_CAPACITY','more than 65536 tables'},
+  {'over 4 MiB',function() local t={};for i=1,300 do t['k'..i]=('v'):rep(16000) end return t end,'PRESERVATION_CAPACITY','more than 4194304 bytes in all'},
+  {'524289 entries',function() local t={};for i=1,524289 do t[i]=true end return t end,'PRESERVATION_CAPACITY','more than 524288 entries'},
  }
  for _,case in ipairs(cases) do
   local legacy=case[2]()
@@ -107,11 +109,13 @@ do
   P=S.Seam()
   check(Nexus.StartupStatus().reason==REAUTH and Nexus.StartupStatus().failure.legacyClass=='FOREIGN_BLOCK',
    case[1]..': refused as FOREIGN_BLOCK as before')
-  local snapshot,why=P.Snapshot(legacy)
+  local snapshot,why,detail=P.Snapshot(legacy)
   check(snapshot==nil and why==case[3],case[1]..': classified '..case[3]..' (got '..tostring(why)..')')
+  check(type(detail)=='string' and detail:find(case[4],1,true),case[1]..': the detail names what was hit: '..tostring(detail))
   local before=F.Serialize(NexusDB)
   local out=S.Plain(S.Say(H,'legacy'))
   check(out:find(case[3],1,true) and out:find('Nothing was changed',1,true),case[1]..': the offer is blocked: '..out)
+  check(out:find(case[4],1,true),case[1]..': the answer names the bound or the value: '..out)
   check(not out:find('/nexus legacy keep',1,true),case[1]..': no confirmation command is offered')
   Refuses(H,'000000000000','NO_OFFER',case[1])
   check(F.Serialize(NexusDB)==before and WishlistRealizerDB==legacy,case[1]..': legacy and current unchanged')
@@ -299,6 +303,106 @@ do
  check(F.Serialize(NexusDB)==before and WishlistRealizerDB==held and held==legacy,'dispose: the entry is rolled back and the legacy is intact')
  out=S.Plain(S.Say(H,'legacy keep '..code))
  check(WishlistRealizerDB==nil and out:find('preserved',1,true),'dispose: a retry with a working global succeeds: '..out)
+end
+
+-- 5c. "Never release without a verified full copy" is pinned directly.
+do
+ -- A copy that silently lost a key (Attach stores it and reports success) is
+ -- caught by the verification: PRESERVATION_FAILED, the legacy stays.
+ local legacy=S.Legacy()
+ local H=S.Start(S.Current(),legacy)
+ local code=S.Code(H)
+ local P=S.Seam();local real=P.Attach
+ P.Attach=function(db,snapshot,undo)
+  snapshot.copy.customLegacy.keep=nil
+  return real(db,snapshot,undo)
+ end
+ local before=F.Serialize(NexusDB)
+ local out=S.Plain(S.Say(H,'legacy keep '..code))
+ P.Attach=real
+ check(out:find('PRESERVATION_FAILED',1,true),'copy lost a key: caught: '..out)
+ check(WishlistRealizerDB==legacy and F.Serialize(NexusDB)==before,'copy lost a key: the legacy stays and nothing was added')
+ -- A copy that gained a key is caught the same way (the comparison is two-way).
+ P.Attach=function(db,snapshot,undo)
+  snapshot.copy.extraKey='added'
+  return real(db,snapshot,undo)
+ end
+ out=S.Plain(S.Say(H,'legacy keep '..code))
+ P.Attach=real
+ check(out:find('PRESERVATION_FAILED',1,true) and WishlistRealizerDB==legacy and F.Serialize(NexusDB)==before,'copy gained a key: caught')
+ -- A same-digest entry that is a strict subset of the legacy value is a conflict.
+ local digest,entry=S.Entry(S.Legacy())
+ entry.value.flag=nil
+ local db=S.Current();db[STORE]={version=1,entries={[digest]=entry}}
+ local H2=S.Start(db,S.Legacy())
+ check(S.Plain(S.Say(H2,'legacy')):find('ARCHIVE_CONFLICT',1,true),'subset entry: a conflict, never reused')
+ -- ... and so is one that has an extra key.
+ digest,entry=S.Entry(S.Legacy());entry.value.extraKey=1
+ db=S.Current();db[STORE]={version=1,entries={[digest]=entry}}
+ H2=S.Start(db,S.Legacy())
+ check(S.Plain(S.Say(H2,'legacy')):find('ARCHIVE_CONFLICT',1,true),'superset entry: a conflict, never reused')
+ -- Numbers and booleans survive exactly (a float, a large value, a negative zero).
+ local H3=S.Start(S.Current(),S.Legacy())
+ S.Say(H3,'legacy keep '..S.Code(H3))
+ local saved=NexusDB[STORE].entries[S.Seam().Snapshot(S.Legacy()).digest].value
+ check(saved.float==0.1+0.2 and saved.huge==1e300 and saved.yes==true and 1/saved.negzero==-math.huge,
+  'values: float, large number, true and negative zero are preserved exactly')
+end
+
+-- 5d. Double fault: Dispose clears the global, raises, and the global then
+-- refuses the restore. The verified copy is KEPT (nothing is lost) and the
+-- reason says the older copy could not be put back.
+do
+ local legacy=S.Legacy()
+ local H=S.Start(S.Current(),legacy)
+ local code=S.Code(H)
+ local held=WishlistRealizerDB
+ local P=S.Seam();local real=P.Dispose
+ local previous=getmetatable(_G)
+ local cleared=false
+ rawset(_G,'WishlistRealizerDB',nil)
+ setmetatable(_G,{__index=function(_,key) if key=='WishlistRealizerDB' and not cleared then return held end end,
+  __newindex=function(table,key,value)
+   if key=='WishlistRealizerDB' then if value==nil then cleared=true end else rawset(table,key,value) end
+  end})
+ P.Dispose=function() WishlistRealizerDB=nil;error('injected after dispose') end
+ local out=S.Plain(S.Say(H,'legacy keep '..code))
+ P.Dispose=real
+ setmetatable(_G,previous)
+ rawset(_G,'WishlistRealizerDB',nil)
+ check(out:find('ROLLBACK_INCOMPLETE',1,true) and out:find('nothing is lost',1,true),'double fault: named, and nothing is lost: '..out)
+ local entry=NexusDB[STORE] and NexusDB[STORE].entries[P.Snapshot(S.Legacy()).digest]
+ check(entry and F.Serialize(entry.value)==F.Serialize(S.Legacy()),'double fault: the complete copy is kept in the archive')
+end
+
+-- 5e. A receipt from a newer build, or a malformed one, fails closed.
+do
+ for _,case in ipairs({{'future','RECEIPT_FUTURE',{version=2,completed=true,decision='noLegacy'}},
+   {'malformed','RECEIPT_MALFORMED',{version=1,completed='yes'}}}) do
+  local legacy=S.Legacy()
+  local db=S.Current();db.nexusStoreMigrations.wishlistRealizerDB=case[3]
+  local H=S.Start(db,legacy)
+  check(Nexus.StartupStatus().reason==REAUTH,case[1]..' receipt: refused as before')
+  local before=F.Serialize(NexusDB)
+  local out=S.Plain(S.Say(H,'legacy'))
+  check(out:find(case[2],1,true) and not out:find('/nexus legacy keep',1,true),case[1]..' receipt: the offer is blocked: '..out)
+  Refuses(H,'000000000000','NO_OFFER',case[1]..' receipt')
+  check(F.Serialize(NexusDB)==before and WishlistRealizerDB==legacy,case[1]..' receipt: nothing changed')
+ end
+end
+
+-- 5f. An error inside the coordinator is recorded, not swallowed, and the
+-- command reports a refusal.
+do
+ local H=S.Start(S.Current(),S.Legacy())
+ local P=S.Seam();local real=P.Offer
+ P.Offer=function() error('injected recovery error') end
+ local before=Nexus.Errors.SessionCount()
+ local out=S.Plain(S.Say(H,'legacy'))
+ P.Offer=real
+ check(out:find('PRESERVATION_FAILED',1,true),'error: the command reports a refusal: '..out)
+ check(Nexus.Errors.SessionCount()==before+1 and tostring(Nexus.lastError):find('injected recovery error',1,true),
+  'error: the failure is recorded: '..tostring(Nexus.lastError))
 end
 
 -- 6. A crash image: the process stops after the entry is attached and before

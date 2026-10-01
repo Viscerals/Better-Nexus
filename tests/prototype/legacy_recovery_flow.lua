@@ -8,7 +8,9 @@
 -- non-authoritative store, unchanged current authority, and a serialize and
 -- reload round trip. Offline literal round trip only; this is NOT a native host
 -- save and reload. Real TOC boot, Store coordinator, lifecycle, commands.
--- Synthetic data only.
+-- Synthetic data only. Two assumptions are NOT tested here (they need the game):
+-- that WoW omits a nil global from the saved file, and that the serialized text
+-- used for the round trip equals what WoW reloads.
 local F=dofile('tests/prototype/format5_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local STORE='nexusLegacyPreservationV1'
@@ -145,4 +147,4 @@ check(WishlistRealizerDB==nil,'restored legacy: released after the existing entr
 local n=0;for _ in pairs(NexusDB[STORE].entries)do n=n+1 end
 check(n==1 and F.Serialize(NexusDB[STORE].entries[keys[1]])==entryBefore,'restored legacy: one entry, not overwritten')
 
-print('PASS legacy_recovery_flow: refusal, read-only offer, bound code, full-value preservation, unchanged authority, reload round trip, repeated start-up checks='..checks)
+print('PASS legacy_recovery_flow: refusal, read-only offer, bound code, full-value preservation, unchanged authority, offline literal reload round trip (not a native reload), repeated start-up checks='..checks)

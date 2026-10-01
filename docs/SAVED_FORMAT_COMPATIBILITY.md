@@ -44,7 +44,7 @@ From the build after test.9035:
 
 ## Older Nexus data next to your current data (`WishlistRealizerDB`)
 
-Older Nexus builds kept their saved data in a second saved variable, `WishlistRealizerDB`. When a profile holds current data and a separate, non-empty `WishlistRealizerDB`, start-up stops at `STORE_LEGACY_DISPOSITION_PENDING` with `LEGACY_DISPOSITION_REAUTH_REQUIRED` and the legacy class `FOREIGN_BLOCK`. Nexus does not guess which data is yours. It does not delete, import or merge anything. A receipt that an earlier start-up recorded (`nexusStoreMigrations.wishlistRealizerDB`, for example `decision = "noLegacy"`) is not permission to discard the older data.
+`WishlistRealizerDB` is a saved variable that `Nexus.toc` still declares for older data. Nexus does not know where a given profile's copy came from. When a profile holds current data and a separate, non-empty `WishlistRealizerDB`, start-up stops at `STORE_LEGACY_DISPOSITION_PENDING` with `LEGACY_DISPOSITION_REAUTH_REQUIRED` and the legacy class `FOREIGN_BLOCK`. Nexus does not guess which data is yours. It does not delete, import or merge anything. A receipt that an earlier start-up recorded (`nexusStoreMigrations.wishlistRealizerDB`, for example `decision = "noLegacy"`) is not permission to discard the older data.
 
 | Case | Behavior |
 |---|---|
@@ -52,7 +52,7 @@ Older Nexus builds kept their saved data in a second saved variable, `WishlistRe
 | `WishlistRealizerDB` is the current root (alias) | Unchanged. One verified nil write. |
 | Distinct, empty `WishlistRealizerDB` | Unchanged. Kept as it is; it grants nothing. |
 | No current data, a non-empty `WishlistRealizerDB` | Unchanged. It becomes the current root. |
-| Future format, invalid or non-plain current data | Unchanged. |
+| Future, unverified or malformed saved format (read-only), invalid or non-plain current data | Unchanged. No recovery is offered: a read-only profile is read-only as a whole, so no key is added and nothing is released. |
 | Current data and a distinct, non-empty `WishlistRealizerDB` | Start-up stops, as before. **New:** the player can keep the current setup and preserve the older data, with an explicit confirmation. |
 
 ### Keep my current setup and preserve the older data
@@ -69,11 +69,13 @@ Older Nexus builds kept their saved data in a second saved variable, `WishlistRe
 | Rollback | If any later step fails, the call removes only what it added and leaves `WishlistRealizerDB` in place. |
 | Untouched | The current authority, characters, settings and the old receipt. |
 
-Refusals change nothing. `NO_OFFER`, `CODE_MISMATCH`, `INPUT_DRIFT`, `LEGACY_NOT_PRESERVABLE` (a metatable, a cycle, a shared table, a function, a non-finite number, a key that is not a string, number or boolean), `PRESERVATION_CAPACITY` (more than 16 levels, 65,536 tables, 16,384 bytes in one string, 256 bytes in one key, 4 MiB in all, or four entries already stored), `ARCHIVE_MALFORMED`, `ARCHIVE_FUTURE`, `ARCHIVE_CONFLICT` (an entry with this digest holds a different value; entries are never overwritten), `PRESERVATION_FAILED` and `DISPOSITION_FAILED`. An equal entry left by an interrupted earlier attempt is reused, not duplicated.
+After you confirm, the older data is kept in the archive and `WishlistRealizerDB` is cleared. Another addon that reads that variable would find it empty. Nexus has no in-game command that puts it back.
+
+Refusals change nothing. `NO_OFFER`, `CODE_MISMATCH`, `INPUT_DRIFT`, `LEGACY_NOT_PRESERVABLE` (a metatable, a cycle, a shared table, a function, a non-finite number, a key that is not a string, number or boolean), `PRESERVATION_CAPACITY` (more than 16 levels, 65,536 tables, 16,384 bytes in one string, 256 bytes in one key, 4 MiB in all, or four entries already stored), `RECEIPT_FUTURE` and `RECEIPT_MALFORMED` (a receipt from a newer build, or a malformed one), `ARCHIVE_MALFORMED`, `ARCHIVE_FUTURE`, `ARCHIVE_CONFLICT` (an entry with this digest holds a different value; entries are never overwritten), `PRESERVATION_FAILED` and `DISPOSITION_FAILED`. The answer to `/nexus legacy` names the bound or the value that blocked the copy. `ROLLBACK_INCOMPLETE` means a late failure could not put the older copy back: the verified copy stays in the archive, nothing is lost, and the player types `/reload`. The size shown with the code is the size of the data Nexus compared, not the size of the file. An equal entry left by an interrupted earlier attempt is reused, not duplicated.
 
 If the game stops before the saved data is written, the file still holds the refusal state. The same refusal returns and the same steps work again.
 
-Evidence limit: the offline tests round-trip synthetic data through serialized saved text. They are not a native game save and reload.
+Evidence limit: the offline tests round-trip synthetic data through serialized saved text. They are not a native game save and reload. Two assumptions need the game and are not tested: that WoW leaves a nil global out of the saved file, and that the serialized text used in the tests equals what WoW reloads.
 
 ## Character rows
 

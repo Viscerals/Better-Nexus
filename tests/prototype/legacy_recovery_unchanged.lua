@@ -86,6 +86,27 @@ do
  NothingWaiting(H,'non-plain current')
 end
 
+-- 7b. A read-only saved root (a future, unverified or malformed saved format)
+-- beside a foreign legacy global is read-only AS A WHOLE: the refusal is as
+-- before, no code is offered, no key is added and nothing is released.
+for _,case in ipairs({
+  {'future 99',function(db) db.settingsVersion=99 end},
+  {'future 6',function(db) db.settingsVersion=6 end},
+  {'malformed marker',function(db) db.settingsVersion='5' end},
+  {'unverified 3',function(db) db.settingsVersion=3;db.settings.syncMode='bogus' end}}) do
+ local db=S.Current();case[2](db)
+ local legacy=S.Legacy()
+ local H=S.Start(db,legacy)
+ local s=Nexus.StartupStatus()
+ check(s.state=='failed' and s.reason==REAUTH,'read-only '..case[1]..': refused as before')
+ local before=F.Serialize(NexusDB)
+ local said=S.Plain(S.Say(H,'status'))
+ check(not said:find('/nexus legacy',1,true),'read-only '..case[1]..': no hint to a recovery that does not apply: '..said)
+ NothingWaiting(H,'read-only '..case[1])
+ check(WishlistRealizerDB==legacy and F.Serialize(legacy)==F.Serialize(S.Legacy()) and F.Serialize(NexusDB)==before,
+  'read-only '..case[1]..': the root and the legacy global are untouched')
+end
+
 -- 8. A retained receipt of any decision is not authority to discard: the same
 -- refusal returns, and only the explicit confirmation changes anything.
 for _,decision in ipairs({'noLegacy','adoptedLegacy','keptCurrent','ignoredEmptyLegacy','completed','absent'}) do
@@ -121,7 +142,7 @@ do
  local said=S.Plain(S.Say(H,'status'))
  check(said:find('Startup stopped: '..REAUTH,1,true) and said:find('Startup failure: stage=STORE_LEGACY_DISPOSITION_PENDING; legacy=FOREIGN_BLOCK; saved format=supported 2',1,true),
   'refusal: the original lines are unchanged: '..said)
- check(said:find('/nexus legacy',1,true) and said:find('Nothing is deleted unless you confirm',1,true),'refusal: status points at /nexus legacy: '..said)
+ check(said:find('/nexus legacy',1,true) and said:find('Nothing is changed unless you confirm',1,true),'refusal: status points at /nexus legacy: '..said)
  -- After the recovery the hint says to reload, and no longer asks for a decision.
  S.Say(H,'legacy keep '..S.Code(H))
  local after=S.Plain(S.Say(H,'status'))

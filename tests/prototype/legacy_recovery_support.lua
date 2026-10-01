@@ -21,7 +21,10 @@ function S.Legacy(tag)
  tag=tag or ''
  return {settingsVersion=1,
   chars={['LegacyAlt'..tag]={loadoutWishlists={[1]={slot=1,name='Old plan'..tag,echoes={{spellId=300001,quality=2,stacks=1}}}},note='legacy'..tag}},
-  customLegacy={keep=true,list={1,2,3}},[7]='numeric key',flag=false}
+  customLegacy={keep=true,list={1,2,3}},[7]='numeric key',flag=false,
+  -- Numbers and booleans whose exact value matters: a float that is not a
+  -- short decimal, a very large one, a negative zero, a true.
+  float=0.1+0.2,huge=1e300,negzero=-0.0,yes=true}
 end
 function S.Start(db,legacy)
  return F.Boot(db,function() WishlistRealizerDB=legacy end)

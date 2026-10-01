@@ -1157,8 +1157,8 @@ EnsureMainCommands = function()
                 local recovery=lifecycle and lifecycle.LegacyRecoveryStatus and lifecycle.LegacyRecoveryStatus()
                 if recovery and recovery.state=="preserved" then
                     Print("Older data is preserved. Type /reload to start Nexus with your current setup.")
-                else
-                    Print("Older saved data needs your decision. Type /nexus legacy to review it. Nothing is deleted unless you confirm.")
+                elseif recovery and recovery.state=="waiting" then
+                    Print("Older saved data needs your decision. Type /nexus legacy to review it. Nothing is changed unless you confirm.")
                 end
             end
         end,
@@ -1189,19 +1189,23 @@ EnsureMainCommands = function()
                     Print("No older-data decision is waiting.")
                 elseif state=="offer" then
                     Print("Older saved data (WishlistRealizerDB) was found next to your current data. Your current setup is unchanged. Nothing is deleted, imported or merged.")
-                    Print(string.format("Found: %d tables, %d bytes. Code: %s",
+                    Print(string.format("Found: %d tables, about %d bytes of data. Code: %s",
                         tonumber(result.tables) or 0, tonumber(result.bytes) or 0, tostring(result.code)))
-                    Print("To keep your current setup and store the older data in a separate archive inside your saved data, type: /nexus legacy keep "..tostring(result.code))
+                    Print("Confirming stores a complete copy in an archive inside your saved data and then clears WishlistRealizerDB. Another addon that reads that variable would find it empty.")
+                    Print("To keep your current setup and do this, type: /nexus legacy keep "..tostring(result.code))
                     Print("Then type /reload.")
                 elseif state=="blocked" then
-                    Print("The older saved data cannot be kept automatically ("..tostring(result.reason).."). Nothing was changed. Your current setup is unchanged.")
+                    Print("The older saved data cannot be kept automatically ("..tostring(result.reason)
+                        ..(result.detail and (": "..tostring(result.detail)) or "").."). Nothing was changed. Your current setup is unchanged.")
                 elseif state=="alreadyPreserved" or (state=="preserved" and not code) then
                     Print("Older data is already preserved. Type /reload to start Nexus with your current setup.")
                 elseif state=="preserved" then
                     Print("Older data preserved separately (code "..tostring(result.code).."). Your current setup is unchanged. Type /reload to start Nexus with it.")
                 else
                     Print("Older data was not changed: "..tostring(result.reason)..".")
-                    if result.reason=="INPUT_DRIFT" then
+                    if result.reason=="ROLLBACK_INCOMPLETE" then
+                        Print("The older data is safe in the archive, but the older copy could not be put back. Type /reload; nothing is lost.")
+                    elseif result.reason=="INPUT_DRIFT" then
                         Print("The saved data changed. Type /reload, then /nexus legacy again.")
                     elseif result.reason=="NO_OFFER" or result.reason=="CODE_MISMATCH" then
                         Print("Type /nexus legacy for the current code.")
