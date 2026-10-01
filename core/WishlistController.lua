@@ -932,6 +932,10 @@ function Controller.New(options)
                 and Adapter.LoadoutAssignmentToken(loadoutSlot) or nil,
             boundFirstRun = tonumber(loadoutSlot) and Adapter
                 and Adapter.FirstRunToken and Adapter.FirstRunToken() or nil,
+            -- Contents this session's server Wishlist has held: the opened
+            -- ones and each upload (TryApply).
+            heldKeys = tonumber(loadoutSlot)
+                and (wishlist.key and {[wishlist.key] = true} or {}) or nil,
         }
         M.LoadPendingEchoes(wishlist.echoes or {}, false,wishlist.designTargets)
         return true
@@ -1303,6 +1307,10 @@ function Controller.New(options)
                     stacks=echo.stacks, locked=false}
             end
             local associated, associationReason = true, nil
+            if state.editingContext and state.editingContext.heldKeys and Adapter.WishlistKey then
+                local uploadedKey = Adapter.WishlistKey(recorded)
+                if uploadedKey ~= nil then state.editingContext.heldKeys[uploadedKey] = true end
+            end
             if state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
                 -- The open editor's binding goes with the save: a Saved
@@ -1313,7 +1321,8 @@ function Controller.New(options)
                     Adapter.UpdateWishlistAssociationAfterSave(
                         context.loadoutSlot, slot, name, recorded, designTargets,
                         context.boundAssignment and {assignment=context.boundAssignment,
-                            firstRun=context.boundFirstRun, key=context.key} or nil)
+                            firstRun=context.boundFirstRun, key=context.key,
+                            held=context.heldKeys} or nil)
                 if associated then
                     RebindAfterSave(assignmentId, key)
                 elseif associationReason == "assignment_changed" then

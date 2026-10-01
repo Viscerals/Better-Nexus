@@ -414,4 +414,42 @@ SlashCmdList.NEXUS('editor')
 Saved(201173,2,'L12 control')
 check(Stored('first')==nil and Copies(Stored(6),201173)==2,'L12 control: the earlier first-run plan is ended, as before')
 closeEditor()
+-- L13. The same W-Six chosen again while a save waits for the spacing
+-- guard and before the server shows the previous save: the retried save
+-- is received.
+one=LoadoutWorld()
+selected(201173).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup()
+local u3=Uploads()
+selected(201173).plus:Click();button('Save Wishlist'):Click();H.AcceptPopup()
+check(Uploads()==u3 and Nexus.WishlistEditor.IsApplyPending(),'L13: the next save waits for the spacing guard')
+check(A.SetLoadoutWishlist(6,106) and Copies(Stored(6),201173)==1,'L13: W-Six chosen again with the contents the server still shows')
+said=Heard(function() H.Advance(4) end)
+local u4,l4=Uploads()
+check(u4==u3+1 and Sent(l4,201173)==3 and not said:find('that choice is kept',1,true),'L13: the retry uploads with no notice')
+check(Stored(6).name=='W-Six' and Copies(Stored(6),201173)==3 and Same(Assignment(1),one),'L13: Saved Build 6 receives the retried save')
+closeEditor()
+-- L14. After an Unassign, the player restores an older retained version of
+-- W-Six (same name and server slot, other contents): a stale save keeps it.
+one=LoadoutWorld()
+Saved(201173,2,'L14 first')
+local older={name='W-Six',slot=106,key='201173:5',echoes={{spellId=201173,quality=0,stacks=5,locked=false}},assignmentId='assigned:90'}
+check(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(s)
+ local e={record=H.Clone(older),loadoutSlot=6,source='unassign'};s.forgottenWishlists={e};s.forgottenWishlist=e end),'L14 setup: an older retained version')
+check(A.ClearLoadoutWishlist(6),'L14: explicit Unassign')
+check(A.RestoreForgottenWishlistPlan({key='201173:5'}) and Stored(6) and Stored(6).key=='201173:5','L14: the older version restored to Saved Build 6')
+said=Heard(function() Saved(201173,3,'L14 stale') end)
+check(said:find('that choice is kept',1,true) and Stored(6).key=='201173:5' and Stored(6).assignmentId=='assigned:90','L14: the stale save keeps the restored version')
+check(Same(Assignment(1),one),'L14: slot 1 unchanged')
+closeEditor()
+-- L15. A different server Wishlist with the same name (server slot 109)
+-- given to Saved Build 6: a stale save keeps it.
+local rows15=Slots6();rows15[109]={name='W-Six',verified=false,echoes={{spellId=201174,quality=0,stacks=2}}}
+Boot({maxSlots=6,active=6,slots=rows15})
+Assign(1,'W-One',E1);Assign(6,'W-Six',E6);H.Notify();A.Poll();H.Advance(1)
+SlashCmdList.NEXUS('editor')
+check(Ctx().name=='W-Six' and Ctx().slot==106,'L15: W-Six (server slot 106) is open')
+check(A.SetLoadoutWishlist(6,109),'L15: the other W-Six (server slot 109) given to Saved Build 6')
+said=Heard(function() Saved(201173,2,'L15 stale') end)
+check(said:find('that choice is kept',1,true) and Stored(6).slot==109,'L15: the stale save keeps the other W-Six')
+closeEditor()
 print('PASS wishlist editor binding checks='..checks)

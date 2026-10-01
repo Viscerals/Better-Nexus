@@ -1907,16 +1907,19 @@ function WishlistRoles.FirstRunToken(first)
     return WishlistRoles.AssignmentToken(first)
 end
 
--- Whether a stored assignment names the server Wishlist an editor saves:
--- the same name and server slot; without a slot, the same name and the
--- editor's content key.
-function WishlistRoles.SameServerWishlist(saved, wishlistSlot, name, key)
-    if type(saved) ~= "table" or tostring(saved.name or "") ~= tostring(name or "") then
+-- Whether a stored assignment names the server Wishlist an editor saves,
+-- with contents that editor held (opened or uploaded in its session): the
+-- same name, the same server slot when one is recorded, and a held content
+-- key. An older version the player restored is not one of them.
+function WishlistRoles.SameServerWishlist(saved, wishlistSlot, name, held, key)
+    if type(saved) ~= "table" or saved.key == nil
+        or tostring(saved.name or "") ~= tostring(name or "") then
         return false
     end
     local slot = tonumber(saved.slot)
-    if slot ~= nil then return slot == tonumber(wishlistSlot) end
-    return key ~= nil and saved.key == key
+    if slot ~= nil and slot ~= tonumber(wishlistSlot) then return false end
+    if type(held) == "table" then return held[saved.key] == true end
+    return saved.key == key
 end
 
 function WishlistRoles.ReplaceFirstRun(state, record)
@@ -2216,15 +2219,17 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     if not UpdateStoreState(function(state)
         -- `binding` is an open editor's: what this Saved Build held when the
         -- editor opened or last saved (`assignment`), the first-run plan when
-        -- it opened (`firstRun`) and its content key (`key`). A Saved Build
-        -- given another Wishlist, or unassigned, since then keeps that newer
-        -- choice; given this same server Wishlist again, it receives this
-        -- save. A first-run plan chosen since the editor opened is kept.
+        -- it opened (`firstRun`), its content key (`key`) and the contents
+        -- its session held (`held`). A Saved Build given another Wishlist, or
+        -- unassigned, since then keeps that newer choice; given this same
+        -- server Wishlist again (with contents the session held), it receives
+        -- this save. A first-run plan chosen since the editor opened is kept.
         local current = type(state.loadoutWishlists) == "table"
             and state.loadoutWishlists[loadoutSlot] or nil
         if type(binding) == "table"
             and WishlistRoles.AssignmentToken(current) ~= binding.assignment
-            and not WishlistRoles.SameServerWishlist(current, wishlistSlot, name, binding.key) then
+            and not WishlistRoles.SameServerWishlist(current, wishlistSlot, name,
+                binding.held, binding.key) then
             changed = true
             return
         end
