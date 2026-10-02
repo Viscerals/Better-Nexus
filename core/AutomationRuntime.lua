@@ -559,21 +559,52 @@ local function LockDesignTargetsFor(wishlist, knownKey)
     local runRoot = RunRoot()
     local legacy = runRoot and runRoot.lockDesignTargets
     if type(legacy) == "table" then
-        local moved = false
-        local accepted = UpdateStoreState(function(state)
-            state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
-            local key = LockSlotKey(wishlist, knownKey)
-            if not state.lockDesignTargetsBySlot[key] then
-                state.lockDesignTargetsBySlot[key] = legacy
-                moved = true
+        -- The flat table is retired only once its targets are known to be
+        -- kept: the Store accepted the move and the bucket reads back equal,
+        -- or the key already holds an equal bucket. A refused or unverified
+        -- move, or a different bucket that must not be overwritten, leaves
+        -- the flat table untouched (nothing is lost and nothing is merged).
+        local function Same(a, b, depth)
+            if type(a) ~= "table" or type(b) ~= "table" then return a == b end
+            if (depth or 0) > 8 then return false end
+            for k, v in pairs(a) do
+                if not Same(v, b[k], (depth or 0) + 1) then return false end
             end
-        end)
-        runRoot.lockDesignTargets = nil
-        -- A bucket was really created: readers that cached this Wishlist's
-        -- plan re-read it (a revision step only; no data changes).
-        if accepted and moved and Adapter
-            and type(Adapter.NoteLockDesignTargetsMoved) == "function" then
-            Adapter.NoteLockDesignTargetsMoved()
+            for k in pairs(b) do
+                if a[k] == nil then return false end
+            end
+            return true
+        end
+        local key = LockSlotKey(wishlist, knownKey)
+        local function Bucket()
+            local ok, row = UpdateStoreState(function(live) return live end)
+            local map = ok and type(row) == "table"
+                and row.lockDesignTargetsBySlot or nil
+            if not ok or type(row) ~= "table" then return false end
+            return true, type(map) == "table" and map[key] or nil
+        end
+        local readable, existing = Bucket()
+        if readable and existing ~= nil then
+            if Same(existing, legacy) then runRoot.lockDesignTargets = nil end
+        elseif readable then
+            local moved = false
+            local accepted = UpdateStoreState(function(state)
+                state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
+                if not state.lockDesignTargetsBySlot[key] then
+                    state.lockDesignTargetsBySlot[key] = legacy
+                    moved = true
+                end
+            end)
+            local _, stored = Bucket()
+            if accepted and moved and Same(stored, legacy) then
+                runRoot.lockDesignTargets = nil
+                -- A bucket was really created and verified: readers that
+                -- cached this Wishlist's plan re-read it (a revision step
+                -- only; no data changes).
+                if Adapter and type(Adapter.NoteLockDesignTargetsMoved) == "function" then
+                    Adapter.NoteLockDesignTargetsMoved()
+                end
+            end
         end
     end
     -- Read LIVE, not from the defensive snapshot. lockDesignTargetsBySlot is

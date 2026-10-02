@@ -297,12 +297,40 @@ function Controller.New(options)
             end
             return found
         end)
-        if type(old) == "table" then account.lockDesignTargets = nil end
-        -- A bucket was really created: readers that cached this Wishlist's
-        -- plan re-read it (a revision step only; no data changes).
-        if ok and moved and Adapter
-            and type(Adapter.NoteLockDesignTargetsMoved) == "function" then
-            Adapter.NoteLockDesignTargetsMoved()
+        if type(old) == "table" then
+            -- The flat table is retired only once its targets are known to be
+            -- kept: the Store accepted the move and the bucket reads back
+            -- equal, or the key already holds an equal bucket. A refused or
+            -- unverified move, or a different bucket that must not be
+            -- overwritten, leaves the flat table untouched.
+            local function Same(a, b, depth)
+                if type(a) ~= "table" or type(b) ~= "table" then return a == b end
+                if (depth or 0) > 8 then return false end
+                for k, v in pairs(a) do
+                    if not Same(v, b[k], (depth or 0) + 1) then return false end
+                end
+                for k in pairs(b) do
+                    if a[k] == nil then return false end
+                end
+                return true
+            end
+            if ok and not moved and type(targets) == "table" then
+                if Same(targets, old) then account.lockDesignTargets = nil end
+            elseif ok and moved then
+                local verified, stored = UpdateStoreState(function(character)
+                    local map = character.lockDesignTargetsBySlot
+                    return type(map) == "table" and map[key] or nil
+                end)
+                if verified and Same(stored, old) then
+                    account.lockDesignTargets = nil
+                    -- A bucket was really created and verified: readers that
+                    -- cached this Wishlist's plan re-read it (a revision step
+                    -- only; no data changes).
+                    if Adapter and type(Adapter.NoteLockDesignTargetsMoved) == "function" then
+                        Adapter.NoteLockDesignTargetsMoved()
+                    end
+                end
+            end
         end
         if not ok or type(targets) ~= "table" then return {} end
         return targets

@@ -5,7 +5,7 @@
 -- Wishlist revision moving, so an overlay that had already read the plan kept hiding the moved
 -- planned locked targets until some unrelated revision changed. Required: after a MATERIAL move
 -- (a bucket really created from the flat table) the overlay shows the moved targets at its next
--- refresh; a no-op (no flat table), a retire-only (the key already has a bucket) or a refused write
+-- refresh; a no-op (no flat table), a key that already has a bucket or a refused write
 -- announces nothing and moves no revision; the legacy values, the bucket contents and the retirement
 -- of the flat table are unchanged; switching Wishlists switches the rows; unchanged ticks do no work;
 -- planned targets are never shown as owned. Real boot, real editor, real adapter, real overlay frame
@@ -120,12 +120,18 @@ H.locked={};H.Notify();A.Poll();H.Advance(1.5)
 local readsBefore,revBefore2,annBefore2=O.Stats().wishlistReads,wishlistRevision(),announced
 Nexus.RequestRecompute();H.Advance(3)
 check(wishlistRevision()==revBefore2 and announced==annBefore2 and O.Stats().wishlistReads==readsBefore,'no flat table: no announcement, no revision step, no overlay read')
--- Retire-only: the content key already has a bucket, so the flat table is retired and not moved.
-NexusDB.lockDesignTargets={[200081]=1}
+-- Equal bucket: the content key already holds the same targets, so nothing is moved and the flat table is retired.
 local before=Clone(Buckets()[keyL])
+NexusDB.lockDesignTargets=Clone(before)
 Nexus.RequestRecompute();H.Advance(3)
-check(NexusDB.lockDesignTargets==nil and Count(Buckets()[keyL])==Count(before) and Buckets()[keyL][200081]==nil,'a flat table never overwrites an existing bucket, and is still retired')
-check(wishlistRevision()==revBefore2 and announced==annBefore2,'retire-only moves no revision and announces nothing')
+check(NexusDB.lockDesignTargets==nil and Count(Buckets()[keyL])==Count(before),'an equal bucket: nothing moved, the flat table is retired')
+check(wishlistRevision()==revBefore2 and announced==annBefore2,'an equal bucket moves no revision and announces nothing')
+-- Different bucket: never overwritten, and the flat table is kept (see lock_design_legacy_preservation).
+NexusDB.lockDesignTargets={[200081]=1}
+Nexus.RequestRecompute();H.Advance(3)
+check(NexusDB.lockDesignTargets~=nil and NexusDB.lockDesignTargets[200081]==1 and Count(Buckets()[keyL])==Count(before) and Buckets()[keyL][200081]==nil,'a different bucket is not overwritten, and the flat table is kept')
+check(wishlistRevision()==revBefore2 and announced==annBefore2,'a different bucket moves no revision and announces nothing')
+NexusDB.lockDesignTargets=nil
 
 -- ===== Writer 2: WishlistController moves the flat table when the editor opens the Wishlist.
 activate(3)
@@ -141,7 +147,7 @@ rows=LockedRows()
 check(#rows==1 and rows[1].t:find(name(200080)..' (locked target)',1,true) and rows[1].t:sub(1,3)=='[ ]','the overlay shows the target the editor move created, as planned and not owned: '..#rows)
 
 -- ===== Refusal: the Store does not accept the move. Nothing is announced and no revision moves
--- (the flat table is retired by both writers whatever the outcome, as before).
+-- (the flat table is kept; see lock_design_legacy_preservation).
 local owner=Nexus.MainInternals.StoreAuthorityOwner
 local realUpdate=owner.UpdateStateV1
 local refusing=false
@@ -162,6 +168,7 @@ refusedAuto=refused-refusedAuto
 check(refusedAuto>=1,'the refusal reached the automation writer ('..refused..')')
 check(Buckets()[keyC]==nil and #LockedRows()==0,'refused (automation writer): no bucket, no locked row')
 check(wishlistRevision()==revR and announced==annR,'refused (automation writer): no announcement and no revision step')
+NexusDB.lockDesignTargets=nil -- the refused source is kept now; clear it so the next scenario starts clean
 activate(5)
 if NexusEditorFrame then NexusEditorFrame:Hide() end
 NexusDB.lockDesignTargets=Clone(designA)
@@ -198,7 +205,7 @@ do
  calls=0
  backing={lockDesignTargetsBySlot={[key]={[200030]=true}}};account={lockDesignTargets={[200021]=true}}
  c=build(backing,account);c.LoadPendingEchoes(content,false,nil)
- check(backing.lockDesignTargetsBySlot[key][200030]==true and backing.lockDesignTargetsBySlot[key][200021]==nil and account.lockDesignTargets==nil and calls==0,'controller alone: an existing bucket wins, the flat table is retired, nothing is announced')
+ check(backing.lockDesignTargetsBySlot[key][200030]==true and backing.lockDesignTargetsBySlot[key][200021]==nil and account.lockDesignTargets and account.lockDesignTargets[200021]==true and calls==0,'controller alone: a different bucket wins, the flat table is kept, nothing is announced')
  calls=0
  backing={};account={}
  c=build(backing,account);c.LoadPendingEchoes(content,false,nil)

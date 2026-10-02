@@ -144,6 +144,7 @@ NAMES += ['leaderboard_arithmetic_cases']
 NAMES += ['wishlist_loadout_selector_slots']
 NAMES += ['wishlist_overlay_locked_targets']
 NAMES += ['wishlist_overlay_legacy_design_refresh']
+NAMES += ['lock_design_legacy_preservation']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
