@@ -82,10 +82,11 @@ run with other parameters gave 0.550 to 0.445 and 0.561 to 0.450): about 0.11 s 
 are chosen in the same order with and without the early poll.
 
 Overhead (`latency-012/overhead_bench.lua`, interleaved rounds, one machine, not a WoW client):
-idle Auto ON, 120 simulated seconds at 60 fps: 127 ms against 128 ms of CPU (about -0.14 us per
-frame, within noise), the same 679 polls, 2 early polls. Active 30-action chain: 59 early polls
-for 30 actions (about 2 per action), CPU -8% because less simulated time passes, allocation
--0.7 MiB.
+idle Auto ON, 120 simulated seconds at 60 fps, two runs: 127 against 128 ms and 131 against 125 ms
+of CPU (-0.14 and +0.83 us per frame, noise-limited with another heavy program running on the
+machine; the harness frame itself costs about 17 us), the same 679 polls, 2 early polls. Active 30-action chain: 59 early polls
+for 30 actions (about 2 per action), CPU -8% and 0% in two runs (less simulated time passes),
+allocation -0.7 MiB.
 
 ## What this does not claim
 
