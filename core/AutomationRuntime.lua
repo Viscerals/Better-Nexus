@@ -3706,7 +3706,27 @@ end
     end
     local function RunUpdate(elapsed)
         pollAccum = pollAccum + (elapsed or 0)
-        if pollAccum < POLL then return end
+        if pollAccum < POLL then
+            -- Early poll (docs/ROLLING_LATENCY.md). The loop normally waits for the
+            -- next 0.2 s tick, which adds up to 0.2 s after every server reply and
+            -- after every scheduled deadline. While Auto is ON, and at most once per
+            -- 0.05 s, the same poll runs at once when (a) a scheduled step is due, or
+            -- (b) the client reports a board or Echo-data notification the poll would
+            -- reconcile. Nothing else changes: the poll, the confirmation rules, the
+            -- in-flight and grant holds, the 0.4 s intent beat and the authorization
+            -- checks run exactly as before, only earlier. Two scalar reads per frame
+            -- while Auto is ON, none while it is OFF.
+            if not autoEnabled or pollAccum < 0.05 or Nexus.EarlyPollDisabled
+                or recomputeStats.earlyBlocked or stepRetry.pending then
+                return
+            end
+            local due = nextStepAt ~= nil and GetTime() >= nextStepAt
+            if not due and not (Adapter.NotificationPending
+                and Adapter.NotificationPending()) then
+                return
+            end
+            recomputeStats.earlyPolls = (recomputeStats.earlyPolls or 0) + 1
+        end
         pollAccum = 0
         recomputeStats.polls = recomputeStats.polls + 1
         local performance = Nexus and Nexus.Performance
@@ -3720,6 +3740,9 @@ end
         if startedAt and performance and type(performance.Finish) == "function" then
             pcall(performance.Finish, "gameadapter.poll", startedAt)
         end
+        -- A failing poll or step is never retried early (state is kept in recomputeStats:
+        -- this chunk is at Lua's local-variable limit).
+        recomputeStats.earlyBlocked = not okPoll or nil
         if not okPoll then
             recomputeStats.pollFailures = recomputeStats.pollFailures + 1
             SetStatus("error (see /nexus err)")

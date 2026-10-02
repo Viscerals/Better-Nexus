@@ -4247,6 +4247,14 @@ local function InstallHooks()
     end
 end
 
+-- Read-only. True while a client notification that the next Poll reconciles has
+-- arrived: a board was shown or updated, or Echo data changed. These are set by the
+-- client's own presentation of a server reply, not by this addon's sends. Changes no
+-- state; the Poll still does all reading, confirming and holding.
+function A.NotificationPending()
+    return boardNotificationPending or echoNotificationPending
+end
+
 function A.ConsumeDirty()
     local b, s, d, static = boardDirty, slotsDirty, dataDirty, staticDirty
     local levelEvents = levelBurstStatus.pending

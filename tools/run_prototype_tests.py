@@ -133,6 +133,7 @@ NAMES += ['wishlist_assignment_action_token']
 NAMES += ['catalog_verdict_reuse','catalog_verdict_reuse_differential']
 NAMES += ['legacy_recovery_flow','legacy_recovery_guards','legacy_recovery_unchanged']
 NAMES += ['adaptive_policy_rules','adaptive_policy_parity','roll_recorder_unit','roll_recorder_runtime']
+NAMES += ['rolling_latency']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
