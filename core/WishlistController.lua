@@ -301,9 +301,10 @@ function Controller.New(options)
         if type(old) == "table" then
             -- The flat table is retired only once its targets are known to be
             -- kept: the Store accepted the move and the bucket reads back
-            -- equal, or the key already holds an equal bucket. A refused or
-            -- unverified move, or a different bucket that must not be
-            -- overwritten, leaves the flat table untouched.
+            -- equal, or the key already holds an equal bucket, and the Store
+            -- reports durable. A refused or unverified move, a different
+            -- bucket that must not be overwritten, or a Store that is not
+            -- durable leaves the flat table untouched.
             local function Same(a, b, depth)
                 if type(a) ~= "table" or type(b) ~= "table" then return a == b end
                 if (depth or 0) > 8 then return false end
@@ -316,10 +317,10 @@ function Controller.New(options)
                 return true
             end
             -- Retirement also needs the Store to be durable now: while it is
-            -- only keeping a transient, never-persisted row an equal bucket
-            -- proves nothing about the saved data. An injected facade is its
-            -- own authority; a real Store that cannot say is treated as not
-            -- durable.
+            -- only keeping a transient, never-persisted row, or the lifecycle
+            -- is still loading, an equal bucket proves nothing about the saved
+            -- data. An injected facade is its own authority; a real Store
+            -- that cannot say is treated as not durable.
             local function Durable()
                 local Store = boundStore
                 if not (type(Store) == "table" and type(Store.Init) == "function"

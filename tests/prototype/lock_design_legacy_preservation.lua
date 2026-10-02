@@ -9,11 +9,16 @@
 -- is never overwritten or merged; a refused move is retried on the next call and lands; repeated calls change
 -- nothing once it has; the overlay invalidation (control 025) fires for a created, verified bucket.
 --
--- Attribution (control 027): each writer is driven ALONE. The editor scenarios keep Plan A (which carries its
--- own design, so automation returns before it reads the flat table) as the active Wishlist and open the legacy
--- Wishlist in the editor without activating it; the automation scenarios close the editor. A wrapper on the
--- Store owner attributes every store call and every bucket-map write attempt to its caller from the stack, and
--- each scenario asserts that its own writer ran and the other did not. Real boot, real editor and adapter.
+-- Attribution (control 027): each writer is driven ALONE in the healthy-store scenarios. The editor scenarios
+-- keep Plan A (which carries its own design, so automation returns before it reads the flat table) as the
+-- active Wishlist and open the legacy Wishlist in the editor without activating it; the automation scenarios
+-- close the editor. A wrapper on the Store owner attributes every store call and every bucket-map write
+-- attempt to its caller from the stack; each scenario asserts that its own writer ran and the other attempted
+-- no write, and a control shows automation inert with Plan A active. Limits, measured: with NexusDB.chars
+-- absent the editor writer makes no store call, and with identity not ready neither writer does, so the
+-- transient-row case is automation-only and the identity case is a nothing-happens regression check. No
+-- natural runtime path to a transient row is demonstrated; the durable guard is defence in depth, covered
+-- by the Store.StateWriteStatus cases. Real boot, real editor and adapter.
 local H=dofile('tests/prototype/orbs_support.lua')
 local A,W=H.A,Nexus.WishlistEditor
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
@@ -205,8 +210,10 @@ local function scenario(writer)
   drive(writer)
   check(NexusDB.lockDesignTargets==nil and Same(Buckets()[key],DESIGN) and announced==a0+1,L..' durable again ('..case.name..'): the flat table is retired, the bucket is unchanged, nothing more announced')
  end
- -- ===== a transient row: the container is unusable, so the Store would keep a never-persisted row
- do
+ -- ===== a transient row: the container is unusable, so the Store would keep a never-persisted row.
+ -- Automation only: with NexusDB.chars absent the editor writer makes no store call at all (measured, control 027),
+ -- so an editor variant would be satisfied by automation. The editor guard is covered by the status cases above.
+ if writer=='automation' then
   reset(writer);setFlat(DESIGN)
   local chars=NexusDB.chars
   local b=counters()
@@ -214,13 +221,14 @@ local function scenario(writer)
   drive(writer)
   local saved=NexusDB.lockDesignTargets
   NexusDB.chars=chars
+  check(calls.controller==b.c,L..' transient row: the editor writer did not run')
   check(type(saved)=='table' and Same(saved,DESIGN),L..' transient row (no container): the saved flat table is kept')
   check(Buckets()[key]==nil,L..' transient row: nothing reached the saved row')
   drive(writer)
   onlyWriter(writer,b,true,L..' after the container returned')
   check(NexusDB.lockDesignTargets==nil and Same(Buckets()[key],DESIGN),L..' after the container returned: moved into the saved row and retired')
  end
- -- ===== identity not ready: no move, source kept; moved when it is ready
+ -- ===== identity not ready: neither writer reaches the Store (a regression check, not a test of the guard)
  do
   reset(writer);setFlat(DESIGN)
   local realUnit=UnitName
@@ -228,6 +236,8 @@ local function scenario(writer)
   local w0=counters()
   drive(writer)
   UnitName=realUnit
+  local w1=counters()
+  check(w1.wa==w0.wa and w1.wc==w0.wc,L..' identity not ready: no bucket write is attempted by either writer')
   check(type(NexusDB.lockDesignTargets)=='table' and Same(NexusDB.lockDesignTargets,DESIGN) and Buckets()[key]==nil,L..' identity not ready: the flat table is kept, no bucket')
   drive(writer)
   check(NexusDB.lockDesignTargets==nil and Same(Buckets()[key],DESIGN),L..' identity ready: moved and retired')
@@ -289,4 +299,4 @@ do
  c=build(backing,account);c.LoadPendingEchoes(content,false,nil)
  check(Same(account.lockDesignTargets,DESIGN) and next(backing.lockDesignTargetsBySlot[key])==nil,'controller alone: an empty bucket is not overwritten and the flat table is kept')
 end
-print('PASS lock_design_legacy_preservation: each writer driven alone and attributed; the flat legacy locked-design table is retired only after its targets are kept and the Store is durable; refused, unpersisted, conflicting, not-durable and transient-row cases keep it byte for byte and overwrite nothing; retry moves it once; repeated calls change nothing; checks='..checks)
+print('PASS lock_design_legacy_preservation: healthy-store scenarios drive each writer alone and attribute it; the flat legacy locked-design table is retired only after its targets are kept and the Store reports durable; refused, unpersisted, conflicting and not-durable cases keep it byte for byte and overwrite nothing (the transient-row case is automation-only); retry moves it once; repeated calls change nothing; checks='..checks)

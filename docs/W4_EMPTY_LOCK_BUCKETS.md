@@ -41,8 +41,9 @@ is not stored; callers (`ApplyCommittedTargets`, `PlanLockCommit`) only read it.
 design only when it has targets, and still never replaces an existing bucket. The one-time
 move of the retired flat account table `lockDesignTargets` under the current key still happens, but the
 flat table is now cleared only after its targets are kept (the move was accepted and reads back equal, or
-the key already holds an equal bucket). A refused or unpersisted move, or a key that already holds a
-different bucket (an empty one included), leaves the flat table as it was and overwrites nothing.
+the key already holds an equal bucket) and the Store reports durable (`Store.StateWriteStatus`). A refused
+or unpersisted move, a key that already holds a different bucket (an empty one included), or a Store that
+is not durable leaves the flat table as it was and overwrites nothing.
 Opening or saving in a read-only saved root still writes nothing.
 
 One behavior change besides the growth: the content key covers the rolled copies only, so opening
