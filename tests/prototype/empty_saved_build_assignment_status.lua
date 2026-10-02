@@ -170,6 +170,15 @@ do
   and firstRunRecord()==nil,'the handoff writes slot 2 and clears the first-run plan, as before')
 end
 
+-- 1b. The server's own shape for an emptied Saved Build is a verified row with no Echoes.
+reopen({name='',verified=true,echoes={}},2)
+do
+ local a=Nexus.GameAdapter.AssignedWishlist()
+ check(Nexus.GameAdapter.Slots().bySlot[2].suspectParse==true,'precondition: the verified empty row')
+ check(a.state=='unassigned' and a.name==nil and a.note==NOTE,'verified empty Saved Build: unassigned: '..tostring(a.state)..' '..tostring(a.name))
+ check(firstRunRecord() and firstRunRecord().name==NAME,'the first-run plan is retained')
+end
+
 -- 2. Explicit Unassign: the empty slot is unassigned too, and stays so.
 reopen(emptyRow(),2,function(d)
  for _,row in pairs(d.chars or {}) do if type(row)=='table' then row.firstRunWishlist=false end end
