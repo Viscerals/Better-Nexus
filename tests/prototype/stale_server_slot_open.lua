@@ -140,6 +140,13 @@ for _,case in ipairs({
  check(uploadsTo(102)==0,case.tag..': the selection reappearing in the slot does not authorize the upload')
 end
 
+-- 1b. B is what the slot shows at the click, A is back before any save is tried: the contradiction
+-- was seen when the editor opened and is not undone by the reading that follows.
+openFromRow(function() rawSet(102,row('Someone Elses Plan',B_ROWS)) end)
+rawSet(102,MIRROR_A)
+saveAttempt()
+check(uploadsTo(102)==0,'a contradiction seen at open is not undone by the selection reappearing before the first save')
+
 -- 2. Unknown is not a contradiction: no readable row at the click, the selection shown when saving.
 openFromRow(function() rawSet(102,false) end)
 check(uploadsTo(102)==0,'precondition: nothing uploaded')
