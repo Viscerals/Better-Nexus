@@ -148,16 +148,42 @@ do
 end
 
 -- An open editor's assignment token for the Saved Build, and the assignment actions, survive the upgrade.
-do
+for _,shape in ipairs({'number','keyless table'}) do
  boot(nil,slots('Plan A',A_ID))
  local A=Nexus.GameAdapter
- seed('number',1,101)
+ seed(shape,1,101)
  local token=A.LoadoutAssignmentToken(1)
- local actions=F.Serialize(A.AssignmentActionSnapshot())
+ local bound=A.AssignmentActionSnapshot()
  H.Advance(1)
- check(upgraded('number',durable()),'the record is upgraded')
- check(A.LoadoutAssignmentToken(1)==token,'the binding token of the Saved Build is unchanged by the upgrade: '..tostring(token))
- check(F.Serialize(A.AssignmentActionSnapshot())==actions,'and so are the assignment actions')
+ check(upgraded(shape,durable()),shape..': the record is upgraded')
+ check(A.LoadoutAssignmentToken(1)==token,shape..': the binding token of the Saved Build is unchanged by the upgrade: '..tostring(token))
+ check(A.AssignmentActionUnchanged(bound,1)==true,shape..': an editor bound before the upgrade still finds its assignment action unchanged')
+end
+
+-- A legacy record that appears while another stays unvalidated is tried at once, even though an attempt was
+-- already counted at this mirror generation.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('number',2,105) -- no Wishlist at slot 105
+ H.Advance(2)
+ check(durable(2)==105,'the unvalidated record stays legacy')
+ seed('number',1,101)
+ H.Advance(1) -- no notification, no change of the mirror
+ check(upgraded('number',durable(1)),'a second legacy record is upgraded without waiting for the mirror to change')
+ check(durable(2)==105,'and the first stays legacy')
+end
+
+-- The same legacy record coming back after none existed (Unassign, then an older removal restored) is tried again.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('keyless table',1,101)
+ H.Advance(1)
+ check(upgraded('keyless table',durable()),'the record is upgraded')
+ check(Nexus.GameAdapter.ClearLoadoutWishlist(1),'unassign')
+ H.Advance(2) -- no legacy record: the attempt state is cleared
+ seed('keyless table',1,101)
+ H.Advance(1) -- same mirror generation, same record
+ check(upgraded('keyless table',durable()),'the identical legacy record returning is upgraded again')
 end
 
 -- Positive control for the poll-cost check below: the upgrade's transaction is recognized by its `plan`
