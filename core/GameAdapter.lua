@@ -4551,7 +4551,7 @@ local function LegacyAssignmentSlot(saved)
     -- A table with its own contents or assignment id (a plan saved before
     -- content keys) already carries an identity of its own; it is not a bare
     -- slot reference and is left alone.
-    if type(saved) == "table" and (saved.key == nil or saved.key == "")
+    if type(saved) == "table" and saved.key == nil
         and saved.echoes == nil and saved.assignmentId == nil then
         return tonumber(saved.slot)
     end
@@ -4563,15 +4563,25 @@ local function ReconcileLegacyAssignments()
     local st = Store and Store.State and Store.State()
     local links = st and st.loadoutWishlists
     if type(links) ~= "table" then return end
-    local present = false
-    for _, saved in pairs(links) do
-        if LegacyAssignmentSlot(saved) then present = true; break end
+    -- The attempt is keyed on the slot mirror's generation and on WHICH legacy
+    -- records exist: a record that appears later (a Restore) is tried at once,
+    -- not only after the mirror next changes.
+    local parts = {}
+    for index, saved in pairs(links) do
+        local wanted = LegacyAssignmentSlot(saved)
+        if wanted then parts[#parts + 1] = tostring(index) .. ":" .. tostring(wanted) end
     end
-    if not present then return end
-    if legacyAssignmentsChecked == echoGenerations.slots then return end
+    if #parts == 0 then
+        legacyAssignmentsChecked = nil
+        return
+    end
+    table.sort(parts)
+    local gate = tostring(Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey())
+        .. "|" .. tostring(echoGenerations.slots) .. "|" .. table.concat(parts, ",")
+    if legacyAssignmentsChecked == gate then return end
     local slots = A.Slots()
     if not slots then return end
-    legacyAssignmentsChecked = echoGenerations.slots
+    legacyAssignmentsChecked = gate
     local live = LiveWishlistCandidates(slots)
     local plan = {}
     for index, saved in pairs(links) do

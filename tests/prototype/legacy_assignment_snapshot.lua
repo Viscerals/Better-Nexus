@@ -120,6 +120,68 @@ do
  check(modern.key=='200090:1' and modern.assignmentId=='assigned:7' and modern.name=='Modern','a modern record is untouched')
 end
 
+-- The mirror is unknown at first (no slot table), then appears WITHOUT a notification: the attempt that
+-- found no mirror was not counted, so the next poll upgrades.
+do
+ boot(nil,nil)
+ seed('number',1,101)
+ H.Advance(2)
+ check(durable()==101,'with no slot table the legacy record is left as it is')
+ H.perks.serverBuildSlots=slots('Plan A',A_ID)
+ H.Advance(1)
+ check(upgraded('number',durable()),'the first poll that sees the mirror persists the identity')
+end
+
+-- A legacy record that appears after the first upgrade, at an unchanged mirror (Restore of a retained
+-- keyless table), is tried at once and not only after the mirror next changes.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('number',1,101)
+ H.Advance(1)
+ check(upgraded('number',durable()),'the first record is upgraded')
+ H.perks.serverBuildSlots[102]={name='Plan C',verified=false,echoes=plan(200011)}
+ H.Notify();H.Advance(1)
+ check(owner().UpdateStateV1(function(s) s.loadoutWishlists[2]={slot=102,name='Plan C'} end),'a legacy keyless record appears later')
+ H.Advance(1) -- no notification, no change of the mirror
+ local late=durable(2)
+ check(late.key=='200011:1' and late.slot==102,'it is upgraded without waiting for the mirror to change: '..tostring(late.key))
+end
+
+-- An open editor's assignment token for the Saved Build, and the assignment actions, survive the upgrade.
+do
+ boot(nil,slots('Plan A',A_ID))
+ local A=Nexus.GameAdapter
+ seed('number',1,101)
+ local token=A.LoadoutAssignmentToken(1)
+ local actions=F.Serialize(A.AssignmentActionSnapshot())
+ H.Advance(1)
+ check(upgraded('number',durable()),'the record is upgraded')
+ check(A.LoadoutAssignmentToken(1)==token,'the binding token of the Saved Build is unchanged by the upgrade: '..tostring(token))
+ check(F.Serialize(A.AssignmentActionSnapshot())==actions,'and so are the assignment actions')
+end
+
+-- Positive control for the poll-cost check below: the upgrade's transaction is recognized by its `plan`
+-- upvalue, so a legacy record must enter it exactly once.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('number',1,101)
+ local raw=owner().UpdateStateV1
+ local entered=0
+ owner().UpdateStateV1=function(mutator,...)
+  local i=1
+  while true do
+   local name=debug.getupvalue(mutator,i)
+   if not name then break end
+   if name=='plan' then entered=entered+1 end
+   i=i+1
+  end
+  return raw(mutator,...)
+ end
+ H.Advance(3)
+ owner().UpdateStateV1=raw
+ check(entered==1,'a legacy record enters the upgrade transaction exactly once: '..entered)
+end
+
 -- The passive-diagnostic write block holds the upgrade back; lifting it lets the poll persist it.
 do
  boot(nil,slots('Plan A',A_ID))

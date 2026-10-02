@@ -32,7 +32,9 @@ that cost was not measured.
 from `A.Poll`, beside `ReconcileTomePending`, which is the existing poll-time owner mutation it follows.
 
 - It enters the mutation entry only when a legacy record is present (a cheap check of the cached
-  snapshot first), and tries again only when the slot mirror has changed.
+  snapshot first), and tries again only when the slot mirror's generation or the set of legacy records
+  changed (a record that appears later, for instance through Restore, is tried at once; an unknown mirror
+  is not counted as an attempt).
 - It upgrades only what the live mirror shows at that record's slot now, which is the validation the
   resolver already applied, and only a bare slot reference: a number, or a table with a slot and neither a
   content key nor contents of its own nor an assignment id (a plan saved before content keys carries an
@@ -63,6 +65,9 @@ Restore (an upgraded record keeps its identity through both), binding tokens, an
   the upgrade ran, the record binds the new occupant; nothing in the saved data can say otherwise.
   The poll runs within a fraction of a second of the mirror becoming known, which narrows this window
   but does not remove it.
+- A table that carries its own contents or assignment id is not upgraded, and `ResolveAssociation`
+  still resolves it by its slot to whatever the mirror shows there before it falls back to the stored
+  record: a reused slot can still capture it. That is unchanged by this fix.
 - A record whose slot never shows a Wishlist stays legacy (and keeps slot-number semantics) until it does.
 - Unassign of a keyless table that is still legacy keeps it as it is in the removal list (a bare number
   is not retained); Restore returns that shape, and the poll upgrades it when the mirror validates it.
