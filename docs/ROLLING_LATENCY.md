@@ -27,8 +27,14 @@ The loop (`AutomationRuntime.RunUpdate`) polls the adapter every 0.2 s. A server
 a due deadline both wait for the next tick. The early poll runs the same poll sooner:
 while Auto is ON, at most once per 0.05 s, when a scheduled step is due or the client has
 reported a board or Echo-data notification (`GameAdapter.NotificationPending`, read only).
-A notification is set by the client's presentation of a server reply (the Show and
-UpdateSinglePerk hooks, the Echo data hook), not by this addon's sends.
+A notification is set by the client's board and Echo-data hooks (Show, UpdateSinglePerk, the
+Echo data hook). They are meant for server replies; a hook can also fire for another caller,
+and that is harmless because the same poll only reads and reconciles.
+
+Scope: the early poll wakes the whole loop, so other time-paced work whose deadline is due also
+runs at its deadline instead of at the next tick: Tome-lever sends (0.5 s spacing) and auto-lock
+retries. Their own spacing checks are unchanged; the effective lever spacing can move from about
+0.6 s to about 0.5 s plus a frame (estimated from the code, not measured).
 
 Not changed: the poll itself, the confirmation rules (latch, board transition, grant), the
 in-flight and awaiting-grant holds, the unconfirmed/uncertain/expired states, the 0.4 s beat,
@@ -39,8 +45,13 @@ needs the first one confirmed.
 
 Bounds and guards:
 - Auto OFF: no early poll, no extra read.
-- Auto ON: two scalar reads per frame, and a clock read after 0.05 s since the last poll.
+- Auto ON: after 0.05 s without a poll, each frame reads the disable knob, the two guards and
+  `nextStepAt`, may read the clock, and asks the adapter whether a notification is pending: a
+  fixed handful of scalar reads, no catalog or HUD work.
 - At most one early poll per 0.05 s. Notifications arrive per server reply, not per frame.
+- If a full step keeps failing while notifications keep arriving, early polls resume after each
+  retry is used up. Offline, a failing step under a notification on every frame for 2 s made
+  about 1.7 times the old number of polls and failures (bounded by the 0.05 s spacing).
 - A failing poll, or a pending step retry, blocks early polls until the next normal tick.
 - `Nexus.EarlyPollDisabled = true` restores the old timing (test and rollback knob).
 - `RecomputeStats().earlyPolls` counts them.
@@ -65,8 +76,9 @@ round trip.
 
 The saving depends on where the round trip falls against the 0.2 s grid: 0 to 0.2 s per
 action. With a jittered round trip (uniform in 0.5x to 1.5x of 0.1 s and of 0.2 s, 60 fps)
-the client delay fell from 0.550 and 0.562 s to 0.442 and 0.445 s: about 0.11 s per
-action. The remaining client delay is the 0.4 s beat plus frame rounding. The same actions
+the client delay fell from 0.550 and 0.562 s to 0.442 and 0.445 s (probe parameters:
+`PROBE_JITTER=0.5`, `PROBE_FPS=60`, `PROBE_PLAN=mixed`, `PROBE_RTT=0.10,0.20`; an independent
+run with other parameters gave 0.550 to 0.445 and 0.561 to 0.450): about 0.11 s per action. The remaining client delay is the 0.4 s beat plus frame rounding. The same actions
 are chosen in the same order with and without the early poll.
 
 Overhead (`latency-012/overhead_bench.lua`, interleaved rounds, one machine, not a WoW client):

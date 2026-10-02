@@ -91,8 +91,15 @@ for _,rtt in ipairs({0.05,0.12,0.30})do
 end
 
 -- 2. A board notification does not release an action while the client latch is still set.
+-- The addon itself must not even ATTEMPT a second send (the mock would refuse one), and its
+-- intent stays submitted.
 do
  local H=Boot(true)
+ local attempts=0
+ for _,name in ipairs({'SelectPerk','BanishPerk','FreezePerk','RequestReroll'})do
+  local real=H.service[name]
+  H.service[name]=function(...)attempts=attempts+1;return real(...)end
+ end
  H.Board({{spellId=200100,quality=0},{spellId=200101,quality=1},{spellId=200102,quality=0}});H.Notify();Step(H,.5)
  SlashCmdList.NEXUS('auto');Step(H,1.2)
  check(#H.actions==1,'precondition: one action is in flight: '..#H.actions)
@@ -101,7 +108,8 @@ do
  for i=1,12 do
   H.Board({{spellId=200110+i,quality=0},{spellId=200120+i,quality=1},{spellId=200130+i,quality=0}});Step(H,.25)
  end
- check(#H.actions==1,'new boards shown while the latch is still set release nothing: '..#H.actions)
+ check(#H.actions==1 and attempts==1,'new boards shown while the latch is still set release nothing and no second send is attempted: '..#H.actions..' sent, '..attempts..' attempts')
+ check(Nexus.GameAdapter.InFlight(),'the action stays in flight (the adapter holds on the client latch, not on the clock)')
  H.perks.pendingBanishIndex,H.perks.pendingReroll=nil,nil
  H.Board({{spellId=200200,quality=0},{spellId=200201,quality=1},{spellId=200202,quality=0}});H.Notify();Step(H,1)
  check(#H.actions==2,'once the latch clears the next action follows: '..#H.actions)
@@ -207,7 +215,56 @@ end
 -- 7. The knob restores the old timing exactly.
 do
  local a,b=Script(false,0.12,12),Script(false,0.12,12)
- for i=1,12 do check(math.abs(a.sent[i]-b.sent[i])<1e-9,'the disabled mode is deterministic') end
- check(a.sent[3]-a.sent[2]>=0.64,'with the early poll disabled the baseline cycle is the old 0.65 s: '..(a.sent[3]-a.sent[2]))
+ for i=1,12 do check(math.abs(a.sent[i]-b.sent[i])<1e-9,'the disabled mode is repeatable') end
+ check(a.sent[3]-a.sent[2]>=0.64,'with the early poll disabled the cycle is the measured old 0.65 s (checked against the 3337319 run, 0.650): '..(a.sent[3]-a.sent[2]))
 end
+-- 8. A FULL step inside the beat (an unrelated Echo-data change wakes the loop) never sends early.
+for _,offset in ipairs({0.07,0.19,0.31})do
+ local H=Boot(true)
+ H.Board({{spellId=200100,quality=0},{spellId=200101,quality=1},{spellId=200102,quality=0}});H.Notify();Step(H,.5)
+ SlashCmdList.NEXUS('auto');Step(H,1.2)
+ H.perks.pendingSelectSpellId,H.perks.pendingBanishIndex,H.perks.pendingFreezeIndex,H.perks.pendingReroll=nil,nil,nil,nil
+ local sent=#H.actions
+ H.Board({{spellId=200300,quality=0},{spellId=200301,quality=1},{spellId=200302,quality=0}});H.Notify()
+ local guard=0
+ while Nexus.RecomputeStats().lastActionLifecycle.state~='prepared' and guard<60 do Step(H,DT);guard=guard+1 end
+ local preparedAt=Nexus.RecomputeStats().lastActionLifecycle.preparedAt
+ check(Nexus.RecomputeStats().lastActionLifecycle.state=='prepared' and #H.actions==sent,'precondition: an intent is prepared and not sent')
+ local before=Nexus.RecomputeStats().fullSteps
+ local stirred=false
+ guard=0
+ while #H.actions==sent and guard<200 do
+  Step(H,DT);guard=guard+1
+  if not stirred and H.now-preparedAt>=offset then
+   stirred=true
+   H.granted[H.names[200050+math.floor(offset*100)]]={{spellId=200050+math.floor(offset*100),quality=2}}
+   H.Notify()
+  end
+  if #H.actions==sent then check(H.now-preparedAt<0.4+1e-6,'still inside the beat') end
+ end
+ check(Nexus.RecomputeStats().fullSteps>before+1,'the Echo-data change ran a full step inside the beat')
+ check(#H.actions==sent+1 and H.now-preparedAt>=0.4-1e-6,string.format('offset %.2f: nothing is sent before the beat is over (%.3f s)',offset,H.now-preparedAt))
+end
+
+-- 9. A step that keeps failing is not retried at the notification rate.
+do
+ local function Failing(early)
+  local H=Boot(early)
+  H.Board({{spellId=200100,quality=0},{spellId=200101,quality=1},{spellId=200102,quality=0}});H.Notify();Step(H,.5)
+  SlashCmdList.NEXUS('auto');Step(H,.1)
+  local real=Nexus.GameAdapter.Board
+  Nexus.GameAdapter.Board=function() error('simulated step failure') end
+  local s0=Nexus.RecomputeStats()
+  for i=1,2*FPS do H.Board({{spellId=200100,quality=0},{spellId=200101+i%5,quality=1},{spellId=200102,quality=0}});Step(H,DT) end
+  local s1=Nexus.RecomputeStats()
+  Nexus.GameAdapter.Board=real
+  return s1.stepFailures-s0.stepFailures,s1.stepRetries-s0.stepRetries,s1.polls-s0.polls,#H.actions
+ end
+ local failsOff,retriesOff,pollsOff=Failing(false)
+ local failsOn,retriesOn,pollsOn,actions=Failing(true)
+ check(actions==0,'a failing step sends nothing')
+ check(failsOn<=2*failsOff+2 and pollsOn<=2*pollsOff+2,string.format('failing steps stay near the old rate: %d (old %d) failures, %d (old %d) polls in 2 s',failsOn,failsOff,pollsOn,pollsOff))
+ check(retriesOn<=2*retriesOff+2,string.format('retries stay near the old rate: %d (old %d)',retriesOn,retriesOff))
+end
+
 print('PASS rolling latency checks='..checks)
