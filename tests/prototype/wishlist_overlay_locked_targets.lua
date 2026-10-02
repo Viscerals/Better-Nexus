@@ -154,6 +154,20 @@ local noted=false
 for _,t in ipairs(lines)do if t:find('locked targets unavailable',1,true) then noted=true end end
 check(noted and #LockedRows()==0 and #lines==80,'unreadable planned targets: a note line, no locked row, 79 ordinary rows: '..#lines)
 A.AssignedWishlist=realAssigned
+-- A projection that holds two locked rows of one Echo (a mirrored locked copy plus the plan's extra copy):
+-- one row, with the group's counts.
+A.AssignedWishlist=function()
+ local r=realAssigned();r.state='ready';r.entries={}
+ for i=1,79 do r.entries[i]={spellId=200000+i,quality=i%4,stacks=1,locked=false}end
+ r.entries[80]={spellId=200080,quality=0,stacks=1,locked=true}
+ r.entries[81]={spellId=200080,quality=0,stacks=1,locked=true}
+ return r
+end
+H.locked={{spellId=200080,stacks=1}};Nexus.RequestRecompute();H.perks.serverActiveSlot=3;H.Notify();A.Poll();H.Advance(1.5)
+rows=LockedRows()
+check(#rows==1 and #Lines()==80 and rows[1].t:sub(1,3)=='[~]' and rows[1].t:find('(1/2)',1,true),'two locked rows of one Echo show one row with the group counts (1/2): '..#rows..' '..(rows[1] and rows[1].t or ''))
+A.AssignedWishlist=realAssigned
+H.locked={}
 activate(1)
 check(#LockedRows()==1,'after the design is readable again the target row returns')
 
