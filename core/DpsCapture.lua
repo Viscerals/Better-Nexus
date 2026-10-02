@@ -3193,7 +3193,11 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
 end
 
 local function DpsBoardEntry(row, category, summaryOnly)
-    if type(row) ~= "table" or (tonumber(row.dps) or 0) <= 0
+    -- A board score is the integer floor of a finite score and must be at least
+    -- 1: a non-finite score is not a record (the pair arithmetic refuses it as
+    -- well), and a score below 1 would be listed as 0.
+    local score = type(row) == "table" and tonumber(row.dps) or nil
+    if not FiniteNumber(score) or math.floor(score) < 1
         or not DPS.IsDurationEligible(category, row.duration) then return nil end
     local rawBuildId = row.buildId
     local buildId = rawBuildId
