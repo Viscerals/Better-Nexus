@@ -61,8 +61,13 @@ no other change to locked-role semantics, assignment identity, shared-build or S
 - Auto locked-slot logic (`TryAutoLock`) on a Wishlist with no persisted bucket reports
   "table missing" and does nothing, as for any never-opened Wishlist. Before this change, opening
   such a Wishlist once created an empty bucket, after which that logic ran with zero targets and
-  also superseded attempt records not belonging to its targets (`target_changed`). This is read from
-  the code (`AutomationRuntime` `TryAutoLock`, `SupersedeMissingAutoLockRecords`) and is not
-  exercised by a test. Those records are now left to their own identities and timeouts, which is the
-  more conservative direction (a retained record blocks a duplicate attempt). Existing empty
-  buckets keep their old behavior.
+  also superseded attempt records not belonging to its targets (`target_changed`). Those records are
+  now left unchanged while the bucket stays absent: the step returns before its confirmation-timeout
+  and reconciliation code runs, so nothing expires or supersedes them in that time. When a target set
+  is next evaluated, matching records reconcile or expire as usual and records outside that set are
+  superseded. Keeping them is the more conservative direction (a pending record blocks a duplicate
+  attempt). Neither an absent nor an empty bucket sends a lock or unlock without targets. Existing
+  empty buckets keep their old behavior.
+  The transition is pinned offline, with the real runtime and Store and counted adapter sends, by
+  `auto_lock_absent_empty_bucket` (added after the W4 review). Offline harness only: it does not
+  confirm native LockPerk or UnlockPerk behavior.
