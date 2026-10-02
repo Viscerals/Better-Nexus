@@ -579,6 +579,21 @@ local function LockDesignTargetsFor(wishlist, knownKey)
             end
             return true
         end
+        -- Retirement also needs the Store to be durable now: while it is only
+        -- keeping a transient, never-persisted row (identity not ready, an
+        -- unusable container, a loading lifecycle) an equal bucket proves
+        -- nothing about the saved data. An injected facade is its own
+        -- authority; a real Store that cannot say is treated as not durable.
+        local function Durable()
+            local Store = boundStore
+            if not (type(Store) == "table" and type(Store.Init) == "function"
+                and type(Store.CurrentOwnerKey) == "function") then
+                return true
+            end
+            if type(Store.StateWriteStatus) ~= "function" then return false end
+            local ok, status = pcall(Store.StateWriteStatus)
+            return ok and type(status) == "table" and status.mode == "durable"
+        end
         local key = LockSlotKey(wishlist, knownKey)
         local function Bucket()
             local ok, row = UpdateStoreState(function(live) return live end)
@@ -589,10 +604,13 @@ local function LockDesignTargetsFor(wishlist, knownKey)
         end
         local readable, existing = Bucket()
         if readable and existing ~= nil then
-            if Same(existing, legacy) then runRoot.lockDesignTargets = nil end
+            if Same(existing, legacy) and Durable() then
+                runRoot.lockDesignTargets = nil
+            end
         elseif readable then
             local moved = false
             local accepted = UpdateStoreState(function(state)
+                moved = false -- a re-run of the mutator starts clean
                 state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
                 if not state.lockDesignTargetsBySlot[key] then
                     state.lockDesignTargetsBySlot[key] = legacy
@@ -601,7 +619,7 @@ local function LockDesignTargetsFor(wishlist, knownKey)
             end)
             local _, stored = Bucket()
             if accepted and moved and Same(stored, legacy) then
-                runRoot.lockDesignTargets = nil
+                if Durable() then runRoot.lockDesignTargets = nil end
                 -- A bucket was really created and verified: readers that
                 -- cached this Wishlist's plan re-read it (a revision step
                 -- only; no data changes).

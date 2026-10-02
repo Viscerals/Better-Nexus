@@ -286,6 +286,7 @@ function Controller.New(options)
         local key = state.currentLockKey or 0
         local moved = false
         local ok, targets = UpdateStoreState(function(character)
+            moved = false -- a re-run of the mutator starts clean
             local map = character.lockDesignTargetsBySlot
             local found = type(map) == "table" and map[key] or nil
             if found == nil and type(old) == "table" then
@@ -314,15 +315,32 @@ function Controller.New(options)
                 end
                 return true
             end
+            -- Retirement also needs the Store to be durable now: while it is
+            -- only keeping a transient, never-persisted row an equal bucket
+            -- proves nothing about the saved data. An injected facade is its
+            -- own authority; a real Store that cannot say is treated as not
+            -- durable.
+            local function Durable()
+                local Store = boundStore
+                if not (type(Store) == "table" and type(Store.Init) == "function"
+                    and type(Store.CurrentOwnerKey) == "function") then
+                    return true
+                end
+                if type(Store.StateWriteStatus) ~= "function" then return false end
+                local ok, status = pcall(Store.StateWriteStatus)
+                return ok and type(status) == "table" and status.mode == "durable"
+            end
             if ok and not moved and type(targets) == "table" then
-                if Same(targets, old) then account.lockDesignTargets = nil end
+                if Same(targets, old) and Durable() then
+                    account.lockDesignTargets = nil
+                end
             elseif ok and moved then
                 local verified, stored = UpdateStoreState(function(character)
                     local map = character.lockDesignTargetsBySlot
                     return type(map) == "table" and map[key] or nil
                 end)
                 if verified and Same(stored, old) then
-                    account.lockDesignTargets = nil
+                    if Durable() then account.lockDesignTargets = nil end
                     -- A bucket was really created and verified: readers that
                     -- cached this Wishlist's plan re-read it (a revision step
                     -- only; no data changes).
