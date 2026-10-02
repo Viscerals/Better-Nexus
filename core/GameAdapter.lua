@@ -4608,17 +4608,24 @@ local function ReconcileLegacyAssignments()
     for index, saved in pairs(links) do
         local wanted = LegacyAssignmentSlot(saved)
         if wanted then
-            for _, c in ipairs(live) do
-                if tonumber(c.slot) == wanted then
-                    local row = slots.bySlot and slots.bySlot[tonumber(c.slot)]
-                    if (type(row) == "table" and row.roleSourceValid == false)
-                        or type(c.key) ~= "string" or c.key == "" then
-                        incomplete = true
-                    else
-                        plan[#plan + 1] = {index = index, wanted = wanted,
-                            slot = c.slot, key = c.key, name = c.name}
+            -- The referenced row is inspected first, not only the candidates
+            -- built from it: a row A.Slots() could not read (wholly or in part)
+            -- yields no candidate, or one of survivors, and neither is proof of
+            -- what the slot holds.
+            local row = slots.bySlot and slots.bySlot[wanted]
+            if type(row) == "table" and row.roleSourceValid == false then
+                incomplete = true
+            else
+                for _, c in ipairs(live) do
+                    if tonumber(c.slot) == wanted then
+                        if type(c.key) ~= "string" or c.key == "" then
+                            incomplete = true
+                        else
+                            plan[#plan + 1] = {index = index, wanted = wanted,
+                                slot = c.slot, key = c.key, name = c.name}
+                        end
+                        break
                     end
-                    break
                 end
             end
         end

@@ -44,9 +44,13 @@ from `A.Poll`, beside `ReconcileTomePending`, which is the existing poll-time ow
   first-run, locked designs, modern records and records whose slot shows nothing as they are.
 - It does nothing under the passive-diagnostic write block.
 - Evidence it will not write from, all left as legacy and retried after 5 seconds (`LEGACY_ASSIGNMENT_RETRY`)
-  rather than counted as an attempt: a slot row `A.Slots()` could only partly read (`roleSourceValid ==
-  false`: a dense row with an unreadable entry, a sparse list; the readable entries are not the row, and
-  their key would persist as a wrong identity); a store that cannot write the character's row durably
+  rather than counted as an attempt: a slot row `A.Slots()` could not read in full (`roleSourceValid ==
+  false`: a dense row with an unreadable entry, a sparse list, an entirely unreadable row). The referenced
+  row is inspected before candidates are enumerated, so a row that yields no candidate at all is not taken
+  for an empty slot; the readable entries of a partly unreadable row are not the row, and their key would
+  persist as a wrong identity. (The first valid echo snapshot after a failed one is a baseline and leaves
+  the mirror generation unchanged, so the retry, not a generation change, is what brings the corrected
+  row back.) a store that cannot write the character's row durably
   right now (`StateWriteStatus` is not `durable`: `UpdateStateV1` would take a transient row and still
   report success); a refused write; and a write after which the authoritative row does not hold every
   identity written. A later complete row, a store that became ready or a write that is allowed resolves it,

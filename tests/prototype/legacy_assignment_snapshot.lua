@@ -427,4 +427,57 @@ do
   'and holds the content identity: '..tostring(canonical.loadoutWishlists[1]))
 end
 
+-- An entirely unreadable row yields NO candidate, which is not proof that the slot holds nothing: the check
+-- must stay eligible for the bounded retry. The row is corrected to a complete Wishlist later; the first
+-- valid echo snapshot is then only a baseline and leaves the mirror generation unchanged, so no unrelated
+-- change brings the record back.
+for _,shape in ipairs({'number','keyless table'}) do
+ local label=shape..', all-unreadable row'
+ boot(nil,{[1]={name='Owned one',verified=true,echoes=plan(200001)},
+  [101]=rowOf({{spellId='unreadable',quality=0,stacks=1,locked=false}})})
+ local A=Nexus.GameAdapter
+ seed(shape,1,101)
+ check(A.Slots().bySlot[101].roleSourceValid==false,label..': the projection flags the source as unreadable')
+ local candidate
+ for _,c in ipairs(A.GetWishlistCandidates()) do if c.slot==101 then candidate=c end end
+ check(candidate==nil,label..': and produces no candidate')
+ local raw=owner().UpdateStateV1
+ local entered=0
+ owner().UpdateStateV1=function(mutator,...) if upgradeTransaction(mutator) then entered=entered+1 end return raw(mutator,...) end
+ H.Advance(2)
+ check(shape=='number' and durable()==101 or (type(durable())=='table' and durable().key==nil),label..': the record stays legacy')
+ check(entered==0,label..': nothing was written: '..entered)
+ local generation=A.PresentationRevisions()
+ H.perks.serverBuildSlots[101]=rowOf({COMPLETE[1]});H.Notify()
+ H.Advance(1)
+ check(A.PresentationRevisions()==generation,label..': the first valid snapshot did not change the slots generation (premise)')
+ H.Advance(6)
+ owner().UpdateStateV1=raw
+ check(upgraded(shape,durable()),label..': the corrected row is retried and its key persisted: '..tostring(type(durable())=='table' and durable().key))
+end
+
+-- The retry for a row that stays unreadable is bounded: one attempt per delay, not one per tick.
+do
+ boot(nil,{[1]={name='Owned one',verified=true,echoes=plan(200001)},
+  [101]=rowOf({{spellId='unreadable',quality=0,stacks=1,locked=false}})})
+ seed('number',1,101)
+ local calls=0
+ local rawStatus=Nexus.Store.StateWriteStatus
+ Nexus.Store.StateWriteStatus=function(...) calls=calls+1;return rawStatus(...) end
+ H.Advance(10)
+ Nexus.Store.StateWriteStatus=rawStatus
+ check(calls>=1 and calls<=4,'an unreadable row is revisited a bounded number of times in 10 s (one per delay, not per tick): '..calls)
+ check(durable()==101,'and the record is still legacy')
+end
+
+-- A legacy record added after an initially empty assignment map is tried at once.
+do
+ boot(nil,slots('Plan A',A_ID))
+ check(owner().UpdateStateV1(function(s) s.loadoutWishlists={} end),'the assignment map is empty')
+ H.Advance(2)
+ seed('number',1,101)
+ H.Advance(1)
+ check(upgraded('number',durable()),'a record added to an empty map is upgraded')
+end
+
 print('PASS legacy_assignment_snapshot: '..checks..' checks (legacy number and keyless table: saved table after the poll, an authorized write and a reload; slot reuse; no read writes; mirror not shown; selective upgrade; newer explicit choice; no-legacy poll cost; unassign and restore)')
