@@ -129,13 +129,37 @@ Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Synthetic new plan',{{spellId
 H.Notify();H.Advance(.5)
 SlashCmdList.NEXUS('auto');H.Advance(1.5)
 check(H.actions[1] and H.actions[1][1]=='take' and H.actions[1][2]==200020 and #H.actions==1,'the action follows the new plan; the stale Freeze is never sent: '..Kinds(H))
-local staleRows=Trace();local staleD,preparedActual
+local staleRows=Trace();local staleD,submittedActual,lifecycle
+lifecycle=''
 for _,r in ipairs(staleRows)do
  if r.k=='D' and not staleD then staleD=r end
- if r.pa then preparedActual=r.pa end
+ if r.sa then submittedActual=r.sa end
+ if r.io then lifecycle=lifecycle..r.io..',' end
 end
 check(staleD.tg:find('200001,1,0',1,true) and not staleD.tg:find('200020',1,true),'the decision record keeps the plan it saw: '..tostring(staleD.tg))
-check(preparedActual=='take:3:200020','the record names the action actually prepared: '..tostring(preparedActual))
+check(submittedActual=='t3.200020','the record names the action actually submitted: '..tostring(submittedActual))
+check(lifecycle:find('prepared:intent_beat@0.0=t3.200020',1,true),'the lifecycle names the prepared action: '..lifecycle)
+
+-- 3c. The real runtime, one unchanged board: proposal A (Freeze), prepared B (the Wishlist changes),
+-- superseded, prepared A again (the Wishlist changes back), submitted A. The record names A as submitted.
+H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5)
+SlashCmdList.NEXUS('auto');H.Advance(.25)
+Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Synthetic B plan',{{spellId=200020,quality=0,stacks=1}})
+H.Notify();H.Advance(.3)
+local laterAction=H.actions[#H.actions]
+Plan();H.Notify();H.Advance(1.5)
+check(#H.actions==1 and H.actions[1][1]=='freeze' and H.actions[1][2]==0,'only the final Freeze was sent: '..Kinds(H))
+H.perks.pendingFreezeIndex=nil
+H.Board({{spellId=200001,quality=1,isFrozen=true},{spellId=200002,quality=2},{spellId=200035,quality=0}});H.Notify();H.Advance(1.5)
+local sequence,submitted,survival='',nil,nil
+for _,r in ipairs(Trace())do
+ if r.io then sequence=sequence..r.io..',' end
+ if r.sa and not submitted then submitted=r.sa end
+ if r.fz and r.fz:find('set:',1,true) and not survival then survival=r.fz end
+end
+check(submitted=='f1.200001','the submitted action is the Freeze of 200001: '..tostring(submitted))
+check(sequence:find('=t3.200020',1,true) and sequence:find('superseded:decision_changed',1,true),'the superseded intent B is named in the lifecycle: '..sequence)
+check(survival=='set:kept','the Freeze outcome follows the submitted Freeze: '..tostring(survival))
 
 -- 4a. A run boundary (the level returning from 80 to 1) ends the open decision and starts a new run id.
 H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5)

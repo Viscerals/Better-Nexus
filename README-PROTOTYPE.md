@@ -144,8 +144,9 @@ rules for that choice and `/nexus status` says why.
 ### Local roll record
 
 Nexus records its rolling decisions automatically, on this computer only. It
-keeps Echo ids, counts, the offers, charges, the action chosen and the result
-seen. It keeps no account, character, realm or Wishlist name, no chat and no
+keeps Echo ids, the offers, charges, the action chosen and sent, and the result
+seen. Owned and locked counts are kept for the Wishlist targets only, not for all
+Echoes. It keeps no account, character, realm or Wishlist name, no chat and no
 credential, and it sends nothing anywhere. At most 256 records are kept in your
 saved data and the oldest are replaced first; a record says when a part is
 incomplete or cut short. To send it, use `/nexus report` and **Prepare report

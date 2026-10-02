@@ -23,15 +23,15 @@ R.SCHEMA = 1
 R.HISTORY = "rollTrace"
 -- Fixed work and size bounds. CAP lives in DiagnosticLogs (the ring owner).
 -- The targets text gets recordBytes minus reserveBytes. Every other text field has
--- its own cap; their worst case after all later updates is about 1030 bytes
--- (decision-time fields about 360, lifecycle 240, ownership changes about 195,
--- after offers 54, confirmation basis 73, fate 40, prepared action 40, charges
--- 20, survival 12).
+-- its own cap; their worst case after all later updates is about 1170 bytes
+-- (decision-time fields about 360, lifecycle 400, ownership changes about 195,
+-- after offers 54, confirmation basis 73, fate 40, submitted action 12, charges
+-- 20, survival 12, incompleteness list 12).
 R.LIMITS = {
     targets = 32,        -- exact Wishlist targets kept per decision
     recordBytes = 2048,  -- string bytes of one saved record
-    reserveBytes = 1040, -- worst case of every field except the targets (see below)
-    ioBytes = 240,       -- action lifecycle text per decision
+    reserveBytes = 1200, -- worst case of every field except the targets (see below)
+    ioBytes = 400,       -- action lifecycle text per decision
     deltaEntries = 16,   -- ownership changes kept per decision
     detailBytes = 48,    -- boundary detail text
 }
@@ -303,6 +303,11 @@ local function UpdatePending(p, fields)
                         if not inc:find("io", 1, true) then entry.inc = inc == "" and "io" or (inc .. ",io") end
                     end
                     entry.io = joined
+                elseif key == "inc" then
+                    local inc = entry.inc or ""
+                    if not (("," .. inc .. ","):find("," .. value .. ",", 1, true)) then
+                        entry.inc = inc == "" and value or (inc .. "," .. value)
+                    end
                 else
                     entry[key] = value
                 end
@@ -388,6 +393,13 @@ function R.Decision(ctx)
     end)
 end
 
+-- Compact identity of one action: kind letter, offer index, spell id.
+local ACTION_CODES = {take = "t", banish = "b", freeze = "f", reroll = "r"}
+local function ActionTag(info)
+    if type(info) ~= "table" or ACTION_CODES[info.type] == nil then return nil end
+    return ACTION_CODES[info.type] .. Int(info.index) .. "." .. Int(info.spellId)
+end
+
 -- One action-intent state change of the decision `id` (the runtime's own
 -- lifecycle states: prepared, submitted, confirmed, uncertain, expired,
 -- rejected, superseded).
@@ -396,7 +408,8 @@ function R.Intent(id, state, reason, info)
         if not id or not Active() then return nil end
         return Measure("rolltrace.intent", function()
             local p = pending
-            if not p or p.id ~= id then
+            local open = p ~= nil and p.id == id
+            if not open then
                 -- The decision is no longer the open one (boundary, reload):
                 -- keep the fact with its link instead of dropping it.
                 local s, n = tostring(id):match("^(.-)%-(%d+)$")
@@ -406,16 +419,29 @@ function R.Intent(id, state, reason, info)
                 p.lastReason = Clip(reason, 40)
             end
             info = type(info) == "table" and info or {}
+            local tag = ActionTag(info)
+            -- Every prepared intent names its own action; a later state of the same
+            -- intent names it only when it differs. A late record has no context, so
+            -- it always names it.
+            local named = tag ~= nil and (not open or state == "prepared" or p.cur ~= tag)
+            if open and tag ~= nil then p.cur = tag end
             local text = Clip(tostring(state) .. ":" .. tostring(reason or "") .. "@"
                 .. string.format("%.1f", Number(info.elapsed, 0))
-                .. (info.mutation and "!" or ""), 80)
+                .. (info.mutation and "!" or "") .. (named and ("=" .. tag) or ""), 100)
             local fields = {io = text}
-            -- The action actually prepared can differ from the proposal recorded
-            -- for this board (for example the assigned Wishlist changed in
-            -- between). Say so instead of letting the record claim otherwise.
-            if state == "prepared" and info.type ~= nil and pending == p
-                and (p.kind ~= info.type or p.index ~= info.index or p.spell ~= Int(info.spellId)) then
-                fields.pa = Clip(tostring(info.type) .. ":" .. Int(info.index) .. ":" .. Int(info.spellId), 40)
+            -- The action actually SUBMITTED is what the outcome is judged against, never
+            -- the board's first proposal. Refused or superseded intents are not submissions.
+            if state == "submitted" then
+                if tag == nil then
+                    fields.inc = "am"
+                else
+                    fields.sa = tag
+                    if open then
+                        p.subs = (p.subs or 0) + 1
+                        p.subKind, p.subSpell = info.type, Int(info.spellId)
+                        if p.subs > 1 then fields.inc = "am" end
+                    end
+                end
             end
             return UpdatePending(p, fields)
         end)
@@ -450,11 +476,13 @@ function R.After(ctx)
                 end
                 if parts then fields.ao = table.concat(parts, ";") end
             end
-            if ctx.board then
-                if p.kind == "freeze" then
+            if p.subs and p.subs > 1 then
+                fields.inc = "am"
+            elseif ctx.board then
+                if p.subKind == "freeze" then
                     local survived = false
                     for _, card in ipairs(ctx.board.cards or {}) do
-                        if Int(card.spellId) == p.spell and (card.isFrozen or card.isCarried) then survived = true end
+                        if Int(card.spellId) == p.subSpell and (card.isFrozen or card.isCarried) then survived = true end
                     end
                     fields.fz = survived and "set:kept" or "set:gone"
                 elseif p.held > 0 then
@@ -520,7 +548,7 @@ local function Esc(value)
 end
 
 local COLUMNS = {"k", "s", "n", "run", "t", "lvl", "hz", "cls", "slot", "pol", "prof", "req", "fb", "cv", "cp",
-    "ch", "of", "pr", "tg", "tn", "ex", "io", "af", "ac", "ao", "fz", "cb", "fate", "pa", "inc", "pd", "ref",
+    "ch", "of", "pr", "tg", "tn", "ex", "io", "af", "ac", "ao", "fz", "cb", "fate", "sa", "inc", "pd", "ref",
     "kind", "d", "b"}
 
 -- The lines a tester sends: a header, then one line per saved record; blank =
@@ -539,7 +567,7 @@ function R.ExportLines()
             .. "|dropped=" .. status.dropped .. "|late=" .. status.late,
         "LOCAL RECORD made by Nexus on this computer. No account, character or realm name, Wishlist name, chat or credential is kept. Nothing is sent anywhere. Send it only privately.",
         "NOT A DRAW MODEL. A board and the next board are observations. They do not prove server odds, and a proposed action is not a result.",
-        "D=decision B=boundary O=late outcome. Offers id.quality.flags (G guaranteed F frozen C carried J justFrozen b no-Banish f no-Freeze u unselectable). Targets id,requested,lockedTarget,ordinary,locked,cap,eligibility,requiredSpell. Eligibility hex: 1 class 2 level 4 lever-ok 8 below-cap, x unknown. Charges banish.reroll.freeze.trusted. inc = parts known to be incomplete. pa = the action actually prepared when it differs from the proposal (for example the Wishlist changed).",
+        "D=decision B=boundary O=late outcome. Offers id.quality.flags (G guaranteed F frozen C carried J justFrozen b no-Banish f no-Freeze u unselectable). Targets id,requested,lockedTarget,ordinary,locked,cap,eligibility,requiredSpell. Eligibility hex: 1 class 2 level 4 lever-ok 8 below-cap, x unknown. Charges banish.reroll.freeze.trusted. inc = parts known to be incomplete (am = the submitted action is ambiguous). io = lifecycle: each prepared intent is followed by =<action>; actions are t take, b banish, f freeze, r reroll as <letter><offer index>.<spell id>. sa = the action actually SUBMITTED; the outcome fields (fz, af, ao) describe that action, not the proposal pr. Ownership fields (tg, ao) cover the Wishlist targets only, not the full ownership.",
         table.concat(COLUMNS, "|"),
     }
     for _, record in ipairs(records) do

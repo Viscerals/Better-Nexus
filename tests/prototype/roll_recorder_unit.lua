@@ -224,23 +224,125 @@ R.Intent(id,'submitted','adapter_accepted',{elapsed=0.4,mutation=true})
 rows=Records()
 check(#rows==3 and rows[3].k=='O' and rows[3].ref==rows[1].n and rows[3].s==rows[1].s and rows[3].io:find('submitted',1,true),'a late outcome is written as its own record naming the decision')
 check(R.Status().late==1,'late outcomes are counted')
--- The action actually prepared is compared with the recorded proposal.
+-- Action identity per intent (control 011). Every prepared intent carries its own action tag
+-- (t take, b banish, f freeze, r reroll; index.spell); the SUBMITTED action is stored as `sa` and is
+-- the one the after-observation is judged against, never the board's first proposal.
+local function Freeze(a) return Ctx({action={type='freeze',index=1,spellId=1001,reasonCode='PAIR_FREEZE_SECOND_NEEDED',policyId='adaptive-0-settle-live1'}}) end
+local FROZEN_AFTER={cards={{spellId=1001,quality=1,isFrozen=true},{spellId=2002,quality=0},{spellId=2001,quality=0}}}
+local PLAIN_AFTER={cards={{spellId=1001,quality=1},{spellId=2002,quality=0},{spellId=2001,quality=0}}}
+-- Proposal A -> prepared B -> superseded -> prepared A -> submitted A, on one unchanged board.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='take',index=2,spellId=2001})
+R.Intent(id,'superseded','decision_changed',{elapsed=.1,type='take',index=2,spellId=2001})
+R.Intent(id,'prepared','intent_beat',{elapsed=.2,type='freeze',index=1,spellId=1001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.6,mutation=true,type='freeze',index=1,spellId=1001})
+record=Records()[1]
+check(record.pa==nil,'there is no initial-proposal-only field any more')
+check(record.sa=='f1.1001','the submitted action is A, not the earlier prepared B: '..tostring(record.sa))
+check(record.io=='prepared:intent_beat@0.0=t2.2001,superseded:decision_changed@0.1,prepared:intent_beat@0.2=f1.1001,submitted:adapter_accepted@0.6!',
+ 'the lifecycle names the action of every prepared intent: '..tostring(record.io))
+R.After({basis='next_board',board=FROZEN_AFTER})
+check(Records()[1].fz=='set:kept' and Records()[1].inc==nil,'B->A: the Freeze outcome follows the submitted Freeze of 1001: '..tostring(Records()[1].fz))
+-- Proposal A (Freeze 1001), but only a Take of 2001 was prepared and submitted.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='take',index=3,spellId=2001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='take',index=3,spellId=2001})
+R.After({basis='next_board',board=FROZEN_AFTER})
+record=Records()[1]
+check(record.sa=='t3.2001' and record.fz==nil,'a submitted Take is not judged as the proposed Freeze, even if 1001 happens to be held: '..tostring(record.sa)..' '..tostring(record.fz))
+-- Proposal Take, submitted Freeze of another spell: the outcome follows that spell.
 Fresh()
 id=R.Decision(Ctx())
-R.Intent(id,'prepared','intent_beat',{elapsed=0,type='take',index=1,spellId=1001})
-check(Records()[1].pa==nil,'the prepared action equals the proposal: no pa field')
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='freeze',index=3,spellId=1002})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='freeze',index=3,spellId=1002})
+R.After({basis='next_board',board={cards={{spellId=1002,quality=2,isCarried=true},{spellId=2002,quality=0},{spellId=2001,quality=0}}}})
+check(Records()[1].sa=='f3.1002' and Records()[1].fz=='set:kept','a submitted Freeze of a spell other than the proposal is judged on its own spell')
 Fresh()
 id=R.Decision(Ctx())
-R.Intent(id,'prepared','intent_beat',{elapsed=0,type='banish',index=2,spellId=2001})
-check(Records()[1].pa=='banish:2:2001','a prepared action that differs from the proposal is named: '..tostring(Records()[1].pa))
-R.Intent(id,'submitted','adapter_accepted',{elapsed=.4,type='banish',index=2,spellId=2001})
-check(Records()[1].io:find('submitted',1,true),'later states still update the record')
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='freeze',index=3,spellId=1002})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='freeze',index=3,spellId=1002})
+R.After({basis='next_board',board={cards={{spellId=1001,quality=1,isFrozen=true},{spellId=2002,quality=0},{spellId=2001,quality=0}}}})
+check(Records()[1].fz=='set:gone','the proposal spell being held does not hide that the submitted Freeze did not survive')
+-- Several superseded and refused intents; the refused one is not a submission.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='take',index=2,spellId=2001})
+R.Intent(id,'superseded','decision_changed',{elapsed=.1,type='take',index=2,spellId=2001})
+R.Intent(id,'prepared','intent_beat',{elapsed=.2,type='banish',index=2,spellId=2001})
+R.Intent(id,'rejected','adapter_refused',{elapsed=.5,mutation=true,type='banish',index=2,spellId=2001})
+R.Intent(id,'prepared','intent_beat',{elapsed=.6,type='freeze',index=1,spellId=1001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=1,mutation=true,type='freeze',index=1,spellId=1001})
+record=Records()[1]
+check(record.sa=='f1.1001' and record.inc==nil,'a refused intent is not a submission; the submitted action is the last accepted one: '..tostring(record.sa)..' '..tostring(record.inc))
+check(record.io:find('prepared:intent_beat@0.2=b2.2001,rejected:adapter_refused@0.5!',1,true),'the refused Banish is named: '..record.io)
+-- Nothing submitted: the proposal is not an outcome.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='freeze',index=1,spellId=1001})
+R.Intent(id,'superseded','board_changed_before_submit',{elapsed=.2,type='freeze',index=1,spellId=1001})
+R.After({basis='next_board',board=FROZEN_AFTER})
+check(Records()[1].sa==nil and Records()[1].fz==nil,'no submission: no Freeze outcome is claimed for the proposal')
+-- Two accepted submissions on one board, or a submission without identity, are marked incomplete.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='freeze',index=1,spellId=1001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.9,mutation=true,type='take',index=2,spellId=2001})
+R.After({basis='next_board',board=FROZEN_AFTER})
+record=Records()[1]
+check(record.inc and record.inc:find('am',1,true) and record.fz==nil,'two submissions: the outcome is ambiguous, marked am and not annotated: '..tostring(record.inc)..' '..tostring(record.fz))
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true})
+R.After({basis='next_board',board=FROZEN_AFTER})
+record=Records()[1]
+check(record.sa==nil and record.inc and record.inc:find('am',1,true) and record.fz==nil,'a submission with no action identity is ambiguous: '..tostring(record.inc))
+-- A late outcome (another record was written first) carries its own tag and sa.
+Fresh()
+id=R.Decision(Freeze())
+R.Boundary('auto','on')
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='take',index=2,spellId=2001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='take',index=2,spellId=2001})
+rows=Records()
+check(rows[3].k=='O' and rows[3].io=='prepared:intent_beat@0.0=t2.2001' and rows[4].sa=='t2.2001' and rows[4].ref==rows[1].n,'late records carry the action tag and the submitted action: '..tostring(rows[3].io)..' '..tostring(rows[4] and rows[4].sa))
+-- Reload: the submitted action is already in the saved record; a later outcome for it is linked, not guessed.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='freeze',index=1,spellId=1001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='freeze',index=1,spellId=1001})
+R.Reset();R.Configure({now=function()return 900 end,epoch=function()return 1790000999 end})
+R.Boundary('session','')
+R.Intent(id,'confirmed','board_transition',{elapsed=2,mutation=true,type='freeze',index=1,spellId=1001})
+rows=Records()
+check(rows[1].sa=='f1.1001' and rows[#rows].k=='O' and rows[#rows].ref==rows[1].n and rows[#rows].io:find('confirmed',1,true),'after a reload the saved decision keeps its submitted action and the late outcome names the decision')
+-- Truncation: a very long sequence cuts the lifecycle text, flags it, and still keeps the submitted action.
+Fresh()
+id=R.Decision(Freeze())
+for n=1,30 do
+ R.Intent(id,'prepared','intent_beat',{elapsed=n/10,type='take',index=2,spellId=2001})
+ R.Intent(id,'superseded','decision_changed',{elapsed=n/10,type='take',index=2,spellId=2001})
+end
+R.Intent(id,'prepared','intent_beat',{elapsed=9,type='freeze',index=1,spellId=1001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=9.5,mutation=true,type='freeze',index=1,spellId=1001})
+record=Records()[1]
+check(#record.io<=400 and record.inc:find('io',1,true) and record.sa=='f1.1001','a truncated lifecycle is flagged and the submitted action is still recorded: '..#record.io)
+R.After({basis='next_board',board=FROZEN_AFTER})
+check(Records()[1].fz=='set:kept' and Flat(Records()[1])<=2048,'the outcome still follows the submitted action and the record stays bounded')
+-- Eviction: a late record keeps its own identity when the decision was replaced.
+Fresh()
+id=R.Decision(Freeze())
+for n=1,300 do clockNow=clockNow+1;R.Decision(Ctx({sig=n+10})) end
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='freeze',index=1,spellId=1001})
+rows=Records()
+check(#rows<=256 and rows[#rows].k=='O' and rows[#rows].sa=='f1.1001' and rows[#rows].ref==tonumber(id:match('%-(%d+)$')),'an outcome for an evicted decision is still a self-describing record')
+
 -- An outcome too long for its field is cut and flagged.
 Fresh()
 id=R.Decision(Ctx())
 for i=1,40 do R.Intent(id,'uncertain','reason_number_'..i,{elapsed=i}) end
 record=Records()[1]
-check(#record.io<=240 and record.inc and record.inc:find('io',1,true),'the lifecycle text is bounded and flagged: '..#record.io)
+check(#record.io<=400 and record.inc and record.inc:find('io',1,true),'the lifecycle text is bounded and flagged: '..#record.io)
 
 -- 7. Boundaries: loading and run resets end the open decision with a fate; reload shows a gap.
 Fresh()
@@ -266,11 +368,13 @@ check(Records()[#Records()].kind=='policy' and Records()[#Records()].d=='adaptiv
 -- 8. Freeze survival and held offers.
 Fresh()
 local freezeCtx=Ctx({action={type='freeze',index=1,spellId=1001,reasonCode='PAIR_FREEZE_SECOND_NEEDED',policyId='adaptive-0-settle-live1'}})
-R.Decision(freezeCtx)
+id=R.Decision(freezeCtx)
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='freeze',index=1,spellId=1001});R.Intent(id,'submitted','adapter_accepted',{elapsed=.4,mutation=true,type='freeze',index=1,spellId=1001})
 R.After({basis='next_board',board={cards={{spellId=1001,quality=1,isFrozen=true},{spellId=2002,quality=0},{spellId=2001,quality=0}}}})
 check(Records()[1].fz=='set:kept','a Freeze that survives is recorded')
 Fresh()
-R.Decision(freezeCtx)
+id=R.Decision(freezeCtx)
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='freeze',index=1,spellId=1001});R.Intent(id,'submitted','adapter_accepted',{elapsed=.4,mutation=true,type='freeze',index=1,spellId=1001})
 R.After({basis='next_board',board={cards={{spellId=1001,quality=1},{spellId=2002,quality=0},{spellId=2001,quality=0}}}})
 check(Records()[1].fz=='set:gone','a Freeze that did not survive is recorded as gone')
 Fresh()

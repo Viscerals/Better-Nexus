@@ -134,9 +134,13 @@ first, the late fact becomes its own record naming the decision (`ref`).
 
 Completeness is explicit. `inc` lists parts known to be incomplete (`tg` targets
 cut, `ow` ownership not synced, `el` eligibility unknown, `ch` charges untrusted,
-`io` lifecycle text cut). `pa` names the action actually prepared when it differs from the proposal recorded for
-the board (for example the assigned Wishlist changed in between; the stale proposal is
-not sent). `pd` counts records dropped before this one. A gap in
+`io` lifecycle text cut). Every prepared intent is named in the lifecycle text `io` (`=t2.200002`: kind letter, offer index,
+spell id), and `sa` is the action actually SUBMITTED. The outcome fields (`fz`, `af`, `ao`) describe
+the submitted action, never the board's first proposal `pr`; a proposal that was never submitted gets
+no Freeze outcome. A board can see several intents (a superseded or refused one, then another); only
+an accepted submission counts. Two accepted submissions on one board, or a submission with no
+action identity, are marked `am` (ambiguous) and get no outcome annotation. `pd` counts records
+dropped before this one. A gap in
 the decision numbers shows replacement. A decision with no outcome before a
 `session` boundary was interrupted by a reload. (Records carry their own session tag, so
 the gap shows even when a loading boundary was written first.) `fate=interrupted:world_leave` or
@@ -146,8 +150,8 @@ the gap shows even when a loading boundary was written first.) `fate=interrupted
 The prepared support report (`/nexus report`, Prepare report file) carries the whole record
 in its own section. A full ring is about 120 KiB of text typically (up to about 0.6 MiB in the worst case), and the report file is also
 stored in the companion addon's saved data, so that data holds a second copy. The report
-limit is 1 MiB. The field `pa` is only set, never cleared: if a later prepared action
-matches the proposal again, an earlier `pa` stays and the `io` text shows the sequence.
+limit is 1 MiB. Ownership fields cover the Wishlist targets only (`tg`, `ao`), not the character's full
+ownership, so the record alone cannot calibrate the game's complete draw mechanics.
 
 Limits: the record is not a draw model. A board and the next board are
 observations. A proposed action is not a result. Eligibility digits use class,
