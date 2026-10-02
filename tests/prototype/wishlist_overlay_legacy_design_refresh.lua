@@ -96,7 +96,6 @@ check(wishlistRevision()>revBefore and (not realNote or announced==announcedBefo
 -- Unchanged frames reuse the model.
 local s1=O.Stats();H.Advance(3);local s2=O.Stats()
 check(s2.wishlistReads==s1.wishlistReads and s2.rowUpdates==s1.rowUpdates and s2.projectionBuilds==s1.projectionBuilds,'unchanged ticks after the move read nothing and update no row')
-check(wishlistRevision()==wishlistRevision(),'(revision read is stable)')
 -- A second read finds nothing to move: nothing is announced and the revision stays.
 local revAfter,annAfter=wishlistRevision(),announced
 Nexus.RequestRecompute();H.Advance(1.5)
@@ -141,6 +140,36 @@ H.Advance(1.5)
 rows=LockedRows()
 check(#rows==1 and rows[1].t:find(name(200080)..' (locked target)',1,true) and rows[1].t:sub(1,3)=='[ ]','the overlay shows the target the editor move created, as planned and not owned: '..#rows)
 
+-- ===== Refusal: the Store does not accept the move. Nothing is announced and no revision moves
+-- (the flat table is retired by both writers whatever the outcome, as before).
+local owner=Nexus.MainInternals.StoreAuthorityOwner
+local realUpdate=owner.UpdateStateV1
+local refusing=false
+local refused=0
+owner.UpdateStateV1=function(mutator,...)
+ if refusing then
+  local probe={};pcall(mutator,probe)
+  if probe.lockDesignTargetsBySlot~=nil then refused=refused+1;return false end
+ end
+ return realUpdate(mutator,...)
+end
+activate(4)
+NexusDB.lockDesignTargets=Clone(designA)
+local revR,annR,readsR=wishlistRevision(),announced,O.Stats().wishlistReads
+refusing=true;Nexus.RequestRecompute();H.Advance(2);refusing=false
+check(refused>=1,'the refusal reached the automation writer ('..refused..')')
+check(Buckets()[keyC]==nil and #LockedRows()==0,'refused (automation writer): no bucket, no locked row')
+check(wishlistRevision()==revR and announced==annR,'refused (automation writer): no announcement and no revision step')
+activate(5)
+if NexusEditorFrame then NexusEditorFrame:Hide() end
+NexusDB.lockDesignTargets=Clone(designA)
+revR,annR=wishlistRevision(),announced
+refusing=true;pcall(W.OpenForWishlist,A.GetLoadoutWishlist(5),5);refusing=false
+check(refused>=2,'the refusal reached the controller writer ('..refused..')')
+check(Buckets()[keyD]==nil and wishlistRevision()==revR and announced==annR,'refused (controller writer): no bucket, no announcement, no revision step')
+owner.UpdateStateV1=realUpdate
+
+-- (last: it re-initialises the adapter with an injected store)
 -- ===== The controller writer alone (injected adapter and store): moved, retire-only, none.
 do
  local calls=0
@@ -172,31 +201,6 @@ do
  c=build(backing,account);c.LoadPendingEchoes(content,false,nil)
  check(calls==0 and backing.lockDesignTargetsBySlot==nil,'controller alone: no flat table, no bucket, nothing announced')
 end
-
--- ===== Refusal: the Store does not accept the move. Nothing is announced and no revision moves
--- (the flat table is retired by both writers whatever the outcome, as before).
-local owner=Nexus.MainInternals.StoreAuthorityOwner
-local realUpdate=owner.UpdateStateV1
-local refusing=false
-owner.UpdateStateV1=function(mutator)
- if refusing then
-  local probe={};pcall(mutator,probe)
-  if probe.lockDesignTargetsBySlot~=nil then return false end
- end
- return realUpdate(mutator)
-end
-activate(4)
-NexusDB.lockDesignTargets=Clone(designA)
-local revR,annR,readsR=wishlistRevision(),announced,O.Stats().wishlistReads
-refusing=true;Nexus.RequestRecompute();H.Advance(2);refusing=false
-check(Buckets()[keyC]==nil and #LockedRows()==0,'refused (automation writer): no bucket, no locked row')
-check(wishlistRevision()==revR and announced==annR,'refused (automation writer): no announcement and no revision step')
-activate(5)
-NexusDB.lockDesignTargets=Clone(designA)
-revR,annR=wishlistRevision(),announced
-refusing=true;pcall(W.OpenForWishlist,A.GetLoadoutWishlist(5),5);refusing=false
-check(Buckets()[keyD]==nil and wishlistRevision()==revR and announced==annR,'refused (controller writer): no bucket, no announcement, no revision step')
-owner.UpdateStateV1=realUpdate
 
 check(H.Count('orb-spend')==0,'no Orb spend')
 for _,a in ipairs(H.actions)do check(a[1]~='unlock' and a[1]~='lock','no lock or unlock action: '..tostring(a[1])) end
