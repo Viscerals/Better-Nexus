@@ -42,8 +42,18 @@ from `A.Poll`, beside `ReconcileTomePending`, which is the existing poll-time ow
 - Inside the transaction it re-checks that each record is still the legacy shape it read, so a newer
   explicit choice is never overwritten. It stamps no assignment id, does not call `Wrote`, and leaves
   first-run, locked designs, modern records and records whose slot shows nothing as they are.
-- It does nothing under the passive-diagnostic write block, and a read-only saved root refuses the write
-  as for any mutation.
+- It does nothing under the passive-diagnostic write block.
+- Evidence it will not write from, all left as legacy and retried after 5 seconds (`LEGACY_ASSIGNMENT_RETRY`)
+  rather than counted as an attempt: a slot row `A.Slots()` could only partly read (`roleSourceValid ==
+  false`: a dense row with an unreadable entry, a sparse list; the readable entries are not the row, and
+  their key would persist as a wrong identity); a store that cannot write the character's row durably
+  right now (`StateWriteStatus` is not `durable`: `UpdateStateV1` would take a transient row and still
+  report success); a refused write; and a write after which the authoritative row does not hold every
+  identity written. A later complete row, a store that became ready or a write that is allowed resolves it,
+  and the retry is bounded (one attempt per 5 seconds, not per tick). Unsupported and read-only roots stay
+  `unavailable` and are polled at the same slow rate.
+- For a character whose saved row is still under its plain name (formats 3-5) the first write creates the
+  canonical row as the owner always does and leaves the original row as it was (tested).
 
 Unchanged: the read-only getters (the test asserts the saved table is byte-identical after them), the
 HUD read (`A.AssignedWishlist` still enters no Store mutation), first-run, locked roles, Unassign and
@@ -61,10 +71,11 @@ Restore (an upgraded record keeps its identity through both), binding tokens, an
 
 ## Limits
 
-- The identity recorded is the occupant of the slot at first contact. If the slot was reused before
-  the upgrade ran, the record binds the new occupant; nothing in the saved data can say otherwise.
-  The poll runs within a fraction of a second of the mirror becoming known, which narrows this window
-  but does not remove it.
+- The identity recorded is the occupant of the slot that the poll's own fresh read of the mirror shows when
+  it runs, not necessarily what an earlier getter showed. If the slot was reused before the upgrade ran, the
+  record binds the new occupant; nothing in the saved data can say otherwise. The poll runs within a fraction
+  of a second of the mirror becoming known, which narrows this window but does not remove it. Under the
+  passive-diagnostic write block nothing is written, so a record is unprotected for as long as it lasts.
 - A table that carries its own contents or assignment id is not upgraded, and `ResolveAssociation`
   still resolves it by its slot to whatever the mirror shows there before it falls back to the stored
   record: a reused slot can still capture it. That is unchanged by this fix.

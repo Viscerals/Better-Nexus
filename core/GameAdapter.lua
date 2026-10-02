@@ -4542,7 +4542,16 @@ end
 -- and every other record alone. The identity it records is the occupant of the
 -- slot at that first contact; it cannot know whether the slot was reused before.
 -- A table that carries its own contents or assignment id is not touched.
+-- Evidence it will not write from: a slot row A.Slots() could only partly read
+-- (roleSourceValid == false: the readable entries are not the row), a store
+-- that cannot write durably right now (UpdateStateV1 then succeeds on a
+-- transient row), or a write that did not reach the authoritative row. None of
+-- those counts as an attempt: the legacy record is left as it was and the
+-- upgrade is tried again after LEGACY_ASSIGNMENT_RETRY seconds, so a later
+-- complete row or a store that became ready resolves it.
 local legacyAssignmentsChecked = nil
+local legacyAssignmentsRetryAt = 0
+local LEGACY_ASSIGNMENT_RETRY = 5
 
 local function LegacyAssignmentSlot(saved)
     if type(saved) == "number" or type(saved) == "string" then
@@ -4573,30 +4582,55 @@ local function ReconcileLegacyAssignments()
     end
     if #parts == 0 then
         legacyAssignmentsChecked = nil
+        legacyAssignmentsRetryAt = 0
         return
     end
     table.sort(parts)
     local gate = tostring(Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey())
-        .. "|" .. tostring(echoGenerations.slots) .. "|" .. table.concat(parts, ",")
+        .. "|" .. tostring(NexusDB) .. "|" .. tostring(echoGenerations.slots)
+        .. "|" .. table.concat(parts, ",")
     if legacyAssignmentsChecked == gate then return end
+    local now = GetTime and GetTime() or 0
+    if now < legacyAssignmentsRetryAt then return end
+    -- UpdateStateV1 falls back to a transient row (and still returns true) while
+    -- the store cannot write the character's row durably; that is not a write.
+    if Store and type(Store.StateWriteStatus) == "function" then
+        local status = Store.StateWriteStatus()
+        if type(status) ~= "table" or status.mode ~= "durable" then
+            legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+            return
+        end
+    end
     local slots = A.Slots()
     if not slots then return end
-    legacyAssignmentsChecked = gate
     local live = LiveWishlistCandidates(slots)
-    local plan = {}
+    local plan, incomplete = {}, false
     for index, saved in pairs(links) do
         local wanted = LegacyAssignmentSlot(saved)
         if wanted then
             for _, c in ipairs(live) do
                 if tonumber(c.slot) == wanted then
-                    plan[#plan + 1] = {index = index, wanted = wanted,
-                        slot = c.slot, key = c.key, name = c.name}
+                    local row = slots.bySlot and slots.bySlot[tonumber(c.slot)]
+                    if (type(row) == "table" and row.roleSourceValid == false)
+                        or type(c.key) ~= "string" or c.key == "" then
+                        incomplete = true
+                    else
+                        plan[#plan + 1] = {index = index, wanted = wanted,
+                            slot = c.slot, key = c.key, name = c.name}
+                    end
                     break
                 end
             end
         end
     end
-    if #plan == 0 then return end
+    if #plan == 0 then
+        if incomplete then
+            legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+        else
+            legacyAssignmentsChecked = gate
+        end
+        return
+    end
     local ok = UpdateStoreState(function(state)
         local durable = state.loadoutWishlists
         if type(durable) ~= "table" then return end
@@ -4611,6 +4645,24 @@ local function ReconcileLegacyAssignments()
             end
         end
     end)
+    -- Done only when the authoritative row now holds every identity written.
+    local verified = ok and true or false
+    if verified then
+        local after = Store and Store.State and Store.State()
+        local stored = after and after.loadoutWishlists
+        for _, item in ipairs(plan) do
+            local record = type(stored) == "table" and stored[item.index] or nil
+            if type(record) ~= "table" or record.key ~= item.key then
+                verified = false
+                break
+            end
+        end
+    end
+    if verified and not incomplete then
+        legacyAssignmentsChecked = gate
+    else
+        legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+    end
     if ok then MarkWishlistProjectionDirty() end
 end
 

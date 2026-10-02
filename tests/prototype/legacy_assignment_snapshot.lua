@@ -301,4 +301,130 @@ do
  check(type(back)=='table' and back.key==A_KEY,'the restored record keeps the content identity: '..tostring(back and back.key))
 end
 
+-- A slot row the adapter could only partly read is not evidence: its readable entries are not the row.
+-- The legacy record stays as it was (no inferred identity); the complete row, when it arrives, is retried
+-- and persisted, and survives an authorized write and a serialize / reload.
+local COMPLETE_KEY='200003:1,200011:1'
+local function rowOf(entries) return {name='Plan A',verified=false,echoes=entries} end
+local function upgradeTransaction(mutator)
+ local i=1
+ while true do
+  local name=debug.getupvalue(mutator,i)
+  if not name then return false end
+  if name=='plan' then return true end
+  i=i+1
+ end
+end
+local COMPLETE={{spellId=A_ID,quality=A_ID%4,stacks=1,locked=false},{spellId=200011,quality=200011%4,stacks=1,locked=false}}
+local DENSE={COMPLETE[1],{spellId='unreadable',quality=0,stacks=1,locked=false}}
+local SPARSE={COMPLETE[1]};SPARSE[3]=COMPLETE[2]
+for _,shape in ipairs({'number','keyless table'}) do
+ for _,case in ipairs({{tag='dense row with an unreadable entry',rows=DENSE},{tag='sparse row',rows=SPARSE}}) do
+  local label=shape..', '..case.tag
+  boot(nil,{[1]={name='Owned one',verified=true,echoes=plan(200001)},[101]=rowOf(case.rows)})
+  local A=Nexus.GameAdapter
+  seed(shape,1,101)
+  check(A.Slots().bySlot[101].roleSourceValid==false,label..': the projection flags the source as unreadable')
+  local survivor
+  for _,c in ipairs(A.GetWishlistCandidates()) do if c.slot==101 then survivor=c end end
+  check(survivor and survivor.key==A_KEY,label..': the readable survivor alone would carry the key '..tostring(survivor and survivor.key))
+  local raw=owner().UpdateStateV1
+  local entered=0
+  owner().UpdateStateV1=function(mutator,...) if upgradeTransaction(mutator) then entered=entered+1 end return raw(mutator,...) end
+  H.Advance(2)
+  check(shape=='number' and durable()==101 or (type(durable())=='table' and durable().key==nil),label..': the saved record is left legacy, with no inferred identity')
+  check(entered==0,label..': no upgrade transaction was entered: '..entered)
+  H.perks.serverBuildSlots[101]=rowOf(COMPLETE);H.Notify()
+  H.Advance(6)
+  owner().UpdateStateV1=raw
+  check(type(durable())=='table' and durable().key==COMPLETE_KEY and durable().name=='Plan A',label..': the complete row is retried and its key persisted: '..tostring(type(durable())=='table' and durable().key))
+  unrelatedAuthorizedWrite()
+  check(durable().key==COMPLETE_KEY,label..': an authorized write does not undo it')
+  local saved=F.Serialize(NexusDB)
+  boot(assert(loadstring('return '..saved))(),{[1]={name='Owned one',verified=true,echoes=plan(200001)},[101]=rowOf(COMPLETE)})
+  H.Advance(1)
+  check(durable().key==COMPLETE_KEY,label..': a later session reads the complete key from the saved table')
+ end
+end
+
+-- An owner write that is refused is not an attempt: the legacy record stays, and the upgrade is tried again
+-- after the retry delay (not on every tick), then persists.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('number',1,101)
+ local raw=owner().UpdateStateV1
+ local attempts,reject=0,true
+ owner().UpdateStateV1=function(mutator,...)
+  if upgradeTransaction(mutator) then
+   attempts=attempts+1
+   if reject then return nil end
+  end
+  return raw(mutator,...)
+ end
+ H.Advance(2)
+ check(durable()==101 and attempts==1,'a refused write leaves the legacy record; one attempt so far: '..attempts)
+ H.Advance(2)
+ check(attempts==1,'and it is not retried on every tick: '..attempts)
+ reject=false
+ H.Advance(5)
+ check(upgraded('number',durable()) and attempts==2,'after the delay it is retried and persisted: attempts '..attempts)
+ H.Advance(3)
+ check(attempts==2,'and no further attempt is made once it is done')
+ owner().UpdateStateV1=raw
+end
+
+-- A store that cannot write durably yet (UpdateStateV1 would take a transient row) is not written to.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('number',1,101)
+ local raw=owner().UpdateStateV1
+ local attempts=0
+ owner().UpdateStateV1=function(mutator,...) if upgradeTransaction(mutator) then attempts=attempts+1 end return raw(mutator,...) end
+ local rawStatus=Nexus.Store.StateWriteStatus
+ Nexus.Store.StateWriteStatus=function() return {mode='loading',reason='lifecycle'} end
+ H.Advance(2)
+ check(attempts==0 and durable()==101,'while the store cannot write durably no upgrade is attempted: '..attempts)
+ Nexus.Store.StateWriteStatus=rawStatus
+ H.Advance(5)
+ check(attempts==1 and upgraded('number',durable()),'once it can, the upgrade is attempted and persisted')
+ owner().UpdateStateV1=raw
+end
+
+-- A write that reports success but did not reach the authoritative row is not counted either.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('number',1,101)
+ local raw=owner().UpdateStateV1
+ local attempts=0
+ owner().UpdateStateV1=function(mutator,...)
+  if upgradeTransaction(mutator) then
+   attempts=attempts+1
+   if attempts==1 then return true end -- reports success, writes nothing
+  end
+  return raw(mutator,...)
+ end
+ H.Advance(2)
+ check(attempts==1 and durable()==101,'a write that changed nothing leaves the legacy record')
+ H.Advance(6)
+ check(attempts==2 and upgraded('number',durable()),'and is retried: attempts '..attempts)
+ owner().UpdateStateV1=raw
+end
+
+-- Plain-name compatibility: a character whose saved row is still under its plain name (format 5) gets the
+-- identity in its canonical row on the first write; the original row is not changed.
+do
+ local db=F.Database({mutate=function(d) d.chars[F.NAME].loadoutWishlists={[1]=101} end})
+ local h=F.Boot(db,function(h)
+  h.perks.serverActiveSlot=1
+  h.perks.serverBuildSlots=slots('Plan A',A_ID)
+ end)
+ h.Advance(6)
+ local canonical=NexusDB.chars[F.OWNER]
+ check(NexusDB.chars[F.NAME].loadoutWishlists[1]==101,'the original plain-name row is untouched')
+ check(type(canonical)=='table' and type(canonical.loadoutWishlists)=='table',
+  'the canonical character row exists after the first write')
+ check(type(canonical.loadoutWishlists[1])=='table' and canonical.loadoutWishlists[1].key==A_KEY,
+  'and holds the content identity: '..tostring(canonical.loadoutWishlists[1]))
+end
+
 print('PASS legacy_assignment_snapshot: '..checks..' checks (legacy number and keyless table: saved table after the poll, an authorized write and a reload; slot reuse; no read writes; mirror not shown; selective upgrade; newer explicit choice; no-legacy poll cost; unassign and restore)')
