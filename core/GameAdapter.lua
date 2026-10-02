@@ -1727,7 +1727,8 @@ function A.ConfirmWishlistRoles(candidate, echoes, source)
     local matched
     for _,live in ipairs(LiveWishlistCandidates(A.Slots())) do
         if tonumber(live.slot)==slot then
-            if live.key~=key or WishlistRoles.Content(live.echoes)~=signature then
+            if live.key~=key or WishlistRoles.Content(live.echoes)~=signature
+                or (candidate.name~=nil and tostring(live.name or "")~=tostring(candidate.name)) then
                 return nil,"This Wishlist changed while the role picker was open; reopen it"
             end
             if live.lockEvidenceVersion==WISHLIST_LOCK_EVIDENCE_VERSION
@@ -3541,6 +3542,10 @@ function A.ServerWishlistSlotToken(slot)
     local slots = slot and A.Slots()
     local row = slots and slots.bySlot and slots.bySlot[slot]
     if type(row) ~= "table" then return nil end
+    -- A.Slots() flags a source it could not read in full (a sparse list, an
+    -- entry without a readable id or count) and still projects the entries it
+    -- could read. Those survivors are not the row: no token.
+    if row.roleSourceValid == false then return nil end
     return ServerSlotToken(row.name, row.echoes)
 end
 

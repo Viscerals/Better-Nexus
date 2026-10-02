@@ -906,7 +906,7 @@ function Controller.New(options)
         return identity.key ~= nil and first.key == identity.key
     end
 
-    function M.BeginWishlist(wishlist, loadoutSlot)
+    function M.BeginWishlist(wishlist, loadoutSlot, selectedToken)
         M.CancelApply()
         state.candidateContext = nil
         state.candidateApplyToken = nil
@@ -915,6 +915,13 @@ function Controller.New(options)
         if type(wishlist) ~= "table" or type(wishlist.echoes)~="table" then
             notify("|cffff6060Nexus:|r Associated wishlist data is unavailable.")
             return false
+        end
+        -- The selected record's identity, from its own name and content, before
+        -- any resolution below can replace it (the editor passes the one it took
+        -- when the selection was made).
+        if selectedToken == nil and tonumber(wishlist.slot) and Adapter
+            and Adapter.ServerWishlistTokenFor then
+            selectedToken = Adapter.ServerWishlistTokenFor(tostring(wishlist.name or ""), wishlist.echoes)
         end
         if Adapter and type(Adapter.ResolveWishlistEvidence) == "function"
             and (wishlist.lockEvidenceStatus == "unavailable"
@@ -959,17 +966,22 @@ function Controller.New(options)
         }
         state.editingContext.destination = tonumber(loadoutSlot)
             or (IsFirstRunPlan(wishlist) and "first" or nil)
-        -- What the slot service shows at this Wishlist's server slot as the
-        -- editor opens, and every state of it this editor later uploads. A save
-        -- is accepted only while the slot still shows one of them (see
-        -- StaleServerSlot). An adapter that cannot name slot identities binds
-        -- nothing and keeps the earlier behavior.
+        -- The selected record's identity is what a save may overwrite, plus every
+        -- state this editor later uploads. It is never taken from the slot service:
+        -- a slot that already shows something else when the editor opens is a
+        -- contradiction, and the binding is marked so that a later reading equal
+        -- to the selection cannot restore it (see StaleServerSlot). A slot that
+        -- cannot be read now is unknown, not a contradiction. An adapter that
+        -- cannot name slot identities binds nothing and keeps the earlier behavior.
         if tonumber(state.editingContext.slot) and Adapter
             and Adapter.ServerWishlistSlotToken then
-            local mirror = {}
-            local token = Adapter.ServerWishlistSlotToken(state.editingContext.slot)
-            if token then mirror[token] = true end
-            state.editingContext.mirrorTokens = mirror
+            local accepted = {}
+            if selectedToken then accepted[selectedToken] = true end
+            state.editingContext.mirrorTokens = accepted
+            local current = Adapter.ServerWishlistSlotToken(state.editingContext.slot)
+            if current ~= nil and not accepted[current] then
+                state.editingContext.slotContradicted = true
+            end
         end
         M.LoadPendingEchoes(wishlist.echoes or {}, false,wishlist.designTargets)
         return true
@@ -1370,8 +1382,13 @@ function Controller.New(options)
             or not (Adapter and Adapter.ServerWishlistSlotToken) then
             return nil
         end
+        -- A replacement this binding has seen stays seen: a later reading equal
+        -- to the selection does not give the overwrite back. Reopening the
+        -- Wishlist is a new selection.
+        if context.slotContradicted then return slot, "replaced" end
         local current = Adapter.ServerWishlistSlotToken(slot)
         if current ~= nil and context.mirrorTokens[current] then return nil end
+        if current ~= nil then context.slotContradicted = true end
         return slot, current == nil and "missing" or "replaced"
     end
 
@@ -1423,20 +1440,21 @@ function Controller.New(options)
             NotSavedStaleSlot(staleSlot, staleWhy)
             return false, "stale_slot"
         end
-        local expected = state.editingContext and state.editingContext.mirrorTokens or nil
+        -- The editor this upload belongs to: a callback during the host call can
+        -- open another one, and the upload is bookkept against this one only.
+        local submitting = state.editingContext
+        local expected = submitting and submitting.mirrorTokens or nil
         local ok, err = Adapter.UploadWishlist(slot or 0, name, echoes, expected)
         if ok then
             -- This editor's own upload is part of the slot's lineage from now on, even
             -- when the draft changed during the call, so a second save in the same
             -- session is not mistaken for slot reuse whether or not the mirror has
             -- caught up yet.
-            do
-                local context = state.editingContext
-                if context and type(context.mirrorTokens) == "table"
-                    and Adapter.ServerWishlistTokenFor then
-                    local own = Adapter.ServerWishlistTokenFor(name, echoes)
-                    if own then context.mirrorTokens[own] = true end
-                end
+            if submitting and type(submitting.mirrorTokens) == "table"
+                and tonumber(submitting.slot) == tonumber(slot)
+                and Adapter.ServerWishlistTokenFor then
+                local own = Adapter.ServerWishlistTokenFor(name, echoes)
+                if own then submitting.mirrorTokens[own] = true end
             end
             -- Service callbacks must not attach a newly edited draft to this
             -- completed upload. Report partial completion; never repeat upload.
@@ -1549,6 +1567,9 @@ function Controller.New(options)
             state.applyRetry = nil
             local current = Adapter.ServerWishlistSlotToken
                 and Adapter.ServerWishlistSlotToken(slot)
+            if current ~= nil and submitting and tonumber(submitting.slot) == tonumber(slot) then
+                submitting.slotContradicted = true
+            end
             NotSavedStaleSlot(slot, current == nil and "missing" or "replaced")
             return false, "stale_slot"
         end
@@ -1640,6 +1661,7 @@ function Controller.New(options)
         end
         local staleSlot, staleWhy = StaleServerSlot()
         if staleSlot then
+            state.applyConfirmation = nil
             NotSavedStaleSlot(staleSlot, staleWhy)
             return nil, "stale_slot"
         end

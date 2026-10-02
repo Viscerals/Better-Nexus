@@ -781,6 +781,13 @@ function M.OpenForCandidate(candidate)
 end
 
 function M.OpenForWishlist(wishlist, loadoutSlot)
+    -- The record the player selected (a Journal row, an assignment, a confirmed
+    -- role choice): its name and content as the server slot showed them when it
+    -- was built. Taken before any resolution, so the controller compares the
+    -- slot service with the selection, never with a record re-read from it.
+    local selectedToken = Adapter and Adapter.ServerWishlistTokenFor
+        and type(wishlist) == "table" and tonumber(wishlist.slot)
+        and Adapter.ServerWishlistTokenFor(tostring(wishlist.name or ""), wishlist.echoes) or nil
     if Adapter and Adapter.ResolveWishlistEvidence then
         local resolved,status=Adapter.ResolveWishlistEvidence(wishlist)
         if status=="evidence-pending" and type(resolved)=="table" then
@@ -790,7 +797,7 @@ function M.OpenForWishlist(wishlist, loadoutSlot)
         if status=="actionable" then wishlist=resolved end
     end
     RolePicker.Hide()
-    if not wishlistController.BeginWishlist(wishlist, loadoutSlot) then
+    if not wishlistController.BeginWishlist(wishlist, loadoutSlot, selectedToken) then
         SyncFulfilledDraftTargets()
         return false
     end

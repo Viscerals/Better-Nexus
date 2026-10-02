@@ -185,14 +185,16 @@ do
  if H.popup then H.AcceptPopup();H.Advance(4) end
  refused('A then B then a different A2')
 end
--- A -> removed -> recreated with the same name and the same content: the mirror cannot tell it from A,
--- and the upload replaces equal content. This limit is documented, not claimed as identity proof.
+-- A -> removed -> shows the same name and the same content again, and no reading happened in between:
+-- the mirror cannot tell that from the unchanged A. The upload carries the EDITED draft, so the host
+-- receives different content from the slot's; whether it is the same server object cannot be known
+-- here. This is the documented limit of contradiction detection, not an identity proof.
 open()
 do
  setMirror(102,false);H.Advance(1)
  setMirror(102,MIRROR_A)
  button('Save Wishlist'):Click();H.AcceptPopup();H.Advance(4)
- check(uploadsTo(102)==1,'an identical re-creation is indistinguishable from the opened Wishlist and replaces equal content')
+ check(uploadsTo(102)==1,'an unobserved identical re-appearance cannot be told from the unchanged Wishlist (documented limit)')
 end
 
 -- 7. Two consecutive saves in one editor session stay supported, with or without the mirror catching up.
@@ -308,23 +310,41 @@ do
  H.Advance(4)
  local ok,reason=c.AcceptApply(101,NAME,planRows)
  check(ok==false and reason=='stale_slot' and #H.actions==before,'a payload for another slot is refused by the adapter check: '..tostring(reason))
+ local d2,w2=c.PrepareApply()
+ check(d2~=nil,'and the refusal about another slot does not mark the bound slot contradicted: '..tostring(w2))
 end
--- missing identity at open: the slot has no observable row when the editor opens
+-- Unknown at open is not a contradiction and is never adopted as the selection: the slot has no
+-- readable row when the editor opens.
 open()
 do
  local A=Nexus.GameAdapter
- local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
-  accountRoot=function() return {} end,notify=function() end})
- c.Initialize(A)
- setMirror(102,false)
+ local function controller()
+  local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
+   accountRoot=function() return {} end,notify=function() end})
+  c.Initialize(A);return c
+ end
  local wishlist={slot=102,name=NAME,key=A.WishlistKey(planRows),echoes=planRows}
+ local c=controller()
+ setMirror(102,false)
  check(c.BeginWishlist(wishlist,nil)==true,'a controller opens a Wishlist whose slot is not in the mirror')
- setMirror(102,MIRROR_A)
  local data,why=c.PrepareApply()
- check(data==nil and why=='stale_slot','an identity that was missing at open authorizes nothing: '..tostring(why))
+ check(data==nil and why=='stale_slot','while the slot cannot be read nothing is authorized: '..tostring(why))
+ setMirror(102,row('Someone Elses Plan',B_ROWS))
+ data,why=c.PrepareApply()
+ check(data==nil and why=='stale_slot','another Wishlist appearing later is not adopted as the selection: '..tostring(why))
+ setMirror(102,MIRROR_A)
+ data,why=c.PrepareApply()
+ check(data==nil and why=='stale_slot','and once seen it is not undone by the selection reappearing: '..tostring(why))
  local ok,reason=c.AcceptApply(102,NAME,planRows)
  check(ok==false and reason=='stale_slot','the direct payload path is refused and reports failure: '..tostring(ok)..'/'..tostring(reason))
  check(uploadsTo(102)==0,'and nothing was uploaded')
+ -- unknown at open, then the slot shows the selected Wishlist: a temporary refresh does not remove editing
+ local c2=controller()
+ setMirror(102,false)
+ check(c2.BeginWishlist(wishlist,nil)==true,'a second controller opens with the slot unreadable')
+ setMirror(102,MIRROR_A)
+ data,why=c2.PrepareApply()
+ check(data~=nil,'once the slot shows the selected Wishlist it can be saved: '..tostring(why))
 end
 
 print=rawPrint
