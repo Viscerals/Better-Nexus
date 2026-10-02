@@ -121,6 +121,12 @@ check(#D.GetDpsBoard('other')==0,'an unknown category lists nothing')
 -- Bravo 150/1 -> best 150, avg 75.5; Charlie 120/80 -> best 120, avg 100; Alpha 100/100 -> best 100, avg 100.
 -- Order by best: P2 820, P3 520, Bravo 150, Charlie 120, Alpha 100. Bravo's average (75.5) is the LOWEST of
 -- the five and it still ranks above Charlie and Alpha (average 100 each).
+-- The synchronous projection (the one-shot reader, before the window has cached anything) ranks the same way
+-- as the window's incremental one.
+local direct=Nexus.ViewProjections.Leaderboard('combined',{search='',classFilter='ALL'})
+local directList={}
+for _,r in ipairs(direct or {}) do directList[#directList+1]=Short(r.player)..':'..r.dps..'/'..r.average end
+check(table.concat(directList,' ')=='P2at:820/815 P3above:520/515 Bravo:150/75.5 Charlie:120/100 Alpha:100/100','synchronous Both records: '..table.concat(directList,' '))
 local combined=Rendered(H,'combined')
 check(Ranks(combined)=='P2at:820 P3above:520 Bravo:150 Charlie:120 Alpha:100','Both records order: '..Ranks(combined))
 local expectExtra={
