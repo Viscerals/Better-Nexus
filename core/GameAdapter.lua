@@ -2779,6 +2779,17 @@ end
 
 function A.WishlistNote() return A._wishlistNote end
 
+-- The retired flat locked-design table moved under a Wishlist's content key
+-- (AutomationRuntime and WishlistController do this once). That changes what
+-- AssignedWishlist reads for that Wishlist without touching any assignment
+-- record, so no Wishlist revision moved and a reader that had cached the plan
+-- kept the old rows. The mover calls this once, after a bucket was really
+-- created. It only advances the Wishlist presentation revision: no data, plan
+-- or decision changes.
+function A.NoteLockDesignTargetsMoved()
+    MarkWishlistPresentationDirty()
+end
+
 -- One read-only assignment projection for the HUD, editor-facing status and
 -- Orb controller. Local permanent designs are part of the assigned target,
 -- even when the server stores only the 79 rolled copies. No Orb-only cache

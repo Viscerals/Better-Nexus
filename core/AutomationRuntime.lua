@@ -559,14 +559,22 @@ local function LockDesignTargetsFor(wishlist, knownKey)
     local runRoot = RunRoot()
     local legacy = runRoot and runRoot.lockDesignTargets
     if type(legacy) == "table" then
-        UpdateStoreState(function(state)
+        local moved = false
+        local accepted = UpdateStoreState(function(state)
             state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
             local key = LockSlotKey(wishlist, knownKey)
             if not state.lockDesignTargetsBySlot[key] then
                 state.lockDesignTargetsBySlot[key] = legacy
+                moved = true
             end
         end)
         runRoot.lockDesignTargets = nil
+        -- A bucket was really created: readers that cached this Wishlist's
+        -- plan re-read it (no data or decision changes).
+        if accepted and moved and Adapter
+            and type(Adapter.NoteLockDesignTargetsMoved) == "function" then
+            Adapter.NoteLockDesignTargetsMoved()
+        end
     end
     -- Read LIVE, not from the defensive snapshot. lockDesignTargetsBySlot is
     -- part of the live sub-tree protocol: WishlistController.LockDesignTargets

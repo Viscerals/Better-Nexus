@@ -284,6 +284,7 @@ function Controller.New(options)
         local account = AccountRoot()
         local old = account.lockDesignTargets
         local key = state.currentLockKey or 0
+        local moved = false
         local ok, targets = UpdateStoreState(function(character)
             local map = character.lockDesignTargetsBySlot
             local found = type(map) == "table" and map[key] or nil
@@ -292,10 +293,17 @@ function Controller.New(options)
                 character.lockDesignTargetsBySlot = map or {}
                 character.lockDesignTargetsBySlot[key] = old
                 found = old
+                moved = true
             end
             return found
         end)
         if type(old) == "table" then account.lockDesignTargets = nil end
+        -- A bucket was really created: readers that cached this Wishlist's
+        -- plan re-read it (no data or decision changes).
+        if ok and moved and Adapter
+            and type(Adapter.NoteLockDesignTargetsMoved) == "function" then
+            Adapter.NoteLockDesignTargetsMoved()
+        end
         if not ok or type(targets) ~= "table" then return {} end
         return targets
     end
