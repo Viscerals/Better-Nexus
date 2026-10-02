@@ -218,6 +218,26 @@ for _,catchUp in ipairs({false,true})do
  check(uploadsTo(102)==2,'a foreign record after own saves is refused')
 end
 
+-- 7b. The draft changes during the host call: the upload is reported as partial, but it still joins
+-- the slot's lineage, so the next save is not refused once the mirror shows that upload.
+open()
+do
+ local submit=H.service.UploadServerBuildSlot
+ H.service.UploadServerBuildSlot=function(slot,name,entries)
+  local ok=submit(slot,name,entries)
+  selected(201172).plus:Click() -- a callback edits the draft while the upload is in flight
+  return ok
+ end
+ button('Save Wishlist'):Click();H.AcceptPopup();H.Advance(4)
+ check(uploadsTo(102)==1 and said('but the editor changed'),'the upload is reported as partial')
+ H.service.UploadServerBuildSlot=submit
+ setMirror(102,row(NAME,H.Clone(H.actions[#H.actions][4])));Nexus.GameAdapter.Poll();H.Advance(1)
+ button('Save Wishlist'):Click()
+ check(H.popup~=nil,'the next save is offered once the mirror shows the own upload of this editor')
+ H.AcceptPopup();H.Advance(4)
+ check(uploadsTo(102)==2,'and it uploads')
+end
+
 -- 8. Adapter level: a caller that skips the editor and names the identities it accepts.
 open()
 do
@@ -273,6 +293,21 @@ do
   local ok,reason=c.AcceptApply(102,NAME,planRows)
   check(ok==false and reason=='stale_slot' and #H.actions==before,case.tag..': the controller alone refuses, nothing is uploaded: '..tostring(reason))
  end
+end
+-- The direct payload API names its own slot: the adapter's accepted set covers a slot other than the bound one.
+open()
+do
+ local A=Nexus.GameAdapter
+ local before=#H.actions
+ local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
+  accountRoot=function() return {} end,notify=function() end})
+ c.Initialize(A)
+ local wishlist={slot=102,name=NAME,key=A.WishlistKey(planRows),echoes=planRows}
+ check(c.BeginWishlist(wishlist,nil)==true,'a controller opens the Wishlist at slot 102')
+ setMirror(101,row('Someone Elses Plan',B_ROWS))
+ H.Advance(4)
+ local ok,reason=c.AcceptApply(101,NAME,planRows)
+ check(ok==false and reason=='stale_slot' and #H.actions==before,'a payload for another slot is refused by the adapter check: '..tostring(reason))
 end
 -- missing identity at open: the slot has no observable row when the editor opens
 open()

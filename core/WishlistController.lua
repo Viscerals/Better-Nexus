@@ -1426,16 +1426,10 @@ function Controller.New(options)
         local expected = state.editingContext and state.editingContext.mirrorTokens or nil
         local ok, err = Adapter.UploadWishlist(slot or 0, name, echoes, expected)
         if ok then
-            -- Service callbacks must not attach a newly edited draft to this
-            -- completed upload. Report partial completion; never repeat upload.
-            if draftToken ~= CurrentDraftToken() then
-                state.applyRetry = nil
-                notify("|cffff6060Nexus:|r Wishlist uploaded, but the editor changed; local targets were not reassigned. Review and save again.")
-                return false, "uploaded_draft_changed"
-            end
-            -- This editor's own upload is part of the slot's lineage from now on, so
-            -- a second save in the same session is not mistaken for slot reuse
-            -- whether or not the mirror has caught up yet.
+            -- This editor's own upload is part of the slot's lineage from now on, even
+            -- when the draft changed during the call, so a second save in the same
+            -- session is not mistaken for slot reuse whether or not the mirror has
+            -- caught up yet.
             do
                 local context = state.editingContext
                 if context and type(context.mirrorTokens) == "table"
@@ -1443,6 +1437,13 @@ function Controller.New(options)
                     local own = Adapter.ServerWishlistTokenFor(name, echoes)
                     if own then context.mirrorTokens[own] = true end
                 end
+            end
+            -- Service callbacks must not attach a newly edited draft to this
+            -- completed upload. Report partial completion; never repeat upload.
+            if draftToken ~= CurrentDraftToken() then
+                state.applyRetry = nil
+                notify("|cffff6060Nexus:|r Wishlist uploaded, but the editor changed; local targets were not reassigned. Review and save again.")
+                return false, "uploaded_draft_changed"
             end
             local committed, commitReason, designTargets = CommitLockDesignTargets(echoes)
             if not committed then

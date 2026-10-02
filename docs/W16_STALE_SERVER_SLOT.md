@@ -44,6 +44,17 @@ redirects the save to another slot. The new Wishlist flow (slot 0), first-run ed
 Wishlists, Unassign, the W15 empty-Saved-Build refusal and the binding tokens are unchanged. A
 controller whose adapter cannot name slot identities binds nothing and keeps the earlier behavior.
 
+## Routes
+
+Every route that reaches a host upload for an existing slot with an editor context is checked:
+`PrepareApply`, `AcceptApply` (including the direct payload API), `PumpApplyRetry` (through `TryApply`)
+and the adapter's `expected` set, which also covers a payload that names a slot other than the bound
+one. `GameAdapter.UploadWishlist` holds the only call to the host. Not checked, by design: slot 0
+(create; also `CommunityController`'s copy flow), the direct payload API with no editor context, and
+any caller of `UploadWishlist(slot > 0, ...)` that passes no `expected` set. The controller's own
+check and the adapter's check overlap for the editor's bound slot, so a mutant that removes only one
+of them stays green behind the other; each layer has its own test.
+
 ## Limits
 
 - The slot service exposes no revision of a slot. Name and content are the strongest identity that
@@ -55,6 +66,11 @@ controller whose adapter cannot name slot identities binds nothing and keeps the
   mirror will show a state the editor did not predict, and a later save in that session is refused
   until the Wishlist is reopened. That is a refusal with the draft kept, not a lost edit. Not
   checked in the real game.
+- `UploadWishlist` requests the slots again after every upload. If the real mirror is cleared and
+  refilled during that refresh, an immediate second save could meet an absent row and be refused
+  ("empty or not loaded") until the mirror is back. Not checked in the real game.
+- "Your edits are kept" is true while the editor stays open; reopening the Wishlist reloads it from the
+  mirror.
 - A Wishlist opened while its slot is not in the mirror (for example the slot data is not loaded)
   cannot be saved in that editor. The mirror evidence is what the freshness check reads; it is not
   a server transaction.
