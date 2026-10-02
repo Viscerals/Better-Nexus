@@ -1124,7 +1124,10 @@ local function IsAssignedPickerRow(linked, c)
         and type(linked.key) == "string" and linked.key ~= "" and linked.key == c.key
 end
 
-local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A)
+-- `emptySlot` is the empty-Saved-Build context `active` and `loadoutName` were taken
+-- in. The picker's tooltips use it, not the live Journal context, so their words
+-- always describe the target its click handlers act on while it stays open.
+local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A, emptySlot)
     if not wishlistPicker then
         wishlistPicker = CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
         wishlistPicker:SetFrameStrata("TOOLTIP")
@@ -1278,7 +1281,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 GameTooltip:SetOwner(self:GetParent() or self, "ANCHOR_RIGHT")
                 GameTooltip:AddLine("Assign Wishlist", .35, .8, 1)
                 GameTooltip:AddLine("Target: " .. tostring(loadoutName or ""), 1, 1, 1, true)
-                GameTooltip:AddLine(associationPanel and associationPanel.emptySlot and EMPTY_SLOT_ASSIGN
+                GameTooltip:AddLine(emptySlot and EMPTY_SLOT_ASSIGN
                     or ("Sets this Wishlist as the target for this loadout. " .. ASSIGN_NOTE),
                     .82, .82, .82, true)
                 GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, .82, .25, true)
@@ -1301,7 +1304,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             row:SetScript("OnEnter",function(self)
                 GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
                 GameTooltip:AddLine("Unassign Wishlist",1,1,1)
-                GameTooltip:AddLine(associationPanel and associationPanel.emptySlot
+                GameTooltip:AddLine(self.emptySlot
                     and "This Saved Build has no Wishlist of its own. This does not remove the first-run Wishlist."
                     or "Keeps the Wishlist; stops using it for this loadout.",.8,.8,.8,true)
                 GameTooltip:AddLine("Does not change or restore the Saved Build.",.8,.8,.8,true)
@@ -1312,6 +1315,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             wishlistPicker.clearRow = row
         end
         row:SetFrameLevel(wishlistPicker:GetFrameLevel() + 2)
+        row.emptySlot = emptySlot
         row:ClearAllPoints(); row:SetPoint("TOPLEFT",6,-24-#wishes*rowH); row:SetPoint("RIGHT",-6,0)
         row:SetScript("OnClick", function()
             if tonumber(active) and tonumber(active) > 0 then A.ClearLoadoutWishlist(active)
@@ -1387,7 +1391,7 @@ local function RefreshAssociationRows()
 
     host.selector:SetScript("OnClick", function(self)
         if wishlistPicker and wishlistPicker:IsShown() then HideWishlistPicker(); return end
-        ShowWishlistPicker(self, wishes, linked, active, loadoutName, A)
+        ShowWishlistPicker(self, wishes, linked, active, loadoutName, A, emptySlot)
     end)
     host.newWishlist:SetScript("OnClick", function()
         HideWishlistPicker()

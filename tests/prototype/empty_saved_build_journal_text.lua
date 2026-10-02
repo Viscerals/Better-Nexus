@@ -355,5 +355,109 @@ do
  check(r.state=='unassigned' and r.emptySlot==true and r.name==nil,'explicit Unassign on an empty slot: unassigned')
 end
 
+-- 4. The open picker's words follow the target it opened for (the same one its click
+-- handlers captured), not the live Journal context. The context can change while the
+-- picker stays open: the active Saved Build switches and the Journal refreshes.
+local STD_ROW='Sets this Wishlist as the target for this loadout.'
+local EMPTY_ROW='refused until it holds Echoes'
+local STD_UNASSIGN='Keeps the Wishlist; stops using it for this loadout.'
+local EMPTY_UNASSIGN='This does not remove the first-run Wishlist.'
+local function spyClears()
+ local A=Nexus.GameAdapter
+ local log={loadout={},first=0}
+ local rawL,rawF=A.ClearLoadoutWishlist,A.ClearFirstRunWishlist
+ A.ClearLoadoutWishlist=function(slot,...) log.loadout[#log.loadout+1]=slot;return rawL(slot,...) end
+ A.ClearFirstRunWishlist=function(...) log.first=log.first+1;return rawF(...) end
+ return log
+end
+local function switchTo(slot,row)
+ H.perks.serverActiveSlot=slot
+ if row then H.perks.serverBuildSlots[slot]=row end
+ Nexus.JournalTab.RefreshAssociations()
+end
+local function liveEmpty() return NexusActiveWishlistSelector:GetParent().emptySlot end
+-- Boot at `startSlot`, open the picker, switch the live context to `endSlot` while it stays open.
+local function transition(tag,startRow,startSlot,endSlot,endRow,mutate)
+ reopen(startRow,startSlot,mutate)
+ local p=openPicker()
+ local log=spyClears()
+ local before=snapshot()
+ switchTo(endSlot,endRow)
+ check(p:IsShown(),tag..': the picker stays open across the refresh')
+ return p,log,before
+end
+
+-- 4a. Opened at slot 0 (first-run target), the context becomes a known-empty Saved Build.
+do
+ local p,log,before=transition('4a',nil,0,2,emptyRow())
+ check(liveEmpty()==true,'4a: the live Journal context is now the empty Saved Build')
+ local rowTip=Hover(pickerRow(p).nameButton)
+ check(has(rowTip,'Target: No Saved Build selected') and has(rowTip,STD_ROW) and not has(rowTip,EMPTY_ROW),
+  '4a: the row tooltip keeps the target it opened for: '..rowTip)
+ local unTip=Hover(p.clearRow)
+ check(has(unTip,STD_UNASSIGN) and not has(unTip,EMPTY_UNASSIGN),'4a: the Unassign tooltip does not promise the first-run plan is kept: '..unTip)
+ p.clearRow:GetScript('OnClick')(p.clearRow)
+ check(log.first==1 and #log.loadout==0,'4a: Unassign still clears the first-run plan (its captured target)')
+ check(type(firstRun())~='table' and Nexus.Store.State().loadoutWishlists[2]==nil,'4a: the first-run plan is cleared and slot 2 is untouched')
+end
+do -- 4a'. The same transition, picker row selection: still the captured first-run target.
+ local p=transition('4a-row',nil,0,2,emptyRow())
+ pickerRow(p).nameButton:Click()
+ check(not said('empty or unavailable'),'4a-row: selecting the first-run plan is not refused')
+ check(Nexus.Store.State().loadoutWishlists[2]==nil,'4a-row: nothing is assigned to the empty slot')
+end
+-- 4b. Opened at an empty Saved Build, the live context becomes slot 0.
+do
+ local p,log=transition('4b',emptyRow(),2,0)
+ check(liveEmpty()~=true,'4b: the live Journal context is no longer the empty Saved Build')
+ local rowTip=Hover(pickerRow(p).nameButton)
+ check(has(rowTip,'Target: Empty Saved Build slot') and has(rowTip,EMPTY_ROW) and not has(rowTip,STD_ROW),'4b: the row tooltip keeps the empty-slot wording: '..rowTip)
+ local unTip=Hover(p.clearRow)
+ check(has(unTip,EMPTY_UNASSIGN) and not has(unTip,STD_UNASSIGN),'4b: the Unassign tooltip keeps the empty-slot wording: '..unTip)
+ p.clearRow:GetScript('OnClick')(p.clearRow)
+ check(#log.loadout==1 and log.loadout[1]==2 and log.first==0,'4b: Unassign still clears the numbered slot only')
+ check(type(firstRun())=='table','4b: the first-run plan is kept')
+end
+do
+ local p=transition('4b-row',emptyRow(),2,0)
+ local before=snapshot()
+ pickerRow(p).nameButton:Click()
+ check(said('empty or unavailable') and T.Equal(before,snapshot()),'4b-row: selection is still refused for the numbered slot and changes no record')
+end
+-- 4c. Opened at an empty Saved Build, the live context becomes a populated one.
+do
+ local p,log=transition('4c',emptyRow(),2,3,populatedRow())
+ check(liveEmpty()~=true,'4c: the live Journal context is a populated Saved Build')
+ check(has(Hover(pickerRow(p).nameButton),EMPTY_ROW) and has(Hover(p.clearRow),EMPTY_UNASSIGN),'4c: both tooltips keep the empty-slot wording')
+ p.clearRow:GetScript('OnClick')(p.clearRow)
+ check(#log.loadout==1 and log.loadout[1]==2 and log.first==0 and type(firstRun())=='table','4c: Unassign still targets slot 2 and keeps the first-run plan')
+end
+-- 4d. Opened at a populated Saved Build (with its association), the live context becomes an empty one.
+do
+ local p,log=transition('4d',populatedRow(),2,3,emptyRow())
+ check(liveEmpty()==true,'4d: the live Journal context is an empty Saved Build')
+ local rowTip=Hover(pickerRow(p).nameButton)
+ check(has(rowTip,STD_ROW) and not has(rowTip,EMPTY_ROW) and has(Hover(p.clearRow),STD_UNASSIGN),'4d: both tooltips keep the populated wording')
+ check(Nexus.Store.State().loadoutWishlists[2]~=nil,'4d: precondition: slot 2 holds the handed-off association')
+ p.clearRow:GetScript('OnClick')(p.clearRow)
+ check(#log.loadout==1 and log.loadout[1]==2 and log.first==0 and Nexus.Store.State().loadoutWishlists[2]==nil,'4d: Unassign still clears the association of slot 2')
+end
+-- 4e. Opened at an empty Saved Build, the active slot becomes unknown.
+do
+ local p=transition('4e',emptyRow(),2,nil)
+ check(has(Hover(pickerRow(p).nameButton),EMPTY_ROW) and has(Hover(p.clearRow),EMPTY_UNASSIGN),'4e: both tooltips keep the empty-slot wording')
+end
+-- 4f. Reopening the picker takes the new context, with its own target.
+do
+ local p,log=transition('4f',nil,0,2,emptyRow())
+ NexusActiveWishlistSelector:Click()
+ check(not p:IsShown(),'4f: the selector closes the open picker')
+ NexusActiveWishlistSelector:Click()
+ check(p:IsShown(),'4f: and reopens it for the new context')
+ check(has(Hover(pickerRow(p).nameButton),EMPTY_ROW) and has(Hover(p.clearRow),EMPTY_UNASSIGN),'4f: reopened tooltips use the empty-slot wording')
+ p.clearRow:GetScript('OnClick')(p.clearRow)
+ check(#log.loadout==1 and log.loadout[1]==2 and log.first==0 and type(firstRun())=='table','4f: the reopened Unassign targets slot 2 and keeps the first-run plan')
+end
+
 print=function(...) io.write(table.concat((function(...)local t={};for i=1,select('#',...) do t[#t+1]=tostring((select(i,...))) end;return t end)(...),'\t'),'\n') end
 print('PASS empty_saved_build_journal_text: '..checks..' checks (Journal gear, selector, row and Unassign tooltips, assignment note, HUD and Orb text for an empty Saved Build with a first-run plan; actions, refusals and records unchanged; populated, slot-zero, unavailable, unknown-data and explicit-Unassign controls)')
