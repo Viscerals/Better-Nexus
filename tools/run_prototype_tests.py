@@ -137,6 +137,7 @@ NAMES += ['rolling_latency']
 NAMES += ['lock_bucket_growth']
 NAMES += ['auto_lock_absent_empty_bucket']
 NAMES += ['empty_saved_build_save']
+NAMES += ['stale_server_slot_save']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

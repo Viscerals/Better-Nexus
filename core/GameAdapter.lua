@@ -3524,7 +3524,37 @@ end
 -- shape both captures showed. No level gate (unlike Save, which is
 -- level-80-only for rolled loadouts) -- designing a wishlist isn't tied
 -- to being at cap. Same spacing guard as Save/Activate.
-function A.UploadWishlist(slot, name, echoes)
+-- What the slot service shows at a server Wishlist slot, as one comparable
+-- string: the name and the content (WishlistIdentity: Echo id and total copies,
+-- the same identity every Wishlist candidate carries). The mirror exposes no
+-- revision of a slot, so this is the strongest identity that can be observed
+-- there. It is never proof of identity: a match means no contradiction was
+-- seen, and an absent, empty or unreadable row has no token at all.
+local function ServerSlotToken(name, echoes)
+    local key = WishlistIdentity(echoes)
+    if not key then return nil end
+    return tostring(name or "") .. "\n" .. key
+end
+
+function A.ServerWishlistSlotToken(slot)
+    slot = PositiveInteger(slot)
+    local slots = slot and A.Slots()
+    local row = slots and slots.bySlot and slots.bySlot[slot]
+    if type(row) ~= "table" then return nil end
+    return ServerSlotToken(row.name, row.echoes)
+end
+
+-- The token the slot will show once the server holds this upload.
+function A.ServerWishlistTokenFor(name, echoes)
+    return ServerSlotToken(tostring(name or "Nexus"), echoes)
+end
+
+-- `expected` (optional): a set of tokens an editor accepts for an EXISTING slot
+-- (slot > 0). The slot is read again immediately before the host call; a slot
+-- that shows anything else, or nothing, is refused ("stale_slot") and nothing is
+-- sent. Slot 0 creates a new Wishlist and is never checked. A caller that passes
+-- no set keeps the earlier behavior.
+function A.UploadWishlist(slot, name, echoes, expected)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if type(echoes) ~= "table" or #echoes == 0 then return false, "no echoes" end
@@ -3561,6 +3591,10 @@ function A.UploadWishlist(slot, name, echoes)
     for _, e in pairs(bySpell) do clean[#clean + 1] = e end
     table.sort(clean, function(a, b) return a.spellId < b.spellId end)
     if #clean == 0 then return false, "no valid echoes" end
+    if type(expected) == "table" and (tonumber(slot) or 0) > 0 then
+        local current = A.ServerWishlistSlotToken(slot)
+        if current == nil or not expected[current] then return false, "stale_slot" end
+    end
     local ok = svc and SafeCall(svc.UploadServerBuildSlot,
         tonumber(slot) or 0, tostring(name or "Nexus"), clean)
     if ok then

@@ -959,6 +959,18 @@ function Controller.New(options)
         }
         state.editingContext.destination = tonumber(loadoutSlot)
             or (IsFirstRunPlan(wishlist) and "first" or nil)
+        -- What the slot service shows at this Wishlist's server slot as the
+        -- editor opens, and every state of it this editor later uploads. A save
+        -- is accepted only while the slot still shows one of them (see
+        -- StaleServerSlot). An adapter that cannot name slot identities binds
+        -- nothing and keeps the earlier behavior.
+        if tonumber(state.editingContext.slot) and Adapter
+            and Adapter.ServerWishlistSlotToken then
+            local mirror = {}
+            local token = Adapter.ServerWishlistSlotToken(state.editingContext.slot)
+            if token then mirror[token] = true end
+            state.editingContext.mirrorTokens = mirror
+        end
         M.LoadPendingEchoes(wishlist.echoes or {}, false,wishlist.designTargets)
         return true
     end
@@ -1346,6 +1358,35 @@ function Controller.New(options)
         }) end
     end
 
+    -- The server Wishlist slot this save would overwrite, when it no longer
+    -- shows what this editor opened or last uploaded: another Wishlist reused
+    -- it, it was removed or emptied, or it could not be identified when the
+    -- editor opened. Nothing is uploaded for it, and the save is never
+    -- redirected to another slot. Returns the slot and "missing" or "replaced".
+    local function StaleServerSlot()
+        local context = state.editingContext
+        local slot = context and tonumber(context.slot)
+        if not slot or slot < 1 or type(context.mirrorTokens) ~= "table"
+            or not (Adapter and Adapter.ServerWishlistSlotToken) then
+            return nil
+        end
+        local current = Adapter.ServerWishlistSlotToken(slot)
+        if current ~= nil and context.mirrorTokens[current] then return nil end
+        return slot, current == nil and "missing" or "replaced"
+    end
+
+    local function NotSavedStaleSlot(slot, why)
+        notify("|cffff6060Nexus:|r Not saved: server Wishlist slot " .. tostring(slot)
+            .. " no longer holds the Wishlist this editor opened"
+            .. (why == "missing" and " (the slot is empty or not loaded)" or "")
+            .. ". Nothing was uploaded or assigned; "
+            .. "your edits are kept. Close the editor and open the Wishlist again from the Echo Journal.")
+        if M._RecordSwitchRefusal then M._RecordSwitchRefusal("save wishlist", "SERVER_SLOT_STALE", {
+            detail = "the server slot no longer shows the opened Wishlist (" .. tostring(why) .. ")",
+            mirrorSlot = slot,
+        }) end
+    end
+
     local function TryApply(slot, name, echoes, guard)
         -- An upload may be delayed by the service's spacing guard. The confirmed
         -- draft must still be current BEFORE sending, not merely before opening
@@ -1376,7 +1417,14 @@ function Controller.New(options)
             NotSavedEmptyDestination(emptySlot)
             return false, "destination_empty"
         end
-        local ok, err = Adapter.UploadWishlist(slot or 0, name, echoes)
+        local staleSlot, staleWhy = StaleServerSlot()
+        if staleSlot then
+            state.applyRetry = nil
+            NotSavedStaleSlot(staleSlot, staleWhy)
+            return false, "stale_slot"
+        end
+        local expected = state.editingContext and state.editingContext.mirrorTokens or nil
+        local ok, err = Adapter.UploadWishlist(slot or 0, name, echoes, expected)
         if ok then
             -- Service callbacks must not attach a newly edited draft to this
             -- completed upload. Report partial completion; never repeat upload.
@@ -1384,6 +1432,17 @@ function Controller.New(options)
                 state.applyRetry = nil
                 notify("|cffff6060Nexus:|r Wishlist uploaded, but the editor changed; local targets were not reassigned. Review and save again.")
                 return false, "uploaded_draft_changed"
+            end
+            -- This editor's own upload is part of the slot's lineage from now on, so
+            -- a second save in the same session is not mistaken for slot reuse
+            -- whether or not the mirror has caught up yet.
+            do
+                local context = state.editingContext
+                if context and type(context.mirrorTokens) == "table"
+                    and Adapter.ServerWishlistTokenFor then
+                    local own = Adapter.ServerWishlistTokenFor(name, echoes)
+                    if own then context.mirrorTokens[own] = true end
+                end
             end
             local committed, commitReason, designTargets = CommitLockDesignTargets(echoes)
             if not committed then
@@ -1485,6 +1544,13 @@ function Controller.New(options)
                 .. DraftModel.EchoListTotal(echoes) .. "/79 rolled copies; planned locked targets are separate).")
             return true
         end
+        if tostring(err) == "stale_slot" then
+            state.applyRetry = nil
+            local current = Adapter.ServerWishlistSlotToken
+                and Adapter.ServerWishlistSlotToken(slot)
+            NotSavedStaleSlot(slot, current == nil and "missing" or "replaced")
+            return false, "stale_slot"
+        end
         if tostring(err) == "spacing" then
             state.applyRetry = state.applyRetry or {
                 slot=slot,name=name,echoes=echoes,tries=0,
@@ -1570,6 +1636,11 @@ function Controller.New(options)
         if emptySlot then
             NotSavedEmptyDestination(emptySlot)
             return nil, "destination_empty"
+        end
+        local staleSlot, staleWhy = StaleServerSlot()
+        if staleSlot then
+            NotSavedStaleSlot(staleSlot, staleWhy)
+            return nil, "stale_slot"
         end
         local slot = state.editingContext and tonumber(state.editingContext.slot) or 0
         local name
