@@ -67,7 +67,6 @@ save(4,'Plan D',{})
 -- A plan whose ordinary list also holds a copy of its own locked target's Echo.
 save(5,'Plan E',{{200080,1}},200080)
 local assigned=Nexus.Store.State().loadoutWishlists
-local storeBefore=NexusDB and NexusDB.loadoutWishlists
 H.locked={};H.granted={}
 activate(1)
 O.Show();H.Advance(1.5)
@@ -158,7 +157,11 @@ lines=Lines()
 local noted=false
 for _,t in ipairs(lines)do if t:find('locked targets unavailable',1,true) then noted=true end end
 check(noted and #LockedRows()==0 and #lines==80,'unreadable planned targets: a note line, no locked row, 79 ordinary rows: '..#lines)
+-- The plan's rows are built through the catalog: a catalog change alone re-reads the assigned plan.
 A.AssignedWishlist=realAssigned
+Nexus.Revisions.Advance(Nexus.Revisions.CATALOG_CHANGED,'overlay test')
+H.Advance(1.5)
+check(#LockedRows()==1 and #Lines()==80,'a catalog change alone re-reads the plan: the locked target row returns ('..#LockedRows()..' rows, '..#Lines()..' lines)')
 -- A projection that holds two locked rows of one Echo (a mirrored locked copy plus the plan's extra copy):
 -- one row, with the group's counts.
 A.AssignedWishlist=function()

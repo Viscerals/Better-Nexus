@@ -234,7 +234,7 @@ end
 
 -- The assigned Wishlist as the HUD and the Orb read it: the server's rolled
 -- copies plus the plan's own locked design targets (GameAdapter.AssignedWishlist).
--- The server mirror alone never holds the planned locked targets. Display only.
+-- The server mirror alone does not hold the plan's design targets. Display only.
 -- `plannedUnavailable` is true when that projection could not read the design.
 local function ReadAssignedPlan()
     local read = Adapter and Adapter.AssignedWishlist
@@ -266,10 +266,13 @@ local function AcquirePresentation()
         return false
     end
 
+    -- The assigned plan's rows are built through the catalog, so a catalog
+    -- change re-reads it too.
     local refreshWishlist = not known or not revisionsKnown
         or slotsRevision ~= lastSlotsRevision
         or activeRevision ~= lastActiveRevision
         or wishlistRevision ~= lastWishlistRevision
+        or catalogRevision ~= lastCatalogRevision
     local refreshOwned = not known or not revisionsKnown
         or grantedRevision ~= lastGrantedRevision
         or ownedRevision ~= lastOwnedRevision
@@ -379,12 +382,12 @@ function M.Refresh()
     for index, e in ipairs(wl.entries or {}) do
         local row = catalog and catalog.rows and catalog.rows[e.spellId]
         local entryProgress = progress and progress.rows[index]
-        local locked = e.locked == true or e.sourceRole == "locked"
+        local isLocked = e.locked == true or e.sourceRole == "locked"
         -- One row per locked target Echo: the model counts the target's
         -- copies as a group, so a second row of the same Echo repeats it.
-        if not (locked and entryProgress and entryProgress.primary == false) then
+        if not (isLocked and entryProgress and entryProgress.primary == false) then
             list[#list + 1] = { spellId = e.spellId, quality = e.quality,
-                stacks = e.stacks, family = e.family, locked = locked,
+                stacks = e.stacks, family = e.family, locked = isLocked,
                 progress = entryProgress,
                 name = (row and row.name) or ("spell " .. tostring(e.spellId)) }
         end
