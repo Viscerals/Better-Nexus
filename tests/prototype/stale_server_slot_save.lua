@@ -347,5 +347,60 @@ do
  check(data~=nil,'once the slot shows the selected Wishlist it can be saved: '..tostring(why))
 end
 
+-- The adapter reports the replacement after the controller's own reading found the slot unchanged
+-- (a race inside the call): that contradiction is latched for the editor as well.
+open()
+do
+ local A=Nexus.GameAdapter
+ local adapter={};for k,v in pairs(A) do adapter[k]=v end
+ adapter.UploadWishlist=function() setMirror(102,row('Someone Elses Plan',B_ROWS));return false,'stale_slot' end
+ local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
+  accountRoot=function() return {} end,notify=function() end})
+ c.Initialize(adapter)
+ local wishlist={slot=102,name=NAME,key=A.WishlistKey(planRows),echoes=planRows}
+ check(c.BeginWishlist(wishlist,nil)==true,'a controller opens the Wishlist')
+ local ok,reason=c.AcceptApply(102,NAME,planRows)
+ check(ok==false and reason=='stale_slot','the adapter-reported replacement refuses the save: '..tostring(reason))
+ setMirror(102,MIRROR_A)
+ local data,why=c.PrepareApply()
+ check(data==nil and why=='stale_slot','and the selection reappearing does not restore it: '..tostring(why))
+end
+
+-- A payload for another slot that is uploaded does not become an accepted state of the bound slot.
+open()
+do
+ local A=Nexus.GameAdapter
+ local adapter={};for k,v in pairs(A) do adapter[k]=v end
+ adapter.UploadWishlist=function() return true end -- the host takes the upload
+ local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
+  accountRoot=function() return {} end,notify=function() end})
+ c.Initialize(adapter)
+ local wishlist={slot=102,name=NAME,key=A.WishlistKey(planRows),echoes=planRows}
+ check(c.BeginWishlist(wishlist,nil)==true,'a controller opens the Wishlist at slot 102')
+ local other={{spellId=200768,quality=0,stacks=3}}
+ c.AcceptApply(101,'Payload For Another Slot',other)
+ setMirror(102,row('Payload For Another Slot',other))
+ local data,why=c.PrepareApply()
+ check(data==nil and why=='stale_slot','a state uploaded for slot 101 is not an accepted state of slot 102: '..tostring(why))
+end
+
+-- A refused PrepareApply drops the confirmation it offered earlier.
+open()
+do
+ local A=Nexus.GameAdapter
+ local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
+  accountRoot=function() return {} end,notify=function() end})
+ c.Initialize(A)
+ local wishlist={slot=102,name=NAME,key=A.WishlistKey(planRows),echoes=planRows}
+ check(c.BeginWishlist(wishlist,nil)==true,'a controller opens the Wishlist')
+ local offered=c.PrepareApply()
+ check(offered~=nil,'a confirmation is offered while the slot is unchanged')
+ setMirror(102,row('Someone Elses Plan',B_ROWS))
+ local data,why=c.PrepareApply()
+ check(data==nil and why=='stale_slot','the second preparation is refused')
+ local ok,reason=c.AcceptApply(offered)
+ check(ok==false and reason=='stale_confirmation','the earlier confirmation no longer stands: '..tostring(reason))
+end
+
 print=rawPrint
 print('PASS stale_server_slot_save: '..checks..' checks (reuse before Save, during confirmation, during retry; name/content/missing; ABA; consecutive saves; adapter; compatibility)')

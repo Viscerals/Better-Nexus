@@ -35,6 +35,10 @@ A second gap: `ServerWishlistSlotToken` hashed the entries `A.Slots()` could rea
 | Submitting editor | `TryApply` captures the editor it belongs to before the host call and adds the submitted state to that editor's accepted set only, even if a callback opened another editor or changed the draft |
 | Confirmation | a refused `PrepareApply` drops a pending confirmation |
 
+An open that an assignment drives (the assigned Wishlist's design button, a Saved Build's linked
+Wishlist, the first-run plan) binds the assignment's record as it resolves at that moment, against the
+same mirror reading; the selection there is the assignment, not an earlier Journal row.
+
 A refusal uploads nothing, assigns nothing, keeps the draft and every assignment, and never
 redirects the save. The new Wishlist flow (slot 0), first-run edits, locked-only Wishlists,
 Unassign, the W15 guard and the binding tokens are unchanged. A locally saved locked design is not
