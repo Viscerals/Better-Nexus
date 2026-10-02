@@ -135,9 +135,10 @@ first, the late fact becomes its own record naming the decision (`ref`).
 Completeness is explicit. `inc` lists parts known to be incomplete (`tg` targets
 cut, `ow` ownership not synced, `el` eligibility unknown, `ch` charges untrusted,
 `io` lifecycle text cut). Every prepared intent is named in the lifecycle text `io` (`=t2.200002`: kind letter, offer index,
-spell id), and `sa` is the action actually SUBMITTED. The outcome fields (`fz`, `af`, `ao`) describe
-the submitted action, never the board's first proposal `pr`; a proposal that was never submitted gets
-no Freeze outcome. A board can see several intents (a superseded or refused one, then another); only
+spell id), and `sa` is the action actually SUBMITTED. The Freeze outcome `fz` is judged on the submitted action, never on the board's first proposal `pr`; a
+proposal that was never submitted gets no Freeze outcome. `af` and `ao` are observations of the next
+board whatever was sent. `sa` holds the last accepted submission. When another record was written
+between two events, the later facts are in rows that name the decision (`ref`); read them together. A board can see several intents (a superseded or refused one, then another); only
 an accepted submission counts. Two accepted submissions on one board, or a submission with no
 action identity, are marked `am` (ambiguous) and get no outcome annotation. `pd` counts records
 dropped before this one. A gap in

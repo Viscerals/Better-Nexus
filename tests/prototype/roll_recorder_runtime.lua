@@ -146,7 +146,6 @@ H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5)
 SlashCmdList.NEXUS('auto');H.Advance(.25)
 Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Synthetic B plan',{{spellId=200020,quality=0,stacks=1}})
 H.Notify();H.Advance(.3)
-local laterAction=H.actions[#H.actions]
 Plan();H.Notify();H.Advance(1.5)
 check(#H.actions==1 and H.actions[1][1]=='freeze' and H.actions[1][2]==0,'only the final Freeze was sent: '..Kinds(H))
 H.perks.pendingFreezeIndex=nil

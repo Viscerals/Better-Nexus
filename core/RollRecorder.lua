@@ -434,6 +434,7 @@ function R.Intent(id, state, reason, info)
             if state == "submitted" then
                 if tag == nil then
                     fields.inc = "am"
+                    if open then p.amb = true end
                 else
                     fields.sa = tag
                     if open then
@@ -476,7 +477,7 @@ function R.After(ctx)
                 end
                 if parts then fields.ao = table.concat(parts, ";") end
             end
-            if p.subs and p.subs > 1 then
+            if p.amb or (p.subs and p.subs > 1) then
                 fields.inc = "am"
             elseif ctx.board then
                 if p.subKind == "freeze" then
@@ -567,7 +568,7 @@ function R.ExportLines()
             .. "|dropped=" .. status.dropped .. "|late=" .. status.late,
         "LOCAL RECORD made by Nexus on this computer. No account, character or realm name, Wishlist name, chat or credential is kept. Nothing is sent anywhere. Send it only privately.",
         "NOT A DRAW MODEL. A board and the next board are observations. They do not prove server odds, and a proposed action is not a result.",
-        "D=decision B=boundary O=late outcome. Offers id.quality.flags (G guaranteed F frozen C carried J justFrozen b no-Banish f no-Freeze u unselectable). Targets id,requested,lockedTarget,ordinary,locked,cap,eligibility,requiredSpell. Eligibility hex: 1 class 2 level 4 lever-ok 8 below-cap, x unknown. Charges banish.reroll.freeze.trusted. inc = parts known to be incomplete (am = the submitted action is ambiguous). io = lifecycle: each prepared intent is followed by =<action>; actions are t take, b banish, f freeze, r reroll as <letter><offer index>.<spell id>. sa = the action actually SUBMITTED; the outcome fields (fz, af, ao) describe that action, not the proposal pr. Ownership fields (tg, ao) cover the Wishlist targets only, not the full ownership.",
+        "D=decision B=boundary O=late outcome. Offers id.quality.flags (G guaranteed F frozen C carried J justFrozen b no-Banish f no-Freeze u unselectable). Targets id,requested,lockedTarget,ordinary,locked,cap,eligibility,requiredSpell. Eligibility hex: 1 class 2 level 4 lever-ok 8 below-cap, x unknown. Charges banish.reroll.freeze.trusted. inc = parts known to be incomplete (am = the submitted action is ambiguous). io = lifecycle: each prepared intent is followed by =<action>; actions are t take, b banish, f freeze, r reroll as <letter><offer index>.<spell id>. sa = the action actually SUBMITTED (the last accepted one); the Freeze outcome fz is judged on it, not on the proposal pr; af and ao are observations of the next board whatever was sent. When another record was written between two events, read the rows that name the same decision (ref) together. Ownership fields (tg, ao) cover the Wishlist targets only, not the full ownership.",
         table.concat(COLUMNS, "|"),
     }
     for _, record in ipairs(records) do

@@ -138,19 +138,23 @@ Fresh()
 local worst=Ctx({targets=40,cards={{spellId=1234567,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false},
  {spellId=1234568,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false},
  {spellId=1234569,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false}}})
-worst.plan.requestedCounts={};worst.owned={synced=true,bySpell={}}
+worst.plan.requestedCounts={};worst.owned={synced=false,bySpell={}}
 for i=1,40 do worst.plan.requestedCounts[1230000+i]=85;worst.owned.bySpell[1230000+i]=85;worst.catalog.rows[1230000+i]=Row({cap=85,lever=1234567}) end
 worst.action={type='freeze',index=3,spellId=1234569,reasonCode=string.rep('R',120),policyId='adaptive-0-settle-live1',policyProfile='group-protected-neutral-1',policyRequested='released',fallbackReason='SELECTOR_UNKNOWN'}
-worst.charges={banish=100,reroll=100,freeze=100,trustworthy=true}
+worst.charges={banish=100,reroll=100,freeze=100,trustworthy=false}
 worst.state={pending=true,ordinaryBoardAllowed=false,allowBanish=false,allowReroll=false,allowFreeze=false,canFreeze=false,searchRefused={banish=true,reroll=true}}
 id=R.Decision(worst)
 R.Intent(id,'prepared','x',{type='banish',index=1,spellId=9999999,elapsed=0})
 for i=1,40 do R.Intent(id,'uncertain',string.rep('x',90),{elapsed=99999.9,mutation=true}) end
 local grown={synced=true,bySpell={}};for i=1,40 do grown.bySpell[1230000+i]=0 end
+R.Intent(id,'submitted','adapter_accepted',{elapsed=99999.9,mutation=true,type='freeze',index=3,spellId=1234569})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=99999.9,mutation=true,type='freeze',index=3,spellId=1234569})
 R.After({basis=string.rep('b',90),board=worst.board,owned=grown,charges=worst.charges})
 record=Records()[1]
 local worstBytes=Flat(record)
 check(worstBytes<=2048,'the worst-case record, after every update, stays within 2048 string bytes: '..worstBytes)
+check(record.sa=='f3.1234569' and record.inc:find('am',1,true) and record.inc:find('ow',1,true) and record.inc:find('ch',1,true),'the worst case carries the submitted action and every incompleteness flag: '..tostring(record.inc))
+check(#record.tg>=R.LIMITS.recordBytes-R.LIMITS.reserveBytes-40,'the worst case fills the targets budget: '..#record.tg..' of '..(R.LIMITS.recordBytes-R.LIMITS.reserveBytes))
 check(record.tn==40 and record.inc and record.inc:find('io',1,true),'the worst case is flagged, not silent')
 -- The byte budget bounds the targets text even under a smaller limit.
 Fresh()
@@ -298,6 +302,33 @@ R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true})
 R.After({basis='next_board',board=FROZEN_AFTER})
 record=Records()[1]
 check(record.sa==nil and record.inc and record.inc:find('am',1,true) and record.fz==nil,'a submission with no action identity is ambiguous: '..tostring(record.inc))
+-- A submission without identity makes the whole outcome ambiguous, also when an identified one follows
+-- and when a held offer is on the board.
+Fresh()
+id=R.Decision(Ctx({cards={{spellId=1001,quality=1,isFrozen=true},{spellId=2001,quality=0},{spellId=1002,quality=2}}}))
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true})
+R.After({basis='next_board',board={cards={{spellId=1001,quality=1,isCarried=true},{spellId=2002},{spellId=2001}}}})
+check(Records()[1].inc=='am' and Records()[1].fz==nil,'an action-less submission gives no held-offer annotation: '..tostring(Records()[1].fz))
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.9,mutation=true,type='freeze',index=1,spellId=1001})
+R.After({basis='next_board',board=FROZEN_AFTER})
+check(Records()[1].inc=='am' and Records()[1].fz==nil and Records()[1].sa=='f1.1001','an identified submission after an action-less one stays ambiguous: '..tostring(Records()[1].inc)..' '..tostring(Records()[1].fz))
+-- The same action prepared twice is named both times; a state naming a different action is named too.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='freeze',index=1,spellId=1001})
+R.Intent(id,'superseded','board_changed_before_submit',{elapsed=.1,type='freeze',index=1,spellId=1001})
+R.Intent(id,'prepared','intent_beat',{elapsed=.2,type='freeze',index=1,spellId=1001})
+R.Intent(id,'rejected','adapter_refused',{elapsed=.3,mutation=true,type='take',index=2,spellId=2001})
+check(Records()[1].io=='prepared:intent_beat@0.0=f1.1001,superseded:board_changed_before_submit@0.1,prepared:intent_beat@0.2=f1.1001,rejected:adapter_refused@0.3!=t2.2001','every prepared intent is named and a changed action is named: '..tostring(Records()[1].io))
+-- Two accepted submissions: sa is the last accepted one.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='freeze',index=1,spellId=1001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.9,mutation=true,type='take',index=2,spellId=2001})
+check(Records()[1].sa=='t2.2001','sa holds the last accepted submission')
 -- Two accepted Freezes of the same spell: still ambiguous, and not annotated even though 1001 is held.
 Fresh()
 id=R.Decision(Freeze())
