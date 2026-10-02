@@ -234,5 +234,39 @@ do
  check(T.Equal(before,snapshot()),'and no assignment changed')
 end
 
+-- 8. Controller level: the returned reasons, and an adapter that cannot tell.
+reopen({echoes={}})
+do
+ local A=Nexus.GameAdapter
+ local uploads=0
+ local function controller(populatedCheck)
+  local adapter={};for k,v in pairs(A) do adapter[k]=v end
+  adapter.UploadWishlist=function(...) uploads=uploads+1;return A.UploadWishlist(...) end
+  if populatedCheck==false then adapter.IsLoadoutPopulated=nil end
+  local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
+   accountRoot=function() return {} end,notify=function() end})
+  c.Initialize(adapter)
+  return c
+ end
+ local rolled={{spellId=201172,quality=0,stacks=1,locked=false}}
+ local before=snapshot()
+ local c=controller()
+ check(c.SelectLoadout(2)==true,'a new Wishlist is bound to Saved Build 2')
+ check(c.LoadPendingEchoes(rolled),'with content')
+ local data,why=c.PrepareApply('W15-CTRL')
+ check(data==nil and why=='destination_empty','PrepareApply refuses with its own reason: '..tostring(why))
+ local ok,reason=c.AcceptApply(2,'W15-CTRL',rolled)
+ check(ok==false and reason=='destination_empty','the direct payload path is refused too and reports failure: '..tostring(ok)..'/'..tostring(reason))
+ check(uploads==0 and T.Equal(before,snapshot()),'no upload and no change')
+ -- An adapter that cannot say whether the Saved Build is populated is not treated as empty;
+ -- the real writer still refuses the assignment, so nothing is assigned.
+ local c2=controller(false)
+ check(c2.SelectLoadout(2)==true and c2.LoadPendingEchoes(rolled),'second controller, same destination')
+ local ok2,reason2=c2.AcceptApply(2,'W15-CTRL',rolled)
+ check(reason2~='destination_empty','without the population check the controller does not refuse: '..tostring(reason2))
+ check(uploads==1,'so the upload is attempted')
+ check(snapshot().loadoutWishlists[2]==nil,'and the writer still stores no association under the empty slot')
+end
+
 print=rawPrint
-print('PASS empty_saved_build_save: '..checks..' checks (picker gear, race after confirmation, populated and locked-only builds, first-run route, writers, new Wishlist, retry)')
+print('PASS empty_saved_build_save: '..checks..' checks (picker gear, race after confirmation, populated and locked-only builds, first-run route, writers, new Wishlist, retry, controller)')
