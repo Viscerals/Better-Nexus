@@ -978,7 +978,8 @@ function M.Step(job)
             end
             local out = {"-- local roll record (local only; no names; not a draw model) --"}
             for _, line in ipairs(recorder.ExportLines()) do
-                out[#out + 1] = safeText(line, 2300)
+                -- A 2048-byte record can grow to three times that when every byte is escaped.
+                out[#out + 1] = safeText(line, 6300)
             end
             return out
         end}

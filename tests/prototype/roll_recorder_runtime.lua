@@ -196,6 +196,16 @@ check(whole:find('PAIR_FREEZE_SECOND_NEEDED',1,true),'the report holds the recor
 check(report.meta.omissions=='none' and not report.meta.partial,'no section is omitted: '..tostring(report.meta.omissions))
 for _,chunk in ipairs(report.chunks)do check(#chunk<=Nexus.SupportReport.CHUNK_BYTES,'every report chunk stays within its bound')end
 check(not whole:find('Synthetic recorder plan',1,true) and not whole:find('Echo 1',1,true),'no Wishlist or Echo name in the report')
+-- A record whose text is full of escaped separators is not cut by the report.
+Nexus.RollRecorder.Decision({state={},action={type='take',index=1,spellId=200001,reasonCode=string.rep('|%',48),policyId='adaptive-0-settle-live1'},
+ board={cards={{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200020,quality=0}},signature='escape-check'},
+ owned={synced=true,bySpell={}},plan={requestedCounts={[200001]=1}},catalog={rows={},playerMask=1},level=20,horizon=5,
+ charges={banish=1,reroll=1,freeze=1,trustworthy=true}})
+local escapedLine
+for line in Nexus.RollRecorder.Export():gmatch('[^\n]+')do if line:find('%7C%25%7C',1,true) then escapedLine=line end end
+check(escapedLine and #escapedLine>400,'precondition: an escaped record line exists')
+report=Nexus.SupportReport.Prepare({})
+check(table.concat(report.chunks):find(escapedLine,1,true),'the report holds the whole escaped record line, not a cut one')
 Nexus.RollRecorder=nil
 report=Nexus.SupportReport.Prepare({})
 check(table.concat(report.chunks):find('local roll record: not available',1,true) and report.meta.omissions=='none','a missing recorder is stated, not an error')

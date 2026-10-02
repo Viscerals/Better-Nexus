@@ -143,6 +143,12 @@ the gap shows even when a loading boundary was written first.) `fate=interrupted
 `:run` marks a loading screen or run reset. Boundaries recorded: `session`,
 `run`, `world_leave`, `world_enter`, `auto`, `policy`.
 
+The prepared support report (`/nexus report`, Prepare report file) carries the whole record
+in its own section. A full ring is about 120 KiB of text, and the report file is also
+stored in the companion addon's saved data, so that data holds a second copy. The report
+limit is 1 MiB. The field `pa` is only set, never cleared: if a later prepared action
+matches the proposal again, an earlier `pa` stays and the `io` text shows the sequence.
+
 Limits: the record is not a draw model. A board and the next board are
 observations. A proposed action is not a result. Eligibility digits use class,
 level, lever opt-out and stack cap only; whether a prerequisite spell is learned
