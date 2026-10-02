@@ -47,6 +47,7 @@ do
  -- 1a. repeated opens of distinct ordinary-only content
  for i=1,60 do check(c.LoadPendingEchoes(Ordinary(i),false,nil),'open '..i) end
  check(count(backing.lockDesignTargetsBySlot)==0,'60 ordinary-only opens leave no bucket: '..count(backing.lockDesignTargetsBySlot))
+ check(backing.lockDesignTargetsBySlot==nil,'and do not even create the empty bucket map')
  -- 1b. reopening the same content changes nothing
  for i=1,60 do c.LoadPendingEchoes(Ordinary(i),false,nil) end
  check(count(backing.lockDesignTargetsBySlot)==0,'reopening known contents adds nothing')
@@ -76,6 +77,21 @@ do
  local key=A.WishlistKey(d.echoes)
  check(count(backing.lockDesignTargetsBySlot)==1 and count(backing.lockDesignTargetsBySlot[key])==6,'the locked design creates exactly one bucket with six targets')
  local kept=backing.lockDesignTargetsBySlot[key]
+ -- saving the same content again with a DIFFERENT locked split never replaces the existing bucket
+ H.Advance(4,.5)
+ local resplit=Fixture()
+ for i,e in ipairs(resplit) do e.locked=(i>=79 and i<=84) end
+ local c5=controller();c5.BeginNewWishlist()
+ check(c5.LoadPendingEchoes(resplit),'load the re-split content')
+ local d5=c5.PrepareApply('W4 resplit')
+ check(d5~=nil,'prepare the re-split save')
+ local key5=A.WishlistKey(d5.echoes)
+ local seeded={[200001]=true}
+ backing.lockDesignTargetsBySlot[key5]=seeded -- an older design for this exact content
+ c5.AcceptApply(d5)
+ check(backing.lockDesignTargetsBySlot[key5]==seeded and count(seeded)==1,'a save never replaces an existing bucket of its content key')
+ backing.lockDesignTargetsBySlot[key5]=nil
+ check(backing.lockDesignTargetsBySlot[key]==kept and count(kept)==6,'the first committed bucket is untouched')
  -- ordinary opens afterwards neither remove nor replace it
  for i=1,30 do c.LoadPendingEchoes(Ordinary(i),false,nil) end
  check(count(backing.lockDesignTargetsBySlot)==1 and backing.lockDesignTargetsBySlot[key]==kept,'later ordinary opens keep the existing bucket as it is')
