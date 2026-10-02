@@ -10,7 +10,7 @@ test, no calibrated draw model, no claim of a gain in the live game.
 | Adaptive strategy `adaptive-0-settle-live1`, profile `group-protected-neutral-1` | `logic/EchoWeaver.lua` (`DecideNexus`), reached through `Policy.Decide` | ON (setting `rollingPolicy = "adaptive"`) |
 | Released strategy `released-nexus-1` | the same module, unchanged rules | explicit rollback: `/nexus policy released` |
 | Automatic local roll record | `core/RollRecorder.lua`, stored by `core/DiagnosticLogs.lua` (history `rollTrace`, key `rollTraceLog`) | ON (setting `rollTrace = true`) |
-| Report | `/nexus trace`, the Roll trace tab, `Nexus.RollRecorder.Export()` | on request |
+| Report | `/nexus report` (Prepare report file: a `rolltrace` section), `/nexus trace` (the Roll trace tab, paged copy) | on request |
 
 Action execution is unchanged. Preparation, the one-beat intent, immediate
 authorization, adapter submission, uncertainty holds and authoritative
@@ -132,9 +132,12 @@ first, the late fact becomes its own record naming the decision (`ref`).
 
 Completeness is explicit. `inc` lists parts known to be incomplete (`tg` targets
 cut, `ow` ownership not synced, `el` eligibility unknown, `ch` charges untrusted,
-`io` lifecycle text cut). `pd` counts records dropped before this one. A gap in
+`io` lifecycle text cut). `pa` names the action actually prepared when it differs from the proposal recorded for
+the board (for example the assigned Wishlist changed in between; the stale proposal is
+not sent). `pd` counts records dropped before this one. A gap in
 the decision numbers shows replacement. A decision with no outcome before a
-`session` boundary was interrupted by a reload. `fate=interrupted:world_leave` or
+`session` boundary was interrupted by a reload. (Records carry their own session tag, so
+the gap shows even when a loading boundary was written first.) `fate=interrupted:world_leave` or
 `:run` marks a loading screen or run reset. Boundaries recorded: `session`,
 `run`, `world_leave`, `world_enter`, `auto`, `policy`.
 

@@ -144,6 +144,7 @@ worst.action={type='freeze',index=3,spellId=1234569,reasonCode=string.rep('R',12
 worst.charges={banish=100,reroll=100,freeze=100,trustworthy=true}
 worst.state={pending=true,ordinaryBoardAllowed=false,allowBanish=false,allowReroll=false,allowFreeze=false,canFreeze=false,searchRefused={banish=true,reroll=true}}
 id=R.Decision(worst)
+R.Intent(id,'prepared','x',{type='banish',index=1,spellId=9999999,elapsed=0})
 for i=1,40 do R.Intent(id,'uncertain',string.rep('x',90),{elapsed=99999.9,mutation=true}) end
 local grown={synced=true,bySpell={}};for i=1,40 do grown.bySpell[1230000+i]=0 end
 R.After({basis=string.rep('b',90),board=worst.board,owned=grown,charges=worst.charges})
@@ -223,6 +224,17 @@ R.Intent(id,'submitted','adapter_accepted',{elapsed=0.4,mutation=true})
 rows=Records()
 check(#rows==3 and rows[3].k=='O' and rows[3].ref==rows[1].n and rows[3].s==rows[1].s and rows[3].io:find('submitted',1,true),'a late outcome is written as its own record naming the decision')
 check(R.Status().late==1,'late outcomes are counted')
+-- The action actually prepared is compared with the recorded proposal.
+Fresh()
+id=R.Decision(Ctx())
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='take',index=1,spellId=1001})
+check(Records()[1].pa==nil,'the prepared action equals the proposal: no pa field')
+Fresh()
+id=R.Decision(Ctx())
+R.Intent(id,'prepared','intent_beat',{elapsed=0,type='banish',index=2,spellId=2001})
+check(Records()[1].pa=='banish:2:2001','a prepared action that differs from the proposal is named: '..tostring(Records()[1].pa))
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.4,type='banish',index=2,spellId=2001})
+check(Records()[1].io:find('submitted',1,true),'later states still update the record')
 -- An outcome too long for its field is cut and flagged.
 Fresh()
 id=R.Decision(Ctx())

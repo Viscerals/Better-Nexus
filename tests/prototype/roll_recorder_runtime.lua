@@ -114,6 +114,23 @@ SlashCmdList.NEXUS('policy released');H.Advance(5)
 check(Nexus.RollingStatusLines()[1]:find('applies at the next safe action boundary',1,true),'the selector waits while the crossed intent is unresolved: '..Nexus.RollingStatusLines()[1])
 check(#H.actions==sent,'and nothing is replayed after the selector change')
 
+-- 3b. A stale assignment: the Wishlist changes after the board was first decided. The record
+-- keeps the plan the decision saw, names the action actually prepared, and the stale action is not sent.
+H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5)
+local staleBefore=Decisions()[1]
+check(staleBefore.pr:find('freeze:1:200001',1,true),'precondition: the first plan proposes a Freeze of 200001')
+Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Synthetic new plan',{{spellId=200020,quality=0,stacks=1}})
+H.Notify();H.Advance(.5)
+SlashCmdList.NEXUS('auto');H.Advance(1.5)
+check(H.actions[1] and H.actions[1][1]=='take' and H.actions[1][2]==200020 and #H.actions==1,'the action follows the new plan; the stale Freeze is never sent: '..Kinds(H))
+local staleRows=Trace();local staleD,preparedActual
+for _,r in ipairs(staleRows)do
+ if r.k=='D' and not staleD then staleD=r end
+ if r.pa then preparedActual=r.pa end
+end
+check(staleD.tg:find('200001,1,0',1,true) and not staleD.tg:find('200020',1,true),'the decision record keeps the plan it saw: '..tostring(staleD.tg))
+check(preparedActual=='take:3:200020','the record names the action actually prepared: '..tostring(preparedActual))
+
 -- 4a. A run boundary (the level returning from 80 to 1) ends the open decision and starts a new run id.
 H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5)
 SlashCmdList.NEXUS('auto');H.Advance(1.5)
@@ -162,6 +179,20 @@ check(absent==reference,'no recorder module: the same actions: '..absent..' vs '
 local failing=Script(function()Nexus.DiagnosticLogs.Append=function()error('simulated storage failure')end end)
 check(failing==reference,'a failing recorder: the same actions: '..failing..' vs '..reference)
 check(reference:find('freeze',1,true) and reference:find('take',1,true) and reference:find('banish',1,true),'the script exercises Freeze, Take and Banish: '..reference)
+
+-- 5b. The prepared support report carries the record (one private file for a tester).
+H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5);SlashCmdList.NEXUS('auto');H.Advance(1.5)
+local report,why=Nexus.SupportReport.Prepare({})
+check(report~=nil,'the support report prepares: '..tostring(why))
+local whole=table.concat(report.chunks)
+check(whole:find('-- local roll record (local only; no names; not a draw model) --',1,true) and whole:find('NEXUS_ROLL_TRACE_1',1,true),'the report holds the roll record section')
+check(whole:find('PAIR_FREEZE_SECOND_NEEDED',1,true),'the report holds the recorded decision')
+check(report.meta.omissions=='none' and not report.meta.partial,'no section is omitted: '..tostring(report.meta.omissions))
+for _,chunk in ipairs(report.chunks)do check(#chunk<=Nexus.SupportReport.CHUNK_BYTES,'every report chunk stays within its bound')end
+check(not whole:find('Synthetic recorder plan',1,true) and not whole:find('Echo 1',1,true),'no Wishlist or Echo name in the report')
+Nexus.RollRecorder=nil
+report=Nexus.SupportReport.Prepare({})
+check(table.concat(report.chunks):find('local roll record: not available',1,true) and report.meta.omissions=='none','a missing recorder is stated, not an error')
 
 -- 6. Commands: switch, clear, report page; Clear Log leaves the record alone.
 H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5);SlashCmdList.NEXUS('auto');H.Advance(1.5)

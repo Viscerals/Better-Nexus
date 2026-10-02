@@ -969,6 +969,19 @@ function M.Step(job)
                 return out
             end},
         }
+        -- The local roll record (core/RollRecorder.lua), so a tester sends one
+        -- private file. Bounded: at most 256 records of at most 2 KiB each.
+        sections[#sections + 1] = {name = "rolltrace", build = function()
+            local recorder = Nexus and Nexus.RollRecorder
+            if not (recorder and type(recorder.ExportLines) == "function") then
+                return {"-- local roll record: not available --"}
+            end
+            local out = {"-- local roll record (local only; no names; not a draw model) --"}
+            for _, line in ipairs(recorder.ExportLines()) do
+                out[#out + 1] = safeText(line, 2300)
+            end
+            return out
+        end}
         job.sectionIndex = (job.sectionIndex or 0) + 1
         local section = sections[job.sectionIndex]
         if not section then

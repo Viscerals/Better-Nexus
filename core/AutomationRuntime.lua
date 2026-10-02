@@ -2068,9 +2068,12 @@ local function RecordActionLifecycle(intent, state, reason)
     do
         local recorder = Nexus.RollRecorder
         if recorder and intent.decisionId then
+            local prepared = intent.action
             recorder.Intent(intent.decisionId, state, reason, {
                 elapsed = GetTime() - (intent.preparedAt or GetTime()),
-                mutation = intent.mutationAttempted and true or false })
+                mutation = intent.mutationAttempted and true or false,
+                type = prepared and prepared.type, index = prepared and prepared.index,
+                spellId = prepared and prepared.spellId })
         end
     end
 end

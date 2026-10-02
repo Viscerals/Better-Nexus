@@ -146,8 +146,10 @@ keeps Echo ids, counts, the offers, charges, the action chosen and the result
 seen. It keeps no account, character, realm or Wishlist name, no chat and no
 credential, and it sends nothing anywhere. At most 256 records are kept in your
 saved data and the oldest are replaced first; a record says when a part is
-incomplete or cut short. `/nexus trace` opens the **Roll trace** tab: copy each
-page in order and send the text privately, never in public. `/nexus trace off`
+incomplete or cut short. To send it, use `/nexus report` and **Prepare report
+file** (the prepared file then also carries the record), or `/nexus trace`, which
+opens the **Roll trace** tab: copy each page in order. Send either privately,
+never in public. `/nexus trace off`
 and `/nexus trace on` switch recording; `/nexus trace clear` deletes the record.
 The record is observation only and is not proof of the game's draw odds.
 

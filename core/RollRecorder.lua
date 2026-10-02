@@ -23,13 +23,14 @@ R.SCHEMA = 1
 R.HISTORY = "rollTrace"
 -- Fixed work and size bounds. CAP lives in DiagnosticLogs (the ring owner).
 -- The targets text gets recordBytes minus reserveBytes. Every other text field has
--- its own cap; their worst case after all later updates is about 990 bytes
+-- its own cap; their worst case after all later updates is about 1030 bytes
 -- (decision-time fields about 360, lifecycle 240, ownership changes about 195,
--- after offers 54, confirmation basis 73, fate 40, charges 20, survival 12).
+-- after offers 54, confirmation basis 73, fate 40, prepared action 40, charges
+-- 20, survival 12).
 R.LIMITS = {
     targets = 32,        -- exact Wishlist targets kept per decision
     recordBytes = 2048,  -- string bytes of one saved record
-    reserveBytes = 1000, -- worst case of every field except the targets (see below)
+    reserveBytes = 1040, -- worst case of every field except the targets (see below)
     ioBytes = 240,       -- action lifecycle text per decision
     deltaEntries = 16,   -- ownership changes kept per decision
     detailBytes = 48,    -- boundary detail text
@@ -401,7 +402,15 @@ function R.Intent(id, state, reason, info)
             local text = Clip(tostring(state) .. ":" .. tostring(reason or "") .. "@"
                 .. string.format("%.1f", Number(info.elapsed, 0))
                 .. (info.mutation and "!" or ""), 80)
-            return UpdatePending(p, {io = text})
+            local fields = {io = text}
+            -- The action actually prepared can differ from the proposal recorded
+            -- for this board (for example the assigned Wishlist changed in
+            -- between). Say so instead of letting the record claim otherwise.
+            if state == "prepared" and info.type ~= nil and pending == p
+                and (p.kind ~= info.type or p.index ~= info.index or p.spell ~= Int(info.spellId)) then
+                fields.pa = Clip(tostring(info.type) .. ":" .. Int(info.index) .. ":" .. Int(info.spellId), 40)
+            end
+            return UpdatePending(p, fields)
         end)
     end)
 end
@@ -501,11 +510,12 @@ local function Esc(value)
 end
 
 local COLUMNS = {"k", "s", "n", "run", "t", "lvl", "hz", "cls", "slot", "pol", "prof", "req", "fb", "cv", "cp",
-    "ch", "of", "pr", "tg", "tn", "ex", "io", "af", "ac", "ao", "fz", "cb", "fate", "inc", "pd", "ref",
+    "ch", "of", "pr", "tg", "tn", "ex", "io", "af", "ac", "ao", "fz", "cb", "fate", "pa", "inc", "pd", "ref",
     "kind", "d", "b"}
 
--- The text a tester copies. One line per saved record; blank = not recorded.
-function R.Export()
+-- The lines a tester sends: a header, then one line per saved record; blank =
+-- not recorded. Used by the Roll trace tab and by the prepared support report.
+function R.ExportLines()
     local logs = Nexus.DiagnosticLogs
     local records = logs and logs.Snapshot and logs.Snapshot(R.HISTORY) or {}
     local status = R.Status()
@@ -516,7 +526,7 @@ function R.Export()
             .. "|dropped=" .. status.dropped .. "|late=" .. status.late,
         "LOCAL RECORD made by Nexus on this computer. No account, character or realm name, Wishlist name, chat or credential is kept. Nothing is sent anywhere. Send it only privately.",
         "NOT A DRAW MODEL. A board and the next board are observations. They do not prove server odds, and a proposed action is not a result.",
-        "D=decision B=boundary O=late outcome. Offers id.quality.flags (G guaranteed F frozen C carried J justFrozen b no-Banish f no-Freeze u unselectable). Targets id,requested,lockedTarget,ordinary,locked,cap,eligibility,requiredSpell. Eligibility hex: 1 class 2 level 4 lever-ok 8 below-cap, x unknown. Charges banish.reroll.freeze.trusted. inc = parts known to be incomplete.",
+        "D=decision B=boundary O=late outcome. Offers id.quality.flags (G guaranteed F frozen C carried J justFrozen b no-Banish f no-Freeze u unselectable). Targets id,requested,lockedTarget,ordinary,locked,cap,eligibility,requiredSpell. Eligibility hex: 1 class 2 level 4 lever-ok 8 below-cap, x unknown. Charges banish.reroll.freeze.trusted. inc = parts known to be incomplete. pa = the action actually prepared when it differs from the proposal (for example the Wishlist changed).",
         table.concat(COLUMNS, "|"),
     }
     for _, record in ipairs(records) do
@@ -526,5 +536,10 @@ function R.Export()
             out[#out + 1] = table.concat(row, "|")
         end
     end
-    return table.concat(out, "\n")
+    return out
+end
+
+-- The text a tester copies from the Roll trace tab.
+function R.Export()
+    return table.concat(R.ExportLines(), "\n")
 end
