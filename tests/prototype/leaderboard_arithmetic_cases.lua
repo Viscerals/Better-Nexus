@@ -84,7 +84,7 @@ local function Pairs(d,k) return Nexus.CandidateEvidence.RealDpsPairs(d,k) end
 --   P4 cross  SHAMAN   410 (25)      420 (25)       25 s: below Dummy's 30, above Lich King's 20
 --   P5 bad    PALADIN  310 (NaN)     320 (inf)      non-finite durations
 local fx1,H=Boot({players={
- {name='Alpha',class='MAGE',dps={dummy=100,lk=100}},
+ {name='Alpha',class='MAGE',dps={dummy=100,lk=100},locked=3}, -- three locked Echoes: a copy total below the limit of 6
  {name='Bravo',class='PRIEST',dps={dummy=150,lk=1}},
  {name='Charlie',class='MAGE',dps={dummy=80,lk=120}},
  {name='Delta',class='ROGUE',dps={dummy=700}},
@@ -195,9 +195,11 @@ check(#Pairs({Ad},{unproved})==0,'a record whose owner is not proved cannot pair
 check(#Pairs({unproved},{Ak})==0 and #Pairs({unproved},{unproved})==0,'nor can it pair as the Dummy side or with itself')
 local otherLocked=Copy(Ak);otherLocked.lockedFingerprint=nil
 otherLocked.lockedEchoes[1].spellId=otherLocked.lockedEchoes[#otherLocked.lockedEchoes].spellId+1
+check(Nexus.CandidateEvidence.DpsPairIdentity(otherLocked)~=nil,'fixture: the changed locked row is itself a valid pair identity')
 check(#Pairs({Ad},{otherLocked})==0,'a different locked spell under the same owner and ordinary evidence does not pair')
 local moreCopies=Copy(Ak);moreCopies.lockedFingerprint=nil
 moreCopies.lockedEchoes[1].count=(moreCopies.lockedEchoes[1].count or 1)+1
+check(Nexus.CandidateEvidence.DpsPairIdentity(moreCopies)~=nil,'fixture: the row with one more locked copy (3 -> 4, under the limit of 6) is itself a valid pair identity')
 check(#Pairs({Ad},{moreCopies})==0,'a different locked copy total does not pair')
 local otherOrdinary=Copy(Ak)
 table.remove(otherOrdinary.echoes)
