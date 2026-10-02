@@ -323,9 +323,25 @@ check(text:find('on%%7Coff now',1) ~= nil,'separators and newlines inside a valu
 NexusDB={};R.Reset();R.Configure({now=function()return clockNow end})
 local passiveText=R.Export();local passiveStatus=R.Status()
 check(rawget(NexusDB,'rollTraceLog')==nil and rawget(NexusDB,'diagnosticMeta')==nil,'export and status of a missing history create no key')
-check(passiveText:find('retained=0',1,true) and passiveStatus.retained==nil,'a missing history reads as empty')
+check(passiveText:find('retained=0',1,true) and passiveStatus.retained==0 and passiveStatus.unreadable==nil,'a missing history reads as empty')
 check(Logs.Exists('rollTrace')==false and Logs.Exists('nonsense')==false,'Exists is false for a missing or unknown history')
 R.Decision(Ctx());check(Logs.Exists('rollTrace')==true,'Exists is true once a record was written')
+-- A history that exists but cannot be read without repair is reported, and a read writes nothing.
+local function Dump(v) if type(v)~='table' then return tostring(v) end local k={};for key in pairs(v)do k[#k+1]=key end table.sort(k,function(x,y)return tostring(x)<tostring(y) end)
+ local out={};for _,key in ipairs(k)do out[#out+1]=tostring(key)..'='..Dump(v[key])end return '{'..table.concat(out,',')..'}' end
+for label,mutate in pairs({
+ ['no bookkeeping']=function(db)db.rollTraceLog={{k='D',s='x',n=1}};db.diagnosticMeta=nil end,
+ ['gapped array']=function(db)db.rollTraceLog={[1]={k='D',s='x',n=1},[3]={k='D',s='x',n=3}} end,
+ ['future schema']=function(db)db.diagnosticMeta.histories.rollTrace.storageSchema=99 end,
+})do
+ NexusDB={};R.Reset();Logs.Init(NexusDB);R.Configure({now=function()return clockNow end});R.Decision(Ctx());R.Decision(Ctx({sig=2}))
+ mutate(NexusDB)
+ local before=Dump(NexusDB)
+ local exported=R.Export();local st=R.Status()
+ check(Dump(NexusDB)==before,'a read of '..label..' writes nothing')
+ check(exported:find('record not read',1,true)~=nil,'a read of '..label..' says the record was not read: '..exported:sub(1,60))
+ check(st.unreadable~=nil,'status of '..label..' names the reason')
+end
 
 -- 11. Measured work: bounded per decision, no growth with history length.
 Fresh()

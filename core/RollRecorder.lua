@@ -502,11 +502,13 @@ function R.Status()
         skipped = stats.skipped, failed = stats.failed, dropped = stats.dropped,
         truncated = stats.truncated, lastError = stats.lastError,
         session = session and session.tag or nil, run = session and session.run or nil}
-    -- Reading is passive: a history that does not exist yet is not created here.
-    if logs and logs.Stats and logs.Exists and logs.Exists(R.HISTORY) == true then
-        local ok, history = pcall(logs.Stats, R.HISTORY)
-        if ok and type(history) == "table" and history.available then
-            out.retained, out.cap, out.evicted = history.retained, history.cap, history.dropped
+    -- Reading is passive: nothing is created or repaired here (DiagnosticLogs.Peek).
+    if logs and logs.Peek then
+        local records, info = logs.Peek(R.HISTORY)
+        if records then
+            out.retained, out.cap, out.evicted = #records, info.cap, info.dropped
+        else
+            out.unreadable = info
         end
     end
     return out
@@ -525,11 +527,13 @@ local COLUMNS = {"k", "s", "n", "run", "t", "lvl", "hz", "cls", "slot", "pol", "
 -- not recorded. Used by the Roll trace tab and by the prepared support report.
 function R.ExportLines()
     local logs = Nexus.DiagnosticLogs
-    local records = logs and logs.Snapshot and logs.Exists and logs.Exists(R.HISTORY) == true
-        and logs.Snapshot(R.HISTORY) or {}
+    local records, why = {}, nil
+    if logs and logs.Peek then records, why = logs.Peek(R.HISTORY) end
+    local unreadable = records == nil
+    records = records or {}
     local status = R.Status()
     local out = {
-        "NEXUS_ROLL_TRACE_" .. R.SCHEMA,
+        "NEXUS_ROLL_TRACE_" .. R.SCHEMA .. (unreadable and (" (record not read: " .. tostring(why) .. ")") or ""),
         "build=" .. Esc(BuildLabel()) .. "|retained=" .. #records .. "|cap=" .. tostring(status.cap)
             .. "|evicted=" .. tostring(status.evicted) .. "|failed=" .. status.failed
             .. "|dropped=" .. status.dropped .. "|late=" .. status.late,

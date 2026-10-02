@@ -339,6 +339,33 @@ function Logs.Exists(name)
     end)
 end
 
+-- Passive read of a history: copies its records and reports its bookkeeping, and never
+-- creates, repairs or normalizes anything. A history whose stored state is missing,
+-- inconsistent or from a future schema is not read and answers nil with the reason.
+-- A missing history is an empty one.
+function Logs.Peek(name)
+    local records, info = Protected(nil, function()
+        local definition = DEFINITIONS[name]
+        if not definition then return nil, "unknown history" end
+        if type(NexusDB) ~= "table" then return {}, {cap = definition.cap, dropped = 0} end
+        local db = CurrentDB()
+        local source = rawget(db, definition.key)
+        if type(source) ~= "table" then return {}, {cap = definition.cap, dropped = 0} end
+        if FutureHistoryMeta(db, name) then return nil, "future storage schema" end
+        local meta = ExistingHistoryMeta(db, name)
+        if not meta then return nil, "no bookkeeping" end
+        local state = StoredState(meta, definition, source)
+        if not state then return nil, "inconsistent storage" end
+        local out = {}
+        for index = state.head, state.tail do
+            local copy = DefensiveCopy(source[index])
+            if copy ~= nil then out[#out + 1] = copy end
+        end
+        return out, {cap = definition.cap, dropped = Number(meta.dropped)}
+    end)
+    return records, info
+end
+
 function Logs.Init(database)
     return Protected(false, function()
         local db = CurrentDB(database)
