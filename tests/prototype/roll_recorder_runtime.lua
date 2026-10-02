@@ -86,6 +86,12 @@ for _,r in ipairs(Trace())do if r.k=='B' and r.kind=='policy' and r.d=='adaptive
 check(seenBoundary,'the switch is a recorded boundary')
 SlashCmdList.NEXUS('policy adaptive');H.Advance(1.5)
 check(Nexus.Store.Settings().rollingPolicy=='adaptive','selecting adaptive again')
+-- A selector fallback is shown in the status lines.
+Nexus.Store.Settings().rollingPolicy='banana'
+H.perks.pendingSelectSpellId=nil;H.Board({{spellId=200001,quality=1,isFrozen=true},{spellId=200002,quality=2},{spellId=200034,quality=0}});H.Notify();H.Advance(2)
+local fallbackLines=table.concat(Nexus.RollingStatusLines(),' | ')
+check(fallbackLines:find('fell back to the released policy: SELECTOR_UNKNOWN',1,true),'the status lines show the fallback reason: '..fallbackLines)
+Nexus.Store.Settings().rollingPolicy='adaptive'
 SlashCmdList.NEXUS('policy banana')
 check(Nexus.Store.Settings().rollingPolicy=='adaptive','an invalid value changes nothing')
 -- A garbage SAVED value runs the released policy and says so.

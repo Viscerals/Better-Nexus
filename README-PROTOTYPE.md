@@ -124,15 +124,17 @@ pending-action and Orb rule of the released strategy and changes these steps:
   that is needed.
 - Several needed offers: it takes the one with the most missing copies; a tie
   goes to the first offer shown.
-- No offer needed: it **Banishes before it Rerolls**, when Banish is allowed
-  and charged. It Banishes only an offer that is not needed, not frozen, not
+- No offer needed: when a Reroll is also available, it **Banishes before it
+  Rerolls**, if Banish is allowed and charged. It Banishes only an offer that is not needed, not frozen, not
   guaranteed, and whose quality group holds no needed Echo. If none qualifies,
   it Rerolls as before.
 - Only held offers are needed: it takes the held offer instead of searching.
 
 It comes from an offline simulation with an equal-draw-odds assumption that is
-not measured in the game (private study, 69,120 synthetic runs: 19.3% complete
-Wishlists against 16.8% for the released strategy; its lead over a simpler
+not measured in the game (private study, 57,600 held-out synthetic runs, 14,400
+per strategy, averaged over 12 model profiles, several of which the live version
+does not model: 19.3% complete Wishlists against 16.8% for the released
+strategy; its lead over a simpler
 protected-Banish strategy was not significant). No gain in your game is
 promised. The live version has no draw-pool data, so among equally safe offers
 it Banishes the first one shown. When it cannot use its own rules for one

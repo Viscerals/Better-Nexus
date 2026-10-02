@@ -24,8 +24,10 @@ The private study `echo-banish-policy-sim` (commit
 `9ebaff0b54203365cfc2776d382304f0dec13196`, `tools/echo-policy-sim/adaptive.lua`,
 `candidates.lua`, `CATALOG_STUDY.md`) selected `adaptive-0-settle` on 11,520
 training runs and measured it on 57,600 held-out runs (69,120 synthetic runs in
-all). Complete Wishlists: adaptive 19.28%, protected Banish-first 18.78%,
-released 16.83%. Adaptive against released: +2.44 points, paired seed-cluster
+all; 14,400 held-out runs per policy). Complete Wishlists, averaged over the study's
+12 model profiles: adaptive 19.28%, protected Banish-first 18.78%, released 16.83%.
+Several of those profiles use role multipliers or spell-ID Banish exclusion, which
+the live variant does not model; the figures are not specific to the live profile. Adaptive against released: +2.44 points, paired seed-cluster
 interval [+1.33, +3.56]. Adaptive against protected Banish-first: +0.49 points,
 interval [-0.26, +1.24], which the study calls inconclusive. The study states
 that no unique or live optimum is established.
@@ -113,7 +115,7 @@ entry point is protected and answers nil on failure.
 | Records | at most 256 (`DiagnosticLogs` ring); the oldest is replaced first |
 | Size | at most 2048 string bytes per record; flat records, no nested tables; at most 32 targets per decision; lifecycle text at most 240 bytes |
 | Worst case in saved data | about 0.5 MiB |
-| Work | `O(targets)` per decision; no catalog scan, no per-frame work, no full-catalog copy; the sorted target list is reused while the plan table is unchanged; the catalog version is read once per catalog revision |
+| Work | `O(targets)` per decision for the record itself; each lifecycle or after update goes through `DiagnosticLogs.UpdateLast`, which checks the ring (at most about 320 slots) and copies one record, about 4 updates per decision; no catalog scan, no per-frame work, no full-catalog copy; the sorted target list is reused while the plan table is unchanged; the catalog version is read once per catalog revision |
 | Identifiers | opaque session tag (base 36 of the login time), run id `<tag>r<n>`, decision id `<tag>-<n>` |
 | Never kept | account, character or realm name, Wishlist or build name, chat, credentials, any network data |
 | Retention | until replaced by newer records, `/nexus trace clear`, or removal of the saved data. `/nexus logclear` and Clear Log leave it alone. |

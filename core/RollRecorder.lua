@@ -260,10 +260,16 @@ local function BuildLabel()
     return ok and Clip(value, 40) or "source"
 end
 
+local classCache = nil
 local function ClassToken()
+    if classCache then return classCache end
     if type(UnitClass) ~= "function" then return "?" end
     local ok, _, token = pcall(UnitClass, "player")
-    return ok and type(token) == "string" and Clip(token, 16) or "?"
+    if ok and type(token) == "string" and token ~= "" then
+        classCache = Clip(token, 16)
+        return classCache
+    end
+    return "?"
 end
 
 local function Store(record)
@@ -325,6 +331,7 @@ function R.Reset()
     session, pending = nil, nil
     planCache.plan, planCache.ids, planCache.count = nil, nil, 0
     catalogCache.revision, catalogCache.version = nil, nil
+    classCache = nil
     for key in pairs(stats) do stats[key] = key == "lastError" and nil or 0 end
 end
 

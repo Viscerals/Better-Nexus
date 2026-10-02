@@ -103,6 +103,11 @@ a=Decide({plan=one,cards=Cards({spellId=101,isFrozen=true},901,902),horizon=2,ro
 check(a.type=='banish','the released policy banishes here: '..Line(a))
 a=Decide({cards=Cards({spellId=101,isFrozen=true},102,901),horizon=2});check(Line(a)=='take:2:102','an unheld needed offer is taken before the held one: '..Line(a))
 
+-- Only held offers are needed and there are several: the first held one is taken (study: heldWanted[1]).
+local twoHeld=Plan({{spellId=101,stacks=1},{spellId=114,stacks=1}})
+a=Decide({plan=twoHeld,cards=Cards({spellId=101,isFrozen=true},{spellId=114,isFrozen=true},901),horizon=30})
+check(Line(a)=='take:1:101','two held needed offers, no unheld one: take the first held offer: '..Line(a))
+
 -- 5. Locked and ordinary coverage: a lock covers only the plan's locked targets.
 local roles=Plan({{spellId=101,stacks=2}});roles.explicitRoles=true;roles.lockedRequestedCounts={[101]=1}
 a=Decide({plan=roles,cards=Cards(101,901,902),locked=P.Owned(catalog,{[101]=1}),charges={trustworthy=true,banish=0,freeze=0,reroll=0}})

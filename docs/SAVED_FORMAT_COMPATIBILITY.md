@@ -35,7 +35,7 @@ Earlier builds (test.9033 and older, and up to the change above) wrote a catalog
 
 ## Rolling strategy setting and local roll record (experimental builds)
 
-- **Settings.** `rollingPolicy` (`"adaptive"` or `"released"`, default `"adaptive"`) and `rollTrace` (default `true`; recording is off only for an exact `false`). Neither authorizes an action. A missing value uses the default. In a read-only saved root a valid saved value is honored for the session and nothing is written. An invalid saved `rollingPolicy` runs the released strategy and the status says `SELECTOR_UNKNOWN`.
+- **Settings.** `rollingPolicy` (`"adaptive"` or `"released"`, default `"adaptive"`) and `rollTrace` (default `true`; recording is off only for an exact `false`). Neither authorizes an action. A missing value uses the default. In a read-only saved root a valid saved value is honored for the session and nothing is written. In a writable root an invalid saved `rollingPolicy` runs the released strategy and the status says `SELECTOR_UNKNOWN`. In a read-only root an invalid value is not copied into the session settings, so the session uses the default (`adaptive`) with no fallback reason.
 - **Record.** The key `rollTraceLog` holds at most 256 flat records (an array with the same head, tail and repair metadata as the other diagnostic histories, in `diagnosticMeta.histories.rollTrace`). It holds Echo ids, counts and observed offers only: no account, character or realm name, no Wishlist or build name, no chat. An older build ignores the key and keeps it. `/nexus logclear` leaves it alone; `/nexus trace clear` deletes it.
 - **Read-only saved data.** Nothing is written to the saved root. The session keeps its own record in session memory, like every other diagnostic history.
 
