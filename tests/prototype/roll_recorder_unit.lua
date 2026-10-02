@@ -135,6 +135,10 @@ check(R.Status().retained==#kept and R.Status().cap==256,'status reports retenti
 -- Worst case: the longest value in every field, then every later update. The record stays
 -- within its byte bound, and the byte budget of the targets (not only their count) is enforced.
 Fresh()
+local realBuild,realClass,realAdapter=Nexus.RuntimeBuildLabel,UnitClass,Nexus.GameAdapter
+Nexus.RuntimeBuildLabel=function()return string.rep('B',40) end
+UnitClass=function()return 'Longclass','CCCCCCCCCCCCCCCC' end
+Nexus.GameAdapter={CatalogStatus=function()return {publishedHash=string.rep('h',24)} end}
 local worst=Ctx({targets=40,cards={{spellId=1234567,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false},
  {spellId=1234568,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false},
  {spellId=1234569,quality=3,isGuaranteed=true,isFrozen=true,isCarried=true,justFrozen=true,banishEligible=false,freezeEligible=false,selectable=false}}})
@@ -152,6 +156,7 @@ R.Intent(id,'submitted','adapter_accepted',{elapsed=99999.9,mutation=true,type='
 R.After({basis=string.rep('b',90),board=worst.board,owned=grown,charges=worst.charges})
 record=Records()[1]
 local worstBytes=Flat(record)
+Nexus.RuntimeBuildLabel,UnitClass,Nexus.GameAdapter=realBuild,realClass,realAdapter
 check(worstBytes<=2048,'the worst-case record, after every update, stays within 2048 string bytes: '..worstBytes)
 check(record.sa=='f3.1234569' and record.inc:find('am',1,true) and record.inc:find('ow',1,true) and record.inc:find('ch',1,true),'the worst case carries the submitted action and every incompleteness flag: '..tostring(record.inc))
 check(#record.tg>=R.LIMITS.recordBytes-R.LIMITS.reserveBytes-40,'the worst case fills the targets budget: '..#record.tg..' of '..(R.LIMITS.recordBytes-R.LIMITS.reserveBytes))
