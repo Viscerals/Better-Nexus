@@ -108,20 +108,40 @@ do
 end
 
 -- 3. A Take is not complete until its grant is seen: elapsed time and a new board are not completion.
-do
+-- The grant arrives at several phases of the 0.2 s grid; the Echo-data notification wakes the loop at
+-- once at every phase, and nothing is sent before the grant is observed.
+for _,offset in ipairs({0,0.03,0.06,0.09,0.12,0.15,0.18})do
  local H=Boot(true)
  H.Board({{spellId=200001,quality=1},{spellId=200100,quality=0},{spellId=200101,quality=0}});H.Notify();Step(H,.5)
  SlashCmdList.NEXUS('auto');Step(H,1.2)
  check(H.actions[1] and H.actions[1][1]=='take' and H.actions[1][2]==200001,'precondition: the wanted offer is taken: '..tostring(H.actions[1] and H.actions[1][1]))
  H.perks.pendingSelectSpellId=nil
- H.Board({{spellId=200110,quality=0},{spellId=200111,quality=1},{spellId=200112,quality=0}});H.Notify();Step(H,6)
+ H.Board({{spellId=200110,quality=0},{spellId=200111,quality=1},{spellId=200112,quality=0}});H.Notify();Step(H,6+offset)
  check(#H.actions==1,'a new board and six seconds without a grant start no action: '..#H.actions)
  H.granted[H.names[200001]]={{spellId=200001,quality=1}}
  H.Notify();local tGrant=H.now
  local guard=0
  while #H.actions<2 and guard<400 do Step(H,DT);guard=guard+1 end
  check(#H.actions>=2,'once the grant is observed the next action follows: '..#H.actions)
- check(H.now-tGrant<=0.4+4*DT,string.format('the Echo-data notification wakes the loop: the next action follows within the beat plus a few frames (%.3f s)',H.now-tGrant))
+ check(H.now-tGrant<=0.4+4*DT,string.format('offset %.2f: the Echo-data notification wakes the loop: the next action follows within the beat plus a few frames (%.3f s)',offset,H.now-tGrant))
+end
+
+-- 3b. A notification in the middle of the beat moves the poll grid; the due beat still wakes the loop.
+for _,offset in ipairs({0.03,0.06,0.09,0.12,0.15})do
+ local H=Boot(true)
+ H.Board({{spellId=200100,quality=0},{spellId=200101,quality=1},{spellId=200102,quality=0}});H.Notify();Step(H,.5)
+ SlashCmdList.NEXUS('auto');Step(H,1.2)
+ H.perks.pendingSelectSpellId,H.perks.pendingBanishIndex,H.perks.pendingFreezeIndex,H.perks.pendingReroll=nil,nil,nil,nil
+ local sent=#H.actions
+ H.Board({{spellId=200200,quality=0},{spellId=200201,quality=1},{spellId=200202,quality=0}});H.Notify();local t0=H.now
+ local stirred=false
+ local guard=0
+ while #H.actions==sent and guard<400 do
+  Step(H,DT);guard=guard+1
+  if not stirred and H.now-t0>=offset then stirred=true;H.Notify() end
+ end
+ check(#H.actions==sent+1,'the next action is sent')
+ check(H.now-t0<=0.4+4*DT,string.format('offset %.2f: a notification during the beat does not delay the send (%.3f s)',offset,H.now-t0))
 end
 
 -- 4. The beat is kept when the notification arrives at once.
