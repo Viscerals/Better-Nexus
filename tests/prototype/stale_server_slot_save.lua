@@ -228,6 +228,9 @@ do
  setMirror(102,row('Someone Elses Plan',B_ROWS))
  local ok,why=A.UploadWishlist(102,NAME,planRows,{[token]=true})
  check(ok==false and why=='stale_slot' and #H.actions==before,'the adapter refuses a stale slot before the host call: '..tostring(why))
+ setMirror(102,false)
+ ok,why=A.UploadWishlist(102,NAME,planRows,{[token]=true})
+ check(ok==false and why=='stale_slot' and #H.actions==before,'the adapter refuses a slot that shows nothing too: '..tostring(why))
  H.Advance(4)
  check(A.UploadWishlist(102,NAME,planRows)==true and #H.actions==before+1,'a caller that names no identity is unchanged')
  H.Advance(4)
@@ -248,6 +251,28 @@ do
  setMirror(102,row('Someone Elses Plan',B_ROWS))
  local data,why=c.PrepareApply()
  check(data~=nil,'without slot identities in the adapter the controller keeps its former behavior: '..tostring(why))
+end
+-- The controller's own check, with an adapter whose upload ignores the accepted set: it alone must refuse.
+open()
+do
+ local A=Nexus.GameAdapter
+ local before=#H.actions
+ local adapter={};for k,v in pairs(A) do adapter[k]=v end
+ adapter.UploadWishlist=function(slot,name,echoes) -- ignores `expected`
+  return A.UploadWishlist(slot,name,echoes)
+ end
+ for _,case in ipairs({{tag='replaced',mirror=row('Someone Elses Plan',B_ROWS)},{tag='removed',mirror=false}})do
+  H.Advance(4)
+  local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
+   accountRoot=function() return {} end,notify=function() end})
+  c.Initialize(adapter)
+  setMirror(102,MIRROR_A)
+  local wishlist={slot=102,name=NAME,key=A.WishlistKey(planRows),echoes=planRows}
+  check(c.BeginWishlist(wishlist,nil)==true,case.tag..': the controller opens the Wishlist')
+  setMirror(102,case.mirror)
+  local ok,reason=c.AcceptApply(102,NAME,planRows)
+  check(ok==false and reason=='stale_slot' and #H.actions==before,case.tag..': the controller alone refuses, nothing is uploaded: '..tostring(reason))
+ end
 end
 -- missing identity at open: the slot has no observable row when the editor opens
 open()
