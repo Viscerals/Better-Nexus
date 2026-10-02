@@ -142,6 +142,7 @@ NAMES += ['stale_server_slot_open','stale_server_slot_roles']
 NAMES += ['legacy_assignment_snapshot']
 NAMES += ['leaderboard_arithmetic_cases']
 NAMES += ['wishlist_loadout_selector_slots']
+NAMES += ['wishlist_overlay_locked_targets']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
