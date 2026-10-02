@@ -116,7 +116,7 @@ H.granted={};H.locked={{spellId=200080,stacks=1}};H.Notify();A.Poll();H.Advance(
 check(LockedRows()[1].t:sub(1,3)=='[X]' and LockedRows()[1].t:find('(1/1)',1,true),'one owned locked copy fulfils it')
 H.locked={};H.Notify();A.Poll();H.Advance(1.5)
 
--- ===== No-op and retire-only: nothing is announced, no revision moves, no extra overlay read.
+-- ===== No-op, equal bucket and different bucket: nothing is announced, no revision moves, no extra overlay read.
 local readsBefore,revBefore2,annBefore2=O.Stats().wishlistReads,wishlistRevision(),announced
 Nexus.RequestRecompute();H.Advance(3)
 check(wishlistRevision()==revBefore2 and announced==annBefore2 and O.Stats().wishlistReads==readsBefore,'no flat table: no announcement, no revision step, no overlay read')
@@ -180,7 +180,7 @@ check(Buckets()[keyD]==nil and wishlistRevision()==revR and announced==annR,'ref
 owner.UpdateStateV1=realUpdate
 
 -- (last: it re-initialises the adapter with an injected store)
--- ===== The controller writer alone (injected adapter and store): moved, retire-only, none.
+-- ===== The controller writer alone (injected adapter and store): moved, existing bucket, none.
 do
  local calls=0
  local function build(backing,account)
@@ -214,4 +214,4 @@ end
 
 check(H.Count('orb-spend')==0,'no Orb spend')
 for _,a in ipairs(H.actions)do check(a[1]~='unlock' and a[1]~='lock','no lock or unlock action: '..tostring(a[1])) end
-print('PASS wishlist_overlay_legacy_design_refresh: both writers of the retired flat locked-design table announce a material move; the overlay shows the moved planned targets at its next refresh without another revision; no-op, retire-only and refused writes announce nothing; values, retirement and ownership unchanged; switching and unchanged ticks checked checks='..checks)
+print('PASS wishlist_overlay_legacy_design_refresh: both writers of the retired flat locked-design table announce a material move; the overlay shows the moved planned targets at its next refresh without another revision; no-op, existing-bucket and refused writes announce nothing; values and ownership unchanged (the retirement rule is in lock_design_legacy_preservation); switching and unchanged ticks checked checks='..checks)

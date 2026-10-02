@@ -547,7 +547,11 @@ end
 -- whatever's in it into the CURRENTLY ACTIVE wishlist's own per-character
 -- bucket (the best available guess for what it was designed against -- and
 -- for THIS character specifically, unlike the account-wide bucket it came
--- from) and retire the flat key permanently. The Dev Test 42-47 account-wide
+-- from) and retire the flat key once its targets are kept: the move was
+-- accepted and reads back equal, or the key already holds an equal bucket.
+-- A refused or unpersisted move, or a different bucket that must not be
+-- overwritten, leaves the flat key as it was (it can then still be adopted
+-- later by a Wishlist that has no bucket yet). The Dev Test 42-47 account-wide
 -- lockDesignTargetsBySlot bucket is deliberately NOT migrated forward -- its
 -- contents can't be reliably attributed to any one character, so carrying it
 -- over would just reintroduce the same cross-character bleed one more time.
