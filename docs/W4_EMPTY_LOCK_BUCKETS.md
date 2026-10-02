@@ -63,7 +63,8 @@ no other change to locked-role semantics, assignment identity, shared-build or S
   such a Wishlist once created an empty bucket, after which that logic ran with zero targets and
   also superseded attempt records not belonging to its targets (`target_changed`). Those records are
   now left unchanged while the bucket stays absent: the step returns before its confirmation-timeout
-  and reconciliation code runs, so nothing expires or supersedes them in that time. When a target set
+  and reconciliation code runs, so nothing expires or supersedes them in that time (read from the
+  code; the test keeps the bucket absent for less than the 10 s confirmation window). When a target set
   is next evaluated, matching records reconcile or expire as usual and records outside that set are
   superseded. Keeping them is the more conservative direction (a pending record blocks a duplicate
   attempt). Neither an absent nor an empty bucket sends a lock or unlock without targets. Existing

@@ -15,7 +15,7 @@ holds no Echoes ("Empty Saved Build slot" in the Journal). A save then:
 | `UpdateWishlistAssociationAfterSave` | checked the slot number range only, wrote `loadoutWishlists[slot]` and cleared the first-run plan |
 | result | an association under an empty slot, which `GetLoadoutWishlist` hides (unusable), and no first-run plan |
 
-Reproduction (`w15-014/repro_w15.lua`, real picker gear and editor, harness): first-run plan
+Reproduction (evidence file `w15-014/repro_w15.lua`, outside the repository; the same path is pinned by `tests/prototype/empty_saved_build_save.lua`; real picker gear and editor, harness): first-run plan
 `201172:1`, active slot 2 empty. After one Edit and Save: `first=nil`,
 `loadoutWishlists={1=..., 2=201172:2}`, one upload, `GetLoadoutWishlist(2)=nil`.
 The two sibling writers (`SetLoadoutWishlistIdentity`, `SetLoadoutWishlist`) already refused an empty
@@ -33,6 +33,12 @@ locked-only draft without ordinary copies is refused the same way; that is exist
 | `WishlistController.PrepareApply` | refuses before the confirmation when the numbered destination is empty |
 | `WishlistController.TryApply` | checks again before the upload (the slot can empty while the editor or the confirmation is open; the delayed-retry path goes through it too) |
 | `UpdateWishlistAssociationAfterSave` | refuses an empty slot at the moment of the write ("that loadout slot is empty or unavailable") |
+
+The same refusal covers a NEW Wishlist whose editor was bound to an empty Saved Build (the Journal
+editor's Saved Build menu or Show on an empty active slot). Before, that save uploaded the Wishlist and
+then failed to assign it ("that loadout slot is empty or unavailable"); now nothing is uploaded. A new
+Wishlist from the Journal's New Wishlist button with an empty active slot has no destination and is
+unchanged.
 
 A refusal uploads nothing, writes nothing, keeps the first-run plan and every assignment, keeps the
 draft on screen and says why. It never redirects the save to the first-run plan: choosing another

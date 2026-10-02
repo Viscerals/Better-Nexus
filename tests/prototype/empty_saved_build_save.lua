@@ -203,5 +203,36 @@ do
  check(snapshot().loadoutWishlists[2]==nil,'Unassign still clears it')
 end
 
+-- 6. A NEW Wishlist whose editor was bound to the empty Saved Build (Show on an empty
+-- active slot). It used to upload and then fail to assign; now nothing is uploaded.
+reopen({echoes={}})
+do
+ local before=snapshot()
+ Nexus.WishlistEditor.Show()
+ catalog(201172):Click()
+ _G.NexusWishlistNameInput:SetText('W15-NEW')
+ button('Create Wishlist'):Click()
+ check(H.popup==nil,'no confirmation for a new Wishlist bound to an empty Saved Build')
+ check(#H.actions==0,'nothing is uploaded for it')
+ check(T.Equal(before,snapshot()),'and nothing is assigned or cleared')
+ check(said('Saved Build 2 is empty'),'the refusal says which Saved Build is empty')
+end
+
+-- 7. The delayed-retry path (upload spacing) re-checks the destination too.
+reopen({echoes={{spellId=200767,quality=0,stacks=1,locked=false}}})
+do
+ local rolled={{spellId=201172,quality=0,stacks=1,locked=false}}
+ check(Nexus.GameAdapter.UploadWishlist(103,'W15-SPACER',rolled)==true,'fixture: a recent upload starts the spacing window')
+ local before=snapshot()
+ editViaPicker()
+ button('Save Wishlist'):Click();H.AcceptPopup()
+ check(Nexus.WishlistEditor.IsApplyPending()==true,'precondition: the save waits for the upload spacing')
+ H.perks.serverBuildSlots[2].echoes={}
+ Nexus.WishlistEditor._PumpApplyRetry()
+ check(Nexus.WishlistEditor.IsApplyPending()==false,'the retry is dropped, not repeated, when the destination emptied')
+ check(#H.actions==1,'only the fixture upload was ever sent')
+ check(T.Equal(before,snapshot()),'and no assignment changed')
+end
+
 print=rawPrint
-print('PASS empty_saved_build_save: '..checks..' checks (picker gear, race after confirmation, populated and locked-only builds, first-run route, writers)')
+print('PASS empty_saved_build_save: '..checks..' checks (picker gear, race after confirmation, populated and locked-only builds, first-run route, writers, new Wishlist, retry)')

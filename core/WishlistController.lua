@@ -1337,9 +1337,9 @@ function Controller.New(options)
 
     local function NotSavedEmptyDestination(loadoutSlot)
         notify("|cffff6060Nexus:|r Not saved: Saved Build " .. tostring(loadoutSlot)
-            .. " is empty, so this Wishlist cannot be assigned to it. Nothing was uploaded or "
-            .. "assigned; your assignments and your edits are kept. Add Echoes to that Saved Build, "
-            .. "or close the editor and edit the Wishlist from the Wishlist selector's edit button.")
+            .. " is empty or not loaded, so this Wishlist cannot be assigned to it. Nothing was uploaded "
+            .. "or assigned; your assignments and your edits are kept. Add Echoes to that Saved Build "
+            .. "and save again.")
         if M._RecordSwitchRefusal then M._RecordSwitchRefusal("save wishlist", "DESTINATION_EMPTY", {
             detail = "the Saved Build this save would assign is empty",
             loadoutSlot = loadoutSlot,
