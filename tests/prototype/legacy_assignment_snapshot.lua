@@ -1,32 +1,29 @@
--- W3 characterization: a legacy Saved Build assignment is "upgraded" only in a detached snapshot.
+-- W3: a legacy Saved Build assignment must reach authoritative state, not only a detached snapshot.
 --
 -- Two old record shapes survive in saved data: a bare designed-slot number (1.0.5) and a table with
--- a slot but no content key. GameAdapter's ResolveAssociation recognizes each on its first validated
--- contact and assigns `links[slot] = {slot,key,name}` / `saved.key, saved.name = ...` on the table it
--- read from Store.State(). Store.State() returns a DETACHED copy, so those assignments never reach
--- authoritative state: after the next authorized write invalidates the snapshot, and after a
--- serialized reload, the durable record is the legacy shape again. A slot reused by another Wishlist
--- then resolves to that Wishlist, which is exactly what the persisted identity was meant to prevent.
+-- a slot but no content key. ResolveAssociation used to "upgrade" them by assigning to the table it
+-- read from Store.State(), a DETACHED copy: the identity never reached saved data, an authorized write
+-- or a reload brought the legacy shape back, and a slot reused by another Wishlist then captured the
+-- association. ResolveAssociation now only recognizes them; ReconcileLegacyAssignments (run from the
+-- poll, like ReconcileTomePending) persists the identity through the state owner.
 --
--- This test states what is true TODAY (EXPECT below) and the invariants any correction must keep.
--- Authoritative state is read from the saved table (NexusDB) after owner writes and after a
--- serialize / reload round trip, never from the in-memory snapshot alone. If the upgrade is later
--- persisted at a sanctioned owner boundary, flip EXPECT (the comments name which lines change).
+-- Authoritative state is read from the saved table (NexusDB) after owner writes, after the poll, and
+-- after a serialize / reload round trip, never from the in-memory snapshot alone.
 local F=dofile('tests/prototype/format5_support.lua')
 local checks=0
 local function check(ok,msg) checks=checks+1; assert(ok,msg) end
-local EXPECT={
- durableUpgraded=false, -- after resolution + an unrelated authorized write, is the durable record upgraded?
- followsReusedSlot=true, -- does the legacy association resolve to Wishlist B once slot 101 holds B?
-}
 local function plan(id) return {{spellId=id,quality=id%4,stacks=1,locked=false}} end
 local A_ID,B_ID=200003,200004
+local A_KEY,B_KEY='200003:1','200004:1'
 local function slots(name,id)
- return {[1]={name='Owned one',verified=true,echoes=plan(200001)},[101]={name=name,verified=false,echoes=plan(id)}}
+ local s={[1]={name='Owned one',verified=true,echoes=plan(200001)}}
+ if name then s[101]={name=name,verified=false,echoes=plan(id)} end
+ return s
 end
+local H
 local function boot(saved,serverSlots)
  Nexus=nil;SlashCmdList=nil;WishlistRealizerDB=nil
- local H=dofile('tests/prototype/harness.lua')
+ H=dofile('tests/prototype/harness.lua')
  H.perks.serverActiveSlot=1
  H.perks.serverBuildSlots=serverSlots
  NexusDB=saved
@@ -34,12 +31,17 @@ local function boot(saved,serverSlots)
  return H
 end
 local function owner() return Nexus.MainInternals.StoreAuthorityOwner end
--- The authoritative record of Saved Build 1: the saved table itself.
-local function durable()
+-- The authoritative record of a Saved Build: the saved table itself (one character row here).
+local function row()
+ local found,n
+ n=0
  for _,r in pairs(NexusDB.chars or {}) do
-  if type(r)=='table' and type(r.loadoutWishlists)=='table' then return r.loadoutWishlists[1] end
+  if type(r)=='table' and type(r.loadoutWishlists)=='table' then found=r;n=n+1 end
  end
+ check(n==1,'exactly one saved row holds assignments')
+ return found
 end
+local function durable(index) return row().loadoutWishlists[index or 1] end
 local function targetSpell()
  local w=Nexus.GameAdapter.Wishlist()
  return w and w.entries and w.entries[1] and w.entries[1].spellId or nil
@@ -47,71 +49,156 @@ end
 local function unrelatedAuthorizedWrite()
  check(owner().UpdateStateV1(function(s) s.recordedPicks=s.recordedPicks or {};s.recordedPicks[200001]=1 end),'an unrelated authorized write is accepted')
 end
-local function isLegacy(shape,v)
- if shape=='number' then return type(v)=='number' end
- return type(v)=='table' and (v.key==nil or v.key=='') and v.slot==101
+local function seed(shape,index,slot)
+ check(owner().UpdateStateV1(function(s)
+  s.loadoutWishlists=s.loadoutWishlists or {}
+  s.loadoutWishlists[index]=shape=='number' and slot or {slot=slot,name='Plan A',note='kept'}
+ end),shape..': the legacy record is written through the owner')
+end
+local function upgraded(shape,v)
+ return type(v)=='table' and v.key==A_KEY and v.name=='Plan A' and v.slot==101 and v.assignmentId==nil
+  and (shape=='number' or v.note=='kept')
 end
 
 for _,shape in ipairs({'number','keyless table'}) do
- local H=boot(nil,slots('Plan A',A_ID))
+ boot(nil,slots('Plan A',A_ID))
  local A=Nexus.GameAdapter
- check(owner().UpdateStateV1(function(s)
-  s.loadoutWishlists=shape=='number' and {[1]=101} or {[1]={slot=101,name='Plan A'}}
- end),shape..': the legacy record is written through the owner')
- check(isLegacy(shape,durable()),shape..': the saved table holds the legacy shape')
+ seed(shape,1,101)
+ check(shape=='number' and durable()==101 or type(durable())=='table' and durable().key==nil,shape..': the saved table holds the legacy shape')
 
- -- Invariant: the read-only diagnosis and the Journal getter do not rewrite saved data.
+ -- Reads never write: the getters, the diagnosis and the active-slot projection leave saved data alone.
  local before=F.Serialize(NexusDB)
- A.GetLoadoutWishlistState(1);A.GetLoadoutWishlist(1)
- check(F.Serialize(NexusDB)==before,shape..': the getters leave the saved table byte-identical')
- -- The active-slot projection resolves A through the legacy record.
+ A.GetLoadoutWishlistState(1);A.GetLoadoutWishlist(1);A.GetLoadoutCandidates()
  check(targetSpell()==A_ID,shape..': the legacy record resolves to Wishlist A')
- -- The snapshot shows the upgrade; the saved table does not.
+ check(A.AssignedWishlist().state=='ready',shape..': and the HUD read shows it ready')
+ check(F.Serialize(NexusDB)==before,shape..': no read changed the saved table')
+
+ -- The poll persists the identity through the owner: the saved table, then the snapshot, then a reload.
+ H.Advance(1)
+ check(upgraded(shape,durable()),shape..': the saved table now holds the content identity of Wishlist A')
  local snap=Nexus.Store.State().loadoutWishlists[1]
- check(type(snap)=='table' and snap.key~=nil,shape..': the detached snapshot carries the content key')
- check(isLegacy(shape,durable()),shape..': the saved table is still the legacy shape after resolution')
- -- An unrelated authorized write invalidates the snapshot: the upgrade is gone from it too.
+ check(upgraded(shape,snap),shape..': and so does the snapshot')
  unrelatedAuthorizedWrite()
- local after=Nexus.Store.State().loadoutWishlists[1]
- check(EXPECT.durableUpgraded==(not isLegacy(shape,durable())),shape..': saved record after an unrelated write: '..tostring(durable()))
- check(EXPECT.durableUpgraded==(type(after)=='table' and after.key~=nil),shape..': the snapshot after invalidation')
+ check(upgraded(shape,durable()),shape..': an unrelated authorized write does not undo it')
+ check(upgraded(shape,Nexus.Store.State().loadoutWishlists[1]),shape..': nor does the invalidated snapshot')
  local saved=F.Serialize(NexusDB)
 
- -- Slot 101 is reused by Wishlist B in the same session.
- H.perks.serverBuildSlots[101]={name='Plan B',verified=false,echoes=plan(B_ID)};H.Notify();A.Poll()
- check((targetSpell()==B_ID)==EXPECT.followsReusedSlot,shape..': same session, slot reused by B: target '..tostring(targetSpell()))
+ -- Slot 101 is reused by Wishlist B in the same session: the association keeps Wishlist A.
+ H.perks.serverBuildSlots[101]={name='Plan B',verified=false,echoes=plan(B_ID)};H.Notify();H.Advance(1)
+ check(targetSpell()==A_ID,shape..': same session, slot reused by B: the target stays A, got '..tostring(targetSpell()))
+ check(upgraded(shape,durable()),shape..': the saved record is still A')
  -- A later session reads the serialized saved table, with slot 101 holding B.
- H=boot(assert(loadstring('return '..saved))(),slots('Plan B',B_ID))
- check((targetSpell()==B_ID)==EXPECT.followsReusedSlot,shape..': later session, slot is B: target '..tostring(targetSpell()))
- check(EXPECT.durableUpgraded==(not isLegacy(shape,durable())),shape..': the saved record in the later session')
+ boot(assert(loadstring('return '..saved))(),slots('Plan B',B_ID))
+ H.Advance(1)
+ check(targetSpell()==A_ID,shape..': later session, slot is B: the target stays A, got '..tostring(targetSpell()))
+ check(upgraded(shape,durable()),shape..': the saved record in the later session is still A')
+ check(durable().key~=B_KEY,shape..': and never B')
 end
 
--- Contrast: an association made by an explicit action carries its identity in the saved table, and a
--- reused slot does not capture it.
+-- Legacy data on disk before the session, slot not shown yet: nothing is upgraded without validation.
 do
- local H=boot(nil,slots('Plan A',A_ID))
+ boot(nil,slots(nil))
+ seed('number',1,101)
+ local saved=F.Serialize(NexusDB)
+ boot(assert(loadstring('return '..saved))(),slots(nil))
+ H.Advance(2)
+ check(durable()==101,'no Wishlist at slot 101 yet: the legacy record is left as it is')
+ H.perks.serverBuildSlots[101]={name='Plan A',verified=false,echoes=plan(A_ID)};H.Notify();H.Advance(1)
+ check(upgraded('number',durable()),'once the mirror shows the slot, the identity is persisted')
+end
+
+-- Only what the mirror validates is upgraded; other records are left alone.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('number',1,101)
+ seed('number',2,102) -- slot 102 shows nothing
+ check(owner().UpdateStateV1(function(s) s.loadoutWishlists[3]={slot=103,key='200090:1',name='Modern',assignmentId='assigned:7'} end),'a modern record is present')
+ H.Advance(1)
+ check(upgraded('number',durable(1)),'the validated record is upgraded')
+ check(durable(2)==102,'a record with no Wishlist at its slot stays legacy')
+ local modern=durable(3)
+ check(modern.key=='200090:1' and modern.assignmentId=='assigned:7' and modern.name=='Modern','a modern record is untouched')
+end
+
+-- A table that carries its own contents (a plan saved before content keys) keeps them: it is not a bare
+-- slot reference, and the live row at its slot is not its identity.
+do
+ boot(nil,slots('Plan A',A_ID))
+ check(owner().UpdateStateV1(function(s)
+  s.loadoutWishlists={[1]={slot=101,name='Own plan',echoes=plan(B_ID),assignmentId='assigned:6',designTargets={}}}
+ end),'a keyless plan with its own contents is written through the owner')
+ H.Advance(2)
+ local kept=durable()
+ check(kept.key==nil and kept.name=='Own plan' and kept.assignmentId=='assigned:6' and kept.echoes[1].spellId==B_ID,'it is left exactly as it was although slot 101 shows another Wishlist')
+end
+
+-- A newer explicit choice made between the read and the write is never overwritten.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('keyless table',1,101)
+ local raw=owner().UpdateStateV1
+ local fired=0
+ owner().UpdateStateV1=function(mutator)
+  if fired==0 and type(durable())=='table' and durable().key==nil then
+   fired=1
+   raw(function(s) s.loadoutWishlists[1]={slot=101,key='200090:2',name='Explicit choice',assignmentId='assigned:99'} end)
+  end
+  return raw(mutator)
+ end
+ H.Advance(1)
+ owner().UpdateStateV1=raw
+ check(fired==1,'the explicit choice was made inside the upgrade window')
+ local current=durable()
+ check(current.key=='200090:2' and current.name=='Explicit choice' and current.assignmentId=='assigned:99','the explicit choice is kept, not overwritten by the upgrade')
+end
+
+-- No legacy shape, no work: the poll never enters the mutation entry for it.
+do
+ boot(nil,slots('Plan A',A_ID))
  local A=Nexus.GameAdapter
  local chosen;for _,c in ipairs(A.GetWishlistCandidates()) do if c.slot==101 then chosen=c end end
  check(A.SetLoadoutWishlist(1,101,chosen),'an explicit assignment is made')
  local record=durable()
  check(type(record)=='table' and record.key and record.assignmentId,'the saved record carries a content key and an assignment id')
+ -- Other startup writes exist; the upgrade's own transaction is recognized by its `plan` upvalue.
+ local raw=owner().UpdateStateV1
+ local entered=0
+ owner().UpdateStateV1=function(mutator,...)
+  local i=1
+  while true do
+   local name=debug.getupvalue(mutator,i)
+   if not name then break end
+   if name=='plan' then entered=entered+1 end
+   i=i+1
+  end
+  return raw(mutator,...)
+ end
+ H.Advance(3);H.Notify();H.Advance(1)
+ owner().UpdateStateV1=raw
+ check(entered==0,'a profile with no legacy record never enters the mutation entry for the upgrade: '..entered)
+ -- the explicit assignment is not captured by a reused slot after a reload
  unrelatedAuthorizedWrite()
  local saved=F.Serialize(NexusDB)
- H=boot(assert(loadstring('return '..saved))(),slots('Plan B',B_ID))
- check(targetSpell()~=B_ID,'after a reload, a reused slot does not capture an explicitly assigned Wishlist')
- check(type(durable())=='table' and durable().key==record.key,'and the saved record is unchanged')
- -- Unassign removes a record in whatever shape it holds.
+ boot(assert(loadstring('return '..saved))(),slots('Plan B',B_ID))
+ H.Advance(1)
+ check(targetSpell()==A_ID,'after a reload, a reused slot does not capture an explicitly assigned Wishlist')
+ check(durable().key==record.key and durable().assignmentId==record.assignmentId,'and the saved record is unchanged')
+ -- Unassign removes the record; Restore brings back the record as it was saved.
  check(Nexus.GameAdapter.ClearLoadoutWishlist(1),'unassign')
  check(durable()==nil,'the saved table no longer holds an association for Saved Build 1')
 end
 
--- A legacy record is replaced by an explicit assignment and cleared by Unassign (existing semantics).
+-- Unassign then Restore of an upgraded legacy record returns the identity, not the old shape.
 do
- local H=boot(nil,slots('Plan A',A_ID))
- local A=Nexus.GameAdapter
- check(owner().UpdateStateV1(function(s) s.loadoutWishlists={[1]=101} end),'legacy number written')
- check(A.ClearLoadoutWishlist(1),'unassign of a legacy record')
- check(durable()==nil,'the legacy record is removed from the saved table')
+ boot(nil,slots('Plan A',A_ID))
+ seed('keyless table',1,101)
+ H.Advance(1)
+ check(upgraded('keyless table',durable()),'the keyless record is upgraded')
+ check(Nexus.GameAdapter.ClearLoadoutWishlist(1),'unassign')
+ check(durable()==nil,'the association is removed')
+ check(Nexus.GameAdapter.RestoreForgottenWishlistPlan(),'restore')
+ local back=durable()
+ check(type(back)=='table' and back.key==A_KEY,'the restored record keeps the content identity: '..tostring(back and back.key))
 end
 
-print('PASS legacy_assignment_snapshot: '..checks..' checks (legacy number and keyless table; durable state after invalidation and reload; slot reuse; explicit-assignment contrast; unassign)')
+print('PASS legacy_assignment_snapshot: '..checks..' checks (legacy number and keyless table: saved table after the poll, an authorized write and a reload; slot reuse; no read writes; mirror not shown; selective upgrade; newer explicit choice; no-legacy poll cost; unassign and restore)')

@@ -1815,14 +1815,14 @@ local function ResolveAssociation(loadoutSlot, slots)
     local saved = links and links[loadoutSlot]
     if saved == nil then return nil end
 
-    -- 1.0.5 stored a bare designed-slot number. Migrate it only after
-    -- validating the current contents, then persist a content identity so a
-    -- recycled server slot can never resurrect an unrelated historical name.
+    -- 1.0.5 stored a bare designed-slot number. It is recognized here, against
+    -- the current contents; the content identity that stops a recycled server
+    -- slot from capturing it is persisted by ReconcileLegacyAssignments, not
+    -- here: Store.State() is a detached copy, and a write to it is lost.
     if type(saved) == "number" or type(saved) == "string" then
         local wanted = tonumber(saved)
         for _, c in ipairs(A.GetWishlistCandidates()) do
             if tonumber(c.slot) == wanted then
-                links[loadoutSlot] = { slot = c.slot, key = c.key, name = c.name }
                 return c
             end
         end
@@ -1837,13 +1837,13 @@ local function ResolveAssociation(loadoutSlot, slots)
     if wantedKey and wantedKey ~= "" then
         return WishlistRoles.ResolveSaved(saved,candidates)
     end
-    -- No key means an incomplete/old record. Slot fallback is accepted once
-    -- only and upgraded immediately.
+    -- No key means an incomplete/old record. The slot fallback is accepted
+    -- while the record has no identity; ReconcileLegacyAssignments persists the
+    -- identity (a write to this detached copy would be lost).
     local wantedSlot = tonumber(saved.slot)
     if not wantedKey and wantedSlot then
         for _, c in ipairs(candidates) do
             if tonumber(c.slot) == wantedSlot then
-                saved.key, saved.name = c.key, c.name
                 return c
             end
         end
@@ -4528,6 +4528,82 @@ function A.OnEvent(event)
     end
 end
 
+-- Persist the content identity of a legacy Saved Build assignment: a bare
+-- designed-slot number (1.0.5) or a table with a slot and no content key. The
+-- resolver only recognizes them; Store.State() is a detached copy, so an
+-- identity assigned there never reached saved data and a recycled server slot
+-- then captured the association. This is not a getter. Like
+-- ReconcileTomePending it runs from the poll, enters the mutation entry only
+-- when a legacy shape is present, and tries again only when the slot mirror
+-- has changed. It upgrades only what the live mirror shows at that slot now
+-- (the resolver's own validation), checks inside the transaction that each
+-- record is still the legacy shape it read (a newer explicit choice is never
+-- overwritten), stamps no assignment id, and leaves first-run, locked designs
+-- and every other record alone. The identity it records is the occupant of the
+-- slot at that first contact; it cannot know whether the slot was reused before.
+-- A table that carries its own contents or assignment id is not touched.
+local legacyAssignmentsChecked = nil
+
+local function LegacyAssignmentSlot(saved)
+    if type(saved) == "number" or type(saved) == "string" then
+        return tonumber(saved)
+    end
+    -- A table with its own contents or assignment id (a plan saved before
+    -- content keys) already carries an identity of its own; it is not a bare
+    -- slot reference and is left alone.
+    if type(saved) == "table" and (saved.key == nil or saved.key == "")
+        and saved.echoes == nil and saved.assignmentId == nil then
+        return tonumber(saved.slot)
+    end
+    return nil
+end
+
+local function ReconcileLegacyAssignments()
+    if A.DIAGNOSTIC_PASSIVE then return end
+    local st = Store and Store.State and Store.State()
+    local links = st and st.loadoutWishlists
+    if type(links) ~= "table" then return end
+    local present = false
+    for _, saved in pairs(links) do
+        if LegacyAssignmentSlot(saved) then present = true; break end
+    end
+    if not present then return end
+    if legacyAssignmentsChecked == echoGenerations.slots then return end
+    local slots = A.Slots()
+    if not slots then return end
+    legacyAssignmentsChecked = echoGenerations.slots
+    local live = LiveWishlistCandidates(slots)
+    local plan = {}
+    for index, saved in pairs(links) do
+        local wanted = LegacyAssignmentSlot(saved)
+        if wanted then
+            for _, c in ipairs(live) do
+                if tonumber(c.slot) == wanted then
+                    plan[#plan + 1] = {index = index, wanted = wanted,
+                        slot = c.slot, key = c.key, name = c.name}
+                    break
+                end
+            end
+        end
+    end
+    if #plan == 0 then return end
+    local ok = UpdateStoreState(function(state)
+        local durable = state.loadoutWishlists
+        if type(durable) ~= "table" then return end
+        for _, item in ipairs(plan) do
+            local current = durable[item.index]
+            if LegacyAssignmentSlot(current) == item.wanted then
+                if type(current) == "table" then
+                    current.key, current.name = item.key, item.name
+                else
+                    durable[item.index] = {slot = item.slot, key = item.key, name = item.name}
+                end
+            end
+        end
+    end)
+    if ok then MarkWishlistProjectionDirty() end
+end
+
 -- Main drives this from its OnUpdate (~0.2s cadence)
 function A.Poll()
     ObserveRunBoundary()
@@ -4547,6 +4623,7 @@ function A.Poll()
     ConfirmAwaitingGrant()
     WatchLatches()
     ReconcileTomePending()
+    ReconcileLegacyAssignments()
     -- owned-sync retry loop: keep re-requesting granted until non-empty
     -- data has been seen at least once (handles the empty-{} window after a
     -- reset/reload); bounded so it never spins
