@@ -71,7 +71,7 @@ ui/LoadingStatus.lua|14543|fae34e27|copy
 ui/Panel.lua|93389|79e98674|copy
 ui/JournalTab.lua|72752|933ffa0f|copy
 ui/LogViewer.lua|19992|2951da02|copy
-ui/WishlistRenderer.lua|108125|341e4fba|tree
+ui/WishlistRenderer.lua|108125|341e4fba|copy
 ui/WishlistEditor.lua|36634|496aaea5|copy
 ui/WishlistOverlay.lua|17815|681adc48|tree
 ui/QuickStart.lua|9226|a8eca2b3|tree
