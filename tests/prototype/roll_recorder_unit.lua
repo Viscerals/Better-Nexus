@@ -319,6 +319,14 @@ local columns;for _,line in ipairs(lines)do if line:sub(1,2)=='k|' then columns=
 for i=7,#lines do check(select(2,lines[i]:gsub('|','|'))==columns,'every record line has the same column count: '..i) end
 check(text:find('on%%7Coff now',1) ~= nil,'separators and newlines inside a value are escaped')
 
+-- 10b. Reading is passive: an export and a status read create and write nothing.
+NexusDB={};R.Reset();R.Configure({now=function()return clockNow end})
+local passiveText=R.Export();local passiveStatus=R.Status()
+check(rawget(NexusDB,'rollTraceLog')==nil and rawget(NexusDB,'diagnosticMeta')==nil,'export and status of a missing history create no key')
+check(passiveText:find('retained=0',1,true) and passiveStatus.retained==nil,'a missing history reads as empty')
+check(Logs.Exists('rollTrace')==false and Logs.Exists('nonsense')==false,'Exists is false for a missing or unknown history')
+R.Decision(Ctx());check(Logs.Exists('rollTrace')==true,'Exists is true once a record was written')
+
 -- 11. Measured work: bounded per decision, no growth with history length.
 Fresh()
 local contexts={};for i=1,50 do contexts[i]=Ctx({targets=32,sig=i}) end

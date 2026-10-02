@@ -502,7 +502,8 @@ function R.Status()
         skipped = stats.skipped, failed = stats.failed, dropped = stats.dropped,
         truncated = stats.truncated, lastError = stats.lastError,
         session = session and session.tag or nil, run = session and session.run or nil}
-    if logs and logs.Stats then
+    -- Reading is passive: a history that does not exist yet is not created here.
+    if logs and logs.Stats and logs.Exists and logs.Exists(R.HISTORY) == true then
         local ok, history = pcall(logs.Stats, R.HISTORY)
         if ok and type(history) == "table" and history.available then
             out.retained, out.cap, out.evicted = history.retained, history.cap, history.dropped
@@ -524,7 +525,8 @@ local COLUMNS = {"k", "s", "n", "run", "t", "lvl", "hz", "cls", "slot", "pol", "
 -- not recorded. Used by the Roll trace tab and by the prepared support report.
 function R.ExportLines()
     local logs = Nexus.DiagnosticLogs
-    local records = logs and logs.Snapshot and logs.Snapshot(R.HISTORY) or {}
+    local records = logs and logs.Snapshot and logs.Exists and logs.Exists(R.HISTORY) == true
+        and logs.Snapshot(R.HISTORY) or {}
     local status = R.Status()
     local out = {
         "NEXUS_ROLL_TRACE_" .. R.SCHEMA,

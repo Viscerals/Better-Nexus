@@ -329,6 +329,16 @@ local function Protected(defaultValue, callback, ...)
     return first, second
 end
 
+-- Passive question: does this history already exist? It never creates, repairs or
+-- normalizes anything, so a read-only caller (a report) can ask before it reads.
+function Logs.Exists(name)
+    return Protected(false, function()
+        local definition = DEFINITIONS[name]
+        if not definition or type(NexusDB) ~= "table" then return false end
+        return type(rawget(CurrentDB(), definition.key)) == "table"
+    end)
+end
+
 function Logs.Init(database)
     return Protected(false, function()
         local db = CurrentDB(database)
