@@ -140,6 +140,7 @@ NAMES += ['empty_saved_build_save']
 NAMES += ['stale_server_slot_save']
 NAMES += ['stale_server_slot_open','stale_server_slot_roles']
 NAMES += ['legacy_assignment_snapshot']
+NAMES += ['leaderboard_arithmetic_cases']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
