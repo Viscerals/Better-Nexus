@@ -270,26 +270,30 @@ function Controller.New(options)
             and (state.currentLockKey == nil or state.currentLockKey == 0)
     end
 
-    -- Returns the LIVE per-slot target table, deliberately: callers mutate the
-    -- returned table in place, so a copy would silently discard their writes.
-    -- It is obtained THROUGH the authorized mutation entry rather than through
-    -- Store.State(), which is the distinction that matters -- the DURABLE_READ
-    -- no longer hands out writable durable state.
+    -- Returns the committed per-slot target table of the current content key, read
+    -- THROUGH the authorized entry rather than through Store.State() (the
+    -- DURABLE_READ no longer hands out writable durable state). A lookup never
+    -- creates a bucket: with no committed design it answers a fresh EMPTY table that
+    -- is not stored. Its callers (ApplyCommittedTargets, PlanLockCommit) only read it;
+    -- a bucket is created only by CommitLockDesignTargets for a design that has
+    -- targets, and by the one-time move of the retired flat account table below.
+    -- Before this rule every distinct Wishlist content that was opened or saved left a
+    -- permanent empty bucket (docs/W4_EMPTY_LOCK_BUCKETS.md).
     local function LockDesignTargets()
         if state.currentDesignTargets~=nil then return state.currentDesignTargets end
         local account = AccountRoot()
         local old = account.lockDesignTargets
         local key = state.currentLockKey or 0
         local ok, targets = UpdateStoreState(function(character)
-            character.lockDesignTargetsBySlot =
-                character.lockDesignTargetsBySlot or {}
-            if type(old) == "table"
-                and not character.lockDesignTargetsBySlot[key] then
+            local map = character.lockDesignTargetsBySlot
+            local found = type(map) == "table" and map[key] or nil
+            if found == nil and type(old) == "table" then
+                -- The retired flat account table moves under this key, once.
+                character.lockDesignTargetsBySlot = map or {}
                 character.lockDesignTargetsBySlot[key] = old
+                found = old
             end
-            character.lockDesignTargetsBySlot[key] =
-                character.lockDesignTargetsBySlot[key] or {}
-            return character.lockDesignTargetsBySlot[key]
+            return found
         end)
         if type(old) == "table" then account.lockDesignTargets = nil end
         if not ok or type(targets) ~= "table" then return {} end
@@ -1207,12 +1211,15 @@ function Controller.New(options)
         local nextKey = (Adapter and Adapter.WishlistKey
             and Adapter.WishlistKey(echoes)) or 0
         local committed, commitReason = UpdateStoreState(function(character)
-            character.lockDesignTargetsBySlot =
-                character.lockDesignTargetsBySlot or {}
             -- Preserve legacy plans. New saves carry their own complete design
             -- on the durable assignment; equal rolled contents are not an ID.
-            if character.lockDesignTargetsBySlot[nextKey]==nil then
-                character.lockDesignTargetsBySlot[nextKey] = fresh
+            -- An empty design needs no bucket: absent reads as empty.
+            if next(fresh) ~= nil then
+                character.lockDesignTargetsBySlot =
+                    character.lockDesignTargetsBySlot or {}
+                if character.lockDesignTargetsBySlot[nextKey]==nil then
+                    character.lockDesignTargetsBySlot[nextKey] = fresh
+                end
             end
         end)
         if not committed then return false, commitReason or "local_state_unavailable" end
