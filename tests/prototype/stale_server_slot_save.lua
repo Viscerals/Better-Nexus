@@ -262,6 +262,9 @@ do
  setMirror(102,MIRROR_A)
  local data,why=c.PrepareApply()
  check(data==nil and why=='stale_slot','an identity that was missing at open authorizes nothing: '..tostring(why))
+ local ok,reason=c.AcceptApply(102,NAME,planRows)
+ check(ok==false and reason=='stale_slot','the direct payload path is refused and reports failure: '..tostring(ok)..'/'..tostring(reason))
+ check(uploadsTo(102)==0,'and nothing was uploaded')
 end
 
 print=rawPrint
