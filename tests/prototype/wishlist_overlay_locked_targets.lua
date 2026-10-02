@@ -110,6 +110,7 @@ H.locked={{spellId=200082,stacks=5},{spellId=200083,stacks=1}};H.Notify();A.Poll
 rows=LockedRows()
 check(Find(rows,200082).t:sub(1,3)=='[X]' and Find(rows,200082).t:find('(2/2)',1,true),'Plan C: owning more than desired shows (2/2), never above the target: '..Find(rows,200082).t)
 check(Find(rows,200083).t:sub(1,3)=='[X]' and Find(rows,200083).t:find('(1/1)',1,true),'Plan C: the second target is fulfilled')
+check(Find(rows,200082).i>=78 and Find(rows,200083).i>=78 and #Lines()==81,'Plan C: both locked targets are the last rows, after every ordinary row (rows '..Find(rows,200082).i..' and '..Find(rows,200083).i..' of '..#Lines()..')')
 H.locked={}
 -- A plan with no locked target shows no locked row.
 activate(4)
@@ -123,6 +124,10 @@ H.granted={['Echo 80']={{spellId=200080,quality=0}}};H.Notify();A.Poll();H.Advan
 rows=LockedRows()
 check(#rows==1 and rows[1].t:sub(1,3)=='[ ]','Plan E: an owned ordinary copy fulfils the ordinary row only, not the locked target')
 H.granted={}
+-- No assigned Wishlist at all: the old single line, no rows.
+H.perks.serverActiveSlot=0;H.Notify();A.Poll();Nexus.RequestRecompute();H.Advance(1.5)
+lines=Lines()
+check(#lines==1 and lines[1]:find('No wishlist set',1,true),'no assigned Wishlist: one "No wishlist set" line: '..#lines..' '..tostring(lines[1]))
 -- Back to Plan A: the target returns.
 activate(1)
 rows=LockedRows()
