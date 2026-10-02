@@ -85,7 +85,7 @@ for _,rtt in ipairs({0.05,0.12,0.30})do
  -- The client delay (reply -> next send) is the beat plus frame granularity.
  local worst=0
  for i=2,COUNT do if fast.replies[i-1] then local d=fast.sent[i]-fast.replies[i-1];if d>worst then worst=d end end end
- check(worst<=0.4+3*DT+0.17,string.format('RTT %.2f: the client delay after a reply stays within the beat plus a few frames: %.3f',rtt,worst))
+ check(worst<=0.4+4*DT,string.format('RTT %.2f: the client delay after a reply is the beat plus a few frames, with no tick wait: %.3f',rtt,worst))
  print(string.format('LATENCY RTT %.2f: cycle before %.3f -> after %.3f (mean saved %.3f s per action; same %d actions)',rtt,
   (base.sent[COUNT]-base.sent[1])/(COUNT-1),(fast.sent[COUNT]-fast.sent[1])/(COUNT-1),meanSaved,COUNT))
 end
@@ -117,8 +117,11 @@ do
  H.Board({{spellId=200110,quality=0},{spellId=200111,quality=1},{spellId=200112,quality=0}});H.Notify();Step(H,6)
  check(#H.actions==1,'a new board and six seconds without a grant start no action: '..#H.actions)
  H.granted[H.names[200001]]={{spellId=200001,quality=1}}
- H.Notify();Step(H,1.5)
+ H.Notify();local tGrant=H.now
+ local guard=0
+ while #H.actions<2 and guard<400 do Step(H,DT);guard=guard+1 end
  check(#H.actions>=2,'once the grant is observed the next action follows: '..#H.actions)
+ check(H.now-tGrant<=0.4+4*DT,string.format('the Echo-data notification wakes the loop: the next action follows within the beat plus a few frames (%.3f s)',H.now-tGrant))
 end
 
 -- 4. The beat is kept when the notification arrives at once.
