@@ -48,14 +48,17 @@ from `A.Poll`, beside `ReconcileTomePending`, which is the existing poll-time ow
   false`: a dense row with an unreadable entry, a sparse list, an entirely unreadable row). The referenced
   row is inspected before candidates are enumerated, so a row that yields no candidate at all is not taken
   for an empty slot; the readable entries of a partly unreadable row are not the row, and their key would
-  persist as a wrong identity. (The first valid echo snapshot after a failed one is a baseline and leaves
-  the mirror generation unchanged, so the retry, not a generation change, is what brings the corrected
-  row back.) a store that cannot write the character's row durably
+  persist as a wrong identity; a store that cannot write the character's row durably
   right now (`StateWriteStatus` is not `durable`: `UpdateStateV1` would take a transient row and still
   report success); a refused write; and a write after which the authoritative row does not hold every
   identity written. A later complete row, a store that became ready or a write that is allowed resolves it,
   and the retry is bounded (one attempt per 5 seconds, not per tick). Unsupported and read-only roots stay
   `unavailable` and are polled at the same slow rate.
+- The first valid echo snapshot after a failed one is only a baseline and leaves the mirror generation
+  unchanged, so the retry, not a generation change, is what brings a corrected row back. For the same
+  reason a record whose slot is absent from the mirror is certified as checked only once the mirror has
+  a valid baseline (`echoSnapshot`); before that, for instance while another row is malformed, it is
+  retried too.
 - For a character whose saved row is still under its plain name (formats 3-5) the first write creates the
   canonical row as the owner always does and leaves the original row as it was (tested).
 

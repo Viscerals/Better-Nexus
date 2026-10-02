@@ -456,6 +456,26 @@ for _,shape in ipairs({'number','keyless table'}) do
  check(upgraded(shape,durable()),label..': the corrected row is retried and its key persisted: '..tostring(type(durable())=='table' and durable().key))
 end
 
+-- The slot is ABSENT, and the echo snapshot cannot be taken because ANOTHER row is malformed: absence is not
+-- evidence yet, and the first valid snapshot afterwards is only a baseline (the generation stays unchanged), so
+-- the record is retried rather than certified.
+for _,shape in ipairs({'number','keyless table'}) do
+ local label=shape..', absent slot while another row is malformed'
+ boot(nil,{[1]={name='Owned one',verified=true,echoes=plan(200001)},
+  [102]={name='Other',verified='yes',echoes=plan(200012)}})
+ local A=Nexus.GameAdapter
+ seed(shape,1,101)
+ H.Advance(2)
+ check(shape=='number' and durable()==101 or (type(durable())=='table' and durable().key==nil),label..': the record stays legacy')
+ local generation=A.PresentationRevisions()
+ H.perks.serverBuildSlots[102]={name='Other',verified=false,echoes=plan(200012)}
+ H.perks.serverBuildSlots[101]=rowOf({COMPLETE[1]});H.Notify()
+ H.Advance(1)
+ check(A.PresentationRevisions()==generation,label..': the first valid snapshot did not change the slots generation (premise)')
+ H.Advance(6)
+ check(upgraded(shape,durable()),label..': the record is retried and upgraded: '..tostring(type(durable())=='table' and durable().key))
+end
+
 -- The retry for a row that stays unreadable is bounded: one attempt per delay, not one per tick.
 do
  boot(nil,{[1]={name='Owned one',verified=true,echoes=plan(200001)},

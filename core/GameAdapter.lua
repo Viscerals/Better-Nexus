@@ -4630,11 +4630,17 @@ local function ReconcileLegacyAssignments()
             end
         end
     end
+    -- Absence is only evidence once the mirror has a valid baseline: a change
+    -- after it bumps the slots generation and changes the gate. Until then (the
+    -- echo snapshot failed, e.g. another row is malformed) the first valid
+    -- snapshot is only a baseline and bumps nothing, so a record that found no
+    -- slot is retried instead of being certified.
+    local settled = not incomplete and echoSnapshot ~= nil
     if #plan == 0 then
-        if incomplete then
-            legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
-        else
+        if settled then
             legacyAssignmentsChecked = gate
+        else
+            legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
         end
         return
     end
@@ -4665,7 +4671,7 @@ local function ReconcileLegacyAssignments()
             end
         end
     end
-    if verified and not incomplete then
+    if verified and settled then
         legacyAssignmentsChecked = gate
     else
         legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
