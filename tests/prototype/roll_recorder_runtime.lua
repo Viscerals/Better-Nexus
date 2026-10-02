@@ -197,13 +197,17 @@ check(report.meta.omissions=='none' and not report.meta.partial,'no section is o
 for _,chunk in ipairs(report.chunks)do check(#chunk<=Nexus.SupportReport.CHUNK_BYTES,'every report chunk stays within its bound')end
 check(not whole:find('Synthetic recorder plan',1,true) and not whole:find('Echo 1',1,true),'no Wishlist or Echo name in the report')
 -- A record whose text is full of escaped separators is not cut by the report.
-Nexus.RollRecorder.Decision({state={},action={type='take',index=1,spellId=200001,reasonCode=string.rep('|%',48),policyId='adaptive-0-settle-live1'},
+local manyTargets={}
+for i=1,32 do manyTargets[1230000+i]=85 end
+local escapeId=Nexus.RollRecorder.Decision({state={},action={type='take',index=1,spellId=200001,reasonCode=string.rep('|%',48),policyId='adaptive-0-settle-live1'},
  board={cards={{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200020,quality=0}},signature='escape-check'},
- owned={synced=true,bySpell={}},plan={requestedCounts={[200001]=1}},catalog={rows={},playerMask=1},level=20,horizon=5,
+ owned={synced=true,bySpell={}},plan={requestedCounts=manyTargets},catalog={rows={},playerMask=1},level=20,horizon=5,
  charges={banish=1,reroll=1,freeze=1,trustworthy=true}})
+for i=1,12 do Nexus.RollRecorder.Intent(escapeId,'uncertain',string.rep('|%',20),{elapsed=1}) end
+Nexus.RollRecorder.After({basis=string.rep('|',32),board={cards={}}})
 local escapedLine
 for line in Nexus.RollRecorder.Export():gmatch('[^\n]+')do if line:find('%7C%25%7C',1,true) then escapedLine=line end end
-check(escapedLine and #escapedLine>400,'precondition: an escaped record line exists')
+check(escapedLine and #escapedLine>1900,'precondition: a long escaped record line exists: '..tostring(escapedLine and #escapedLine))
 report=Nexus.SupportReport.Prepare({})
 check(table.concat(report.chunks):find(escapedLine,1,true),'the report holds the whole escaped record line, not a cut one')
 Nexus.RollRecorder=nil
