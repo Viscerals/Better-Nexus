@@ -2784,8 +2784,8 @@ function A.WishlistNote() return A._wishlistNote end
 -- AssignedWishlist reads for that Wishlist without touching any assignment
 -- record, so no Wishlist revision moved and a reader that had cached the plan
 -- kept the old rows. The mover calls this once, after a bucket was really
--- created. It only advances the Wishlist presentation revision: no data, plan
--- or decision changes.
+-- created. It only advances the Wishlist presentation revision; it changes
+-- no data and makes no decision.
 function A.NoteLockDesignTargetsMoved()
     MarkWishlistPresentationDirty()
 end

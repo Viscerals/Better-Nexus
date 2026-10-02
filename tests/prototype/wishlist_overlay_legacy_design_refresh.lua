@@ -1,7 +1,7 @@
 -- Wishlist overlay: refresh when the retired flat locked-design table moves (W5 follow-up). Two writers
 -- move NexusDB.lockDesignTargets under the current Wishlist content key, once: AutomationRuntime
--- (LockDesignTargetsFor, read every recompute for the active Wishlist) and WishlistController
--- (LockDesignTargets, on an editor open). Both create lockDesignTargetsBySlot[key] without any
+-- (LockDesignTargetsFor, read whenever the active Wishlist is projected) and WishlistController
+-- (LockDesignTargets, on an editor open or a save). Both create lockDesignTargetsBySlot[key] without any
 -- Wishlist revision moving, so an overlay that had already read the plan kept hiding the moved
 -- planned locked targets until some unrelated revision changed. Required: after a MATERIAL move
 -- (a bucket really created from the flat table) the overlay shows the moved targets at its next
@@ -156,16 +156,19 @@ end
 activate(4)
 NexusDB.lockDesignTargets=Clone(designA)
 local revR,annR,readsR=wishlistRevision(),announced,O.Stats().wishlistReads
+local refusedAuto=refused
 refusing=true;Nexus.RequestRecompute();H.Advance(2);refusing=false
-check(refused>=1,'the refusal reached the automation writer ('..refused..')')
+refusedAuto=refused-refusedAuto
+check(refusedAuto>=1,'the refusal reached the automation writer ('..refused..')')
 check(Buckets()[keyC]==nil and #LockedRows()==0,'refused (automation writer): no bucket, no locked row')
 check(wishlistRevision()==revR and announced==annR,'refused (automation writer): no announcement and no revision step')
 activate(5)
 if NexusEditorFrame then NexusEditorFrame:Hide() end
 NexusDB.lockDesignTargets=Clone(designA)
 revR,annR=wishlistRevision(),announced
+local refusedBefore=refused
 refusing=true;pcall(W.OpenForWishlist,A.GetLoadoutWishlist(5),5);refusing=false
-check(refused>=2,'the refusal reached the controller writer ('..refused..')')
+check(refused>refusedBefore,'the refusal reached the controller writer ('..refused..')')
 check(Buckets()[keyD]==nil and wishlistRevision()==revR and announced==annR,'refused (controller writer): no bucket, no announcement, no revision step')
 owner.UpdateStateV1=realUpdate
 

@@ -570,7 +570,7 @@ local function LockDesignTargetsFor(wishlist, knownKey)
         end)
         runRoot.lockDesignTargets = nil
         -- A bucket was really created: readers that cached this Wishlist's
-        -- plan re-read it (no data or decision changes).
+        -- plan re-read it (a revision step only; no data changes).
         if accepted and moved and Adapter
             and type(Adapter.NoteLockDesignTargetsMoved) == "function" then
             Adapter.NoteLockDesignTargetsMoved()
