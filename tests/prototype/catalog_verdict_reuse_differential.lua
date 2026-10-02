@@ -18,11 +18,12 @@
 -- source check" step) and before the first witness read. A hook keyed to the
 -- mutation-capture phase is NOT before the capture: the pump that closes the bundle
 -- phase sets mutation-capture and, in the same call, already pumps the first slice of
--- the witness (about 17 nodes), so the phase hook fires after it. Whether the edited
--- scalar (or the table that receives the new key) was already inside that slice then
--- depended on the iteration order of the string-keyed source tables, which differs
--- per process. The edit landed after its field was witnessed and the catalog correctly
--- refused the mutation, about once in 80 runs (control 028).
+-- the witness (17 to 19 nodes), so the phase hook fires after it. Whether the edited
+-- scalar was already inside that slice then depended on the iteration order of the
+-- string-keyed source tables, which differs per process: the edit landed after its
+-- field was witnessed and the catalog correctly refused the mutation, about once in
+-- 80 runs (control 028). Only the title step was observed failing; the key-addition
+-- step has the same hook and is moved with it by symmetry, not because it was seen to fail.
 -- Real TOC boot, real catalog; synthetic records only.
 dofile('tests/prototype/startup_support.lua').SingleSlicePacing()
 local F=dofile('tests/prototype/format5_support.lua')
@@ -85,7 +86,7 @@ local function Run(reuse,size,plan)
    and RANK[h.phase] and RANK[h.phase]>=RANK[inject.restorePhase] then
    inject.restored=true;inject.restore()
   end
-  if inject and not inject.done and not inject.atCapture and h and h.mode=='mutation' and RANK[h.phase] and RANK[h.phase]>=RANK[inject.phase] then
+  if inject and not inject.done and not inject.atCapture and not inject.atSourceCheck and h and h.mode=='mutation' and RANK[h.phase] and RANK[h.phase]>=RANK[inject.phase] then
    inject.done=true;inject.handle=h;inject.fn(ST,h)
    around=inject.after
   end
@@ -123,6 +124,15 @@ local function Run(reuse,size,plan)
   end
   return realNewCapture(source)
  end
+ -- The mutation's own source check starts with Witness.BeginVerify (the first one of a mutation).
+ local realBeginVerify=Witness.BeginVerify
+ Witness.BeginVerify=function(witness,source)
+  local h=ST.candidate
+  if inject and inject.atSourceCheck and not inject.done and h and h.mode=='mutation' then
+   inject.done=true;inject.handle=h;inject.fn(ST,h)
+  end
+  return realBeginVerify(witness,source)
+ end
  for _=1,200 do H.Advance(.05,.05) end
  local env={H=H,C=C,ST=ST,Record=Record,serial=0}
  function env.OwnerWindow(open) ownerWindow=open end
@@ -136,6 +146,9 @@ local function Run(reuse,size,plan)
  end
  function env.InjectAtCapture(fn)
   inject={phase='mutation-capture',fn=fn,atCapture=true};env.injection=inject
+ end
+ function env.InjectAtSourceCheck(fn)
+  inject={phase='mutation-bundle',fn=fn,atSourceCheck=true};env.injection=inject
  end
  function env.Inject(phase,fn,after,restorePhase,restore,untilHandleEnds)
   inject={phase=phase,fn=fn,after=after,restorePhase=restorePhase,restore=restore,
@@ -283,9 +296,9 @@ local plan={
  Batch('one-row after drift',1),
  Batch('one-row reuse after drift',1),
  {label='in-place edit before the source check',run=function(e)
-  -- The mutation first proves the source still matches the witness of the root it replaces
-  -- (mutation-bundle); a raw edit made before that walk reaches the field refuses the mutation.
-  e.Inject('mutation-bundle',function() NexusDB.authorityBundle.communityBuilds['b-16'].title='Edited before source check' end)
+  -- The mutation first proves the source still matches the witness of the root it replaces; the edit
+  -- is injected as that check begins, before its first read, so it cannot be missed whatever the walk order.
+  e.InjectAtSourceCheck(function() NexusDB.authorityBundle.communityBuilds['b-16'].title='Edited before source check' end)
   local outcome=e.Batch(e.New(1));e.Settle();return outcome
  end},
  {label='re-admission after the early drift',run=function(e) return e.Readmit() end},
@@ -310,8 +323,9 @@ local plan={
  Batch('one-row after evidence append',1),
  Batch('one-row reuse after evidence append',1),
  {label='owner change during the walk',run=function(e)
-  -- The catalog's pumps see another owner from the capture until the
-  -- index phase (the whole row walk); nothing else does.
+  -- The catalog's pumps see another owner from just after the first witness slice
+  -- until the index phase (the row walk); nothing else does. The owner does not
+  -- affect the witness, so this phase hook needs no exact boundary.
   e.Inject('mutation-capture',function() e.OwnerWindow(true) end,
    nil,'index',function() e.OwnerWindow(false) end)
   local outcome=e.Batch(e.New(1))
