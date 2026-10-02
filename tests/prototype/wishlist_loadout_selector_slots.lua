@@ -134,6 +134,14 @@ rows=OpenRows();text=Texts(rows)
 check(#rows==6 and not rows[6].enabled and text[6]:find('Loadout 6',1,true) and text[6]:find('Empty',1,true),'a declared sixth slot without data is a disabled Empty row: '..text[6])
 check(rows[1].enabled,'slot 1 stays selectable')
 
+-- 4b. A readable slot 6 with no name keeps the generic label and stays selectable.
+Boot({maxSlots=6,active=6,slots={[6]={name='',verified=true,echoes=E6}}})
+SlashCmdList.NEXUS('editor')
+rows=OpenRows();text=Texts(rows)
+check(#rows==6 and rows[6].enabled and text[6]:find('Loadout 6',1,true) and not text[6]:find('Empty',1,true),'an unnamed readable sixth slot is labelled Loadout 6 and enabled: '..text[6])
+Select(rows[6]);ctx,target=Ctx()
+check((ctx.loadoutSlot or target.loadoutSlot)==6,'and it selects Saved Build 6')
+
 -- 5. Declarations: used as given from 1 up to ten rows; anything else keeps five rows.
 local function RowsFor(value)
  Boot({maxSlots=value,active=1,slots=Rows(1)})
