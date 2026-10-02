@@ -120,6 +120,18 @@ do
  check(modern.key=='200090:1' and modern.assignmentId=='assigned:7' and modern.name=='Modern','a modern record is untouched')
 end
 
+-- The passive-diagnostic write block holds the upgrade back; lifting it lets the poll persist it.
+do
+ boot(nil,slots('Plan A',A_ID))
+ seed('number',1,101)
+ Nexus.GameAdapter.DIAGNOSTIC_PASSIVE=true
+ H.Advance(2)
+ check(durable()==101,'under the passive-diagnostic write block the saved table is not written')
+ Nexus.GameAdapter.DIAGNOSTIC_PASSIVE=nil
+ H.Notify();H.Advance(1)
+ check(upgraded('number',durable()),'once the block is lifted the identity is persisted')
+end
+
 -- A table that carries its own contents (a plan saved before content keys) keeps them: it is not a bare
 -- slot reference, and the live row at its slot is not its identity.
 do
