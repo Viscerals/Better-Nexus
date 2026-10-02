@@ -298,6 +298,20 @@ R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true})
 R.After({basis='next_board',board=FROZEN_AFTER})
 record=Records()[1]
 check(record.sa==nil and record.inc and record.inc:find('am',1,true) and record.fz==nil,'a submission with no action identity is ambiguous: '..tostring(record.inc))
+-- Two accepted Freezes of the same spell: still ambiguous, and not annotated even though 1001 is held.
+Fresh()
+id=R.Decision(Freeze())
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true,type='freeze',index=1,spellId=1001})
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.9,mutation=true,type='freeze',index=1,spellId=1001})
+check(Records()[1].inc=='am','the second submission marks the record at once, before any observation: '..tostring(Records()[1].inc))
+R.After({basis='next_board',board=FROZEN_AFTER})
+check(Records()[1].fz==nil,'two submitted Freezes get no survival annotation')
+-- An existing incompleteness flag is kept when another one is added.
+Fresh()
+id=R.Decision(Ctx({owned={synced=false,bySpell={}},action={type='freeze',index=1,spellId=1001,reasonCode='X',policyId='adaptive-0-settle-live1'}}))
+check(Records()[1].inc=='ow','precondition: unsynced ownership is flagged: '..tostring(Records()[1].inc))
+R.Intent(id,'submitted','adapter_accepted',{elapsed=.5,mutation=true})
+check(Records()[1].inc=='ow,am','a later flag is added, not substituted: '..tostring(Records()[1].inc))
 -- A late outcome (another record was written first) carries its own tag and sa.
 Fresh()
 id=R.Decision(Freeze())
