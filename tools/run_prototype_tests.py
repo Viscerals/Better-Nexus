@@ -135,6 +135,8 @@ NAMES += ['legacy_recovery_flow','legacy_recovery_guards','legacy_recovery_uncha
 NAMES += ['adaptive_policy_rules','adaptive_policy_parity','roll_recorder_unit','roll_recorder_runtime']
 NAMES += ['rolling_latency']
 NAMES += ['lock_bucket_growth']
+NAMES += ['auto_lock_absent_empty_bucket']
+NAMES += ['empty_saved_build_save']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

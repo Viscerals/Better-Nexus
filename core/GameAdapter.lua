@@ -2048,6 +2048,12 @@ local function IsPopulatedLoadout(loadoutSlot, slots)
     return row and type(row.echoes) == "table" and #row.echoes > 0 and true or false
 end
 
+-- Whether a numbered Saved Build holds Echoes now (a locked-only build does).
+-- Read-only; the editor asks it before it uploads for that destination.
+function A.IsLoadoutPopulated(loadoutSlot)
+    return IsPopulatedLoadout(loadoutSlot)
+end
+
 -- Read-only association diagnosis for presentation code. Unlike
 -- ResolveAssociation, this never migrates, renames, reindexes, or otherwise
 -- rewrites SavedVariables; it admits only an exact stable identity or the
@@ -2303,6 +2309,13 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     local slots = A.Slots()
     if not slots or loadoutSlot > (tonumber(slots.maxSlots) or 5) then
         return false, "invalid loadout"
+    end
+    -- Its two sibling writers refuse an empty Saved Build as well. An
+    -- association stored under one is unusable (GetLoadoutWishlist hides it)
+    -- yet this write also clears the first-run plan. The editor checks
+    -- before it uploads; this is the check at the moment of the write.
+    if not IsPopulatedLoadout(loadoutSlot, slots) then
+        return false, "that loadout slot is empty or unavailable"
     end
     local record = StoredWishlistRecord({
         slot=wishlistSlot, name=name, echoes=echoes,designTargets=designTargets,

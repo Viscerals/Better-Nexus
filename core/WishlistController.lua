@@ -1321,6 +1321,31 @@ function Controller.New(options)
             .. "current Wishlist.")
     end
 
+    -- The numbered Saved Build this save would assign, when it holds no Echoes
+    -- now (it can empty while the editor is open). Nothing is uploaded for it:
+    -- the assignment would be refused after the upload, or, from an opened
+    -- Wishlist, stored unusable while it cleared the first-run plan. The save
+    -- is never redirected to the first-run plan; that is the player's choice.
+    -- An adapter that cannot tell is not treated as empty.
+    local function EmptyDestination()
+        local context = state.editingContext or state.createTargetContext
+        local loadoutSlot = context and tonumber(context.loadoutSlot)
+        if not loadoutSlot or not (Adapter and Adapter.IsLoadoutPopulated) then return nil end
+        if Adapter.IsLoadoutPopulated(loadoutSlot) then return nil end
+        return loadoutSlot
+    end
+
+    local function NotSavedEmptyDestination(loadoutSlot)
+        notify("|cffff6060Nexus:|r Not saved: Saved Build " .. tostring(loadoutSlot)
+            .. " is empty, so this Wishlist cannot be assigned to it. Nothing was uploaded or "
+            .. "assigned; your assignments and your edits are kept. Add Echoes to that Saved Build, "
+            .. "or close the editor and edit the Wishlist from the Wishlist selector's edit button.")
+        if M._RecordSwitchRefusal then M._RecordSwitchRefusal("save wishlist", "DESTINATION_EMPTY", {
+            detail = "the Saved Build this save would assign is empty",
+            loadoutSlot = loadoutSlot,
+        }) end
+    end
+
     local function TryApply(slot, name, echoes, guard)
         -- An upload may be delayed by the service's spacing guard. The confirmed
         -- draft must still be current BEFORE sending, not merely before opening
@@ -1344,6 +1369,12 @@ function Controller.New(options)
             state.applyRetry = nil
             NotSavedChanged(destination)
             return false, "assignment_changed"
+        end
+        local emptySlot = EmptyDestination()
+        if emptySlot then
+            state.applyRetry = nil
+            NotSavedEmptyDestination(emptySlot)
+            return false, "destination_empty"
         end
         local ok, err = Adapter.UploadWishlist(slot or 0, name, echoes)
         if ok then
@@ -1534,6 +1565,11 @@ function Controller.New(options)
         if #echoes == 0 then
             notify("|cffff6060Nexus:|r pending list is empty -- add something first.")
             return nil, "empty"
+        end
+        local emptySlot = EmptyDestination()
+        if emptySlot then
+            NotSavedEmptyDestination(emptySlot)
+            return nil, "destination_empty"
         end
         local slot = state.editingContext and tonumber(state.editingContext.slot) or 0
         local name

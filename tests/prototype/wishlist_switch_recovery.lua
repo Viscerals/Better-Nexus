@@ -448,6 +448,9 @@ do
  local other={}
  for index=1,12 do other[#other+1]={spellId=310000+index,quality=2,stacks=1,locked=false} end
  other[#other+1]={spellId=317777,quality=2,stacks=1,locked=false}
+ -- A real Saved Build 1 holds Echoes. The association writer refuses an empty
+ -- (or unavailable) one, as its siblings do, so the fixture now says it has some.
+ H.perks.serverBuildSlots[1]={name='Other Plan',verified=false,echoes=other}
  check(A.UpdateWishlistAssociationAfterSave(1,104,'Other Plan',other,{})==true,
   'a different plan now holds Saved Build 1')
  local ok,reason,detail=A.RestoreForgottenWishlistPlan()
