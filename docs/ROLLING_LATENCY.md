@@ -100,10 +100,20 @@ allocation -0.7 MiB.
 
 ## Minimal native measurement procedure (for a later, authorized test)
 
-Not run under this change. With Auto ON on a character with a resource-safe Wishlist, record
-for 20 consecutive Banish or Reroll actions: `/nexus perf` rows `gameadapter.poll` and
-`automation.step`, and from the local roll record (`/nexus trace`) the `t` column of the
-decision rows. The difference between consecutive decision `t` values is the live cycle.
-Compare a run with `Nexus.EarlyPollDisabled = true` (set in a macro) and one without, on the
-same character and level, alternating, in the same session. Do not spend extra resources to
-collect it.
+Not run under this change. Observe only rolling the owner already intends and has authorized,
+with the same character, level, Wishlist, policy, permissions and recording setting. Do not spend
+extra resources to reach a sample; stop with a smaller sample when normal play ends. At a safe
+boundary with no unresolved action, compare `Nexus.EarlyPollDisabled = true` (set in a macro)
+with the default in short alternating blocks of the same session; never toggle it during an
+outstanding action. Read `/nexus perf` rows `gameadapter.poll` and `automation.step` (cost and
+call deltas) with the frame-rate context.
+
+From the local roll record (`/nexus trace`) the `t` column gives a **decision-to-decision
+interval**. It is NOT the send-to-send cycle that the offline probe measures: a decision can be
+prepared, superseded, refused or held before it is sent, the lifecycle times (`io`) are rounded
+to 0.1 s, and the record has no exact send time. Use only records with exactly one accepted
+submission (`sa` set, no `am` flag) and a complete outcome; report the sample count, range,
+median and action mix; report holds, uncertain, expired, rejected and superseded actions and
+incomplete records separately. Do not combine these intervals with the offline send-to-send
+cycles and do not call them server round trips. Exact send timing needs separately admitted
+native observation.
