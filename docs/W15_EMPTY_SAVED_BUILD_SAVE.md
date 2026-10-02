@@ -34,8 +34,10 @@ locked-only draft without ordinary copies is refused the same way; that is exist
 | `WishlistController.TryApply` | checks again before the upload (the slot can empty while the editor or the confirmation is open; the delayed-retry path goes through it too) |
 | `UpdateWishlistAssociationAfterSave` | refuses an empty slot at the moment of the write ("that loadout slot is empty or unavailable") |
 
-The same refusal covers a NEW Wishlist whose editor was bound to an empty Saved Build (the Journal
-editor's Saved Build menu or Show on an empty active slot). Before, that save uploaded the Wishlist and
+The same refusal covers a NEW Wishlist whose editor was bound to an empty Saved Build (`Show` on an
+empty active slot, exercised by the test; the editor's Saved Build menu reaches the same
+`Controller.SelectLoadout`, which is source-traced shared-controller behavior: its row click was not
+exercised). Before, that save uploaded the Wishlist and
 then failed to assign it ("that loadout slot is empty or unavailable"); now nothing is uploaded. A new
 Wishlist from the Journal's New Wishlist button with an empty active slot has no destination and is
 unchanged.
