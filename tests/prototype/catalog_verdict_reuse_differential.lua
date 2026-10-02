@@ -11,6 +11,18 @@
 -- mutation phase, not at a frame, so both routes are edited at the same
 -- logical point; single-slice pacing (no profile clock) makes the slice
 -- boundaries, and so the injection points, deterministic.
+--
+-- The two "before the capture" edits are injected at the capture itself: the hook
+-- runs inside Witness.NewCapture, after the mutation's own source verify (a raw edit
+-- made earlier refuses the mutation with SOURCE_DRIFT, asserted by the "before the
+-- source check" step) and before the first witness read. A hook keyed to the
+-- mutation-capture phase is NOT before the capture: the pump that closes the bundle
+-- phase sets mutation-capture and, in the same call, already pumps the first slice of
+-- the witness (about 17 nodes), so the phase hook fires after it. Whether the edited
+-- scalar (or the table that receives the new key) was already inside that slice then
+-- depended on the iteration order of the string-keyed source tables, which differs
+-- per process. The edit landed after its field was witnessed and the catalog correctly
+-- refused the mutation, about once in 80 runs (control 028).
 -- Real TOC boot, real catalog; synthetic records only.
 dofile('tests/prototype/startup_support.lua').SingleSlicePacing()
 local F=dofile('tests/prototype/format5_support.lua')
@@ -73,7 +85,7 @@ local function Run(reuse,size,plan)
    and RANK[h.phase] and RANK[h.phase]>=RANK[inject.restorePhase] then
    inject.restored=true;inject.restore()
   end
-  if inject and not inject.done and h and h.mode=='mutation' and RANK[h.phase] and RANK[h.phase]>=RANK[inject.phase] then
+  if inject and not inject.done and not inject.atCapture and h and h.mode=='mutation' and RANK[h.phase] and RANK[h.phase]>=RANK[inject.phase] then
    inject.done=true;inject.handle=h;inject.fn(ST,h)
    around=inject.after
   end
@@ -87,6 +99,30 @@ local function Run(reuse,size,plan)
   end
   return unpack(results)
  end
+ -- The witness owner is a local of the catalog; find it through the upvalues of the pump.
+ local function FindUpvalue(fn,name,depth,seen)
+  seen=seen or {}
+  if type(fn)~='function' or seen[fn] or depth<0 then return nil end
+  seen[fn]=true
+  for i=1,255 do
+   local n,v=debug.getupvalue(fn,i);if not n then break end
+   if n==name and type(v)=='table' then return v end
+  end
+  for i=1,255 do
+   local n,v=debug.getupvalue(fn,i);if not n then break end
+   if type(v)=='function' then local found=FindUpvalue(v,name,depth-1,seen);if found then return found end end
+  end
+ end
+ local Witness=FindUpvalue(pump,'Witness',4)
+ assert(Witness and type(Witness.NewCapture)=='function','the catalog witness owner')
+ local realNewCapture=Witness.NewCapture
+ Witness.NewCapture=function(source)
+  local h=ST.candidate
+  if inject and inject.atCapture and not inject.done and h and h.mode=='mutation' then
+   inject.done=true;inject.handle=h;inject.fn(ST,h)
+  end
+  return realNewCapture(source)
+ end
  for _=1,200 do H.Advance(.05,.05) end
  local env={H=H,C=C,ST=ST,Record=Record,serial=0}
  function env.OwnerWindow(open) ownerWindow=open end
@@ -97,6 +133,9 @@ local function Run(reuse,size,plan)
    if not open and C.ManualPreparationStatus().ready then break end
    H.Advance(.05,.05)
   end
+ end
+ function env.InjectAtCapture(fn)
+  inject={phase='mutation-capture',fn=fn,atCapture=true};env.injection=inject
  end
  function env.Inject(phase,fn,after,restorePhase,restore,untilHandleEnds)
   inject={phase=phase,fn=fn,after=after,restorePhase=restorePhase,restore=restore,
@@ -228,11 +267,11 @@ local plan={
  Batch('one-row after overlay removal',1),
  Batch('one-row reuse again',1),
  {label='in-place edit before the capture',run=function(e)
-  e.Inject('mutation-capture',function() NexusDB.authorityBundle.communityBuilds['b-12'].title='Edited before capture' end)
+  e.InjectAtCapture(function() NexusDB.authorityBundle.communityBuilds['b-12'].title='Edited before capture' end)
   return e.Batch(e.New(1))
  end},
  {label='in-place key addition before the capture',run=function(e)
-  e.Inject('mutation-capture',function() NexusDB.authorityBundle.communityBuilds['b-15'].probeExtra='added' end)
+  e.InjectAtCapture(function() NexusDB.authorityBundle.communityBuilds['b-15'].probeExtra='added' end)
   return e.Batch(e.New(1))
  end},
  Batch('one-row after key addition',1),
@@ -243,6 +282,14 @@ local plan={
  {label='re-admission after drift',run=function(e) return e.Readmit() end},
  Batch('one-row after drift',1),
  Batch('one-row reuse after drift',1),
+ {label='in-place edit before the source check',run=function(e)
+  -- The mutation first proves the source still matches the witness of the root it replaces
+  -- (mutation-bundle); a raw edit made before that walk reaches the field refuses the mutation.
+  e.Inject('mutation-bundle',function() NexusDB.authorityBundle.communityBuilds['b-16'].title='Edited before source check' end)
+  local outcome=e.Batch(e.New(1));e.Settle();return outcome
+ end},
+ {label='re-admission after the early drift',run=function(e) return e.Readmit() end},
+ Batch('one-row after the early drift',1),
  {label='in-place evidence-pool edit',run=function(e)
   local store=Nexus.LoadoutEvidence.DurableStore()
   local key=NexusDB.authorityBundle.communityBuilds['b-14'].evidenceKey
@@ -303,7 +350,7 @@ local function Committed(label)
 end
 for _,label in ipairs({'one-row first after admission','one-row','eight-row','one-row after single Put',
  'one-row after removal marker','one-row again','one-row after overlay removal','one-row reuse again',
- 'in-place edit before the capture','in-place key addition before the capture','one-row after key addition','one-row after drift','one-row reuse after drift','in-place evidence-pool edit',
+ 'in-place edit before the capture','in-place key addition before the capture','one-row after key addition','one-row after drift','one-row reuse after drift','one-row after the early drift','in-place evidence-pool edit',
  'one-row after pool edit','one-row after evidence append','one-row reuse after evidence append',
  'owner change during the walk','one-row after owner change','one-row reuse after owner change',
  'one-row after failed publication','one-row reuse after failed publication'}) do
@@ -326,6 +373,9 @@ check(mixed[6] and mixed[6].committed==true,'the valid member of the mixed batch
 check(S['removal marker'].outcome.ok==true or S['removal marker'].outcome.why=='ROOT_MUTATION_PENDING','the removal marker is accepted: '..tostring(S['removal marker'].outcome.why))
 local drift=S['in-place edit during the walk'].outcome
 check(drift[1] and drift[1].committed==false and drift[1].reason=='SOURCE_DRIFT','an edit during the walk refuses the mutation: '..tostring(drift[1] and drift[1].reason))
+local early=S['in-place edit before the source check'].outcome
+check(early[1] and early[1].committed==false and early[1].reason=='SOURCE_DRIFT','an edit before the mutation source check refuses the mutation: '..tostring(early[1] and early[1].reason))
+check(S['re-admission after the early drift'].admitted,'re-admission after the early drift succeeds')
 check(S['re-admission after drift'].admitted and S['re-admission after evidence append'].admitted
  and S['re-admission after failed publication'].admitted,'re-admission succeeds')
 local failed=S['failed publication'].outcome
