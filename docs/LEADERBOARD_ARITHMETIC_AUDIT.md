@@ -37,9 +37,11 @@ and window; synthetic players).
 `DpsCapture.DpsBoardEntry` admitted any score above 0. A non-finite saved score (inf, nan) therefore ranked
 on the Training Dummy and Lich King tabs (inf first, nan out of order) while `CandidateEvidence.PositiveFiniteDps`
 already refused it in the pair arithmetic, and a score below 1 was listed as score 0. Admission now requires a
-finite score whose floor is at least 1. Current writers cannot produce these rows (receive requires a finite
-score of at least 1000; stored rows are floored at ingest), so the exposure is saved-data or legacy only. Rows
-with a valid score behave exactly as before.
+finite score whose floor is at least 1. Such rows could appear in the Leaderboard from saved data. The known
+writers make them unlikely (receive requires a finite score of at least 1000; the local writer floors the score),
+but a non-finite score from Details! is a theoretical local source, so they are not claimed impossible. The
+check applies to what the Training Dummy and Lich King tabs list; other readers of saved scores (nameplate rank,
+qualification summaries, retention ranking) are unchanged. Rows with a valid score behave exactly as before.
 
 ## Not changed, recorded
 
