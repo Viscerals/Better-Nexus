@@ -480,7 +480,7 @@ local function BuildHudDisplayModel(base)
     local assignment=Adapter.AssignedWishlist and DisplayCall(Adapter.AssignedWishlist)
     HudPhaseFinish("hud.phase.assignment", phaseStarted)
     if assignment then
-        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name}
+        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name,emptySlot=assignment.emptySlot}
     end
     if baseSnapshot.level == nil then
         input.level = DisplayCall(Adapter and Adapter.Level) or 0

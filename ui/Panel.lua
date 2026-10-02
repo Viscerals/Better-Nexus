@@ -1884,6 +1884,7 @@ local function ApplyModel(model, signatures, roll)
             or (assignment.state=="unavailable" and "Assigned Wishlist is unavailable" or "Assign a wishlist to this loadout"))
         SetPoint(setupHint, "TOP", frame, "TOP", 0, contentTop - 48)
         setupHint:SetText((restoring or assignment.state=="unavailable") and (assignment.note or "Waiting for the saved assignment and current loadout data.")
+            or (assignment.emptySlot and assignment.note)
             or "Assign an existing wishlist to this loadout, or create a new one. No Saved Build is required.")
         if restoring then setupGetStartedBtn:Hide();setupImportBtn:Hide()end
         setupGetStartedBtn:ClearAllPoints()

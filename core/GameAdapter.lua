@@ -2049,6 +2049,14 @@ local function IsPopulatedLoadout(loadoutSlot, slots)
     return row and type(row.echoes) == "table" and #row.echoes > 0 and true or false
 end
 
+-- True only when the server reports this numbered Saved Build with a valid,
+-- empty Echo list. A missing row or a malformed list is not known to be empty.
+local function IsKnownEmptyLoadout(loadoutSlot, slots)
+    local row = slots and slots.bySlot and slots.bySlot[loadoutSlot]
+    return type(row) == "table" and type(row.echoes) == "table"
+        and row.roleSourceValid == true and #row.echoes == 0
+end
+
 -- Whether a numbered Saved Build holds Echoes now (a locked-only build does).
 -- Read-only; the editor asks it before it uploads for that destination.
 function A.IsLoadoutPopulated(loadoutSlot)
@@ -2772,6 +2780,12 @@ function A.Wishlist(slots)
         end
         return WishlistRoles.Wishlist(starter,"loadout-association",false)
     end
+    if IsKnownEmptyLoadout(activeSlot, slots) then
+        -- Assigning to an empty Saved Build is refused (SetLoadoutWishlist).
+        A._wishlistNote = "Loadout " .. tostring(activeSlot)
+            .. " is empty. A Wishlist can be assigned once it holds Echoes."
+        return nil
+    end
     A._wishlistNote = "Loadout " .. tostring(activeSlot)
         .. " has no wishlist association. Set it in the Echo Journal."
     return nil
@@ -2790,14 +2804,6 @@ function A.NoteLockDesignTargetsMoved()
     MarkWishlistPresentationDirty()
 end
 
--- True only when the server reports this numbered Saved Build with a valid,
--- empty Echo list. A missing row or a malformed list is not known to be empty.
-local function IsKnownEmptyLoadout(loadoutSlot, slots)
-    local row = slots and slots.bySlot and slots.bySlot[loadoutSlot]
-    return type(row) == "table" and type(row.echoes) == "table"
-        and row.roleSourceValid == true and #row.echoes == 0
-end
-
 -- One read-only assignment projection for the HUD, editor-facing status and
 -- Orb controller. Local permanent designs are part of the assigned target,
 -- even when the server stores only the 79 rolled copies. No Orb-only cache
@@ -2814,10 +2820,9 @@ function A.AssignedWishlist()
     -- The first-run plan is the target only where no Saved Build is in use. An
     -- empty Saved Build with no association of its own is unassigned: it has
     -- no saved assignment, and the first-run plan is not one.
-    if not saved and not (active and active>0 and active<=(tonumber(slots.maxSlots) or 5)
-        and IsKnownEmptyLoadout(active,slots)) then
-        saved=state.firstRunWishlist
-    end
+    local emptySlot = active and active>0 and active<=(tonumber(slots.maxSlots) or 5)
+        and IsKnownEmptyLoadout(active,slots)
+    if not saved and not emptySlot then saved=state.firstRunWishlist end
     local w=A.Wishlist(slots)
     local result={state="unassigned",activeSlot=active,owner=Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey(),
         note=A.WishlistNote(),name=type(saved)=="table" and saved.name or nil}
@@ -2828,7 +2833,8 @@ function A.AssignedWishlist()
     end
     if not w then
         if result.note=="Restoring assigned Wishlist..." then result.state="restoring"
-        elseif saved then result.state="unavailable" end
+        elseif saved then result.state="unavailable"
+        elseif emptySlot then result.emptySlot=true end
         return result
     end
     result.state="ready";result.name=w.name;result.wishlist=w;result.entries={}

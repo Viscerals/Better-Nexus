@@ -57,7 +57,7 @@ local mirror={[102]={name=NAME,verified=false,echoes=H.Clone(H.actions[1][4])}}
 H.perks.serverBuildSlots=H.Clone(mirror);H.Notify();Nexus.GameAdapter.Poll();H.Advance(4)
 local saved=H.Clone(NexusDB)
 local PLAN_ECHO={spellId=200767,quality=0,stacks=1,locked=false}
-local NOTE='Loadout 2 has no wishlist association. Set it in the Echo Journal.'
+local NOTE='Loadout 2 is empty. A Wishlist can be assigned once it holds Echoes.'
 
 -- Boot a fresh character that kept `saved`, with Saved Build 2 as given and active.
 local function reopen(slot2,active,mutate)

@@ -55,6 +55,14 @@ local NOTE2 = "|cff8a8a8aSet associations in My Builds. Saved Build activation r
 -- assignment marks the projection dirty, so at level 80 with a finished run
 -- the save check runs again at once against the new Wishlist.
 local ASSIGN_NOTE = "Assigning by itself does not change any Saved Build."
+-- An empty numbered Saved Build holds no Wishlist of its own and refuses an
+-- assignment. The name the Journal shows beside it is the retained first-run
+-- Wishlist, which the gear opens for editing without a destination. These
+-- wordings say that; no action behind them changes.
+local EMPTY_SLOT_ASSIGN = "This Saved Build is empty, so assigning a Wishlist to it is refused until it holds Echoes. "
+    .. ASSIGN_NOTE
+local EMPTY_SLOT_SELECTOR = "This Saved Build is empty, so no Wishlist can be assigned to it until it holds Echoes. "
+    .. "A name shown here is the first-run Wishlist, not an assignment to this Saved Build. " .. ASSIGN_NOTE
 local AUTO_SAVE_WARNING = "With Auto ON, Nexus may replace the active Saved Build with a finished run that "
     .. "has more overall Wishlist progress, or equal progress after cleanup or an even swap of requested "
     .. "copies. At level 80 after a finished run, Auto checks again right away when you change the assignment. "
@@ -936,8 +944,9 @@ local function ShowSelectorTooltip(selector)
     local besidePicker = wishlistPicker and wishlistPicker:IsShown()
     GameTooltip:SetOwner(selector, besidePicker and "ANCHOR_NONE" or "ANCHOR_TOP")
     GameTooltip:AddLine("Automation Wishlist", 0.35, 0.8, 1)
-    GameTooltip:AddLine("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown. "
-        .. ASSIGN_NOTE, 0.82, 0.82, 0.82, true)
+    GameTooltip:AddLine(associationPanel and associationPanel.emptySlot and EMPTY_SLOT_SELECTOR
+        or ("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown. "
+        .. ASSIGN_NOTE), 0.82, 0.82, 0.82, true)
     GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, 0.82, 0.25, true)
     GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, 0.82, 0.25, true)
     GameTooltip:Show()
@@ -1053,8 +1062,13 @@ local function EnsureAssociationPanel(journal)
 
         associationPanel.design:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Edit assigned Wishlist", 0.35, 0.8, 1)
-            GameTooltip:AddLine("Open the Wishlist assigned to this Saved Build. This does not activate another build.", 0.82, 0.82, 0.82, true)
+            if associationPanel and associationPanel.emptySlot then
+                GameTooltip:AddLine("Edit first-run Wishlist", 0.35, 0.8, 1)
+                GameTooltip:AddLine("Open the first-run Wishlist for editing. This Saved Build is empty and has no Wishlist of its own, so nothing is assigned to it. This does not activate another build.", 0.82, 0.82, 0.82, true)
+            else
+                GameTooltip:AddLine("Edit assigned Wishlist", 0.35, 0.8, 1)
+                GameTooltip:AddLine("Open the Wishlist assigned to this Saved Build. This does not activate another build.", 0.82, 0.82, 0.82, true)
+            end
             GameTooltip:Show()
         end)
         associationPanel.design:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1264,7 +1278,8 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 GameTooltip:SetOwner(self:GetParent() or self, "ANCHOR_RIGHT")
                 GameTooltip:AddLine("Assign Wishlist", .35, .8, 1)
                 GameTooltip:AddLine("Target: " .. tostring(loadoutName or ""), 1, 1, 1, true)
-                GameTooltip:AddLine("Sets this Wishlist as the target for this loadout. " .. ASSIGN_NOTE,
+                GameTooltip:AddLine(associationPanel and associationPanel.emptySlot and EMPTY_SLOT_ASSIGN
+                    or ("Sets this Wishlist as the target for this loadout. " .. ASSIGN_NOTE),
                     .82, .82, .82, true)
                 GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, .82, .25, true)
                 GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, .82, .25, true)
@@ -1286,7 +1301,9 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             row:SetScript("OnEnter",function(self)
                 GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
                 GameTooltip:AddLine("Unassign Wishlist",1,1,1)
-                GameTooltip:AddLine("Keeps the Wishlist; stops using it for this loadout.",.8,.8,.8,true)
+                GameTooltip:AddLine(associationPanel and associationPanel.emptySlot
+                    and "This Saved Build has no Wishlist of its own. This does not remove the first-run Wishlist."
+                    or "Keeps the Wishlist; stops using it for this loadout.",.8,.8,.8,true)
                 GameTooltip:AddLine("Does not change or restore the Saved Build.",.8,.8,.8,true)
                 GameTooltip:Show()
             end)
@@ -1321,8 +1338,11 @@ local function RefreshAssociationRows()
     local activeRow = slots.bySlot and slots.bySlot[active]
     local populated = activeRow and type(activeRow.echoes) == "table" and #activeRow.echoes > 0
     local firstRun = active < 1 or active > maxSlots or not populated
+    -- A numbered Saved Build that holds no Echoes (see EMPTY_SLOT_*).
+    local emptySlot = firstRun and active >= 1 and active <= maxSlots
 
     local host = EnsureAssociationPanel(journal)
+    host.emptySlot = emptySlot
     local wishes = A.GetWishlistCandidates and A.GetWishlistCandidates() or {}
     local linked = firstRun and (A.GetFirstRunWishlist and A.GetFirstRunWishlist())
         or (A.GetLoadoutWishlist and A.GetLoadoutWishlist(active))
