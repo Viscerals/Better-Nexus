@@ -123,7 +123,9 @@ for _,offset in ipairs({0,0.03,0.06,0.09,0.12,0.15,0.18})do
  local guard=0
  while #H.actions<2 and guard<400 do Step(H,DT);guard=guard+1 end
  check(#H.actions>=2,'once the grant is observed the next action follows: '..#H.actions)
- check(H.now-tGrant<=0.4+4*DT,string.format('offset %.2f: the Echo-data notification wakes the loop: the next action follows within the beat plus a few frames (%.3f s)',offset,H.now-tGrant))
+ -- The decision was already waiting (its beat is long over): only the grant gate held it. The
+ -- notification releases it within a few frames, not up to a tick later.
+ check(H.now-tGrant<=3*DT,string.format('offset %.2f: the Echo-data notification wakes the loop: the waiting action follows within three frames (%.3f s)',offset,H.now-tGrant))
 end
 
 -- 3b. A notification in the middle of the beat moves the poll grid; the due beat still wakes the loop.
