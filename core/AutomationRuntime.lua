@@ -570,11 +570,11 @@ local function LockDesignTargetsFor(wishlist, knownKey)
     end
     -- Read LIVE, not from the defensive snapshot. lockDesignTargetsBySlot is
     -- part of the live sub-tree protocol: WishlistController.LockDesignTargets
-    -- hands callers the live per-slot table and they mutate it in place AFTER
-    -- the authorized entry has returned, so those nested writes cannot
-    -- invalidate the read snapshot and a snapshot read here would observe stale
-    -- targets. Reading through the owner is free now that invalidation is
-    -- content-based: this reads and changes nothing, so it invalidates nothing.
+    -- hands out the live committed per-slot table (its callers only read it; a
+    -- design is stored through the authorized entry), and a snapshot read here
+    -- could observe stale targets. Reading through the owner is free now that
+    -- invalidation is content-based: this reads and changes nothing, so it
+    -- invalidates nothing.
     local ok, state = UpdateStoreState(function(row) return row end)
     if not ok or type(state) ~= "table" then return nil end
     local bySlot = state.lockDesignTargetsBySlot

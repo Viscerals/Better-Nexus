@@ -27,8 +27,9 @@ Owner-normal workflow only: open or save ordinary-only Wishlists of different co
 | 10 / 100 / 500 / 2000 opens, real Store | 10 / 100 / 500 / 1777 persisted empty buckets (content collisions explain the last count), serialized 692 / 6,885 / 34,418 / 122,391 bytes | 0 buckets, 2 bytes |
 | 20 save cycles | +20 empty buckets | 0 |
 
-Cost: memory and saved-file size grow by the bucket key plus a few bytes: about 52 bytes for a
-6-entry content, 764 bytes for a full 85-entry content. CPU per open stays small (about 0.01
+Cost: memory and saved-file size grow by the bucket key plus a few bytes. Measured: about 69
+serialized bytes per bucket for the 7-entry test contents (key about 52 bytes), and the content key
+of a full 85-entry Wishlist is 764 bytes. CPU per open stays small (about 0.01
 to 0.02 ms offline). **No limit is claimed.** The 4096 bound in the migration reader
 (`CharMigration.BOUNDS.mapEntries`) counts character rows, not these buckets, and no
 write refusal, data loss or start-up failure was demonstrated.
@@ -41,8 +42,17 @@ design only when it has targets, and still never replaces an existing bucket. Th
 move of the retired flat account table `lockDesignTargets` under the current key is unchanged.
 Opening or saving in a read-only saved root still writes nothing.
 
+One behavior change besides the growth: the content key covers the rolled copies only, so opening
+ordinary-only content K and later saving the same rolled content WITH locked targets used to find the
+empty bucket and DROP those targets from the sidecar (they were stored only when the content had not
+been opened first). The targets are now stored in both orders. Assigned Wishlists carry their own design
+on the assignment and are unaffected; the sidecar is read when a Wishlist has no assignment design.
+The user designed those targets in that save, so the new result matches the first-time-save result.
+Keys that already have an empty bucket keep the old rule. A test pins this
+(`lock_bucket_growth`, "same key").
+
 Not done on purpose: no pruning or deletion of existing buckets (empty or not), no migration,
-no change to locked-role semantics, assignment identity, shared-build or Sync data.
+no other change to locked-role semantics, assignment identity, shared-build or Sync data.
 
 ## Behavior notes
 

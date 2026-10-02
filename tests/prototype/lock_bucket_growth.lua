@@ -92,6 +92,29 @@ do
  check(backing.lockDesignTargetsBySlot[key5]==seeded and count(seeded)==1,'a save never replaces an existing bucket of its content key')
  backing.lockDesignTargetsBySlot[key5]=nil
  check(backing.lockDesignTargetsBySlot[key]==kept and count(kept)==6,'the first committed bucket is untouched')
+-- F1 (review): opening ordinary-only content K and then saving the same rolled content with locked
+ -- targets. The content key covers the rolled copies only, so both have key K. The old empty bucket
+ -- made that save DROP the targets from the sidecar; without it they are stored (as they were when the
+ -- content had not been opened first).
+ do
+  H.Advance(4,.5)
+  local ordinary2={}
+  for i=1,78 do ordinary2[#ordinary2+1]={spellId=200000+i,quality=i%4,stacks=1,locked=false} end -- 78 rolled copies: a content key of its own (quality is not part of the key)
+  local full2={}
+  for _,e in ipairs(ordinary2) do full2[#full2+1]=e end
+  for i=80,85 do full2[#full2+1]={spellId=200000+i,quality=i%4,stacks=1,locked=true} end
+  local k2=A.WishlistKey(ordinary2)
+  local c6=controller()
+  c6.LoadPendingEchoes(ordinary2,false,nil)
+  check(backing.lockDesignTargetsBySlot[k2]==nil,'precondition: opening the content created no bucket')
+  c6.BeginNewWishlist()
+  check(c6.LoadPendingEchoes(full2),'load the same rolled content with six locked targets')
+  local d6=assert(c6.PrepareApply('W4 same key'))
+  check(A.WishlistKey(d6.echoes)==k2,'precondition: the save has the same content key as the open')
+  check(c6.AcceptApply(d6)==true,'save')
+  check(count(backing.lockDesignTargetsBySlot[k2])==6,'the saved locked targets are stored for their content key: '..count(backing.lockDesignTargetsBySlot[k2]))
+  backing.lockDesignTargetsBySlot[k2]=nil
+ end
  -- ordinary opens afterwards neither remove nor replace it
  for i=1,30 do c.LoadPendingEchoes(Ordinary(i),false,nil) end
  check(count(backing.lockDesignTargetsBySlot)==1 and backing.lockDesignTargetsBySlot[key]==kept,'later ordinary opens keep the existing bucket as it is')
@@ -113,11 +136,22 @@ do
  local c4=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=store2,accountRoot=function()return account2 end,notify=function()end})
  c4.Initialize(adapter)
  c4.LoadPendingEchoes(Ordinary(7),false,nil)
+ check(count(c4.PendingLockRows())>=1,'the moved legacy target is applied on that first open')
  local moved=backing2.lockDesignTargetsBySlot and backing2.lockDesignTargetsBySlot[A.WishlistKey(Ordinary(7))]
  check(type(moved)=='table' and moved[200020]==true and account2.lockDesignTargets==nil,'the legacy flat table moves under its key and is retired')
  check(count(backing2.lockDesignTargetsBySlot)==1,'and creates exactly that one bucket')
  c4.LoadPendingEchoes(Ordinary(8),false,nil)
  check(count(backing2.lockDesignTargetsBySlot)==1,'a second content does not move or create anything')
+ -- an existing bucket of the key wins over the retired flat table, which is still retired
+ local backing3={lockDesignTargetsBySlot={[A.WishlistKey(Ordinary(9))]={[200030]=true}}}
+ local store3={State=function() return backing3 end,Settings=function() return settings end}
+ local account3={lockDesignTargets={[200021]=true}}
+ A.Init({},store3)
+ local c7=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=store3,accountRoot=function()return account3 end,notify=function()end})
+ c7.Initialize(adapter)
+ c7.LoadPendingEchoes(Ordinary(9),false,nil)
+ local kept9=backing3.lockDesignTargetsBySlot[A.WishlistKey(Ordinary(9))]
+ check(kept9[200030]==true and kept9[200021]==nil,'a legacy flat table never overwrites an existing bucket')
  A.Init({},store)
 end
 
@@ -152,6 +186,7 @@ do
 end
 
 -- ---------------------------------------------------------------- 3. read-only saved root
+-- (A preservation check: a read-only root already refused these writes before the fix.)
 do
  local db=F.Database({version=6})
  local H=F.Boot(db,function(h)h.pendingRolls=2 end)
