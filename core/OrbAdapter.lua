@@ -581,8 +581,11 @@ local function copyNumbers(t)
 end
 -- Numbers, booleans and short names only: no player, no sender, no payload text.
 function O.TransportStatus()
+    -- retained: how many records the ring holds now (never more than TRANSPORT_RING).
+    local retained=0
+    for _ in pairs(T.ring) do retained=retained+1 end
     return {started=T.started,epoch=T.epoch,ord=T.ord,counts=copyNumbers(T.counts),rejects=copyNumbers(T.rejects),
-        good=copyNumbers(T.good),bad=copyNumbers(T.bad),requests=T.requests,reqOrd=T.reqOrd}
+        good=copyNumbers(T.good),bad=copyNumbers(T.bad),requests=T.requests,reqOrd=T.reqOrd,retained=retained}
 end
 -- The relevant records that arrived after ordinal `since`, oldest first, or nil and
 -- "overflow" when the bounded ring no longer covers them.

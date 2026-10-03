@@ -1461,8 +1461,13 @@ end
 function M.ContinueView()
     init()
     local p=run.pending
-    local ok,reason=RC.eligible(p,run.snap)
     local rc=run.rc
+    -- A check whose receipt is gone or is another one is over (the recovery pass may not run
+    -- again for it): it must not show as running.
+    if rc and (rc.stage=="checking" or rc.stage=="ready") and (not p or RC.identity(p)~=rc.rid) then
+        RC.refuse(rc,"receipt_changed")
+    end
+    local ok,reason=RC.eligible(p,run.snap)
     local astate,_,count=RC.archiveInfo()
     local v={eligible=ok,reason=reason,stage=rc and rc.stage or "idle",step=rc and rc.step or nil,
         refusal=rc and rc.refusal or nil,token=rc and rc.stage=="ready" and rc.token or nil,
