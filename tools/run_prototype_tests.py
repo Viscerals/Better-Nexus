@@ -149,7 +149,7 @@ NAMES += ['wishlist_overlay_legacy_design_refresh']
 NAMES += ['lock_design_legacy_preservation']
 NAMES += ['sync_realm_syntax']
 NAMES += ['orb_loadout_hold_repro','orb_loadout_hold_shape','orb_loadout_hold_cause','orb_loadout_hold_history']
-NAMES += ['orb_pick_evidence']
+NAMES += ['orb_pick_evidence','orb_transport_observer']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
