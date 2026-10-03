@@ -139,16 +139,16 @@ spell id), and `sa` is the action actually SUBMITTED. The Freeze outcome `fz` is
 proposal that was never submitted gets no Freeze outcome. The outcome values are
 `set:kept` (the first board shows the spell held `F` or carried `C`), `set:just` (the first board shows
 it as `J` justFrozen: "just frozen observed", which is not proof of the final result and is not a
-loss; a later `C` is a separate observation, recorded on the next decision's row as `held:kept`) and `set:gone`
+loss; a later `C` is a separate observation and may be seen on a later row, for example as `held:kept`) and `set:gone`
 (the spell is not on the first board in any frozen state). `held:kept`, `held:just` and `held:gone` are
 the same reading of a held offer after another action. Rows written by earlier builds marked a first `J` as `set:gone`; they are not rewritten. Read their `af` column: a
-`set:gone` row whose `af` shows the Freeze spell with `J` is a first `J` observation. The export
-schema number stays 1 (the new value is additive). `af` and `ao` are observations of the next
+`set:gone` row whose `af` shows the Freeze spell with `J` is a first `J` observation (when `af` is not cut). `af` and `ao` are observations of the next
 board whatever was sent. `ao` compares a row's own decision with its own first observation only, so
 an ownership change first seen after a later decision is on that later row, never on the earlier
 action's row; it covers the recorded targets only (`inc` `tg` means the target list was cut, and a
 target missing from it is not a negative result). A decision with no later observation (the last Take)
-has no outcome field, and a wait proposal with no intent is an observation, not an executed action. `sa` holds the last accepted submission. When another record was written
+has no outcome field, and a wait proposal with no intent is an observation, not an executed action. The export
+schema number stays 1 (the new value is additive). `sa` holds the last accepted submission. When another record was written
 between two events, the later facts are in rows that name the decision (`ref`); read them together. A board can see several intents (a superseded or refused one, then another); only
 an accepted submission counts. Two accepted submissions on one board, or a submission with no
 action identity, are marked `am` (ambiguous) and get no outcome annotation. `pd` counts records
