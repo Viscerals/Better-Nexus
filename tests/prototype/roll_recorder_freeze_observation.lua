@@ -278,4 +278,9 @@ check(not legend:find('set:gone = not on the board',1,true) and not legend:find(
 check(legend:find('held:* is the same reading of a held offer after another action, and also appears on wait or no-intent rows',1,true),
  'the legend: held:* can also occur on wait or no-intent rows')
 check(legend:find('set:just = the first board showed it as J, just frozen observed, not proof of the final result',1,true),'the legend keeps the set:just definition')
+-- The documentation says the same.
+local f=assert(io.open('docs/ADAPTIVE_ROLLING.md','rb'));local doc=f:read('*a'):gsub('%s+',' ');f:close()
+check(doc:find('`set:gone` (the matching target was not observed frozen, carried or just-frozen at the first observation; it may still be present as a plain card)',1,true),'the docs: set:gone may be a plain card')
+check(not doc:find('not on the first board in any frozen state',1,true),'the docs no longer use the older set:gone wording')
+check(doc:find('and also appear on wait or no-intent rows',1,true),'the docs: held:* also appears on wait or no-intent rows')
 print('PASS roll recorder freeze observation checks='..checks)

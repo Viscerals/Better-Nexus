@@ -140,8 +140,9 @@ proposal that was never submitted gets no Freeze outcome. The outcome values are
 `set:kept` (the first board shows the spell held `F` or carried `C`), `set:just` (the first board shows
 it as `J` justFrozen: "just frozen observed", which is not proof of the final result and is not a
 loss; a later `C` is a separate observation and may be seen on a later row, for example as `held:kept`) and `set:gone`
-(the spell is not on the first board in any frozen state). `held:kept`, `held:just` and `held:gone` are
-the same reading of a held offer after another action. Rows written by earlier builds marked a first `J` as `set:gone`; they are not rewritten. Read their `af` column: a
+(the matching target was not observed frozen, carried or just-frozen at the first observation; it may still be
+present as a plain card). `held:kept`, `held:just` and `held:gone` are the same reading of a held offer after another
+action, and also appear on wait or no-intent rows. Rows written by earlier builds marked a first `J` as `set:gone`; they are not rewritten. Read their `af` column: a
 `set:gone` row whose `af` shows the Freeze spell with `J` is a first `J` observation (when `af` is not cut). `af` and `ao` are observations of the next
 board whatever was sent. `ao` compares a row's own decision with its own first observation only, so
 an ownership change first seen after a later decision is on that later row, never on the earlier
