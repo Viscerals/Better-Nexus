@@ -480,18 +480,27 @@ function R.After(ctx)
             if p.amb or (p.subs and p.subs > 1) then
                 fields.inc = "am"
             elseif ctx.board then
+                -- A first board that shows the spell as justFrozen (J) is "just frozen
+                -- observed": neither kept (held F or carried C) nor gone, and not proof of
+                -- the final result. Held and carried win when both are shown.
                 if p.subKind == "freeze" then
-                    local survived = false
+                    local kept, just = false, false
                     for _, card in ipairs(ctx.board.cards or {}) do
-                        if Int(card.spellId) == p.subSpell and (card.isFrozen or card.isCarried) then survived = true end
+                        if Int(card.spellId) == p.subSpell then
+                            if card.isFrozen or card.isCarried then kept = true
+                            elseif card.justFrozen then just = true end
+                        end
                     end
-                    fields.fz = survived and "set:kept" or "set:gone"
+                    fields.fz = kept and "set:kept" or (just and "set:just" or "set:gone")
                 elseif p.held > 0 then
-                    local after = 0
+                    local kept, just = 0, 0
                     for _, card in ipairs(ctx.board.cards or {}) do
-                        if (card.isFrozen or card.isCarried) and Int(card.spellId) == p.heldId then after = after + 1 end
+                        if Int(card.spellId) == p.heldId then
+                            if card.isFrozen or card.isCarried then kept = kept + 1
+                            elseif card.justFrozen then just = just + 1 end
+                        end
                     end
-                    fields.fz = "held:" .. (after > 0 and "kept" or "gone")
+                    fields.fz = "held:" .. (kept > 0 and "kept" or (just > 0 and "just" or "gone"))
                 end
             end
             return UpdatePending(p, fields)
@@ -568,7 +577,7 @@ function R.ExportLines()
             .. "|dropped=" .. status.dropped .. "|late=" .. status.late,
         "LOCAL RECORD made by Nexus on this computer. No account, character or realm name, Wishlist name, chat or credential is kept. Nothing is sent anywhere. Send it only privately.",
         "NOT A DRAW MODEL. A board and the next board are observations. They do not prove server odds, and a proposed action is not a result.",
-        "D=decision B=boundary O=late outcome. Offers id.quality.flags (G guaranteed F frozen C carried J justFrozen b no-Banish f no-Freeze u unselectable). Targets id,requested,lockedTarget,ordinary,locked,cap,eligibility,requiredSpell. Eligibility hex: 1 class 2 level 4 lever-ok 8 below-cap, x unknown. Charges banish.reroll.freeze.trusted. inc = parts known to be incomplete (am = the submitted action is ambiguous). io = lifecycle: each prepared intent is followed by =<action>; actions are t take, b banish, f freeze, r reroll as <letter><offer index>.<spell id>. sa = the action actually SUBMITTED (the last accepted one); the Freeze outcome fz is judged on it, not on the proposal pr; af and ao are observations of the next board whatever was sent. When another record was written between two events, read the rows that name the same decision (ref) together. Ownership fields (tg, ao) cover the Wishlist targets only, not the full ownership.",
+        "D=decision B=boundary O=late outcome. Offers id.quality.flags (G guaranteed F frozen C carried J justFrozen b no-Banish f no-Freeze u unselectable). Targets id,requested,lockedTarget,ordinary,locked,cap,eligibility,requiredSpell. Eligibility hex: 1 class 2 level 4 lever-ok 8 below-cap, x unknown. Charges banish.reroll.freeze.trusted. inc = parts known to be incomplete (am = the submitted action is ambiguous). io = lifecycle: each prepared intent is followed by =<action>; actions are t take, b banish, f freeze, r reroll as <letter><offer index>.<spell id>. sa = the action actually SUBMITTED (the last accepted one); the Freeze outcome fz is judged on it, not on the proposal pr (set:kept = held F or carried C, set:just = the first board showed it as J, just frozen observed, not proof of the final result, set:gone = not on the board; held:* is the same for a held offer after another action); af and ao are observations of the next board whatever was sent. When another record was written between two events, read the rows that name the same decision (ref) together. Ownership fields (tg, ao) cover the Wishlist targets only, not the full ownership.",
         table.concat(COLUMNS, "|"),
     }
     for _, record in ipairs(records) do
