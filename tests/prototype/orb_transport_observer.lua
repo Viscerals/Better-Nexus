@@ -311,5 +311,101 @@ section('10 request mark and start',function()
  check(H.orbs.requests==1,'it asked the game once (the existing read-only call)')
 end)
 
+-- 11. Segmented messages of the other opcodes: a fragment replaces nothing. The game calls its
+-- handler only when every fragment has arrived, so only a COMPLETE message clears a taint; an
+-- assembly that includes a rejected fragment taints again; the tracking is bounded.
+section('11 segmented messages',function()
+ local H2=S.Fresh();H=H2
+ B=Nexus.GameAdapter.Orbs;assert(B.TransportStart())
+ for _,op in ipairs({16,18,540,542,1000}) do
+  local mid=string.format('%04X',op)
+  Send(op..'\tFORGED','WHISPER','Other')
+  local st=B.TransportStatus()
+  local forged=st.bad[op]
+  check(forged~=nil,'op '..op..': a forged packet taints')
+  local ord=st.ord
+  Send(op..'\t@'..mid..'\t001/003\tone','WHISPER',ME)
+  Send(op..'\t@'..mid..'\t002/003\ttwo','WHISPER',ME)
+  st=B.TransportStatus()
+  check(st.ord==ord and (st.good[op] or 0)<forged and st.bad[op]==forged,'op '..op..': fragments of an incomplete message clear nothing and make no record')
+  Send(op..'\t@'..mid..'\t002/003\ttwo','WHISPER',ME) -- a duplicate fragment counts once
+  check(B.TransportStatus().ord==ord,'op '..op..': a duplicate fragment completes nothing')
+  Send(op..'\t@'..mid..'\t003/003\tthree','WHISPER',ME)
+  st=B.TransportStatus()
+  local last=Last(ord)
+  check(st.ord==ord+1 and last.op==op and last.cls=='A' and last.why==nil and last.seg==true,'op '..op..': the complete message is one admitted record')
+  check(st.good[op]>st.bad[op],'op '..op..': the complete message replaces what the game cached')
+ end
+ -- a rejected fragment inside an assembly: the game completes a mixed message
+ local ord=B.TransportStatus().ord
+ Send('18\t@AAAA\t001/002\tgood','WHISPER',ME)
+ Send('18\t@AAAA\t002/002\tforged','WHISPER','Other')
+ local st=B.TransportStatus()
+ check(st.bad[18]>(st.good[18] or 0) and Last(ord).cls=='R','a rejected fragment taints at once')
+ Send('18\t@BBBB\t001/002\tforged','WHISPER','Other')
+ local o2=B.TransportStatus().ord
+ Send('18\t@BBBB\t002/002\tgood','WHISPER',ME)
+ local last=Last(o2)
+ check(last and last.cls=='R' and last.why=='mixed' and B.TransportStatus().bad[18]==last.ord,'a message completed with a rejected fragment is rejected and taints')
+ -- bounds: more open assemblies than the table holds, and a total that cannot be tracked
+ for i=1,20 do Send('16\t@'..string.format('%04X',0x100+i)..'\t001/002\tx','WHISPER',ME) end
+ local before=B.TransportStatus().ord
+ Send('16\t@0101\t002/002\ty','WHISPER',ME)  -- its assembly was forgotten: nothing completes
+ check(B.TransportStatus().ord==before,'the assembly table is bounded; an evicted assembly never completes')
+ local o3=B.TransportStatus().ord
+ Send('540\t@CCCC\t001/FFF\tz','WHISPER',ME)
+ local rec=Last(o3)
+ check(rec and rec.cls=='A' and rec.why=='range' and B.TransportStatus().bad[540]==rec.ord,'a total that cannot be tracked is an unqualified admitted packet and taints')
+ -- opcode 1220 stays unqualified
+ local o4=B.TransportStatus().ord
+ Send('1220\t@DDDD\t001/001\t49,0,0','WHISPER',ME)
+ check(Last(o4).cls=='A' and Last(o4).why=='segmented','a segmented charge reply is never a qualifying reply')
+end)
+
+-- 12. The opcode text is canonical; a localized unknown identity does not qualify.
+section('12 opcode text and identity',function()
+ local H2=S.Fresh();H=H2
+ B=Nexus.GameAdapter.Orbs;assert(B.TransportStart())
+ local b0=B.TransportStatus().ord
+ Send('01220\t49,0,0','WHISPER',ME)
+ local r=Last(b0)
+ check(r.op==1220 and r.cls=='A' and r.why=='malformed','a leading-zero opcode reaches the game but is never a qualifying reply')
+ check(B.TransportStatus().bad[1220]==r.ord,'and it taints')
+ local rawName,rawUnknown=UnitName,UNKNOWNOBJECT
+ UNKNOWNOBJECT='Unbekannt'
+ UnitName=function() return 'Unbekannt' end
+ local b1=B.TransportStatus().ord
+ Send('1220\t49,0,0','WHISPER','Unbekannt')
+ check(Last(b1).cls=='R' and Last(b1).why=='identity','the client\'s own word for an unknown unit is an unknown identity')
+ UnitName=rawName;UNKNOWNOBJECT=rawUnknown
+end)
+
+-- 13. A failing identity read is an unknown identity, never a silent miss.
+section('13 identity read throws',function()
+ local H2=S.Fresh();H=H2
+ B=Nexus.GameAdapter.Orbs;assert(B.TransportStart())
+ local rawName=UnitName
+ UnitName=function() error('synthetic identity failure',0) end
+ local b0=B.TransportStatus().ord
+ Send('1220\t49,0,7','WHISPER','Other')
+ UnitName=rawName
+ local r=Last(b0)
+ check(r and r.cls=='R' and r.why=='identity' and B.TransportStatus().bad[1220]==r.ord,'recorded as rejected for identity, and tainted')
+end)
+
+-- 14. A refresh that was not sent has no mark.
+section('14 failed request',function()
+ local H2=S.Fresh();H=H2
+ B=Nexus.GameAdapter.Orbs
+ local orb=ProjectEbonhold.OrbService
+ local raw=orb.RequestCharges
+ orb.RequestCharges=function() error('synthetic send failure',0) end
+ local ok,why,mark=B.RequestRefresh()
+ orb.RequestCharges=raw
+ check(ok==false and mark==nil and B.TransportStatus().requests==0 and B.TransportStatus().reqOrd==0,'no request, no mark, no count')
+ local ok2,_,mark2=B.RequestRefresh()
+ check(ok2==true and mark2~=nil and B.TransportStatus().requests==1,'the next one is marked')
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb transport observer: passive, strict admission, taint and epochs; no competing handler, nothing sent checks='..checks)

@@ -39,10 +39,22 @@ end
 local entry,original
 section('0 a real entry',function()
  local H,M,A,O,server
- H,M,A,O=R.Class()
+ -- the worst case: three raw pick entries with every field, saved with the receipt
+ local function Picks()
+  local list={}
+  for i=1,3 do
+   list[i]={id=500000+i,q=1,board='500037:1,500001:1,500038:1',m='offer',acc=true,op=true,slot=101,sk=true,rd='ok',u=false,
+    inb=true,ph='w',ep=65535,at=1700000000+i,c=999}
+  end
+  return list
+ end
+ H,M,A,O=R.Class({edit=function(row,state)
+  for _,r in ipairs({row,state}) do r.picks=Picks();r.pickSeen=999;r.pickDropped=999 end
+ end})
  server=R.Server(H)
  S.Pass(H,M,A,2)
  original=H.Clone(R.Saved())
+ check(type(original.picks)=='table' and #original.picks==3,'the saved receipt carries three full pick entries')
  assert(M.ContinueBegin())
  local waited=0;while waited<20 and M.ContinueView().stage~='ready' do H.Advance(.25);waited=waited+.25 end
  assert(M.ContinueConfirm(M.ContinueView().token))
@@ -51,7 +63,9 @@ section('0 a real entry',function()
  print(string.format('  measured entry (deidentified 034 shape): %d edges, %d bytes, depth %d',edges,bytes,depth))
  check(edges<=1200 and bytes<=6144 and depth<=4,'a real entry is within the entry caps')
  check(edges*8<=16384 and bytes*8<=28672,'eight real entries fit the total caps and the per-row notional Store bounds')
- check(2+depth<=5,'row > archive > entry > receipt > before stays inside the Store depth bound of 6, with a level to spare: '..(2+depth))
+ -- row (1) > archive (2) > entry (3) > receipt (4) > picks (5) > one pick (6): the deepest table is at the
+ -- Store's own bound of 6 EXACTLY, and no deeper. The entry cap (depth 4 below the archive) keeps it there.
+ check(depth==4 and 2+depth==6,'with pick evidence the deepest table is at the Store depth bound of 6, not past it: '..(2+depth))
  local longest=0
  local function Keys(t) for k,v in pairs(t) do longest=math.max(longest,#tostring(k));if type(v)=='table' then Keys(v) end end end
  Keys(entry)

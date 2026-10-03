@@ -329,7 +329,7 @@ section('14 re-entrant callback',function()
  check(type(p.picks)=='table' and #p.picks>=1 and #p.picks<=3,'bounded')
  local first=false
  for _,e in ipairs(p.picks) do if e.id==S.IdQ(OFFER[1]) or e.id==900001 then first=true end end
- check(first and p.pickSeen>=1 and p.pickSeen<=3,'the callbacks are counted and kept: '..tostring(p.pickSeen))
+ check(first and p.pickSeen==2 and #p.picks==2,'both callbacks are counted and kept: '..tostring(p.pickSeen))
  check(p.selectedKey==nil,'and nothing is fabricated')
 end)
 
@@ -349,6 +349,8 @@ end)
 section('16 saved evidence is sanitized',function()
  local junk={
   {id=500001,q=1,board='500037:1,500001:1,500038:1',m='offer',acc=true,evil='x',c=5,slot=101,at=1700000000,ph='w'},
+  -- every field of this one is damaged: a long board text, unknown enum names, out-of-range numbers
+  {id=500002,q=999,board=('9'):rep(80),m='hax',rd='boom',ph='z',acc='yes',at=5,ep=99999999,slot=-1,c=0},
   'text',42,{id='abc'},{id=-5},
   {id=500006},{id=500007},
  }
@@ -359,12 +361,16 @@ section('16 saved evidence is sanitized',function()
  S.Pass(H,M,A,2)
  R.Pick(H,S.IdQ(OFFER[1]))
  local p=R.Saved()
- check(type(p.picks)=='table' and #p.picks==2,'the damaged entries were dropped: '..tostring(p.picks and #p.picks))
+ check(type(p.picks)=='table' and #p.picks==3,'the damaged entries were dropped, the valid ones kept: '..tostring(p.picks and #p.picks))
  for _,e in ipairs(p.picks) do
   for k in pairs(e) do check(FIELDS[k],'only known fields: '..tostring(k)) end
  end
  local e=p.picks[1]
  check(e.id==500001 and e.q==1 and e.m=='offer' and e.c==5 and e.evil==nil and e.at==1700000000,'the valid first entry is kept, an unknown field is not')
+ local d=p.picks[2]
+ local keys={};for k in pairs(d) do keys[#keys+1]=k end;table.sort(keys)
+ check(table.concat(keys,',')=='c,id' and d.id==500002 and d.c==1,'every damaged field of the second entry is dropped: '..table.concat(keys,','))
+ check(p.picks[3].id==S.IdQ(OFFER[1]),'the new pick follows')
  check(p.pickSeen==1 and p.pickDropped==nil,'out-of-range counters are rebuilt, not trusted: '..tostring(p.pickSeen))
 end)
 
@@ -377,6 +383,77 @@ section('17 pick before the first pass',function()
  local p=R.Saved()
  check(type(p.picks)=='table' and #p.picks==1 and p.picks[1].m=='offer','captured with no pass and no read in between')
  check(p.picks[1].ph=='r','still in the reentry phase: no read has succeeded yet')
+end)
+
+-- 18. A throwing Store loses nothing silently: the evidence stays in memory, is reported as
+-- unsaved, retried, and a throwing flush changes no run state.
+section('18 throwing store',function()
+ local H,M,A,O=World({latch=true})
+ S.Pass(H,M,A,2)
+ local id=S.IdQ(OFFER[2])
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1
+ local n=0
+ owner.UpdateStateV1=function(fn,...) n=n+1;if n==1 then error('store exploded',0) end return raw(fn,...) end
+ local ok,v=pcall(R.Pick,H,id)
+ check(ok and v==true,'the game caller gets the host result')
+ check(Nexus.OrbRuntime.RecoveryView().rawPickUnsaved==true and Nexus.OrbRuntime.RecoveryView().rawPicks==1,'the throw is reported as unsaved, not hidden')
+ H.Advance(.5)
+ owner.UpdateStateV1=raw
+ check(type(R.Saved().picks)=='table' and #R.Saved().picks==1 and Nexus.OrbRuntime.RecoveryView().rawPickUnsaved==false,'the next pass saves it')
+ -- a flush that throws at a pass: no pause, no error, evidence kept
+ local H2,M2,A2,O2=World({latch=true}) -- held: the evidence is the only thing that is saved
+ S.Pass(H2,M2,A2,2)
+ local restore=R.BreakStore()
+ R.Pick(H2,S.IdQ(OFFER[2]))
+ restore()
+ check(Nexus.OrbRuntime.RecoveryView().rawPickUnsaved==true,'dirty')
+ H2.Advance(.01)
+ local state,reason=M2.Status().state,M2.Status().reason
+ local owner2=Nexus.MainInternals.StoreAuthorityOwner;local raw2=owner2.UpdateStateV1
+ owner2.UpdateStateV1=function() error('store exploded',0) end
+ H2.Advance(1)
+ owner2.UpdateStateV1=raw2
+ check(M2.Status().state==state and M2.Status().reason==reason and not M2.Status().reason:find('internal error',1,true),'a throwing flush changes no run state or text: '..tostring(M2.Status().state))
+ check(Nexus.OrbRuntime.RecoveryView().rawPickUnsaved==true,'and the evidence is still reported as unsaved')
+ H2.Advance(.5)
+ check(Nexus.OrbRuntime.RecoveryView().rawPickUnsaved==false,'saved once the store works')
+end)
+
+-- 19. A superseded adapter instance is inert: after a reload an old hook does not read the game.
+section('19 superseded instance',function()
+ local H,M,A,O=S.Fresh()
+ local src,slots=S.SpendOfferNoChoice(H,M,A,O)
+ local oldB=Nexus.GameAdapter.Orbs
+ local reads=0;local rawRead=oldB.Read
+ oldB.Read=function(...) reads=reads+1;return rawRead(...) end
+ M=R.Reload(H)   -- the new instance is not started; only the old hook is on the service
+ R.Pick(H,410002)
+ check(reads==0,'the old adapter instance did not read the game after the reload: '..reads)
+end)
+
+-- 20. The phase label is the phase AT the callback, also when the read then succeeds.
+section('20 phase at the callback',function()
+ local H,M,A,O=S.Fresh()
+ local src,slots=S.SpendOfferNoChoice(H,M,A,O)
+ R.Leaving(H);R.Entering(H)
+ check(R.Pick(H,410003)==true,'the game accepted the pick')
+ local e=R.Saved().picks and R.Saved().picks[1]
+ check(e and e.ph=='r' and e.rd=='ok','just after the reentry, with a working read, the entry says reentry: '..tostring(e and e.ph)..'/'..tostring(e and e.rd))
+end)
+
+-- 21. If the raw read itself fails, an entry with the Echo id is still kept.
+section('21 raw read fails',function()
+ local H,M,A,O=World({latch=true})
+ H.service.SelectPerk=function() return true end -- the hook wraps this host function
+ S.Pass(H,M,A,2)
+ H.perks.currentChoice=nil
+ setmetatable(H.perks,{__index=function(t,k) if k=='currentChoice' then error('synthetic table failure',0) end end})
+ local id=S.IdQ(OFFER[2])
+ check(R.Pick(H,id)==true,'the host result reaches the caller')
+ setmetatable(H.perks,nil)
+ local p=R.Saved()
+ check(type(p.picks)=='table' and #p.picks==1 and p.picks[1].id==id,'an entry with the id is kept')
+ check(p.selectedKey==nil,'nothing is fabricated')
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end

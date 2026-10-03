@@ -583,5 +583,21 @@ section('23 unreadable pass',function()
  restore2()
 end)
 
+-- 24. A request that was not sent does not look like one that is awaiting a reply.
+section('24 request failure',function()
+ local H,M,A,O,server=World()
+ local original=H.Clone(R.Saved())
+ local orb=ProjectEbonhold.OrbService
+ local rawRequest=orb.RequestCharges
+ orb.RequestCharges=function() error('synthetic send failure',0) end
+ local ok,why=M.ContinueBegin()
+ check(ok==true or why==nil,'the check starts')
+ H.Advance(.5)
+ Refused(H,M,original,'request_failed','a send that failed')
+ orb.RequestCharges=rawRequest
+ Begin(M)
+ check(Run(H,M,10,'ready'),'the next check is not blocked by the request that never left: '..tostring(M.ContinueView().refusal))
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery refusals: stale, omitted, rejected, late, changed and failed inputs never release the blocker checks='..checks)
