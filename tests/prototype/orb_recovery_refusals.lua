@@ -471,6 +471,7 @@ section('17 support lines',function()
  local text=table.concat(Nexus.SupportReport.OrbLines(),'\n')
  check(text:find('continue',1,true) and text:find('reply_unqualified',1,true),'the last attempt and its reason')
  check(text:find('third_absent=',1,true) and text:find('sender=',1,true),'the strict-path counters name each reason')
+ check(text:find('partial fragments seen=',1,true) and not text:find('fragments waiting',1,true),'the fragment counter says what it counts')
  check(not text:find('Somebody',1,true) and not text:find(R.ME,1,true),'no player or sender name')
  for _,l in ipairs(Nexus.SupportReport.OrbLines()) do check(#l<500 and not l:find('[%z\1-\31]'),'bounded line') end
 end)

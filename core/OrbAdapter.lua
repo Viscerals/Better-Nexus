@@ -539,8 +539,9 @@ end
 -- in its cache. Only a COMPLETE message counts as an arrival that replaces what the game
 -- cached; an assembly that includes a rejected fragment completes a mixed message and taints.
 -- The game follows the FIRST fragment's total (a later fragment's own total is ignored, and a
--- forged fragment inside it is stored), and drops an assembly 15 s after its first fragment; both
--- are mirrored. The format allows 0xFFF fragments, so a large legitimate push is tracked in full.
+-- forged fragment inside it is stored), and drops an assembly 15 s after its first fragment. Both are
+-- mirrored; the expiry here runs before the lookup (the game's runs after it), so this can only
+-- under-count a completion, never over-count one. The format allows 0xFFF fragments, so a large legitimate push is tracked in full.
 -- At most SEG_ASSEMBLIES are tracked (the oldest is forgotten and never completes). A fragment
 -- outside its assembly (index or total out of range) is an unqualified admitted packet: it taints.
 -- Returns "partial", "complete", "mixed" or "range".

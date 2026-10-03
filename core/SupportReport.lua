@@ -724,7 +724,7 @@ local function continueLines()
             .. " channel=" .. bigCount(r.channel) .. " segmented=" .. bigCount(r.segmented)
             .. " third_absent=" .. bigCount(r.third_absent) .. " fields_extra=" .. bigCount(r.fields_extra)
             .. " malformed=" .. bigCount(r.malformed) .. " range=" .. bigCount(r.range) .. " mixed=" .. bigCount(r.mixed)
-            .. "; fragments waiting=" .. bigCount(c.seg)
+            .. "; partial fragments seen=" .. bigCount(c.seg)
             .. "; local epoch=" .. bigCount(st.epoch) .. " (rejects local work only; no server correlation)"
     end
     for index = math.max(1, #log - 1), #log do

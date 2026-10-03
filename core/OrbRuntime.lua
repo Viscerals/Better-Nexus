@@ -1075,7 +1075,8 @@ end
 --   and the balance must equal the game's own cache; an ownership push must have been
 --   observed after the first request and the game's ownership view must have been replaced.
 --   Requests are serialized: the second goes out only after the first reply was observed,
---   and none goes out while an earlier Nexus request has no observed reply. The whole time:
+--   and none goes out while an earlier Nexus request has no observed reply, unless that request went
+--   unanswered for the whole wait and was given up (a refusal ends the wait). The whole time:
 --   an empty board, no pending Orb offer, no pick, no host action, no in-flight action, no
 --   Nexus intent; the balance, the rolled and locked Echoes and the slot unchanged; no
 --   rejected relevant packet, no choice or pick-result packet, no loading transition.
@@ -1249,7 +1250,8 @@ function RC.refuse(rc,reason)
     if rc.stage=="refused" and rc.refusal==reason then return end
     rc.stage="refused";rc.refusal=reason;rc.token=nil;rc.step=nil
     -- A request that went unanswered for the whole wait is given up: the next check may send its own.
-    -- (A late answer to it is indistinguishable from an answer to the next request: see the notes above.)
+    -- (A late answer to it is indistinguishable from an answer to the next request: arrival order is not a
+    -- correlation, the limit stated in the check's notes at the top of this block.)
     if reason=="no_reply" then RS.reqMark=nil end
     noteAttempt(rc,"refused",reason)
 end

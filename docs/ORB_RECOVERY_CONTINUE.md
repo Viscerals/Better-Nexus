@@ -64,8 +64,9 @@ parsed numbers and enumerated codes, never a sender, a name or a payload.
   by arrival only (16 offers, 18 ownership, 540 and 542 slot data, 1000 pick results). For those
   opcodes a segmented message is tracked by fragment: the game calls its handler only when every
   fragment has arrived, so a fragment alone replaces nothing and makes no record; only a COMPLETE
-  message is an arrival. The assembly follows the first fragment's total and expires 15 s after it,
-  as the game's own does. Up to the format limit of 4095 fragments are tracked; at most eight
+  message is an arrival. The assembly follows the first fragment's total, as the game's does, and
+  expires 15 s after it. The observer expires eagerly (before the lookup; the game cleans up after it), so it
+  can only under-count a completion, never over-count one. Up to the format limit of 4095 fragments are tracked; at most eight
   assemblies at a time; a fragment outside its assembly is an unqualified admitted packet and taints. A leading-zero opcode
   ("01220") reaches the game's handler as 1220, so it is recorded and never qualifies.
 * Class R: a relevant packet that the game's dispatcher would still accept and the observer
@@ -93,7 +94,9 @@ The check (a session-only state machine, driven by the passive recovery pass):
 1. needs the observer; asks the game for a refresh; waits for the first qualifying charge reply
    observed after that request began; asks again; waits for the second. Requests are serialized
    (the second goes out only after the first reply was observed; none while an earlier Nexus
-   request has no observed reply in this epoch);
+   request has no observed reply in this epoch, unless that request went unanswered for the whole
+   wait and was given up: a `no_reply` refusal ends the wait, and a late answer to it is then
+   indistinguishable from an answer to the next request);
 2. each reply needs an explicit third field of 0, a reported change (the second field) of 0 and the same balance, and that balance must equal
    the game's own cache; an ownership push must have been observed after the first request and the
    game's ownership view must have been replaced;
