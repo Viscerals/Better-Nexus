@@ -64,6 +64,85 @@ function R.Calls(H)
  return calls
 end
 
+-- The reported class, built from the deidentified shape of 034: a restored receipt
+-- with a confirmed spend, no recorded choice, and the original offer gone (no board,
+-- no pending offer). opts.latch (default true): the loadout hold is set, as reported;
+-- false: the original slot is still the live slot. opts.slot, opts.known, opts.charges.
+function R.Class(opts)
+ opts=opts or {}
+ local H,M,A,O=S.World(S.Shape(),{slot=opts.slot or 101,known=opts.known,latch=opts.latch~=false,
+  charges=opts.charges or S.Shape().receipt.chargesBefore-1,open=false})
+ -- opts.edit(savedReceipt,storeReceipt) changes the receipt as the next load reads it.
+ if opts.edit then M=S.Reload(H,opts.edit) end
+ return H,M,A,O
+end
+
+local ME='PrototypeTester'
+R.ME=ME
+R.PREFIX='AAM0x9'
+-- A synthetic server for the transport model. It answers RequestCharges with a reply that
+-- arrives at the NEXT update tick (never inside the request call), applies to the fake
+-- OrbService what the game's own handler would (the charge count, and the pending count only
+-- when the reply has a third field), and fires the packet to every frame, as the client does.
+-- RequestGrantedPerks is answered with an ownership push (opcode 18). Nothing here says a
+-- reply belongs to a request: the model delivers in order and a test can reorder, hold,
+-- duplicate or drop. opts.body(n) may return the body of reply n; opts.mode:
+-- 'auto' (default), 'hold' (replies wait for server.Release) or 'drop'.
+function R.Server(H,opts)
+ opts=opts or {}
+ local server={mode=opts.mode or 'auto',queue={},requests=0,delivered=0,sender=ME,dist='WHISPER',
+  pendingOffers=0,sent={},noCache=opts.noCache==true}
+ local O=H.orbs
+ local function Body(n)
+  if opts.body then local b=opts.body(n,server);if b~=nil then return b end end
+  return tostring(O.charges)..',0,'..tostring(server.pendingOffers)
+ end
+ local rawRequest=ProjectEbonhold.OrbService.RequestCharges
+ ProjectEbonhold.OrbService.RequestCharges=function(...)
+  server.requests=server.requests+1
+  if server.mode~='drop' then server.queue[#server.queue+1]={op=1220,body=Body(server.requests)} end
+  return rawRequest(...)
+ end
+ local rawGranted=H.service.RequestGrantedPerks
+ H.service.RequestGrantedPerks=function(...)
+  if server.mode~='drop' then server.queue[#server.queue+1]={op=18,body='x'} end
+  return rawGranted(...)
+ end
+ -- The game's own handler: the charge count is replaced; the pending count only when a
+ -- third field is present and is a number (the audited client reads a bad one as zero).
+ function server.GameCache(body)
+  local a,b,c=body:match('^([^,]*),([^,]*),?([^,]*)$')
+  if a~=nil then O.charges=tonumber(a) or 0 end
+  if body:find('^[^,]*,[^,]*,') then O.offer=(tonumber(c) or 0)>0 end
+ end
+ function server.Deliver(item,opts2)
+  opts2=opts2 or {}
+  if item.op==1220 and not opts2.noCache and not server.noCache then server.GameCache(item.body) end
+  -- opts2.sender / opts2.dist: false means "no value at all" (nil), absent means the normal one.
+  local sender,dist=server.sender,server.dist
+  if opts2.sender~=nil then sender=opts2.sender end
+  if opts2.dist~=nil then dist=opts2.dist end
+  if sender==false then sender=nil end
+  if dist==false then dist=nil end
+  H.Fire('CHAT_MSG_ADDON',R.PREFIX,item.op..'	'..item.body,dist,sender)
+  server.delivered=server.delivered+1
+ end
+ function server.Release(n)
+  local count=0
+  while #server.queue>0 and (not n or count<n) do
+   server.Deliver(table.remove(server.queue,1));count=count+1
+  end
+  return count
+ end
+ local tick=CreateFrame('Frame')
+ tick:SetScript('OnUpdate',function()
+  if server.mode=='auto' then server.Release() end
+ end)
+ -- A packet that arrives on its own (not an answer to anything Nexus did).
+ function server.Push(op,body,opts2) server.Deliver({op=op,body=body},opts2) end
+ return server
+end
+
 -- Deep equality of two plain tables.
 function R.Same(a,b)
  if type(a)~=type(b) then return false end
