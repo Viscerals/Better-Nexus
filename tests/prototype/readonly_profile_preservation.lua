@@ -109,7 +109,7 @@ local function AutoRun(mutate)
  ProjectEbonholdOptionsService:SetSetting('autoAcceptLoadoutEchoes',false)
  local A=Nexus.GameAdapter
  check(A.SetFirstLoadoutWishlistIdentity('EchoWeaver planned',{{spellId=200001,quality=1,stacks=2}}),'fixture: first run plan')
- H.Board({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+ H.Board({{spellId=200001,quality=1},{spellId=200001,quality=1},{spellId=200021,quality=1}})
  H.Notify();H.Advance(.5)
  SlashCmdList.NEXUS('auto');H.Advance(3)
  local kinds={}

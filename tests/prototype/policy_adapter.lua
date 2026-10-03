@@ -167,7 +167,9 @@ function Adapter.State(input)
   params=Nexus.DefaultProfile.params,
   searchRefused={banish=false,reroll=input.allowReroll~=true},
   rerollBudget={consecutive=0,consecutiveLimit=3,bracketSpent=0,bracketLimit=4,reserve=5},
-  pending=input.pending,pendingAction=input.pendingAction}
+  pending=input.pending,pendingAction=input.pendingAction,
+  -- nil = the default policy (adaptive); 'released' pins released-nexus-1.
+  rollingPolicy=input.rollingPolicy}
  if legacyRuntime or input.forceVerifiedFlag~=nil then
   state.snapshotVerified=input.forceVerifiedFlag==nil and verified or input.forceVerifiedFlag
  end

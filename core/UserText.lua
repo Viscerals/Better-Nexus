@@ -105,6 +105,8 @@ end
 function T.Annotation(value)
     return ({wanted="Needed",["returns later"]="Not taken now; a later offer is not guaranteed",
         banked="Held offer",filler="Not on Wishlist",["low quality"]="Different quality from target",
-        ["target met"]="Target already met",["wrong quality"]="Different quality from target"})[value] or T.Message(value)
+        ["target met"]="Target already met",["wrong quality"]="Different quality from target",
+        -- EchoWeaver's own words for the same states.
+        ["target satisfied"]="Target already met",frozen="Frozen offer"})[value] or T.Message(value)
 end
 function T.Details(code) return "Details: "..tostring(code or "unknown") end

@@ -4,6 +4,10 @@ local S=dofile('tests/prototype/share_test_support.lua');local T=S.T
 T.SingleSlicePacing()
 for _,kind in ipairs({'put','retention'})do
 local H,C=S.Boot();S.Incoming(H,C)
+-- The fixture needs a later catalog write that lasts more than 120 seconds
+-- under single-slice pacing. A Put re-admits rows; with verdict reuse it
+-- would finish sooner, so this fixture keeps the full row walk.
+if kind=='put' then C.DebugSetVerdictReuse(false) end
 -- Hold the real wire guard during setup so frame timing cannot submit before
 -- the later candidate exists. Release it before the behavior under test.
 H.combat=true

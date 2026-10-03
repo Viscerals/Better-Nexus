@@ -30,6 +30,10 @@ local PATH_ORDER = {
     "automation.phase.overlay-prepare",
     "automation.phase.overlay-render",
     "decision.policy",
+    -- Automatic local roll recorder (core/RollRecorder.lua), observation only.
+    "rolltrace.decision",
+    "rolltrace.intent",
+    "rolltrace.after",
     "sync.update",
     "sync.incoming",
     "dps.update",
@@ -48,15 +52,57 @@ local PATH_ORDER = {
     "lifecycle.update",
     "automation.update",
     "gameadapter.poll",
+    -- Sub-steps of lifecycle.update (inclusive; each runs inside it).
+    "lifecycle.phase.rebind",
+    "lifecycle.phase.store",
+    "lifecycle.phase.community",
+    "lifecycle.phase.maintenance",
+    "lifecycle.phase.catalog",
+    "lifecycle.phase.hashes",
+    "lifecycle.phase.share",
+    "lifecycle.phase.transport",
+    -- After lifecycle.update, in the same frame script (not inside it).
+    "lifecycle.loading-status",
+    -- Sub-steps of hud.prepare (inclusive; each runs inside it).
+    "hud.phase.assignment",
+    "hud.phase.projection",
+    "hud.phase.view-model",
 }
 local PATHS = {}
 for _, name in ipairs(PATH_ORDER) do PATHS[name] = true end
 local AGGREGATE_ONLY = {}
+-- Only automation.phase.* compete for the dominant phase of automation.step.
+local STEP_PHASES = {}
 for _, name in ipairs(PATH_ORDER) do
-    if name:find("automation.phase.", 1, true) == 1 then
+    if name:find("automation.phase.", 1, true) == 1 then STEP_PHASES[name] = true end
+    if name:find("automation.phase.", 1, true) == 1
+        or name:find("lifecycle.phase.", 1, true) == 1
+        or name:find("hud.phase.", 1, true) == 1
+        or name == "lifecycle.loading-status" then
         AGGREGATE_ONLY[name] = true
     end
 end
+-- The measured parent each direct sub-step runs inside. While a parent with a
+-- tracker runs, its largest finished sub-step (inclusive time) is kept, and
+-- the parent's recent-operation entry names it in its mode/outcome fields.
+-- automation.step keeps its own tracker below (automation.phase.*).
+local SUBSTEP_PARENT = {
+    ["automation.update"] = "lifecycle.update",
+    ["sync.update"] = "lifecycle.update",
+    ["dps.update"] = "lifecycle.update",
+    ["gameadapter.poll"] = "automation.update",
+}
+for _, name in ipairs(PATH_ORDER) do
+    if name:find("lifecycle.phase.", 1, true) == 1 then
+        SUBSTEP_PARENT[name] = "lifecycle.update"
+    elseif name:find("hud.phase.", 1, true) == 1 then
+        SUBSTEP_PARENT[name] = "hud.prepare"
+    end
+end
+local trackers = {
+    ["lifecycle.update"] = {active=false,name="none",ms=0,fields={mode="none",outcome=0}},
+    ["hud.prepare"] = {active=false,name="none",ms=0,fields={mode="none",outcome=0}},
+}
 
 local enabled = true
 local injectedClock = nil
@@ -116,6 +162,11 @@ local function ReadSessionTime()
     local ok, value = pcall(GetTime)
     return ok and FiniteNumber(value) or nil
 end
+
+-- Observation window of the aggregates, in session seconds (GetTime): from
+-- module load or the last full Reset to the last completed lifecycle.update.
+local windowStartedAt = ReadSessionTime()
+local lastLifecycleAt = nil
 
 local function ControlledScalar(value)
     local kind = type(value)
@@ -226,7 +277,7 @@ function Performance.Finish(name, startedAt, classifications)
     if not finishedAt then return false end
     local elapsed = finishedAt - startedAt
     if elapsed < 0 then return false end
-    if activeAutomationStep and AGGREGATE_ONLY[name]
+    if activeAutomationStep and STEP_PHASES[name]
         and elapsed > activeStepDominantMs then
         activeStepDominantName = name
         activeStepDominantMs = elapsed
@@ -243,6 +294,16 @@ function Performance.Finish(name, startedAt, classifications)
             lastSlowStep.endTime = ReadSessionTime() or 0
         end
     end
+    local parent = trackers[SUBSTEP_PARENT[name]]
+    if parent and parent.active and elapsed > parent.ms then
+        parent.name, parent.ms = name, elapsed
+    end
+    local own = trackers[name]
+    if own and own.active then
+        own.fields.mode, own.fields.outcome = own.name, own.ms
+        classifications = own.fields
+    end
+    if name == "lifecycle.update" then lastLifecycleAt = ReadSessionTime() end
     local aggregate = aggregates[name]
     if not aggregate then
         aggregate = {count=0, total=0, maximum=0, last=0}
@@ -265,6 +326,8 @@ end
 local function Complete(name, startedAt, ...)
     Performance.Finish(name, startedAt)
     if name == "automation.step" then activeAutomationStep = false end
+    local tracker = trackers[name]
+    if tracker then tracker.active = false end
     return ...
 end
 
@@ -280,6 +343,8 @@ function Performance.Measure(name, callback, ...)
         activeStepDominantName = "none"
         activeStepDominantMs = 0
     end
+    local tracker = trackers[name]
+    if tracker then tracker.active, tracker.name, tracker.ms = true, "none", 0 end
     -- Callback errors intentionally propagate unchanged. In that case there is
     -- no completed sample to aggregate, and no result-packing allocation.
     return Complete(name, startedAt, callback(...))
@@ -330,6 +395,10 @@ function Performance.Reset(name)
     aggregates = {}
     operations = {}
     clockFailures = 0
+    windowStartedAt, lastLifecycleAt = ReadSessionTime(), nil
+    for _, tracker in pairs(trackers) do
+        tracker.active, tracker.name, tracker.ms = false, "none", 0
+    end
     activeAutomationStep = false
     activeStepDominantName = "none"
     activeStepDominantMs = 0
@@ -388,6 +457,20 @@ function Performance.Definitions()
     local names = {}
     for index, name in ipairs(PATH_ORDER) do names[index] = name end
     return names
+end
+
+-- Session seconds (GetTime) of the aggregates' observation window: from module
+-- load or the last full Reset to the last completed lifecycle.update (nil
+-- until one completes).
+function Performance.Window()
+    return {startedAt=windowStartedAt, lastLifecycleAt=lastLifecycleAt}
+end
+
+-- The measured parent a sub-step path always runs inside, or nil.
+function Performance.ParentOf(name)
+    return SUBSTEP_PARENT[name]
+        or (type(name) == "string" and name:find("automation.phase.", 1, true) == 1
+            and PATHS[name] and "automation.step") or nil
 end
 
 function Performance.Instrument(name, owner, key)

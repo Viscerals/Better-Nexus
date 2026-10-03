@@ -66,7 +66,10 @@ function M.CardLine(card, annotation, delta)
     local q = QUALITY_NAMES[card.quality]
     if q then parts[#parts + 1] = "(" .. q .. ")" end
     -- Scores remain available in diagnostics; they are priorities, not DPS.
-    if annotation ~= nil and annotation ~= "" then
+    -- The "[Guaranteed offer]" prefix already states EchoWeaver's
+    -- "guaranteed" annotation.
+    if annotation ~= nil and annotation ~= ""
+        and not (annotation == "guaranteed" and card.isGuaranteed) then
         parts[#parts + 1] = Nexus.UserText and Nexus.UserText.Annotation(annotation) or tostring(annotation)
     end
     return table.concat(parts, " ")

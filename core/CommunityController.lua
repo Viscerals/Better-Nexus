@@ -3135,12 +3135,15 @@ function Controller.New(options)
     local function RepairedIdentity(build)
         if type(build.echoes) ~= "table" or #build.echoes == 0 then return nil end
         local candidate = ShallowCopy(build)
+        -- needsFullBuild nil and false both mean "no full build needed" (Sync
+        -- stores received builds with nil); that alone is not worth a
+        -- whole catalog mutation pass at start-up.
         if RefreshBuildIdentity(candidate)
             and (build.fingerprint ~= candidate.fingerprint
                 or build.fingerprintHash ~= candidate.fingerprintHash
                 or build.echoCount ~= candidate.echoCount
                 or build.loadoutAvailable ~= candidate.loadoutAvailable
-                or build.needsFullBuild ~= candidate.needsFullBuild) then
+                or (build.needsFullBuild == true) ~= (candidate.needsFullBuild == true)) then
             return candidate
         end
     end

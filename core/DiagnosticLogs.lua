@@ -14,8 +14,11 @@ local DEFINITIONS = {
     runAudit = {key="runAudit", cap=240},
     autoLock = {key="autoLockLog", cap=150},
     uiProbe = {key="uiProbeLog", cap=120},
+    -- Automatic local roll recorder (core/RollRecorder.lua). `explicit`: the
+    -- all-history clear leaves it alone; only its own command clears it.
+    rollTrace = {key="rollTraceLog", cap=256, explicit=true},
 }
-local ORDER = {"decision", "runAudit", "autoLock", "uiProbe"}
+local ORDER = {"decision", "runAudit", "autoLock", "uiProbe", "rollTrace"}
 local META_SCHEMA = 1
 local STORAGE_SCHEMA = 1
 local FUTURE_STORAGE_REASON =
@@ -326,6 +329,43 @@ local function Protected(defaultValue, callback, ...)
     return first, second
 end
 
+-- Passive question: does this history already exist? It never creates, repairs or
+-- normalizes anything, so a read-only caller (a report) can ask before it reads.
+function Logs.Exists(name)
+    return Protected(false, function()
+        local definition = DEFINITIONS[name]
+        if not definition or type(NexusDB) ~= "table" then return false end
+        return type(rawget(CurrentDB(), definition.key)) == "table"
+    end)
+end
+
+-- Passive read of a history: copies its records and reports its bookkeeping, and never
+-- creates, repairs or normalizes anything. A history whose stored state is missing,
+-- inconsistent or from a future schema is not read and answers nil with the reason.
+-- A missing history is an empty one.
+function Logs.Peek(name)
+    local records, info = Protected(nil, function()
+        local definition = DEFINITIONS[name]
+        if not definition then return nil, "unknown history" end
+        if type(NexusDB) ~= "table" then return {}, {cap = definition.cap, dropped = 0} end
+        local db = CurrentDB()
+        local source = rawget(db, definition.key)
+        if type(source) ~= "table" then return {}, {cap = definition.cap, dropped = 0} end
+        if FutureHistoryMeta(db, name) then return nil, "future storage schema" end
+        local meta = ExistingHistoryMeta(db, name)
+        if not meta then return nil, "no bookkeeping" end
+        local state = StoredState(meta, definition, source)
+        if not state then return nil, "inconsistent storage" end
+        local out = {}
+        for index = state.head, state.tail do
+            local copy = DefensiveCopy(source[index])
+            if copy ~= nil then out[#out + 1] = copy end
+        end
+        return out, {cap = definition.cap, dropped = Number(meta.dropped)}
+    end)
+    return records, info
+end
+
 function Logs.Init(database)
     return Protected(false, function()
         local db = CurrentDB(database)
@@ -448,11 +488,13 @@ function Logs.ClearAll()
         -- owns its physical index semantics, so the all-history operation is
         -- refused before changing any array or metadata table.
         for _, name in ipairs(ORDER) do
-            if FutureHistoryMeta(db, name) then
+            if not DEFINITIONS[name].explicit and FutureHistoryMeta(db, name) then
                 return false, FUTURE_STORAGE_REASON
             end
         end
-        for _, name in ipairs(ORDER) do ClearUnsafe(name, db) end
+        for _, name in ipairs(ORDER) do
+            if not DEFINITIONS[name].explicit then ClearUnsafe(name, db) end
+        end
         return true
     end)
 end

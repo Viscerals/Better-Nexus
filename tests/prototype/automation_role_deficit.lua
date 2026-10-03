@@ -42,6 +42,8 @@ local function row(id,stacks,locked) local r={spellId=id,quality=id%4,stacks=sta
 local lockX={[X]={version=1,copies=1,rows={{spellId=X,quality=X%4,stacks=1,locked=true,sourceRole='locked'}}}}
 local oneLock={{spellId=X,stacks=1}}
 local function Kept(r) return r.action=='freeze' or r.action=='take' end
+-- The default policy searches an unwanted board with Banish before Reroll.
+local function Searched(r) return r.action=='reroll' or r.action=='banish' end
 
 -- 1. Explicit ordinary X is requested; one X is locked and no ordinary X is
 -- held. The ordinary copy is still needed: the offered X is wanted and kept,
@@ -66,14 +68,14 @@ do
  local r=Run('locked-only',{echoes={row(Y,1,false)},design=lockX,locked=oneLock})
  check(not r.hudMissing,'fixture: nothing of X is missing in the HUD')
  check(r.ann=='target satisfied','the offered X is not wanted: '..tostring(r.ann))
- check(r.action=='reroll','and the board is searched further: '..tostring(r.action))
+ check(Searched(r),'and the board is searched further: '..tostring(r.action))
 end
 
 -- 4. Enough ordinary copies satisfy the ordinary target, whatever the locks.
 do
  local r=Run('ordinary-held',{echoes={row(X,1,false),row(Y,1,false)},design={},locked=oneLock,ordinaryOwned=1})
  check(not r.hudMissing,'fixture: the ordinary X is held')
- check(r.ann=='target satisfied' and r.action=='reroll','an X already held ordinarily is not wanted again: '..tostring(r.ann))
+ check(r.ann=='target satisfied' and Searched(r),'an X already held ordinarily is not wanted again: '..tostring(r.ann))
 end
 
 -- 5. Two ordinary copies requested, one held ordinarily, one X locked: one
@@ -88,7 +90,7 @@ end
 -- further X is needed (the lock acquisition is preserved, not doubled).
 do
  local r=Run('future-lock',{echoes={row(Y,1,false)},design=lockX,locked={},ordinaryOwned=1})
- check(r.ann=='target satisfied' and r.action=='reroll','the held rolled X serves the locked target: '..tostring(r.ann))
+ check(r.ann=='target satisfied' and Searched(r),'the held rolled X serves the locked target: '..tostring(r.ann))
 end
 do
  local r=Run('future-lock-and-ordinary',{echoes={row(X,1,false),row(Y,1,false)},design=lockX,locked={},ordinaryOwned=1})
@@ -100,7 +102,7 @@ end
 do
  local r=Run('untyped',{echoes={row(X,1,nil),row(Y,1,nil)},design=nil,locked=oneLock})
  check(not r.hudMissing,'fixture: the untyped HUD credits the lock')
- check(r.ann=='target satisfied' and r.action=='reroll','and so does automation, as before: '..tostring(r.ann))
+ check(r.ann=='target satisfied' and Searched(r),'and so does automation, as before: '..tostring(r.ann))
 end
 
 -- 8. Locked ownership not known yet: no decision is made on a guess.
@@ -123,7 +125,7 @@ do
  local lockZ={[Z]={version=1,copies=1,rows={{spellId=Z,quality=Z%4,stacks=1,locked=true,sourceRole='locked'}}}}
  local r=Run('untyped-with-design',{echoes={row(X,1,nil),row(Y,1,nil)},design=lockZ,locked=oneLock})
  check(not r.hudMissing,'fixture: the untyped HUD credits the lock of X')
- check(r.ann=='target satisfied' and r.action=='reroll','and so does automation: '..tostring(r.ann))
+ check(r.ann=='target satisfied' and Searched(r),'and so does automation: '..tostring(r.ann))
 end
 
 -- 11. A role-only change after the plan was compiled: the same Echoes and

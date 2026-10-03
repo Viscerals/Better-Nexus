@@ -657,12 +657,24 @@ end
 
 local function ShowLoadoutSwitchMenu(anchor)
     if loadoutSwitchMenu and frame and loadoutSwitchMenu:GetParent() ~= frame then loadoutSwitchMenu:SetParent(frame) end
-    -- Saved Builds are the server's fixed slots 1-5. Build this selector
-    -- directly from those slots instead of relying on inferred candidates.
+    -- Saved Builds are the server's slots 1..maxSlots, as the server declares
+    -- them (Slots() reports 5 when it declares nothing). Slots above that are
+    -- Wishlist mirrors, never Saved Builds. A declaration that is not a whole
+    -- number from 1 up is not trusted, and the selector keeps its five rows;
+    -- a very large one is limited to MAX_SELECTOR_SLOTS rows (a display
+    -- limit, not a statement about the server). Build this selector directly
+    -- from those slots instead of relying on inferred candidates.
     local slots = View and View.Slots and View.Slots()
     local active = slots and tonumber(slots.activeSlot) or 0
+    local MAX_SELECTOR_SLOTS = 10
+    local declared = slots and tonumber(slots.maxSlots)
+    local count = 5
+    if declared and declared >= 1 and declared < math.huge
+        and declared == math.floor(declared) then
+        count = math.min(declared, MAX_SELECTOR_SLOTS)
+    end
     local candidates = {}
-    for slot = 1, 5 do
+    for slot = 1, count do
         local data = slots and slots.bySlot and slots.bySlot[slot]
         local name = data and tostring(data.name or "") or ""
         if name == "" then name = "Loadout " .. tostring(slot) end
@@ -693,7 +705,7 @@ local function ShowLoadoutSwitchMenu(anchor)
             loadoutSwitchMenu:SetBackdropBorderColor(0.48, 0.42, 0.25, 1)
         end)
     end
-    local visible = 5
+    local visible = #candidates
     loadoutSwitchMenu:SetSize(230, 18 + math.max(1, visible) * 24)
     loadoutSwitchMenu:ClearAllPoints()
     loadoutSwitchMenu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)

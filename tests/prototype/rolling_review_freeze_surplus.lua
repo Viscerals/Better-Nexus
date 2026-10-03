@@ -6,6 +6,10 @@
 -- (real pure modules in TOC order). Fixtures only; no draw odds; no general
 -- efficiency claim.
 local P=dofile('tests/prototype/policy_adapter.lua');P.Load()
+-- Pinned to the RELEASED policy (released-nexus-1): the rules checked here belong
+-- to it. The default policy is adaptive; see adaptive_policy_*.lua.
+local ReleasedDecide=P.Decide
+P.Decide=function(input)input.rollingPolicy='released';return ReleasedDecide(input)end
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local catalog=P.Catalog({a={[0]=101},b={[0]=102},x={[0]=901},y={[0]=902}})
 local plan=P.Plan(catalog,{{spellId=101,stacks=1},{spellId=102,stacks=1}})

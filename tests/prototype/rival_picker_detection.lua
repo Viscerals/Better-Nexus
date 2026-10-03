@@ -19,7 +19,7 @@ EchoOptimizer=nil
 check(A.RivalDetected()==false,'detection clears when no other picker is loaded')
 -- The protection reaches automation: nothing is submitted while one is loaded.
 check(A.SetFirstLoadoutWishlistIdentity('Rival check',{ {spellId=200001,quality=1,stacks=2} }),'set a plan')
-H.Board({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+H.Board({{spellId=200001,quality=1},{spellId=200001,quality=1},{spellId=200021,quality=1}})
 H.Notify();H.Advance(.5)
 SlashCmdList.LOADOUTPILOT=function() end
 SlashCmdList.NEXUS('auto');H.Advance(1.2)

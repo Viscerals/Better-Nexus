@@ -33,6 +33,14 @@ For an unverified format, a future format and a malformed marker, "read-only" co
 
 Earlier builds (test.9033 and older, and up to the change above) wrote a catalog bundle and diagnostic keys into such data. What they wrote is kept as it is.
 
+## Rolling strategy setting and local roll record (experimental builds)
+
+- **Settings.** `rollingPolicy` (`"adaptive"` or `"released"`, default `"adaptive"`) and `rollTrace` (default `true`; recording is off only for an exact `false`). Neither authorizes an action. A missing value uses the default. In a read-only saved root a valid saved value is honored for the session and nothing is written. In a writable root an invalid saved `rollingPolicy` runs the released strategy and the status says `SELECTOR_UNKNOWN`. In a read-only root an invalid value is not copied into the session settings, so the session uses the default (`adaptive`) with no fallback reason.
+- **Record.** The key `rollTraceLog` holds at most 256 flat records (an array with the same head, tail and repair metadata as the other diagnostic histories, in `diagnosticMeta.histories.rollTrace`). It holds Echo ids, counts and observed offers only: no account, character or realm name, no Wishlist or build name, no chat. An older build ignores the key and keeps it. `/nexus logclear` leaves it alone; `/nexus trace clear` deletes it.
+- **Read-only saved data.** Nothing is written to the saved root. The session keeps its own record in session memory, like every other diagnostic history.
+
+Details: `docs/ADAPTIVE_ROLLING.md`.
+
 ## Upgrading from a build that kept the data read-only
 
 test.9033 and earlier kept formats 3 to 5 read-only. In that state the Store built no Store-data wrapper. The catalog still saved its data bundle, with an empty Store-data placeholder in it. test.9034 and test.9035 then refused that placeholder: start-up failed with `STORE_INVALID`, and the displayed reason had no further detail. This is reproduced on the exact sources: synthetic format-5 data started on test.9033 (`487eaa9`), then on test.9035 (`753e384`).
@@ -41,6 +49,41 @@ From the build after test.9035:
 
 - **The empty placeholder is accepted as a first admission.** When the bundle holds exactly the empty placeholder and the saved format is an accepted 3 to 5, the Store builds its data wrapper as a first admission does. Start-up adds only the usual missing defaults; no saved value is changed or removed. Any other invalid wrapper still fails, and so does the placeholder for any other format. The placeholder stays in the saved bundle until a later catalog save replaces the bundle; until then each start-up builds the wrapper again in the same way, which changes nothing else.
 - **Start-up failures state their cause.** A failed start-up keeps its failure code (for example `STORE_INVALID`). `/nexus status` (and any command while start-up has failed) adds one line with the retained facts: stage, cause, detail, owner, a bounded one-line error, the selection row, and the saved-format verdict. These are session-only. Reading them binds, retries and writes nothing.
+
+## Older Nexus data next to your current data (`WishlistRealizerDB`)
+
+`WishlistRealizerDB` is a saved variable that `Nexus.toc` still declares for older data. Nexus does not know where a given profile's copy came from. When a profile holds current data and a separate, non-empty `WishlistRealizerDB`, start-up stops at `STORE_LEGACY_DISPOSITION_PENDING` with `LEGACY_DISPOSITION_REAUTH_REQUIRED` and the legacy class `FOREIGN_BLOCK`. Nexus does not guess which data is yours. It does not delete, import or merge anything. A receipt that an earlier start-up recorded (`nexusStoreMigrations.wishlistRealizerDB`, for example `decision = "noLegacy"`) is not permission to discard the older data.
+
+| Case | Behavior |
+|---|---|
+| No `WishlistRealizerDB` | Unchanged. |
+| `WishlistRealizerDB` is the current root (alias) | Unchanged. One verified nil write. |
+| Distinct, empty `WishlistRealizerDB` | Unchanged. Kept as it is; it grants nothing. |
+| No current data, a non-empty `WishlistRealizerDB` | Unchanged. It becomes the current root. |
+| Future, unverified or malformed saved format (read-only), invalid or non-plain current data | Unchanged. No recovery is offered: a read-only profile is read-only as a whole, so no key is added and nothing is released. |
+| Current data and a distinct, non-empty `WishlistRealizerDB` | Start-up stops, as before. **New:** the player can keep the current setup and preserve the older data, with an explicit confirmation. |
+
+### Keep my current setup and preserve the older data
+
+1. Type `/nexus legacy`. It reads and writes nothing. It shows what was found (tables, bytes) and a 12-character code that belongs to this exact older data.
+2. Type `/nexus legacy keep <code>` with that code.
+3. Type `/reload`. Nexus starts with the current setup. The session is not resumed in place.
+
+| Step of the confirmation | What it checks or does |
+|---|---|
+| Inputs | The legacy table, the current root, its authority bundle and its migration receipt are the same ones the offer was made for, and the legacy value has the same digest. Any difference is `INPUT_DRIFT`; type `/reload` and review again. |
+| Copy | The legacy value is copied in full, verified equal, and stored under `nexusLegacyPreservationV1.entries[<digest>]` in your saved data. This store is separate from the current data and non-authoritative. Sync, Wishlists, assignments, Community and the catalog never read it. |
+| Release | Only after the copy is verified, `WishlistRealizerDB` is released with one verified nil write. |
+| Rollback | If any later step fails, the call removes only what it added and leaves `WishlistRealizerDB` in place. |
+| Untouched | The current authority, characters, settings and the old receipt. |
+
+After you confirm, the older data is kept in the archive and `WishlistRealizerDB` is cleared. Another addon that reads that variable would find it empty. Nexus has no in-game command that puts it back.
+
+Refusals change nothing. `NO_OFFER`, `CODE_MISMATCH`, `INPUT_DRIFT`, `LEGACY_NOT_PRESERVABLE` (a metatable, a cycle, a shared table, a function, a non-finite number, a key that is not a string, number or boolean), `PRESERVATION_CAPACITY` (more than 16 levels, 65,536 tables, 16,384 bytes in one string, 256 bytes in one key, 4 MiB in all, 524,288 entries in all across every table, or four entries already stored), `RECEIPT_FUTURE` and `RECEIPT_MALFORMED` (a receipt from a newer build, or a malformed one), `ARCHIVE_MALFORMED`, `ARCHIVE_FUTURE`, `ARCHIVE_CONFLICT` (an entry with this digest holds a different value; entries are never overwritten), `PRESERVATION_FAILED` and `DISPOSITION_FAILED`. The answer to `/nexus legacy` names the bound or the value that blocked the copy. `ROLLBACK_INCOMPLETE` means a late failure could not put the older copy back: the verified copy stays in the archive, nothing is lost, and the player types `/reload`. The size shown with the code is the size of the data Nexus compared, not the size of the file. An equal entry left by an interrupted earlier attempt is reused, not duplicated.
+
+If the game stops before the saved data is written, the file still holds the refusal state. The same refusal returns and the same steps work again.
+
+Evidence limit: the offline tests round-trip synthetic data through serialized saved text. They are not a native game save and reload. Two assumptions need the game and are not tested: that WoW leaves a nil global out of the saved file, and that the serialized text used in the tests equals what WoW reloads.
 
 ## Character rows
 

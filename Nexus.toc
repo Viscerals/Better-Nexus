@@ -36,6 +36,7 @@ core\SupportReport.lua
 core\Scheduler.lua
 core\DiagnosticHistory.lua
 core\DiagnosticLogs.lua
+core\RollRecorder.lua
 core\PeerDebug.lua
 core\ViewRefresh.lua
 core\Updates.lua

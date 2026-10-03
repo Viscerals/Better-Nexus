@@ -9,7 +9,7 @@ local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 check(A.SetFirstLoadoutWishlistIdentity('F1 plan',{ {spellId=200001,quality=1,stacks=2} }),'plan set')
 local known,pending=false,false
 ProjectEbonhold.OrbService={IsStateKnown=function()return known end,IsOfferPending=function()return pending end}
-H.Board({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}});H.Notify();H.Advance(.5)
+H.Board({{spellId=200001,quality=1},{spellId=200001,quality=1},{spellId=200021,quality=1}});H.Notify();H.Advance(.5)
 local n=#H.actions
 SlashCmdList.NEXUS('auto');H.Advance(3,.1)
 check(#H.actions==n,'unknown Orb state: automatic rolling sends nothing')

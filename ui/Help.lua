@@ -15,6 +15,10 @@ Before you turn Auto ON: With Auto ON, Nexus may replace that active Saved Build
 4. To target another Saved Build: in My Builds, select the intended Saved Build and assign the Wishlist to it (click the Wishlist selector and choose the Wishlist). Assigning only chooses the target; by itself it does not change the Saved Build.
 5. Review the recommendations with Auto OFF first. Click Auto OFF only when you accept the warning above; it then shows Auto ON.
 
+What Nexus is for: you choose the Echoes you want (a Wishlist). Nexus counts the exact copies still missing and recommends, or with Auto ON performs, Take, Banish, Reroll and Freeze on each Echo choice to work toward them.
+
+Saving and loading Saved Builds: in the game's own build window, loading a Saved Build makes it your current loadout. Saving writes your current Echoes into the slot you selected and REPLACES what that slot held. Check the selected slot before you save; Nexus cannot undo a save or bring back the old contents. Nexus never loads a Saved Build for you. Its only save is the automatic save with Auto ON, described above. Creating or importing a Wishlist saves only a plan. Assigning a Wishlist by itself changes no Saved Build.
+
 Words: A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Nexus treats no future random Echo roll as guaranteed.]]},
  {id="wishlists",title="Wishlists and locked targets",text=[[Before you edit: a plan holds up to 79 rolled copies and 6 locked Echo copies (85 total). Counts are copies, not names or rows. Each quality is a different target; a lower-quality copy does not count for a higher-quality target.
 
@@ -33,10 +37,25 @@ Nexus-only locked-role markers should be imported in Nexus, not assumed compatib
 Better means Wishlist progress, not Orb investment or keeping every individual Echo. Example: a run that loses 1 requested copy but gains 3 other requested copies is +2 overall. It can replace the Saved Build even when the lost Echo is one you value or obtained with Orbs. The save itself spends no Orbs, and it does not mean that Echo was judged worthless. Nexus cannot undo a completed save or bring back that Echo or the Orbs spent on it; Unassign does not restore a Saved Build. Keep Auto OFF if you want the current Saved Build left untouched. Auto starts OFF each session.
 
 1. Click Auto OFF on the Nexus panel to turn Auto ON. Auto is a permission for your enabled automatic actions. Auto OFF does not turn Nexus off, stop build sharing, or hide the panel.
-2. Choose actions: /nexus reroll on|off and /nexus freeze on|off. They change those permissions, not the Auto button.
-3. Watch the panel. Take chooses a needed offer. Banish removes an eligible offer. Reroll asks for new choices when enabled. Freeze keeps an eligible offered card.
+2. Choose actions: /nexus reroll on|off and /nexus freeze on|off. They change those permissions, not the Auto button. Each one only allows or forbids that action; it does not choose another strategy. When an action is off, Nexus skips that step and uses the next rule below.
+3. Watch the panel. It shows what Nexus recommends now; with Auto ON, Nexus performs it.
 
-Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. Priority numbers in advanced diagnostics are not DPS or percentages. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [G] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none. These symbols are not network or loading states.
+EXPERIMENTAL STRATEGY (the default in this build). The released strategy stays available as a rollback. On an ordinary Echo choice the experimental strategy keeps every permission, charge, pending-action and Orb rule and changes these steps:
+- Two needed offers shown, none held: it can Freeze one so the second is kept. It does not Freeze the extra copy of an Echo when one more copy is all you need.
+- Several needed offers: it takes the offer with the most missing copies. A tie goes to the first offer shown.
+- No offer needed: when a Reroll is also available, it Banishes before it Rerolls, if Banish is allowed and charged. It Banishes only an offer that is not needed, not frozen, not guaranteed, and whose quality group holds no needed Echo. If none qualifies, it Rerolls as before.
+- Only held offers are needed: it takes the held offer instead of searching.
+It comes from an offline simulation that assumes equal draw odds for every Echo you can still roll. That assumption is not measured in the game. In the study's 57,600 held-out runs (14,400 per strategy, averaged over 12 model profiles, several of which the live version does not model) it completed 19.3% of Wishlists, against 16.8% for the released strategy; its lead over a simpler protected-Banish strategy was not significant. No gain in your game is promised: it can be better, equal or worse. The live version has no draw-pool data, so among equally safe offers it Banishes the first one shown.
+/nexus policy adaptive or /nexus policy released chooses. A change applies at the next safe action boundary and never clears or repeats an action that waits for confirmation. /nexus status shows the strategy in force. When Nexus cannot use the experimental rules for one choice (for example an Echo's quality group is unknown), it uses the released rules for that choice and /nexus status says why.
+
+How the released strategy chooses on an ordinary Echo choice (in this order). Needed means an offer of the exact Echo and quality that still has missing copies: the Wishlist's copies minus the copies you have, rolled and locked (with locked targets, locked copies count only up to those targets). Picks are very few when 6 or fewer remain, or no more than the missing copies. Picks are few when 18 or fewer remain, or the missing copies are at least a third of them.
+- All targets complete: Nexus takes an available offer. It can be outside the Wishlist.
+- No offer is still needed: Reroll comes first, when Reroll is allowed, you have one and fewer than two offers are frozen.
+- A needed offer is shown: Nexus takes it. Freeze is used only in some cases: picks are very few, at least two copies are still missing, Freeze is allowed and charged, and a Banish is available to search further. After a Freeze, Nexus takes another needed offer if one is shown. While picks stay very few and a Banish is left, it banishes an offer that is not needed. Otherwise it takes the frozen offer.
+- No offer is needed and Reroll is not possible: when picks are few, Nexus banishes an offer that is not needed and not frozen. Otherwise, or with no Banish left, it takes an available offer, which can be outside the Wishlist.
+Nexus does not keep rerolls back for later in a run. These rules are not a guarantee of any future offer or of a complete build.
+
+Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. Frozen offer is a card kept by Freeze. Priority numbers in advanced diagnostics are not DPS or percentages. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [Guaranteed offer] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none. These symbols are not network or loading states.
 
 When it is blocked: "Waiting for the game to confirm the last Echo action." means an action was sent and has no confirmed result yet. Do not choose again or reload; wait. "No Echo choice is showing." means only that no choice is on screen now. It does not mean the run is finished, and it is not a reason to retry. "Auto ON — paused" means Auto stays ON but is not acting; point at the ... button to see the reason in its Status line. Waiting for current Echo data means automatic choices wait for ownership confirmation; it is not Sync status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
  {id="sharing",title="Shared builds and DPS",text=[[1. Click Build Library on the Nexus panel. Use the scope button to switch between All Shared and My Builds.
@@ -59,7 +78,7 @@ Sync Now asks for shared builds and records. Preparing, request sent, receiving 
 3. Click Start. Start approves the maximum shown and automatic use of eligible surplus copies, including safe recycling. Starting disables ordinary Automation; it does not automatically re-enable it. Locked and required copies stay protected. The approved maximum does not change during the run.
 4. Watch the run. It continues after each confirmed result and stops at target completion, the maximum, insufficient balance, no safe source, or uncertainty.
 
-The game's auto-accept and other addons' pickers must be off. Unknown client capabilities disable only Orb mode. Login, reconnect, new resources or reload never restart spending.
+The game's auto-accept and other addons' pickers must be off. If the game has no Orb service, only Orb mode is unavailable and ordinary rolling still works. If the Orb service exists but Nexus cannot read its state, ordinary rolling waits too. Login, reconnect, new resources or reload never restart spending.
 
 Closing the window does not stop an approved run. Use Pause or Stop. The main Nexus panel keeps compact progress and Pause/Resume/Stop.
 
@@ -67,9 +86,11 @@ After a finished run: click Start new run, review the maximum, then click Confir
 
 When it is blocked: Pause/Stop prevents new submissions, not a spend already accepted; a pending result may still settle. Changing the active loadout, assignment or targets pauses new actions; Resume adopts the new target and keeps the same maximum. Advanced has optional exclusions and Recheck. Recheck only asks for balance and ownership data; it is not a replay or a fix.
 
-Unresolved result: an Orb action without a confirmed result keeps its spending exposure and blocks new Orb runs and ordinary rolling. Relogging, reloading, changing builds, returning to the old loadout, Resume or pressing controls again do not clear it. Recheck can request the confirming data; pressing it does not clear the record. Nexus never retries, refunds, or deletes it. Do not clear saved data.
+Unresolved result: an Orb action without a confirmed result keeps its spending exposure and blocks new Orb runs and ordinary rolling. Relogging, reloading, changing builds, returning to the old loadout, Resume or pressing controls again do not clear it. Recheck can request the confirming data; pressing it does not clear the record. Nexus never retries or refunds it, and never deletes the record. Do not clear saved data.
 
-Only one manual case can confirm it: after a reload, if that action's offer is still open in the game's offer window and matches the saved record, choose in that window. Nexus confirms the action only from the exact matching result. If Nexus had proposed an Echo, only that same Echo can be confirmed; the Orb window names it. If the action ended while Nexus could not observe it, it cannot be confirmed. No exit from that block exists yet.]]},
+Only one manual case can confirm it: after a reload, if that action's offer is still open in the game's offer window and matches the saved record, choose in that window. Nexus confirms the action only from the exact matching result. If Nexus had proposed an Echo, only that same Echo can be confirmed; the Orb window names it. If the action ended while Nexus could not observe it, it cannot be confirmed.
+
+Continue: if the action has a confirmed spend and no recorded outcome, and its offer is gone, the Orb window shows Continue... You can go on with an unconfirmed outcome. Nexus first asks the game twice, read-only, for the Orb count (and for your Echoes) and checks that nothing is open or changing. No spend and no choice is sent. Then you confirm. The spent Orb stays counted, the original record is saved unchanged, nothing is refunded, repeated or chosen, and a new Orb run needs its own approval. Nexus cannot prove that the server is finished with the old action: two answers received after Nexus asked do not prove that no older answer is still on its way. Nexus never continues by itself.]]},
  {id="troubleshooting",title="Problems and bug reports",text=[[If something goes wrong: do not reload, relog, spend Orbs, reroll or change builds to recreate it. Do not clear logs or reset saved data.
 
 Report a problem. No report/logs or requested details = your support request will be ignored until provided.
@@ -98,6 +119,10 @@ Commands:
 /nexus sync - request shared-build Sync
 /nexus log errors - recorded errors
 /nexus perf - timing diagnostics (not DPS)
+/nexus policy adaptive|released - rolling strategy
+/nexus trace - local roll record (copy and send privately)
+
+Local roll record: Nexus records its rolling decisions automatically, on this computer only. It keeps Echo ids, the offers, charges, the action chosen and sent, and the result seen. Owned and locked counts are kept for your Wishlist targets only, not for all your Echoes. It keeps no account, character, realm or Wishlist name, no chat and no credential, and it sends nothing anywhere. At most 256 records are kept in your saved data and the oldest are replaced first; a record says when a part is incomplete or cut short. Recording changes no action; offline it added about 0.1 ms per board. It is not proof of the game's draw odds. To send it, use /nexus report and Prepare report file (the file then also carries the record), or /nexus trace, which opens the Roll trace tab: copy each page in order. Send either privately, never in public. /nexus trace off or on switches recording; /nexus trace clear deletes the record.
 
 More diagnostics: /nexus log opens the log viewer. Prepare full diagnostic report builds a paged report. Select this page and copy pages in order; it does not put every page on the clipboard.
 

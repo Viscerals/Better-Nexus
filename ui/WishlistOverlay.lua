@@ -232,6 +232,23 @@ local function StoreRevisions(slotsRevision, activeRevision, grantedRevision,
     lastLockedProjectionRevision = lockedProjectionRevision
 end
 
+-- The assigned Wishlist as the HUD and the Orb read it: the server's rolled
+-- copies plus the plan's own locked design targets (GameAdapter.AssignedWishlist).
+-- The server mirror alone does not hold the plan's design targets. Display only.
+-- `plannedUnavailable` is true when that projection could not read the design.
+local function ReadAssignedPlan()
+    local read = Adapter and Adapter.AssignedWishlist
+    if type(read) ~= "function" then
+        return Adapter and Adapter.Wishlist and Adapter.Wishlist()
+    end
+    local assigned = read()
+    if type(assigned) ~= "table" or type(assigned.wishlist) ~= "table" then
+        return nil
+    end
+    return { entries = assigned.entries,
+        plannedUnavailable = assigned.state == "unavailable" }
+end
+
 local function AcquirePresentation()
     local known, slotsRevision, activeRevision, grantedRevision, ownedRevision,
         wishlistRevision, catalogRevision, lockedRevision,
@@ -249,10 +266,13 @@ local function AcquirePresentation()
         return false
     end
 
+    -- The assigned plan's rows are built through the catalog, so a catalog
+    -- change re-reads it too.
     local refreshWishlist = not known or not revisionsKnown
         or slotsRevision ~= lastSlotsRevision
         or activeRevision ~= lastActiveRevision
         or wishlistRevision ~= lastWishlistRevision
+        or catalogRevision ~= lastCatalogRevision
     local refreshOwned = not known or not revisionsKnown
         or grantedRevision ~= lastGrantedRevision
         or ownedRevision ~= lastOwnedRevision
@@ -262,7 +282,7 @@ local function AcquirePresentation()
         or lockedRevision ~= lastLockedRevision
         or lockedProjectionRevision ~= lastLockedProjectionRevision
     if refreshWishlist then
-        cachedWishlist = Adapter and Adapter.Wishlist and Adapter.Wishlist()
+        cachedWishlist = ReadAssignedPlan()
         stats.wishlistReads = stats.wishlistReads + 1
     end
     if refreshOwned then
@@ -361,22 +381,35 @@ function M.Refresh()
     end
     for index, e in ipairs(wl.entries or {}) do
         local row = catalog and catalog.rows and catalog.rows[e.spellId]
-        list[#list + 1] = { spellId = e.spellId, quality = e.quality,
-            stacks = e.stacks, family = e.family,
-            locked = e.locked == true or e.sourceRole == "locked",
-            progress = progress and progress.rows[index],
-            name = (row and row.name) or ("spell " .. tostring(e.spellId)) }
+        local entryProgress = progress and progress.rows[index]
+        local isLocked = e.locked == true or e.sourceRole == "locked"
+        -- One row per locked target Echo: the model counts the target's
+        -- copies as a group, so a second row of the same Echo repeats it.
+        if not (isLocked and entryProgress and entryProgress.primary == false) then
+            list[#list + 1] = { spellId = e.spellId, quality = e.quality,
+                stacks = e.stacks, family = e.family, locked = isLocked,
+                progress = entryProgress,
+                name = (row and row.name) or ("spell " .. tostring(e.spellId)) }
+        end
     end
     table.sort(list, function(a, b)
+        -- Locked targets are listed apart, after every ordinary row.
+        if a.locked ~= b.locked then return not a.locked end
         local ac = tonumber(a.quality) or 0
         local bc = tonumber(b.quality) or 0
         if ac ~= bc then return ac > bc end
         return tostring(a.name) < tostring(b.name)
     end)
 
+    local noteLine = wl.plannedUnavailable and #list < MAX_LINES and #list + 1
     for i = 1, MAX_LINES do
         local e = list[i]
-        if e then
+        if not e and i == noteLine then
+            local text = "|cff888888Planned locked targets unavailable"
+                .. " - open the Wishlist Editor|r"
+            changed = ShowLine(i, LineKey(text, nil, nil, nil, false),
+                text, nil, nil, nil, false) or changed
+        elseif e then
             local want = e.progress and tonumber(e.progress.want)
                 or tonumber(e.stacks) or 1
             local fallbackOwner = e.locked and locked or owned

@@ -41,7 +41,9 @@ print('PASS adapter projects the production catalog and Wishlist shapes: '..P.Li
 local action=P.Decide(Base({activeRow=unsaved}))
 assert(action.planner=='echoweaver' and action.type~='wait' and plan.requestedCounts[action.spellId]==1,'ordinary Wishlist board reaches the intended planner and acts on a requested Echo')
 local reference=P.Line(action)
-assert(reference=='freeze|1001|1|echoweaver|Freeze wanted Echo before search (EchoWeaver)','exact diagnostic fixture decision: '..reference)
+assert(reference=='freeze|1001|1|echoweaver|Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)','exact diagnostic fixture decision (adaptive default): '..reference)
+local releasedInput=Base({activeRow=unsaved});releasedInput.rollingPolicy='released'
+assert(P.Line(P.Decide(releasedInput))=='freeze|1001|1|echoweaver|Freeze wanted Echo before search (EchoWeaver)','released policy keeps its exact fixture decision')
 print('PASS real TOC-order dispatch makes useful progress: '..reference)
 
 -- 2. Metadata invariance: only saved verification, old flags or a stale

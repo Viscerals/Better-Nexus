@@ -104,6 +104,97 @@ local function Collect(context)
     return ok and type(result) == "table" and result or {}
 end
 
+-- Optional timing summary, version 1. StutterAlert asks for it only while it
+-- builds a report (a user action), never per frame or per hitch. It holds the
+-- session aggregates of a fixed list of Performance paths: count, total and
+-- maximum milliseconds. Every duration is inclusive. A row with `parent`
+-- always runs inside that parent row, so the two must not be added; a row
+-- without a parent can be called from several places. No samples, player or
+-- character names, community builds or saved data; the only identity is the
+-- Nexus version and build label. The counters are existing session totals.
+local TIMING_SUMMARY_VERSION = 1
+local TIMING_ROWS = {
+    "lifecycle.update",
+    "lifecycle.phase.rebind", "lifecycle.phase.store",
+    "lifecycle.phase.community", "lifecycle.phase.maintenance",
+    "lifecycle.phase.catalog", "lifecycle.phase.hashes",
+    "lifecycle.phase.share", "lifecycle.phase.transport",
+    "sync.update", "dps.update", "automation.update", "gameadapter.poll",
+    "automation.step", "hud.prepare", "hud.phase.assignment",
+    "hud.phase.projection", "hud.phase.view-model", "panel.render",
+    "lifecycle.loading-status", "sync.incoming",
+}
+
+local function SessionCounters()
+    local counters = {}
+    local hud = type(Nexus.HudSnapshotStats) == "function" and Nexus.HudSnapshotStats() or nil
+    if type(hud) == "table" then
+        counters[#counters + 1] = {name="hud.view-model.builds", value=FiniteNumber(hud.builds) or 0}
+        counters[#counters + 1] = {name="hud.view-model.reuses", value=FiniteNumber(hud.skipped) or 0}
+        counters[#counters + 1] = {name="hud.view-model.copied-tables", value=FiniteNumber(hud.copiedTables) or 0}
+    end
+    local adapter = Nexus.GameAdapter
+    local echo = adapter and type(adapter.EchoReconcileStats) == "function"
+        and adapter.EchoReconcileStats() or nil
+    local projections = type(echo) == "table" and type(echo.projections) == "table"
+        and echo.projections or nil
+    if projections then
+        local slots, wishlist = projections.slots, projections.wishlist
+        counters[#counters + 1] = {name="adapter.slot-projections",
+            value=type(slots) == "table" and FiniteNumber(slots.calls) or 0}
+        counters[#counters + 1] = {name="adapter.wishlist-reads",
+            value=type(wishlist) == "table" and FiniteNumber(wishlist.calls) or 0}
+    end
+    return counters
+end
+
+local function TimingSummaryUnsafe()
+    local performance = Nexus and Nexus.Performance
+    if not (performance and type(performance.Stats) == "function"
+        and type(performance.Snapshot) == "function") then return nil end
+    local snapshot = performance.Snapshot()
+    local window = type(performance.Window) == "function" and performance.Window() or {}
+    local now = type(GetTime) == "function" and FiniteNumber(GetTime()) or nil
+    local rows = {}
+    for _, name in ipairs(TIMING_ROWS) do
+        local stats = performance.Stats(name)
+        if type(stats) == "table" then
+            rows[#rows + 1] = {
+                name=name,
+                parent=type(performance.ParentOf) == "function" and performance.ParentOf(name) or nil,
+                count=FiniteNumber(stats.count) or 0,
+                totalMs=FiniteNumber(stats.total) or 0,
+                maxMs=FiniteNumber(stats.maximum) or 0,
+            }
+        end
+    end
+    local label = type(Nexus.RuntimeBuildLabel) == "function" and Nexus.RuntimeBuildLabel() or nil
+    return {
+        timingSummaryVersion=TIMING_SUMMARY_VERSION,
+        units="ms", nesting="inclusive", windowClock="GetTime",
+        version=type(Nexus.Release) == "table" and Nexus.Release.version or nil,
+        buildLabel=type(label) == "string" and label or nil,
+        enabled=snapshot.enabled == true, clockAvailable=snapshot.clockAvailable == true,
+        windowStart=FiniteNumber(window.startedAt), windowEnd=now,
+        lastUpdate=FiniteNumber(window.lastLifecycleAt),
+        rows=rows, counters=SessionCounters(),
+    }
+end
+
+local function CollectTimingSummary()
+    local ok, result = pcall(TimingSummaryUnsafe)
+    return ok and type(result) == "table" and result or nil
+end
+
+-- Registered table: StutterAlert calls Collect(self, context) for attributed
+-- hitches (the v1 contract, unchanged) and, when it supports it,
+-- CollectTimingSummary(self) while building a report.
+local Provider = {
+    TIMING_SUMMARY_VERSION = TIMING_SUMMARY_VERSION,
+    Collect = function(_, context) return Collect(context) end,
+    CollectTimingSummary = function() return CollectTimingSummary() end,
+}
+
 function Integration.Unregister()
     local api = registeredApi
     registeredApi = nil
@@ -124,7 +215,7 @@ function Integration.Register()
     if registeredApi == api then return true end
     if registeredApi then Integration.Unregister() end
     local ok, registered, reason = pcall(api.RegisterDiagnosticProvider,
-        ADDON_NAME, Collect)
+        ADDON_NAME, Provider)
     if not ok or registered ~= true then
         return false, ok and reason or "registration failed"
     end
@@ -137,3 +228,5 @@ function Integration.IsRegistered()
 end
 
 Integration.Collect = Collect
+Integration.CollectTimingSummary = CollectTimingSummary
+Integration.Provider = Provider

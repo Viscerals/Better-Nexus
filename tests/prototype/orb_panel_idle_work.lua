@@ -32,7 +32,7 @@ Nexus.GameAdapter=A
 A.Catalog=function()return cat end
 A.Owned=function()return {synced=true,generation=1}end
 A.LockedOwned=function()return {synced=true}end
-A.AutomationSignature=function()return {activeSlot=1}end
+A.EchoActiveSlotGeneration=function()return 1 end
 A.Level=function()return 80 end
 A.InFlight=function()return false end
 A.RivalDetected=function()return false end

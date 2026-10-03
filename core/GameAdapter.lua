@@ -1634,6 +1634,29 @@ local function LiveWishlistCandidates(slots)
     return out
 end
 
+-- One assignment read builds the candidate list at most once. AssignedWishlist
+-- makes a context for the slot projection it read and passes it down; the
+-- list is built on first use and shared by every step of that read that was
+-- given the same projection. It lives only in that read's locals, so nothing
+-- survives the read (early return or error included), and a step given any
+-- other projection, or none, builds its own as before.
+local function CandidateContext(slots)
+    return {slots = slots}
+end
+
+local function ContextCandidates(context, slots)
+    if context and slots ~= nil and context.slots == slots then
+        local list = context.candidates
+        if list == nil then
+            list = LiveWishlistCandidates(slots)
+            context.candidates = list
+        end
+        return list
+    end
+    local list = LiveWishlistCandidates(slots)
+    return list
+end
+
 function A.GetWishlistCandidates()
     local slots = A.Slots()
     local out = LiveWishlistCandidates(slots)
@@ -1727,7 +1750,8 @@ function A.ConfirmWishlistRoles(candidate, echoes, source)
     local matched
     for _,live in ipairs(LiveWishlistCandidates(A.Slots())) do
         if tonumber(live.slot)==slot then
-            if live.key~=key or WishlistRoles.Content(live.echoes)~=signature then
+            if live.key~=key or WishlistRoles.Content(live.echoes)~=signature
+                or (candidate.name~=nil and tostring(live.name or "")~=tostring(candidate.name)) then
                 return nil,"This Wishlist changed while the role picker was open; reopen it"
             end
             if live.lockEvidenceVersion==WISHLIST_LOCK_EVIDENCE_VERSION
@@ -1804,7 +1828,10 @@ local function SelectWishlistCandidate(wishlistSlot, candidate)
     return nil, "wishlist data is unavailable; waiting for the server mirror"
 end
 
-local function ResolveAssociation(loadoutSlot)
+-- `slots` is optional: a caller that already read the slot projection in the
+-- same call passes it, so the server slots are not projected again. `context`
+-- is optional: the read's candidate context (see CandidateContext).
+local function ResolveAssociation(loadoutSlot, slots, context)
     loadoutSlot = tonumber(loadoutSlot)
     if not loadoutSlot then return nil end
     local state = Store and Store.State and Store.State()
@@ -1812,14 +1839,14 @@ local function ResolveAssociation(loadoutSlot)
     local saved = links and links[loadoutSlot]
     if saved == nil then return nil end
 
-    -- 1.0.5 stored a bare designed-slot number. Migrate it only after
-    -- validating the current contents, then persist a content identity so a
-    -- recycled server slot can never resurrect an unrelated historical name.
+    -- 1.0.5 stored a bare designed-slot number. It is recognized here, against
+    -- the current contents; the content identity that stops a recycled server
+    -- slot from capturing it is persisted by ReconcileLegacyAssignments, not
+    -- here: Store.State() is a detached copy, and a write to it is lost.
     if type(saved) == "number" or type(saved) == "string" then
         local wanted = tonumber(saved)
         for _, c in ipairs(A.GetWishlistCandidates()) do
             if tonumber(c.slot) == wanted then
-                links[loadoutSlot] = { slot = c.slot, key = c.key, name = c.name }
                 return c
             end
         end
@@ -1829,18 +1856,18 @@ local function ResolveAssociation(loadoutSlot)
         return nil
     end
 
-    local candidates = LiveWishlistCandidates(A.Slots())
+    local candidates = ContextCandidates(context, slots or A.Slots())
     local wantedKey = saved.key
     if wantedKey and wantedKey ~= "" then
         return WishlistRoles.ResolveSaved(saved,candidates)
     end
-    -- No key means an incomplete/old record. Slot fallback is accepted once
-    -- only and upgraded immediately.
+    -- No key means an incomplete/old record. The slot fallback is accepted
+    -- while the record has no identity; ReconcileLegacyAssignments persists the
+    -- identity (a write to this detached copy would be lost).
     local wantedSlot = tonumber(saved.slot)
     if not wantedKey and wantedSlot then
         for _, c in ipairs(candidates) do
             if tonumber(c.slot) == wantedSlot then
-                saved.key, saved.name = c.key, c.name
                 return c
             end
         end
@@ -1855,11 +1882,11 @@ end
 -- wishlist target so Nexus can guide their very first 1-80 run. This is a
 -- temporary account-local association and is replaced naturally once the
 -- player has a real Saved Build selected.
-local function ResolveFirstRunWishlist()
+local function ResolveFirstRunWishlist(slots, context)
     local state = Store and Store.State and Store.State()
     local saved = state and state.firstRunWishlist
     if type(saved) ~= "table" then return nil end
-    return WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(A.Slots()))
+    return WishlistRoles.ResolveSaved(saved,ContextCandidates(context,slots or A.Slots()))
 end
 
 function A.GetFirstRunWishlist()
@@ -1881,13 +1908,122 @@ function WishlistRoles.FirstRunHandoff(state)
         and handoff.assignmentId == first.assignmentId
 end
 
+-- A stored assignment as an editor binds it: its assignment identity; for
+-- records saved before identities, its server slot (which ResolveAssociation's
+-- read-time upgrade of the oldest shapes keeps), else its content key. "none"
+-- when nothing is assigned.
+function WishlistRoles.AssignmentToken(saved)
+    if saved == nil or saved == false then return "none" end
+    if type(saved) == "table" and saved.assignmentId ~= nil then
+        return "id:" .. tostring(saved.assignmentId)
+    end
+    local slot
+    if type(saved) == "table" then slot = tonumber(saved.slot) else slot = tonumber(saved) end
+    if slot then return "slot:" .. tostring(slot) end
+    if type(saved) == "table" and type(saved.key) == "string" and saved.key ~= "" then
+        return "key:" .. saved.key
+    end
+    return "invalid"
+end
+
+-- The first-run plan as an editor binds it; false is an explicit Unassign.
+function WishlistRoles.FirstRunToken(first)
+    if first == false then return "unassigned" end
+    return WishlistRoles.AssignmentToken(first)
+end
+
+-- Assignment action tokens: one opaque token per assignment destination (a
+-- numbered Saved Build index, or "first" for the first-run plan), separate
+-- from plan identity and contents. Every write to a destination replaces its
+-- token: each explicit Assign, Unassign (also of an empty destination),
+-- Restore and Forget, a re-pick of the same plan, the automatic promotion,
+-- and an editor's own save. An editor binds a snapshot when it opens; its
+-- save writes a destination only while that destination's token is still the
+-- bound one, and adopts only the tokens that save installed. Session memory
+-- only: an editor does not survive a reload, so nothing is persisted and no
+-- token comes back from retained data. Bound to the owner and database
+-- identity; a change of either starts a new epoch with fresh tokens.
+local assignmentActions = {epoch = 0, serial = 0, tokens = {}}
+
+local function AssignmentActions()
+    local actions = assignmentActions
+    local owner = Store and type(Store.CurrentOwnerKey) == "function"
+        and Store.CurrentOwnerKey() or nil
+    if actions.epoch == 0 or actions.owner ~= owner or actions.db ~= NexusDB then
+        actions.epoch = actions.epoch + 1
+        actions.owner, actions.db = owner, NexusDB
+        actions.tokens = {}
+    end
+    return actions
+end
+
+local function ActionDestination(destination)
+    if destination == "first" then return "first" end
+    return tonumber(destination)
+end
+
+function WishlistRoles.ActionToken(destination)
+    local actions = AssignmentActions()
+    local key = ActionDestination(destination)
+    if key == nil then return nil end
+    return actions.tokens[key] or ("e" .. actions.epoch .. ":0")
+end
+
+-- Whether a bound snapshot still holds this destination's current token.
+function WishlistRoles.ActionUnchanged(bound, destination)
+    local key = ActionDestination(destination)
+    if type(bound) ~= "table" or key == nil then return false end
+    local token = type(bound.tokens) == "table" and bound.tokens[key]
+        or ("e" .. tostring(bound.epoch) .. ":0")
+    return token == WishlistRoles.ActionToken(destination)
+end
+
+-- Inside a write: may it write `destination`? Without a bound snapshot (an
+-- explicit action) yes; for an editor save only while the token is unchanged.
+function WishlistRoles.MayWrite(bound, destination)
+    return bound == nil or WishlistRoles.ActionUnchanged(bound, destination)
+end
+
+-- Inside a write that wrote `destination`: replace its token and record the
+-- new one in `installed` (the result an editor's save returns).
+function WishlistRoles.Wrote(installed, destination)
+    local key = ActionDestination(destination)
+    if key == nil then return nil end
+    local actions = AssignmentActions()
+    actions.serial = actions.serial + 1
+    local token = "e" .. actions.epoch .. ":" .. actions.serial
+    actions.tokens[key] = token
+    if installed then installed[key] = token end
+    return token
+end
+
+-- A bounded copy of every destination's current token, for an editor to bind.
+function A.AssignmentActionSnapshot()
+    local actions = AssignmentActions()
+    local tokens = {}
+    for key, token in pairs(actions.tokens) do tokens[key] = token end
+    return {epoch = actions.epoch, tokens = tokens}
+end
+
+function A.AssignmentActionToken(destination)
+    return WishlistRoles.ActionToken(destination)
+end
+
+function A.AssignmentActionUnchanged(bound, destination)
+    return WishlistRoles.ActionUnchanged(bound, destination)
+end
+
 function WishlistRoles.ReplaceFirstRun(state, record)
     -- Prove ownership before stamping the replacement. An explicit picker
     -- change must keep its existing bootstrap handoff on the same target.
     local handoff = WishlistRoles.FirstRunHandoff(state)
     WishlistRoles.StampAssignment(state,record)
     state.firstRunWishlist = record
-    if handoff then state.loadoutWishlists[1] = WishlistRoles.CopyDesign(record) end
+    WishlistRoles.Wrote(nil, "first")
+    if handoff then
+        state.loadoutWishlists[1] = WishlistRoles.CopyDesign(record)
+        WishlistRoles.Wrote(nil, 1)
+    end
 end
 
 function A.SetFirstRunWishlist(wishlistSlot, candidate)
@@ -1919,10 +2055,12 @@ function A.ClearFirstRunWishlist()
         -- Equal names or contents cannot identify an unrelated assignment.
         if WishlistRoles.FirstRunHandoff(state) then
             state.loadoutWishlists[1] = nil
+            WishlistRoles.Wrote(nil, 1)
         end
         -- False records an explicit first-run Unassign. Nil still means that
         -- an older assignment may be waiting for its active-loadout identity.
         state.firstRunWishlist = false
+        WishlistRoles.Wrote(nil, "first")
     end) then return false end
     MarkWishlistProjectionDirty()
     return true
@@ -1933,6 +2071,20 @@ local function IsPopulatedLoadout(loadoutSlot, slots)
     slots = slots or A.Slots()
     local row = slots and slots.bySlot and loadoutSlot and slots.bySlot[loadoutSlot]
     return row and type(row.echoes) == "table" and #row.echoes > 0 and true or false
+end
+
+-- True only when the server reports this numbered Saved Build with a valid,
+-- empty Echo list. A missing row or a malformed list is not known to be empty.
+local function IsKnownEmptyLoadout(loadoutSlot, slots)
+    local row = slots and slots.bySlot and slots.bySlot[loadoutSlot]
+    return type(row) == "table" and type(row.echoes) == "table"
+        and row.roleSourceValid == true and #row.echoes == 0
+end
+
+-- Whether a numbered Saved Build holds Echoes now (a locked-only build does).
+-- Read-only; the editor asks it before it uploads for that destination.
+function A.IsLoadoutPopulated(loadoutSlot)
+    return IsPopulatedLoadout(loadoutSlot)
 end
 
 -- Read-only association diagnosis for presentation code. Unlike
@@ -2042,12 +2194,28 @@ function A.GetLoadoutWishlist(loadoutSlot)
     return resolved
 end
 
+-- What the Saved Build holds now, as an open editor binds it.
+function A.LoadoutAssignmentToken(loadoutSlot)
+    local state = Store and Store.State and Store.State()
+    local links = type(state) == "table" and state.loadoutWishlists or nil
+    return WishlistRoles.AssignmentToken(type(links) == "table"
+        and links[tonumber(loadoutSlot)] or nil)
+end
+
+-- What the first-run plan is now, as an open editor binds it.
+function A.FirstRunToken()
+    local state = Store and Store.State and Store.State()
+    local first = nil
+    if type(state) == "table" then first = state.firstRunWishlist end
+    return WishlistRoles.FirstRunToken(first)
+end
+
 function A.GetLoadoutWishlistSlot(loadoutSlot)
     local c = A.GetLoadoutWishlist(loadoutSlot)
     return c and tonumber(c.slot) or nil
 end
 
-function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets)
+function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets, bound)
     loadoutSlot = tonumber(loadoutSlot)
     local slots = A.Slots()
     if not slots or not loadoutSlot or loadoutSlot < 1
@@ -2059,14 +2227,23 @@ function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets)
     end
     local record = StoredWishlistRecord({name=name, echoes=echoes,designTargets=designTargets})
     if not record then return false, "invalid wishlist" end
+    -- `bound`: an editor's snapshot (WishlistRoles.MayWrite); each written
+    -- destination is checked on its own and its new token returned.
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
+        if not WishlistRoles.MayWrite(bound, loadoutSlot) then changed = true; return end
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
-        state.firstRunWishlist = nil
+        WishlistRoles.Wrote(installed, loadoutSlot)
+        if WishlistRoles.MayWrite(bound, "first") then
+            state.firstRunWishlist = nil
+            WishlistRoles.Wrote(installed, "first")
+        end
     end) then return false, "store unavailable" end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    return true
+    return true, nil, record.assignmentId, record.key, installed
 end
 
 -- Bootstrap for a genuinely brand-new character: no Saved Build exists yet
@@ -2089,19 +2266,36 @@ end
 --     leveling 1-79), A.Wishlist() reads ONLY this, via
 --     ResolveFirstRunWishlist -- ResolveAssociation is never even reached
 --     yet since there's no active slot to resolve.
-function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
+function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets, bound)
     local record = StoredWishlistRecord({name=name, echoes=echoes,designTargets=designTargets})
     if not record then return false, "invalid wishlist" end
     local mirrored = StoredWishlistRecord(record)
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
+        -- `bound`: an editor's snapshot. The first-run plan and the slot-1
+        -- handoff are separate destinations, each checked on its own.
+        if not WishlistRoles.MayWrite(bound, "first") then changed = true; return end
+        -- Slot 1 receives the handoff only when it holds no assignment or
+        -- holds the proven handoff of the current first-run plan
+        -- (WishlistRoles.FirstRunHandoff). Another assignment there is never
+        -- replaced; the first-run plan alone is then updated.
+        local handoff = WishlistRoles.FirstRunHandoff(state)
+        local current = type(state.loadoutWishlists) == "table" and state.loadoutWishlists[1] or nil
         WishlistRoles.StampAssignment(state,record)
         mirrored.assignmentId=record.assignmentId
         state.loadoutWishlists = state.loadoutWishlists or {}
-        state.loadoutWishlists[1] = record
+        if (current == nil or handoff) and WishlistRoles.MayWrite(bound, 1) then
+            state.loadoutWishlists[1] = record
+            WishlistRoles.Wrote(installed, 1)
+        end
         state.firstRunWishlist = mirrored
+        WishlistRoles.Wrote(installed, "first")
     end) then return false, "store unavailable" end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    return true
+    -- The identity this save stamped and the tokens it installed, for an
+    -- editor that holds this plan.
+    return true, nil, mirrored.assignmentId, mirrored.key, installed
 end
 
 function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
@@ -2126,14 +2320,16 @@ function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
+        WishlistRoles.Wrote(nil, loadoutSlot)
         state.firstRunWishlist = nil
+        WishlistRoles.Wrote(nil, "first")
     end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
     return true
 end
 
 
-function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets)
+function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets, binding)
     loadoutSlot, wishlistSlot = PositiveInteger(loadoutSlot), PositiveInteger(wishlistSlot)
     -- Slot 0 is the first-run context, never a numbered loadout association.
     -- Refuse invalid identifiers before clearing its durable assignment.
@@ -2147,18 +2343,48 @@ function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, e
     if not slots or loadoutSlot > (tonumber(slots.maxSlots) or 5) then
         return false, "invalid loadout"
     end
+    -- Its two sibling writers refuse an empty Saved Build as well. An
+    -- association stored under one is unusable (GetLoadoutWishlist hides it)
+    -- yet this write also clears the first-run plan. The editor checks
+    -- before it uploads; this is the check at the moment of the write.
+    if not IsPopulatedLoadout(loadoutSlot, slots) then
+        return false, "that loadout slot is empty or unavailable"
+    end
     local record = StoredWishlistRecord({
         slot=wishlistSlot, name=name, echoes=echoes,designTargets=designTargets,
     })
     if not record then return false end
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
+        -- `binding` is an open editor's: its action snapshot (`actions`) and,
+        -- as additional safeguards, what this Saved Build held (`assignment`)
+        -- and the first-run plan (`firstRun`) when it opened. Any Assign,
+        -- Unassign or Restore of this Saved Build since then -- also of the
+        -- same plan -- is kept; so is a first-run plan chosen since then.
+        local current = type(state.loadoutWishlists) == "table"
+            and state.loadoutWishlists[loadoutSlot] or nil
+        local bound = nil
+        if type(binding) == "table" then bound = binding.actions or false end
+        if type(binding) == "table" and (not WishlistRoles.MayWrite(bound, loadoutSlot)
+            or WishlistRoles.AssignmentToken(current) ~= binding.assignment) then
+            changed = true
+            return
+        end
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
-        state.firstRunWishlist = nil
+        WishlistRoles.Wrote(installed, loadoutSlot)
+        if type(binding) ~= "table" or (WishlistRoles.MayWrite(bound, "first")
+            and WishlistRoles.FirstRunToken(state.firstRunWishlist) == binding.firstRun) then
+            state.firstRunWishlist = nil
+            WishlistRoles.Wrote(installed, "first")
+        end
     end) then return false end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    return true
+    -- The identity this save stamped and the tokens it installed, for the
+    -- editor that holds this plan.
+    return true, nil, record.assignmentId, record.key, installed
 end
 
 -- How many removals stay recoverable at once. A later removal must never
@@ -2230,6 +2456,7 @@ function A.ClearLoadoutWishlist(loadoutSlot)
         state.loadoutWishlists = state.loadoutWishlists or {}
         local removed = state.loadoutWishlists[loadoutSlot]
         state.loadoutWishlists[loadoutSlot] = nil
+        WishlistRoles.Wrote(nil, loadoutSlot)
         if type(removed) == "table" then
             RememberRemoval(state,
                 {record = removed, loadoutSlot = loadoutSlot, source = "unassign"})
@@ -2344,6 +2571,7 @@ function A.ForgetWishlistPlan(selector)
         end
         if removed == nil then return end
         state.loadoutWishlists[removedIndex] = nil
+        WishlistRoles.Wrote(nil, removedIndex)
         -- The same identity pointed at from first-run state would restore the
         -- record on the next read. It is reconciled in THIS write.
         local first = CandidateFromStoredRecord(state.firstRunWishlist)
@@ -2351,6 +2579,7 @@ function A.ForgetWishlistPlan(selector)
         if first and removedCandidate and first.key == removedCandidate.key
             and first.assignmentId == removedCandidate.assignmentId then
             state.firstRunWishlist = nil
+            WishlistRoles.Wrote(nil, "first")
             firstRunRemoved = true
         end
         RememberRemoval(state, {
@@ -2455,8 +2684,10 @@ function A.RestoreForgottenWishlistPlan(selector)
             if index == nil then full = true; return end
         end
         live.loadoutWishlists[index] = retained.record
+        WishlistRoles.Wrote(nil, index)
         if retained.firstRun and live.firstRunWishlist == nil then
             live.firstRunWishlist = retained.record
+            WishlistRoles.Wrote(nil, "first")
         end
         table.remove(list, chosen.position)
         live.forgottenWishlist = list[1]
@@ -2495,10 +2726,14 @@ function A.ServerWishlistDeletionSupport()
         reason = "this client build exposes no Wishlist deletion call"}
 end
 
-function A.Wishlist()
+-- `slots` is optional: AssignedWishlist passes the projection it read in the
+-- same call. Every other caller reads the current slots here. `context` is
+-- private to AssignedWishlist (its candidate context for that projection);
+-- no other caller passes one.
+function A.Wishlist(slots, context)
     projectionStatus.wishlist.calls = projectionStatus.wishlist.calls + 1
     A._wishlistNote = nil
-    local slots = A.Slots()
+    if slots == nil then slots = A.Slots() end
     if not slots or slots.activeKnown==false then
         local saved = Store and Store.State and Store.State()
         local known = saved and (saved.firstRunWishlist
@@ -2509,7 +2744,7 @@ function A.Wishlist()
     local activeSlot = slots and tonumber(slots.activeSlot) or 0
     local maxSlots = slots and (tonumber(slots.maxSlots) or 5) or 5
     if activeSlot < 1 or activeSlot > maxSlots then
-        local starter = ResolveFirstRunWishlist()
+        local starter = ResolveFirstRunWishlist(slots, context)
         if starter then
             if WishlistRequiresLockEvidence(starter) then
                 A._wishlistNote = "Wishlist needs locked targets. Open the Wishlist Editor to choose and confirm them."
@@ -2531,7 +2766,7 @@ function A.Wishlist()
         A._wishlistNote = "Choose or create a wishlist to begin your first run."
         return nil
     end
-    local linked = ResolveAssociation(activeSlot)
+    local linked = ResolveAssociation(activeSlot, slots, context)
     if linked then
         local status, resolvedKey, reason
         linked, status, resolvedKey, reason = ResolveWishlistEvidence(linked, slots)
@@ -2556,18 +2791,26 @@ function A.Wishlist()
     -- publishes a real populated active loadout. This is the only automatic
     -- hand-off; ambiguous stored associations remain unresolved.
     local starter = IsPopulatedLoadout(activeSlot, slots)
-        and ResolveFirstRunWishlist() or nil
+        and ResolveFirstRunWishlist(slots, context) or nil
     if starter then
         local record = StoredWishlistRecord(starter)
         if record then
             UpdateStoreState(function(state)
                 state.loadoutWishlists = state.loadoutWishlists or {}
                 state.loadoutWishlists[activeSlot] = record
+                WishlistRoles.Wrote(nil, activeSlot)
                 state.firstRunWishlist = nil
+                WishlistRoles.Wrote(nil, "first")
             end)
             MarkWishlistProjectionDirty()
         end
         return WishlistRoles.Wishlist(starter,"loadout-association",false)
+    end
+    if IsKnownEmptyLoadout(activeSlot, slots) then
+        -- Assigning to an empty Saved Build is refused (SetLoadoutWishlist).
+        A._wishlistNote = "Loadout " .. tostring(activeSlot)
+            .. " is empty. A Wishlist can be assigned once it holds Echoes."
+        return nil
     end
     A._wishlistNote = "Loadout " .. tostring(activeSlot)
         .. " has no wishlist association. Set it in the Echo Journal."
@@ -2576,18 +2819,40 @@ end
 
 function A.WishlistNote() return A._wishlistNote end
 
+-- The retired flat locked-design table moved under a Wishlist's content key
+-- (AutomationRuntime and WishlistController do this once). That changes what
+-- AssignedWishlist reads for that Wishlist without touching any assignment
+-- record, so no Wishlist revision moved and a reader that had cached the plan
+-- kept the old rows. The mover calls this once, after a bucket was really
+-- created. It only advances the Wishlist presentation revision; it changes
+-- no data and makes no decision.
+function A.NoteLockDesignTargetsMoved()
+    MarkWishlistPresentationDirty()
+end
+
 -- One read-only assignment projection for the HUD, editor-facing status and
 -- Orb controller. Local permanent designs are part of the assigned target,
 -- even when the server stores only the 79 rolled copies. No Orb-only cache
 -- or name match can replace this authority.
+-- The HUD runs this for every preparation. It reads the server slots once and
+-- passes that projection to Wishlist, and reads the character row through the
+-- Store read (Store.State), as Wishlist does: no Store mutation entry, which
+-- would compare the whole row with the read snapshot on every call. The
+-- candidate list is built at most once for this read's projection: the
+-- association lookup and the mirror check below share it (CandidateContext).
 function A.AssignedWishlist()
     local slots=A.Slots()
-    local _,live=UpdateStoreState(function(row)return row end)
-    local state=type(live)=="table" and live or (Store and Store.State and Store.State() or {})
+    local context=CandidateContext(slots)
+    local state=Store and Store.State and Store.State() or {}
     local active=slots and tonumber(slots.activeSlot)
     local saved=active and active>0 and state.loadoutWishlists and state.loadoutWishlists[active]
-        or state.firstRunWishlist
-    local w=A.Wishlist()
+    -- The first-run plan is the target only where no Saved Build is in use. An
+    -- empty Saved Build with no association of its own is unassigned: it has
+    -- no saved assignment, and the first-run plan is not one.
+    local emptySlot = active and active>0 and active<=(tonumber(slots.maxSlots) or 5)
+        and IsKnownEmptyLoadout(active,slots)
+    if not saved and not emptySlot then saved=state.firstRunWishlist end
+    local w=A.Wishlist(slots,context)
     local result={state="unassigned",activeSlot=active,owner=Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey(),
         note=A.WishlistNote(),name=type(saved)=="table" and saved.name or nil}
     if not slots or slots.activeKnown==false then
@@ -2597,7 +2862,8 @@ function A.AssignedWishlist()
     end
     if not w then
         if result.note=="Restoring assigned Wishlist..." then result.state="restoring"
-        elseif saved then result.state="unavailable" end
+        elseif saved then result.state="unavailable"
+        elseif emptySlot then result.emptySlot=true end
         return result
     end
     result.state="ready";result.name=w.name;result.wishlist=w;result.entries={}
@@ -2610,6 +2876,12 @@ function A.AssignedWishlist()
         if row.locked then permanent[row.spellId]=(permanent[row.spellId] or 0)+(row.stacks or 1) end
     end
     local targets=w.designTargets
+    -- Read from the Store.State snapshot. AutomationRuntime reads this subtree
+    -- live because WishlistController.LockDesignTargets hands out the live
+    -- per-slot table. Its callers (ApplyCommittedTargets, PlanLockCommit) only
+    -- read it, and CommitLockDesignTargets stores a new table inside the
+    -- mutation entry, so the snapshot holds the same targets. A future caller
+    -- that edits that table in place must do so through the mutation entry.
     if targets==nil then targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key] end
     if targets~=nil then
         A._assignmentTargetModel=A._assignmentTargetModel or Nexus.WishlistModel.New()
@@ -2629,7 +2901,7 @@ function A.AssignedWishlist()
         result.mirrorNote="Assigned Wishlist has no distinct current server mirror. Its exact saved plan is retained. Refresh the list or reassign deliberately."
     elseif type(saved)=="table" and saved.slot then
         local found=false
-        for _,candidate in ipairs(LiveWishlistCandidates(slots)) do if candidate.key==saved.key then found=true;break end end
+        for _,candidate in ipairs(ContextCandidates(context,slots)) do if candidate.key==saved.key then found=true;break end end
         if not found then result.mirrorNote="Assigned Wishlist is absent from the current server list. Its saved plan is retained. Refresh the list or reassign deliberately." end
     end
     return result
@@ -2865,8 +3137,15 @@ function A.ToggleLever(leverId, wantDisabled)
     if cur == (wantDisabled and true or false) then return false, "already" end
     local ok = SafeCall(svc.ToggleTomeEcho, lv.members[1])
     if ok then
-        pending[leverId] = { t = GetTime(), want = wantDisabled and true or false }
-        UpdateStoreState(function(state) state.tomeTogglePending = pending end)
+        -- `pending` belongs to the read snapshot. The entry is written into
+        -- the owner's own map, so no snapshot table becomes durable state.
+        local entry = { t = GetTime(), want = wantDisabled and true or false }
+        UpdateStoreState(function(state)
+            local durable = type(state.tomeTogglePending) == "table"
+                and state.tomeTogglePending or {}
+            durable[leverId] = entry
+            state.tomeTogglePending = durable
+        end)
         leverProjectionRevision = leverProjectionRevision + 1
         return true
     end
@@ -2881,7 +3160,10 @@ end
 -- otherwise never expire).
 local function ReconcileTomePending()
     local st = Store and Store.State()
-    if not st or not st.tomeTogglePending then return end
+    -- Every shaped row has this map, usually empty. With nothing pending the
+    -- update below changes nothing, so the poll does not enter the Store
+    -- mutation entry (a whole-row comparison) five times a second for it.
+    if not st or not st.tomeTogglePending or next(st.tomeTogglePending) == nil then return end
     local cat = A.Catalog()
     local svc = PS()
     if not cat or not svc then return end
@@ -3303,7 +3585,41 @@ end
 -- shape both captures showed. No level gate (unlike Save, which is
 -- level-80-only for rolled loadouts) -- designing a wishlist isn't tied
 -- to being at cap. Same spacing guard as Save/Activate.
-function A.UploadWishlist(slot, name, echoes)
+-- What the slot service shows at a server Wishlist slot, as one comparable
+-- string: the name and the content (WishlistIdentity: Echo id and total copies,
+-- the same identity every Wishlist candidate carries). The mirror exposes no
+-- revision of a slot, so this is the strongest identity that can be observed
+-- there. It is never proof of identity: a match means no contradiction was
+-- seen, and an absent, empty or unreadable row has no token at all.
+local function ServerSlotToken(name, echoes)
+    local key = WishlistIdentity(echoes)
+    if not key then return nil end
+    return tostring(name or "") .. "\n" .. key
+end
+
+function A.ServerWishlistSlotToken(slot)
+    slot = PositiveInteger(slot)
+    local slots = slot and A.Slots()
+    local row = slots and slots.bySlot and slots.bySlot[slot]
+    if type(row) ~= "table" then return nil end
+    -- A.Slots() flags a source it could not read in full (a sparse list, an
+    -- entry without a readable id or count) and still projects the entries it
+    -- could read. Those survivors are not the row: no token.
+    if row.roleSourceValid == false then return nil end
+    return ServerSlotToken(row.name, row.echoes)
+end
+
+-- The token the slot will show once the server holds this upload.
+function A.ServerWishlistTokenFor(name, echoes)
+    return ServerSlotToken(tostring(name or "Nexus"), echoes)
+end
+
+-- `expected` (optional): a set of tokens an editor accepts for an EXISTING slot
+-- (slot > 0). The slot is read again immediately before the host call; a slot
+-- that shows anything else, or nothing, is refused ("stale_slot") and nothing is
+-- sent. Slot 0 creates a new Wishlist and is never checked. A caller that passes
+-- no set keeps the earlier behavior.
+function A.UploadWishlist(slot, name, echoes, expected)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if type(echoes) ~= "table" or #echoes == 0 then return false, "no echoes" end
@@ -3340,6 +3656,10 @@ function A.UploadWishlist(slot, name, echoes)
     for _, e in pairs(bySpell) do clean[#clean + 1] = e end
     table.sort(clean, function(a, b) return a.spellId < b.spellId end)
     if #clean == 0 then return false, "no valid echoes" end
+    if type(expected) == "table" and (tonumber(slot) or 0) > 0 then
+        local current = A.ServerWishlistSlotToken(slot)
+        if current == nil or not expected[current] then return false, "stale_slot" end
+    end
     local ok = svc and SafeCall(svc.UploadServerBuildSlot,
         tonumber(slot) or 0, tostring(name or "Nexus"), clean)
     if ok then
@@ -4039,6 +4359,14 @@ local function InstallHooks()
     end
 end
 
+-- Read-only. True while a client notification that the next Poll reconciles has
+-- arrived: a board was shown or updated, or Echo data changed. These are set by the
+-- client's own presentation of a server reply, not by this addon's sends. Changes no
+-- state; the Poll still does all reading, confirming and holding.
+function A.NotificationPending()
+    return boardNotificationPending or echoNotificationPending
+end
+
 function A.ConsumeDirty()
     local b, s, d, static = boardDirty, slotsDirty, dataDirty, staticDirty
     local levelEvents = levelBurstStatus.pending
@@ -4201,6 +4529,17 @@ function A.AutomationSignature()
     }
 end
 
+-- The Orb read path reads the game state several times a second and keeps
+-- only the Echo reconciliation and its active-slot generation. It runs the
+-- same reconciliation as AutomationSignature, and nothing of the rest of that
+-- five-second check (the character-row comparison through the Store mutation
+-- entry, the bag scan for a Tome, the settings), whose results it discarded.
+function A.EchoActiveSlotGeneration()
+    local echoOk = ReconcileEchoState(false, "fallback")
+    if not echoOk then return nil end
+    return echoGenerations.activeSlot
+end
+
 -- Manual-training capture: returns and clears the last user-clicked
 -- action (SelectPerk/BanishPerk/FreezePerk/RequestReroll + its argument).
 function A.ConsumeUserAction()
@@ -4249,6 +4588,157 @@ function A.OnEvent(event)
     end
 end
 
+-- Persist the content identity of a legacy Saved Build assignment: a bare
+-- designed-slot number (1.0.5) or a table with a slot and no content key. The
+-- resolver only recognizes them; Store.State() is a detached copy, so an
+-- identity assigned there never reached saved data and a recycled server slot
+-- then captured the association. This is not a getter. Like
+-- ReconcileTomePending it runs from the poll, enters the mutation entry only
+-- when a legacy shape is present, and tries again only when the slot mirror
+-- has changed. It upgrades only what the live mirror shows at that slot now
+-- (the resolver's own validation), checks inside the transaction that each
+-- record is still the legacy shape it read (a newer explicit choice is never
+-- overwritten), stamps no assignment id, and leaves first-run, locked designs
+-- and every other record alone. The identity it records is the occupant of the
+-- slot at that first contact; it cannot know whether the slot was reused before.
+-- A table that carries its own contents or assignment id is not touched.
+-- Evidence it will not write from: a slot row A.Slots() could only partly read
+-- (roleSourceValid == false: the readable entries are not the row), a store
+-- that cannot write durably right now (UpdateStateV1 then succeeds on a
+-- transient row), or a write that did not reach the authoritative row. None of
+-- those counts as an attempt: the legacy record is left as it was and the
+-- upgrade is tried again after LEGACY_ASSIGNMENT_RETRY seconds, so a later
+-- complete row or a store that became ready resolves it.
+local legacyAssignmentsChecked = nil
+local legacyAssignmentsRetryAt = 0
+local LEGACY_ASSIGNMENT_RETRY = 5
+
+local function LegacyAssignmentSlot(saved)
+    if type(saved) == "number" or type(saved) == "string" then
+        return tonumber(saved)
+    end
+    -- A table with its own contents or assignment id (a plan saved before
+    -- content keys) already carries an identity of its own; it is not a bare
+    -- slot reference and is left alone.
+    if type(saved) == "table" and saved.key == nil
+        and saved.echoes == nil and saved.assignmentId == nil then
+        return tonumber(saved.slot)
+    end
+    return nil
+end
+
+local function ReconcileLegacyAssignments()
+    if A.DIAGNOSTIC_PASSIVE then return end
+    local st = Store and Store.State and Store.State()
+    local links = st and st.loadoutWishlists
+    if type(links) ~= "table" then return end
+    -- The attempt is keyed on the slot mirror's generation and on WHICH legacy
+    -- records exist: a record that appears later (a Restore) is tried at once,
+    -- not only after the mirror next changes.
+    local parts = {}
+    for index, saved in pairs(links) do
+        local wanted = LegacyAssignmentSlot(saved)
+        if wanted then parts[#parts + 1] = tostring(index) .. ":" .. tostring(wanted) end
+    end
+    if #parts == 0 then
+        legacyAssignmentsChecked = nil
+        legacyAssignmentsRetryAt = 0
+        return
+    end
+    table.sort(parts)
+    local gate = tostring(Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey())
+        .. "|" .. tostring(NexusDB) .. "|" .. tostring(echoGenerations.slots)
+        .. "|" .. table.concat(parts, ",")
+    if legacyAssignmentsChecked == gate then return end
+    local now = GetTime and GetTime() or 0
+    if now < legacyAssignmentsRetryAt then return end
+    -- UpdateStateV1 falls back to a transient row (and still returns true) while
+    -- the store cannot write the character's row durably; that is not a write.
+    if Store and type(Store.StateWriteStatus) == "function" then
+        local status = Store.StateWriteStatus()
+        if type(status) ~= "table" or status.mode ~= "durable" then
+            legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+            return
+        end
+    end
+    local slots = A.Slots()
+    if not slots then return end
+    local live = LiveWishlistCandidates(slots)
+    local plan, incomplete = {}, false
+    for index, saved in pairs(links) do
+        local wanted = LegacyAssignmentSlot(saved)
+        if wanted then
+            -- The referenced row is inspected first, not only the candidates
+            -- built from it: a row A.Slots() could not read (wholly or in part)
+            -- yields no candidate, or one of survivors, and neither is proof of
+            -- what the slot holds.
+            local row = slots.bySlot and slots.bySlot[wanted]
+            if type(row) == "table" and row.roleSourceValid == false then
+                incomplete = true
+            else
+                for _, c in ipairs(live) do
+                    if tonumber(c.slot) == wanted then
+                        if type(c.key) ~= "string" or c.key == "" then
+                            incomplete = true
+                        else
+                            plan[#plan + 1] = {index = index, wanted = wanted,
+                                slot = c.slot, key = c.key, name = c.name}
+                        end
+                        break
+                    end
+                end
+            end
+        end
+    end
+    -- Absence is only evidence once the mirror has a valid baseline: a change
+    -- after it bumps the slots generation and changes the gate. Until then (the
+    -- echo snapshot failed, e.g. another row is malformed) the first valid
+    -- snapshot is only a baseline and bumps nothing, so a record that found no
+    -- slot is retried instead of being certified.
+    local settled = not incomplete and echoSnapshot ~= nil
+    if #plan == 0 then
+        if settled then
+            legacyAssignmentsChecked = gate
+        else
+            legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+        end
+        return
+    end
+    local ok = UpdateStoreState(function(state)
+        local durable = state.loadoutWishlists
+        if type(durable) ~= "table" then return end
+        for _, item in ipairs(plan) do
+            local current = durable[item.index]
+            if LegacyAssignmentSlot(current) == item.wanted then
+                if type(current) == "table" then
+                    current.key, current.name = item.key, item.name
+                else
+                    durable[item.index] = {slot = item.slot, key = item.key, name = item.name}
+                end
+            end
+        end
+    end)
+    -- Done only when the authoritative row now holds every identity written.
+    local verified = ok and true or false
+    if verified then
+        local after = Store and Store.State and Store.State()
+        local stored = after and after.loadoutWishlists
+        for _, item in ipairs(plan) do
+            local record = type(stored) == "table" and stored[item.index] or nil
+            if type(record) ~= "table" or record.key ~= item.key then
+                verified = false
+                break
+            end
+        end
+    end
+    if verified and settled then
+        legacyAssignmentsChecked = gate
+    else
+        legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+    end
+    if ok then MarkWishlistProjectionDirty() end
+end
+
 -- Main drives this from its OnUpdate (~0.2s cadence)
 function A.Poll()
     ObserveRunBoundary()
@@ -4268,6 +4758,7 @@ function A.Poll()
     ConfirmAwaitingGrant()
     WatchLatches()
     ReconcileTomePending()
+    ReconcileLegacyAssignments()
     -- owned-sync retry loop: keep re-requesting granted until non-empty
     -- data has been seen at least once (handles the empty-{} window after a
     -- reset/reload); bounded so it never spins

@@ -22,6 +22,7 @@ local phases = {
     ["catalog-index"]="Indexing build library records",
     ["catalog-bundle"]="Preparing the build library save",
     ["catalog-witness-capture"]="Verifying build library data",
+    ["catalog-mutation-capture"]="Verifying build library data",
     ["catalog-witness-verify"]="Verifying build library data",
     ["catalog-mutation-bundle"]="Preparing a build library update",
     ["catalog-mutation"]="Preparing a build library update",

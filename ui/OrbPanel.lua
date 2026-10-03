@@ -24,6 +24,7 @@ local function editLimit(on)
 end
 local function inactiveControls()
     editLimit(false)
+    if frame.cont then frame.cont:Hide()end
     for _,b in ipairs(frame.mutations)do b:Disable()end
     frame.advanced:Hide();frame:SetHeight(445)
 end
@@ -195,6 +196,11 @@ local function refresh()
         frame.sourcePage:SetText("Eligible sources "..sourcePage.." / "..math.max(1,math.ceil(#rows/4)))
     end
     enable(frame.start,s.running or s.canResume or s.canStart);enable(frame.stop,busy);enable(frame.assigned,not busy)
+    do
+        local cv=Nexus.OrbRuntime.ContinueView()
+        local stage=cv.stage
+        if cv.eligible==true or stage=="checking" or stage=="ready" or stage=="refused" or stage=="done" then frame.cont:Show()else frame.cont:Hide()end
+    end
     if advanced then frame.advanced:Show()else frame.advanced:Hide()end
     frame:SetHeight(advanced and 660 or 445)
 end
@@ -296,7 +302,10 @@ local function ensure()
     end)
     frame.stop=button(frame,470,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
     frame.approval=text(frame,20,-221,580,37,"Start approves this maximum and automatic use of eligible surplus copies, including safe recycling. Ordinary Automation will turn OFF.")
-    frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,580,24)
+    frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,440,24)
+    -- 035: only while an unresolved action can be continued, or a check is in progress, or its result is shown.
+    frame.cont=button(frame,470,-364,130,"Continue...",function()UI.ShowContinue()end)
+    frame.cont:Hide()
     frame.closeNotice=text(frame,20,-393,580,20,CLOSE_NOTICE)
     button(frame,20,-414,85,"Help",function()Nexus.Help.Show("orbs")end)
     button(frame,115,-414,95,"Advanced",function()advanced=not advanced;UI.Refresh()end)
@@ -617,6 +626,70 @@ local function ensureLog()
 end
 function UI.ShowLog()
     ensureLog();logFrame:Show();refreshLog();return logFrame
+end
+
+-- 035: Continue with an unconfirmed outcome. Reading and opening this window send nothing.
+-- Check starts the strict read-only check; Continue, enabled only for the current ready token,
+-- is the player's explicit confirmation; Cancel and closing the window cancel a check. The
+-- text is the runtime's own (what was observed, what Continue does, what stays uncertain).
+local contFrame
+local function contRefresh()
+    if not contFrame or not contFrame:IsShown()then return end
+    local v=Nexus.OrbRuntime.ContinueView()
+    contFrame.token=v.token
+    contFrame.body:SetText(v.text or "")
+    local idle=v.stage=="idle" or v.stage=="refused"
+    local active=v.stage=="checking" or v.stage=="ready"
+    enable(contFrame.check,v.eligible==true and idle)
+    enable(contFrame.go,v.stage=="ready" and v.token~=nil)
+    enable(contFrame.cancel,active)
+    contFrame.state:SetText(v.stage=="ready" and "Ready: waiting for your confirmation"
+        or v.stage=="checking" and "Checking the game's current state..."
+        or v.stage=="done" and "Continued"
+        or v.stage=="refused" and "Not continued"
+        or (v.eligible and "Not checked yet" or "Not available"))
+end
+local function ensureContinue()
+    if contFrame then return end
+    local f=CreateFrame("Frame","NexusOrbContinue",UIParent);contFrame=f;f:Hide()
+    f:SetSize(580,330);f:SetPoint("CENTER",UIParent,"CENTER",30,10)
+    f:SetFrameStrata("DIALOG");f:SetFrameLevel(50);f:EnableMouse(true);f:SetMovable(true);f:SetClampedToScreen(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart",function(self)self:StartMoving()end)
+    f:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
+    f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
+    f:SetBackdropColor(.035,.04,.05,1)
+    text(f,20,-14,540,22,"Continue with an unconfirmed Orb outcome")
+    f.state=text(f,20,-40,540,20)
+    f.body=text(f,20,-66,540,170)
+    f.notice=text(f,20,-240,540,22)
+    f.check=button(f,20,-282,150,"Check the game's state",function()
+        local ok,why=Nexus.OrbRuntime.ContinueBegin()
+        f.notice:SetText(ok and "" or Nexus.OrbRuntime.ContinueReason(why))
+        contRefresh()
+    end)
+    f.go=button(f,180,-282,130,"Continue",function()
+        -- The token this window showed, never a newer one: a stale click is refused.
+        local ok,why=Nexus.OrbRuntime.ContinueConfirm(f.token)
+        f.notice:SetText(ok and "" or Nexus.OrbRuntime.ContinueReason(why))
+        UI.Refresh();contRefresh()
+    end)
+    f.cancel=button(f,320,-282,90,"Cancel",function()
+        Nexus.OrbRuntime.ContinueCancel();f.notice:SetText("");contRefresh()
+    end)
+    button(f,480,-282,80,"Close",function()f:Hide()end)
+    f:SetScript("OnShow",function()contRefresh()end)
+    -- Closing the window (also with Escape) cancels a check: no token outlives its window.
+    f:SetScript("OnHide",function()
+        local v=Nexus.OrbRuntime.ContinueView()
+        if v.stage=="checking" or v.stage=="ready" then Nexus.OrbRuntime.ContinueCancel()end
+    end)
+    local elapsed=0
+    f:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;contRefresh()end end)
+    UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbContinue"
+end
+function UI.ShowContinue()
+    ensureContinue();contFrame:Show();contRefresh();return contFrame
 end
 function UI.Show()ensure();frame:Show();UI.Refresh();return frame end
 function UI.Hide()if frame then frame:Hide()end end

@@ -96,8 +96,9 @@ action. An action that ended while unobserved stays unresolved; the visible
 text says that it cannot be confirmed and that Recheck cannot settle it.
 The offer and the choice are also recorded at the moment of a manual choice
 (event-driven, through the same read-only observer), so the observation does not
-depend on the timed reads. A block that has no exit says so: the settlement path
-is only a proposal and is not built.
+depend on the timed reads. Besides the exact matching result, the only exit from a block is the player's explicit
+Continue for an action with a confirmed spend and no recorded outcome whose offer
+is gone (`docs/ORB_RECOVERY_CONTINUE.md`); a block that has no such exit says so.
 
 After a reload or login the client shows its load-time default active slot
 (0, "none") until the server sends its build-slot data; `GetServerBuildSlots()`
@@ -108,7 +109,36 @@ loadout rule (a different slot, or a receipt without an original slot, keeps
 the hold). A slot other than 0 shown in that state comes from the server's
 active-slot push: a different one is a loadout change, and a later return to
 the original slot does not settle the action. A client without
-`GetServerBuildSlots()` keeps the plain slot comparison. While a recorded choice waits for its result (`WAIT_RESULT`), the
+`GetServerBuildSlots()` keeps the plain slot comparison.
+
+The loadout hold is one saved flag (`loadoutChanged`). Several different causes
+set it alike: a real slot change, a different slot pushed before the build-slot
+data, the plain comparison on a client that cannot report slot data, a receipt
+without an original slot, and (in builds before the wait for the build-slot data
+existed) a reload whose first read came before the server's slot data, because
+that build compared the load-time default slot 0 with the recorded slot. A hold that an earlier build saved says nothing about which
+of these happened, and no later read can tell. The support summary therefore
+adds a loadout line to the Orb action: the original slot (`not recorded` when
+absent), the slot read now and whether the build-slot data has arrived, the
+loadout check, the cause the hold was first set for and when, whether an offer
+is recorded, and the requirements that the saved record alone shows unmet
+(`loadout`, and `choice` when no choice is recorded). The cause is recorded once,
+at the moment a build with this line first sets the hold, as three small saved
+fields in the pending receipt (`loadoutCause`, a fixed name;
+`loadoutObservedSlot`, a whole number from 0 to 65535; and `loadoutObservedAt`,
+the client clock time in whole seconds, from 2000-01-01 to 2100-01-01 UTC, shown
+with the date in the local form of the audit rows and labelled "local", so that it
+can be compared with them (the error times in the same report are UTC and say so);
+it is absent when the clock is missing, failing or implausible). They are never changed
+later. A hold saved without a cause stays `not recorded`: it is not filled in
+from a later read, and a missing original slot is never inferred. Older builds
+copy these fields through their own saves. The line is text only. It adds no
+requirement, removes none, and changes no block. Settlement still needs the
+recorded offer, a recorded choice inside that offer and the exact fresh ownership
+delta, so a receipt that records no choice cannot be settled, with or without the
+hold.
+
+While a recorded choice waits for its result (`WAIT_RESULT`), the
 status names the settlement requirement that the last read did not meet (a
 fresh ownership response, the chosen Echo in ownership, an open offer or
 another game action, an open Echo choice, or, while the spend is not yet
