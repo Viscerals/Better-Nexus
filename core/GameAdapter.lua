@@ -1634,6 +1634,29 @@ local function LiveWishlistCandidates(slots)
     return out
 end
 
+-- One assignment read builds the candidate list at most once. AssignedWishlist
+-- makes a context for the slot projection it read and passes it down; the
+-- list is built on first use and shared by every step of that read that was
+-- given the same projection. It lives only in that read's locals, so nothing
+-- survives the read (early return or error included), and a step given any
+-- other projection, or none, builds its own as before.
+local function CandidateContext(slots)
+    return {slots = slots}
+end
+
+local function ContextCandidates(context, slots)
+    if context and slots ~= nil and context.slots == slots then
+        local list = context.candidates
+        if list == nil then
+            list = LiveWishlistCandidates(slots)
+            context.candidates = list
+        end
+        return list
+    end
+    local list = LiveWishlistCandidates(slots)
+    return list
+end
+
 function A.GetWishlistCandidates()
     local slots = A.Slots()
     local out = LiveWishlistCandidates(slots)
@@ -1806,8 +1829,9 @@ local function SelectWishlistCandidate(wishlistSlot, candidate)
 end
 
 -- `slots` is optional: a caller that already read the slot projection in the
--- same call passes it, so the server slots are not projected again.
-local function ResolveAssociation(loadoutSlot, slots)
+-- same call passes it, so the server slots are not projected again. `context`
+-- is optional: the read's candidate context (see CandidateContext).
+local function ResolveAssociation(loadoutSlot, slots, context)
     loadoutSlot = tonumber(loadoutSlot)
     if not loadoutSlot then return nil end
     local state = Store and Store.State and Store.State()
@@ -1832,7 +1856,7 @@ local function ResolveAssociation(loadoutSlot, slots)
         return nil
     end
 
-    local candidates = LiveWishlistCandidates(slots or A.Slots())
+    local candidates = ContextCandidates(context, slots or A.Slots())
     local wantedKey = saved.key
     if wantedKey and wantedKey ~= "" then
         return WishlistRoles.ResolveSaved(saved,candidates)
@@ -1858,11 +1882,11 @@ end
 -- wishlist target so Nexus can guide their very first 1-80 run. This is a
 -- temporary account-local association and is replaced naturally once the
 -- player has a real Saved Build selected.
-local function ResolveFirstRunWishlist(slots)
+local function ResolveFirstRunWishlist(slots, context)
     local state = Store and Store.State and Store.State()
     local saved = state and state.firstRunWishlist
     if type(saved) ~= "table" then return nil end
-    return WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(slots or A.Slots()))
+    return WishlistRoles.ResolveSaved(saved,ContextCandidates(context,slots or A.Slots()))
 end
 
 function A.GetFirstRunWishlist()
@@ -2703,8 +2727,10 @@ function A.ServerWishlistDeletionSupport()
 end
 
 -- `slots` is optional: AssignedWishlist passes the projection it read in the
--- same call. Every other caller reads the current slots here.
-function A.Wishlist(slots)
+-- same call. Every other caller reads the current slots here. `context` is
+-- private to AssignedWishlist (its candidate context for that projection);
+-- no other caller passes one.
+function A.Wishlist(slots, context)
     projectionStatus.wishlist.calls = projectionStatus.wishlist.calls + 1
     A._wishlistNote = nil
     if slots == nil then slots = A.Slots() end
@@ -2718,7 +2744,7 @@ function A.Wishlist(slots)
     local activeSlot = slots and tonumber(slots.activeSlot) or 0
     local maxSlots = slots and (tonumber(slots.maxSlots) or 5) or 5
     if activeSlot < 1 or activeSlot > maxSlots then
-        local starter = ResolveFirstRunWishlist(slots)
+        local starter = ResolveFirstRunWishlist(slots, context)
         if starter then
             if WishlistRequiresLockEvidence(starter) then
                 A._wishlistNote = "Wishlist needs locked targets. Open the Wishlist Editor to choose and confirm them."
@@ -2740,7 +2766,7 @@ function A.Wishlist(slots)
         A._wishlistNote = "Choose or create a wishlist to begin your first run."
         return nil
     end
-    local linked = ResolveAssociation(activeSlot, slots)
+    local linked = ResolveAssociation(activeSlot, slots, context)
     if linked then
         local status, resolvedKey, reason
         linked, status, resolvedKey, reason = ResolveWishlistEvidence(linked, slots)
@@ -2765,7 +2791,7 @@ function A.Wishlist(slots)
     -- publishes a real populated active loadout. This is the only automatic
     -- hand-off; ambiguous stored associations remain unresolved.
     local starter = IsPopulatedLoadout(activeSlot, slots)
-        and ResolveFirstRunWishlist(slots) or nil
+        and ResolveFirstRunWishlist(slots, context) or nil
     if starter then
         local record = StoredWishlistRecord(starter)
         if record then
@@ -2811,9 +2837,12 @@ end
 -- The HUD runs this for every preparation. It reads the server slots once and
 -- passes that projection to Wishlist, and reads the character row through the
 -- Store read (Store.State), as Wishlist does: no Store mutation entry, which
--- would compare the whole row with the read snapshot on every call.
+-- would compare the whole row with the read snapshot on every call. The
+-- candidate list is built at most once for this read's projection: the
+-- association lookup and the mirror check below share it (CandidateContext).
 function A.AssignedWishlist()
     local slots=A.Slots()
+    local context=CandidateContext(slots)
     local state=Store and Store.State and Store.State() or {}
     local active=slots and tonumber(slots.activeSlot)
     local saved=active and active>0 and state.loadoutWishlists and state.loadoutWishlists[active]
@@ -2823,7 +2852,7 @@ function A.AssignedWishlist()
     local emptySlot = active and active>0 and active<=(tonumber(slots.maxSlots) or 5)
         and IsKnownEmptyLoadout(active,slots)
     if not saved and not emptySlot then saved=state.firstRunWishlist end
-    local w=A.Wishlist(slots)
+    local w=A.Wishlist(slots,context)
     local result={state="unassigned",activeSlot=active,owner=Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey(),
         note=A.WishlistNote(),name=type(saved)=="table" and saved.name or nil}
     if not slots or slots.activeKnown==false then
@@ -2872,7 +2901,7 @@ function A.AssignedWishlist()
         result.mirrorNote="Assigned Wishlist has no distinct current server mirror. Its exact saved plan is retained. Refresh the list or reassign deliberately."
     elseif type(saved)=="table" and saved.slot then
         local found=false
-        for _,candidate in ipairs(LiveWishlistCandidates(slots)) do if candidate.key==saved.key then found=true;break end end
+        for _,candidate in ipairs(ContextCandidates(context,slots)) do if candidate.key==saved.key then found=true;break end end
         if not found then result.mirrorNote="Assigned Wishlist is absent from the current server list. Its saved plan is retained. Refresh the list or reassign deliberately." end
     end
     return result
