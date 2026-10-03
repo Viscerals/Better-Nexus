@@ -93,7 +93,24 @@ for index,cause in ipairs(S.CAUSES)do
  check(after.originalSlot==before.originalSlot,name..': the original slot is not inferred or filled in (still '..tostring(before.originalSlot)..')')
  check(after.offerKey==before.offerKey and after.removed==before.removed and after.chargesBefore==before.chargesBefore
   and after.lockedKey==before.lockedKey,name..': offer, source and balance record are unchanged')
- check(writes()==0,name..': no Orb receipt write after the hold is set (passes, Recheck, Stop, a reload, the player\'s pick): '..writes())
+ -- 035: the player's pick is the ONE write after the hold is set. It saves the raw pick evidence (receipt.picks and
+ -- receipt.pickSeen) and nothing else: every field pinned above is unchanged, and the evidence is not authoritative.
+ check(writes()==1,name..': the player\'s pick is the only Orb receipt write after the hold is set (passes, Recheck, Stop, a reload): '..writes())
+ check(type(after.picks)=='table' and #after.picks==1 and after.picks[1].u==false and after.pickSeen==1,
+  name..': that write is non-authoritative raw pick evidence')
+ do
+  -- restored and refreshRequested are the two session flags that ANY save of a restored receipt writes (the same
+  -- save the recovery makes at its first offer); they are not evidence and not part of this claim.
+  local function Rest(r)local c=H.Clone(r);c.picks=nil;c.pickSeen=nil;c.pickDropped=nil;c.restored=nil;c.refreshRequested=nil;return c end
+  local function Same(a,b)
+   if type(a)~=type(b)then return false end
+   if type(a)~='table'then return a==b end
+   for k,v in pairs(a)do if not Same(v,b[k])then return false end end
+   for k in pairs(b)do if a[k]==nil then return false end end
+   return true
+  end
+  check(Same(Rest(after),Rest(before)),name..': every other field of the receipt is unchanged')
+ end
  check(calls.spend==0 and calls.select==calls.player and calls.player==1 and H.Count('orb-spend')==1 and H.Count('take')==1,
   name..': nothing reached the game from Nexus (no second spend, no automatic choice; only the player\'s one pick)')
 end

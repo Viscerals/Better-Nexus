@@ -55,7 +55,7 @@ for _,cause in ipairs(S.CAUSES)do
  local receipt=S.Receipt()
  check(receipt.loadoutCause==e.cause and receipt.loadoutObservedSlot==e.seen and receipt.loadoutObservedAt==view.loadoutSeenAt,name..': the cause is persisted with the receipt')
  local line3,lines=Line3()
- check(#lines==3 and lines[1]:find('waiting for=loadout',1,true),name..': a third support line follows the two existing ones')
+ check(#lines==4 and lines[1]:find('waiting for=loadout',1,true) and lines[4]:find('raw picks',1,true),name..': a third support line follows the two existing ones; the raw pick line (035) comes last')
  Has(line3,'original slot='..(e.original==nil and 'not recorded' or tostring(e.original)),name)
  Has(line3,'slot now='..(e.now==nil and 'not reported' or tostring(e.now))..' ('..(e.nowKnown==true and 'data received' or e.nowKnown==false and 'data not yet received' or 'client reports no slot data')..')',name)
  Has(line3,'check=changed',name);Has(line3,'hold cause='..CAUSE_TEXT[e.cause],name)
@@ -366,7 +366,7 @@ do
  }
  for index,extra in ipairs(VIEWS)do
   lines=Gated(extra)
-  check(#lines==3,'4f view '..index..': three lines, not the fallback answer: '..#lines)
+  check(#lines==4,'4f view '..index..': four lines (the last is the 035 raw pick line), not the fallback answer: '..#lines)
   for i,l in ipairs(lines)do
    check(#l<400 and not l:find('[%z\1-\31]') and not l:find('SENTINEL',1,true) and not l:find('ZZZZZZZZZZ',1,true),'4f view '..index..' line '..i..' is bounded and carries no raw value')
   end
