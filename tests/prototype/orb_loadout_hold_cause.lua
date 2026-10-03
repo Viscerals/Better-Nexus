@@ -11,7 +11,8 @@
 --  3. A hold that was set without a cause (an earlier build) stays "not recorded".
 --     It is never filled in from what is seen later, and a missing original slot
 --     is never inferred.
---  4. The new persisted fields are two small scalars and are validated on read: a
+--  4. The new persisted fields are a short name and two small whole numbers (the slot seen
+--     then, and the clock time the hold was first set) and are validated on read: a
 --     hostile saved value is never shown and never raises.
 --  5. Nothing changes what the code does: no rule, refusal, spend or choice.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
@@ -44,6 +45,7 @@ for _,cause in ipairs(S.CAUSES)do
  local view=Nexus.OrbRuntime.RecoveryView()
  check(view.loadoutCause==e.cause,name..': the cause recorded when the hold was first set: '..tostring(view.loadoutCause))
  check(view.loadoutSeenSlot==e.seen,name..': the slot seen then: '..tostring(view.loadoutSeenSlot))
+ check(type(view.loadoutSeenAt)=='number' and view.loadoutSeenAt>=1700000000 and view.loadoutSeenAt<=time(),name..': the clock time the hold was first set: '..tostring(view.loadoutSeenAt))
  check(view.originalSlot==e.original and view.originalSlotState==(e.original==nil and 'absent' or 'recorded'),
   name..': the original slot: '..tostring(view.originalSlot)..'/'..tostring(view.originalSlotState))
  check(view.slotRead==true and view.slotNow==e.now and view.slotNowKnown==e.nowKnown,
@@ -51,13 +53,14 @@ for _,cause in ipairs(S.CAUSES)do
  check(view.loadoutCheck=='CHANGED' and view.loadoutChanged==true,name..': the check and the latch')
  check(view.offerRecorded==true and ListText(view.unmet)=='loadout,choice',name..': the record shows two unmet requirements: '..ListText(view.unmet))
  local receipt=S.Receipt()
- check(receipt.loadoutCause==e.cause and receipt.loadoutObservedSlot==e.seen,name..': the cause is persisted with the receipt')
+ check(receipt.loadoutCause==e.cause and receipt.loadoutObservedSlot==e.seen and receipt.loadoutObservedAt==view.loadoutSeenAt,name..': the cause is persisted with the receipt')
  local line3,lines=Line3()
  check(#lines==3 and lines[1]:find('waiting for=loadout',1,true),name..': a third support line follows the two existing ones')
  Has(line3,'original slot='..(e.original==nil and 'not recorded' or tostring(e.original)),name)
  Has(line3,'slot now='..(e.now==nil and 'not reported' or tostring(e.now))..' ('..(e.nowKnown==true and 'data received' or e.nowKnown==false and 'data not yet received' or 'client reports no slot data')..')',name)
  Has(line3,'check=changed',name);Has(line3,'hold cause='..CAUSE_TEXT[e.cause],name)
  if e.seen~=nil then Has(line3,'saw slot '..tostring(e.seen),name)end
+ Has(line3,', set at '..date('%Y-%m-%d %H:%M:%S',view.loadoutSeenAt)..';',name)
  Has(line3,'offer recorded=yes',name);Has(line3,'unmet in record=loadout,choice',name)
  check(#line3<400 and not line3:find('[%z\1-\31]'),name..': the line is bounded')
  -- Idempotent: more passes, more rechecks, a return to the original slot and a
@@ -74,7 +77,11 @@ end
 do
  local H,M,A,O,src,slots=S.Build(S.CAUSES[1])
  check(S.Receipt().loadoutCause=='SLOT_DIFFERS' and S.Receipt().loadoutObservedSlot==2,'first observation: slot 2')
+ local firstAt=S.Receipt().loadoutObservedAt
+ check(type(firstAt)=='number','first observation: a clock time')
+ H.advanceClock=true;H.Advance(120)
  H.perks.serverActiveSlot=3;S.Pass(H,M,A);S.Rechecks(H,M,3)
+ check(S.Receipt().loadoutObservedAt==firstAt and time()>firstAt+60,'a later pass, 2 minutes on, does not rewrite the clock time')
  local view=Nexus.OrbRuntime.RecoveryView()
  check(S.Receipt().loadoutCause=='SLOT_DIFFERS' and S.Receipt().loadoutObservedSlot==2,'a later slot 3 does not rewrite the recorded cause or the slot seen then')
  check(view.slotNow==3 and view.loadoutSeenSlot==2,'the live slot is 3; the recorded one is 2')
@@ -93,9 +100,9 @@ end
 
 -- 3. A hold set without a cause stays "not recorded" (an earlier build).
 for _,variant in ipairs({
- {name='old hold, slot data known and different',edit=function(row,state)row.loadoutCause=nil;row.loadoutObservedSlot=nil;state.loadoutCause=nil;state.loadoutObservedSlot=nil end},
+ {name='old hold, slot data known and different',edit=function(row,state)row.loadoutCause=nil;row.loadoutObservedSlot=nil;row.loadoutObservedAt=nil;state.loadoutCause=nil;state.loadoutObservedSlot=nil;state.loadoutObservedAt=nil end},
  {name='old hold, original slot missing',edit=function(row,state)
-   row.loadoutCause=nil;row.loadoutObservedSlot=nil;state.loadoutCause=nil;state.loadoutObservedSlot=nil
+   row.loadoutCause=nil;row.loadoutObservedSlot=nil;row.loadoutObservedAt=nil;state.loadoutCause=nil;state.loadoutObservedSlot=nil;state.loadoutObservedAt=nil
    row.originalSlot=nil;state.originalSlot=nil end,absent=true},
 })do
  local H,M,A,O,src,slots=S.Build(S.CAUSES[1])
@@ -105,13 +112,13 @@ for _,variant in ipairs({
  end
  local view=Nexus.OrbRuntime.RecoveryView()
  check(view.loadoutChanged==true and view.loadoutCause==nil and view.loadoutSeenSlot==nil,variant.name..': the cause stays not recorded')
- check(S.Receipt().loadoutCause==nil and S.Receipt().loadoutObservedSlot==nil,variant.name..': nothing was written into the receipt after the fact')
+ check(S.Receipt().loadoutCause==nil and S.Receipt().loadoutObservedSlot==nil and S.Receipt().loadoutObservedAt==nil,variant.name..': nothing was written into the receipt after the fact')
  local wantOriginal=1;if variant.absent then wantOriginal=nil end
  check(S.Receipt().originalSlot==wantOriginal,variant.name..': the original slot is not inferred or filled in')
  check(view.originalSlotState==(variant.absent and 'absent' or 'recorded'),variant.name..': the original slot state is the receipt\'s own')
  local line3=Line3()
  Has(line3,'hold cause=not recorded',variant.name)
- check(not line3:find('saw slot',1,true),variant.name..': no slot is claimed for a cause that was not recorded')
+ check(not line3:find('saw slot',1,true) and not line3:find('set at',1,true),variant.name..': no slot or time is claimed for a cause that was not recorded')
  -- The current facts are still shown, as current facts.
  check(view.slotNow==1 and view.slotNowKnown==true and view.loadoutCheck=='CHANGED',variant.name..': the live slot and the latch are shown as such')
 end
@@ -155,6 +162,14 @@ do
   {name='string seen slot',edit=function(p)p.loadoutObservedSlot='2' end,cause=true},
   {name='table seen slot',edit=function(p)p.loadoutObservedSlot={2} end,cause=true},
   {name='nan seen slot',edit=function(p)p.loadoutObservedSlot=0/0 end,cause=true},
+  {name='negative clock time',edit=function(p)p.loadoutObservedAt=-1 end,cause=true,seen=2,at=false},
+  {name='clock time before 2000',edit=function(p)p.loadoutObservedAt=5 end,cause=true,seen=2,at=false},
+  {name='clock time after 2100',edit=function(p)p.loadoutObservedAt=1e12 end,cause=true,seen=2,at=false},
+  {name='fractional clock time',edit=function(p)p.loadoutObservedAt=1700000000.5 end,cause=true,seen=2,at=false},
+  {name='string clock time',edit=function(p)p.loadoutObservedAt='1700000000' end,cause=true,seen=2,at=false},
+  {name='table clock time',edit=function(p)p.loadoutObservedAt={1700000000} end,cause=true,seen=2,at=false},
+  {name='nan clock time',edit=function(p)p.loadoutObservedAt=0/0 end,cause=true,seen=2,at=false},
+  {name='long cause with a valid clock time',edit=function(p)p.loadoutCause=HUGE end,cause=false,at=false},
   {name='original slot string',edit=function(p)p.originalSlot=HUGE end,cause=true,original='unreadable',seen=2},
   {name='original slot table',edit=function(p)p.originalSlot={1} end,cause=true,original='unreadable',seen=2},
   {name='original slot fractional',edit=function(p)p.originalSlot=1.5 end,cause=true,original='unreadable',seen=2},
@@ -166,14 +181,16 @@ do
   local ok,view=pcall(Nexus.OrbRuntime.RecoveryView)
   check(ok and type(view)=='table',case.name..': the owner answers')
   check(view.loadoutSeenSlot==case.seen,case.name..': an invalid slot is not reported, no slot is reported for a cause that is not valid, and a valid one is kept: '..tostring(view.loadoutSeenSlot))
+  if case.at==false then check(view.loadoutSeenAt==nil,case.name..': an invalid clock time is not reported') end
   check((view.loadoutCause=='SLOT_DIFFERS')==case.cause and (case.cause or view.loadoutCause==nil),case.name..': only an exact known cause name is reported: '..tostring(view.loadoutCause))
   if case.original then check(view.originalSlotState=='unreadable' and view.originalSlot==nil,case.name..': an unreadable original slot is named unreadable') end
   local line3=Line3()
   check(line3 and #line3<400 and not line3:find('[%z\1-\31]') and not line3:find('XXXXXXXXXX',1,true),case.name..': the line is bounded and clean: '..tostring(line3))
+  if case.at==false then check(not line3:find('set at',1,true),case.name..': no time is printed for an invalid one: '..tostring(line3)) end
   check(Nexus.SupportReport.Summary():find('Orb action',1,true)~=nil,case.name..': the summary is still produced')
  end
 end
--- The fields a hold adds to a receipt are exactly two small scalars. A receipt that a post-reload session
+-- The fields a hold adds to a receipt are exactly three small scalars. A receipt that a post-reload session
 -- latched has the key set of the reported receipt (the fixture plus its GUID) and nothing else.
 do
  local F=S.Shape()
@@ -183,11 +200,11 @@ do
   local ks={};for k in pairs(t)do if not (skip and skip[k]) then ks[#ks+1]=k end end;table.sort(ks);return table.concat(ks,',')
  end
  local want={guid=true};for k in pairs(F.receipt)do want[k]=true end
- check(Keys(latched,{loadoutCause=true,loadoutObservedSlot=true})==Keys(want),
+ check(Keys(latched,{loadoutCause=true,loadoutObservedSlot=true,loadoutObservedAt=true})==Keys(want),
   'a hold latched after a reload has exactly the keys of the reported receipt, apart from the two annotations: '..Keys(latched))
  check(latched.restored==true and latched.refreshRequested==false,'a save made in a session that restored the receipt writes restored and refreshRequested')
- check(type(latched.loadoutCause)=='string' and #latched.loadoutCause<=24 and type(latched.loadoutObservedSlot)=='number',
-  'the annotations are a short name and one number')
+ check(type(latched.loadoutCause)=='string' and #latched.loadoutCause<=24 and type(latched.loadoutObservedSlot)=='number' and type(latched.loadoutObservedAt)=='number',
+  'the annotations are a short name and two whole numbers')
  -- A hold latched in the ORIGINAL session (before any reload) has no restored / refreshRequested keys.
  local H5,M5,A5,O5=S.Fresh()
  local source,slotsLive=S.SpendOfferNoChoice(H5,M5,A5,O5)
@@ -214,6 +231,46 @@ do
  lines=Nexus.SupportReport.OrbLines()
  for i,l in ipairs(lines)do check(#l<400 and not l:find('[%z\1-\31]') and not l:find('SENTINEL',1,true),'poisoned list line '..i..' is bounded')end
  runtime.RecoveryView=real
+end
+
+-- 4c. The support line checks every number again, whatever the owner answers: a slot that is negative, fractional, huge, NaN,
+-- infinite or not a number is never printed.
+do
+ local H,M,A,O,src,slots=S.Build(S.CAUSES[1])
+ local runtime=Nexus.OrbRuntime;local real=runtime.RecoveryView
+ local BAD={-5,1.5,1e300,2^53,0/0,1/0,-1/0,65536,'7',{7},true}
+ for index,bad in ipairs(BAD)do
+  runtime.RecoveryView=function()return {pending=true,restored=true,state='PAUSED',recovery='PAUSED',gate='loadout',loadoutChanged=true,
+   originalSlot=bad,originalSlotState='recorded',slotRead=true,slotNow=bad,slotNowKnown=true,loadoutCheck='CHANGED',
+   loadoutCause='SLOT_DIFFERS',loadoutSeenSlot=bad,loadoutSeenAt=bad,offerRecorded=true,unmet={'loadout','choice'}} end
+  local line3=Nexus.SupportReport.OrbLines()[3]
+  check(line3=='  original slot=unreadable; slot now=not reported (data received); check=changed; hold cause=slot differed (slot data received); offer recorded=yes; unmet in record=loadout,choice',
+   'bad number '..index..' ('..tostring(bad)..'): never printed: '..tostring(line3))
+ end
+ -- the limits themselves are accepted
+ for _,good in ipairs({0,1,101,65535})do
+  runtime.RecoveryView=function()return {pending=true,restored=true,state='PAUSED',recovery='PAUSED',gate='loadout',loadoutChanged=true,
+   originalSlot=good,originalSlotState='recorded',slotRead=true,slotNow=good,slotNowKnown=true,loadoutCheck='CHANGED',
+   loadoutCause='SLOT_DIFFERS',loadoutSeenSlot=good,offerRecorded=true,unmet={'loadout'}} end
+  local line3=Nexus.SupportReport.OrbLines()[3]
+  Has(line3,'original slot='..good..'; slot now='..good..' (data received)','good slot '..good)
+  Has(line3,'saw slot '..good,'good slot '..good)
+ end
+ runtime.RecoveryView=real
+end
+
+-- 4d. No clock, or a clock that raises: the hold and its cause are still recorded; no time is.
+for _,mode in ipairs({'missing','raising','not a number','out of range'})do
+ local H,M,A,O=S.Fresh();local src,slots=S.SpendOfferNoChoice(H,M,A,O)
+ local realTime=time
+ if mode=='missing' then time=nil elseif mode=='raising' then time=function()error('no clock') end
+ elseif mode=='not a number' then time=function()return 'now' end else time=function()return 5 end end
+ H.perks.serverActiveSlot=2;S.Pass(H,M,A)
+ time=realTime
+ local r=S.Receipt()
+ check(r.loadoutChanged==true and r.loadoutCause=='SLOT_DIFFERS' and r.loadoutObservedSlot==2 and r.loadoutObservedAt==nil,'4d clock '..mode..': the hold and cause are recorded, no time')
+ check(Nexus.OrbRuntime.RecoveryView().loadoutSeenAt==nil and not Line3():find('set at',1,true),'4d clock '..mode..': no time is shown')
+ check(M.Status().state=='PAUSED' and M.Status().pending and not M.Resume(),'4d clock '..mode..': held as before')
 end
 
 -- 5. Nothing about what the code does changed: the hold, every refusal and the game
