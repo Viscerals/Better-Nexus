@@ -696,7 +696,7 @@ end
 local function replyText(r)
     if type(r) ~= "table" then return "none" end
     return "(ordinal " .. bigCount(r.ord) .. ", fields " .. bigCount(r.nf) .. ", pending " .. bigCount(r.pd)
-        .. ", balance " .. bigCount(r.ch) .. ")"
+        .. ", balance " .. bigCount(r.ch) .. ", reported change " .. signedCount(r.dl) .. ")"
 end
 local function continueLines()
     local runtime = Nexus.OrbRuntime

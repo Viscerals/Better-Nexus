@@ -56,7 +56,8 @@ This file has two parts.
   explicit Continue (`docs/ORB_RECOVERY_CONTINUE.md`), for a confirmed spend with
   no usable recorded outcome and the original offer gone: it keeps the spent
   count, the limit and the configured maximum, archives the saved receipt
-  unchanged in the character row key `orbRecoveryArchive`, sends nothing and is
+  unchanged in the character row key `orbRecoveryArchive`, sends no spend and no
+  choice (only the read-only refresh requests that Recheck also sends) and is
   never automatic. A passive observer of the game's own addon-message prefix
   feeds its strict check; it registers no handler, replaces nothing and sends
   nothing.

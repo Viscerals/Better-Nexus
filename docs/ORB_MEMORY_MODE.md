@@ -96,8 +96,9 @@ action. An action that ended while unobserved stays unresolved; the visible
 text says that it cannot be confirmed and that Recheck cannot settle it.
 The offer and the choice are also recorded at the moment of a manual choice
 (event-driven, through the same read-only observer), so the observation does not
-depend on the timed reads. A block that has no exit says so: the settlement path
-is only a proposal and is not built.
+depend on the timed reads. The only exit from a block is the player's explicit
+Continue for an action with a confirmed spend and no recorded outcome whose offer
+is gone (`docs/ORB_RECOVERY_CONTINUE.md`); a block that has no such exit says so.
 
 After a reload or login the client shows its load-time default active slot
 (0, "none") until the server sends its build-slot data; `GetServerBuildSlots()`
