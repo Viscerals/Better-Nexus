@@ -1,5 +1,5 @@
 -- Shared synthetic scenarios for the Orb loadout-hold tests (orb_loadout_hold_repro,
--- orb_loadout_hold_cause). Real Store, OrbRuntime, OrbAdapter, GameAdapter and
+-- orb_loadout_hold_shape, orb_loadout_hold_cause and orb_loadout_hold_history). Real Store, OrbRuntime, OrbAdapter, GameAdapter and
 -- SupportReport; only the game services are synthetic. Nothing here uses a real
 -- character, account, SavedVariables file or game client.
 --
@@ -93,9 +93,6 @@ S.CAUSES={
    H.perks.serverActiveSlot=0;H.perks.serverBuildSlots=slots;S.Pass(H,M,A);S.Rechecks(H,M,2)
    return M
   end},
- -- A designed Wishlist slot (100 and above) as the recorded original slot; the
- -- number is a synthetic stand-in. The saved receipt is edited as the next load
- -- reads it, as C3 does.
  {name='C8 the client reports no active slot at all',expect={cause='SLOT_DIFFERS',seen=nil,original=1,now=nil,nowKnown=true},
   run=function(H,M,A,O,src,slots)
    M=S.Reload(H)
@@ -103,6 +100,9 @@ S.CAUSES={
    H.perks.serverActiveSlot=nil;H.perks.serverBuildSlots=slots;S.Pass(H,M,A);S.Rechecks(H,M,2)
    return M
   end},
+ -- A designed Wishlist slot (100 and above) as the recorded original slot; the
+ -- number is a synthetic stand-in. The saved receipt is edited as the next load
+ -- reads it, as C3 does.
  {name='C7 designed-slot original, a different slot afterwards',expect={cause='SLOT_DIFFERS',seen=1,original=107,now=1,nowKnown=true},
   run=function(H,M,A,O,src,slots)
    M=S.Reload(H,function(row,state)row.originalSlot=107;state.originalSlot=107 end)
@@ -110,6 +110,17 @@ S.CAUSES={
    return M
   end},
 }
+-- Count the writes that replace the saved Orb table (an UpdateStateV1 after which orbRefinement is a new table).
+function S.CountOrbWrites()
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1;local n=0
+ owner.UpdateStateV1=function(fn,...)
+  local before=Nexus.Store.State().orbRefinement
+  local r=raw(fn,...)
+  if Nexus.Store.State().orbRefinement~=before then n=n+1 end
+  return r
+ end
+ return function()return n end
+end
 -- Count every call that Nexus or the player could make to the game after `from`.
 function S.CountCalls(H)
  local calls={select=0,spend=0,player=0}

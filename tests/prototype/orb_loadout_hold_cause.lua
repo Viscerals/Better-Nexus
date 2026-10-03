@@ -1,6 +1,6 @@
 -- Diagnostics for the Orb loadout hold (see orb_loadout_hold_repro). The accepted
--- code held an unresolved Orb action with one flag, `loadoutChanged`, that seven
--- different causes set alike, and its report named neither the original slot nor
+-- code held an unresolved Orb action with one flag, `loadoutChanged`, that eight
+-- different scenarios set alike (four recorded cause names), and its report named neither the original slot nor
 -- the cause. This test pins the read-only visibility added for support, and the
 -- rules that keep it honest:
 --  1. The owner's view and the support report name the original slot, the slot
@@ -108,7 +108,10 @@ for _,variant in ipairs({
  local H,M,A,O,src,slots=S.Build(S.CAUSES[1])
  M=S.Reload(H,variant.edit)
  for _,slot in ipairs({0,2,3,1})do
-  H.perks.serverActiveSlot=slot;H.perks.serverBuildSlots=(slot==0) and nil or slots;S.Pass(H,M,A);S.Rechecks(H,M,2)
+  H.perks.serverActiveSlot=slot
+  if slot==0 then H.perks.serverBuildSlots=nil else H.perks.serverBuildSlots=slots end
+  S.Pass(H,M,A);S.Rechecks(H,M,2)
+  check(Nexus.OrbRuntime.RecoveryView().slotNowKnown==(slot~=0),variant.name..': slot '..slot..': the slot-data state is as set')
  end
  local view=Nexus.OrbRuntime.RecoveryView()
  check(view.loadoutChanged==true and view.loadoutCause==nil and view.loadoutSeenSlot==nil,variant.name..': the cause stays not recorded')
@@ -271,6 +274,102 @@ for _,mode in ipairs({'missing','raising','not a number','out of range'})do
  check(r.loadoutChanged==true and r.loadoutCause=='SLOT_DIFFERS' and r.loadoutObservedSlot==2 and r.loadoutObservedAt==nil,'4d clock '..mode..': the hold and cause are recorded, no time')
  check(Nexus.OrbRuntime.RecoveryView().loadoutSeenAt==nil and not Line3():find('set at',1,true),'4d clock '..mode..': no time is shown')
  check(M.Status().state=='PAUSED' and M.Status().pending and not M.Resume(),'4d clock '..mode..': held as before')
+end
+
+-- 3d. A cause without a hold is never shown: an edited or damaged receipt that carries a cause, a seen slot and a time but no hold.
+do
+ local H,M,A,O=S.Fresh();local src,slots=S.SpendOfferNoChoice(H,M,A,O)
+ M=S.Reload(H,function(row,state)
+  row.loadoutCause='SLOT_DIFFERS';row.loadoutObservedSlot=2;row.loadoutObservedAt=1700000000
+  state.loadoutCause='SLOT_DIFFERS';state.loadoutObservedSlot=2;state.loadoutObservedAt=1700000000
+ end)
+ S.Pass(H,M,A);S.Rechecks(H,M,2)
+ local v=Nexus.OrbRuntime.RecoveryView()
+ check(v.loadoutChanged==false and v.loadoutCheck=='SAME' and v.loadoutCause==nil and v.loadoutSeenSlot==nil and v.loadoutSeenAt==nil,'3d: no hold: no cause, no seen slot and no time are returned')
+ local line3=Line3()
+ check(line3:find('hold cause=none recorded',1,true) and not line3:find('saw slot',1,true) and not line3:find('set at',1,true),'3d: the line says none recorded: '..tostring(line3))
+ -- the support line alone: an owner answer with no hold and a valid cause
+ local runtime=Nexus.OrbRuntime;local real=runtime.RecoveryView
+ runtime.RecoveryView=function()return {pending=true,restored=true,state='RECOVERY',recovery='OFFER_OPEN',loadoutChanged=false,originalSlotState='recorded',originalSlot=1,
+  slotRead=true,slotNow=1,slotNowKnown=true,loadoutCheck='SAME',loadoutCause='SLOT_DIFFERS',loadoutSeenSlot=2,loadoutSeenAt=1700000000,offerRecorded=true,unmet={'choice'}} end
+ local stub=Nexus.SupportReport.OrbLines()[3]
+ check(stub and stub:find('hold cause=none recorded',1,true) and not stub:find('slot differed',1,true) and not stub:find('saw slot',1,true) and not stub:find('set at',1,true),
+  '3d: the support line shows no cause for an owner answer without a hold: '..tostring(stub))
+ runtime.RecoveryView=real
+end
+
+-- 3e. "Unmet in record" is the saved record alone. A live state (no slot data yet, another character, a different slot read) is not in it.
+do
+ local H,M,A,O=S.Fresh();S.SpendOfferNoChoice(H,M,A,O)
+ M=S.Reload(H);H.perks.serverActiveSlot=0;H.perks.serverBuildSlots=nil;S.Pass(H,M,A)
+ local v=Nexus.OrbRuntime.RecoveryView()
+ check(v.loadoutChanged==false and v.loadoutCheck=='UNKNOWN' and ListText(v.unmet)=='choice','3e: waiting for the slot data: only the choice is unmet in the record: '..ListText(v.unmet))
+ local line3=Line3()
+ check(line3:find('check=waiting',1,true) and line3:find('unmet in record=choice',1,true) and not line3:find('loadout-unknown',1,true),'3e: the wait is the check, not a record fact: '..tostring(line3))
+end
+do
+ local H,M,A,O=S.Fresh();S.SpendOfferNoChoice(H,M,A,O)
+ M=S.Reload(H,function(row,state)row.guid='another character';state.guid='another character' end)
+ H.perks.serverActiveSlot=2;S.Pass(H,M,A)
+ local v=Nexus.OrbRuntime.RecoveryView()
+ check(v.loadoutChanged==false and v.loadoutCheck=='CHANGED' and ListText(v.unmet)=='choice','3e: another character and a different slot read: the record has no hold: '..ListText(v.unmet)..' / '..tostring(v.loadoutCheck))
+end
+
+-- 4e. The saved slot is bounded whatever the game pushes: only a whole number 0..65535 is written, and -0 is written as 0.
+for _,bad in ipairs({1.5,'2',1e12,-1,0/0,65536})do
+ local H,M,A,O=S.Fresh();S.SpendOfferNoChoice(H,M,A,O)
+ M=S.Reload(H);S.Pass(H,M,A)
+ H.perks.serverActiveSlot=bad;S.Pass(H,M,A)
+ local r=S.Receipt()
+ check(r.loadoutChanged==true and r.loadoutCause=='SLOT_DIFFERS' and r.loadoutObservedSlot==nil,'4e live slot '..tostring(bad)..': the hold and cause are saved, the slot is not: '..tostring(r.loadoutObservedSlot))
+ check(Nexus.OrbRuntime.RecoveryView().slotNow==nil and Line3():find('slot now=not reported',1,true),'4e live slot '..tostring(bad)..': the read slot is not reported')
+end
+do
+ local H,M,A,O=S.Fresh();S.SpendOfferNoChoice(H,M,A,O)
+ M=S.Reload(H);S.Pass(H,M,A)
+ H.perks.serverActiveSlot=-0.0;S.Pass(H,M,A)
+ local r=S.Receipt()
+ check(r.loadoutObservedSlot==0 and 1/r.loadoutObservedSlot>0,'4e: a live -0 is saved as 0')
+ local v=Nexus.OrbRuntime.RecoveryView()
+ check(v.slotNow==0 and 1/v.slotNow>0,'4e: the live -0 is returned as 0')
+ check(Line3():find('saw slot 0',1,true) and Line3():find('slot now=0 (',1,true) and not Line3():find('-0',1,true),'4e: and shown as 0: '..tostring(Line3()))
+end
+do
+ local H,M,A,O=S.Fresh();S.SpendOfferNoChoice(H,M,A,O)
+ M=S.Reload(H,function(row,state)row.originalSlot=-0.0;state.originalSlot=-0.0 end)
+ H.perks.serverActiveSlot=0;S.Pass(H,M,A)
+ local v=Nexus.OrbRuntime.RecoveryView()
+ check(v.originalSlot==0 and 1/v.originalSlot>0 and Line3():find('original slot=0;',1,true) and not Line3():find('-0',1,true),'4e: a saved -0 original slot is shown as 0: '..tostring(Line3()))
+end
+
+-- 4f. The owner's list is capped; a view with every gate set never leaks a raw value; -0 is shown as 0 by the line itself.
+do
+ local H,M,A,O,src,slots=S.Build(S.CAUSES[1])
+ local runtime=Nexus.OrbRuntime;local real=runtime.RecoveryView
+ local many={};for i=1,200 do many[i]='choice' end
+ local function Gated(extra)
+  local view={pending=true,restored=true,state='PAUSED',recovery='PAUSED',gate='loadout',loadoutChanged=true,originalSlotState='recorded',originalSlot=1,
+   slotRead=true,slotNow=1,slotNowKnown=true,loadoutCheck='CHANGED',loadoutCause='SLOT_DIFFERS',loadoutSeenSlot=2,offerRecorded=true,unmet={'loadout'}}
+  for k,v in pairs(extra)do view[k]=v end
+  runtime.RecoveryView=function()return view end
+  return Nexus.SupportReport.OrbLines()
+ end
+ local lines=Gated({unmet=many})
+ check(lines[3] and lines[3]:match('unmet in record=([^;]*)$')=='choice,choice,choice' and #lines[3]<400,'4f: a list of 200 entries shows at most three: '..tostring(lines[3]))
+ local POISON='SENTINEL'..string.char(1)..string.char(10)..string.char(7)..string.rep('Z',300)
+ local VIEWS={
+  {originalSlot=POISON},{slotNow=POISON},{loadoutSeenSlot=POISON,loadoutSeenAt=POISON},{originalSlotState=POISON},{loadoutCheck=POISON},{unmet={POISON,'loadout'}},
+ }
+ for index,extra in ipairs(VIEWS)do
+  lines=Gated(extra)
+  check(#lines==3,'4f view '..index..': three lines, not the fallback answer: '..#lines)
+  for i,l in ipairs(lines)do
+   check(#l<400 and not l:find('[%z\1-\31]') and not l:find('SENTINEL',1,true) and not l:find('ZZZZZZZZZZ',1,true),'4f view '..index..' line '..i..' is bounded and carries no raw value')
+  end
+ end
+ lines=Gated({originalSlot=-0.0,slotNow=-0.0,loadoutSeenSlot=-0.0})
+ check(lines[3]:find('original slot=0; slot now=0 (',1,true) and lines[3]:find('saw slot 0',1,true) and not lines[3]:find('-0',1,true),'4f: the line itself shows -0 as 0: '..tostring(lines[3]))
+ runtime.RecoveryView=real
 end
 
 -- 5. Nothing about what the code does changed: the hold, every refusal and the game

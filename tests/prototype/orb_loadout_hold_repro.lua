@@ -18,6 +18,8 @@
 --     recorded for the earlier action; an exact result does not settle it.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local S=dofile('tests/prototype/orb_loadout_hold_support.lua')
+-- The accepted pause text of the hold, word for word (a diagnostic change must not touch it).
+local PAUSE_TEXT="The original loadout cannot be verified after a loadout change or an incomplete older receipt. Ownership responses do not identify the original loadout. Pending exposure is retained; no retry is allowed."
 
 local FIELDS={'pending','restored','state','recovery','gate','spendConfirmed','choiceSent','choiceObserved','selectedKey','removed','loadoutChanged','pickInFlight','autoRefresh'}
 local REPORTED={pending=true,restored=true,state='PAUSED',recovery='PAUSED',gate='loadout',spendConfirmed=true,
@@ -46,7 +48,7 @@ for index,cause in ipairs(S.CAUSES)do
  check(sig==Expected(key),name..': the reported view is reproduced: '..sig)
  signatures[#signatures+1]=sig
  check(M.Status().state=='PAUSED' and M.Status().recovery.kind=='PAUSED' and M.Status().pending,name..': Status is PAUSED / PAUSED with the receipt pending')
- check(M.Status().reason:find('original loadout',1,true)~=nil,name..': the unchanged loadout text is shown')
+ check(M.Status().reason==PAUSE_TEXT,name..': the hold text is exactly the accepted one: '..tostring(M.Status().reason))
  local lines=OrbLines()
  check(lines[1]=='Orb action: unresolved after a reload; state=PAUSED; recovery=PAUSED; waiting for=loadout',name..': first support line: '..tostring(lines[1]))
  check(lines[2]=='  spend confirmed=yes; choice=none; selected=none; source='..key..'; game pick in flight=no; loadout change recorded=yes; automatic refresh=not requested',
@@ -61,6 +63,7 @@ for index,cause in ipairs(S.CAUSES)do
  check(before.originalSlot==cause.expect.original,name..': the original slot is exactly what was recorded ('..tostring(cause.expect.original)..')')
 
  local calls=S.CountCalls(H)
+ local writes=S.CountOrbWrites()
  check(not M.Resume() and not M.Prepare() and M.BlocksOrdinary()==true,name..': no Resume, no new run, ordinary rolling blocked')
  -- Return to the original slot, Recheck, Stop, reload: none of them clears it.
  H.perks.serverActiveSlot=cause.expect.original or 1;H.perks.serverBuildSlots=slots;S.Pass(H,M,A);S.Rechecks(H,M,3)
@@ -90,8 +93,21 @@ for index,cause in ipairs(S.CAUSES)do
  check(after.originalSlot==before.originalSlot,name..': the original slot is not inferred or filled in (still '..tostring(before.originalSlot)..')')
  check(after.offerKey==before.offerKey and after.removed==before.removed and after.chargesBefore==before.chargesBefore
   and after.lockedKey==before.lockedKey,name..': offer, source and balance record are unchanged')
+ check(writes()==0,name..': no Orb receipt write after the hold is set (passes, Recheck, Stop, a reload, the player\'s pick): '..writes())
  check(calls.spend==0 and calls.select==calls.player and calls.player==1 and H.Count('orb-spend')==1 and H.Count('take')==1,
   name..': nothing reached the game from Nexus (no second spend, no automatic choice; only the player\'s one pick)')
+end
+-- The hold is saved by exactly one write, and nothing writes the receipt again.
+do
+ local H,M,A,O=S.Fresh();S.SpendOfferNoChoice(H,M,A,O)
+ M=S.Reload(H);S.Pass(H,M,A);S.Rechecks(H,M,2)
+ local writes=S.CountOrbWrites()
+ S.Rechecks(H,M,4);H.Advance(5)
+ check(writes()==0 and not S.Receipt().loadoutChanged,'an unheld restored receipt is not rewritten by passes')
+ H.perks.serverActiveSlot=2;S.Pass(H,M,A)
+ check(S.Receipt().loadoutChanged==true and writes()==1,'the hold is saved by exactly one write: '..writes())
+ S.Rechecks(H,M,4);H.perks.serverActiveSlot=1;S.Pass(H,M,A);S.Rechecks(H,M,3);M.Stop();S.Rechecks(H,M,2)
+ check(writes()==1,'and nothing writes it again: '..writes())
 end
 -- The eight causes are not distinguishable from the reported view or the two lines.
 for i=2,#signatures do
