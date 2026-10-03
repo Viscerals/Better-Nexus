@@ -172,10 +172,22 @@ balance is never recorded, also on an offer that was matched before).
 - The live-path rule that a manual choice different from a recorded proposed
   key pauses the operation. This also applies after a reload. Only its text
   changed (F7).
-- `UNOBSERVABLE` receipts still block new Orb runs and ordinary rolling
-  indefinitely. No exit exists. See the proposal below.
+- `UNOBSERVABLE` receipts still block new Orb runs and ordinary rolling until
+  the player chooses Continue (035, `docs/ORB_RECOVERY_CONTINUE.md`). Nothing
+  else clears them. The proposal below is superseded by that implementation.
 
-### Proposal only, not implemented: acknowledged settlement of unobservable history
+### Superseded by 035: the player-confirmed Continue (phase one)
+
+The proposal below is now implemented in a different form, described in
+`docs/ORB_RECOVERY_CONTINUE.md`: the class is a confirmed spend with no usable
+recorded outcome and the original offer gone (not `UNOBSERVABLE` only); the
+fresh-state check is two qualifying charge replies observed after Nexus's own
+requests, not a minimum time; the archive is the character row key
+`orbRecoveryArchive`, not `orbRefinement.unresolvedHistory` (an older build drops
+unknown keys inside `orbRefinement`); the confirmation is state-bound. The text
+below is kept as written for history.
+
+### Proposal (historical, superseded): acknowledged settlement of unobservable history
 
 Goal: let a player leave the permanent block of an `UNOBSERVABLE` receipt
 without any fabricated confirmation.

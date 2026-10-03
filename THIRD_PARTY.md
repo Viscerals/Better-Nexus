@@ -30,6 +30,15 @@ addon are in this repository or in the installable package. The supplied
 archive contains no license or notice file; no notice obligation from it
 applies here. No claim of mathematical optimality or native validation is made.
 
+Passive observation (035): `core/OrbAdapter.lua` listens to the client's
+`CHAT_MSG_ADDON` event in a frame of its own and reads the game's own addon-message
+prefix for four opcodes (the Orb charge reply, the offer, ownership and pick-result
+packets) plus two slot opcodes. It registers no opcode handler, replaces no game
+handler, patches no client file, sends nothing, and keeps only parsed numbers and
+enumerated codes. No source, UI, asset or database of the game's own addon is
+copied; the opcode numbers and the prefix come from reading the owner's installed
+client files and are specific to that build. See `docs/ORB_RECOVERY_CONTINUE.md`.
+
 Compatibility exception: `A.RivalDetected()` in `core/GameAdapter.lua` detects
 that separately distributed addon by its exact addon name and slash-command key,
 so Nexus pauses automation while another picker may own the same server

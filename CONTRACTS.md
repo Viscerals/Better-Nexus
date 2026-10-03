@@ -52,7 +52,14 @@ This file has two parts.
   changes.
 - **Orb mode** is specified in `docs/ORB_MEMORY_MODE.md`. All Orb mutation sits
   behind `GameAdapter.Orbs`. An unresolved Orb action is never retried, refunded
-  or erased. Recovery after reload is passive.
+  or erased. Recovery after reload is passive. The only exit is the player's
+  explicit Continue (`docs/ORB_RECOVERY_CONTINUE.md`), for a confirmed spend with
+  no usable recorded outcome and the original offer gone: it keeps the spent
+  count, the limit and the configured maximum, archives the saved receipt
+  unchanged in the character row key `orbRecoveryArchive`, sends nothing and is
+  never automatic. A passive observer of the game's own addon-message prefix
+  feeds its strict check; it registers no handler, replaces nothing and sends
+  nothing.
 - **Version.** The release identity lives in `data/Release.lua` and `Nexus.toc`,
   not in this file.
 - **Tests.** The maintained offline suite is `tools/run_prototype_tests.py` with
