@@ -131,7 +131,7 @@ section('4 late events across sessions and floods',function()
  H.Advance(6)
  e=R.SavedRow('orbRecoveryArchive')[1]
  local lost=false;for _,l in ipairs(e.late) do if l.k=='events_lost' then lost=true end end
- check(lost or e.lateN>=3,'a flood that overflowed the ring says events were lost: '..tostring(e.lateN))
+ check(lost and e.lateN==3 and #e.late==3,'a flood that overflowed the ring says events were lost: '..tostring(e.lateN))
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
