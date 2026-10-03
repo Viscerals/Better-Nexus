@@ -125,9 +125,10 @@ is recorded, and the requirements that the saved record alone shows unmet
 at the moment a build with this line first sets the hold, as three small saved
 fields in the pending receipt (`loadoutCause`, a fixed name;
 `loadoutObservedSlot`, a whole number from 0 to 65535; and `loadoutObservedAt`,
-the client clock time in whole seconds, from 2000 to 2100, shown in the local
-form of the audit rows with the date, so that it can be compared with them; it
-is absent when the clock is missing or implausible). They are never changed
+the client clock time in whole seconds, from 2000-01-01 to 2100-01-01 UTC, shown
+with the date in the local form of the audit rows and labelled "local", so that it
+can be compared with them (the error times in the same report are UTC and say so);
+it is absent when the clock is missing, failing or implausible). They are never changed
 later. A hold saved without a cause stays `not recorded`: it is not filled in
 from a later read, and a missing original slot is never inferred. Older builds
 copy these fields through their own saves. The line is text only. It adds no

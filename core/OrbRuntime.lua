@@ -638,8 +638,9 @@ local function slotValue(n)
     if integer(n,0,MAX_SLOT) then return n==0 and 0 or n end
     return nil
 end
--- The client clock in whole seconds, 2000-01-01 to 2100-01-01, or nil: a missing, failing or
--- implausible clock records no time and changes nothing else.
+-- The client clock in whole seconds, 2000-01-01 to 2100-01-01 (UTC), or nil: a missing, failing or
+-- implausible clock records no time and changes nothing else. The same bounds are checked again in
+-- core/SupportReport.lua (clockText); change both together.
 local MIN_EPOCH,MAX_EPOCH=946684800,4102444800
 local function epochValue(n) return integer(n,MIN_EPOCH,MAX_EPOCH) and n or nil end
 local function wallClock()
@@ -1316,8 +1317,8 @@ function M.RecoveryView()
     local p=run and run.pending
     if not p then return {pending=false,state=run and run.state} end
     local gate=run.settleGate
-    -- The loadout facts. Every saved value is checked on the way out: only a known cause
-    -- name, a small whole slot number and a boolean are ever returned.
+    -- The loadout facts. Every saved value is checked on the way out: only a known cause name,
+    -- small whole numbers (a slot, a clock time in range) and booleans are ever returned.
     local read=run.slotRead
     local check=read and loadoutCheck({context=read},p) or nil
     local nowKnown -- true, false, or nil when the client cannot say (false must survive)

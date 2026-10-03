@@ -575,9 +575,10 @@ local function errorOrigin(view, rank)
 end
 
 -- The loadout line of the unresolved Orb action. Every value of the owner's answer is
--- matched against a fixed list or a small whole number before it is shown. A value that
--- fails is shown as "unreadable", "unread", "not reported" or "not recorded", or left
--- out (a seen slot or a time without a valid cause); it is never copied.
+-- matched against a fixed list, a small whole number or an exact text form before it is
+-- shown. A value that fails is shown as "unreadable", "unread", "not reported" or "not
+-- recorded", or left out (a seen slot or a time that fails its own check, or that comes
+-- without a valid cause); it is never copied.
 local LOADOUT_CAUSE_TEXT = {
     NO_ORIGINAL_SLOT = "no original slot in the record",
     SLOT_DIFFERS = "slot differed (slot data received)",
@@ -592,17 +593,22 @@ local function slotNumber(value)
     end
     return nil
 end
--- The client clock time at which the hold was first set, in the same local form as the audit
--- rows' time of day, with the date. Whole seconds from 2000-01-01 to 2100-01-01 only.
+-- The client clock time at which the hold was first set, in the same LOCAL form as the audit
+-- rows' time of day, with the date, and labelled "local" (the error times in this report are UTC
+-- and say so). Whole seconds from 2000-01-01 to 2100-01-01 (UTC) only; the same bounds are checked
+-- in core/OrbRuntime.lua (epochValue). `date` is a shared API: only an answer of the exact form
+-- YYYY-MM-DD HH:MM:SS is shown.
 local function clockText(epoch)
     if type(epoch) ~= "number" or epoch ~= math.floor(epoch) or epoch < 946684800 or epoch > 4102444800 then
         return nil
     end
     if type(date) ~= "function" then return nil end
     local ok, text = pcall(date, "%Y-%m-%d %H:%M:%S", epoch)
-    if not ok or type(text) ~= "string" then return nil end
-    text = text:gsub("%c", " "):sub(1, 19)
-    return #text == 19 and text or nil
+    if not ok or type(text) ~= "string"
+        or not text:find("^%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d$") then
+        return nil
+    end
+    return text .. " local"
 end
 local function loadoutLine(view)
     local original = "unreadable"
