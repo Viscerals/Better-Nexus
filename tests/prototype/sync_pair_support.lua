@@ -100,7 +100,11 @@ NewPeer=function(i,name,rows,configure,opts)
    write=io.write,read=io.read,stdout=io.stdout,stderr=io.stderr}
   e.dofile=function(path)return assert(e.loadfile(path))()end
   local H=e.dofile('tests/prototype/harness.lua')
-  e.UnitName=function()return name,'Ebonhold'end
+  e.UnitName=function()return name,opts.realm or 'Ebonhold'end
+  if opts.realm then
+   e.GetRealmName=function()return opts.realm end
+   e.GetNormalizedRealmName=e.GetRealmName
+  end
   local T=e.dofile('tests/prototype/startup_support.lua')
   -- rows may be one size for both peers or one size per peer.
   e.NexusDB=T.Profile(type(rows)=='table' and rows[i] or rows or 5,0)

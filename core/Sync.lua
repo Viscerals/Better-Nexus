@@ -3750,9 +3750,9 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
 end
 
 local function CommitReceivedBuild(payload, transportSender, context,
-        onComplete, deferredEntry)
+        onComplete, deferredEntry, channelOwnerSender)
     local directOwner = Identity.TransportOwns(
-        payload.ownerKey, transportSender)
+        payload.ownerKey, channelOwnerSender or transportSender)
     local existing, existingSource = CatalogGet(payload.id)
     if existing and Identity.SavedMirrorKind(existing) ~= "ordinary" then
         Responder.NoteContextOutcome(context, "rejected", "ownership")
@@ -3927,7 +3927,7 @@ local function CommitReceivedBuild(payload, transportSender, context,
     end
     local function Submit()
         return StoreReceivedBuild(
-            payload, directOwner, transportSender, matchedReplacement,
+            payload, directOwner, channelOwnerSender or transportSender, matchedReplacement,
             replacementFingerprint, function(completed, completedWhy)
                 local accepted = Complete(completed, completedWhy)
                 if type(onComplete) == "function" then onComplete(accepted) end
@@ -3960,7 +3960,7 @@ local function CommitReceivedBuild(payload, transportSender, context,
             end,
             run=function(entry)
                 local accepted, pendingWhy = CommitReceivedBuild(payload,
-                    transportSender, context, onComplete, entry)
+                    transportSender, context, onComplete, entry, channelOwnerSender)
                 if accepted == nil and pendingWhy == "ADMISSION_BUSY" then
                     return "busy"
                 end
@@ -4494,6 +4494,39 @@ function Sync.HandleIncoming(text, sender)
     -- Isolated: a failure of this passive read must never cost the message.
     pcall(Sync.NoteChannelTraffic)
     local accepted,reason=Inbound.HandleIncoming(text,sender)
+    if accepted and Nexus.SyncWire then Nexus.SyncWire.ObservePeer(sender) end
+    if accepted then pcall(Responder.NotePeerActivity, sender) end
+    return accepted,reason
+end
+
+-- Called only after MainLifecycle admits CHAT_MSG_CHANNEL for wrbuildssync.
+-- Task 037: the owner confirms that this current server's channel is realm-
+-- local, with no cross-realm channels. Revisit this assumption if that changes.
+-- Qualify only the game event's bare sender for full-build owner admission.
+-- Keep the raw sender for diagnostics, peer/session state and other messages.
+-- Unknown entry points and addon whispers never receive this authority.
+function Sync.HandleNativeChannelIncoming(text, sender)
+    if not Identity.ValidPlayer(sender) then return false end
+    local channelOwnerSender
+    if not sender:find("-", 1, true) then
+        local realm
+        if type(GetNormalizedRealmName) == "function" then
+            realm = GetNormalizedRealmName()
+        end
+        if realm == nil or realm == "" then
+            realm = type(GetRealmName) == "function" and GetRealmName() or nil
+        end
+        local owner = type(realm) == "string" and Identity.OwnerKey(sender, realm)
+        if owner and not owner:match("@unknown$") then
+            local qualified = sender .. "-" .. owner:match("@(.+)$")
+            if Identity.CanonicalOwnerFromTransport(qualified) then
+                channelOwnerSender = qualified
+            end
+        end
+        if not channelOwnerSender then return false end
+    end
+    pcall(Sync.NoteChannelTraffic)
+    local accepted,reason=Inbound.HandleIncoming(text,sender,channelOwnerSender)
     if accepted and Nexus.SyncWire then Nexus.SyncWire.ObservePeer(sender) end
     if accepted then pcall(Responder.NotePeerActivity, sender) end
     return accepted,reason

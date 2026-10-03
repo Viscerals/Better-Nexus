@@ -262,7 +262,7 @@ function Inbound.New(options)
     end
 
     local function HandleCompleteBuild(buildId, envelopeModified, fullData,
-            transportSender, context)
+            transportSender, context, channelOwnerSender)
         local json = base64Decode(fullData)
         if not json then
             noteOutcome(context, "rejected", "malformed")
@@ -328,7 +328,7 @@ function Inbound.New(options)
             return terminal
         end
         local committed, why = commitBuild(payload, transportSender,
-            context, Finish)
+            context, Finish, nil, channelOwnerSender)
         if settled then return terminal end
         if committed == nil and why == "ROOT_MUTATION_PENDING" then
             return false
@@ -460,7 +460,7 @@ function Inbound.New(options)
         return committed
     end
 
-    local function HandleBuildTransfer(parts, protocolSender)
+    local function HandleBuildTransfer(parts, protocolSender, channelOwnerSender)
         local buildId, lastMod, chunkSpec, data =
             parts[3], parts[4], parts[5], parts[6]
         local context
@@ -494,7 +494,7 @@ function Inbound.New(options)
             if TransferBlocked("build", key) then return false end
             if total == 1 then
                 return HandleCompleteBuild(buildId, lastMod, data,
-                    protocolSender, context)
+                    protocolSender, context, channelOwnerSender)
             end
             I.CleanExpired()
             if not CanStartTransfer(protocolSender) then
@@ -506,12 +506,16 @@ function Inbound.New(options)
             local current = now()
             entry = {chunks={}, total=total, t0=current, lastSeen=current,
                 buildId=buildId, lastMod=lastMod, sender=protocolSender,
-                bytes=0, received=0,context=context}
+                bytes=0, received=0,context=context,
+                channelOwnerSender=channelOwnerSender}
             buildInflight[key] = entry
         end
         if total ~= entry.total or buildId ~= entry.buildId
             or protocolSender ~= entry.sender
             or tostring(lastMod) ~= tostring(entry.lastMod)
+            -- Every chunk must carry the same admitted channel authority.
+            -- An addon/direct chunk cannot borrow it from a native chunk.
+            or channelOwnerSender ~= entry.channelOwnerSender
             or not I.SameContext(entry.context, context) then
             buildInflight[key] = nil
             RememberBlockedTransfer("build", key)
@@ -554,10 +558,10 @@ function Inbound.New(options)
         observe("build_transfer_complete", {id=buildId,peer=protocolSender,
             chunks=entry.total,bytes=#full,outcome="complete"})
         return HandleCompleteBuild(buildId, lastMod, full, protocolSender,
-            context)
+            context, entry.channelOwnerSender)
     end
 
-    function I.HandleIncoming(text, sender)
+    function I.HandleIncoming(text, sender, channelOwnerSender)
         if type(text) ~= "string" then return false end
         local claimedCode = text:match("^([^|]+)")
         if not peerCodes[claimedCode] then return false end
@@ -797,7 +801,7 @@ function Inbound.New(options)
         if code ~= codes.build or (#parts ~= 6 and #parts ~= 8) then
             return rejectIncoming("invalid build transfer")
         end
-        return HandleBuildTransfer(parts, protocolSender)
+        return HandleBuildTransfer(parts, protocolSender, channelOwnerSender)
     end
 
     function I.Reset()

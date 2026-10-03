@@ -1083,7 +1083,7 @@ function Lifecycle.New(options)
                     numbered = (arg4:lower():gsub("^%s*%d+%.%s*", ""))
                 end
                 if bare == want or numbered == want then
-                    local ok, err = pcall(Nexus.Sync.HandleIncoming, arg1, arg2)
+                    local ok, err = pcall(Nexus.Sync.HandleNativeChannelIncoming, arg1, arg2)
                     if not ok then
                         RecordError("Sync.HandleIncoming", err)
                         Nexus.Sync.LogEvent("RX", "handler ERROR: %s", ErrorText(err))

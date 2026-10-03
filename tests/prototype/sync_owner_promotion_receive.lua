@@ -58,7 +58,10 @@ local function Run(actual,expected,route,verifiedSeed)
  local observations={}
  I.TransportOwns=function(owner,sender)
   local answer=owns(owner,sender)
-  if owner==I.CanonicalOwnerKey(payload.o) and sender==actual then
+  -- Native channel authority may now qualify the bare event sender with the
+  -- harness realm Ebonhold. That still cannot prove this TestRealm owner.
+  if owner==I.CanonicalOwnerKey(payload.o) and (sender==actual
+   or route=='channel' and actual=='Origin' and sender=='Origin-ebonhold') then
    observations[#observations+1]=answer
   end
   return answer
