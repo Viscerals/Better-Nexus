@@ -134,5 +134,18 @@ section('4 late events across sessions and floods',function()
  check(lost and e.lateN==3 and #e.late==3,'a flood that overflowed the ring says events were lost: '..tostring(e.lateN))
 end)
 
+-- 5. An event that arrived BEFORE the new run is not labelled as the new run's, even if the player
+-- presses Start before the next idle tick.
+section('5 label of the first late event',function()
+ local H,M,A,O,server=ClassFromARun()
+ assert(M.ContinueBegin());assert(Until(H,M,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ server.Push(1000,'1')            -- arrives now; nothing has looked at it yet
+ H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+ assert(M.Start(1))               -- the new run starts at once
+ H.Advance(6)
+ local e=R.SavedRow('orbRecoveryArchive')[1]
+ check(e.late and e.late[1] and e.late[1].k=='pick_result' and e.late[1].nr==nil,'the event is recorded without the new run flag: '..tostring(e.late and e.late[1] and e.late[1].nr))
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery after Continue: a new baseline, no retroactive attribution, normal gates, no replacement allowance checks='..checks)

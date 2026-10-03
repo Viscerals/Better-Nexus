@@ -684,5 +684,33 @@ section('30 odd keys',function()
  check(ok,'begin does not throw on boolean and fractional keys in the receipt: '..tostring(res))
 end)
 
+-- 31. After an unanswered check the player can check again, without a Recheck: a request that went
+-- unanswered for the whole wait is given up, not waited for forever.
+section('31 check again after no answer',function()
+ local H,M,A,O,server=World({server={mode='drop'}})
+ local original=H.Clone(R.Saved())
+ Begin(M);assert(Run(H,M,M.CONTINUE_WAIT+3,'refused'))
+ Refused(H,M,original,'no_reply','no answer')
+ server.mode='auto'                       -- the game answers again
+ Begin(M)
+ check(Run(H,M,M.CONTINUE_WAIT+10,'ready'),'the next check reaches ready: '..tostring(M.ContinueView().refusal))
+ -- the same when the unanswered request was the player's own Recheck
+ local H2,M2,A2,O2,s2=World({server={mode='drop'}})
+ M2.Recheck()
+ Begin(M2);assert(Run(H2,M2,M2.CONTINUE_WAIT+3,'refused'))
+ s2.mode='auto'
+ Begin(M2)
+ check(Run(H2,M2,M2.CONTINUE_WAIT+10,'ready'),'and after an unanswered Recheck')
+end)
+
+-- 32. The words of the block and of a changed answer are true.
+section('32 texts',function()
+ local H,M,A,O,server=World({latch=false})
+ local why=M.BlockReason('Ordinary rolling')
+ check(why:find('Continue',1,true) and not why:find('block ends only when that action is confirmed',1,true),'the block text allows for Continue: '..why)
+ check(M.ContinueReason('reply_changed'):find('reported a change',1,true),'a single answer that reports a change is not called two answers that disagree')
+ check(M.ContinueReason('observer_tainted'):find('usually',1,true),'a reload does not always clear a taint')
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery refusals: stale, omitted, rejected, late, changed and failed inputs never release the blocker checks='..checks)

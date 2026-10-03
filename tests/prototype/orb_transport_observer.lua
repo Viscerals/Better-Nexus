@@ -347,15 +347,15 @@ section('11 segmented messages',function()
  Send('18\t@BBBB\t002/002\tgood','WHISPER',ME)
  local last=Last(o2)
  check(last and last.cls=='R' and last.why=='mixed' and B.TransportStatus().bad[18]==last.ord,'a message completed with a rejected fragment is rejected and taints')
- -- bounds: more open assemblies than the table holds, and a total that cannot be tracked
+ -- bounds: more open assemblies than the table holds, and a fragment outside its assembly (a total of zero)
  for i=1,20 do Send('16\t@'..string.format('%04X',0x100+i)..'\t001/002\tx','WHISPER',ME) end
  local before=B.TransportStatus().ord
  Send('16\t@0101\t002/002\ty','WHISPER',ME)  -- its assembly was forgotten: nothing completes
  check(B.TransportStatus().ord==before,'the assembly table is bounded; an evicted assembly never completes')
  local o3=B.TransportStatus().ord
- Send('540\t@CCCC\t001/FFF\tz','WHISPER',ME)
+ Send('540\t@CCCC\t001/000\tz','WHISPER',ME)
  local rec=Last(o3)
- check(rec and rec.cls=='A' and rec.why=='range' and B.TransportStatus().bad[540]==rec.ord,'a total that cannot be tracked is an unqualified admitted packet and taints')
+ check(rec and rec.cls=='A' and rec.why=='range' and B.TransportStatus().bad[540]==rec.ord,'a fragment outside its assembly is an unqualified admitted packet and taints')
  -- opcode 1220 stays unqualified
  local o4=B.TransportStatus().ord
  Send('1220\t@DDDD\t001/001\t49,0,0','WHISPER',ME)
@@ -405,6 +405,43 @@ section('14 failed request',function()
  check(ok==false and mark==nil and B.TransportStatus().requests==0 and B.TransportStatus().reqOrd==0,'no request, no mark, no count')
  local ok2,_,mark2=B.RequestRefresh()
  check(ok2==true and mark2~=nil and B.TransportStatus().requests==1,'the next one is marked')
+end)
+
+-- 15. A large legitimate message is tracked up to the format limit (three hex digits: 4095
+-- fragments); a taint it clears is not permanent. The assembly follows the FIRST fragment's total
+-- as the game does (a forged fragment is stored by the game, so it counts here), and an assembly
+-- the game would have expired (15 s after its first fragment) never completes.
+section('15 large, forged and expired messages',function()
+ local H2=S.Fresh();H=H2
+ B=Nexus.GameAdapter.Orbs;assert(B.TransportStart())
+ local function Frag(op,mid,i,n,sender,text)
+  Send(op..'\t@'..mid..'\t'..string.format('%03X',i)..'/'..string.format('%03X',n)..'\t'..(text or 'x'),'WHISPER',sender or ME)
+ end
+ for _,n in ipairs({65,200,4095}) do
+  Send('18\tFORGED','WHISPER','Other')
+  local forged=B.TransportStatus().bad[18]
+  local ord=B.TransportStatus().ord
+  for i=1,n do Frag(18,string.format('%04X',n),i,n) end
+  local st=B.TransportStatus()
+  check(st.ord==ord+1 and Last(ord).cls=='A' and Last(ord).seg==true and st.good[18]>forged,n..' fragments: one complete admitted record that clears the taint')
+ end
+ check(B.TransportStatus().bad[18]<B.TransportStatus().good[18],'the opcode is clean afterwards')
+ -- a fragment that claims its own smaller total: the game still stores it under the first fragment's total
+ Frag(18,'AAAA',1,3)
+ Send('18\t@AAAA\t003/002\tFORGED','WHISPER','Other')
+ local o1=B.TransportStatus().ord
+ Frag(18,'AAAA',2,3)
+ local rec=Last(o1)
+ check(rec and rec.cls=='R' and rec.why=='mixed','the forged fragment counts toward the assembly: the completed message is mixed')
+ -- an assembly older than 15 s is dropped, as the game drops it
+ local o2=B.TransportStatus().ord
+ Frag(16,'BBBB',1,2)
+ H.now=H.now+16
+ Frag(16,'BBBB',2,2)
+ check(B.TransportStatus().ord==o2,'the late last fragment completes nothing: its assembly expired')
+ Frag(16,'BBBB',1,2)
+ Frag(16,'BBBB',2,2)
+ check(B.TransportStatus().ord==o2+1,'a message sent again within the time completes')
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
