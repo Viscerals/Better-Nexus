@@ -61,10 +61,18 @@ parsed numbers and enumerated codes, never a sender, a name or a payload.
   digits. This follows the strict convention of EbonAPI 2.1.1's bridge. It is a source-backed
   expectation, not proof of the real server's sender.
 * Class A: admitted (sender and channel pass) but not qualifying, or an opcode that is followed
-  by arrival only (16 offers, 18 ownership, 540 and 542 slot data, 1000 pick results).
+  by arrival only (16 offers, 18 ownership, 540 and 542 slot data, 1000 pick results). For those
+  opcodes a segmented message is tracked by fragment: the game calls its handler only when every
+  fragment has arrived, so a fragment alone replaces nothing and makes no record; only a COMPLETE
+  message is an arrival. At most eight assemblies are tracked; a message that cannot be tracked
+  (more than 64 fragments) is an unqualified admitted packet and taints. A leading-zero opcode
+  ("01220") reaches the game's handler as 1220, so it is recorded and never qualifies.
 * Class R: a relevant packet that the game's dispatcher would still accept and the observer
-  rejects. R, and an A of opcode 1220, may have changed the game's cache, so the opcode is
-  tainted until a later Q (1220) or A (the others) replaces it. The check refuses on a taint it
+  rejects (also a message that was completed with a rejected fragment: `mixed`). R, and any
+  admitted record that carries a reason (an unqualified 1220, an untrackable message), may have
+  changed the game's cache, so the opcode is tainted until a later Q (1220) or a complete A (the
+  others) replaces it. A failing read of the player's name is an unknown identity, recorded as
+  such, never a silent miss. The check refuses on a taint it
   cannot refresh and never reads a possibly poisoned cache as a trusted baseline.
 * A reply is "observed after the refresh began". The protocol has no correlation. A local epoch
   rejects local timers, closures and already-observed replies. It cannot identify an older server
@@ -125,8 +133,11 @@ intended), `observed` (counts of the raw pick evidence, which lives inside the r
 `resolution` (`UNCONFIRMED`, confidence `NONE`), `consent` (version, policy `TWO_OBSERVED`, serial),
 `pre` and `post` (below), `late` and `lateN`.
 
-Budget review (measured in `orb_recovery_store_compat`, deidentified 034 shape): one entry is about
-167 edges, 2.5 KB, depth 3 (row > archive > entry > receipt > before is depth 5 of the Store's 6).
+Budget review (measured in `orb_recovery_store_compat`, deidentified 034 shape with three full
+pick entries, the worst case): one entry is about 218 edges, 3 KB, depth 4. The deepest table is
+row (1) > archive (2) > entry (3) > receipt (4) > picks (5) > one pick (6): exactly at the Store's
+own depth bound of 6, not past it. There is no margin: the entry cap (depth 4 below the archive)
+refuses anything deeper, so a later change that adds a level is refused, not written.
 Caps: an entry at most 1200 edges, 6144 bytes, depth 4; the archive at most 8 entries and 28672
 bytes. The real Store starts, stays writable and keeps the archive with eight entries at the caps.
 Refuse, never evict, never repair, never delete: a full archive, a malformed one, one written by a

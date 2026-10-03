@@ -268,9 +268,9 @@ end
 local function flushEvidence()
     if not (run and run.pickDirty) then return true end
     if not run.pending then run.pickDirty=nil;return true end
-    local ok=savePending()
-    if ok then run.pickDirty=nil end
-    return ok==true
+    local okCall,ok=pcall(savePending)
+    if okCall and ok then run.pickDirty=nil end
+    return okCall and ok==true
 end
 local function release()
     if run.token then B.Release(run.token);run.token=nil end
@@ -765,7 +765,8 @@ local function onPickRaw(raw)
     local p=run and run.pending
     if not p then return end
     local entry=cleanPick({id=raw.id,q=raw.q,board=raw.board,m=pickRelation(raw,p),acc=raw.acc,op=raw.op,
-        slot=raw.slot,sk=raw.sk,rd=raw.rd,inb=raw.inb,ph=life.phase,ep=life.epoch,at=wallClock(),c=1})
+        slot=raw.slot,sk=raw.sk,rd=raw.rd,inb=raw.inb,ph=PICK_PHASE[raw.ph] and raw.ph or life.phase,
+        ep=pickInt(raw.ep,0,65535) or life.epoch,at=wallClock(),c=1})
     if not entry then return end
     entry.u=entry.id~=nil and entry.q~=nil and p.choiceObserved==true and p.selectedKey==entry.id..":"..entry.q or false
     local list=type(p.picks)=="table" and p.picks or {}
@@ -779,10 +780,11 @@ local function onPickRaw(raw)
         else p.pickDropped=math.min((tonumber(p.pickDropped) or 0)+1,PICK_COUNT_MAX) end
     end
     p.picks=list
-    -- Saved at once, for a reload or a logout that follows. A refusal keeps it in
-    -- memory for the next pass and changes nothing else.
-    local ok=savePending()
-    run.pickDirty=(not ok) or nil
+    -- Saved at once, for a reload or a logout that follows. A refusal, or a store that throws,
+    -- keeps it in memory (reported as unsaved) for the next pass and changes nothing else.
+    run.pickDirty=true
+    local okCall,ok=pcall(savePending)
+    if okCall and ok then run.pickDirty=nil end
 end
 -- A pick that passed every contextual check is recorded by the same pass the
 -- restored receipt already gets: a passive pump, now, not at the next timed read.
@@ -1364,7 +1366,7 @@ end
 -- The text of each state. Plain statements: what was observed, what Continue does, and what
 -- stays uncertain. None of it says a result was verified.
 local RC_INTRO="An earlier Orb action has a confirmed spend and no recorded outcome, and its offer is gone. Continue lets you go on without that outcome. First Nexus checks the game's current state read-only: it asks the game twice for the Orb count and waits for each answer. Nothing is sent but those two questions. You then confirm, or cancel."
-local RC_CHECKING="Checking the game's current state. Nexus asked the game for the Orb count and waits for the answer; it asks a second time after the first answer. Nothing but these read-only questions is sent. Any change in the game, or a loading screen, cancels this check."
+local RC_CHECKING="Checking the game's current state. Nexus asked the game for the Orb count and waits for an answer observed after that request began; it asks a second time after the first. Nothing but these read-only questions is sent. Any change in the game, or a loading screen, cancels this check."
 local RC_CONFIRM="Continue with an unconfirmed Orb outcome? The earlier Orb action counts %d of its approved %d Orb(s) as spent. Nexus did not see which Echo, if any, you received, and the game gives no way to check. If you continue: the spent count stays; the original record is saved unchanged; nothing is refunded, repeated or chosen; Nexus stops blocking rolling; a new Orb run needs its own approval and every normal check. Risk you accept: Nexus cannot prove that the server is finished with the old action. Two answers that arrived after Nexus asked do not prove that no older answer is still on its way. A late result would show up as an ordinary change, and Nexus will not link it to the old record."
 local RC_DONE="Continued with an unconfirmed outcome. The earlier Orb action is saved unchanged in the archive and its spent Orb stays counted. Nothing was refunded, repeated or chosen. A new Orb run needs its own approval and every normal check."
 local RC_REFUSALS={
@@ -1390,7 +1392,7 @@ local RC_REFUSALS={
     pending_positive="The game reports Orb offer(s) still pending. Resolve them in the game's offer window. Nothing was sent or spent.",
     reply_changed="The two answers about the Orb count disagree, so the check was cancelled. Nothing was changed. Check again.",
     balance_mismatch="The answer about the Orb count does not match what the game shows, so the check was cancelled. Nothing was changed.",
-    no_reply="The game did not answer in time. Nothing was changed. Press Continue to check again.",
+    no_reply="No answer was observed in time. Nothing was changed. Press Continue to check again.",
     no_ownership="The game did not refresh your Echoes in time. Nothing was changed. Press Continue to check again.",
     request_failed="The game's refresh request could not be sent. Nothing was changed.",
     archive_full="The saved list of continued Orb actions is full. Nothing was changed and nothing was deleted.",
@@ -2169,4 +2171,4 @@ function M.CompactStatus()
         canResume=run.state=="PAUSED" and not (run.pending and (run.targetChanged or run.pending.restored or run.pending.selectionAttempted))}
 end
 -- The adapter's hook reaches the evidence sink and the immediate notification.
-if type(B.CaptureSink)=="function" then B.CaptureSink(onPickRaw,onOwnerChoice) end
+if type(B.CaptureSink)=="function" then B.CaptureSink(onPickRaw,onOwnerChoice,function() return life.phase,life.epoch end) end

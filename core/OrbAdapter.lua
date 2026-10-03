@@ -269,7 +269,7 @@ local watcherContext,watcherNotify
 -- both once at load; see O.CaptureSink). selfSelecting is true only while
 -- O.Select itself calls SelectPerk: that pick is saved before the call, so it is
 -- not captured again as an observation.
-local captureSink,ownerNotify
+local captureSink,ownerNotify,capturePhase
 local selfSelecting=false
 -- The plain facts of one SelectPerk callback, read from the game's own tables the
 -- moment it happens. No O.Read(): it needs the catalog, a synced ownership view
@@ -361,11 +361,20 @@ local function watchChoices(svc)
         local raw
         if captureSink and not selfSelecting then
             local okR,r=pcall(rawPick,svc,id)
-            if okR and type(r)=="table" then raw=r end
+            if okR and type(r)=="table" then raw=r
+            else raw={id=integer(id,1) and id or nil} end -- the read failed: the Echo id is still kept
+            -- the lifecycle phase AT the callback, before anything below can change it
+            if type(capturePhase)=="function" then
+                local okP,phase,epoch=pcall(capturePhase)
+                if okP then raw.ph,raw.ep=phase,epoch end
+            end
         end
         local okO,status=pcall(observe,svc,id)
         if not okO then
-            if Nexus.Errors and Nexus.Errors.Record then pcall(Nexus.Errors.Record,"OrbAdapter",tostring(status)) end
+            if Nexus.Errors and Nexus.Errors.Record then
+                local okT,text=pcall(tostring,status)
+                pcall(Nexus.Errors.Record,"OrbAdapter",okT and text or "unreadable error")
+            end
             status="err"
         end
         if raw then raw.rd=status;pcall(captureSink,raw) end
@@ -375,9 +384,10 @@ local function watchChoices(svc)
 end
 -- The owner of the Orb receipt registers its evidence sink and its immediate
 -- notification once, when it loads; the hook below reaches both.
-function O.CaptureSink(sink,notify)
+function O.CaptureSink(sink,notify,phase)
     captureSink=type(sink)=="function" and sink or nil
     ownerNotify=type(notify)=="function" and notify or nil
+    capturePhase=type(phase)=="function" and phase or nil
 end
 -- Install the hook now, without any read: a receipt that exists must not wait for
 -- the first successful O.Read() before a pick can be seen. Idempotent; false
@@ -497,8 +507,8 @@ local TRANSPORT_PREFIX="AAM0x9"
 local TRANSPORT_OPS={[16]=true,[18]=true,[540]=true,[542]=true,[1000]=true,[1220]=true}
 local TRANSPORT_RING,COUNT_CAP=48,1000000
 local T={started=false,epoch=0,ord=0,ring={},requests=0,reqOrd=0,good={},bad={},
-    counts={Q=0,A=0,R=0,echo=0,drop=0,other=0},
-    rejects={identity=0,sender=0,channel=0,segmented=0,third_absent=0,fields_extra=0,malformed=0,range=0}}
+    counts={Q=0,A=0,R=0,echo=0,drop=0,other=0,seg=0},
+    rejects={identity=0,sender=0,channel=0,segmented=0,third_absent=0,fields_extra=0,malformed=0,range=0,mixed=0}}
 local function bump(t,k) t[k]=math.min((t[k] or 0)+1,COUNT_CAP) end
 -- A canonical whole number: digits only (a leading minus only where signed), no
 -- leading zero, no "-0", at most six digits.
@@ -523,6 +533,34 @@ local function parseCharges(body)
     local pending;pending,why=canonical(fields[3],false);if not pending then return nil,why,nf end
     return {charges=charges,delta=delta,pending=pending},nil,nf
 end
+-- Segmented messages of the opcodes that are followed by arrival only (16, 18, 540, 542, 1000).
+-- The game calls a handler only when EVERY fragment of a message has arrived (one assembly per
+-- opcode and message id, whatever the sender of each fragment), so a fragment replaces nothing
+-- in its cache. Only a COMPLETE message counts as an arrival that replaces what the game
+-- cached; an assembly that includes a rejected fragment completes a mixed message and taints.
+-- At most SEG_ASSEMBLIES are tracked and a message of more than SEG_MAX fragments cannot be
+-- tracked (an unqualified admitted packet: it taints). Returns "partial", "complete", "mixed"
+-- or "range".
+local SEG_MAX,SEG_ASSEMBLIES=64,8
+local assemblies={map={},order={}}
+local function segmentNote(op,mid,idxText,totalText,rejected)
+    local idx,total=tonumber(idxText,16),tonumber(totalText,16)
+    if total<1 or total>SEG_MAX or idx<1 or idx>total then return "range" end
+    local key=op..":"..mid
+    local a=assemblies.map[key]
+    if not a then
+        a={total=total,got=0,parts={},bad=false}
+        assemblies.map[key]=a;assemblies.order[#assemblies.order+1]=key
+        while #assemblies.order>SEG_ASSEMBLIES do assemblies.map[table.remove(assemblies.order,1)]=nil end
+    end
+    -- The game keeps the total of the first fragment and ignores an index outside it.
+    if idx<=a.total and not a.parts[idx] then a.parts[idx]=true;a.got=a.got+1 end
+    if rejected then a.bad=true end
+    if a.got~=a.total then return "partial" end
+    assemblies.map[key]=nil
+    for i,k in ipairs(assemblies.order) do if k==key then table.remove(assemblies.order,i);break end end
+    return a.bad and "mixed" or "complete"
+end
 local function transportCapture(prefix,payload,dist,sender)
     if prefix~=TRANSPORT_PREFIX or type(payload)~="string" or payload=="" then return end
     local evt,rest=payload:match("^(%d+)\t(.*)$")
@@ -534,25 +572,48 @@ local function transportCapture(prefix,payload,dist,sender)
     -- The client's own empty request, echoed or not, and any empty 1220 body: the
     -- game's handler returns at once, so nothing changed and nothing is a reply.
     if op==1220 and rest=="" then bump(T.counts,"echo");return end
-    local name=UnitName and UnitName("player")
+    -- The player's own exact name. A failing or unknown identity (also the client's own word for
+    -- an unknown unit) never qualifies and is never a silent miss: the packet is still recorded.
+    local okName,name=false,nil
+    if type(UnitName)=="function" then okName,name=pcall(UnitName,"player") end
     local why
-    if type(name)~="string" or name=="" or name:lower()=="unknown" then why="identity"
+    if not okName or type(name)~="string" or name=="" or name:lower()=="unknown"
+        or (type(UNKNOWNOBJECT)=="string" and name==UNKNOWNOBJECT) then why="identity"
     elseif type(sender)~="string" or sender~=name then why="sender"
     elseif dist~="WHISPER" then why="channel" end
-    T.ord=T.ord+1
-    local rec={ord=T.ord,op=op,epoch=T.epoch}
-    if why then rec.cls="R";rec.why=why
-    elseif op~=1220 then rec.cls="A"
-    elseif rest:find("^@%x%x%x%x\t%x%x%x/%x%x%x\t") then rec.cls="A";rec.why="segmented"
+    local rec={op=op,epoch=T.epoch}
+    local mid,idxText,totalText=rest:match("^@(%x%x%x%x)\t(%x%x%x)/(%x%x%x)\t")
+    if why then
+        rec.cls="R";rec.why=why
+        -- a rejected fragment still counts toward the game's assembly
+        if mid and op~=1220 then segmentNote(op,mid,idxText,totalText,true) end
+    elseif op~=1220 then
+        rec.cls="A"
+        if mid then
+            local state=segmentNote(op,mid,idxText,totalText,false)
+            if state=="partial" then bump(T.counts,"seg");return end
+            if state=="mixed" then rec.cls="R";rec.why="mixed"
+            elseif state=="range" then rec.why="range"
+            else rec.seg=true end
+        end
+    elseif mid then rec.cls="A";rec.why="segmented"
+    elseif evt~=tostring(op) then
+        -- The game reads "01220" as 1220 (tonumber), so it reaches the same handler: it can change
+        -- the cache, and it is never a qualifying reply.
+        rec.cls="A";rec.why="malformed"
     else
         local parsed,reason,nf=parseCharges(rest)
         rec.nf=nf
         if parsed then rec.cls="Q";rec.charges,rec.delta,rec.pending=parsed.charges,parsed.delta,parsed.pending
         else rec.cls="A";rec.why=reason end
     end
+    T.ord=T.ord+1
+    rec.ord=T.ord
     bump(T.counts,rec.cls)
     if rec.why then bump(T.rejects,rec.why) end
-    if rec.cls=="R" or (rec.cls=="A" and op==1220) then T.bad[op]=rec.ord else T.good[op]=rec.ord end
+    -- Any record with a reason (a rejection, or an admitted packet that cannot be trusted to have
+    -- replaced the cache) taints the opcode; a later complete, qualifying record clears it.
+    if rec.why then T.bad[op]=rec.ord else T.good[op]=rec.ord end
     T.ring[rec.ord]=rec
     T.ring[rec.ord-TRANSPORT_RING]=nil
 end
@@ -608,7 +669,9 @@ function O.RequestRefresh()
     if not a or not b then return false,"The client cannot request an Orb/ownership refresh." end
     local okA=pcall(orb.RequestCharges);local okB=pcall(svc.RequestGrantedPerks)
     -- The mark is the arrival ordinal at this moment. It is not a correlation: a
-    -- reply that arrives later is "observed after refresh began", nothing more.
-    if okA then T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=T.ord end
-    return okA and okB,nil,{ord=T.ord,n=T.requests,epoch=T.epoch}
+    -- reply that arrives later is "observed after refresh began", nothing more. A request
+    -- that was not sent has no mark.
+    if not okA then return false end
+    T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=T.ord
+    return okB,nil,{ord=T.ord,n=T.requests,epoch=T.epoch}
 end
