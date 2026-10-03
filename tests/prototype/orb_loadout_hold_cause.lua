@@ -60,7 +60,7 @@ for _,cause in ipairs(S.CAUSES)do
  Has(line3,'slot now='..(e.now==nil and 'not reported' or tostring(e.now))..' ('..(e.nowKnown==true and 'data received' or e.nowKnown==false and 'data not yet received' or 'client reports no slot data')..')',name)
  Has(line3,'check=changed',name);Has(line3,'hold cause='..CAUSE_TEXT[e.cause],name)
  if e.seen~=nil then Has(line3,'saw slot '..tostring(e.seen),name)end
- Has(line3,', set at '..date('%Y-%m-%d %H:%M:%S',view.loadoutSeenAt)..';',name)
+ Has(line3,', set at '..date('%Y-%m-%d %H:%M:%S',view.loadoutSeenAt)..' local;',name)
  Has(line3,'offer recorded=yes',name);Has(line3,'unmet in record=loadout,choice',name)
  check(#line3<400 and not line3:find('[%z\1-\31]'),name..': the line is bounded')
  -- Idempotent: more passes, more rechecks, a return to the original slot and a
@@ -79,7 +79,7 @@ do
  check(S.Receipt().loadoutCause=='SLOT_DIFFERS' and S.Receipt().loadoutObservedSlot==2,'first observation: slot 2')
  local firstAt=S.Receipt().loadoutObservedAt
  check(type(firstAt)=='number','first observation: a clock time')
- H.advanceClock=true;H.Advance(120)
+ H.Advance(120)
  H.perks.serverActiveSlot=3;S.Pass(H,M,A);S.Rechecks(H,M,3)
  check(S.Receipt().loadoutObservedAt==firstAt and time()>firstAt+60,'a later pass, 2 minutes on, does not rewrite the clock time')
  local view=Nexus.OrbRuntime.RecoveryView()
@@ -274,6 +274,10 @@ for _,mode in ipairs({'missing','raising','not a number','out of range'})do
  check(r.loadoutChanged==true and r.loadoutCause=='SLOT_DIFFERS' and r.loadoutObservedSlot==2 and r.loadoutObservedAt==nil,'4d clock '..mode..': the hold and cause are recorded, no time')
  check(Nexus.OrbRuntime.RecoveryView().loadoutSeenAt==nil and not Line3():find('set at',1,true),'4d clock '..mode..': no time is shown')
  check(M.Status().state=='PAUSED' and M.Status().pending and not M.Resume(),'4d clock '..mode..': held as before')
+ -- later passes and a reload, now with a working clock: a time is never filled in afterwards
+ S.Pass(H,M,A);S.Rechecks(H,M,3);M=S.Reload(H);H.perks.serverActiveSlot=2;S.Pass(H,M,A);S.Rechecks(H,M,2)
+ check(Nexus.OrbRuntime.RecoveryView().loadoutSeenAt==nil and S.Receipt().loadoutObservedAt==nil and not Line3():find('set at',1,true),
+  '4d clock '..mode..': a time is not filled in later: '..tostring(S.Receipt().loadoutObservedAt))
 end
 
 -- 3d. A cause without a hold is never shown: an edited or damaged receipt that carries a cause, a seen slot and a time but no hold.
@@ -376,6 +380,34 @@ do
  lines=Gated({originalSlot=-0.0,slotNow=-0.0,loadoutSeenSlot=-0.0})
  check(lines[3]:find('original slot=0; slot now=0 (',1,true) and lines[3]:find('saw slot 0',1,true) and not lines[3]:find('-0',1,true),'4f: the line itself shows -0 as 0: '..tostring(lines[3]))
  runtime.RecoveryView=real
+end
+
+-- 4g. The date function is a shared API. Only a text of the exact form YYYY-MM-DD HH:MM:SS is shown, labelled local.
+do
+ local H,M,A,O,src,slots=S.Build(S.CAUSES[1])
+ local realDate=date
+ local ANSWERS={'|cffff0000|Hx|h|r12','12345678901234567890123456789012345678901234567890','2023-11-14 22:13:2'..string.char(1),
+  'abcd-ef-gh ij:kl:mn','2023-11-14T22:13:20 ',' 023-11-14 22:13:20',42,false,true,{}}
+ for index,answer in ipairs(ANSWERS)do
+  date=function()return answer end
+  local line3=Line3()
+  check(line3 and not line3:find('set at',1,true) and not line3:find('|c',1,true) and #line3<400,'4g date answer '..index..': no time is shown: '..tostring(line3))
+ end
+ date=function()error('no date') end
+ check(Line3() and not Line3():find('set at',1,true),'4g a raising date shows no time')
+ date=nil
+ check(Line3() and not Line3():find('set at',1,true),'4g a missing date shows no time')
+ date=realDate
+ local good=Line3()
+ check(good:find(', set at %d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d local;')~=nil,'4g the real date shows the time with the label local: '..tostring(good))
+end
+
+-- 4h. Before the first read, a receipt without an original slot already lists the loadout as unmet in the record.
+do
+ local H,M,A,O=S.Fresh();S.SpendOfferNoChoice(H,M,A,O)
+ M=S.Reload(H,function(row,state)row.originalSlot=nil;state.originalSlot=nil end)
+ local v=Nexus.OrbRuntime.RecoveryView()
+ check(v.slotRead==false and v.loadoutChanged==false and v.originalSlotState=='absent' and ListText(v.unmet)=='loadout,choice','4h: before any read the record lists loadout and choice: '..ListText(v.unmet))
 end
 
 -- 5. Nothing about what the code does changed: the hold, every refusal and the game
