@@ -624,6 +624,23 @@ local function loadoutCheck(s,p)
     if p.originalSlot~=s.context.slot then return "CHANGED" end
     return "SAME"
 end
+-- Support visibility only: it decides nothing and no rule reads it. Why loadoutCheck
+-- answers CHANGED for this read, named when the hold is FIRST set and kept as an
+-- annotation of that moment: a short name and the slot seen then. A hold that was set
+-- without one (an earlier build) is never given a cause from a later read, and an
+-- original slot that is missing is never filled in.
+local MAX_SLOT=65535
+local LOADOUT_CAUSES={NO_ORIGINAL_SLOT=true,SLOT_DIFFERS=true,SLOT_PUSHED=true,SLOT_DIFFERS_UNVERIFIED=true}
+local function slotValue(n) return integer(n,0,MAX_SLOT) and n or nil end
+local function loadoutChangeCause(s,p)
+    if p.originalSlot==nil then return "NO_ORIGINAL_SLOT" end
+    local known,slot=s.context.slotKnown,s.context.slot
+    -- slotKnown false: a slot pushed before the build-slot data. nil: the client
+    -- cannot report slot data, so the compared slot may be its load-time default.
+    if known==false then return "SLOT_PUSHED",slot end
+    if known==nil then return "SLOT_DIFFERS_UNVERIFIED",slot end
+    return "SLOT_DIFFERS",slot
+end
 -- Read-only record of the settlement requirement that the last attempt did
 -- not meet, for the status text. Session only; it authorizes nothing.
 local function unmet(gate,detail)
@@ -637,7 +654,12 @@ local function finishResult(s,p)
     local loadout=loadoutCheck(s,p)
     if loadout=="UNKNOWN" then return unmet("loadout-unknown") end
     if loadout=="CHANGED" then
-        if not p.loadoutChanged then p.loadoutChanged=true;savePending() end
+        if not p.loadoutChanged then
+            p.loadoutChanged=true
+            local cause,seen=loadoutChangeCause(s,p)
+            p.loadoutCause=cause;p.loadoutObservedSlot=slotValue(seen)
+            savePending()
+        end
         pause("The original loadout cannot be verified after a loadout change or an incomplete older receipt. Ownership responses do not identify the original loadout. Pending exposure is retained; no retry is allowed.")
         return unmet("loadout")
     end
@@ -989,6 +1011,8 @@ function M.Pump(passive)
         if not s then pause(err);return end
         -- Read before any check can pause, so the report never shows a stale value.
         run.pickInFlight=s.selectInFlight~=nil
+        -- The slot this read saw (session only, never saved), for the support view.
+        run.slotRead={slot=s.context.slot,slotKnown=s.context.slotKnown}
         if p and p.restored then
             if p.guid~=s.context.guid then pause("The earlier Orb action belongs to another character.");return end
             if not p.baselineStamp then p.baselineStamp=s.grantStamp end
@@ -1277,11 +1301,32 @@ function M.RecoveryView()
     local p=run and run.pending
     if not p then return {pending=false,state=run and run.state} end
     local gate=run.settleGate
+    -- The loadout facts. Every saved value is checked on the way out: only a known cause
+    -- name, a small whole slot number and a boolean are ever returned.
+    local read=run.slotRead
+    local check=read and loadoutCheck({context=read},p) or nil
+    local nowKnown -- true, false, or nil when the client cannot say (false must survive)
+    if read and type(read.slotKnown)=="boolean" then nowKnown=read.slotKnown end
+    local cause,seen
+    if p.loadoutChanged==true and type(p.loadoutCause)=="string" and LOADOUT_CAUSES[p.loadoutCause] then
+        cause=p.loadoutCause;seen=slotValue(p.loadoutObservedSlot)
+    end
+    local originalState=p.originalSlot==nil and "absent" or (slotValue(p.originalSlot)~=nil and "recorded" or "unreadable")
+    -- What the record ALONE shows unmet (not the live conditions that settlement also needs).
+    local unmetNow={}
+    if p.loadoutChanged or p.originalSlot==nil or check=="CHANGED" then unmetNow[#unmetNow+1]="loadout"
+    elseif check=="UNKNOWN" then unmetNow[#unmetNow+1]="loadout-unknown" end
+    if not hasChoiceEvidence(p) then unmetNow[#unmetNow+1]="choice" end
     return {pending=true,restored=p.restored==true,state=run.state,
         recovery=p.restored and run.recovery and run.recovery.kind or nil,gate=gate and gate.gate or nil,
         spendConfirmed=p.spendConfirmed==true,choiceSent=p.choiceMayHaveBeenSent==true,choiceObserved=p.choiceObserved==true,
         selectedKey=p.selectedKey,removed=p.removed,loadoutChanged=p.loadoutChanged==true,
-        pickInFlight=run.pickInFlight,autoRefresh=run.autoRefreshAt~=nil}
+        pickInFlight=run.pickInFlight,autoRefresh=run.autoRefreshAt~=nil,
+        originalSlot=originalState=="recorded" and p.originalSlot or nil,originalSlotState=originalState,
+        slotRead=read~=nil,slotNow=read and slotValue(read.slot) or nil,
+        slotNowKnown=nowKnown,
+        loadoutCheck=check,loadoutCause=cause,loadoutSeenSlot=cause and seen or nil,
+        offerRecorded=p.offerKey~=nil,unmet=unmetNow}
 end
 function M.BlocksOrdinary()
     if not config then

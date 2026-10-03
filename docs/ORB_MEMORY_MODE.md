@@ -108,7 +108,31 @@ loadout rule (a different slot, or a receipt without an original slot, keeps
 the hold). A slot other than 0 shown in that state comes from the server's
 active-slot push: a different one is a loadout change, and a later return to
 the original slot does not settle the action. A client without
-`GetServerBuildSlots()` keeps the plain slot comparison. While a recorded choice waits for its result (`WAIT_RESULT`), the
+`GetServerBuildSlots()` keeps the plain slot comparison.
+
+The loadout hold is one saved flag (`loadoutChanged`). Several different causes
+set it alike: a real slot change, a different slot pushed before the build-slot
+data, the plain comparison on a client that cannot report slot data, a receipt
+without an original slot, and (in builds before the wait for the build-slot data
+existed) any reload. A hold that an earlier build saved says nothing about which
+of these happened, and no later read can tell. The support summary therefore
+adds a loadout line to the Orb action: the original slot (`not recorded` when
+absent), the slot read now and whether the build-slot data has arrived, the
+loadout check, the cause the hold was first set for, whether an offer is
+recorded, and the requirements that the saved record alone shows unmet
+(`loadout`, and `choice` when no choice is recorded). The cause is recorded once,
+at the moment a build with this line first sets the hold, as two small saved
+fields in the pending receipt (`loadoutCause`, a fixed name, and
+`loadoutObservedSlot`, a whole number from 0 to 65535). It is never changed
+later. A hold saved without a cause stays `not recorded`: it is not filled in
+from a later read, and a missing original slot is never inferred. Older builds
+copy these two fields through their own saves. The line is text only. It adds no
+requirement, removes none, and changes no block. Settlement still needs the
+recorded offer, a recorded choice inside that offer and the exact fresh ownership
+delta, so a receipt that records no choice cannot be settled, with or without the
+hold.
+
+While a recorded choice waits for its result (`WAIT_RESULT`), the
 status names the settlement requirement that the last read did not meet (a
 fresh ownership response, the chosen Echo in ownership, an open offer or
 another game action, an open Echo choice, or, while the spend is not yet

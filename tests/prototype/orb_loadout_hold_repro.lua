@@ -6,7 +6,7 @@
 --
 -- This is a CHARACTERIZATION test. It pins what the accepted code does, so a
 -- diagnostic change cannot alter an action rule:
---  1. Seven unrelated synthetic causes end in the SAME reported view. The
+--  1. Eight unrelated synthetic causes end in the SAME reported view. The
 --     owner's answer and the first two support lines cannot tell them apart.
 --  2. The hold is permanent. Return to the original slot, Recheck, Stop and
 --     reload never clear it; Resume and a new run stay refused; the ordinary
@@ -93,9 +93,9 @@ for index,cause in ipairs(S.CAUSES)do
  check(calls.spend==0 and calls.select==calls.player and calls.player==1 and H.Count('orb-spend')==1 and H.Count('take')==1,
   name..': nothing reached the game from Nexus (no second spend, no automatic choice; only the player\'s one pick)')
 end
--- The seven causes are not distinguishable from the reported view or the two lines.
+-- The eight causes are not distinguishable from the reported view or the two lines.
 for i=2,#signatures do
  check(signatures[i]==signatures[1],'cause '..i..' gives the identical reported view')
  check(lineOne[i]==lineOne[1] and lineTwo[i]==lineTwo[1],'cause '..i..' gives the identical first two support lines')
 end
-print('PASS Orb loadout hold: seven synthetic causes give one identical reported view; the hold is permanent and nothing is inferred or sent checks='..checks)
+print('PASS Orb loadout hold: eight synthetic causes give one identical reported view; the hold is permanent and nothing is inferred or sent checks='..checks)

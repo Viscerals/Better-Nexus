@@ -574,6 +574,59 @@ local function errorOrigin(view, rank)
     return rank <= view.session and "this session" or "earlier session"
 end
 
+-- The loadout line of the unresolved Orb action. Every value of the owner's answer is
+-- matched against a fixed list or a small whole number before it is shown, so a
+-- damaged saved value is reported as "unreadable" or "not recorded", never copied.
+local LOADOUT_CAUSE_TEXT = {
+    NO_ORIGINAL_SLOT = "no original slot in the record",
+    SLOT_DIFFERS = "slot differed (slot data received)",
+    SLOT_PUSHED = "slot pushed before the slot data",
+    SLOT_DIFFERS_UNVERIFIED = "slot differed (client reports no slot data)",
+}
+local LOADOUT_CHECK_TEXT = {SAME = "same", UNKNOWN = "waiting", CHANGED = "changed"}
+local UNMET_TEXT = {loadout = "loadout", ["loadout-unknown"] = "loadout-unknown", choice = "choice"}
+local function slotNumber(value)
+    if type(value) == "number" and value == math.floor(value) and value >= 0 and value <= 65535 then
+        return value
+    end
+    return nil
+end
+local function loadoutLine(view)
+    local original = "unreadable"
+    if view.originalSlotState == "absent" then original = "not recorded"
+    elseif view.originalSlotState == "recorded" and slotNumber(view.originalSlot) then
+        original = tostring(view.originalSlot)
+    end
+    local now = "unread"
+    if view.slotRead == true then
+        local slot = slotNumber(view.slotNow)
+        now = (slot and tostring(slot) or "not reported") .. " ("
+            .. (view.slotNowKnown == true and "data received"
+                or view.slotNowKnown == false and "data not yet received"
+                or "client reports no slot data") .. ")"
+    end
+    local cause = "none recorded"
+    if view.loadoutChanged == true then
+        local text = type(view.loadoutCause) == "string" and LOADOUT_CAUSE_TEXT[view.loadoutCause] or nil
+        cause = text or "not recorded"
+        local seen = text and slotNumber(view.loadoutSeenSlot) or nil
+        if seen then cause = cause .. ", saw slot " .. seen end
+    end
+    local unmet = {}
+    if type(view.unmet) == "table" then
+        for index = 1, 3 do
+            local text = type(view.unmet[index]) == "string" and UNMET_TEXT[view.unmet[index]] or nil
+            if text then unmet[#unmet + 1] = text end
+        end
+    end
+    return "  original slot=" .. original
+        .. "; slot now=" .. now
+        .. "; check=" .. (type(view.loadoutCheck) == "string" and LOADOUT_CHECK_TEXT[view.loadoutCheck] or "unread")
+        .. "; hold cause=" .. cause
+        .. "; offer recorded=" .. (view.offerRecorded == true and "yes" or "no")
+        .. "; unmet in record=" .. (#unmet > 0 and table.concat(unmet, ",") or "none")
+end
+
 -- The unresolved Orb action, if any: the recovery state and the requirement
 -- that the last read did not meet, so a report shows why an Orb action (and
 -- ordinary rolling) is held. Scalars from OrbRuntime.RecoveryView; no names.
@@ -606,6 +659,7 @@ function M.OrbLines()
                 .. "; game pick in flight=" .. (type(inFlight) == "boolean" and yes(inFlight) or "unknown")
                 .. "; loadout change recorded=" .. yes(view.loadoutChanged)
                 .. "; automatic refresh=" .. (view.autoRefresh == true and "requested" or "not requested"),
+            loadoutLine(view),
         }
     end)
     if ok and type(lines) == "table" then return lines end
