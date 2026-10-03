@@ -97,6 +97,12 @@ check(FreezeThen(Cards({{1001,1,J=true},{1001,1,F=true},{2002}})).fz=='set:kept'
 check(FreezeThen(Cards({{1001,1,F=true},{1001,1,J=true},{2002}})).fz=='set:kept','the same in the other order: kept')
 check(FreezeThen(Cards({{1001,1,J=true},{1002,2},{2002}})).fz=='set:just','J alone is just frozen observed')
 check(FreezeThen(Cards({{1001,1},{1002,2},{2002}})).fz=='set:gone','a plain card of the spell is gone, as before')
+do
+ local plainPresent=FreezeThen(Cards({{1001,1},{1002,2},{2002}}))
+ check(plainPresent.fz=='set:gone' and plainPresent.af=='1001.1.;1002.2.;2002.0.','set:gone can be a PLAIN card still on the board: not observed frozen, carried or just frozen: '..tostring(plainPresent.af))
+ local absent=FreezeThen(Cards({{1002,2},{2002},{2003}}))
+ check(absent.fz=='set:gone' and not absent.af:find('1001.',1,true),'set:gone is also an absent spell; the two are told apart only by af')
+end
 check(FreezeThen(Cards({{1002,2},{2002},{2003}})).fz=='set:gone','an absent spell is gone, as before')
 check(FreezeThen(Cards({{1002,2,J=true},{1001,1},{2002}})).fz=='set:gone','J on ANOTHER spell is not the submitted Freeze')
 do
@@ -262,4 +268,14 @@ local text=R.Export()
 check(text:find('|set:just|',1,true),'the export row carries set:just')
 check(text:find('set:just',1,true) and text:find('just frozen observed',1,true) and text:find('not proof',1,true),'the legend defines set:just as observed, not proof')
 check(text:find('NEXUS_ROLL_TRACE_1',1,true)==1,'the export schema number is unchanged: the value is additive')
+-- The legend line states what each value means, matching the source and ADAPTIVE_ROLLING.md.
+local legend
+for line in text:gmatch('[^\n]+')do if line:find('D=decision',1,true)==1 then legend=line end end
+check(legend~=nil,'the export has its legend line')
+check(legend:find('set:gone = the matching target was not observed frozen, carried or just-frozen at the first observation (it may still be present as a plain card)',1,true),
+ 'the legend: set:gone is not observed frozen/carried/just-frozen and may be a plain card')
+check(not legend:find('set:gone = not on the board',1,true) and not legend:find('not on the board',1,true),'the legend no longer says set:gone means not on the board')
+check(legend:find('held:* is the same reading of a held offer after another action, and also appears on wait or no-intent rows',1,true),
+ 'the legend: held:* can also occur on wait or no-intent rows')
+check(legend:find('set:just = the first board showed it as J, just frozen observed, not proof of the final result',1,true),'the legend keeps the set:just definition')
 print('PASS roll recorder freeze observation checks='..checks)
