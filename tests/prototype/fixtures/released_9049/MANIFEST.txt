@@ -32,7 +32,7 @@ core/SupportReport.lua|49645|07bcc9f9|copy
 core/Scheduler.lua|8581|0d777811|tree
 core/DiagnosticHistory.lua|5013|89abc60a|copy
 core/DiagnosticLogs.lua|17755|1cc78943|copy
-core/PeerDebug.lua|26643|daf81b86|tree
+core/PeerDebug.lua|26643|daf81b86|copy
 core/ViewRefresh.lua|7176|f547a94f|copy
 core/Updates.lua|29849|85f2a35d|tree
 core/Codec.lua|21638|d1cd6415|tree

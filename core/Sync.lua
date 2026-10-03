@@ -3762,6 +3762,26 @@ local function CommitReceivedBuild(payload, transportSender, context,
     local payloadOwner = Identity.CanonicalOwnerKey(payload.ownerKey)
     local replacingUnverified = existing and directOwner
         and CanPromoteStoredOwner(existing, payloadOwner)
+    -- The peer trace displays a short name. Record the authority boundary
+    -- separately without retaining that name, the owner key or payload.
+    pcall(function()
+        local debugOwner = Nexus and Nexus.PeerDebug
+        if not (debugOwner and type(debugOwner.IsEnabled) == "function"
+            and debugOwner.IsEnabled()) then return end
+        local claim = existing and Identity.CanonicalOwnerKey(existing.claimedOwnerKey)
+        local stored = existing and Identity.CanonicalOwnerKey(existing.ownerKey)
+        PeerObserve("owner_boundary", {
+            rawSenderQualified=Identity.CanonicalOwnerFromTransport(transportSender) ~= nil,
+            localRealmAvailable=CurrentOwnerKey() ~= nil,
+            directOwner=directOwner == true,
+            claimMatches=payloadOwner ~= nil and (claim or stored) == payloadOwner,
+            storedOwnerConflict=claim ~= nil and stored ~= nil and claim ~= stored,
+            existingVerified=Identity.VerifiedOwnerKey(existing) ~= nil,
+            sourceKind=not existingSource and "none"
+                or existingSource == "bundled" and "bundled"
+                or existingSource == "overlay" and "overlay" or "other",
+        })
+    end)
     local pending = Session.PendingReplacement(payload.id)
     local matchedReplacement = false
     local replacementFingerprint = BuildFingerprint(payload)

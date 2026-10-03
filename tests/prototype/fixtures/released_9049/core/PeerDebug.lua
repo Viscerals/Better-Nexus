@@ -26,14 +26,6 @@ local ALLOWED_FIELDS = {
     operation=true,attempts=true,
 }
 
--- Owner-boundary evidence has no player or build identifiers. Keep these
--- fields typed even if a caller supplies unexpected values.
-local OWNER_BOOLEANS = {
-    rawSenderQualified=true,localRealmAvailable=true,directOwner=true,claimMatches=true,
-    storedOwnerConflict=true,existingVerified=true,
-}
-local OWNER_SOURCES = {none=true,bundled=true,overlay=true,other=true}
-
 local function Now()
     local ok, value = pcall(function()
         return (GetTime and GetTime()) or 0
@@ -137,13 +129,7 @@ function PeerDebug.Record(kind, fields)
     local event = {at=Now(),kind=kind,fields={}}
     if type(fields) == "table" then
         for key, value in pairs(fields) do
-            if kind == "owner_boundary" and OWNER_BOOLEANS[key] then
-                if type(value) == "boolean" then event.fields[key] = value end
-            elseif kind == "owner_boundary" and key == "sourceKind" then
-                if type(value) == "string" and OWNER_SOURCES[value] then
-                    event.fields[key] = value
-                end
-            elseif kind ~= "owner_boundary" and ALLOWED_FIELDS[key] then
+            if ALLOWED_FIELDS[key] then
                 local valueType = type(value)
                 if valueType == "number" then
                     if value == value and value < math.huge
