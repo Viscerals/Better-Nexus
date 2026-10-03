@@ -50,7 +50,7 @@ check(I.OwnerKey('Probe','Rogue-Lite (Live)')=='probe@rogue-lite(live)','trusted
 check(I.TransportOwns('probe@rogue-lite(live)','Probe-Rogue-Lite(Live)')==true,'configured realm owns its sender')
 
 -- Part 1b: authority boundaries. Each of these must stay false/nil.
-local owner=I.OwnerKey('Probe','Rogue-Lite(Live)')
+local owner
 for _,realm in ipairs({'Ebonhold','Rogue-Lite(Live)','Rogue-LiteLive'}) do
  owner=I.OwnerKey('Probe',realm)
  check(not I.TransportOwns(owner,'Other-'..realm),'wrong name never owns '..realm)
@@ -89,6 +89,7 @@ local MALFORMED={
  'Probe-\255','Probe-Rogue-Lite(Liv\255)','Probe-Ebonhold\192\175','Probe-\226\128','Pro\255be-Ebonhold',
  'Probe-Rogue.Lite(Live)','Probe-Rogue/Lite(Live)','Probe-[Live]','Probe-{Live}','Probe-Ebon,hold',
  '','-',
+ 'Probe-Rogue-Lite(Live)-','Probe-(Live)--x','Probe-\195\131\194\169','Pro\195\131\194\169be-Ebonhold',
  string.rep('P',81),'Probe-'..string.rep('R',72)..'(Y)',
 }
 for _,bad in ipairs(MALFORMED) do
@@ -100,6 +101,12 @@ for _,bad in ipairs(MALFORMED) do
  check(not I.TransportOwns('probe@ebonhold',bad) and not I.TransportOwns('probe@rogue-lite(live)',bad),'no authority from '..label)
  check(not I.SameTransportSender(bad,'Probe-Ebonhold') and not I.SameTransportSender('Probe-Ebonhold',bad),'envelope refuses '..label)
 end
+-- Pinned, pre-existing RealmKey behaviour: parentheses are not required to balance
+-- or to follow a letter. Authority is exact string equality of the canonical
+-- realm, so such a realm only ever owns its own identical spelling.
+check(I.ValidPlayer('Probe-Rogue-Lite(Live')==true and I.ValidPlayer('Probe-(Live)')==true,'unbalanced or leading parenthesis is a valid realm spelling')
+check(I.TransportOwns('probe@rogue-lite(live','Probe-Rogue-Lite(Live')==true,'unbalanced realm owns only itself')
+check(not I.TransportOwns('probe@rogue-lite(live','Probe-Rogue-Lite(Live)') and not I.TransportOwns('probe@rogue-lite(live)','Probe-Rogue-Lite(Live'),'unbalanced realm never aliases the balanced one')
 -- Byte bound: the whole qualified token is at most 80 bytes.
 local limit='Probe-'..string.rep('R',71)..'(Y)'
 check(#limit==80 and I.ValidPlayer(limit)==true,'80-byte qualified token is accepted')
@@ -131,12 +138,12 @@ local P=dofile('tests/prototype/sync_pair_support.lua')
 P.Boot({'Receiver','Idle'},0)
 local B=P.A
 local serial=0
-local function deliver(realm,wireSender,actual,id,stamp,ownerOverride)
+local function deliver(realm,wireSender,actual,id,stamp,ownerOverride,authorOverride)
  serial=serial+1
  local N=B.e.Nexus
  local name='Probe'
  local sender=wireSender or (name..'-'..realm)
- local payload={id=id or ('realm-syntax-'..serial),t='Synthetic realm syntax',a=name,
+ local payload={id=id or ('realm-syntax-'..serial),t='Synthetic realm syntax',a=authorOverride or name,
   o=ownerOverride or N.Identity.OwnerKey(name,realm),c='MAGE',m=stamp or (1700000200+serial),
   e={{200001,1,3}},lv=1,le={{200085,1,1}}}
  local b64=N.Codec.Base64Encode(N.Codec.JSONEncode(payload))
@@ -161,8 +168,10 @@ check(deliver('Rogue-Lite(Live)','Probe-Rogue-Lite(Live)','Probe-Rogue-Lite(Liv)
 check(deliver('Rogue-Lite(Live)','Probe-Rogue-Lite(Live)','Probe-Rogue-LiteLive')==nil,'CHANNEL punctuation-stripped actual realm stores nothing')
 check(deliver('Rogue-LiteLive','Probe-Rogue-LiteLive','Probe-Rogue-Lite(Live)')==nil,'CHANNEL punctuation-added actual realm stores nothing')
 -- Malformed actual senders never reach storage.
-for _,bad in ipairs({'Probe-Rogue-Lite (Live)','Probe-Rogue-Lite(Live)|x','Probe-Rogue-Lite(Live)\226\128\174','Probe-Rogue-Lite(\255)','Pro(be)-Rogue-Lite(Live)'}) do
+for _,bad in ipairs({'Probe-Rogue-Lite (Live)','Probe-Rogue-Lite(Live)\226\128\174','Probe-Rogue-Lite(\255)','Pro(be)-Rogue-Lite(Live)','Probe-Rogue-Lite(Live)@x'}) do
  check(deliver('Rogue-Lite(Live)',bad,bad)==nil,'CHANNEL malformed sender stores nothing '..Q(bad))
+ -- Also with a well-formed wire sender and only the actual sender malformed.
+ check(deliver('Rogue-Lite(Live)','Probe-Rogue-Lite(Live)',bad)==nil,'CHANNEL malformed actual sender stores nothing '..Q(bad))
 end
 -- A bare actual sender is never owner authority, with or without a realm claim.
 local short=deliver('Rogue-Lite(Live)','Probe','Probe')
@@ -174,6 +183,18 @@ local relay=deliver('Rogue-Lite(Live)','Other-Rogue-Lite(Live)','Other-Rogue-Lit
 check(relay==nil or (relay.ownerVerified~=true and relay.ownerKey==nil),'CHANNEL relayed claim is not verified')
 local crossRealm=deliver('Ebonhold','Probe-Rogue-Lite(Live)','Probe-Rogue-Lite(Live)')
 check(crossRealm==nil or (crossRealm.ownerVerified~=true and crossRealm.ownerKey==nil),'CHANNEL owner key of another realm is not verified')
+-- An owner key whose realm differs only by parentheses is never verified.
+local strippedOwner=deliver('Rogue-Lite(Live)','Probe-Rogue-Lite(Live)','Probe-Rogue-Lite(Live)',nil,nil,'probe@rogue-litelive')
+check(strippedOwner==nil or (strippedOwner.ownerVerified~=true and strippedOwner.ownerKey==nil),'CHANNEL stripped owner key is not verified for a parenthesised sender')
+local addedOwner=deliver('Rogue-LiteLive','Probe-Rogue-LiteLive','Probe-Rogue-LiteLive',nil,nil,'probe@rogue-lite(live)')
+check(addedOwner==nil or (addedOwner.ownerVerified~=true and addedOwner.ownerKey==nil),'CHANNEL parenthesised owner key is not verified for a stripped sender')
+-- A qualified author must be exactly the owner and sender.
+local qa=deliver('Rogue-Lite(Live)',nil,nil,nil,nil,nil,'Probe-Rogue-Lite(Live)')
+check(qa and qa.ownerVerified==true and qa.ownerKey=='probe@rogue-lite(live)','CHANNEL exact qualified author is verified')
+for _,author in ipairs({'Probe-Rogue-LiteLive','Probe-Ebonhold','Other-Rogue-Lite(Live)','Pro(be)-Rogue-Lite(Live)'}) do
+ local row=deliver('Rogue-Lite(Live)',nil,nil,nil,nil,nil,author)
+ check(row==nil or (row.ownerVerified~=true and row.ownerKey==nil),'CHANNEL mismatched qualified author is not verified '..author)
+end
 -- A newer relayed packet cannot overwrite an owner-verified record.
 for _,realm in ipairs({'Ebonhold','Rogue-Lite(Live)'}) do
  local base,p=deliver(realm)
