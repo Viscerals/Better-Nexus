@@ -64,8 +64,9 @@ parsed numbers and enumerated codes, never a sender, a name or a payload.
   by arrival only (16 offers, 18 ownership, 540 and 542 slot data, 1000 pick results). For those
   opcodes a segmented message is tracked by fragment: the game calls its handler only when every
   fragment has arrived, so a fragment alone replaces nothing and makes no record; only a COMPLETE
-  message is an arrival. At most eight assemblies are tracked; a message that cannot be tracked
-  (more than 64 fragments) is an unqualified admitted packet and taints. A leading-zero opcode
+  message is an arrival. The assembly follows the first fragment's total and expires 15 s after it,
+  as the game's own does. Up to the format limit of 4095 fragments are tracked; at most eight
+  assemblies at a time; a fragment outside its assembly is an unqualified admitted packet and taints. A leading-zero opcode
   ("01220") reaches the game's handler as 1220, so it is recorded and never qualifies.
 * Class R: a relevant packet that the game's dispatcher would still accept and the observer
   rejects (also a message that was completed with a rejected fragment: `mixed`). R, and any
@@ -93,7 +94,7 @@ The check (a session-only state machine, driven by the passive recovery pass):
    observed after that request began; asks again; waits for the second. Requests are serialized
    (the second goes out only after the first reply was observed; none while an earlier Nexus
    request has no observed reply in this epoch);
-2. each reply needs an explicit third field of 0 and the same balance, and that balance must equal
+2. each reply needs an explicit third field of 0, a reported change (the second field) of 0 and the same balance, and that balance must equal
    the game's own cache; an ownership push must have been observed after the first request and the
    game's ownership view must have been replaced;
 3. throughout: an empty board, no pending Orb offer, no pick, no host action, no in-flight action,

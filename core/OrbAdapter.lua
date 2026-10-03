@@ -538,23 +538,33 @@ end
 -- opcode and message id, whatever the sender of each fragment), so a fragment replaces nothing
 -- in its cache. Only a COMPLETE message counts as an arrival that replaces what the game
 -- cached; an assembly that includes a rejected fragment completes a mixed message and taints.
--- At most SEG_ASSEMBLIES are tracked and a message of more than SEG_MAX fragments cannot be
--- tracked (an unqualified admitted packet: it taints). Returns "partial", "complete", "mixed"
--- or "range".
-local SEG_MAX,SEG_ASSEMBLIES=64,8
+-- The game follows the FIRST fragment's total (a later fragment's own total is ignored, and a
+-- forged fragment inside it is stored), and drops an assembly 15 s after its first fragment; both
+-- are mirrored. The format allows 0xFFF fragments, so a large legitimate push is tracked in full.
+-- At most SEG_ASSEMBLIES are tracked (the oldest is forgotten and never completes). A fragment
+-- outside its assembly (index or total out of range) is an unqualified admitted packet: it taints.
+-- Returns "partial", "complete", "mixed" or "range".
+local SEG_MAX,SEG_ASSEMBLIES,SEG_EXPIRY=4095,8,15
 local assemblies={map={},order={}}
 local function segmentNote(op,mid,idxText,totalText,rejected)
-    local idx,total=tonumber(idxText,16),tonumber(totalText,16)
-    if total<1 or total>SEG_MAX or idx<1 or idx>total then return "range" end
+    local idx=tonumber(idxText,16)
+    local nowT=GetTime and GetTime() or 0
+    for key,a in pairs(assemblies.map) do
+        if nowT-a.t0>SEG_EXPIRY then
+            assemblies.map[key]=nil
+            for i,k in ipairs(assemblies.order) do if k==key then table.remove(assemblies.order,i);break end end
+        end
+    end
     local key=op..":"..mid
     local a=assemblies.map[key]
+    local total=a and a.total or tonumber(totalText,16)
+    if total<1 or total>SEG_MAX or idx<1 or idx>total then return "range" end
     if not a then
-        a={total=total,got=0,parts={},bad=false}
+        a={total=total,got=0,parts={},bad=false,t0=nowT}
         assemblies.map[key]=a;assemblies.order[#assemblies.order+1]=key
         while #assemblies.order>SEG_ASSEMBLIES do assemblies.map[table.remove(assemblies.order,1)]=nil end
     end
-    -- The game keeps the total of the first fragment and ignores an index outside it.
-    if idx<=a.total and not a.parts[idx] then a.parts[idx]=true;a.got=a.got+1 end
+    if not a.parts[idx] then a.parts[idx]=true;a.got=a.got+1 end
     if rejected then a.bad=true end
     if a.got~=a.total then return "partial" end
     assemblies.map[key]=nil

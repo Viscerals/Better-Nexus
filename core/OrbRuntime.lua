@@ -27,7 +27,7 @@ local HELD_CHOICE_DELAY=5
 local SESSION_INTERRUPTED="Session interrupted. Orb spending will not restart automatically."
 -- The record and its spending exposure stay, and the only exit is the player's own Continue (035).
 local KEPT=" The record and its spending exposure are kept."
-local NO_EXIT=" The only exit is the player's explicit Continue in /nexus orbs. It is offered only for an action with a confirmed spend and no recorded outcome, once its offer is gone, after a read-only check; Nexus never continues by itself."
+local NO_EXIT=" Besides a matching result, the only exit is the player's explicit Continue in /nexus orbs. It is offered only for an action with a confirmed spend and no recorded outcome, once its offer is gone, after a read-only check; Nexus never continues by itself."
 -- The game's lifecycle as this owner's frame saw it (local facts only; they say
 -- nothing about the server). epoch counts every loading transition (leave or
 -- enter). phase: "l" between leaving and entering a world, "r" from entering (and
@@ -39,6 +39,8 @@ local life={epoch=0,phase="r"}
 -- that new run. serial: attempts counted; log: the last attempts; after: the archive entry that
 -- late events are recorded on; reqMark: the latest Nexus refresh request; busy: a step is running.
 local RS={serial=0}
+-- The continuation's own functions (defined in the block below; M.Confirm needs it earlier).
+local RC={}
 local ensureFrame,heldChoiceHint,cleanEvidence
 local function copy(t)
     if type(t)~="table" then return t end
@@ -606,6 +608,8 @@ ensureFrame=function()
 end
 function M.Confirm(token)
     init();local a=approval
+    -- Late events that arrived before this new run belong to the old action, not to the run.
+    if RS.after then pcall(RC.late) end
     if not a or a.token~=token or now()-a.created>60 then return nil,"The confirmation expired. Review the plan again." end
     if run.running or run.pending or run.state=="PAUSED" or run.state=="LIMIT" then return nil,"An Orb run already owns this action." end
     local m,err=preflight(a.automatic);if not m then return nil,err end
@@ -1090,7 +1094,6 @@ end
 --   of what identifies the receipt) and a content digest, so repeating the confirmation adds
 --   nothing. The entry keeps apart: the intent (what Nexus intended), the observed (raw pick
 --   evidence, inside the receipt), and the resolution (UNCONFIRMED, no confidence).
-local RC={}
 local ARCHIVE_KEY="orbRecoveryArchive"
 local ARCHIVE_MAX,ARCHIVE_EDGES,ENTRY_BYTES,ARCHIVE_BYTES=8,1200,6144,28672
 -- Seconds the check waits for ONE observed answer before it refuses. It only ends a wait.
@@ -1245,6 +1248,9 @@ end
 function RC.refuse(rc,reason)
     if rc.stage=="refused" and rc.refusal==reason then return end
     rc.stage="refused";rc.refusal=reason;rc.token=nil;rc.step=nil
+    -- A request that went unanswered for the whole wait is given up: the next check may send its own.
+    -- (A late answer to it is indistinguishable from an answer to the next request: see the notes above.)
+    if reason=="no_reply" then RS.reqMark=nil end
     noteAttempt(rc,"refused",reason)
 end
 -- Is an earlier Nexus refresh request still without any observed charge reply (this epoch)?
@@ -1400,7 +1406,7 @@ local RC_REFUSALS={
     other_character="The earlier Orb action belongs to another character.",
     offer_open="An Orb or Echo offer is open in the game. Finish it in the game first; Continue starts only when no offer is open.",
     no_observer="This client does not let Nexus observe the game's replies, so Continue is not available. Nothing was changed.",
-    observer_tainted="A game packet that Nexus could not accept may have changed the game's cached offer or slot. A reload clears it. Nothing was changed.",
+    observer_tainted="A game packet that Nexus could not accept may have changed the game's cached offer or slot. A reload usually clears it. Nothing was changed.",
     loading_transition="A loading screen started or ended, so this check was cancelled. Nothing was changed. Start the check again once the game is ready.",
     receipt_changed="The earlier Orb action's record changed, so this check was cancelled. Nothing was changed.",
     offer_or_action="Something is open or in progress in the game (an offer, a choice or an action). Nothing was changed. Finish it, then check again.",
@@ -1411,7 +1417,7 @@ local RC_REFUSALS={
     late_result="The game sent a pick result during the check, so it was cancelled. Nothing was changed. Check again.",
     reply_unqualified="An answer about the Orb count was missing a field, malformed or not accepted, so the check cannot show that no Orb offer is pending. Nothing was changed.",
     pending_positive="The game reports Orb offer(s) still pending. Resolve them in the game's offer window. No spend and no choice was sent.",
-    reply_changed="The two answers about the Orb count disagree, so the check was cancelled. Nothing was changed. Check again.",
+    reply_changed="An answer about the Orb count reported a change, or two answers disagree, so the check was cancelled. Nothing was changed. Check again.",
     balance_mismatch="The answer about the Orb count does not match what the game shows, so the check was cancelled. Nothing was changed.",
     no_reply="No answer was observed in time. Nothing was changed. Use Check in the Continue window to check again.",
     no_ownership="No fresh answer about your Echoes was observed in time. Nothing was changed. Use Check in the Continue window to check again.",
@@ -1789,7 +1795,7 @@ function M.BlockReason(subject)
     if p and p.restored and not run.running then
         local r=run.recovery or {}
         if CAN_PROGRESS[r.kind] or (CAN_PROGRESS_OBSERVING[r.kind] and r.observing) then
-            return subject.." is blocked: an earlier Orb action is unresolved after a reload. Nexus only observes it and sends nothing. The block ends only when that action is confirmed. Open /nexus orbs for the current instruction."
+            return subject.." is blocked: an earlier Orb action is unresolved after a reload. Nexus only observes it and sends nothing. The block ends when that action is confirmed or, if it has a confirmed spend and no recorded outcome, when you choose Continue. Open /nexus orbs for the current instruction."
         end
         return subject.." is blocked: an earlier Orb action cannot be confirmed. If it has a confirmed spend and no recorded outcome, Continue in /nexus orbs ends this block after a read-only check and your confirmation; Nexus does not clear it by itself. Open /nexus orbs for details."
     end
