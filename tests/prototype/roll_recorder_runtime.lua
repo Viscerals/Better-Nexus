@@ -180,10 +180,10 @@ for _,r in ipairs(Trace())do if r.k=='B' and r.kind=='session' then sessions=ses
 check(sessions==1,'a session boundary is written before the first decision')
 
 -- 5. The recorder changes no action: on, off, failing and absent give the same actions.
-local function Script(setup)
+local function Script(setup,boardsOverride)
  local h=Boot();Plan({{spellId=200001,quality=1,stacks=2},{spellId=200002,quality=2,stacks=1}})
  if setup then setup(h) end
- local boards={
+ local boards=boardsOverride or {
   TWO,
   {{spellId=200001,quality=1,isFrozen=true},{spellId=200002,quality=2},{spellId=200030,quality=0}},
   {{spellId=200040,quality=0},{spellId=200041,quality=0},{spellId=200042,quality=0}},
@@ -208,6 +208,23 @@ check(absent==reference,'no recorder module: the same actions: '..absent..' vs '
 local failing=Script(function()Nexus.DiagnosticLogs.Append=function()error('simulated storage failure')end end)
 check(failing==reference,'a failing recorder: the same actions: '..failing..' vs '..reference)
 check(reference:find('freeze',1,true) and reference:find('take',1,true) and reference:find('banish',1,true),'the script exercises Freeze, Take and Banish: '..reference)
+
+-- 5a. The same equivalence on the observed shape: the first board after the Freeze shows the held offer as
+-- justFrozen (J), then as carried (C). The record annotates the first J as just frozen observed.
+local JBOARDS={
+ TWO,
+ {{spellId=200001,quality=1,justFrozen=true},{spellId=200002,quality=2},{spellId=200030,quality=0}},
+ {{spellId=200001,quality=1,isCarried=true},{spellId=200002,quality=2},{spellId=200031,quality=0}},
+ {{spellId=200040,quality=0},{spellId=200041,quality=0},{spellId=200042,quality=0}},
+}
+local jReference=Script(nil,JBOARDS)
+local jFirst=nil
+for _,r in ipairs(Trace())do if r.fz and r.fz:find('set:',1,true) and not jFirst then jFirst=r end end
+check(jFirst and jFirst.fz=='set:just' and jFirst.af:find('200001.1.J',1,true),'the real runtime records the first J board after a Freeze as just frozen observed: '..tostring(jFirst and jFirst.fz))
+check(jReference:find('freeze',1,true),'the J script sends a Freeze: '..jReference)
+check(Script(function()Nexus.Store.Settings().rollTrace=false end,JBOARDS)==jReference,'recording off: the same actions on a J board')
+check(Script(function()Nexus.RollRecorder=nil end,JBOARDS)==jReference,'no recorder module: the same actions on a J board')
+check(Script(function()Nexus.DiagnosticLogs.Append=function()error('simulated storage failure')end end,JBOARDS)==jReference,'a failing recorder: the same actions on a J board')
 
 -- 5b. The prepared support report carries the record (one private file for a tester).
 H=Boot();Plan();H.Board(TWO);H.Notify();H.Advance(.5);SlashCmdList.NEXUS('auto');H.Advance(1.5)
