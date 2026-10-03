@@ -110,14 +110,15 @@ S.CAUSES={
    return M
   end},
 }
--- Count the writes that replace the saved Orb table (an UpdateStateV1 after which orbRefinement is a new table).
+-- Count the Orb writes: the calls of UpdateStateV1 whose update sets orbRefinement (the update is tried on a scratch
+-- table first). The Store keeps the old table when the new content is identical, so a redundant save of the same
+-- content must be counted by call, not by a changed table.
 function S.CountOrbWrites()
  local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1;local n=0
  owner.UpdateStateV1=function(fn,...)
-  local before=Nexus.Store.State().orbRefinement
-  local r=raw(fn,...)
-  if Nexus.Store.State().orbRefinement~=before then n=n+1 end
-  return r
+  local scratch={}
+  if pcall(fn,scratch) and scratch.orbRefinement~=nil then n=n+1 end
+  return raw(fn,...)
  end
  return function()return n end
 end

@@ -367,6 +367,12 @@ do
    check(#l<400 and not l:find('[%z\1-\31]') and not l:find('SENTINEL',1,true) and not l:find('ZZZZZZZZZZ',1,true),'4f view '..index..' line '..i..' is bounded and carries no raw value')
   end
  end
+ lines=Gated({loadoutCause='MADE_UP',loadoutSeenSlot=2,loadoutSeenAt=1700000000})
+ check(lines[3]:find('hold cause=not recorded',1,true) and not lines[3]:find('saw slot',1,true) and not lines[3]:find('set at',1,true),
+  '4f: a set hold with an unknown cause name shows neither a seen slot nor a time: '..tostring(lines[3]))
+ lines=Gated({loadoutCause=false,loadoutSeenSlot=2,loadoutSeenAt=1700000000})
+ check(lines[3]:find('hold cause=not recorded',1,true) and not lines[3]:find('saw slot',1,true) and not lines[3]:find('set at',1,true),
+  '4f: a set hold with no cause shows neither a seen slot nor a time: '..tostring(lines[3]))
  lines=Gated({originalSlot=-0.0,slotNow=-0.0,loadoutSeenSlot=-0.0})
  check(lines[3]:find('original slot=0; slot now=0 (',1,true) and lines[3]:find('saw slot 0',1,true) and not lines[3]:find('-0',1,true),'4f: the line itself shows -0 as 0: '..tostring(lines[3]))
  runtime.RecoveryView=real
