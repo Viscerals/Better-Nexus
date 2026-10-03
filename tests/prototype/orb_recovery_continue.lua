@@ -143,6 +143,8 @@ section('4 cancel and stale tokens',function()
  local H,M,A,O,server=World()
  local v1=Ready(H,M)
  check(M.ContinueCancel()==true and M.ContinueView().stage=='idle' and M.ContinueView().token==nil,'cancel returns to idle')
+ local log=M.ContinueLog()
+ check(#log>=2 and log[#log].outcome=='cancelled' and log[#log-1].outcome=='ready','the log keeps the ready check and its cancellation')
  local ok,why=M.ContinueConfirm(v1.token)
  check(ok==nil and why=='stale_token' and R.Saved()~=nil,'a cancelled token is dead')
  check(M.ContinueCancel()==true,'cancel is idempotent')
@@ -201,6 +203,32 @@ section('8 block texts',function()
  check(why:find('Continue',1,true) and not why:find('not built',1,true) and not why:find('only a proposal',1,true),'the block text names the exit: '..why)
  local r=M.Status().reason
  check(not r:find('settlement path is only a proposal',1,true),'the recovery text no longer claims there is no exit: '..r)
+end)
+
+-- 9. The words: the check asks for the Orb count AND the Echoes, and no text says "nothing was sent".
+section('9 what the texts say',function()
+ local H,M,A,O,server=World()
+ local v=M.ContinueView()
+ check(v.text:find('Orb count',1,true) and v.text:find('Echoes',1,true) and v.text:find('No spend and no choice',1,true),'the intro names both read-only requests and what is not sent: '..v.text)
+ assert(M.ContinueBegin());H.Advance(.01)
+ check(M.ContinueView().text:find('read-only',1,true) and M.ContinueView().text:find('Echoes',1,true),'the checking text too')
+ for _,code in ipairs({'pending_positive','no_reply','no_ownership','choice_recorded'}) do
+  local text=M.ContinueReason(code)
+  check(not text:find('Nothing was sent',1,true) and not text:find('Press Continue',1,true),code..': '..text)
+ end
+ check(M.ContinueReason('no_reply'):find('Check in the Continue window',1,true),'the retry text names the control that exists')
+ check(M.ContinueReason('stale_token'):find('no longer current',1,true) and M.ContinueReason('nonsense')=='Nothing was changed.','codes map to words')
+end)
+
+-- 10. Only the pending receipt is cleared: every other saved field of orbRefinement stays, also an unknown one.
+section('10 settings stay',function()
+ local H,M,A,O,server=World()
+ local owner=Nexus.MainInternals.StoreAuthorityOwner
+ assert(owner.UpdateStateV1(function(r) r.orbRefinement.futureField={a=1,b='x'};r.orbRefinement.keepMe=7 end))
+ assert(M.ContinueBegin());assert(Until(H,M,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ local _,row=R.Row()
+ check(row.orbRefinement.pending==nil and row.orbRefinement.keepMe==7 and row.orbRefinement.futureField and row.orbRefinement.futureField.b=='x',
+  'no other saved Orb setting was rebuilt or dropped')
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end

@@ -85,5 +85,54 @@ section('2 the normal gates still refuse',function()
  check(select(2,M.Resume())~=nil and M.Status().running==false,'the old run is not resumed')
 end)
 
+-- 3. Late events keep being recorded when a new run starts, flagged as the new run's; the attempt log stays.
+section('3 late events during a new run',function()
+ local H,M,A,O,server=ClassFromARun()
+ assert(M.ContinueBegin());assert(Until(H,M,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ local logBefore=#M.ContinueLog()
+ server.Push(16,'late offer');H.Advance(6)
+ check(R.SavedRow('orbRecoveryArchive')[1].lateN==1,'a late offer is recorded')
+ H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+ local ok,why=M.Start(1)
+ check(ok==true,'a new run starts: '..tostring(why))
+ server.Push(1000,'1');H.Advance(6)
+ server.Push(1220,tostring(O.charges)..',0,2');H.Advance(6)
+ local e=R.SavedRow('orbRecoveryArchive')[1]
+ check(e.lateN==3 and #e.late==3,'events of the new run are recorded too: '..tostring(e.lateN))
+ check(e.late[1].nr==nil and e.late[2].nr==true and e.late[3].nr==true,'and the new run is flagged on them')
+ check(e.late[2].k=='pick_result' and e.late[3].k=='pending_positive','with their kinds')
+ check(#M.ContinueLog()==logBefore and M.ContinueLog()[logBefore].outcome=='archived','the attempt log survived the new run')
+ -- idle ticks write nothing more
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1;local writes=0
+ owner.UpdateStateV1=function(fn,...)
+  local scratch={};if pcall(fn,scratch) and scratch.orbRecoveryArchive~=nil then writes=writes+1 end
+  return raw(fn,...)
+ end
+ H.Advance(15)
+ owner.UpdateStateV1=raw
+ check(writes==0,'once saved, quiet ticks write nothing: '..writes)
+end)
+
+-- 4. The same receipt archived again keeps its earlier late events; a flood of packets says events were lost.
+section('4 late events across sessions and floods',function()
+ local H,M,A,O,server=ClassFromARun()
+ local original=H.Clone(R.Saved())
+ assert(M.ContinueBegin());assert(Until(H,M,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ server.Push(16,'late offer');H.Advance(6)
+ local owner=Nexus.MainInternals.StoreAuthorityOwner
+ assert(owner.UpdateStateV1(function(r) r.orbRefinement.pending=H.Clone(original) end))
+ M=R.Reload(H);H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false;S.Pass(H,M,A,2)
+ assert(M.ContinueBegin());assert(Until(H,M,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ server.Push(1000,'1');H.Advance(6)
+ local e=R.SavedRow('orbRecoveryArchive')[1]
+ check(#R.SavedRow('orbRecoveryArchive')==1 and e.lateN==2 and #e.late==2 and e.late[1].k=='choice_push' and e.late[2].k=='pick_result',
+  'the earlier session\'s late event is kept and counted on: '..tostring(e.lateN))
+ for i=1,60 do server.Push(1220,tostring(O.charges)..',0,0') end
+ H.Advance(6)
+ e=R.SavedRow('orbRecoveryArchive')[1]
+ local lost=false;for _,l in ipairs(e.late) do if l.k=='events_lost' then lost=true end end
+ check(lost or e.lateN>=3,'a flood that overflowed the ring says events were lost: '..tostring(e.lateN))
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery after Continue: a new baseline, no retroactive attribution, normal gates, no replacement allowance checks='..checks)

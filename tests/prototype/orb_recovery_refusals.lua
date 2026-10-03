@@ -599,5 +599,90 @@ section('24 request failure',function()
  check(Run(H,M,10,'ready'),'the next check is not blocked by the request that never left: '..tostring(M.ContinueView().refusal))
 end)
 
+-- 25. The confirmation re-checks everything ITSELF, with no pass in between (the recovery pass can be
+-- five seconds away). Each change is made and the confirmation is pressed at once.
+section('25 confirmation time of check',function()
+ local Cases={
+  {'a slot change',function(H) H.perks.serverActiveSlot=102 end},
+  {'a pending offer in a charge reply',function(H,M,A,O,server) server.Push(1220,'49,0,1') end},
+  {'a loading transition',function(H) R.Leaving(H);R.Entering(H) end},
+  {'a late offer',function(H,M,A,O,server) server.Push(16,'offer') end},
+  {'a forged packet',function(H,M,A,O,server) server.Push(18,'forged',{sender='Other'}) end},
+  {'an open offer',function(H,M,A,O) O.offer=true;H.Board({{spellId=500037,quality=1},{spellId=500001,quality=1},{spellId=500038,quality=1}}) end},
+  {'a flood of packets (the ring overflows)',function(H,M,A,O,server) for i=1,60 do server.Push(1220,'49,0,0') end end},
+  {'a pick in flight',function(H) H.perks.pendingSelectSpellId=500001 end},
+ }
+ for _,c in ipairs(Cases) do
+  local H,M,A,O,server=World()
+  local original=H.Clone(R.Saved())
+  Begin(M);assert(Run(H,M,8,'ready'));local t=M.ContinueView().token
+  c[2](H,M,A,O,server)
+  local ok,why=M.ContinueConfirm(t)
+  check(ok==nil and why~=nil,c[1]..': refused at once: '..tostring(why))
+  check(R.Same(R.Saved(),original) and R.SavedRow('orbRecoveryArchive')==nil and M.Status().pending==true,c[1]..': nothing was archived')
+ end
+end)
+
+-- 26. The saved receipt must still be what the session knows: the class, the spent count and the limit.
+section('26 saved receipt against the session',function()
+ local function Case(name,change)
+  local H,M,A,O,server=World()
+  Begin(M);assert(Run(H,M,8,'ready'));local t=M.ContinueView().token
+  local _,row=R.Row()
+  change(row.orbRefinement.pending)
+  local seen=H.Clone(row.orbRefinement.pending)
+  local ok,why=M.ContinueConfirm(t)
+  check(ok==nil and why=='receipt_changed',name..': refused: '..tostring(why))
+  check(R.Same(row.orbRefinement.pending,seen) and row.orbRecoveryArchive==nil,name..': left alone')
+ end
+ Case('a spent count that lags the session',function(p) p.spent=p.spent-1 end)
+ Case('a limit that differs',function(p) p.limit=p.limit+1 end)
+ Case('a spend that is no longer confirmed',function(p) p.spendConfirmed=nil end)
+ Case('a recorded choice',function(p)
+  p.selectedKey=F.receipt.offerKey:match('(%d+:%d+):true');p.selectionAttempted=true;p.choiceObserved=true
+ end)
+end)
+
+-- 27. A reply that reports a change in the count is not a quiet answer.
+section('27 reply delta',function()
+ local bodies={{'49,-1,0','49,0,0'},{'49,5,0','49,-3,0'},{'49,0,0','49,1,0'}}
+ for i,b in ipairs(bodies) do
+  local H,M,A,O,server=World({server={body=function(n) return b[n] end}})
+  local original=H.Clone(R.Saved())
+  Begin(M);Run(H,M,6,'refused')
+  Refused(H,M,original,'reply_changed','a reported change '..b[1]..' then '..b[2])
+ end
+end)
+
+-- 28. Requests are also serialized before the second one.
+section('28 serialized second request',function()
+ local H,M,A,O,server=World({server={mode='hold'}})
+ Begin(M)
+ server.Release()                 -- the first answer (and the ownership push) arrive
+ M.Recheck()                      -- the player asks too: that reply is held
+ check(server.requests==2,'the check and the Recheck have each sent one request')
+ H.Advance(.4)
+ check(server.requests==2 and M.ContinueView().step=='req2','the second request waits for the held reply')
+ server.mode='auto';server.Release();H.Advance(.4)
+ check(Run(H,M,10,'ready') and server.requests==3,'then it goes on')
+end)
+
+-- 29. A synchronous pass inside the request does not send the request twice.
+section('29 reentrant request',function()
+ local H,M,A,O,server=World({server={mode='hold'}})
+ local orb=ProjectEbonhold.OrbService;local raw=orb.RequestCharges
+ orb.RequestCharges=function(...) Nexus.OrbRuntime.Pump();return raw(...) end
+ Begin(M)
+ orb.RequestCharges=raw
+ check(server.requests==1,'one request, not two: '..server.requests)
+end)
+
+-- 30. A receipt with keys that cannot be ordered does not make the owner throw.
+section('30 odd keys',function()
+ local H,M,A,O,server=World({edit=function(row,state) for _,r in ipairs({row,state}) do r.before[true]=1;r.before[false]=1;r.before[1.5]=2 end end})
+ local ok,res=pcall(M.ContinueBegin)
+ check(ok,'begin does not throw on boolean and fractional keys in the receipt: '..tostring(res))
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery refusals: stale, omitted, rejected, late, changed and failed inputs never release the blocker checks='..checks)
