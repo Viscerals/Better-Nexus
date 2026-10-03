@@ -193,7 +193,31 @@ function Identity.DisplaySafeText(value, maxBytes, allowEmpty, allowLineBreaks)
     return (value:gsub("|", "||"))
 end
 
-local function ValidPlayer(value)
+local function RealmKey(value, trustedLocal)
+    if type(value) ~= "string" then return nil end
+    if trustedLocal then value = value:gsub("%s+", "") end
+    if value == "" or #value > 96 or value:find("@", 1, true)
+        or value:sub(1, 1) == "-" or value:sub(-1) == "-"
+        or value:find("--", 1, true)
+        or not SafeSequence(value, false) then return nil end
+    for index = 1, #value do
+        local byte = value:byte(index)
+        if byte < 0x80 and not ((byte >= 0x30 and byte <= 0x39)
+            or (byte >= 0x41 and byte <= 0x5A)
+            or (byte >= 0x61 and byte <= 0x7A)
+            or byte == 0x27 or byte == 0x28 or byte == 0x29
+            or byte == 0x2D or byte == 0x5F) then
+            return nil
+        end
+    end
+    return AsciiLower(value)
+end
+
+-- A character name is strict. A realm may also carry parentheses, e.g.
+-- "Rogue-Lite (Live)", so a qualified sender is checked as two tokens split
+-- at the first hyphen (a realm keeps its own hyphens): the strict character
+-- grammar, then the one RealmKey grammar. Nothing is stripped or aliased.
+local function ValidCharacter(value)
     if type(value) ~= "string" or value == "" or #value > 80
         or value:find("@", 1, true) or not SafeSequence(value, false) then
         return false
@@ -215,6 +239,14 @@ local function ValidPlayer(value)
     return first >= 0x80 or (first >= 0x30 and first <= 0x39)
         or (first >= 0x41 and first <= 0x5A)
         or (first >= 0x61 and first <= 0x7A) or first == 0x5F
+end
+
+local function ValidPlayer(value)
+    if type(value) ~= "string" or #value > 80 then return false end
+    local hyphen = value:find("-", 1, true)
+    if not hyphen then return ValidCharacter(value) end
+    return ValidCharacter(value:sub(1, hyphen - 1))
+        and RealmKey(value:sub(hyphen + 1), false) ~= nil
 end
 
 function Identity.ValidPlayer(value)
@@ -245,26 +277,6 @@ function Identity.SameTransportSender(declared, actual)
         return declaredFull == actualFull
     end
     return Identity.SamePlayer(declared, actual)
-end
-
-local function RealmKey(value, trustedLocal)
-    if type(value) ~= "string" then return nil end
-    if trustedLocal then value = value:gsub("%s+", "") end
-    if value == "" or #value > 96 or value:find("@", 1, true)
-        or value:sub(1, 1) == "-" or value:sub(-1) == "-"
-        or value:find("--", 1, true)
-        or not SafeSequence(value, false) then return nil end
-    for index = 1, #value do
-        local byte = value:byte(index)
-        if byte < 0x80 and not ((byte >= 0x30 and byte <= 0x39)
-            or (byte >= 0x41 and byte <= 0x5A)
-            or (byte >= 0x61 and byte <= 0x7A)
-            or byte == 0x27 or byte == 0x28 or byte == 0x29
-            or byte == 0x2D or byte == 0x5F) then
-            return nil
-        end
-    end
-    return AsciiLower(value)
 end
 
 function Identity.OwnerKey(name, realm)
