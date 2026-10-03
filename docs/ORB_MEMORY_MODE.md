@@ -114,7 +114,8 @@ The loadout hold is one saved flag (`loadoutChanged`). Several different causes
 set it alike: a real slot change, a different slot pushed before the build-slot
 data, the plain comparison on a client that cannot report slot data, a receipt
 without an original slot, and (in builds before the wait for the build-slot data
-existed) any reload. A hold that an earlier build saved says nothing about which
+existed) a reload whose first read came before the server's slot data, because
+that build compared the load-time default slot 0 with the recorded slot. A hold that an earlier build saved says nothing about which
 of these happened, and no later read can tell. The support summary therefore
 adds a loadout line to the Orb action: the original slot (`not recorded` when
 absent), the slot read now and whether the build-slot data has arrived, the

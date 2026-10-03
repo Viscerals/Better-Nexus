@@ -629,9 +629,15 @@ end
 -- annotation of that moment: a short name and the slot seen then. A hold that was set
 -- without one (an earlier build) is never given a cause from a later read, and an
 -- original slot that is missing is never filled in.
+-- A bound far above any slot id in use (saved builds are few; designed Wishlist slots start at 100).
+-- It is not a product limit. A larger value is reported as unreadable. No rule reads it.
 local MAX_SLOT=65535
 local LOADOUT_CAUSES={NO_ORIGINAL_SLOT=true,SLOT_DIFFERS=true,SLOT_PUSHED=true,SLOT_DIFFERS_UNVERIFIED=true}
-local function slotValue(n) return integer(n,0,MAX_SLOT) and n or nil end
+-- A whole number in range, with -0 written as 0.
+local function slotValue(n)
+    if integer(n,0,MAX_SLOT) then return n==0 and 0 or n end
+    return nil
+end
 -- The client clock in whole seconds, 2000-01-01 to 2100-01-01, or nil: a missing, failing or
 -- implausible clock records no time and changes nothing else.
 local MIN_EPOCH,MAX_EPOCH=946684800,4102444800
@@ -1321,17 +1327,18 @@ function M.RecoveryView()
         cause=p.loadoutCause;seen=slotValue(p.loadoutObservedSlot);seenAt=epochValue(p.loadoutObservedAt)
     end
     local originalState=p.originalSlot==nil and "absent" or (slotValue(p.originalSlot)~=nil and "recorded" or "unreadable")
-    -- What the record ALONE shows unmet (not the live conditions that settlement also needs).
+    -- What the saved record ALONE shows unmet. The live loadout check of the last read is returned
+    -- separately (loadoutCheck). hasChoiceEvidence is stricter than the settlement gate for a
+    -- damaged record; this is display only.
     local unmetNow={}
-    if p.loadoutChanged or p.originalSlot==nil or check=="CHANGED" then unmetNow[#unmetNow+1]="loadout"
-    elseif check=="UNKNOWN" then unmetNow[#unmetNow+1]="loadout-unknown" end
+    if p.loadoutChanged or p.originalSlot==nil then unmetNow[#unmetNow+1]="loadout" end
     if not hasChoiceEvidence(p) then unmetNow[#unmetNow+1]="choice" end
     return {pending=true,restored=p.restored==true,state=run.state,
         recovery=p.restored and run.recovery and run.recovery.kind or nil,gate=gate and gate.gate or nil,
         spendConfirmed=p.spendConfirmed==true,choiceSent=p.choiceMayHaveBeenSent==true,choiceObserved=p.choiceObserved==true,
         selectedKey=p.selectedKey,removed=p.removed,loadoutChanged=p.loadoutChanged==true,
         pickInFlight=run.pickInFlight,autoRefresh=run.autoRefreshAt~=nil,
-        originalSlot=originalState=="recorded" and p.originalSlot or nil,originalSlotState=originalState,
+        originalSlot=originalState=="recorded" and slotValue(p.originalSlot) or nil,originalSlotState=originalState,
         slotRead=read~=nil,slotNow=read and slotValue(read.slot) or nil,
         slotNowKnown=nowKnown,
         loadoutCheck=check,loadoutCause=cause,loadoutSeenSlot=cause and seen or nil,loadoutSeenAt=cause and seenAt or nil,

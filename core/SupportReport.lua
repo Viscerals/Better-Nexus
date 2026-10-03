@@ -575,8 +575,9 @@ local function errorOrigin(view, rank)
 end
 
 -- The loadout line of the unresolved Orb action. Every value of the owner's answer is
--- matched against a fixed list or a small whole number before it is shown, so a
--- damaged saved value is reported as "unreadable" or "not recorded", never copied.
+-- matched against a fixed list or a small whole number before it is shown. A value that
+-- fails is shown as "unreadable", "unread", "not reported" or "not recorded", or left
+-- out (a seen slot or a time without a valid cause); it is never copied.
 local LOADOUT_CAUSE_TEXT = {
     NO_ORIGINAL_SLOT = "no original slot in the record",
     SLOT_DIFFERS = "slot differed (slot data received)",
@@ -584,10 +585,10 @@ local LOADOUT_CAUSE_TEXT = {
     SLOT_DIFFERS_UNVERIFIED = "slot differed (client reports no slot data)",
 }
 local LOADOUT_CHECK_TEXT = {SAME = "same", UNKNOWN = "waiting", CHANGED = "changed"}
-local UNMET_TEXT = {loadout = "loadout", ["loadout-unknown"] = "loadout-unknown", choice = "choice"}
+local UNMET_TEXT = {loadout = "loadout", choice = "choice"}
 local function slotNumber(value)
     if type(value) == "number" and value == math.floor(value) and value >= 0 and value <= 65535 then
-        return value
+        return value == 0 and 0 or value
     end
     return nil
 end
@@ -607,7 +608,7 @@ local function loadoutLine(view)
     local original = "unreadable"
     if view.originalSlotState == "absent" then original = "not recorded"
     elseif view.originalSlotState == "recorded" and slotNumber(view.originalSlot) then
-        original = tostring(view.originalSlot)
+        original = tostring(slotNumber(view.originalSlot))
     end
     local now = "unread"
     if view.slotRead == true then
