@@ -265,37 +265,128 @@ end
 -- The observer is read-only. It serves the action owner, or, after a reload,
 -- a passive recovery watcher that holds no action token and cannot mutate.
 local watcherContext,watcherNotify
+-- The owner's evidence sink and its immediate notification (OrbRuntime registers
+-- both once at load; see O.CaptureSink). selfSelecting is true only while
+-- O.Select itself calls SelectPerk: that pick is saved before the call, so it is
+-- not captured again as an observation.
+local captureSink,ownerNotify
+local selfSelecting=false
+-- The plain facts of one SelectPerk callback, read from the game's own tables the
+-- moment it happens. No O.Read(): it needs the catalog, a synced ownership view
+-- and an equal context, so it fails exactly when a loading screen or a server push
+-- is under way. Everything returned is a number, a boolean or a short text.
+-- NON-AUTHORITATIVE: the runtime keeps it as evidence, never as a selection.
+local function rawBoard(perks)
+    local raw=type(perks)=="table" and perks.currentChoice or nil
+    if raw==nil then return "",{} end
+    if type(raw)~="table" or getmetatable(raw) then return nil,nil end
+    local cards,parts={},{}
+    for i=1,4 do
+        local c=raw[i]
+        if c==nil then break end
+        if i>3 or type(c)~="table" or getmetatable(c) or not integer(c.spellId,1) then return nil,nil end
+        local q=integer(c.quality,0) and c.quality<=255 and c.quality or nil
+        cards[i]={id=c.spellId,q=q,selectable=c.selectable~=false}
+        parts[i]=c.spellId..":"..(q and tostring(q) or "?")
+    end
+    return table.concat(parts,","),cards
+end
+local function rawPick(svc,id)
+    local pe=_G.ProjectEbonhold
+    local perks=type(pe)=="table" and type(pe.Perks)=="table" and pe.Perks or nil
+    local raw={id=integer(id,1) and id or nil}
+    raw.board,raw.cards=rawBoard(perks)
+    if perks then
+        local latch=perks.pendingSelectSpellId
+        raw.acc=latch~=nil and latch==id
+        local slot=perks.serverActiveSlot
+        if integer(slot,0) and slot<=65535 then raw.slot=slot==0 and 0 or slot end
+    end
+    raw.sk=slotKnown(svc)
+    if raw.cards and raw.id then
+        -- The quality is named only when exactly one card carries this Echo.
+        local matches,quality=0,nil
+        for _,c in ipairs(raw.cards) do if c.id==raw.id then matches=matches+1;quality=c.q end end
+        raw.inb=matches>0
+        if matches==1 then raw.q=quality end
+    end
+    local orb=type(pe)=="table" and pe.OrbService or nil
+    local okP,pending=call(orb,"IsOfferPending")
+    if okP and type(pending)=="boolean" then raw.op=pending end
+    return raw
+end
+-- The contextual observation: needs a context, a successful read, an equal
+-- context, an open three-card offer and the game's own pick latch holding this
+-- Echo. Returns what it concluded: "ok" (the choice was recorded), "noctx" (no
+-- owner or watcher context), "fail" (the read failed), "diff" (the context
+-- differs), "state" (not a recordable pick).
+local function observe(svc,id)
+    local c=ownerContext or watcherContext
+    if not c or c.svc~=svc then return "noctx" end
+    local s=O.Read()
+    if not s then return "fail" end
+    if not same(c,s.context) then return "diff" end
+    if not s.offerPending or #s.board~=3
+        or type(c.pe.Perks)~="table" or c.pe.Perks.pendingSelectSpellId~=id then return "state" end
+    local chosen
+    for _,card in ipairs(s.board) do if card.spellId==id then
+        local k=id..":"..card.quality
+        if chosen and chosen~=k then return "state" end
+        chosen=k
+    end end
+    if not chosen then return "state" end
+    selectionSerial=selectionSerial+1
+    -- onlyAction: the observed SelectPerk is the single host action in
+    -- flight, so "host pending" at this moment is this very choice.
+    local perks=c.pe.Perks
+    local only=perks.pendingBanishIndex==nil and perks.pendingFreezeIndex==nil
+        and perks.pendingReroll~=true and perks.pendingLockSpellId==nil and perks.pendingUnlockSpellId==nil
+    selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp,onlyAction=only}
+    -- Event-driven observation: tell the passive watcher (after a reload), or
+    -- the action owner's receipt, now, so that the record does not wait for the
+    -- next timed read and a reload or logout in that gap cannot lose it.
+    -- Read-only listeners; an error in them never reaches the game's call.
+    if not owner and watcherNotify then pcall(watcherNotify)
+    elseif owner and ownerNotify then pcall(ownerNotify) end
+    return "ok"
+end
 local function watchChoices(svc)
     if watched[svc] then return true end
     if type(hooksecurefunc)~="function" or type(svc)~="table" or type(svc.SelectPerk)~="function" then return false end
     local ok=pcall(hooksecurefunc,svc,"SelectPerk",function(id)
-        local c=ownerContext or watcherContext
-        if not c or c.svc~=svc then return end
-        local s=O.Read()
-        if not s or not same(c,s.context) or not s.offerPending or #s.board~=3
-            or type(c.pe.Perks)~="table" or c.pe.Perks.pendingSelectSpellId~=id then return end
-        local chosen
-        for _,card in ipairs(s.board) do if card.spellId==id then
-            local k=id..":"..card.quality
-            if chosen and chosen~=k then return end
-            chosen=k
-        end end
-        if chosen then
-            selectionSerial=selectionSerial+1
-            -- onlyAction: the observed SelectPerk is the single host action in
-            -- flight, so "host pending" at this moment is this very choice.
-            local perks=c.pe.Perks
-            local only=perks.pendingBanishIndex==nil and perks.pendingFreezeIndex==nil
-                and perks.pendingReroll~=true and perks.pendingLockSpellId==nil and perks.pendingUnlockSpellId==nil
-            selection={serial=selectionSerial,key=chosen,boardKey=s.boardKey,grantStamp=s.grantStamp,onlyAction=only}
-            -- Event-driven recovery observation: tell the passive watcher now,
-            -- so that it does not depend on its next timed read. Read-only
-            -- listener; an error in it never reaches the game's call.
-            if not owner and watcherNotify then pcall(watcherNotify) end
+        -- Nothing in this hook may reach the game's caller: the host function has
+        -- already run, and its return values and errors are its own. An instance
+        -- that a reload superseded (the harness keeps the old wrapper) is inert.
+        if A.Orbs~=O then return end
+        local raw
+        if captureSink and not selfSelecting then
+            local okR,r=pcall(rawPick,svc,id)
+            if okR and type(r)=="table" then raw=r end
         end
+        local okO,status=pcall(observe,svc,id)
+        if not okO then
+            if Nexus.Errors and Nexus.Errors.Record then pcall(Nexus.Errors.Record,"OrbAdapter",tostring(status)) end
+            status="err"
+        end
+        if raw then raw.rd=status;pcall(captureSink,raw) end
     end)
     if ok then watched[svc]=true end
     return ok
+end
+-- The owner of the Orb receipt registers its evidence sink and its immediate
+-- notification once, when it loads; the hook below reaches both.
+function O.CaptureSink(sink,notify)
+    captureSink=type(sink)=="function" and sink or nil
+    ownerNotify=type(notify)=="function" and notify or nil
+end
+-- Install the hook now, without any read: a receipt that exists must not wait for
+-- the first successful O.Read() before a pick can be seen. Idempotent; false
+-- until the game's PerkService exists.
+function O.CaptureStart()
+    local pe=_G.ProjectEbonhold
+    local svc=type(pe)=="table" and pe.PerkService or nil
+    if type(svc)~="table" then return false end
+    return watchChoices(svc)==true
 end
 -- Passive recovery watcher. It takes a snapshot that the caller just read, keeps
 -- only its context, and installs the read-only choice observer. It never sets
@@ -364,7 +455,9 @@ function O.Select(token,index,expectedBoard,id,guard)
         or not s.catalog[id] or not s.catalog[id].available
         or s.boardKey~=expectedBoard then return nil,"REJECTED","The Orb offer changed or another action is pending." end
     if guard and guard(s)~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
+    selfSelecting=true
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
+    selfSelecting=false
     if not ok or (v~=true and v~=false) then return nil,"AMBIGUOUS","The selection outcome is unknown. No selection will be repeated." end
     if v==false then return nil,"REJECTED","The game refused the Orb choice. Resolve the offer manually." end
     return true,"SUBMITTED",s.grantStamp

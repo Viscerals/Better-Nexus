@@ -25,7 +25,13 @@ local RECOVERY_FAST_WINDOW,RECOVERY_SLOW_INTERVAL=60,5
 -- choice before the status says so (its reply can still arrive late).
 local HELD_CHOICE_DELAY=5
 local SESSION_INTERRUPTED="Session interrupted. Orb spending will not restart automatically."
-local ensureFrame,heldChoiceHint
+-- The game's lifecycle as this owner's frame saw it (local facts only; they say
+-- nothing about the server). epoch counts every loading transition (leave or
+-- enter). phase: "l" between leaving and entering a world, "r" from entering (and
+-- from this load) until a read succeeds, "w" afterwards. A phase is a label on the
+-- evidence, never proof that the game is ready.
+local life={epoch=0,phase="r"}
+local ensureFrame,heldChoiceHint,cleanEvidence
 local function copy(t)
     if type(t)~="table" then return t end
     local r={};for k,v in pairs(t) do r[k]=copy(v) end;return r
@@ -132,6 +138,11 @@ local function init()
     if type(config.pending)=="table" then
         run.pending=copy(config.pending);run.pending.restored=true;run.pending.since=now()
         run.pending.refreshRequested=false;run.pending.baselineStamp=nil;run.pending.recoverySerial=nil;run.pending.recoveryMatched=nil
+        -- A saved file is data, not truth: the raw pick evidence is rebuilt from
+        -- its known plain fields only (and bounded) before anything uses it.
+        cleanEvidence(run.pending)
+        -- See a pick from this moment on, without waiting for a successful read.
+        if type(B.CaptureStart)=="function" then pcall(B.CaptureStart) end
         run.state="RECOVERY";run.reason="An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open."
         run.recovery={kind="CHECKING",observing=false}
         run.spent=run.pending.spent or 0;run.reserved=run.pending.spendConfirmed and 0 or 1;run.limit=run.pending.limit or config.maxOrbs or 0
@@ -245,6 +256,16 @@ local function savePending()
         config.pending=p
     else config.pending=nil end
     return write(config)
+end
+-- Raw pick evidence that the store refused when it was seen is kept in memory
+-- (run.pickDirty) and saved at the next pass or lifecycle event. Never fatal, and
+-- it changes no run state. Returns true when nothing is left unsaved.
+local function flushEvidence()
+    if not (run and run.pickDirty) then return true end
+    if not run.pending then run.pickDirty=nil;return true end
+    local ok=savePending()
+    if ok then run.pickDirty=nil end
+    return ok==true
 end
 local function release()
     if run.token then B.Release(run.token);run.token=nil end
@@ -546,8 +567,13 @@ ensureFrame=function()
     if frame then frame:Show();return end
     frame=CreateFrame("Frame","NexusOrbRuntime",UIParent)
     frame:RegisterEvent("PLAYER_LOGOUT");frame:RegisterEvent("PLAYER_LEAVING_WORLD");frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    frame:SetScript("OnEvent",function()
+    frame:SetScript("OnEvent",function(_,event)
         init()
+        if event=="PLAYER_LEAVING_WORLD" then life.epoch=(life.epoch+1)%65536;life.phase="l"
+        elseif event=="PLAYER_ENTERING_WORLD" then life.epoch=(life.epoch+1)%65536;life.phase="r" end
+        -- Evidence that could not be saved when it was seen is saved now: a
+        -- reload or a logout follows these events.
+        flushEvidence()
         -- A restored receipt is already passive. Keep its recovery explanation.
         if run.pending and run.pending.restored and not run.running then return end
         if run.running or run.pending then
@@ -657,6 +683,109 @@ local function loadoutChangeCause(s,p)
     if known==nil then return "SLOT_DIFFERS_UNVERIFIED",slot end
     return "SLOT_DIFFERS",slot
 end
+-- Raw pick evidence (035) ----------------------------------------------------
+-- What the game's SelectPerk callback showed at the moment of a manual pick, saved
+-- with the receipt (receipt.picks, at most PICK_MAX entries, the earliest are kept)
+-- before any fallible read. It is EVIDENCE: no rule reads it. It is never a
+-- selection, it fills no settlement gate (hasChoiceEvidence, finishResult and
+-- observeLifecycle ignore it), and a held, unmatched, context-poor or unreadable
+-- observation stays only this. Each entry holds numbers, booleans and short texts:
+--   id  the Echo the callback named           q   its quality when exactly one card carries it
+--   board the raw board "id:q,id:q,id:q"      inb the Echo was on that board
+--   m   the board against the recorded offer: offer (exact), ids (same Echoes, quality unreadable),
+--       other, none (no readable board), norec (no recorded offer)
+--   acc the game's own pick latch held this Echo after the call
+--   op  OrbService.IsOfferPending() then      slot, sk  the active slot and whether slot data was received
+--   rd  what the contextual observer concluded: ok (recorded), noctx, fail, diff, state, err
+--   u   the receipt's own selection fields name this Echo (the immediate pass recorded it)
+--   ph, ep  the lifecycle phase and loading epoch (see `life`)    at  client clock    c  identical callbacks merged
+-- A load, a loading screen and a reload change nothing here: a local epoch label
+-- says when Nexus saw the callback, not whether the server has finished anything.
+local PICK_MAX,PICK_COUNT_MAX=3,999
+local PICK_RD={ok=true,noctx=true,fail=true,diff=true,state=true,err=true}
+local PICK_M={offer=true,ids=true,other=true,none=true,norec=true}
+local PICK_PHASE={w=true,l=true,r=true}
+local function pickInt(n,min,max) if integer(n,min,max) then return n==0 and 0 or n end return nil end
+local function pickBool(v) if v==true or v==false then return v end return nil end
+local function pickBoard(v)
+    if type(v)=="string" and #v<=40 and v:find("^[%d:%?,]*$") then return v end
+    return nil
+end
+local function cleanPick(e)
+    if type(e)~="table" then return nil end
+    local out={id=pickInt(e.id,1,2147483647),q=pickInt(e.q,0,255),board=pickBoard(e.board),
+        m=PICK_M[e.m] and e.m or nil,acc=pickBool(e.acc),op=pickBool(e.op),slot=pickInt(e.slot,0,MAX_SLOT),
+        sk=pickBool(e.sk),rd=PICK_RD[e.rd] and e.rd or nil,u=pickBool(e.u),inb=pickBool(e.inb),
+        ph=PICK_PHASE[e.ph] and e.ph or nil,ep=pickInt(e.ep,0,65535),at=epochValue(e.at),
+        c=pickInt(e.c,1,PICK_COUNT_MAX) or 1}
+    if not out.id and not out.board then return nil end
+    return out
+end
+cleanEvidence=function(p)
+    local list={}
+    if type(p.picks)=="table" then
+        for i=1,PICK_MAX do local e=cleanPick(p.picks[i]);if e then list[#list+1]=e end end
+    end
+    p.picks=#list>0 and list or nil
+    p.pickSeen=pickInt(p.pickSeen,1,PICK_COUNT_MAX)
+    p.pickDropped=pickInt(p.pickDropped,1,PICK_COUNT_MAX)
+end
+local function pickSame(a,b)
+    for _,k in ipairs({"id","q","board","m","acc","op","slot","sk","rd","u","inb","ph","ep"}) do
+        if a[k]~=b[k] then return false end
+    end
+    return true
+end
+-- The raw board against the recorded offer, for the evidence label only.
+local function pickRelation(raw,p)
+    if not p.offerKey then return "norec" end
+    local cards=raw.cards
+    if type(cards)~="table" or #cards==0 then return "none" end
+    local parts,ids,exact={},{},true
+    for i,c in ipairs(cards) do
+        ids[i]=tostring(c.id)
+        if c.q==nil then exact=false else parts[i]=c.id..":"..c.q..":"..tostring(c.selectable==true) end
+    end
+    if exact and table.concat(parts,",")==p.offerKey then return "offer" end
+    local recorded={}
+    for id in tostring(p.offerKey):gmatch("(%d+):%d+:%a+") do recorded[#recorded+1]=id end
+    if not exact and table.concat(ids,",")==table.concat(recorded,",") then return "ids" end
+    return "other"
+end
+-- Called by the adapter's hook for every manual SelectPerk callback, after the
+-- contextual observer ran. Never throws to the game and never sends anything.
+local function onPickRaw(raw)
+    if Nexus.OrbRuntime~=M or type(raw)~="table" then return end
+    init()
+    local p=run and run.pending
+    if not p then return end
+    local entry=cleanPick({id=raw.id,q=raw.q,board=raw.board,m=pickRelation(raw,p),acc=raw.acc,op=raw.op,
+        slot=raw.slot,sk=raw.sk,rd=raw.rd,inb=raw.inb,ph=life.phase,ep=life.epoch,at=wallClock(),c=1})
+    if not entry then return end
+    entry.u=entry.id~=nil and entry.q~=nil and p.choiceObserved==true and p.selectedKey==entry.id..":"..entry.q or false
+    local list=type(p.picks)=="table" and p.picks or {}
+    p.pickSeen=math.min((tonumber(p.pickSeen) or 0)+1,PICK_COUNT_MAX)
+    local merged=false
+    for _,e in ipairs(list) do
+        if pickSame(e,entry) then e.c=math.min((e.c or 1)+1,PICK_COUNT_MAX);e.at=entry.at or e.at;merged=true;break end
+    end
+    if not merged then
+        if #list<PICK_MAX then list[#list+1]=entry
+        else p.pickDropped=math.min((tonumber(p.pickDropped) or 0)+1,PICK_COUNT_MAX) end
+    end
+    p.picks=list
+    -- Saved at once, for a reload or a logout that follows. A refusal keeps it in
+    -- memory for the next pass and changes nothing else.
+    local ok=savePending()
+    run.pickDirty=(not ok) or nil
+end
+-- A pick that passed every contextual check is recorded by the same pass the
+-- restored receipt already gets: a passive pump, now, not at the next timed read.
+local function onOwnerChoice()
+    if Nexus.OrbRuntime~=M or not (run and run.pending) or run.pending.restored then return end
+    pcall(M.Pump,true)
+end
+
 -- Read-only record of the settlement requirement that the last attempt did
 -- not meet, for the status text. Session only; it authorizes nothing.
 local function unmet(gate,detail)
@@ -1013,9 +1142,19 @@ end
 function M.Pump(passive)
     init();if advancing or (not run.running and not run.pending) then return end
     passive=passive==true or passiveDepth>0
+    if run.pending then
+        -- Install the pick hook if the game's PerkService appeared after the load,
+        -- and save pick evidence that the store refused earlier. Neither reads the
+        -- game and neither changes any run state.
+        if not run.captureOn and type(B.CaptureStart)=="function" then
+            local okC,started=pcall(B.CaptureStart);run.captureOn=okC and started==true
+        end
+        flushEvidence()
+    end
     advancing=true
     local function step()
         local s,err=B.Read()
+        if s and life.phase=="r" then life.phase="w" end
         local p=run.pending
         if not s and p and p.restored and not run.running then
             -- Passive recovery reads from addon load onward. A read that is not
@@ -1334,7 +1473,19 @@ function M.RecoveryView()
     local unmetNow={}
     if p.loadoutChanged or p.originalSlot==nil then unmetNow[#unmetNow+1]="loadout" end
     if not hasChoiceEvidence(p) then unmetNow[#unmetNow+1]="choice" end
+    -- Raw pick evidence: counts only (see the evidence section above). No Echo id.
+    local pickMatching,pickUsed,pickStored=0,0,0
+    if type(p.picks)=="table" then
+        for _,e in ipairs(p.picks) do
+            pickStored=pickStored+1
+            if e.m=="offer" then pickMatching=pickMatching+1 end
+            if e.u==true then pickUsed=pickUsed+1 end
+        end
+    end
     return {pending=true,restored=p.restored==true,state=run.state,
+        rawPicks=pickStored,rawPickCallbacks=pickInt(p.pickSeen,0,PICK_COUNT_MAX) or 0,
+        rawPickDropped=pickInt(p.pickDropped,0,PICK_COUNT_MAX) or 0,rawPickMatching=pickMatching,rawPickUsed=pickUsed,
+        rawPickUnsaved=run.pickDirty==true,
         recovery=p.restored and run.recovery and run.recovery.kind or nil,gate=gate and gate.gate or nil,
         spendConfirmed=p.spendConfirmed==true,choiceSent=p.choiceMayHaveBeenSent==true,choiceObserved=p.choiceObserved==true,
         selectedKey=p.selectedKey,removed=p.removed,loadoutChanged=p.loadoutChanged==true,
@@ -1393,3 +1544,5 @@ function M.CompactStatus()
         limit=run.limit,remaining=remaining,reason=run.reason,
         canResume=run.state=="PAUSED" and not (run.pending and (run.targetChanged or run.pending.restored or run.pending.selectionAttempted))}
 end
+-- The adapter's hook reaches the evidence sink and the immediate notification.
+if type(B.CaptureSink)=="function" then B.CaptureSink(onPickRaw,onOwnerChoice) end

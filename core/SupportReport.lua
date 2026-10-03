@@ -648,6 +648,25 @@ local function loadoutLine(view)
         .. "; unmet in record=" .. (#unmet > 0 and table.concat(unmet, ",") or "none")
 end
 
+-- Raw pick evidence of the unresolved Orb action: counts only. A pick that the game's
+-- callback showed is kept as evidence even when no choice could be recorded for the
+-- action; it is not a choice and settles nothing. No Echo id, name or board is shown.
+local function smallCount(value)
+    if type(value) == "number" and value == math.floor(value) and value >= 0 and value <= 999 then
+        return value == 0 and 0 or value
+    end
+    return 0
+end
+local function pickLine(view)
+    return "  raw picks: callbacks seen=" .. smallCount(view.rawPickCallbacks)
+        .. "; stored=" .. smallCount(view.rawPicks)
+        .. "; not stored=" .. smallCount(view.rawPickDropped)
+        .. "; on the recorded offer=" .. smallCount(view.rawPickMatching)
+        .. "; recorded as the action's choice=" .. smallCount(view.rawPickUsed)
+        .. "; not yet saved=" .. (view.rawPickUnsaved == true and "yes" or "no")
+        .. " (evidence only; it settles nothing)"
+end
+
 -- The unresolved Orb action, if any: the recovery state and the requirement
 -- that the last read did not meet, so a report shows why an Orb action (and
 -- ordinary rolling) is held. Scalars from OrbRuntime.RecoveryView; no names.
@@ -681,6 +700,7 @@ function M.OrbLines()
                 .. "; loadout change recorded=" .. yes(view.loadoutChanged)
                 .. "; automatic refresh=" .. (view.autoRefresh == true and "requested" or "not requested"),
             loadoutLine(view),
+            pickLine(view),
         }
     end)
     if ok and type(lines) == "table" then return lines end
