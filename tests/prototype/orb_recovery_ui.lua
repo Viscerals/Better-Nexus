@@ -105,6 +105,24 @@ section('4 a stale click',function()
  check(w.notice:GetText()~=nil and w.notice:GetText()~='','and the player is told')
 end)
 
+section('6 a click confirms what the window showed',function()
+ local H,M,A,O,server=World()
+ SlashCmdList.NEXUS('orbs');NexusOrbPanel.cont:Click();local w=NexusOrbContinue
+ w.check:Click();assert(Until(H,function() return w.go:IsEnabled() end))
+ local shown=w.token
+ check(shown~=nil and shown==M.ContinueView().token,'the window holds the current token')
+ -- the window stops refreshing (a stalled frame); the game side starts a new check with a new token
+ w:SetScript('OnUpdate',nil)
+ M.ContinueCancel();assert(M.ContinueBegin())
+ assert(Until(H,function() return M.ContinueView().stage=='ready' end))
+ local newest=M.ContinueView().token
+ check(newest~=shown and w.token==shown,'the newest token is not the one the window showed')
+ local original=H.Clone(R.Saved())
+ w.go:GetScript('OnClick')(w.go)
+ check(R.Same(R.Saved(),original) and R.SavedRow('orbRecoveryArchive')==nil,'a click confirms what the window showed, never a newer state: nothing changed')
+ check(M.ContinueView().stage=='ready' and M.ContinueView().token==newest,'and the newer check is untouched')
+end)
+
 section('5 the help names Continue',function()
  -- the Orb help topic is a long string in ui/Help.lua; it must describe Continue and no longer claim there is no exit
  local f=assert(io.open('ui/Help.lua','rb'));local text=f:read('*a');f:close()

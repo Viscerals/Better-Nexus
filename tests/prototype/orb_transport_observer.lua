@@ -273,6 +273,7 @@ section('8 bounds',function()
  check(#list==10,'the recent records are returned')
  check(#(B.TransportSince(top-48) or {})<=48,'the ring is bounded')
  check(B.TransportStatus().counts.Q==301,'the counters keep counting')
+ check(B.TransportStatus().retained==48,'and the ring holds 48 records, not 301: '..tostring(B.TransportStatus().retained))
  check(R.Plain(B.TransportStatus(),24),'the status holds only numbers, booleans and short names')
 end)
 

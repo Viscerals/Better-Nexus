@@ -333,5 +333,51 @@ section('14 re-entrant callback',function()
  check(p.selectedKey==nil,'and nothing is fabricated')
 end)
 
+-- 15. Nexus's own pick is not captured as an observation: it is saved before the call.
+section('15 own pick',function()
+ local H,M,A,O=S.Fresh()
+ H.OrbPlan({{spellId=410002,quality=2,stacks=1}})
+ H.Approve(3,false)
+ H.Offer({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}})
+ H.Advance(1)
+ check(H.Count('take')==1,'the run chose the target itself')
+ local p=Nexus.Store.State().orbRefinement.pending
+ check(p~=nil and p.selectedKey=='410002:2' and p.picks==nil and p.pickSeen==nil,'its own pick is the receipt\'s choice, not a raw observation')
+end)
+
+-- 16. Saved evidence is data, not truth: a damaged file is rebuilt from known plain fields.
+section('16 saved evidence is sanitized',function()
+ local junk={
+  {id=500001,q=1,board='500037:1,500001:1,500038:1',m='offer',acc=true,evil='x',c=5,slot=101,at=1700000000,ph='w'},
+  'text',42,{id='abc'},{id=-5},
+  {id=500006},{id=500007},
+ }
+ local H,M,A,O=S.World(F,{slot=101,latch=true,charges=F.receipt.chargesBefore-1,open=true})
+ M=S.Reload(H,function(row,state)
+  for _,r in ipairs({row,state}) do r.picks=H.Clone(junk);r.pickSeen=1000000000;r.pickDropped=-3 end
+ end)
+ S.Pass(H,M,A,2)
+ R.Pick(H,S.IdQ(OFFER[1]))
+ local p=R.Saved()
+ check(type(p.picks)=='table' and #p.picks==2,'the damaged entries were dropped: '..tostring(p.picks and #p.picks))
+ for _,e in ipairs(p.picks) do
+  for k in pairs(e) do check(FIELDS[k],'only known fields: '..tostring(k)) end
+ end
+ local e=p.picks[1]
+ check(e.id==500001 and e.q==1 and e.m=='offer' and e.c==5 and e.evil==nil and e.at==1700000000,'the valid first entry is kept, an unknown field is not')
+ check(p.pickSeen==1 and p.pickDropped==nil,'out-of-range counters are rebuilt, not trusted: '..tostring(p.pickSeen))
+end)
+
+-- 17. A pick after the load but before the first timed pass is still captured: the hook is
+-- installed when the receipt is restored, not at the first successful read.
+section('17 pick before the first pass',function()
+ local H,M,A,O=World({latch=true})
+ M.BlocksOrdinary() -- the first owner call after the load restores the receipt
+ check(R.Pick(H,S.IdQ(OFFER[2]))==true,'the game accepted the pick')
+ local p=R.Saved()
+ check(type(p.picks)=='table' and #p.picks==1 and p.picks[1].m=='offer','captured with no pass and no read in between')
+ check(p.picks[1].ph=='r','still in the reentry phase: no read has succeeded yet')
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb pick evidence: raw observation kept at the hook boundary, non-authoritative, callback unchanged checks='..checks)

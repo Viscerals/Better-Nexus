@@ -362,11 +362,21 @@ section('13 archive capacity and format',function()
  local H,M,A,O,server=World()
  Begin(M);assert(Run(H,M,8,'ready'));local t=M.ContinueView().token
  local _,row=R.Row()
- for i=1,3000 do row.orbRefinement.pending.before['999'..i..':1']=1 end
+ -- a field that is not part of the receipt's identity, so only the size can refuse it
+ for i=1,3000 do row.orbRefinement.pending.offeredKeys['999'..i..':1']=true end
  local huge=H.Clone(row.orbRefinement.pending)
  local ok,why=M.ContinueConfirm(t)
- check(ok==nil and (why=='entry_too_large' or why=='receipt_changed'),'a huge receipt is refused: '..tostring(why))
+ check(ok==nil and why=='entry_too_large','a huge receipt is refused for its size: '..tostring(why))
  check(R.Same(row.orbRefinement.pending,huge) and row.orbRecoveryArchive==nil,'and nothing is written or dropped')
+ -- another receipt in the row (the identity differs): it is not the one that was checked
+ local H3,M3,A3,O3,s3=World()
+ Begin(M3);assert(Run(H3,M3,8,'ready'));local t3=M3.ContinueView().token
+ local _,row3=R.Row()
+ row3.orbRefinement.pending.removed='999999:1'
+ local other=H3.Clone(row3.orbRefinement.pending)
+ local ok3,why3=M3.ContinueConfirm(t3)
+ check(ok3==nil and why3=='receipt_changed','a different saved receipt is refused: '..tostring(why3))
+ check(R.Same(row3.orbRefinement.pending,other) and row3.orbRecoveryArchive==nil,'and left alone')
  -- the archive is checked again at the confirmation
  local H2,M2,A2,O2,s2=World()
  Begin(M2);assert(Run(H2,M2,8,'ready'));local t2=M2.ContinueView().token
@@ -463,6 +473,114 @@ section('17 support lines',function()
  check(text:find('third_absent=',1,true) and text:find('sender=',1,true),'the strict-path counters name each reason')
  check(not text:find('Somebody',1,true) and not text:find(R.ME,1,true),'no player or sender name')
  for _,l in ipairs(Nexus.SupportReport.OrbLines()) do check(#l<500 and not l:find('[%z\1-\31]'),'bounded line') end
+end)
+
+-- 18. Requests are serialized with earlier Nexus requests.
+section('18 serialized requests',function()
+ local H,M,A,O,server=World({server={mode='hold'}})
+ M.Recheck() -- an earlier Nexus request; its reply is held
+ check(server.requests==1,'one request so far')
+ Begin(M);H.Advance(1)
+ check(server.requests==1 and M.ContinueView().step=='req1','the check does not send its request while an earlier one has no observed reply')
+ server.mode='auto';server.Release();H.Advance(.5)
+ check(Run(H,M,10,'ready'),'then it goes on and completes')
+ check(server.requests==3,'its own two requests followed: '..server.requests)
+ -- an earlier request that is never answered ends the check
+ local H2,M2,A2,O2,s2=World({server={mode='drop'}})
+ local o2=H2.Clone(R.Saved())
+ M2.Recheck()
+ Begin(M2)
+ check(Run(H2,M2,M2.CONTINUE_WAIT+3,'refused'),'it gives up')
+ Refused(H2,M2,o2,'no_reply','an earlier request without a reply')
+ check(s2.requests==1,'and sent nothing of its own')
+end)
+
+-- 19. The same receipt comes back (a backup, an older build): one entry per content, never a duplicate.
+section('19 an existing entry',function()
+ local H,M,A,O,server=World()
+ local original=H.Clone(R.Saved())
+ Begin(M);assert(Run(H,M,8,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ local first=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ local owner=Nexus.MainInternals.StoreAuthorityOwner
+ assert(owner.UpdateStateV1(function(r) r.orbRefinement.pending=H.Clone(original) end))
+ M=R.Reload(H);S.Pass(H,M,A,2)
+ check(M.ContinueView().eligible==true,'the restored receipt is the class again')
+ Begin(M);assert(Run(H,M,8,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ local archive=R.SavedRow('orbRecoveryArchive')
+ check(#archive==1 and R.Saved()==nil,'the same receipt is not archived twice: the identifier and the content digest match')
+ check(R.Same(archive[1],first),'and the entry that was kept is untouched')
+ -- the same spend with more evidence: same identifier, other content: both are kept
+ local variant=H.Clone(original);variant.picks={{id=500001,q=1,m='offer',c=1}};variant.pickSeen=1
+ assert(owner.UpdateStateV1(function(r) r.orbRefinement.pending=H.Clone(variant) end))
+ M=R.Reload(H);S.Pass(H,M,A,2)
+ Begin(M);assert(Run(H,M,8,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ archive=R.SavedRow('orbRecoveryArchive')
+ check(#archive==2 and archive[2].id==archive[1].id and archive[2].cd~=archive[1].cd,'other content under the same identifier is kept too')
+ check(R.Same(archive[1],first) and archive[2].receipt.picks~=nil and #archive[2].receipt.picks==1,'neither loses anything')
+end)
+
+-- 21. The write is verified and a failed one is rolled back.
+section('21 verification and rollback',function()
+ local H,M,A,O,server=World()
+ local original=H.Clone(R.Saved())
+ Begin(M);assert(Run(H,M,8,'ready'));local t=M.ContinueView().token
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1
+ -- a store that writes the archive and puts the pending receipt back
+ owner.UpdateStateV1=function(fn,...)
+  local a,b=raw(fn,...)
+  local _,row=R.Row()
+  if row and row.orbRefinement then row.orbRefinement.pending=H.Clone(original) end
+  return a,b
+ end
+ local ok,why=M.ContinueConfirm(t)
+ owner.UpdateStateV1=raw
+ check(ok==nil and why=='write_failed','an unverified write is refused: '..tostring(why))
+ check(R.SavedRow('orbRecoveryArchive')==nil and R.Same(R.Saved(),original),'and rolled back: no entry is left and the receipt is as it was')
+ check(M.ContinueView().stage=='ready' and M.Status().pending==true,'the check is still ready')
+ check(M.ContinueConfirm(t)==true and #R.SavedRow('orbRecoveryArchive')==1,'the retry works')
+end)
+
+-- 22. Evidence that is not saved yet is never archived away.
+section('22 unsaved evidence',function()
+ local H,M,A,O=S.World(F,{slot=101,latch=true,charges=F.receipt.chargesBefore-1,open=true})
+ local server=R.Server(H)
+ S.Pass(H,M,A,2)
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1
+ -- the store refuses to write a pending receipt, but accepts the archive move (which clears it)
+ owner.UpdateStateV1=function(fn,...)
+  local scratch={}
+  if pcall(fn,scratch) and type(scratch.orbRefinement)=='table' and scratch.orbRefinement.pending~=nil then return nil end
+  return raw(fn,...)
+ end
+ R.Pick(H,S.IdQ(S.Offer(F)[2]))
+ check(Nexus.OrbRuntime.RecoveryView().rawPickUnsaved==true and R.Saved().picks==nil,'the pick evidence is not saved')
+ H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;H.orbs.offer=false;S.Pass(H,M,A,1)
+ Begin(M);assert(Run(H,M,8,'ready'));local t=M.ContinueView().token
+ local ok,why=M.ContinueConfirm(t)
+ check(ok==nil and why=='write_failed','the archive refuses to drop it: '..tostring(why))
+ check(R.Saved()~=nil and R.SavedRow('orbRecoveryArchive')==nil,'nothing moved')
+ owner.UpdateStateV1=raw
+ H.Advance(.5)
+ check(R.Saved().picks~=nil and #R.Saved().picks==1,'once the store works the next pass saves it')
+ check(M.ContinueConfirm(t)==true,'and then the same token confirms')
+ local e=R.SavedRow('orbRecoveryArchive')[1]
+ check(e.receipt.picks~=nil and #e.receipt.picks==1 and e.observed.picks==1,'the evidence is in the archive')
+end)
+
+-- 23. A pass that cannot read the game voids the check.
+section('23 unreadable pass',function()
+ local H,M,A,O,server=World({server={mode='hold'}})
+ local original=H.Clone(R.Saved())
+ Begin(M)
+ local restore=R.BreakOwned(H);H.Advance(.6)
+ Refused(H,M,original,'unreadable','a read that fails during the check')
+ restore()
+ local H2,M2,A2,O2,s2=World()
+ Begin(M2);assert(Run(H2,M2,8,'ready'))
+ local o2=H2.Clone(R.Saved())
+ local restore2=R.BreakOwned(H2);H2.Advance(.6)
+ Refused(H2,M2,o2,'unreadable','a read that fails while it waits for the player')
+ restore2()
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
