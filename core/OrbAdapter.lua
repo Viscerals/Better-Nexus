@@ -462,11 +462,150 @@ function O.Select(token,index,expectedBoard,id,guard)
     if v==false then return nil,"REJECTED","The game refused the Orb choice. Resolve the offer manually." end
     return true,"SUBMITTED",s.grantStamp
 end
+-- Passive transport observer (035) ---------------------------------------------
+-- The audited client (the owner's installed bytes; the reporter's build is NOT
+-- verified) delivers every server message through ONE CHAT_MSG_ADDON frame, keeps
+-- one handler per opcode, and checks the prefix and the framing, not the sender or
+-- the channel. This observer therefore never registers an opcode handler: it
+-- listens to the same event in a frame of its own, which leaves the game's frame,
+-- handlers, payloads, order and errors alone, and it sends nothing.
+--
+-- CAPTURE FIRST, EVALUATE LATER. The event handler only classifies and records
+-- (class, ordinal, epoch, parsed numbers). It reads no game state, so nothing
+-- depends on which frame runs first; whoever evaluates a record reads the game's
+-- cache on a later pass, after the game's own handler has run.
+--
+-- CLASSES. Q: qualifying protocol evidence (opcode 1220 only): exact prefix, the
+-- whisper channel, a sender equal to the player's own exact name (a known identity;
+-- no cross-realm or short-name alias), a tab and a non-empty body, no segmentation,
+-- exactly three fields, canonical bounded integers. A: admitted (sender and channel
+-- pass) but not parsed or not qualifying. R: a relevant packet that the game's
+-- dispatcher would still have accepted, rejected here (identity, sender or channel).
+-- An R, and an A of opcode 1220, may have changed the game's cache, so the opcode
+-- is TAINTED (bad[op]) until a later Q (1220) or A (other opcodes) replaces the cache.
+-- A raw arrival is never proof of anything beyond "observed after refresh began":
+-- the protocol carries no correlation, a local epoch rejects only local work, and an
+-- older server reply that arrives later cannot be told from a newer one.
+-- Native server sender and channel are NOT TESTED; that the convention (a whisper
+-- from the player's own name, as EbonAPI's strict bridge requires) matches the real
+-- server is a source-backed expectation, not proof. A mismatch rejects every reply
+-- and the counters say so (rejects.sender, rejects.channel, rejects.identity).
+local TRANSPORT_PREFIX="AAM0x9"
+-- Opcodes whose packets change what Nexus reads from the game's cache: the offer
+-- (16), the rolled and locked Echoes (18), the pick result (1000), the build-slot
+-- data (540, 542) and the Orb charge reply (1220).
+local TRANSPORT_OPS={[16]=true,[18]=true,[540]=true,[542]=true,[1000]=true,[1220]=true}
+local TRANSPORT_RING,COUNT_CAP=48,1000000
+local T={started=false,epoch=0,ord=0,ring={},requests=0,reqOrd=0,good={},bad={},
+    counts={Q=0,A=0,R=0,echo=0,drop=0,other=0},
+    rejects={identity=0,sender=0,channel=0,segmented=0,third_absent=0,fields_extra=0,malformed=0,range=0}}
+local function bump(t,k) t[k]=math.min((t[k] or 0)+1,COUNT_CAP) end
+-- A canonical whole number: digits only (a leading minus only where signed), no
+-- leading zero, no "-0", at most six digits.
+local function canonical(text,signed)
+    local negative,digits=false,text
+    if signed and text:sub(1,1)=="-" then negative=true;digits=text:sub(2) end
+    if digits=="" or digits:find("%D") then return nil,"malformed" end
+    if #digits>1 and digits:sub(1,1)=="0" then return nil,"malformed" end
+    if negative and digits=="0" then return nil,"malformed" end
+    if #digits>6 then return nil,"range" end
+    local n=tonumber(digits)
+    return negative and -n or n
+end
+local function parseCharges(body)
+    local fields={}
+    for part in (body..","):gmatch("([^,]*),") do fields[#fields+1]=part end
+    local nf=math.min(#fields,9)
+    if #fields<3 then return nil,"third_absent",nf end
+    if #fields>3 then return nil,"fields_extra",nf end
+    local charges,why=canonical(fields[1],false);if not charges then return nil,why,nf end
+    local delta;delta,why=canonical(fields[2],true);if not delta then return nil,why,nf end
+    local pending;pending,why=canonical(fields[3],false);if not pending then return nil,why,nf end
+    return {charges=charges,delta=delta,pending=pending},nil,nf
+end
+local function transportCapture(prefix,payload,dist,sender)
+    if prefix~=TRANSPORT_PREFIX or type(payload)~="string" or payload=="" then return end
+    local evt,rest=payload:match("^(%d+)\t(.*)$")
+    -- The game drops what does not have this framing without a trace: it cannot
+    -- change its cache, so it is only counted.
+    if not evt then bump(T.counts,"drop");return end
+    local op=tonumber(evt,10)
+    if not TRANSPORT_OPS[op] then bump(T.counts,"other");return end
+    -- The client's own empty request, echoed or not, and any empty 1220 body: the
+    -- game's handler returns at once, so nothing changed and nothing is a reply.
+    if op==1220 and rest=="" then bump(T.counts,"echo");return end
+    local name=UnitName and UnitName("player")
+    local why
+    if type(name)~="string" or name=="" or name:lower()=="unknown" then why="identity"
+    elseif type(sender)~="string" or sender~=name then why="sender"
+    elseif dist~="WHISPER" then why="channel" end
+    T.ord=T.ord+1
+    local rec={ord=T.ord,op=op,epoch=T.epoch}
+    if why then rec.cls="R";rec.why=why
+    elseif op~=1220 then rec.cls="A"
+    elseif rest:find("^@%x%x%x%x\t%x%x%x/%x%x%x\t") then rec.cls="A";rec.why="segmented"
+    else
+        local parsed,reason,nf=parseCharges(rest)
+        rec.nf=nf
+        if parsed then rec.cls="Q";rec.charges,rec.delta,rec.pending=parsed.charges,parsed.delta,parsed.pending
+        else rec.cls="A";rec.why=reason end
+    end
+    bump(T.counts,rec.cls)
+    if rec.why then bump(T.rejects,rec.why) end
+    if rec.cls=="R" or (rec.cls=="A" and op==1220) then T.bad[op]=rec.ord else T.good[op]=rec.ord end
+    T.ring[rec.ord]=rec
+    T.ring[rec.ord-TRANSPORT_RING]=nil
+end
+local function transportEvent(event,prefix,payload,dist,sender)
+    if event=="CHAT_MSG_ADDON" then transportCapture(prefix,payload,dist,sender)
+    elseif event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_ENTERING_WORLD" then T.epoch=(T.epoch+1)%65536 end
+end
+-- Start the observer. Idempotent; true when it is listening.
+function O.TransportStart()
+    if T.started then return true end
+    if type(CreateFrame)~="function" then return false,"The client cannot create a frame." end
+    local ok,frame=pcall(CreateFrame,"Frame")
+    if not ok or type(frame)~="table" then return false,"The observer frame could not be created." end
+    frame:RegisterEvent("CHAT_MSG_ADDON")
+    frame:RegisterEvent("PLAYER_LEAVING_WORLD");frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    frame:SetScript("OnEvent",function(_,event,a,b,c,d)
+        -- Never an error to the game, and a superseded instance is inert.
+        if A.Orbs~=O then return end
+        pcall(transportEvent,event,a,b,c,d)
+    end)
+    T.started=true
+    return true
+end
+local function copyNumbers(t)
+    local out={};for k,v in pairs(t) do out[k]=v end;return out
+end
+-- Numbers, booleans and short names only: no player, no sender, no payload text.
+function O.TransportStatus()
+    return {started=T.started,epoch=T.epoch,ord=T.ord,counts=copyNumbers(T.counts),rejects=copyNumbers(T.rejects),
+        good=copyNumbers(T.good),bad=copyNumbers(T.bad),requests=T.requests,reqOrd=T.reqOrd}
+end
+-- The relevant records that arrived after ordinal `since`, oldest first, or nil and
+-- "overflow" when the bounded ring no longer covers them.
+function O.TransportSince(since)
+    if not integer(since,0) then return nil,"argument" end
+    local first=math.max(1,T.ord-TRANSPORT_RING+1)
+    if since<T.ord and since+1<first then return nil,"overflow" end
+    local out={}
+    for ord=since+1,T.ord do
+        local rec=T.ring[ord]
+        if not rec then return nil,"overflow" end
+        out[#out+1]=copyNumbers(rec)
+    end
+    return out
+end
 function O.RequestRefresh()
     local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService;local svc=pe and pe.PerkService
     local a=type(orb)=="table" and type(orb.RequestCharges)=="function"
     local b=type(svc)=="table" and type(svc.RequestGrantedPerks)=="function"
     if not a or not b then return false,"The client cannot request an Orb/ownership refresh." end
     local okA=pcall(orb.RequestCharges);local okB=pcall(svc.RequestGrantedPerks)
-    return okA and okB
+    -- The mark is the arrival ordinal at this moment. It is not a correlation: a
+    -- reply that arrives later is "observed after refresh began", nothing more.
+    if okA then T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=T.ord end
+    return okA and okB,nil,{ord=T.ord,n=T.requests,epoch=T.epoch}
 end
