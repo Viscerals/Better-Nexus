@@ -667,6 +667,91 @@ local function pickLine(view)
         .. " (evidence only; it settles nothing)"
 end
 
+-- The player-confirmed continuation (035): the strict path's own counters, the last
+-- attempts of this session and the archive. Every value is a whole number in a fixed range,
+-- a code that matches a fixed shape, or a hex identifier; nothing is copied from a packet,
+-- no sender, player, Echo id or board is shown. "Observed after the refresh began" is all
+-- the protocol allows: arrival order is not a correlation, so two replies do not prove that
+-- no older reply remains. Native server behavior is not tested.
+local function bigCount(value)
+    if type(value) == "number" and value == math.floor(value) and value >= 0 and value <= 10000000 then
+        return tostring(value == 0 and 0 or value)
+    end
+    return "?"
+end
+local function signedCount(value)
+    if type(value) == "number" and value == math.floor(value) and value >= -10000000 and value <= 10000000 then
+        return tostring(value == 0 and 0 or value)
+    end
+    return "?"
+end
+local function codeText(value)
+    if type(value) == "string" and #value <= 24 and value:find("^[%a_]+$") then return value end
+    return value == nil and "none" or "unreadable"
+end
+local function hexText(value)
+    if type(value) == "string" and #value <= 16 and value:find("^%x+$") then return value end
+    return value == nil and "none" or "unreadable"
+end
+local function replyText(r)
+    if type(r) ~= "table" then return "none" end
+    return "(ordinal " .. bigCount(r.ord) .. ", fields " .. bigCount(r.nf) .. ", pending " .. bigCount(r.pd)
+        .. ", balance " .. bigCount(r.ch) .. ")"
+end
+local function continueLines()
+    local runtime = Nexus.OrbRuntime
+    local out = {}
+    if not (type(runtime) == "table" and type(runtime.ContinueView) == "function") then return out end
+    local view = runtime.ContinueView()
+    if type(view) ~= "table" then return out end
+    local archive = type(view.archive) == "table" and view.archive or {}
+    local log = type(runtime.ContinueLog) == "function" and runtime.ContinueLog() or {}
+    local adapter = Nexus.GameAdapter and Nexus.GameAdapter.Orbs
+    local st = adapter and type(adapter.TransportStatus) == "function" and adapter.TransportStatus() or nil
+    local pending = view.reason ~= "no_receipt"
+    local archived = type(archive.count) == "number" and archive.count > 0
+    if not (pending or archived or #log > 0) then return out end
+    out[#out + 1] = "  continue: stage=" .. codeText(view.stage)
+        .. "; available=" .. (view.eligible == true and "yes" or "no")
+        .. "; why not=" .. codeText(view.refusal or view.reason)
+        .. "; archive=" .. bigCount(archive.count) .. "/" .. bigCount(archive.capacity) .. " (" .. codeText(archive.state) .. ")"
+    if type(st) == "table" then
+        local c = type(st.counts) == "table" and st.counts or {}
+        local r = type(st.rejects) == "table" and st.rejects or {}
+        out[#out + 1] = "  strict reply path: listening=" .. (st.started == true and "yes" or "no")
+            .. "; observed qualifying=" .. bigCount(c.Q) .. " admitted-unqualified=" .. bigCount(c.A) .. " rejected=" .. bigCount(c.R)
+            .. "; not accepted: identity=" .. bigCount(r.identity) .. " sender=" .. bigCount(r.sender)
+            .. " channel=" .. bigCount(r.channel) .. " segmented=" .. bigCount(r.segmented)
+            .. " third_absent=" .. bigCount(r.third_absent) .. " fields_extra=" .. bigCount(r.fields_extra)
+            .. " malformed=" .. bigCount(r.malformed) .. " range=" .. bigCount(r.range)
+            .. "; local epoch=" .. bigCount(st.epoch) .. " (rejects local work only; no server correlation)"
+    end
+    for index = math.max(1, #log - 1), #log do
+        local e = log[index]
+        if type(e) == "table" then
+            out[#out + 1] = "  attempt " .. bigCount(e.n) .. ": " .. codeText(e.outcome) .. " (" .. codeText(e.reason) .. ")"
+                .. "; replies seen=" .. bigCount(e.replies) .. "; first " .. replyText(e.r1) .. "; second " .. replyText(e.r2)
+                .. "; balance=" .. bigCount(e.balance) .. " vs record=" .. codeText(e.rel)
+                .. "; slot now=" .. bigCount(e.slot) .. " original=" .. bigCount(e.orig) .. " loadout=" .. codeText(e.lo)
+                .. "; ownership=" .. hexText(e.fpC) .. " locks=" .. hexText(e.fpL)
+                .. "; consent v" .. bigCount(e.v) .. " " .. codeText(e.policy) .. "; receipt=" .. hexText(e.rid)
+        end
+    end
+    if type(runtime.Archive) == "function" then
+        local list = runtime.Archive()
+        local entries = type(list) == "table" and type(list.entries) == "table" and list.entries or {}
+        for index = math.max(1, #entries - 1), #entries do
+            local e = entries[index]
+            if type(e) == "table" then
+                out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. codeText(e.outcome)
+                    .. "; spent=" .. bigCount(e.spent) .. " limit=" .. bigCount(e.limit)
+                    .. "; late events kept=" .. bigCount(e.late) .. " seen=" .. bigCount(e.lateN)
+            end
+        end
+    end
+    return out
+end
+
 -- The unresolved Orb action, if any: the recovery state and the requirement
 -- that the last read did not meet, so a report shows why an Orb action (and
 -- ordinary rolling) is held. Scalars from OrbRuntime.RecoveryView; no names.
@@ -681,13 +766,18 @@ function M.OrbLines()
         end
         local view = runtime.RecoveryView()
         if type(view) ~= "table" then return unavailable end
-        if view.pending ~= true then return {"Orb action: none unresolved"} end
+        if view.pending ~= true then
+            local none = {"Orb action: none unresolved"}
+            -- A continued action stays visible (archive and late events), and so does an attempt.
+            for _, line in ipairs(continueLines()) do none[#none + 1] = line end
+            return none
+        end
         local function yes(value) return value == true and "yes" or "no" end
         local choice = {}
         if view.choiceSent == true then choice[#choice + 1] = "sent" end
         if view.choiceObserved == true then choice[#choice + 1] = "observed" end
         local inFlight = view.pickInFlight
-        return {
+        local lines = {
             "Orb action: unresolved " .. (view.restored == true and "after a reload" or "in this session")
                 .. "; state=" .. safeText(view.state or "unknown", 24)
                 .. "; recovery=" .. safeText(view.recovery or "none", 24)
@@ -702,6 +792,8 @@ function M.OrbLines()
             loadoutLine(view),
             pickLine(view),
         }
+        for _, line in ipairs(continueLines()) do lines[#lines + 1] = line end
+        return lines
     end)
     if ok and type(lines) == "table" then return lines end
     return unavailable
