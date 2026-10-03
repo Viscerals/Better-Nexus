@@ -8,7 +8,7 @@
 --    waits instead. A hold that an older build saved is therefore NOT evidence of a
 --    change, and it looks exactly like a real one: no later read can tell them apart.
 -- 2. The current build does not relabel such a hold: it shows the cause as not recorded.
--- 3. Compatibility of the two saved annotation fields: an older build copies unknown
+-- 3. Compatibility of the saved annotation fields: an older build copies unknown
 --    fields of a pending receipt through its own re-save, and holds on a receipt that
 --    carries them exactly as it holds on one that does not.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
@@ -65,11 +65,12 @@ do
  local H,M,A,O=S.Fresh();S.SpendOfferNoChoice(H,M,A,O)
  -- a pending receipt as this build writes it, carrying the annotation, not yet held
  M=ReloadOld(H,function(row,state)
-  row.loadoutCause='SLOT_DIFFERS';row.loadoutObservedSlot=2;state.loadoutCause='SLOT_DIFFERS';state.loadoutObservedSlot=2
+  row.loadoutCause='SLOT_DIFFERS';row.loadoutObservedSlot=2;row.loadoutObservedAt=1700000000
+  state.loadoutCause='SLOT_DIFFERS';state.loadoutObservedSlot=2;state.loadoutObservedAt=1700000000
  end)
  Default(H);S.Pass(H,M,A)
  local r=S.Receipt()
- check(r.loadoutChanged==true and r.loadoutCause=='SLOT_DIFFERS' and r.loadoutObservedSlot==2,'3: an older build keeps the annotation fields through its own re-save')
+ check(r.loadoutChanged==true and r.loadoutCause=='SLOT_DIFFERS' and r.loadoutObservedSlot==2 and r.loadoutObservedAt==1700000000,'3: an older build keeps the annotation fields through its own re-save')
  check(NexusDB.chars[Nexus.Store.CurrentOwnerKey()].orbRefinement.pending.loadoutCause=='SLOT_DIFFERS','3: the saved row keeps them too')
 end
 do

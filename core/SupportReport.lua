@@ -591,6 +591,18 @@ local function slotNumber(value)
     end
     return nil
 end
+-- The client clock time at which the hold was first set, in the same local form as the audit
+-- rows' time of day, with the date. Whole seconds from 2000-01-01 to 2100-01-01 only.
+local function clockText(epoch)
+    if type(epoch) ~= "number" or epoch ~= math.floor(epoch) or epoch < 946684800 or epoch > 4102444800 then
+        return nil
+    end
+    if type(date) ~= "function" then return nil end
+    local ok, text = pcall(date, "%Y-%m-%d %H:%M:%S", epoch)
+    if not ok or type(text) ~= "string" then return nil end
+    text = text:gsub("%c", " "):sub(1, 19)
+    return #text == 19 and text or nil
+end
 local function loadoutLine(view)
     local original = "unreadable"
     if view.originalSlotState == "absent" then original = "not recorded"
@@ -611,6 +623,8 @@ local function loadoutLine(view)
         cause = text or "not recorded"
         local seen = text and slotNumber(view.loadoutSeenSlot) or nil
         if seen then cause = cause .. ", saw slot " .. seen end
+        local at = text and clockText(view.loadoutSeenAt) or nil
+        if at then cause = cause .. ", set at " .. at end
     end
     local unmet = {}
     if type(view.unmet) == "table" then

@@ -632,6 +632,15 @@ end
 local MAX_SLOT=65535
 local LOADOUT_CAUSES={NO_ORIGINAL_SLOT=true,SLOT_DIFFERS=true,SLOT_PUSHED=true,SLOT_DIFFERS_UNVERIFIED=true}
 local function slotValue(n) return integer(n,0,MAX_SLOT) and n or nil end
+-- The client clock in whole seconds, 2000-01-01 to 2100-01-01, or nil: a missing, failing or
+-- implausible clock records no time and changes nothing else.
+local MIN_EPOCH,MAX_EPOCH=946684800,4102444800
+local function epochValue(n) return integer(n,MIN_EPOCH,MAX_EPOCH) and n or nil end
+local function wallClock()
+    if type(time)~="function" then return nil end
+    local ok,t=pcall(time)
+    return ok and epochValue(t) or nil
+end
 local function loadoutChangeCause(s,p)
     if p.originalSlot==nil then return "NO_ORIGINAL_SLOT" end
     local known,slot=s.context.slotKnown,s.context.slot
@@ -657,7 +666,7 @@ local function finishResult(s,p)
         if not p.loadoutChanged then
             p.loadoutChanged=true
             local cause,seen=loadoutChangeCause(s,p)
-            p.loadoutCause=cause;p.loadoutObservedSlot=slotValue(seen)
+            p.loadoutCause=cause;p.loadoutObservedSlot=slotValue(seen);p.loadoutObservedAt=wallClock()
             savePending()
         end
         pause("The original loadout cannot be verified after a loadout change or an incomplete older receipt. Ownership responses do not identify the original loadout. Pending exposure is retained; no retry is allowed.")
@@ -1307,9 +1316,9 @@ function M.RecoveryView()
     local check=read and loadoutCheck({context=read},p) or nil
     local nowKnown -- true, false, or nil when the client cannot say (false must survive)
     if read and type(read.slotKnown)=="boolean" then nowKnown=read.slotKnown end
-    local cause,seen
+    local cause,seen,seenAt
     if p.loadoutChanged==true and type(p.loadoutCause)=="string" and LOADOUT_CAUSES[p.loadoutCause] then
-        cause=p.loadoutCause;seen=slotValue(p.loadoutObservedSlot)
+        cause=p.loadoutCause;seen=slotValue(p.loadoutObservedSlot);seenAt=epochValue(p.loadoutObservedAt)
     end
     local originalState=p.originalSlot==nil and "absent" or (slotValue(p.originalSlot)~=nil and "recorded" or "unreadable")
     -- What the record ALONE shows unmet (not the live conditions that settlement also needs).
@@ -1325,7 +1334,7 @@ function M.RecoveryView()
         originalSlot=originalState=="recorded" and p.originalSlot or nil,originalSlotState=originalState,
         slotRead=read~=nil,slotNow=read and slotValue(read.slot) or nil,
         slotNowKnown=nowKnown,
-        loadoutCheck=check,loadoutCause=cause,loadoutSeenSlot=cause and seen or nil,
+        loadoutCheck=check,loadoutCause=cause,loadoutSeenSlot=cause and seen or nil,loadoutSeenAt=cause and seenAt or nil,
         offerRecorded=p.offerKey~=nil,unmet=unmetNow}
 end
 function M.BlocksOrdinary()

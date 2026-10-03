@@ -118,15 +118,18 @@ existed) any reload. A hold that an earlier build saved says nothing about which
 of these happened, and no later read can tell. The support summary therefore
 adds a loadout line to the Orb action: the original slot (`not recorded` when
 absent), the slot read now and whether the build-slot data has arrived, the
-loadout check, the cause the hold was first set for, whether an offer is
-recorded, and the requirements that the saved record alone shows unmet
+loadout check, the cause the hold was first set for and when, whether an offer
+is recorded, and the requirements that the saved record alone shows unmet
 (`loadout`, and `choice` when no choice is recorded). The cause is recorded once,
-at the moment a build with this line first sets the hold, as two small saved
-fields in the pending receipt (`loadoutCause`, a fixed name, and
-`loadoutObservedSlot`, a whole number from 0 to 65535). It is never changed
+at the moment a build with this line first sets the hold, as three small saved
+fields in the pending receipt (`loadoutCause`, a fixed name;
+`loadoutObservedSlot`, a whole number from 0 to 65535; and `loadoutObservedAt`,
+the client clock time in whole seconds, from 2000 to 2100, shown in the local
+form of the audit rows with the date, so that it can be compared with them; it
+is absent when the clock is missing or implausible). They are never changed
 later. A hold saved without a cause stays `not recorded`: it is not filled in
 from a later read, and a missing original slot is never inferred. Older builds
-copy these two fields through their own saves. The line is text only. It adds no
+copy these fields through their own saves. The line is text only. It adds no
 requirement, removes none, and changes no block. Settlement still needs the
 recorded offer, a recorded choice inside that offer and the exact fresh ownership
 delta, so a receipt that records no choice cannot be settled, with or without the
