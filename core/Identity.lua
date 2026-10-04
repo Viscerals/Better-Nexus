@@ -309,6 +309,35 @@ function Identity.CanonicalOwnerKey(value)
     return player and normalizedRealm and (player .. "@" .. normalizedRealm) or nil
 end
 
+-- Native Ebonhold channels are realm-local. The legacy client's actual game
+-- realm is independent of an optional addon shim which removes hyphens.
+-- Keep the two observed spellings distinct in every general wire/storage
+-- identity operation; this alias proof is available only with native context.
+function Identity.NativeChannelSender(name)
+    local realm = type(GetRealmName) == "function" and GetRealmName() or nil
+    local owner = type(realm) == "string" and Identity.OwnerKey(name, realm)
+    if not owner or owner:match("@unknown$") then return nil end
+    local sender = name .. "-" .. owner:match("@(.+)$")
+    return Identity.CanonicalOwnerFromTransport(sender) and sender or nil
+end
+
+function Identity.NativeChannelDpsOwnerSender(nativeSender, claimedOwner)
+    local actual = Identity.CanonicalOwnerFromTransport(nativeSender)
+    local owner = Identity.CanonicalOwnerKey(claimedOwner)
+    if not actual or not owner then return nativeSender end
+    if actual == owner then return nativeSender end
+    local name, realm = actual:match("^([^@]+)@(.+)$")
+    local claimedName, claimedRealm = owner:match("^([^@]+)@(.+)$")
+    local localSender = Identity.NativeChannelSender(name)
+    -- This exact, observed server alias is not punctuation normalization.
+    local aliases = { ["rogue-lite(live)"]=true, ["roguelite(live)"]=true }
+    if name == claimedName and aliases[realm] and aliases[claimedRealm]
+        and localSender and Identity.CanonicalOwnerFromTransport(localSender) == actual then
+        return name .. "-" .. claimedRealm
+    end
+    return nativeSender
+end
+
 function Identity.TransportOwns(ownerKey, actualSender)
     local claimed = Identity.CanonicalOwnerKey(ownerKey)
     local transport = Identity.CanonicalOwnerFromTransport(actualSender)

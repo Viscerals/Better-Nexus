@@ -77,13 +77,13 @@ for _,case in ipairs({
  {name='mixed native and unknown chunks',before=function(i)
   return i==2 and 'unknown' or 'native' end},
  {name='native realm changes between chunks',before=function(i,peer)
-  peer.e.GetNormalizedRealmName=function()return i==2 and 'OtherRealm' or 'TestRealm' end
+  peer.e.GetRealmName=function()return i==2 and 'OtherRealm' or 'TestRealm' end
  end},
  {name='native realm is missing',before=function(_,peer)
   peer.e.GetNormalizedRealmName=nil;peer.e.GetRealmName=nil
  end},
  {name='native realm is invalid',before=function(_,peer)
-  peer.e.GetNormalizedRealmName=function()return 'bad@realm' end
+  peer.e.GetRealmName=function()return 'bad@realm' end
  end},
 }) do
  local N,peer=Boot()

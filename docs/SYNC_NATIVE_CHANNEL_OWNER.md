@@ -59,3 +59,32 @@ promoted at startup, and no score or replacement rule changes. An exact direct
 owner replay may establish authority for matching historical evidence through
 the existing promotion rule. Synthetic serialization/reload tests do not prove
 live two-client SavedVariables persistence.
+
+## Optional normalized-realm compatibility shim
+
+The live two-client test found different optional API availability: the full
+client's TradeSkillMaster compatibility shim removes hyphens and whitespace
+from `GetRealmName()`, returning `RogueLite(Live)`; the minimal client has no
+shim and sees `Rogue-Lite (Live)`. Both load the same private build. The sender's
+verified DPS payload preserves `valentiné@roguelite(live)`, but the recipient
+previously admitted it with `ownerKey=nil`, `ownerVerified=false`, and native
+transport `Valentiné-rogue-lite(live)`. The admission boundary discards the
+unmatched owner claim; the serializer does not omit it.
+
+Native `WLD2` assembly now retains the actual game realm, independent of the
+optional shim. At final direct DPS admission only, a retained native sender
+can prove either of the two exact observed Ebonhold spellings. General owner
+keys, qualified addon/unknown routes, other realms, saved loadout ownership,
+and full-build transport rules keep their existing semantics. No general
+punctuation stripping or realm aliasing is introduced.
+
+A new authenticated native transfer may recover its exact earlier unverified
+alternate slot. Recovery requires the same score, timestamp, duration within
+serialization precision, ordinary fingerprint, exact ordinary/locked evidence
+and agreeing evidence references; the old slot must have no owner claim and
+must retain the matching native sender/realm and an unverified generated DPS
+page. Conflicting or verified slots/pages are preserved. Reading, startup and
+reload never promote records. The production serializer/admission, negative
+retirement guards and serialized fresh-runtime persistence are covered by
+`sync_dps_native_realm_shim.lua`. These offline results remain separate from
+live acceptance of the new private candidate.

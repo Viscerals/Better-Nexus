@@ -101,10 +101,15 @@ NewPeer=function(i,name,rows,configure,opts)
   e.dofile=function(path)return assert(e.loadfile(path))()end
   local H=e.dofile('tests/prototype/harness.lua')
   e.UnitName=function()return name,opts.realm or 'Ebonhold'end
-  if opts.realm then
-   e.GetRealmName=function()return opts.realm end
-   e.GetNormalizedRealmName=e.GetRealmName
-  end
+    if opts.realm then
+     e.GetRealmName=function()return opts.realm end
+     e.GetNormalizedRealmName=e.GetRealmName
+    end
+    local apis=opts.realmApis and opts.realmApis[i]
+    if apis then
+     e.GetRealmName=apis.game and function()return apis.game end or nil
+     e.GetNormalizedRealmName=apis.normalized and function()return apis.normalized end or nil
+    end
   local T=e.dofile('tests/prototype/startup_support.lua')
   -- rows may be one size for both peers or one size per peer.
   e.NexusDB=T.Profile(type(rows)=='table' and rows[i] or rows or 5,0)

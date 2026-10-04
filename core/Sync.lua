@@ -4330,8 +4330,13 @@ Inbound = InboundFactory.New({
             Responder.NoteContextOutcome(context, "rejected", "storage")
             return false
         end
+        local authoritySender = channelOwnerSender or sender
+        if channelOwnerSender and not relayed then
+            authoritySender = Identity.NativeChannelDpsOwnerSender(
+                channelOwnerSender, record.o or record.ownerKey)
+        end
         local ok, accepted, rejectionReason = pcall(receiver, record,
-            channelOwnerSender or sender)
+            authoritySender, channelOwnerSender)
         if not (ok and accepted) then
             local key = relayed and "dpsRelayRejected" or "dpsDirectRejected"
             stats[key] = (stats[key] or 0) + 1
@@ -4510,19 +4515,18 @@ function Sync.HandleNativeChannelIncoming(text, sender)
     if not Identity.ValidPlayer(sender) then return false end
     local channelOwnerSender
     if not sender:find("-", 1, true) then
-        local realm
-        if type(GetNormalizedRealmName) == "function" then
-            realm = GetNormalizedRealmName()
-        end
-        if realm == nil or realm == "" then
-            realm = type(GetRealmName) == "function" and GetRealmName() or nil
-        end
-        local owner = type(realm) == "string" and Identity.OwnerKey(sender, realm)
-        if owner and not owner:match("@unknown$") then
-            local qualified = sender .. "-" .. owner:match("@(.+)$")
-            if Identity.CanonicalOwnerFromTransport(qualified) then
-                channelOwnerSender = qualified
-            end
+        if type(text) == "string" and text:match("^WLD2|") then
+            channelOwnerSender = Identity.NativeChannelSender(sender)
+        else
+            -- Full-build admission keeps its established context rules. This
+            -- correction is bounded to native exact DPS evidence.
+            local realm = GetNormalizedRealmName and GetNormalizedRealmName()
+            if not realm or realm == "" then realm = GetRealmName and GetRealmName() end
+            local owner = type(realm) == "string" and Identity.OwnerKey(sender, realm)
+            local qualified = owner and not owner:match("@unknown$")
+                and (sender .. "-" .. owner:match("@(.+)$")) or nil
+            channelOwnerSender = qualified
+                and Identity.CanonicalOwnerFromTransport(qualified) and qualified or nil
         end
         if not channelOwnerSender then return false end
     end

@@ -4032,7 +4032,7 @@ function DPS.LocalOwnsDpsBucket(bucket)
     return false
 end
 
-local function ReceiveRecord(record, transportSender, relayed)
+local function ReceiveRecord(record, transportSender, relayed, nativeChannelSender)
     if type(record) ~= "table" then return RejectReceive("schema") end
     if not WireDpsAliasesAgree(record) then return RejectReceive("schema") end
     local version = tonumber(record.v or record.protocolVersion)
@@ -4167,6 +4167,50 @@ local function ReceiveRecord(record, transportSender, relayed)
     local characterKey = CharacterKey(player, storageOwner, storageRealm)
     local existing = bucket[characterKey]
     local existingKey = characterKey
+    -- Recover only the exact record previously stored under the native game's
+    -- other observed Ebonhold spelling. A new authenticated owner transfer is
+    -- required; reading/reloading a historical row never promotes it.
+    local nativeOwner = nativeChannelSender
+        and Identity.CanonicalOwnerFromTransport(nativeChannelSender)
+    if not existing and directOwner and nativeOwner ~= canonicalOwner
+        and Identity.NativeChannelDpsOwnerSender(nativeChannelSender,
+            canonicalOwner) == transportSender then
+        local prior = bucket[nativeOwner]
+        local evidence = Nexus and Nexus.LoadoutEvidence
+        local function ExactPool(reference, inline, locked)
+            if not evidence or type(evidence.Resolve) ~= "function"
+                or type(evidence.Fingerprint) ~= "function" then return nil end
+            local options = locked and {forceLocked=true} or {}
+            if reference ~= nil and (type(reference) ~= "string" or reference == "") then return nil end
+            if inline ~= nil then
+                if type(inline) ~= "table" then return nil end
+                local inlineExact = evidence.Fingerprint(inline, options)
+                if not inlineExact or (reference ~= nil and reference ~= inlineExact) then return nil end
+            end
+            local rows, resolvedExact = evidence.Resolve(reference, inline, options)
+            if not rows or not resolvedExact
+                or (reference ~= nil and reference ~= resolvedExact) then return nil end
+            local exact = evidence.Fingerprint(rows, options)
+            return exact == resolvedExact and exact or nil
+        end
+        local priorOrdinary = prior and ExactPool(prior.evidenceKey, prior.echoes, false)
+        local priorLocked = prior and ExactPool(prior.lockedEvidenceKey, prior.lockedEchoes, true)
+        local incomingOrdinary = ExactPool(nil, rawEchoes, false)
+        local incomingLockedExact = ExactPool(nil, rawLocked, true)
+        local priorBuild = prior and CatalogGet(prior.buildId)
+        if prior and DPS.VerifiedOwnerKey(prior) == nil
+            and prior.ownerKey == nil and prior.realm == nativeOwner:match("@(.+)$")
+            and prior.relaySender == nativeChannelSender
+            and prior.dps == math.floor(dps) and prior.ts == ts
+            and math.abs((tonumber(prior.duration) or -1) - duration) < 0.000001
+            and prior.fingerprint == fingerprint
+            and priorOrdinary and priorOrdinary == incomingOrdinary
+            and priorLocked and priorLocked == incomingLockedExact
+            and type(priorBuild) == "table" and priorBuild.autoDps == true
+            and Identity.VerifiedOwnerKey(priorBuild) == nil then
+            existing, existingKey = prior, nativeOwner
+        end
+    end
     local legacyKey = PlayerKey(player)
     if not existing and legacyKey ~= characterKey then
         local legacy = bucket[legacyKey]
@@ -4381,8 +4425,8 @@ local function ReceiveRecord(record, transportSender, relayed)
 end
 
 
-function DPS.ReceiveRecord(record, transportSender)
-    return ReceiveRecord(record, transportSender, false)
+function DPS.ReceiveRecord(record, transportSender, nativeChannelSender)
+    return ReceiveRecord(record, transportSender, false, nativeChannelSender)
 end
 
 -- Response-only relay admission. SyncInbound establishes the intended
