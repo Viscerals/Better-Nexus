@@ -83,6 +83,38 @@ do
  check(byOwner[nilly.owner].row.data.publicIdentityVerified==false,'a legacy row without a name stays unverified')
  check(Detail(nilly).owner=='by Unknown','legacy row without a name: the safe fallback: '..tostring(Detail(nilly).owner))
  check(Detail(val).owner=='by '..VAL,'detail heading: '..tostring(Detail(val).owner))
+ -- The row tooltip tells same-name characters apart, and closes with the
+ -- row: on leave and when a hovered pooled row is hidden.
+ local tip=GameTooltip
+ local saved={SetText=tip.SetText,AddLine=tip.AddLine,Hide=tip.Hide,IsOwned=tip.IsOwned}
+ local lines
+ tip.SetText=function(self,t) lines={tostring(t)};self.tipShown=true end
+ tip.AddLine=function(self,t) lines[#lines+1]=tostring(t) end
+ tip.IsOwned=function() return true end
+ tip.Hide=function(self) self.tipShown=false end
+ local function Hover(p)
+  local index=byOwner[p.owner].index
+  Nexus.Leaderboard.ScrollTo((index-1)*40);H.Advance(.05,.05)
+  local button
+  for _,b in ipairs(NexusLeaderboardFrame._virtualListScrollFrame.scrollChild.children) do
+   if b:IsShown() and b.data and b.data.ownerKey==p.owner then button=b end
+  end
+  assert(button,'row of '..p.owner..' is bound')
+  lines=nil;button:GetScript('OnEnter')(button)
+  return button,table.concat(lines or {},' / ')
+ end
+ local button,text=Hover(twin)
+ check(text=='Twin / Realm: ebonhold / Owner verified','verified row tooltip: '..text)
+ button:GetScript('OnLeave')(button)
+ check(tip.tipShown==false,'leaving the row hides its tooltip')
+ button,text=Hover(twinF)
+ check(text=='Twin / Realm: frostmourne / Owner verified','the same name on another realm: '..text)
+ button,text=Hover(nilly)
+ check(text=='Unknown / Realm stated: frostmourne / Owner identity not established','a row without an established owner: '..text)
+ button:Hide()
+ check(tip.tipShown==false,'hiding a hovered pooled row hides its tooltip')
+ button:Show()
+ for k,v in pairs(saved) do tip[k]=v end
  check(Detail(twinF).owner=='by Twin' and Detail(twin).owner=='by Twin','same-name detail headings')
 end
 

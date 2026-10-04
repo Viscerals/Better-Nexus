@@ -171,7 +171,7 @@ do
   and now.ownerKey==held.ownerKey and now.ownerVerified==true and now.id==held.id,
   'completed in place: same revision, fingerprint, ordinary targets and verified owner')
  check(Sent(P.B,'WLLQ')-q0==1,'exactly one loadout request: '..(Sent(P.B,'WLLQ')-q0))
- check(Sent(P.B,'WLCP')-c0>=1,'our capability was stated with the request')
+ check(Sent(P.B,'WLCP')-c0==1,'our capability was stated once with the request: '..(Sent(P.B,'WLCP')-c0))
  check(Sent(P.A,'WLRB')-a0>=1,'the owner answered')
  check(S.LockedRolesRequestStatus(id)=='complete','state: complete')
  local done,doneState=S.RequestLockedRoles(id)
@@ -244,6 +244,26 @@ do
  policy.Mode=mode
  P.Advance(120)
  check(Sent(P.B,'WLLQ')==q0 and S.LockedRolesRequestStatus(id)=='refused','no later send by itself')
+end
+
+-- 7. The session owner alone (real SyncSession, fake transport): while the
+-- control queue keeps refusing the request, the forced capability is not
+-- repeated on every retry; the request stays queued, not sent.
+do
+ local Factory=P.B.e.Nexus.SyncInternals.Session
+ local clock,forced,attempts=0,0,0
+ local S=Factory.New({now=function() return clock end,myName=function() return 'Rel' end,
+  normalizePeerName=function(n) return n end,maxRecoveryQueue=8,
+  validIdentifier=function(v) return type(v)=='string' and v~='' end,
+  catalogGet=function() return {echoes={{spellId=200001,stacks=1}}} end,
+  transportSnapshot=function() return {bulk=0} end,loadoutRequestCode='WLLQ',
+  advertiseCapability=function(_,force) if force then forced=forced+1 end return true end,
+  enqueueControl=function() attempts=attempts+1;return false,'queue full' end})
+ check(S.QueueRolesRequest('roles-unit-1')==true,'unit: a roles request is queued')
+ for _=1,20 do clock=clock+1.6;S.PumpRecovery(1.6) end
+ check(attempts>=10,'unit: the request was retried while the queue refused it: '..attempts)
+ check(forced==1,'unit: the capability is forced once per request, not per retry: '..forced)
+ check(S.RolesRequestState('roles-unit-1')=='queued','unit: still queued, not sent')
 end
 
 print('PASS sync_locked_roles_request checks='..checks)

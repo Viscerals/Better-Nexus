@@ -546,11 +546,16 @@ function Session.New(options)
             }
             -- Our locked-role capability travels just before our request,
             -- under its metadata (same queue, route and permission).
-            -- A user-requested roles completion always states it: the owner
-            -- may have restarted and lost our entry since the last interval.
+            -- A user-requested roles completion states it once (the owner
+            -- may have restarted and lost our entry since the last
+            -- interval); a retry while the request cannot be queued does not
+            -- force it again.
             if type(options.advertiseCapability) == "function" then
-                pcall(options.advertiseCapability, metadata,
-                    type(recovery) == "table" and recovery.roles == true)
+                local force = type(recovery) == "table"
+                    and recovery.roles == true and not recovery.capsForced
+                local ok, advertised = pcall(options.advertiseCapability,
+                    metadata, force)
+                if force and ok and advertised then recovery.capsForced = true end
             end
             local queued, queueWhy = (options.enqueueControl or options.enqueue)(
                 wire, metadata)
