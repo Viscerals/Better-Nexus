@@ -47,7 +47,7 @@ function Renderer.New(options)
         and options.refresh or function() return M.Refresh() end
 
     local MAX_ROWS = 19
-    local PICK_ROWS = 18
+    local PICK_ROWS = 17
     local ROW_HEIGHT = 24
     local MAX_WISHLIST_ECHOES = 79
     local MAX_LOCK_SLOTS = 6
@@ -1625,7 +1625,10 @@ local function EnsureFrame()
 
     pickFooterText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     pickFooterText:SetPoint("BOTTOMLEFT", 674, 56)
+    pickFooterText:SetSize(332, 28)
+    pickFooterText:SetWordWrap(true)
     pickFooterText:SetJustifyH("LEFT")
+    pickFooterText:SetJustifyV("TOP")
 
     -- Apply remains a presentation binding: the controller prepares and
     -- submits only after the established confirmation popup is accepted.
@@ -2247,12 +2250,13 @@ local function RefreshView(catalogRevision)
     if lockedCount > 0 then footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount .. "/6" end
     footerParts[#footerParts + 1] = "Rolled copies: " .. PendingTotal() .. "/79"
     local totalDesigned = designedCount + toLockCount
-    footerParts[#footerParts + 1] = "Locked targets: " .. totalDesigned .. "/6"
+    local targetParts = { "Locked targets: " .. totalDesigned .. "/6" }
     -- realEntryCount, not #list -- the spliced-in "replaces" ghost rows are
     -- a display aid, not separate wishlist entries, and shouldn't inflate
     -- this count.
-    footerParts[#footerParts + 1] = realEntryCount .. " Echo/quality entries"
-    pickFooterText:SetText(table.concat(footerParts, "  •  "))
+    targetParts[#targetParts + 1] = realEntryCount .. " Echo/quality entries"
+    pickFooterText:SetText(table.concat(footerParts, "  •  ")
+        .. "\n" .. table.concat(targetParts, "  •  "))
 end
 
     local function RefreshKeyMatches(known,controllerRevision,slots,active,
