@@ -581,7 +581,13 @@ function Lifecycle.New(options)
         initialized = true
         RegisterStutterAlertProvider()
         RequestRecompute()
-        Print("v" .. Nexus.VERSION .. " -- type /nexus for commands.")
+        local buildLabel = type(Nexus.RuntimeBuildLabel) == "function"
+            and Nexus.RuntimeBuildLabel() or "source"
+        local release = type(Nexus.ReleaseIdentity) == "function"
+            and Nexus.ReleaseIdentity() or nil
+        local privateMark = release and release.channel == "internal" and " internal" or ""
+        Print("v" .. Nexus.VERSION .. " build=" .. buildLabel .. privateMark
+            .. " -- type /nexus for commands.")
         if Adapter.RivalDetected() then
             Print("|cffff6060EchoOptimizer detected -- it conflicts with Nexus's board hook. Disable EchoOptimizer; Nexus replaces its functionality.|r")
         end
