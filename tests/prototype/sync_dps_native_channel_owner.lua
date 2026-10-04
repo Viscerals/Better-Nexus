@@ -146,7 +146,7 @@ do
   'foreign verified row cannot unsolicited-broadcast')
  record._originVerified=true
  local emitted,why=N.Sync.BroadcastDpsRecord(record,nil,true,
-  {requester='Requester-TestRealm',requestId='native-dps-proof',
+  {requester='Requester-TestRealm',requestId='c1-native-dps-proof',
    bucket=N.DpsCapture.SyncBucket('dummy','Origin')})
  check(emitted==true,'verified received evidence is relay-eligible in response context: '..tostring(why))
 end

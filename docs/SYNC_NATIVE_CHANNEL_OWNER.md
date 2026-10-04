@@ -17,10 +17,10 @@ qualified identity must pass the existing strict transport parser. Missing or
 invalid sender/realm context refuses before admission. Already qualified
 senders remain as supplied, including a different realm.
 
-This correction is limited to full-build owner admission and catalog storage.
+Task 037 was limited to full-build owner admission and catalog storage.
 The raw sender remains the peer/session and diagnostic identity. Payload owner
-claims, stored-owner parsing, summaries, DPS and deletes keep their existing
-rules. `Sync.HandleIncoming` without native channel provenance and addon
+claims, stored-owner parsing, summaries and deletes keep their existing rules.
+The later DPS extension is described below. `Sync.HandleIncoming` without native channel provenance and addon
 whispers retain qualified-transport authority. A handshake is not owner proof.
 
 Build assembly retains the channel owner sender separately from the raw

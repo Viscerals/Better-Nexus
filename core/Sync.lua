@@ -4503,7 +4503,7 @@ end
 -- Called only after MainLifecycle admits CHAT_MSG_CHANNEL for wrbuildssync.
 -- Task 037: the owner confirms that this current server's channel is realm-
 -- local, with no cross-realm channels. Revisit this assumption if that changes.
--- Qualify only the game event's bare sender for full-build owner admission.
+-- Qualify only the game event's bare sender for full-build and DPS owner admission.
 -- Keep the raw sender for diagnostics, peer/session state and other messages.
 -- Unknown entry points and addon whispers never receive this authority.
 function Sync.HandleNativeChannelIncoming(text, sender)
