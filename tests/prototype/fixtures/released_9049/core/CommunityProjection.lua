@@ -428,24 +428,17 @@ function Projection.New(options)
             stats.detail.failures = stats.detail.failures + 1
             return nil, tostring(build)
         end
-        -- A third value names why no detail exists, so the view can say so
-        -- instead of showing a blank panel. Existing callers ignore it.
-        if type(build) ~= "table" then return nil, nil, "unavailable" end
         if Identity.SavedMirrorKind(build) == "saved" then
             local okProject, projected = false, nil
             if savedProjection then
                 okProject, projected = pcall(savedProjection, build)
             end
-            if not okProject or type(projected) ~= "table" then
-                return nil, nil, "unavailable"
-            end
+            if not okProject or type(projected) ~= "table" then return nil end
             build = projected
         elseif Identity.SavedMirrorKind(build) == "invalid" then
-            return nil, nil, "invalid"
+            return nil
         end
-        if not PublicOrdinaryComplete(build) then
-            return nil, nil, "incomplete"
-        end
+        if not PublicOrdinaryComplete(build) then return nil end
         key = DetailKey(id, revisions, context, build)
         if detailCache and detailCache.id == id and detailCache.key == key then
             stats.detail.hits = stats.detail.hits + 1

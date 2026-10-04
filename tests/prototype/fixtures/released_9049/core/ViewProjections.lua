@@ -457,7 +457,6 @@ local function CombinedRows()
             local ownerKey = Identity.VerifiedOwnerKey(lrow)
             out[#out + 1] = {
                 player=lrow.player,displayPlayer=lrow.displayPlayer,
-                displayName=lrow.displayName,
                 publicIdentityKey=lrow.publicIdentityKey,
                 publicIdentityVerified=lrow.publicIdentityVerified,
                 dps=pair.bestDps, bestDps=pair.bestDps, average=average,
@@ -597,8 +596,7 @@ end
 local function BeginCatalogRows(job, catalog)
     if type(catalog.BeginSummaryCursor) == "function"
         and type(catalog.SummaryCursorNext) == "function" then
-        -- Its own named slot: no other long walk may supersede this one.
-        job.catalogCursor = catalog.BeginSummaryCursor("community")
+        job.catalogCursor = catalog.BeginSummaryCursor()
         if type(job.catalogCursor) ~= "table" then
             return false, "catalog cursor unavailable"
         end
@@ -899,7 +897,6 @@ local function CombinedRow(drow, lrow)
     local ownerKey = Identity.VerifiedOwnerKey(lrow)
     return {
         player=lrow.player,displayPlayer=lrow.displayPlayer,
-        displayName=lrow.displayName,
         publicIdentityKey=lrow.publicIdentityKey,
         publicIdentityVerified=lrow.publicIdentityVerified,
         dps=bestDps,bestDps=bestDps,average=average,

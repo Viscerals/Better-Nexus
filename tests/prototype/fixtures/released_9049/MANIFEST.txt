@@ -24,7 +24,7 @@ core/CandidateEvidence.lua|39893|640a6567|copy
 core/DataCompaction.lua|45727|a9070bf9|tree
 core/BuildCatalog.lua|319811|e97ac271|copy
 core/DataRetention.lua|53099|8acce751|tree
-core/BuildHashCache.lua|20954|467065af|tree
+core/BuildHashCache.lua|20954|467065af|copy
 core/Store.lua|114813|39cde2bf|copy
 core/Errors.lua|6592|b8405cea|copy
 core/SupportIncidents.lua|13769|c8464efd|tree
@@ -52,8 +52,8 @@ core/Sync.lua|206109|9f1554cc|copy
 core/DpsCapture.lua|171436|8350ce7b|copy
 core/LegacyDataMigration.lua|39496|441db4c6|copy
 core/LegacyQualificationRepair.lua|27140|a93eae8b|copy
-core/ViewProjections.lua|69918|c12165ad|tree
-core/CommunityProjection.lua|19197|fdf914a9|tree
+core/ViewProjections.lua|69918|c12165ad|copy
+core/CommunityProjection.lua|19197|fdf914a9|copy
 core/CommunityController.lua|187428|9cf89ff4|copy
 core/GameAdapter.lua|188383|f1f072cb|copy
 core/OrbAdapter.lua|22107|8f48477d|copy

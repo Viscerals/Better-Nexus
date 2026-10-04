@@ -696,6 +696,11 @@ local function PairProjectionRow(row)
             result.publicIdentityVerified = true
         end
     end
+    -- Presentation only: the record's own character name (capitals and
+    -- accents kept). The canonical player/owner fields above stay lowercase.
+    if type(row.displayName) == "string" and row.displayName ~= "" then
+        result.displayName = row.displayName
+    end
     -- Build detail is output-relevant, but only these structural values may
     -- distinguish equal-DPS rows. Presentation labels never enter a pair tie.
     if type(row.build) == "table" then
@@ -847,7 +852,15 @@ local function ConsiderPairCategory(cursor, category, row)
         -- Rows that differ only by excluded clocks have equal authority and
         -- output. Keep every real retention source, but publish a neutral copy
         -- so input order cannot leak one record's recency into the pair.
+        -- The shown name is the smaller of the two labels, so input order
+        -- cannot choose it either.
+        local name, other = current.row.displayName, row.displayName
+        if type(other) == "string" and other ~= ""
+            and (type(name) ~= "string" or other < name) then
+            name = other
+        end
         current.row = PairProjectionRow(current.row)
+        current.row.displayName = name
         AddPairSource(current.sources, row)
     end
 end

@@ -466,6 +466,39 @@ function Session.New(options)
         return true
     end
 
+    -- One user-requested completion of a stored build whose locked roles are
+    -- unknown (docs/P1_7_LOCKED_ROLE_WIRE.md). It reuses the exact-ID loadout
+    -- request; the owner's same-revision full answer states the roles. Never
+    -- queued twice for one build while unsent, never retried automatically.
+    function M.QueueRolesRequest(buildId)
+        if not options.validIdentifier(buildId) then return false end
+        local prior = requestedLoadouts[buildId]
+        if type(prior) == "table" and not prior.sent then
+            if prior.replacement then return false end
+            prior.roles = true
+            return true
+        end
+        local depth = RecoveryCount()
+        if depth >= maxRecoveryQueue then return false end
+        local recovery = {
+            buildId=tostring(buildId),at=now(),sent=false,roles=true,
+        }
+        requestedLoadouts[buildId] = recovery
+        recoveryTail = recoveryTail + 1
+        recoveryQueue[recoveryTail] = recovery
+        return true
+    end
+
+    -- "queued", "sent" (and when) or "unsent" (and why) for a requested
+    -- roles completion; nil when none is held. A read only.
+    function M.RolesRequestState(buildId)
+        local recovery = requestedLoadouts[buildId]
+        if type(recovery) ~= "table" or not recovery.roles then return nil end
+        if recovery.unsent then return "unsent", recovery.unsent end
+        if recovery.sentAt then return "sent", recovery.sentAt end
+        return "queued"
+    end
+
     function M.PumpRecovery(elapsed)
         recoveryTicker = recoveryTicker + Number(elapsed)
         if recoveryTicker < 1.5 then return end
@@ -490,7 +523,9 @@ function Session.New(options)
             -- refusal; it ends here like any unsendable recovery.
             log("SYNC", "recovery for '%s' not requested: saved Sync mode %s",
                 tostring(buildId), mode)
-        elseif type(recovery) == "table" and recovery.replacement
+            if type(recovery) == "table" then recovery.unsent = "mode" end
+        elseif type(recovery) == "table" and (recovery.replacement
+                or recovery.roles)
             or not (build and type(build.echoes) == "table"
             and #build.echoes > 0) then
             local contextual = type(requestId) == "string"
@@ -511,8 +546,11 @@ function Session.New(options)
             }
             -- Our locked-role capability travels just before our request,
             -- under its metadata (same queue, route and permission).
+            -- A user-requested roles completion always states it: the owner
+            -- may have restarted and lost our entry since the last interval.
             if type(options.advertiseCapability) == "function" then
-                pcall(options.advertiseCapability, metadata)
+                pcall(options.advertiseCapability, metadata,
+                    type(recovery) == "table" and recovery.roles == true)
             end
             local queued, queueWhy = (options.enqueueControl or options.enqueue)(
                 wire, metadata)
@@ -522,9 +560,11 @@ function Session.New(options)
                 if queueWhy ~= "invalid packet" then return end
                 log("SYNC", "legacy loadout request '%s' exceeded wire bounds",
                     tostring(buildId))
+                if type(recovery) == "table" then recovery.unsent = "wire" end
             else
                 if type(recovery) == "table" then
                     recovery.sent, recovery.at = true, now()
+                    recovery.sentAt = recovery.at
                 end
                 receiveWindowUntil = math.max(receiveWindowUntil,
                     now() + inflightGrace)

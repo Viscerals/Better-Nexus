@@ -265,9 +265,7 @@ local function StartWarmJob()
     if not (catalog and type(catalog.BeginSummaryCursor) == "function"
         and type(catalog.SummaryCursorNext) == "function"
         and type(catalog.TombstoneNext) == "function") then return false end
-    -- Its own named slot, so the warm-up and the Community list walk never
-    -- cancel each other's cursor.
-    local ok, token = pcall(catalog.BeginSummaryCursor, "build-hash-cache")
+    local ok, token = pcall(catalog.BeginSummaryCursor)
     if not ok or type(token) ~= "table" then return false end
     local tombstoneCounts = {}
     for bucket = 1, BUCKETS do tombstoneCounts[bucket] = 0 end

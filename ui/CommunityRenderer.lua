@@ -1484,24 +1484,90 @@ local function EnsureDetailPanel(parent)
     return p
 end
 
-local function RefreshDetailPanel(buildId)
+-- A selected build that cannot be shown gets an explicit state in place of
+-- the detail, never a blank panel: still loading, or why it is unavailable.
+local DETAIL_STATUS = {
+    pending={"Loading build details...",
+        "The build library is still being prepared. The selected build appears here when it is ready."},
+    unavailable={"Build not available",
+        "This build is not in your build library. It may have been removed, not received yet, or not accepted."},
+    invalid={"Build not available",
+        "The selected build record is invalid and cannot be shown."},
+    incomplete={"Build not available yet",
+        "The full Echo list for this build is still arriving."},
+}
+
+local function ShowDetailStatus(kind)
+    local p = detailPanel
+    if not p then return end
+    local status = p._nexusStatus
+    if not status then
+        status = CreateFrame("Frame", nil, p:GetParent())
+        status:SetAllPoints(p)
+        status:SetFrameLevel(p:GetFrameLevel())
+        pcall(function()
+            status:SetBackdrop({
+                bgFile="Interface\\Tooltips\\UI-Tooltip-Background",
+                edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",
+                tile=true, tileSize=16, edgeSize=12,
+                insets={left=3,right=3,top=3,bottom=3},
+            })
+            status:SetBackdropColor(0.04,0.04,0.06,0.95)
+        end)
+        status.title = status:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        status.title:SetPoint("TOPLEFT", 16, -16)
+        status.title:SetPoint("TOPRIGHT", -16, -16)
+        status.title:SetJustifyH("LEFT")
+        status.text = status:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        status.text:SetPoint("TOPLEFT", status.title, "BOTTOMLEFT", 0, -10)
+        status.text:SetPoint("TOPRIGHT", status.title, "BOTTOMRIGHT", 0, -10)
+        status.text:SetJustifyH("LEFT")
+        p._nexusStatus = status
+    end
+    local text = DETAIL_STATUS[kind] or DETAIL_STATUS.unavailable
+    status.kind = DETAIL_STATUS[kind] and kind or "unavailable"
+    status.title:SetText(text[1])
+    status.text:SetText(text[2])
+    p._nexusShownId = nil
+    p:Hide()
+    status:Show()
+end
+
+local function HideDetailStatus()
+    local status = detailPanel and detailPanel._nexusStatus
+    if status then status.kind = nil; status:Hide() end
+end
+
+-- listPending: the build list is not published yet, so an unavailable
+-- selected build is reported as loading (or keeps its shown detail).
+local function RefreshDetailPanel(buildId, listPending)
     if not detailPanel then return end
-    if buildId == nil then detailPanel:Hide(); return end
+    if buildId == nil then
+        detailPanel._nexusShownId = nil
+        detailPanel:Hide(); HideDetailStatus(); return
+    end
     local projection = EnsureCommunityProjection()
     local detail, build
     if projection then
-        local err
-        detail, err = projection.Detail(buildId, ProjectionContext())
+        local err, why
+        detail, err, why = projection.Detail(buildId, ProjectionContext())
         if not detail then
             if err then error(err) end
-            detailPanel:Hide()
+            if listPending and detailPanel:IsShown()
+                and detailPanel._nexusShownId == buildId then return end
+            ShowDetailStatus(listPending and "pending" or why or "unavailable")
             return
         end
         build = detail.build
     else
         build = LoadBuild(buildId)
     end
-    if not build then detailPanel:Hide(); return end
+    if not build then
+        ShowDetailStatus(listPending and "pending" or "unavailable")
+        return
+    end
+    HideDetailStatus()
+    detailPanel._nexusShownId = buildId
 
     local c = CLASS_COLOR[(build.class or ""):upper()] or {1,1,1}
     detailPanel.title:SetTextColor(c[1],c[2],c[3])
@@ -2849,6 +2915,7 @@ function M.Refresh()
         viewDiagnostic.projectionError = false
         viewDiagnostic.projectionCurrent = false
         RenderSyncStatus()
+        RefreshDetailPanel(SelectedId(), true)
         return false, "pending"
     end
 
@@ -2871,6 +2938,7 @@ function M.Refresh()
             viewDiagnostic.projectionError = false
             viewDiagnostic.projectionCurrent = false
             RenderSyncStatus()
+            RefreshDetailPanel(SelectedId(), true)
             return false, "pending"
         end
         refreshDirty = true

@@ -1,10 +1,13 @@
 -- Readable public names (BN-OWNER-LEADERBOARD-LABEL-001). A record whose
 -- owner is not established shows its readable name (with the realm it states)
--- on Leaderboard rows, Community bylines and detail headings, without the
+-- on Community bylines and detail headings, without the
 -- generated "(legacy/unverified ...)" tuple of raw typed tokens. The tuple
 -- stays in publicIdentityKey; the detail views say in plain words that the
 -- owner is not established. Identity, shadowing, selection, DPS, ranking and
 -- actions are unchanged.
+-- Leaderboard rows and their detail heading show the character name only
+-- (owner decision of 2026-10-04, superseding the realm in those names): the
+-- realm stays in the identity key, the record fields and the row tooltip.
 --
 -- Real TOC boot, catalog, DpsCapture relay admission, projections and the
 -- Leaderboard and Community windows; synthetic players only. Expected names
@@ -79,6 +82,15 @@ do
  check(hostile.displayPlayer=='Unknown-ebonhold' and Inert(hostile.displayPlayer),'hostile name: the safe fallback, no active formatting: '..tostring(hostile.displayPlayer))
  check(tabRealm.displayPlayer=='Unknown','a realm with a control character never reaches the name (display escaping refuses it): '..tostring(tabRealm.displayPlayer))
  check(missing.displayPlayer==nil and missing.publicIdentityKey:find('^legacy|nil:0:|') ~= nil,'missing name: no label (the view falls back), no raw key printed')
+ -- The character-name-only label (Leaderboard): the same records, no realm.
+ check(verified.displayName=='Alpha' and kiralyl.displayName=='Kiralyl'
+  and mengooE.displayName=='Mengoo' and mengooF.displayName=='Mengoo'
+  and mengooE.publicIdentityKey~=mengooF.publicIdentityKey,'character names: same short name stays two records')
+ check(full.displayName=='Kiralyl','a stated full player name shows its character name: '..tostring(full.displayName))
+ check(unicode.displayName=='Ærøn','UTF-8 character names are kept: '..tostring(unicode.displayName))
+ check(hostile.displayName=='Unknown' and Inert(hostile.displayName),'hostile name: the safe fallback: '..tostring(hostile.displayName))
+ check(tabRealm.displayName=='Tabby','the character name does not depend on a bad realm: '..tostring(tabRealm.displayName))
+ check(missing.displayName==nil,'missing name: no character label either')
  for _,r in ipairs({verified,kiralyl,mengooE,mengooF,alphaF,full,unicode,hostile}) do
   check(Clean(r.displayPlayer) and Inert(r.displayPlayer),'no generated decoration: '..tostring(r.displayPlayer))
  end
@@ -158,21 +170,44 @@ do
  local function Key(name,realm) local owner=name:lower()..'@'..realm
   return K:format(#name,name,#realm,realm,#owner,owner) end
  local want={
-  {label='Alpha-ebonhold',key='verified:alpha@ebonhold',dps=61000,verified=true,actions=true},
-  {label='Bravo-ebonhold',key='verified:bravo@ebonhold',dps=51000,verified=true,actions=true},
-  {label='Kiralyl-ebonhold',key=Key('Kiralyl','ebonhold'),dps=40000,verified=false,actions=false},
-  {label='Mengoo-ebonhold',key=Key('Mengoo','ebonhold'),dps=39000,verified=false,actions=false},
-  {label='Mengoo-frostmourne',key=Key('Mengoo','frostmourne'),dps=38000,verified=false,actions=false},
+  {label='Alpha',realm='Realm: ebonhold',key='verified:alpha@ebonhold',dps=61000,verified=true,actions=true},
+  {label='Bravo',realm='Realm: ebonhold',key='verified:bravo@ebonhold',dps=51000,verified=true,actions=true},
+  {label='Kiralyl',realm='Realm stated: ebonhold',key=Key('Kiralyl','ebonhold'),dps=40000,verified=false,actions=false},
+  {label='Mengoo',realm='Realm stated: ebonhold',key=Key('Mengoo','ebonhold'),dps=39000,verified=false,actions=false},
+  {label='Mengoo',realm='Realm stated: frostmourne',key=Key('Mengoo','frostmourne'),dps=38000,verified=false,actions=false},
  }
  L.Open(H,'dummy')
  local rows,total=L.RenderedRows(H)
  check(total==#want,'dummy board: exactly the expected rows (the relayed Alpha stays shadowed): '..total)
+ -- The row tooltip tells same-name characters apart (recorded lines only).
+ local lines
+ local tip=GameTooltip
+ local saved={SetText=tip.SetText,AddLine=tip.AddLine,Hide=tip.Hide,IsOwned=tip.IsOwned}
+ tip.SetText=function(self,t) lines={tostring(t)};self.tipShown=true end
+ tip.AddLine=function(self,t) lines[#lines+1]=tostring(t) end
+ tip.IsOwned=function() return true end
+ tip.Hide=function(self) self.tipShown=false end
  for i,w in ipairs(want) do
   local r=rows[i]
   check(r.player==w.label and Clean(r.player),'row '..i..' shows '..w.label..': '..tostring(r.player))
   check(r.data.publicIdentityKey==w.key and r.data.dps==w.dps and r.data.publicIdentityVerified==w.verified,
    'row '..i..' is the record '..w.key..' at '..w.dps)
+  -- Pooled buttons are rebound while scrolling: hover the one bound now.
+  Nexus.Leaderboard.ScrollTo((i-1)*40);H.Advance(.05,.05)
+  local button
+  for _,b in ipairs(NexusLeaderboardFrame._virtualListScrollFrame.scrollChild.children) do
+   if b:IsShown() and b.data==r.data then button=b end
+  end
+  assert(button,'row '..i..' is bound')
+  lines=nil
+  button:GetScript('OnEnter')(button)
+  check(lines and lines[1]==w.label and lines[2]==w.realm
+   and lines[3]==(w.verified and 'Owner verified' or 'Owner identity not established'),
+   'row '..i..' tooltip: '..table.concat(lines or {},' / '))
+  button:GetScript('OnLeave')(button)
+  check(tip.tipShown==false,'row '..i..': leaving the row hides its tooltip')
  end
+ for k,v in pairs(saved) do tip[k]=v end
  -- Detail, selected out of order: the detail is the clicked record's.
  for _,i in ipairs({5,4,3,1,2}) do
   local w=want[i]

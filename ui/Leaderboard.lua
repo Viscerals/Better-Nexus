@@ -72,6 +72,37 @@ local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
         value, maxBytes, allowEmpty, allowLineBreaks)
 end
 
+-- The main name of a row is the character name only, as the record writes
+-- it. Realm and owner stay in the row's identity fields and in its tooltip;
+-- nothing here selects, matches or pairs a record.
+local function RowName(row, build)
+    row = type(row) == "table" and row or {}
+    if type(row.displayName) == "string" and row.displayName ~= "" then
+        return row.displayName
+    end
+    local raw = row.player
+    if raw == nil and type(build) == "table" then raw = build.author end
+    local text = raw ~= nil and tostring(raw) or "?"
+    return DisplayRemoteText(Identity.DisplayPlayer(text) or text,
+        1024, false) or "Unknown"
+end
+
+-- Tooltip lines that tell same-name characters apart. A realm is shown as
+-- verified only for an established owner; any other realm is only stated.
+local function IdentityLines(row)
+    row = type(row) == "table" and row or {}
+    local owner = Identity.VerifiedOwnerKey(row)
+    local realm = owner and owner:match("@(.+)$")
+    if realm then
+        return {"Realm: " .. (DisplayRemoteText(realm, 96, false) or "unknown"),
+            "Owner verified"}
+    end
+    local stated = type(row.realm) == "string" and row.realm ~= ""
+        and DisplayRemoteText(row.realm, 96, false) or nil
+    return {stated and ("Realm stated: " .. stated) or "Realm not stated",
+        "Owner identity not established"}
+end
+
 -- Category, class, search, and explicit Show requests are user work. They
 -- must remain responsive while background Sync coalesces revision-driven
 -- refreshes. The flag also lets OnUpdate recreate a projection job if a Sync
@@ -230,6 +261,7 @@ local function CombinedRows()
             local ownerKey = Identity.VerifiedOwnerKey(lrow)
             out[#out+1] = {
                 player=lrow.player,displayPlayer=lrow.displayPlayer,
+                displayName=lrow.displayName,
                 publicIdentityKey=lrow.publicIdentityKey,
                 publicIdentityVerified=lrow.publicIdentityVerified,
                 dps=pair.bestDps,bestDps=pair.bestDps,average=avg,
@@ -365,20 +397,38 @@ local function GetRow(parent)
     r.sel=r:CreateTexture(nil,"BACKGROUND"); r.sel:SetAllPoints(r); r.sel:SetTexture(0.15,0.55,0.9,0.16); r.sel:Hide()
     r:SetScript("OnEnter",function(self)
         pcall(function() self:SetBackdropColor(0.08,0.09,0.14,0.96) end)
-        if self.classUnavailable and GameTooltip then
+        if GameTooltip and self.data then
+            local row = self.data
             pcall(function()
                 GameTooltip:SetOwner(self,"ANCHOR_LEFT")
-                GameTooltip:SetText("Class not supplied")
+                GameTooltip:SetText(RowName(row),1,1,1)
+                for _, line in ipairs(IdentityLines(row)) do
+                    GameTooltip:AddLine(line,0.75,0.75,0.75)
+                end
+                if self.classUnavailable then
+                    GameTooltip:AddLine("Class not supplied",0.75,0.75,0.75)
+                end
                 GameTooltip:Show()
             end)
+            self.tooltipShown = true
         end
     end)
+    local function HideOwnTooltip(self)
+        if self.tooltipShown and GameTooltip then
+            pcall(function()
+                if not GameTooltip.IsOwned or GameTooltip:IsOwned(self) then
+                    GameTooltip:Hide()
+                end
+            end)
+        end
+        self.tooltipShown = nil
+    end
     r:SetScript("OnLeave",function(self)
         pcall(function() self:SetBackdropColor(0.025,0.025,0.04,0.80) end)
-        if self.classUnavailable and GameTooltip then
-            pcall(function() GameTooltip:Hide() end)
-        end
+        HideOwnTooltip(self)
     end)
+    -- A pooled row may be hidden and rebound under the pointer.
+    r:SetScript("OnHide",HideOwnTooltip)
     r:SetScript("OnClick",function(self) SelectRow(self.data) end)
     if Nexus.Theme and Nexus.Theme.StyleVirtualRow then Nexus.Theme.StyleVirtualRow(r) end
     return r
@@ -455,6 +505,37 @@ local function ResolveCopyLocked(row, dummy, lk, ordinary)
         dummyRecord=dummy,lkRecord=lk,copyAuthorityRequired=true,
         currentProvenance=provenanceOrReason,
     })
+end
+
+-- Copy needs the current build's own locked roles (strict authority above).
+-- A remote build of a verified owner whose roles were never received offers
+-- one deliberate "Request full build" action instead. Known roles, a local
+-- build, historical record rows and unverified identities never qualify.
+local function RolesRequestTarget(row)
+    local build = CurrentCopyBuild(row)
+    if type(build) ~= "table" or build.isMine == true
+        or build.lockedAuthorityProven == true then return nil end
+    if type(build.lockedEchoes) == "table" and #build.lockedEchoes > 0 then
+        return nil
+    end
+    for _, echo in ipairs(type(build.echoes) == "table" and build.echoes or {}) do
+        if type(echo) == "table" and echo.locked then return nil end
+    end
+    return build.id
+end
+
+local function RolesRequestText(state, reason, name)
+    if state == "pending" then
+        return "Requested the full build from " .. name
+            .. ". Waiting for the owner's reply..."
+    elseif state == "timeout" then
+        return "No reply with the locked Echo roles arrived. The owner may be"
+            .. " offline, or their Sync may be Off or Manual. You can request again."
+    elseif state == "offline" or state == "refused" then
+        return "Request not sent: " .. tostring(reason or "unavailable") .. "."
+    end
+    return "Copy unavailable: the locked Echo roles of this build were not"
+        .. " received. Request full build asks the owner for them."
 end
 
 local function RecordEvidenceParts(parts, label, row)
@@ -680,6 +761,27 @@ local function ResolveOpenBuildId(row)
     return nil,"exact build identity is unavailable"
 end
 
+local RenderDetail
+
+-- Button and text for the roles request state. Reads only; never sends.
+local function ApplyRolesState()
+    if not (detail and detail.rolesBuildId) then return end
+    local state = detail.rolesState
+    local text = RolesRequestText(state, detail.rolesReason,
+        RowName(detail.row, detail.row and detail.row.build))
+    if detail.openReason then
+        text = text .. " Open unavailable: " .. tostring(detail.openReason)
+    end
+    detail.more:SetText(text)
+    if state == "pending" then
+        detail.copy:SetText("Requesting...")
+        detail.copy:Disable()
+    else
+        detail.copy:SetText("Request full build")
+        detail.copy:Enable()
+    end
+end
+
 local function EnsureDetail(parent)
     if detail then return end
     detail=CreateFrame("Frame",nil,parent); detail:SetWidth(335); detail:SetPoint("TOPRIGHT",-18,-102); detail:SetPoint("BOTTOMRIGHT",-18,18); SetBackdrop(detail,0.90)
@@ -707,6 +809,16 @@ local function EnsureDetail(parent)
     -- Keep ordinary and permanently locked evidence in separate immutable
     -- pools.  Neither ordering nor a shared spell ID may redefine its role.
     detail.copy:SetScript("OnClick",function()
+        -- One deliberate click sends at most one bounded request.
+        if detail.rolesBuildId then
+            local sync=Nexus.Sync
+            if not (sync and sync.RequestLockedRoles) then return end
+            local _,state,reason=sync.RequestLockedRoles(detail.rolesBuildId)
+            if state=="complete" then RenderDetail(detail.row); return end
+            detail.rolesState,detail.rolesReason=state,reason
+            ApplyRolesState()
+            return
+        end
         local candidate=detail.copyCandidate
         if not candidate then return end
         if not (Nexus.WishlistEditor and Nexus.WishlistEditor.OpenForCandidate) then return end
@@ -735,10 +847,26 @@ local function EnsureDetail(parent)
         if opened~=false then M.Hide() end
     end)
     detail.empty=detail:CreateFontString(nil,"OVERLAY","GameFontHighlight"); detail.empty:SetPoint("CENTER",0,15); detail.empty:SetSize(280,70); detail.empty:SetJustifyH("CENTER")
+    -- While a roles request waits, re-read its status once per second (a
+    -- read only). An arrived answer re-renders through the strict Copy path.
+    detail:SetScript("OnUpdate",function(self,elapsed)
+        if not self.rolesBuildId or self.rolesState~="pending" then return end
+        self.rolesTick=(self.rolesTick or 0)+(tonumber(elapsed) or 0)
+        if self.rolesTick<1 then return end
+        self.rolesTick=0
+        local sync=Nexus.Sync
+        if not (sync and sync.LockedRolesRequestStatus) then return end
+        local state,reason=sync.LockedRolesRequestStatus(self.rolesBuildId)
+        if state=="complete" then RenderDetail(self.row)
+        elseif state~="pending" then
+            self.rolesState,self.rolesReason=state,reason
+            ApplyRolesState()
+        end
+    end)
     parent._leaderboardDetail=detail
 end
 
-local function RenderDetail(row)
+RenderDetail = function(row)
     if not detail then return end
     virtualStats.detailRenders = virtualStats.detailRenders + 1
     detail.row=row
@@ -746,6 +874,8 @@ local function RenderDetail(row)
     detail.copyReason=nil
     detail.openBuildId=nil
     detail.openReason=nil
+    detail.rolesBuildId,detail.rolesState,detail.rolesReason=nil,nil,nil
+    detail.copy:SetText("Copy into Editor")
     if not row then
         for _,x in ipairs({detail.title,detail.owner,detail.record,detail.desc,detail.echoTitle,detail.more,detail.copy,detail.open,detail.lockedTitle}) do x:Hide() end
         for _,b in ipairs(detail.lockedIcons) do b:Hide() end; for _,b in ipairs(detail.icons) do b:Hide() end
@@ -755,7 +885,7 @@ local function RenderDetail(row)
     for _,x in ipairs({detail.title,detail.owner,detail.record,detail.desc,detail.echoTitle,detail.more,detail.copy,detail.open}) do x:Show() end
     local b=row.build or {}; local class=type(row.resolvedClass)=="string" and row.resolvedClass:upper() or nil; local c=CLASS_COLOR[class] or {0.8,0.8,0.8}
     detail.title:SetText(DisplayRemoteText(
-        b.title or "Recorded build",1024,false) or "Invalid title"); detail.title:SetTextColor(c[1],c[2],c[3]); detail.owner:SetText("by "..(row.displayPlayer or b.displayAuthor or DisplayRemoteText(tostring(b.author or row.player or "?"),1024,false) or "Unknown")..(class and "" or " - Class not supplied"))
+        b.title or "Recorded build",1024,false) or "Invalid title"); detail.title:SetTextColor(c[1],c[2],c[3]); detail.owner:SetText("by "..RowName(row, b)..(class and "" or " - Class not supplied"))
     if row.category=="combined" then
         detail.record:SetText("|cff4dff80Strongest "..DpsText(row.dps)
             .." DPS|r\nAverage "..DpsText(row.average).."  •  Dummy "
@@ -794,6 +924,22 @@ local function RenderDetail(row)
             or (tostring(total).." Echo slots")))
     if candidate then detail.copy:Enable() else detail.copy:Disable() end
     if openBuildId then detail.open:Enable() else detail.open:Disable() end
+    -- Only when the missing current roles are the reason: the resolver then
+    -- had nothing but historical record rows, which never prove Copy.
+    local rolesId=not candidate
+        and copyReason=="historical locked evidence is not current copy authority"
+        and RolesRequestTarget(row) or nil
+    if rolesId~=nil then
+        local sync=Nexus.Sync
+        local state,reason
+        if sync and sync.LockedRolesRequestStatus then
+            state,reason=sync.LockedRolesRequestStatus(rolesId)
+        end
+        detail.rolesBuildId=rolesId
+        detail.rolesState=state~="complete" and state or nil
+        detail.rolesReason=reason
+        ApplyRolesState()
+    end
 end
 
 local function FindSelectedRow()
@@ -833,8 +979,7 @@ local function BindRows(reason)
             r.classUnavailable=class==nil
             r.classLabel=class and (CLASS_LABEL[class] or class)
                 or "Class not supplied"
-            r.player:SetText(row.displayPlayer or DisplayRemoteText(
-                tostring(row.player or "?"),1024,false) or "Unknown")
+            r.player:SetText(RowName(row))
             r.player:SetTextColor(c[1],c[2],c[3])
             local buildTitle=DisplayRemoteText(
                 tostring((row.build or {}).title or "Recorded build"),1024,false)

@@ -187,7 +187,7 @@ function L.New(spec)
    isLocal=p.isLocal==true,ordinary=ord,locked=locked,fingerprint=L.Fingerprint(ord),
    dpsOrdinary=L.DpsRows(ord),dpsLocked=L.DpsRows(locked),
    lockedFingerprint=#locked>0 and L.Fingerprint(locked) or '0',
-   displayPlayer=name..'-'..realmKey,title=p.title or ('Leaderboard fixture build of '..name),
+   displayPlayer=name..'-'..realmKey,displayName=name,title=p.title or ('Leaderboard fixture build of '..name),
    dps={},ts={},duration={},level=p.level or 80}
   fx.players[#fx.players+1]=player
   if mode=='present' then

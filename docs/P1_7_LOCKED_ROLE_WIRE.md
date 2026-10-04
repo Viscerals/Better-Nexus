@@ -105,6 +105,26 @@ itself states the roles.
   Before, it copied every Wishlist entry into `echoes` and kept the previous
   `lockedEchoes`, so a role change was lost and stale rows would travel.
 
+## User-requested completion (Request full build)
+
+A remote build of a verified owner can keep unknown roles at an unchanged
+revision (for example after an unsolicited broadcast). Leaderboard Copy then
+stays unavailable: historical DPS record rows never prove current locked
+roles. The Leaderboard detail offers "Request full build" for exactly that
+case (`Sync.RequestLockedRoles`):
+
+- One click queues one exact-ID loadout request (`WLLQ`) through the existing
+  recovery queue, Sync-mode checks and route. Our capability (`WLCP`) is
+  always stated just before it, because the owner may have restarted since
+  our last advertisement.
+- Only the owner's own same-revision full answer completes the record in
+  place (the existing "roles" acceptance); a relay's answer stays refused.
+- Refused requests (Sync Off, Manual without Sync Now, not connected, own,
+  unknown or unverified build, known roles) send nothing and say why.
+- The state is pending until roles arrive, or timeout 60 s after the actual
+  send (a busy queue may hold the request first). Reading the state never
+  sends; nothing retries by itself; a new request needs a new click.
+
 ## Not changed
 
 Bucket tokens, summaries (`WLBI`) and ordinary fingerprints. A record stored

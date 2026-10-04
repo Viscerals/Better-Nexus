@@ -2261,13 +2261,15 @@ local function ReleaseSupersededCursors()
     for token, state in pairs(registry) do
         if state.servingGeneration ~= ST.servingGeneration then
             local family = state.kind
-            if sentinel[family] then
+            local slot = state.slot or family
+            if sentinel[slot] then
                 drop[#drop + 1] = token
             else
-                sentinel[family] = true
+                sentinel[slot] = true
                 -- The sentinel keeps no root wrapper, no accumulator, and no
                 -- page state: only enough to refuse once with STALE_CURSOR.
-                registry[token] = {kind=family, stale=true,
+                -- One per slot: a fixed named reader keeps its own.
+                registry[token] = {kind=family, slot=slot, stale=true,
                     servingGeneration=state.servingGeneration}
                 ST.debugStats.cursorSentinels = ST.debugStats.cursorSentinels + 1
             end
@@ -7179,12 +7181,16 @@ function Cursor.CopyStep(state, verdict)
     return nil, state.copyVerdict, false
 end
 
-local function BeginCursor(family, state)
+-- `slot` names the one active cursor a new cursor supersedes. It is the
+-- family itself, except for the fixed named readers below, which own one
+-- slot each so concurrent long walks cannot cancel each other.
+local function BeginCursor(family, state, slot)
     local root, why = Gate()
     if not root then return nil, why end
     local sequence, sequenceWhy = Generation.Advance(ST, "cursorSequence")
     if not sequence then return nil, sequenceWhy end
-    local previous = ST.activeCursors[family]
+    slot = slot or family
+    local previous = ST.activeCursors[slot]
     if previous then ST.cursorRegistry[previous] = nil end
     local token = {kind=family, cursorId=sequence, generation=ST.generation}
     state = state or {}
@@ -7192,10 +7198,11 @@ local function BeginCursor(family, state)
     -- against. It holds no root wrapper, so a superseded root is released at
     -- publication instead of being pinned by an unused retained token.
     state.kind, state.generation = family, ST.generation
+    state.slot = slot
     state.servingGeneration = ST.servingGeneration
     state.nextIndex, state.exhausted = 1, false
     ST.cursorRegistry[token] = state
-    ST.activeCursors[family] = token
+    ST.activeCursors[slot] = token
     ST.debugStats.cursorsBegun = ST.debugStats.cursorsBegun + 1
     return token
 end
@@ -7209,7 +7216,8 @@ local function CursorState(token, family)
         -- A stale-once sentinel refuses exactly once and then leaves the
         -- registry; its next use is INVALID_CURSOR.
         ST.cursorRegistry[token] = nil
-        if ST.activeCursors[family] == token then ST.activeCursors[family] = nil end
+        local slot = state.slot or family
+        if ST.activeCursors[slot] == token then ST.activeCursors[slot] = nil end
         return nil, "STALE_CURSOR"
     end
     return state, nil, root
@@ -7296,8 +7304,14 @@ function Catalog.RecordCursorNext(token)
     return Cursor.RecordPage(state, root, Admitted)
 end
 
-function Catalog.BeginSummaryCursor()
-    return BeginCursor("summary")
+-- Fixed named summary readers. Each owns one independent slot, so the
+-- Community list walk and the hash warm-up no longer supersede each other on
+-- every restart (they could livelock on a multi-frame catalog). Any other
+-- caller, or an unknown name, keeps the shared "summary" slot unchanged.
+function Catalog.BeginSummaryCursor(reader)
+    local slot = (reader == "community" or reader == "build-hash-cache")
+        and ("summary:" .. reader) or nil
+    return BeginCursor("summary", nil, slot)
 end
 
 function Catalog.SummaryCursorNext(token)

@@ -229,7 +229,8 @@ local function RowCheck(tag,category,i,r,e,H)
  local label=tag..' '..category..' #'..i..' '..p.name
  check(r.rank==i,label..': rank text shows the position')
  check(d.ownerKey==p.owner and Nexus.Identity.VerifiedOwnerKey(d)==p.owner,label..': the row belongs to '..p.owner..': '..tostring(d.ownerKey))
- check(r.player==p.displayPlayer and d.player==p.name,label..': the player is shown as '..p.displayPlayer..': '..tostring(r.player))
+ -- The shown name is the character name only; the realm stays in the identity.
+ check(r.player==p.displayName and d.player==p.name and d.displayPlayer==p.displayPlayer,label..': the player is shown as '..p.displayName..': '..tostring(r.player))
  check(d.dps==e.dps and r.dps:find(string.format('%.1fk DPS',e.dps/1000),1,true),label..': DPS '..e.dps..': '..tostring(r.dps))
  check(d.resolvedClass==p.class,label..': class '..p.class..': '..tostring(d.resolvedClass))
  check(d.fingerprint==p.fingerprint and List(d.echoes,'stacks')==List(p.dpsOrdinary),label..': the exact ordinary evidence')
@@ -246,7 +247,7 @@ local function RowCheck(tag,category,i,r,e,H)
  end
  local det=L.Select(H,i)
  check(det.row and det.row.ownerKey==p.owner,label..': selecting the row shows its detail')
- check(det.owner=='by '..p.displayPlayer,label..': detail owner line: '..tostring(det.owner))
+ check(det.owner=='by '..p.displayName,label..': detail owner line: '..tostring(det.owner))
  check(List(det.ordinary)==List(p.dpsOrdinary),label..': detail shows the exact ordinary Echoes and copies')
  check(Spells(det.locked)==Spells(p.dpsLocked) and det.lockedTitle==hasLocked,label..': detail shows the exact locked Echoes: '..Spells(det.locked))
  if p.build=='present' then

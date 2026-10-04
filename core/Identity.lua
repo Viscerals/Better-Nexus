@@ -543,6 +543,11 @@ function Identity.PresentPublicRecord(context, record)
             or "Unknown"
         if field == "author" then record.displayAuthor = displayLabel
         else record.displayPlayer = displayLabel end
+        -- The character name alone, as the record writes it (capitals and
+        -- accents kept), for views that show no realm in the name. Identity
+        -- stays in publicIdentityKey, ownerKey and realm.
+        record.displayName = Identity.DisplaySafeText(
+            PublicBaseName(record, field), 1024, false) or "Unknown"
     end
     if type(record.title) == "string" then
         record.displayTitle = Identity.DisplaySafeText(

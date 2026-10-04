@@ -2449,6 +2449,97 @@ function Sync.RequestLoadout(buildId)
     return false, queued and "queued for background recovery" or "awaiting sync"
 end
 
+-- Locked-role completion for one stored build, on a deliberate user action
+-- only (docs/P1_7_LOCKED_ROLE_WIRE.md). The record must be a remote build of
+-- an independently verified owner whose locked roles are unknown. One exact-ID
+-- request is queued with our capability stated; only the owner's own
+-- same-revision full answer can enrich it (ShouldStore "roles"; a relay's
+-- answer is refused). Nothing is sent from rendering, and nothing retries:
+-- a new request needs a new click after the previous one ended. Memory only.
+Sync.RolesRequests = {byId={}, count=0, max=32, timeout=60}
+
+function Sync.RequestLockedRoles(buildId)
+    local wireId, why = WireBuildId(buildId)
+    if not wireId then return false, "refused", tostring(why or "invalid build ID") end
+    local key = tostring(buildId)
+    local build = CatalogGet(buildId)
+    if type(build) ~= "table" or type(build.echoes) ~= "table"
+        or #build.echoes == 0 then
+        return false, "refused", "the build's Echo list is not in your library"
+    end
+    if LocalOwnsStoredBuild(build) then
+        return false, "refused", "this is your own build"
+    end
+    if not Identity.VerifiedOwnerKey(build) then
+        return false, "refused", "the build owner is not verified"
+    end
+    if Responder.Caps.KnownLockedRoles(build) ~= nil then
+        return false, "complete", "the locked Echo roles are already known"
+    end
+    local requests = Sync.RolesRequests
+    local entry = requests.byId[key]
+    if entry and Sync.LockedRolesRequestStatus(buildId) == "pending" then
+        return false, "pending", "a request for this build is already waiting"
+    end
+    local policy = Nexus and Nexus.SyncModePolicy
+    local mode = policy and policy.Mode and policy.Mode() or "automatic"
+    if mode == "off" then
+        return false, "refused", "Sync is Off"
+    end
+    if mode == "manual" and not Session.ManualGrant() then
+        return false, "refused",
+            "Sync is in Manual mode. Press Sync Now, then request again"
+    end
+    if not Sync.IsConnected() then
+        return false, "offline", "not connected to the Nexus sync channel"
+    end
+    if not Session.QueueRolesRequest(buildId) then
+        return false, "refused", "the request queue is full"
+    end
+    if not entry then
+        if requests.count >= requests.max then
+            local oldest, stamp
+            for id, value in pairs(requests.byId) do
+                if not stamp or value.at < stamp then oldest, stamp = id, value.at end
+            end
+            if oldest then requests.byId[oldest] = nil; requests.count = requests.count - 1 end
+        end
+        requests.count = requests.count + 1
+    end
+    requests.byId[key] = {state="pending", at=Now()}
+    LogEvent("SYNC", "user requested the locked roles of '%s'", key)
+    return true, "pending"
+end
+
+-- nil when no request was made; otherwise "pending", "complete", "refused"
+-- or "timeout" with a factual reason. The reply time counts from the actual
+-- send (a busy queue may hold the request first). Reading never sends.
+function Sync.LockedRolesRequestStatus(buildId)
+    local requests = Sync.RolesRequests
+    local entry = buildId ~= nil and requests.byId[tostring(buildId)] or nil
+    if not entry then return nil end
+    local build = CatalogGet(buildId)
+    if type(build) == "table"
+        and Responder.Caps.KnownLockedRoles(build) ~= nil then
+        return "complete"
+    end
+    if entry.state ~= "pending" then return entry.state, entry.reason end
+    local sent, detail = Session.RolesRequestState(buildId)
+    if sent == "unsent" then
+        entry.state, entry.reason = "refused", detail == "mode"
+            and "the saved Sync mode did not allow the request"
+            or "the request could not be sent"
+    elseif sent == "sent" and Now() - detail >= requests.timeout then
+        entry.state, entry.reason = "timeout",
+            "no reply with the locked Echo roles arrived"
+    elseif sent ~= "sent" and Now() - entry.at >= 2 * requests.timeout then
+        entry.state, entry.reason = "timeout",
+            "the request could not be sent before the time limit"
+    end
+    if entry.state ~= "pending" then return entry.state, entry.reason end
+    return "pending"
+end
+
 function Sync.RequestFullLoadoutSync()
     -- Backward-compatible API: use one normal hash reconciliation instead of
     -- broadcasting one request per missing build.
@@ -2615,11 +2706,14 @@ end
 -- request's metadata: the same queue, route and Sync-mode permission. Once
 -- per interval, or again after readvertiseSpacing when a new or restarted
 -- peer was seen; nothing is sent on its own schedule.
-function Responder.AdvertiseCapability(metadata)
+-- force: one user-requested roles completion (one advertisement per
+-- deliberate request; see Sync.RequestLockedRoles).
+function Responder.AdvertiseCapability(metadata, force)
     local caps = Responder.Caps
     local current = Now()
     local since = caps.lastAdvert and current - caps.lastAdvert or nil
-    local due = since == nil or since >= caps.advertiseInterval
+    local due = force == true or since == nil
+        or since >= caps.advertiseInterval
         or (caps.readvertise and since >= caps.readvertiseSpacing)
     if not due then
         return false
@@ -4454,8 +4548,8 @@ Session = SessionFactory.New({
         return Transport.EnqueueControl(message, metadata)
     end,
     -- Our locked-role capability, next to our own requests only.
-    advertiseCapability=function(metadata)
-        return Responder.AdvertiseCapability(metadata)
+    advertiseCapability=function(metadata, force)
+        return Responder.AdvertiseCapability(metadata, force)
     end,
     cancelRequest=function(requestId, requester)
         return Transport.CancelRequest(requestId, requester)
