@@ -336,7 +336,7 @@ function Inbound.New(options)
         return Finish(committed)
     end
 
-    local function HandleDpsTransfer(parts)
+    local function HandleDpsTransfer(parts, channelOwnerSender)
         local sender, transferId, spec, data =
             parts[2], parts[3], parts[4], parts[5]
         local context
@@ -376,10 +376,11 @@ function Inbound.New(options)
             local current = now()
             entry = {chunks={}, total=total, t0=current, lastSeen=current,
                 sender=sender, transferId=transferId, bytes=0, received=0,
-                context=context}
+                context=context, channelOwnerSender=channelOwnerSender}
             dpsInflight[key] = entry
         end
         if entry.total ~= total or entry.sender ~= sender
+            or entry.channelOwnerSender ~= channelOwnerSender
             or entry.transferId ~= transferId
             or not I.SameContext(entry.context, context) then
             dpsInflight[key] = nil
@@ -450,7 +451,11 @@ function Inbound.New(options)
                 tostring(sender))
             return false
         end
-        local committed = commitDps(record, sender, relayed, context)
+        -- Retain raw peer identity for response windows and diagnostics. Only
+        -- the admitted native realm-local channel route supplies this owner
+        -- context; every chunk must agree before it can reach durable storage.
+        local committed = commitDps(record, sender, relayed, context,
+            entry.channelOwnerSender)
         if committed then
             noteInbound({kind="dps_commit",sender=sender,
                 transferId=transferId,
@@ -794,7 +799,9 @@ function Inbound.New(options)
             if #parts ~= 5 and #parts ~= 8 then
                 return rejectIncoming("invalid DPS transfer")
             end
-            if HandleDpsTransfer(parts) then return acceptPeer(protocolSender) end
+            if HandleDpsTransfer(parts, channelOwnerSender) then
+                return acceptPeer(protocolSender)
+            end
             return false
         end
 

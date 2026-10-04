@@ -4322,7 +4322,7 @@ Inbound = InboundFactory.New({
         end
         return valid and true or false
     end,
-    commitDps=function(record, sender, relayed, context)
+    commitDps=function(record, sender, relayed, context, channelOwnerSender)
         local dps = Nexus and Nexus.DpsCapture
         local receiver = relayed and dps and dps.ReceiveRelayedRecord
             or dps and dps.ReceiveRecord
@@ -4330,7 +4330,8 @@ Inbound = InboundFactory.New({
             Responder.NoteContextOutcome(context, "rejected", "storage")
             return false
         end
-        local ok, accepted, rejectionReason = pcall(receiver, record, sender)
+        local ok, accepted, rejectionReason = pcall(receiver, record,
+            channelOwnerSender or sender)
         if not (ok and accepted) then
             local key = relayed and "dpsRelayRejected" or "dpsDirectRejected"
             stats[key] = (stats[key] or 0) + 1

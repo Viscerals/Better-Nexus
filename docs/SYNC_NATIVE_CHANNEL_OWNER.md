@@ -42,3 +42,20 @@ Offline regressions use synthetic native events, two-chunk assembly and actual
 catalog storage. They do not prove live transfer, saved persistence or later
 session loading. The new candidate is native NOT TESTED until separate package
 acceptance, installation and a two-client test.
+
+## DPS native channel authority
+
+The DPS correction extends the same owner-confirmed realm-local channel rule
+to exact-record `WLD2` transfers. Assembly retains the qualified channel owner
+sender separately from the raw peer identity, and every chunk must carry the
+same authority context. A realm change or mixed native/unknown chunks refuses
+the whole transfer. Only durable DPS admission receives that qualified sender;
+response windows, peer/session identity and diagnostics retain the raw sender.
+
+Qualified channel and addon transports keep their existing direct-owner rules.
+Bare addon messages and unknown entry points cannot borrow the local realm.
+No payload verification flag is trusted, no existing unverified saved record is
+promoted at startup, and no score or replacement rule changes. An exact direct
+owner replay may establish authority for matching historical evidence through
+the existing promotion rule. Synthetic serialization/reload tests do not prove
+live two-client SavedVariables persistence.
