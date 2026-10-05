@@ -53,6 +53,7 @@ core\SyncReconciler.lua
 core\SyncInbound.lua
 core\SyncDiagnostics.lua
 core\SyncSession.lua
+core\SyncAdmission.lua
 core\Sync.lua
 core\DpsCapture.lua
 core\LegacyDataMigration.lua

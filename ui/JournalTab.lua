@@ -26,14 +26,11 @@ local installed = false
 local hooked = false
 local provider                -- dataProvider() -> { sections={ {title,lines={}} }, version }
 local ourTab, panel, scroll, child
-local rowButtons, rowFrames = {}, {}
 local associationPanel
 local scanFrame, associationVisible = nil, false
 local wishlistPicker, wishlistPickerRows = nil, {}
 local HideWishlistPicker
-local pendingOpenLoadoutsUntil = 0
 local theirTabCount = 0
-local stockTabs = {}
 local linePool, linesUsed = {}, 0
 
 local ASSET ="Interface\\AddOns\\ProjectEbonhold\\assets\\"
@@ -439,7 +436,6 @@ end
 
 local function HideRowButtons()
     if associationPanel then associationPanel:Hide() end
-    for _, row in pairs(rowButtons) do row:Hide() end
 end
 
 HideWishlistPicker = function()
@@ -694,7 +690,12 @@ local function RefreshAssociationRows()
 
     local host = EnsureAssociationPanel(journal)
     host.emptySlot = emptySlot
-    local wishes = A.GetWishlistCandidates and A.GetWishlistCandidates() or {}
+    -- The scanner calls this every 0.75 s while the Journal is open. The
+    -- Wishlist candidates are the most expensive adapter read of a refresh
+    -- and only the picker shows them, so they are read when the picker
+    -- opens (below), as the store is at that moment. The slots and the
+    -- assignment are still read on every refresh: the label and the
+    -- selector follow every change, announced or not.
     local linked = firstRun and (A.GetFirstRunWishlist and A.GetFirstRunWishlist())
         or (A.GetLoadoutWishlist and A.GetLoadoutWishlist(active))
     local loadoutName = (active < 1 or active > maxSlots) and "No Saved Build selected"
@@ -738,6 +739,7 @@ local function RefreshAssociationRows()
 
     host.selector:SetScript("OnClick", function(self)
         if wishlistPicker and wishlistPicker:IsShown() then HideWishlistPicker(); return end
+        local wishes = A.GetWishlistCandidates and A.GetWishlistCandidates() or {}
         ShowWishlistPicker(self, wishes, linked, active, loadoutName, A, emptySlot)
     end)
     host.newWishlist:SetScript("OnClick", function()
@@ -896,11 +898,9 @@ local function Install()
 
     -- Their tab numbering differs between client revisions. Never assume
     -- Tab1 is Loadouts: inspect the clicked tab after the stock handler runs.
-    stockTabs = {}
     for i = 1, theirTabCount do
         local t = _G["ProjectEbonholdEchoJournalTab" .. i]
         if t then
-            stockTabs[#stockTabs + 1] = t
             if t.HookScript and not Attach.hookedTabs[t] then
                 Attach.hookedTabs[t] = true
                 -- The host hides or restores these tabs at its own time.

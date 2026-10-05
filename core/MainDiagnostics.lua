@@ -871,7 +871,9 @@ local function LogText_Sync()
     end
     local cursor
     if catalog and type(catalog.BeginSummaryCursor) == "function" then
-        local ok, value = pcall(catalog.BeginSummaryCursor)
+        -- The page's own named slot: this bounded walk never ends the ranked
+        -- retention scan or another reader's multi-frame walk.
+        local ok, value = pcall(catalog.BeginSummaryCursor, "diagnostic")
         if ok then cursor = value end
     end
     if type(cursor) == "table"

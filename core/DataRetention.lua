@@ -482,7 +482,9 @@ local function OverlaySummaries(catalog, database)
             return rows, true
         end
         if why ~= "CURSOR_REQUIRED" then return nil, nil, why end
-        local token, cursorWhy = catalog.BeginSummaryCursor()
+        -- This owner's own named slot: the hash cache's probe and the Sync
+        -- diagnostic page no longer end a scan that takes many frames.
+        local token, cursorWhy = catalog.BeginSummaryCursor("retention")
         if not token then return nil, nil, cursorWhy or "CURSOR_UNAVAILABLE" end
         job = {catalog=catalog, token=token, rows={}, slices=0}
         pendingOverlayScans[database] = job

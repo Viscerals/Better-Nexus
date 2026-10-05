@@ -839,7 +839,9 @@ EH:SetScript("OnEvent", function(_, event, ...)
     local lifecycle = Lifecycle()
     if lifecycle then return lifecycle.OnEvent(event, ...) end
 end)
-EH:RegisterEvent("CHAT_MSG_WHISPER")
+-- CHAT_MSG_WHISPER is not registered here: no handler reads it (the addon
+-- whisper handshake is CHAT_MSG_ADDON in SyncWire's own frame), and the
+-- registration made every incoming whisper run this dispatcher for nothing.
 EH:SetScript("OnUpdate", function(_, elapsed)
     local lifecycle = Lifecycle()
     if lifecycle then return lifecycle.OnUpdate(elapsed) end

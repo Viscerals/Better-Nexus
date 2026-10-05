@@ -26,9 +26,8 @@
 --   • Conservative paced queued sends; full loadouts sync in-band
 --   • Eight build and DPS hash buckets: resend only changed subsets
 --   • Responder claims: identical peers elect one sender; unique peers contribute
---   • Hot-build window (120s): a build posted while no peer is listening
---     is still included in the next BroadcastMine so the peer catches it
---     on their next Sync Now
+--   • Hot-build window (120s): a build this client broadcast keeps its
+--     evidence pinned for the responder window, then is forgotten
 --   • Max 999 chunks per build (enforced before queuing)
 
 Nexus = Nexus or {}
@@ -131,17 +130,15 @@ local Codec, Adapter, Transport, Compatibility, Reconciler, Inbound
 local Diagnostics, Session
 local channelIndex
 local seenRemoteIds  = {}   -- id -> lastModified we already hold
-local tombstones     = {}   -- id -> stamp; never resurrect
-local hotBuilds      = {}   -- id -> { build, t }; recently posted, include in answers
+local hotBuilds      = {}   -- id -> { build, t }; broadcast builds, pinned for HOT_WINDOW
+local hotBuildCheckedAt = 0 -- the last once-per-second hot-build expiry check
 local registeredHotBuildEvidenceOwner
-local pendingDeletes = {}   -- local tombstone ids awaiting direct notification
-local pendingDeleteTicker = 0
 local pendingShare          -- one immutable, session-only Share summary
 local pendingShareTicker = 0
 local Operation = {
     latestShare=nil,latestDelete=nil,active={},activeShares={},
     activeDeletes={},shareById={},deleteById={},recent={},recentNext=1,
-    recentCap=64,sequence=0,deleteCursor=nil,deleteDiscoveryComplete=false,
+    recentCap=64,sequence=0,deleteDiscoveryComplete=true,
     counters={
         queued="operationQueued",attempted="operationAttempted",
         requeued="operationRequeued",
@@ -169,12 +166,11 @@ local Responder = {state={hotBuildGeneration=0}, Work={}}
 -- the batch that is currently inside the catalog candidate: they have left the
 -- queue but are not settled, so they keep counting against the same bounds and
 -- no new arrival gains an unaccounted allowance while a batch runs.
+-- The behaviour is installed by core/SyncAdmission.lua below (see "Deferred
+-- inbound admission").
 Responder.Admission = {order={}, byKey={}, count=0, maxTotal=64, maxPerSender=16,
     inFlight={}, inFlightCount=0}
--- An item whose own submission raises is retried once and then refused.
-local ADMISSION_ERROR_ATTEMPTS = 2
 local catalogMutationIdentity
-local PendingDeleteCount
 
 local function Catalog()
     return Nexus and Nexus.BuildCatalog
@@ -210,6 +206,30 @@ function Responder.Work.ForgetHotBuild(id)
     Responder.state.hotBuildGeneration =
         (Responder.state.hotBuildGeneration or 0) + 1
     return true
+end
+
+-- A broadcast build stays hot for HOT_WINDOW seconds after its broadcast and
+-- then leaves; nothing keeps it pinned for the rest of the session. The
+-- window outlives the build's own queued packets (PENDING_MAX_AGE bounds
+-- them) only by design of the two constants, not by any check here: queued
+-- packets are serialized bytes and read no evidence. Checked once a second.
+local function ExpireHotBuilds()
+    local now = Now()
+    if now - hotBuildCheckedAt < 1 then return 0 end
+    hotBuildCheckedAt = now
+    local expired = 0
+    for id, hot in pairs(hotBuilds) do
+        local posted = type(hot) == "table" and tonumber(hot.t) or nil
+        if posted == nil or now - posted > HOT_WINDOW then
+            hotBuilds[id] = nil
+            expired = expired + 1
+        end
+    end
+    if expired > 0 then
+        Responder.state.hotBuildGeneration =
+            (Responder.state.hotBuildGeneration or 0) + 1
+    end
+    return expired
 end
 
 local function EnsureHotBuildEvidenceProvider()
@@ -492,7 +512,7 @@ function Sync.WorkState()
         requestRelated=requestTransport.requestRelated
             + requestIncoming.total,
         requestOutstandingTransfers=requestTransport.outstandingTransfers,
-        pendingDeletes=PendingDeleteCount(),
+        pendingDeletes=0, -- MASTER-RC-019: no delete ever acquires retry ownership
         pendingDeleteDiscovery=Operation.deleteDiscoveryComplete and 0 or 1,
         pendingShares=pendingShare and 1 or 0,
         deferredAdmissions=Responder.Admission.count,
@@ -998,6 +1018,9 @@ function Sync.Stats()
     -- Expose the current session's separate readiness state without inventing
     -- a queued request or expanding that transport enum.
     stats.preparingRequest = Session.StatusSnapshot().queueOutcome == "preparing"
+    local hot = 0
+    for _ in pairs(hotBuilds) do hot = hot + 1 end
+    stats.hotBuilds, stats.hotWindow = hot, HOT_WINDOW
     return stats
 end
 
@@ -1582,58 +1605,19 @@ end
 -- and the retry pump removed, nothing enqueues a delete, so the envelope had
 -- no remaining caller.
 
--- Pending deletes are a session-only fixed-shape map. A durable `pending`
--- field on a tombstone is opaque evidence and grants no retry authority.
---
--- MASTER-RC-019. `MarkDeletePending` was removed with the retry pump below:
--- architecture line 4856 makes the originating local delete an unconditional
--- zero-wire refusal, so nothing populates this map any more and
--- `PendingDeleteCount()` honestly reports zero. The map, its clear entry and
--- its count are kept because `Sync.WorkState()` is a public surface that must
--- keep reporting them.
-local function ClearPendingDelete(id)
-    pendingDeletes[id] = nil
-end
+-- MASTER-RC-019. The originating local delete is an unconditional zero-wire
+-- refusal (architecture line 4856) and the responder path encodes no
+-- withdrawal either, so no delete ever acquires retry ownership. The retry
+-- pump, its session map, its discovery and its count were dead and are gone;
+-- `Sync.WorkState()` keeps reporting the public fields, which were always
+-- zero. A durable `pending` field on a tombstone is opaque evidence and grants
+-- no retry authority. Remote withdrawal stays unsupported until the protocol
+-- carries a comparable edit/delete order.
 
-PendingDeleteCount = function()
-    local count = 0
-    for id in pairs(pendingDeletes) do
-        if LocalOwnsTomb(CatalogTombstoneView(id)) then
-            count = count + 1
-        end
-    end
-    return count
-end
-
-function Operation.DiscoverPendingDeletes()
-    -- Persisted pending markers never restore session delete work.
-    Operation.deleteDiscoveryComplete = true
-    return 0
-end
-
-local function PumpPendingDeletes(elapsed)
-    pendingDeleteTicker = pendingDeleteTicker + (tonumber(elapsed) or 0)
-    if pendingDeleteTicker < 1 then return end
-    pendingDeleteTicker = 0
-    -- MASTER-RC-019. The retry-pump CONSUMER that used to live here -- expiry
-    -- and drop transitions, owner selection, and the retry
-    -- Transport.Enqueue(DeleteWireMessage(...)) -- was unreachable once the
-    -- originating local delete became an unconditional zero-wire refusal
-    -- (architecture line 4856): `MarkDeletePending` had exactly one caller, in
-    -- the enqueue tail that refusal replaced, so `pendingDeletes` can never be
-    -- non-empty and every branch past this point was dead.
-    --
-    -- Discovery is kept: it is reachable, it publishes
-    -- `Operation.deleteDiscoveryComplete`, and it honestly returns zero.
-    -- The RESPONDER path no longer encodes a withdrawal either: answering a
-    -- peer's reconciliation request emitted the WLRD that the originating
-    -- operation had refused as REMOTE_TOMBSTONE_ORDER_UNPROVEN. Both paths are
-    -- now zero-wire. Remote withdrawal stays unsupported until the protocol
-    -- carries a comparable edit/delete order.
-    Operation.DiscoverPendingDeletes(32)
-end
-
-Sync._pendingDeleteScheduled = false
+-- Whether the scheduler owns the once-per-second Share retry pump (then the
+-- update turn skips it). On the module table: this chunk is near the Lua 5.1
+-- limit of 200 locals and the field is read by the step table below.
+Sync._pendingShareScheduled = false
 
 function Sync.RequestDataViewRefresh()
     local refresh = Nexus and Nexus.ViewRefresh
@@ -1649,490 +1633,33 @@ end
 -- Deferred inbound admission
 ------------------------------------------------------------------------
 
--- Catalog.Put answers `false` plus a root-pending reason, and no ticket, when
--- another transaction owns admission. Nothing was accepted, so that is not a
--- pending operation. It is also not a verdict on the item. The validated item
--- is retained here, bounded and session-only, and is submitted once when
--- ordinary admission is available again. The complete inbound handler runs
--- again at that point, so owner, revision, pending-replacement and tombstone
--- state are rechecked against the then-current catalog. Only the ticket that
--- submission returns may report success; expiry, overflow, reset and a
--- changed catalog scope settle as the same storage refusal the item would
--- have received before.
---
--- Each item has one fixed deadline, PENDING_MAX_AGE from its own arrival.
--- Other catalog work never extends it. An item whose turn does not come in
--- that time fails as a storage refusal, even while the catalog keeps working.
-function Responder.Admission.Busy(stored, why)
-    return stored == false and (why == "ROOT_MUTATION_PENDING"
-        or why == "ROOT_ADMISSION_PENDING")
+-- The owner lives in core/SyncAdmission.lua, a verbatim move out of this
+-- chunk, which is at the Lua 5.1 limit of 200 local variables. The factory
+-- installs the Responder.Admission functions onto the state table created
+-- above. Session and the catalog mutation identity are bound after this
+-- point, so they are handed over as accessors.
+if not (Nexus.SyncInternals and type(Nexus.SyncInternals.Admission) == "table"
+    and type(Nexus.SyncInternals.Admission.New) == "function") then
+    error("Nexus SyncAdmission must load before Sync")
 end
-
-function Responder.Admission.Remove(entry)
-    if Responder.Admission.byKey[entry.key] ~= entry then return false end
-    Responder.Admission.byKey[entry.key] = nil
-    for index, candidate in ipairs(Responder.Admission.order) do
-        if candidate == entry then
-            table.remove(Responder.Admission.order, index)
-            break
-        end
-    end
-    Responder.Admission.count = #Responder.Admission.order
-    return true
-end
-
-function Responder.Admission.Fail(entry, counter, detail)
-    if not Responder.Admission.Remove(entry) then return false end
-    if counter then
-        stats.storageRejected = (stats.storageRejected or 0) + 1
-        stats[counter] = (stats[counter] or 0) + 1
-    end
-    Responder.NoteContextOutcome(entry.context, "rejected", "storage")
-    PeerObserve("receiver_commit", {id=entry.id,peer=entry.sender,
-        outcome="store_failed",reason=detail})
-    LogEvent("RX", "REJECT deferred %s '%s': %s", tostring(entry.kind),
-        tostring(entry.id), tostring(detail))
-    entry.settle(false, false, "storage")
-    return true
-end
-
--- The scope an item was validated in: this Sync session, this catalog owner,
--- its bound database and binding generation, and the local player. An item is
--- never submitted into any other scope.
-function Responder.Admission.Scope()
-    local catalog = Catalog()
-    local preparation = catalog
-        and type(catalog.ManualPreparationStatus) == "function"
-        and catalog.ManualPreparationStatus() or nil
-    return {
-        identity=catalogMutationIdentity,catalog=catalog,
-        database=catalog and type(catalog.BoundDatabase) == "function"
-            and catalog.BoundDatabase() or nil,
-        savedVariables=NexusDB,
-        binding=preparation and preparation.binding or nil,
-        owner=CurrentOwnerKey(),
-    }
-end
-
-function Responder.Admission.SameScope(entry)
-    local scope, current = entry.scope, Responder.Admission.Scope()
-    for _, key in ipairs({"identity", "catalog", "database", "savedVariables",
-        "binding", "owner"}) do
-        if scope[key] ~= current[key] then return false end
-    end
-    return current.catalog ~= nil and current.database ~= nil
-end
-
--- Returns "deferred", "duplicate", "rejected" or "overflow". One entry per
--- kind and ID: an older or equal revision never displaces the retained one,
--- and a different owner claim cannot take over its place in the queue.
-function Responder.Admission.Defer(fields)
-    local key = tostring(fields.kind) .. ":" .. type(fields.id) .. ":"
-        .. tostring(fields.id)
-    -- Settle cancelled and expired items first. An item retained in an earlier
-    -- scope is not a prior claim in this one: it must not make a fresh valid
-    -- receipt a duplicate, refuse its owner, or count against the bounds.
-    Responder.Admission.Expire()
-    local prior = Responder.Admission.byKey[key]
-    if prior then
-        if prior.owner ~= fields.owner then
-            Responder.NoteContextOutcome(fields.context, "rejected", "ownership")
-            return "rejected"
-        end
-        local promotes = fields.stamp == prior.stamp
-            and fields.direct == true and prior.direct ~= true
-            and fields.digest == prior.digest
-        -- The owner's answer that states the locked set supersedes a held
-        -- answer for the same content without it (never the reverse).
-        local enriches = fields.stamp == prior.stamp
-            and fields.direct == true and fields.digest == prior.digest
-            and fields.rolesKnown == true and prior.rolesKnown ~= true
-        if fields.stamp < prior.stamp then
-            Responder.NoteContextOutcome(fields.context, "duplicate", "stale")
-            return "duplicate"
-        end
-        if fields.stamp == prior.stamp and not promotes and not enriches then
-            local same = fields.digest == prior.digest
-            Responder.NoteContextOutcome(fields.context,
-                same and "duplicate" or "rejected",
-                same and "duplicate" or "integrity")
-            return same and "duplicate" or "rejected"
-        end
-        Responder.Admission.Remove(prior)
-        stats.admissionSuperseded = (stats.admissionSuperseded or 0) + 1
-        Responder.NoteContextOutcome(prior.context, "duplicate", "stale")
-        prior.settle(true, false)
-    end
-    local fromSender = 0
-    for _, candidate in ipairs(Responder.Admission.order) do
-        if candidate.sender == fields.sender then fromSender = fromSender + 1 end
-    end
-    for _, member in ipairs(Responder.Admission.inFlight) do
-        if member.sender == fields.sender then fromSender = fromSender + 1 end
-    end
-    local held = Responder.Admission.count + Responder.Admission.inFlightCount
-    if held >= Responder.Admission.maxTotal
-        or fromSender >= Responder.Admission.maxPerSender then
-        stats.admissionOverflow = (stats.admissionOverflow or 0) + 1
-        return "overflow"
-    end
-    local current = Now()
-    local entry = {
-        key=key,kind=fields.kind,id=fields.id,stamp=fields.stamp,
-        owner=fields.owner,direct=fields.direct == true,digest=fields.digest,
-        rolesKnown=fields.rolesKnown == true,sender=fields.sender,context=fields.context,run=fields.run,
-        settle=fields.settle,enqueuedAt=current,
-        expiresAt=current + PENDING_MAX_AGE,
-        scope=Responder.Admission.Scope(),
-    }
-    Responder.Admission.byKey[key] = entry
-    Responder.Admission.order[#Responder.Admission.order + 1] = entry
-    Responder.Admission.count = #Responder.Admission.order
-    stats.admissionDeferred = (stats.admissionDeferred or 0) + 1
-    PeerObserve("receiver_commit", {id=fields.id,peer=fields.sender,
-        outcome="deferred",reason="catalog admission pending"})
-    LogEvent("RX", "DEFER %s '%s': catalog admission pending",
-        tostring(fields.kind), tostring(fields.id))
-    return "deferred"
-end
-
-function Responder.Admission.Expire()
-    if Responder.Admission.count == 0 then return end
-    local current, index = Now(), 1
-    while Responder.Admission.order[index] do
-        local entry = Responder.Admission.order[index]
-        if not Responder.Admission.SameScope(entry) then
-            -- A changed player, database or binding cancels the item. It is
-            -- never carried into the new scope.
-            Responder.Admission.Fail(entry, "admissionCancelled",
-                "catalog scope changed")
-        elseif current >= entry.expiresAt then
-            Responder.Admission.Fail(entry, "admissionExpired",
-                "catalog admission wait expired")
-        else
-            index = index + 1
-        end
-    end
-end
-
--- A submission makes the catalog busy, and the lifecycle then withholds every
--- full Sync turn until that transaction ends. Transport only sends in a full
--- turn, so a queue that submits in every ready turn leaves outbound traffic,
--- including the user's explicit Sync Now request, with no turn at all.
--- Outbound and deferred inbound work therefore alternate, and the outbound
--- unit is a whole transfer, never a single chunk: a catalog transaction
--- between two chunks outlasts the chunks' own deadline.
---  * Sync's paced owners (response election, recovery, send pacing) only
---    accumulate time in full turns. After the catalog becomes ready they get
---    one continuous RESPONSE_ELECTION_DELAY window before any submission, or
---    they would never produce the outbound work that is then owed.
---  * A started multi-chunk transfer is never interrupted.
---  * While a response or loadout is pending, admission yields: its election
---    and bucket delays accumulate only in full turns, and a unit sent for
---    other work is not its turn. While only valid outbound traffic waits,
---    one whole unit must be transmitted between two submissions. Outbound
---    goes first.
---  * Apart from a started transfer, admission never yields to owed work for
---    more than PENDING_TTL of continuous ready time, so sustained outbound
---    work cannot hold deferred inbound work until its deadline.
--- The catalog stays ready in the meantime, so ordinary send pacing decides
--- when a transmission happens. Admission yields only to a transmission
--- that can actually happen: when the channel is absent, a throttle pause is
--- active, or the wire itself reports a persistent blocker (suspended, combat,
--- no throttle library), no send is possible and the catalog is not left
--- idle. Nothing is dropped, reordered or extended: each item keeps its fixed
--- deadline.
-function Responder.Admission.OutboundOwed()
-    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
-        return false
-    end
-    -- The same owner Transport asks before every dispatch.
-    local wire = Nexus.SyncWire
-    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
-        return false
-    end
-    local progress = Transport.OutboundProgress()
-    if progress.midTransfer then return true end
-    local current = Now()
-    local readySince = Responder.Admission.readySince or current
-    local pending = (tonumber(Reconciler.Counts().total) or 0) > 0
-    local owed = progress.waiting > 0 or pending
-    -- The yield cap runs from the first turn in which retained items
-    -- yielded to owed work within this continuous ready period. Idle ready
-    -- time before the work existed does not spend it; a later arrival or a
-    -- later request does not restart it. Newly owed work is served first,
-    -- as at the first submission: a unit sent for earlier work is not its
-    -- turn.
-    if not owed then
-        Responder.Admission.yieldSince = nil
-        Responder.Admission.unitsAtSubmission = nil
-    else
-        Responder.Admission.yieldSince = math.max(
-            Responder.Admission.yieldSince or current, readySince)
-    end
-    if current - readySince < RESPONSE_ELECTION_DELAY then return true end
-    if not owed then return false end
-    if current - Responder.Admission.yieldSince >= PENDING_TTL then
-        return false
-    end
-    -- A pending response or loadout has not had its turn because some other
-    -- unit was sent: its election and bucket delays accumulate only in full
-    -- turns. It is served first, inside the cap above.
-    if pending then return true end
-    return progress.unitsSent == (Responder.Admission.unitsAtSubmission or -1)
-        or Responder.Admission.unitsAtSubmission == nil
-end
-
--- A validated inbound item that finds the catalog ready normally takes it at
--- once. While the user's explicit manual request is still unsent, that write
--- costs the request its turn: every commit invalidates the hash walk the
--- request waits for, the lifecycle withholds every full Sync turn until the
--- catalog and the hash are both ready, and at a large catalog the request
--- expires unsent behind a chain of direct writes. The lifecycle already gives
--- a pending Share the next admission turn; this gives the same to a manual
--- request. The item is not refused, dropped or delayed beyond its own
--- deadline: it enters this same bounded, scoped owner, keeps its validation,
--- fixed deadline, scope capture and FIFO place, and is submitted by the pump
--- after the request's transmission. The hold is bounded by the request's own
--- fixed lifetime, and it never waits for a transmission the wire cannot make.
--- A full owner refuses a held item exactly as it refuses one that found the
--- catalog busy: a counted storage refusal, never a silent drop.
-function Responder.Admission.RequestHold()
-    if not (Session and type(Session.ManualRequestUnsent) == "function"
-        and Session.ManualRequestUnsent()) then return false end
-    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
-        return false
-    end
-    local wire = Nexus.SyncWire
-    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
-        return false
-    end
-    return true
-end
-
--- The same turn is owed to a peer's transaction. A received reconciliation
--- or loadout request is answered only in a full Sync turn, and it expires
--- after PENDING_TTL without one; a queued loadout recovery request is sent
--- only in a full turn. On a busy channel every ready moment of the catalog
--- was taken by the next valid inbound record, so a responder never reached
--- a turn and the exact full record was never serialized. While such work is
--- owed and the wire can send, a valid inbound item is retained in this same
--- bounded owner instead. Nothing is refused that would not be refused for a
--- busy catalog, and no lifetime changes. Owed work is a pending response or
--- loadout, a started transfer, valid queued outbound packets, or a queued
--- recovery request that has not reached the wire.
--- Retention is only the entry and has no clock of its own: the pump below
--- decides when the item is submitted, with its whole-unit alternation and
--- its PENDING_TTL yield cap. A transaction already in flight when the
--- request arrives is never cut short; if it outlasts PENDING_TTL the request
--- still expires.
-function Responder.Admission.Owed()
-    local progress = Transport.OutboundProgress()
-    if progress.midTransfer or progress.waiting > 0
-        or (tonumber(Reconciler.Counts().total) or 0) > 0 then return true end
-    -- A queued recovery request reaches the wire only in a full turn.
-    local session = Session and type(Session.WorkSnapshot) == "function"
-        and Session.WorkSnapshot() or nil
-    return session ~= nil and (tonumber(session.recovery) or 0) > 0
-end
-
-function Responder.Admission.OwedHold()
-    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
-        return false
-    end
-    local wire = Nexus.SyncWire
-    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
-        return false
-    end
-    return Responder.Admission.Owed()
-end
-
--- FIFO place. An item that finds the catalog ready while older items are
--- still retained queues behind them; a direct write would overtake them at
--- every ready moment and leave them to expire behind newer traffic. A busy
--- catalog is asked as before and gives its ordinary refusal.
-function Responder.Admission.Behind()
-    if Responder.Admission.count == 0 then return false end
-    local catalog = Catalog()
-    local preparation = catalog
-        and type(catalog.ManualPreparationStatus) == "function"
-        and catalog.ManualPreparationStatus() or nil
-    return preparation ~= nil and preparation.ready == true
-end
--- Full Sync turns are continuous while the catalog is ready. A gap means the
--- lifecycle withheld them, so the continuous ready window starts again.
-function Responder.Admission.NoteTurn()
-    local current = Now()
-    if not Responder.Admission.turnAt or current - Responder.Admission.turnAt > 1 then
-        Responder.Admission.readySince = current
-    end
-    Responder.Admission.turnAt = current
-end
-
--- Runs only behind the lifecycle's full catalog readiness gate, after the
--- transport turn. The passive status read means a still-busy catalog receives
--- no further Put call.
-function Responder.Admission.Pump()
-    if Responder.Admission.count == 0 then
-        Responder.Admission.yieldSince = nil
-        Responder.Admission.unitsAtSubmission = nil
-        return
-    end
-    Responder.Admission.Expire()
-    if Responder.Admission.OutboundOwed() then
-        stats.admissionYielded = (stats.admissionYielded or 0) + 1
-        return
-    end
-    local catalog = Catalog()
-    local function Ready()
-        local preparation = catalog
-            and type(catalog.ManualPreparationStatus) == "function"
-            and catalog.ManualPreparationStatus() or nil
-        return preparation == nil or preparation.ready == true
-    end
-    if not Ready() then return end
-    if Responder.Admission.inFlightCount > 0 then return end
-    -- Frozen membership: the items waiting at this moment. An item that
-    -- arrives while this batch runs waits for a later batch; it never
-    -- enlarges or restarts the candidate.
-    local frozen = {}
-    for index, entry in ipairs(Responder.Admission.order) do frozen[index] = entry end
-    local collected = {}
-    Responder.Admission.collector = collected
-    local ok = pcall(function()
-        for _, entry in ipairs(frozen) do
-            -- An item whose own submission took the catalog (a path that
-            -- does not join the batch) ends the collection at once.
-            if not Ready() then break end
-            if Responder.Admission.byKey[entry.key] == entry then
-                -- Rechecked at the point of submission, after Expire above,
-                -- because a rebind can complete between turns.
-                if not Responder.Admission.SameScope(entry) then
-                    Responder.Admission.Fail(entry, "admissionCancelled",
-                        "catalog scope changed")
-                else
-                    -- One item's error is its own terminal outcome. Without
-                    -- this, a repeating error would be retained, restored
-                    -- and retried for ever, and the valid items behind it
-                    -- would expire waiting for a pass that never completes.
-                    local ranOk, outcome = pcall(entry.run, entry)
-                    if not ranOk then
-                        -- One item's error is its own problem. It is reported,
-                        -- retried once, and then refused with a counted
-                        -- outcome, so it can never become a poison item that
-                        -- starves the valid work behind it. Items collected
-                        -- before it in this pass are still submitted.
-                        LogEvent("RX", "ERROR admission item '%s': %s",
-                            tostring(entry.id), tostring(outcome))
-                        if Nexus.Errors and Nexus.Errors.Record then
-                            pcall(Nexus.Errors.Record, "Sync.Admission",
-                                tostring(outcome))
-                        end
-                        entry.errorCount = (entry.errorCount or 0) + 1
-                        if entry.errorCount >= ADMISSION_ERROR_ATTEMPTS then
-                            Responder.Admission.Fail(entry, "admissionError",
-                                "admission failed")
-                        end
-                        break
-                    else
-                        if outcome == "busy" then break end
-                        Responder.Admission.Remove(entry)
-                    end
-                end
-            end
-        end
-    end)
-    Responder.Admission.collector = nil
-    if #collected == 0 then return end
-    if not ok or not Ready() then
-        -- Nothing was submitted: the collected members go back to the queue
-        -- with their original deadlines and places, never settled here.
-        Responder.Admission.Restore(collected)
-        return
-    end
-    Responder.Admission.SubmitBatch(collected)
-end
-
--- Put collected members back at the front of the queue, in their original
--- order and with their own unchanged deadlines. A member whose key was taken
--- by a newer retained item in the meantime keeps that newer item and settles
--- as the ordinary busy refusal.
-function Responder.Admission.Restore(collected)
-    for index = #collected, 1, -1 do
-        local member = collected[index]
-        local entry = member.entry
-        if type(entry) == "table" and Responder.Admission.byKey[entry.key] == nil then
-            Responder.Admission.byKey[entry.key] = entry
-            table.insert(Responder.Admission.order, 1, entry)
-            Responder.Admission.count = #Responder.Admission.order
-            stats.admissionRestored = (stats.admissionRestored or 0) + 1
-            -- It was collected, not resolved: its run counted a resolution
-            -- that did not happen, so the counter keeps its meaning.
-            stats.admissionResolved = math.max(0, (stats.admissionResolved or 0) - 1)
-        else
-            member.complete(false, "ROOT_MUTATION_PENDING")
-        end
-    end
-end
-
--- One catalog mutation for the whole frozen batch. Each member keeps its own
--- ticket, storage answer and refusal reason, and is settled exactly once.
-function Responder.Admission.SubmitBatch(collected)
-    local catalog = Catalog()
-    local requests = {}
-    for index, member in ipairs(collected) do
-        requests[index] = {record=member.record, options=member.options}
-    end
-    local stored, storedAs, tickets
-    if catalog and type(catalog.PutBatch) == "function" then
-        stored, storedAs, tickets = catalog.PutBatch(requests)
-    else
-        stored, storedAs = false, "batch admission unavailable"
-    end
-    if not (stored == nil and storedAs == "ROOT_MUTATION_PENDING"
-        and type(tickets) == "table") then
-        -- The catalog could not start this batch at all. Its members keep
-        -- their own deadlines and wait for a later turn; nothing is settled
-        -- as a storage failure here.
-        Responder.Admission.Restore(collected)
-        return
-    end
-    stats.admissionBatches = (stats.admissionBatches or 0) + 1
-    stats.admissionBatchMembers = (stats.admissionBatchMembers or 0) + #collected
-    if #collected > (stats.admissionBatchLargest or 0) then
-        stats.admissionBatchLargest = #collected
-    end
-    for index, member in ipairs(collected) do
-        local ticket = tickets[index]
-        local row = {key=member.key, sender=member.sender, settled=false}
-        Responder.Admission.inFlight[#Responder.Admission.inFlight + 1] = row
-        Responder.Admission.inFlightCount = #Responder.Admission.inFlight
-        local bound = ticket ~= nil and BindCatalogCompletion(ticket,
-            function(ok, why)
-                Responder.Admission.FinishInFlight(row)
-                member.complete(ok, why)
-            end)
-        if not bound then
-            Responder.Admission.FinishInFlight(row)
-            member.complete(false, "INVALID_MUTATION_TICKET")
-        end
-    end
-    -- One accepted submission per turn; the next batch waits for a whole
-    -- transmitted unit while outbound work is owed.
-    Responder.Admission.unitsAtSubmission = Transport.OutboundProgress().unitsSent
-end
-
-function Responder.Admission.FinishInFlight(row)
-    if row.settled then return end
-    row.settled = true
-    for index, candidate in ipairs(Responder.Admission.inFlight) do
-        if candidate == row then
-            table.remove(Responder.Admission.inFlight, index)
-            break
-        end
-    end
-    Responder.Admission.inFlightCount = #Responder.Admission.inFlight
-end
+Nexus.SyncInternals.Admission.New({
+    responder=Responder,
+    sync=Sync,
+    stats=stats,
+    now=Now,
+    catalog=Catalog,
+    currentOwnerKey=CurrentOwnerKey,
+    mutationIdentity=function() return catalogMutationIdentity end,
+    transport=Transport,
+    reconciler=Reconciler,
+    session=function() return Session end,
+    bindCatalogCompletion=BindCatalogCompletion,
+    logEvent=LogEvent,
+    peerObserve=PeerObserve,
+    pendingTtl=PENDING_TTL,
+    pendingMaxAge=PENDING_MAX_AGE,
+    responseElectionDelay=RESPONSE_ELECTION_DELAY,
+})
 
 -- Read-only view of the retained inbound items: one bounded row per queued
 -- entry, in queue order. It starts no work, submits nothing, settles nothing
@@ -2154,17 +1681,6 @@ function Sync.AdmissionSnapshot()
         inFlight=Responder.Admission.inFlightCount, inFlightEntries=flying,
         maxTotal=Responder.Admission.maxTotal,
         maxPerSender=Responder.Admission.maxPerSender}
-end
-
-function Responder.Admission.Reset()
-    while Responder.Admission.order[1] do
-        Responder.Admission.Fail(Responder.Admission.order[1], nil, "explicit reset")
-    end
-    Responder.Admission.order, Responder.Admission.byKey, Responder.Admission.count = {}, {}, 0
-    Responder.Admission.inFlight, Responder.Admission.inFlightCount = {}, 0
-    Responder.Admission.unitsAtSubmission = nil
-    Responder.Admission.readySince, Responder.Admission.turnAt = nil, nil
-    Responder.Admission.yieldSince = nil
 end
 
 local function StoreSummary(data, transportSender, context, onComplete,
@@ -2909,122 +2425,11 @@ function Sync.BroadcastBuild(build)
     return Responder.AdmitBuild(prepared, false)
 end
 
-function Responder.Work.BroadcastCatalogRecord(build, sent)
-    if type(build) ~= "table" then return 0 end
-    sent[build.id] = true
-    if build.legacyRecovered == true and build.ownerVerified ~= true then
-        return 0
-    end
-    return BroadcastSummary(build) and 1 or 0
-end
-
-function Responder.Work.HotBuildCountWithin(limit)
-    local count = 0
-    for _ in pairs(hotBuilds) do
-        count = count + 1
-        if count > limit then return nil end
-    end
-    return count
-end
-
-function Responder.Work.BroadcastSmallRoot(records, now)
-    local sent, expired, count = {}, {}, 0
-    for _, build in pairs(records) do
-        count = count + Responder.Work.BroadcastCatalogRecord(build, sent)
-    end
-    for id, hot in pairs(hotBuilds) do
-        if now - hot.t > HOT_WINDOW then
-            expired[#expired + 1] = id
-        elseif not sent[id] then
-            local current = CatalogGet(id)
-            if current and RelayEligible(current) then
-                if BroadcastSummary(current) then count = count + 1 end
-            else
-                expired[#expired + 1] = id
-            end
-        end
-    end
-    for _, id in ipairs(expired) do Responder.Work.ForgetHotBuild(id) end
-    return count
-end
-
-function Responder.Work.PumpBroadcastMine()
-    local job = Responder.state.broadcastMineJob
-    if not job then return true end
-    if job.phase == "records" then
-        local page, err = job.catalog.RecordCursorNext(job.cursor)
-        if err or type(page) ~= "table" then
-            Responder.state.broadcastMineJob = nil
-            return false, err or "catalog cursor unavailable"
-        end
-        if page.done then
-            job.phase, job.hotCursor = "hot", nil
-            job.hotGeneration = Responder.state.hotBuildGeneration or 0
-            return false, "pending"
-        end
-        if type(page.record) == "table" then
-            job.count = job.count
-                + Responder.Work.BroadcastCatalogRecord(page.record, job.sent)
-        end
-        return false, "pending"
-    end
-
-    -- The traversal key remains present until the next key is obtained. Any
-    -- external hot-set mutation changes the generation before `next` runs.
-    if job.hotGeneration ~= (Responder.state.hotBuildGeneration or 0) then
-        Responder.state.broadcastMineJob = nil
-        return false, "hot build set changed"
-    end
-    local id, hot = next(hotBuilds, job.hotCursor)
-    if job.removeHot then
-        Responder.Work.ForgetHotBuild(job.removeHot)
-        job.hotGeneration = Responder.state.hotBuildGeneration or 0
-        job.removeHot = nil
-    end
-    if id == nil then
-        local count = job.count
-        Responder.state.broadcastMineJob = nil
-        return true, count
-    end
-    job.hotCursor = id
-    if job.now - hot.t > HOT_WINDOW then
-        job.removeHot = id
-    elseif not job.sent[id] then
-        local current = CatalogGet(id)
-        if current and RelayEligible(current) then
-            if BroadcastSummary(current) then job.count = job.count + 1 end
-        else
-            job.removeHot = id
-        end
-    end
-    return false, "pending"
-end
-
-function Sync.BroadcastMine()
-    local now = Now()
-    local catalog = Catalog()
-    if not catalog then return 0 end
-    if Responder.state.broadcastMineJob then return nil, "pending" end
-
-    -- Preserve immediate behavior only when both collections fit the public
-    -- one-call frontier. A sparse maximum root refuses before traversal.
-    local records, why = type(catalog.All) == "function" and catalog.All()
-    if type(records) == "table"
-        and Responder.Work.HotBuildCountWithin(8) ~= nil then
-        return Responder.Work.BroadcastSmallRoot(records, now)
-    end
-    if records == nil and why ~= "CURSOR_REQUIRED" then return 0, why end
-    if type(catalog.BeginRecordCursor) ~= "function"
-        or type(catalog.RecordCursorNext) ~= "function" then
-        return 0, "catalog cursor unavailable"
-    end
-    local cursor, cursorWhy = catalog.BeginRecordCursor()
-    if not cursor then return 0, cursorWhy or "catalog cursor unavailable" end
-    Responder.state.broadcastMineJob = {catalog=catalog, cursor=cursor,
-        sent={}, count=0,
-        phase="records", now=now}
-    return nil, "pending"
-end
+-- The whole-library "BroadcastMine" sweep (every catalog record plus the hot
+-- set as summaries) had no caller left: the library reaches peers through
+-- hash-bucket reconciliation, and a single posted or changed build through
+-- its own Share summary. The hot-build expiry it carried now runs on its own
+-- (ExpireHotBuilds).
 
 -- Response candidates are the mutable overlay/tombstone delta only. Immutable
 -- release baselines arrive with addon releases; mixed-version peers can request
@@ -3148,9 +2553,7 @@ function Responder.SendNextBuild(bucketState, responseBudget)
     if admitted then
         bucketState.progress[item.token] = "admitted"
         bucketState.cursor = bucketState.cursor + 1
-        if item.kind == "tomb" then
-            ClearPendingDelete(item.id, item.tomb)
-        else
+        if item.kind ~= "tomb" then
             stats.overlaySent = (stats.overlaySent or 0) + 1
         end
         return 1, bucketState.cursor > #candidates,
@@ -3681,7 +3084,6 @@ function Sync.BroadcastDelete(build, onLocalComplete)
         if not status then return false, operationWhy end
         Operation.latestDelete = status
         Operation.Transition(status, "rejected", "REMOTE_TOMBSTONE_ORDER_UNPROVEN")
-        ClearPendingDelete(id, tomb)
         return false, "REMOTE_TOMBSTONE_ORDER_UNPROVEN", Operation.Copy(status)
     end
     local function Complete(tombStored, tombStoreWhy)
@@ -4449,14 +3851,22 @@ Inbound = InboundFactory.New({
             relay=relayed and true or false})
         -- Never reuse payload-supplied authority hints for automatic egress.
         -- Only an exact transport-to-owner bridge may enter the established
-        -- direct-owner redistribution path.
-        if not relayed and Identity.TransportOwns(
-                record.o or record.ownerKey, sender) then
+        -- direct-owner redistribution path, and only for this client's own
+        -- record (its channel echo): a remote owner's record is that owner's
+        -- to redistribute, and BroadcastDpsRecord would refuse it as
+        -- "owner_sender" after validating it in full.
+        if not relayed and IsLocalTransportSender(sender)
+            and Identity.TransportOwns(record.o or record.ownerKey, sender) then
             Sync.BroadcastDpsRecord(record)
         end
+        -- The build a record names is relayed only when this client owns it.
+        -- A receiver that relayed a held remote build after every accepted
+        -- record made every peer resend the same complete build; a peer that
+        -- lacks it asks for it through its own request instead.
         local buildId = record.b or record.buildId
         local build = buildId and CatalogGet(buildId)
-        if build and type(build.echoes) == "table" and #build.echoes > 0 then
+        if build and LocalOwnsStoredBuild(build)
+            and type(build.echoes) == "table" and #build.echoes > 0 then
             pcall(Sync.BroadcastBuild, build)
         end
         Responder.NoteContextOutcome(context, "updated", "accepted")
@@ -4561,7 +3971,6 @@ Session = SessionFactory.New({
     transportHasPending=function() return Transport.HasPending() end,
     inboundHasPending=function() return Inbound.HasPending() end,
     reconcilerHasPending=function() return Reconciler.HasPending() end,
-    pendingDeleteCount=PendingDeleteCount,
     rejectRecoveryOverflow=RejectRecoveryOverflow,
     isConnected=function() return Sync.IsConnected() end,
     isRequestChannelPresent=function()
@@ -4658,7 +4067,7 @@ function Sync.GetLeaderboardSyncStatus()
         requestRelated=requestTransport.requestRelated
             + requestIncoming.total,
         requestOutstandingTransfers=requestTransport.outstandingTransfers,
-        pendingDeletes=PendingDeleteCount(),
+        pendingDeletes=0, -- MASTER-RC-019: no delete ever acquires retry ownership
         pendingDeleteDiscovery=Operation.deleteDiscoveryComplete and 0 or 1,
         pendingShares=pendingShare and 1 or 0,
         deferredAdmissions=Responder.Admission.count,
@@ -4691,6 +4100,7 @@ end
 function Sync.Housekeep()
     -- Passive expiry only: a deferred inbound item is never submitted here.
     Responder.Admission.Expire()
+    ExpireHotBuilds()
     Operation.housekeeping = true
     local ok, err = pcall(Transport.Housekeep)
     Operation.housekeeping = false
@@ -4723,7 +4133,7 @@ end
 -- Responder.Admission.Pump, while transport preparation, serialization,
 -- inbound decoding and the view refresh sit outside it.
 --
--- Measuring fourteen steps on every update would be its own cost, so the
+-- Measuring every step on every update would be its own cost, so the
 -- phases are timed only AFTER an update was actually slow, for a bounded
 -- window of updates. In the ordinary case this is two clock reads per update.
 -- These are scalars for a support report, not a profiler and not a claim about
@@ -4791,14 +4201,12 @@ Sync._phases.steps = {
         Responder.Admission.NoteTurn()
         Responder.Admission.Expire()
         Inbound.CleanExpired()
+        ExpireHotBuilds()
     end},
     {name = "responses", run = function(elapsed) ProcessPendingResponses(elapsed) end},
     {name = "recovery", run = function(elapsed) Session.PumpRecovery(elapsed) end},
-    {name = "broadcast", run = function() Responder.Work.PumpBroadcastMine() end},
-    {name = "deletes", run = function(elapsed) PumpPendingDeletes(elapsed) end,
-        skip = function() return Sync._pendingDeleteScheduled end},
     {name = "share", run = function(elapsed) PumpPendingShare(elapsed) end,
-        skip = function() return Sync._pendingDeleteScheduled end},
+        skip = function() return Sync._pendingShareScheduled end},
     {name = "transport.prepare", run = function() Session.PrepareTransport() end},
     {name = "handshake", run = function()
         if Nexus.SyncWire then Nexus.SyncWire.PumpHandshake() end
@@ -4964,11 +4372,6 @@ function Sync.Init(codec, adapter)
     if pendingShare and type(pendingShare.status) == "table" then
         Operation.Transition(pendingShare.status, "reset", "explicit reset")
     end
-    for _, status in pairs(pendingDeletes) do
-        if type(status) == "table" then
-            Operation.Transition(status, "reset", "explicit reset")
-        end
-    end
     Responder.Admission.Reset()
     Inbound.Reset()
     Session.Reset()
@@ -4980,16 +4383,14 @@ function Sync.Init(codec, adapter)
     end
     preparedDpsProofs = setmetatable({}, {__mode="k"})
     hotBuilds = {}  -- clear on init
+    hotBuildCheckedAt = 0
     Responder.state.hotBuildGeneration =
         (Responder.state.hotBuildGeneration or 0) + 1
-    Responder.state.broadcastMineJob = nil
     EnsureHotBuildEvidenceProvider()
-    pendingDeletes = {}
-    pendingDeleteTicker = 0
     pendingShare = nil
     pendingShareTicker = 0
     Operation.active, Operation.activeShares, Operation.activeDeletes = {}, {}, {}
-    Sync._pendingDeleteScheduled = false
+    Sync._pendingShareScheduled = false
     -- Keep login initialization constant-time. Existing build timestamps are
     -- resolved lazily in ShouldStore instead of walking the entire library
     -- during PLAYER_ENTERING_WORLD.
@@ -5013,18 +4414,18 @@ function Sync.Init(codec, adapter)
         catalog.RequestAuthorityRebindV1("SOURCE_REBIND_REQUIRED")
     end
     -- Tombstone authority is served only by the catalog's published root;
-    -- Sync never binds the raw SavedVariables tombstone table again.
-    tombstones = {}
-    Operation.deleteCursor = nil
+    -- Sync never binds the raw SavedVariables tombstone table.
     Operation.deleteDiscoveryComplete = true
+    -- The retained Share's once-per-second local-save retry runs from the
+    -- scheduler, so it progresses while the full update turn is withheld
+    -- (catalog or hashes not ready); the update turn then skips it.
     local scheduler = Nexus and Nexus.Scheduler
     if scheduler and scheduler.IsInitialized and scheduler.IsInitialized()
         and type(scheduler.Every) == "function" then
-        local scheduled = scheduler.Every("sync.pending-deletes", 1, function()
-            PumpPendingDeletes(1)
+        local scheduled = scheduler.Every("sync.pending-share", 1, function()
             PumpPendingShare(1)
         end)
-        Sync._pendingDeleteScheduled = scheduled == true
+        Sync._pendingShareScheduled = scheduled == true
     end
     Transport.InstallFilters()
     Sync.EnsureChannel()

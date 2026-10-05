@@ -7159,11 +7159,18 @@ function Catalog.RecordCursorNext(token)
 end
 
 -- Fixed named summary readers. Each owns one independent slot, so the
--- Community list walk and the hash warm-up no longer supersede each other on
--- every restart (they could livelock on a multi-frame catalog). Any other
--- caller, or an unknown name, keeps the shared "summary" slot unchanged.
+-- Community list walk, the hash warm-up, the ranked retention scan and the
+-- Sync diagnostic page never supersede each other's multi-frame walk (the
+-- first two could livelock on a multi-frame catalog; the retention scan was
+-- ended by the hash cache's probe and by the diagnostic page). The allowlist
+-- is fixed and small, so the slot registry stays bounded: any other caller,
+-- or an unknown name, keeps the shared "summary" slot unchanged.
+Cursor.summaryReaders = {
+    community=true, ["build-hash-cache"]=true, retention=true, diagnostic=true,
+}
+
 function Catalog.BeginSummaryCursor(reader)
-    local slot = (reader == "community" or reader == "build-hash-cache")
+    local slot = Cursor.summaryReaders[reader] == true
         and ("summary:" .. reader) or nil
     return BeginCursor("summary", nil, slot)
 end

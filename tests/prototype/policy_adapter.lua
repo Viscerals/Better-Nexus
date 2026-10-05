@@ -9,6 +9,9 @@
 -- The root is NEXUS_POLICY_ROOT or the current directory, so the same adapter
 -- drives the immutable test.9020 baseline and a corrected candidate.
 local Adapter={}
+-- The free-slot support list the production state carried for the historical
+-- scoring engine: test-only now (the engine is gone from logic/Policy.lua).
+local Historical=dofile('tests/prototype/historical_model_support.lua')
 local PURE={'data\\DefaultProfile.lua','core\\EchoCatalogSource.lua','logic\\Model.lua','logic\\Strategy.lua','logic\\Ratchet.lua',
  'logic\\EchoWeaver.lua','logic\\OrbPolicy.lua','logic\\Policy.lua'}
 function Adapter.Load(root)
@@ -163,7 +166,7 @@ function Adapter.State(input)
   activeEchoes=row.echoes or {},queue=queue,flags=flags,level=level,catalog=catalog,
   horizon=input.horizon,
   canFreeze=input.allowFreeze==true and (level<80 or (type(input.horizon)=='number' and input.horizon>1)),
-  support=Nexus.Model.Support(catalog,owned,level,input.disabledLevers or {},plan,Nexus.DefaultProfile.params),
+  support=Historical.Support(catalog,owned,level,input.disabledLevers or {},plan,Nexus.DefaultProfile.params),
   params=Nexus.DefaultProfile.params,
   searchRefused={banish=false,reroll=input.allowReroll~=true},
   rerollBudget={consecutive=0,consecutiveLimit=3,bracketSpent=0,bracketLimit=4,reserve=5},

@@ -160,6 +160,8 @@ NAMES += ['orb_pick_evidence','orb_transport_observer','orb_recovery_continue','
 NAMES += ['community_detail_layout','leaderboard_detail_layout','wishlist_menu_label_layout','text_overflow_policy']
 NAMES += ['automation_refused_freeze','dps_build_link_index','dps_board_cursor_source','catalog_tombstone_unknown_evidence']
 NAMES += ['catalog_tombstone_readers','dps_capture_readonly_note','tombstone_retirement_policy','dps_build_link_bounded']
+NAMES += ['sync_received_dps_egress','hash_cache_warm_budget','summary_cursor_named_readers','sync_hot_build_expiry']
+NAMES += ['journal_association_lazy_candidates','dps_index_summary_rows']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

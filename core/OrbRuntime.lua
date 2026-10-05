@@ -314,18 +314,10 @@ local function reachedLimit(fallbackReason)
         terminal("LIMIT",fallbackReason or "The approved Orb limit was reached.")
     end
 end
-local function entriesStillMatch()
-    if not config.selectedSlot then return true end
-    local choices=Nexus.GameAdapter.GetWishlistCandidates()
-    for _,c in ipairs(choices) do
-        if c.slot==config.selectedSlot then
-            local resolved,st=Nexus.GameAdapter.ResolveWishlistEvidence(c)
-            if st~="actionable" or not resolved then return false end
-            return fingerprint(resolved.echoes)==config.fingerprint
-        end
-    end
-    return false
-end
+-- Defined below (after `binding`/`matches`): whether the assigned Wishlist
+-- still matches the run's targets. The former selected-slot body here was
+-- overwritten by that definition before any caller ran.
+local entriesStillMatch
 function M.SelectWishlist(candidate)
     return nil,"Orb mode uses the assigned Wishlist. Change its assignment through My Builds or the Wishlist Editor."
 end

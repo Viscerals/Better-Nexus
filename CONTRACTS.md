@@ -27,10 +27,14 @@ This file has two parts.
 - **`Policy.Decide(state)`** returns a wait when `state.ordinaryBoardAllowed ==
   false`. Otherwise every ordinary board goes to
   `EchoWeaver.DecideNexus(state)`. `state.snapshotVerified`, `state.queue` and
-  `state.flags` select no planner and change no decision. The scoring rules in
-  the historical `logic/Policy.lua` section below are reachable only when
-  EchoWeaver is not loaded, which the production TOC never allows, and then
-  only with an empty queue.
+  `state.flags` select no planner and change no decision. The historical
+  scoring engine described in the `logic/Policy.lua` section below was
+  unreachable (the production TOC always loads EchoWeaver) and has been
+  removed from the file; without the planner, `Policy.Decide` answers a wait.
+  `Model.Support` and the draw-distribution helpers (`BuildDistribution`,
+  `EmaxK`, `EmaxGivenK`, `WithoutKey`, `FreeDist`) fed only that engine and
+  now live in the test-only `tests/prototype/historical_model_support.lua`, which the
+  policy adapter uses; `Model.Delta` stays in `logic/Model.lua`.
 - **`EchoWeaver.Decide(input)`** is the pure ordinary planner. Without
   `input.policy` it follows the base strategy. `DecideNexus` passes `EchoWeaver.NEXUS_POLICY`, whose options
   are deliberate, documented differences (`docs/ROLLING_ORB_REVIEW_EADFF8A.md`).

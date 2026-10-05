@@ -509,19 +509,6 @@ end
 -- Owned (current-run granted ∪ recorded picks; trust model)
 ------------------------------------------------------------------------
 
--- deterministic signature of the CLIENT-reported owned set (no recorded
--- picks): used to detect the post-reset refresh after a run boundary
-local function ClientOwnedSig(bySpell)
-    local ids = {}
-    for id in pairs(bySpell) do ids[#ids + 1] = id end
-    table.sort(ids)
-    local parts = {}
-    for i = 1, #ids do
-        parts[i] = ids[i] .. ":" .. bySpell[ids[i]]
-    end
-    return table.concat(parts, ",")
-end
-
 -- GetLockedPerks has appeared in more than one server-side shape: a flat
 -- numeric array, a name-keyed table of arrays, and entries using spellId/id
 -- plus stack/stacks/count. Locked perks may also sit outside the normal roll

@@ -19,7 +19,7 @@ check(stats.thresholdMs>0,'a slow update has a stated threshold: '..stats.thresh
 check(stats.slowUpdates==0,'no slow update has happened yet')
 check(next(stats.phases)==nil,'and nothing is measured per phase until one does')
 
--- An ordinary update measures the update only, never the fourteen steps.
+-- An ordinary update measures the update only, never its individual steps.
 S.OnUpdate(0.05)
 stats=S.PhaseStats()
 check(next(stats.phases)==nil,'an ordinary update stays un-instrumented')
@@ -161,7 +161,7 @@ Nexus.Sync._phases={thresholdMs=50,window=20,stats={},armed=0,slowUpdates=0,
  clock=function() return debugprofilestop and debugprofilestop() or nil end,
  record=function() end}
 check(ranSteps==9,'every broken shape was exercised: '..ranSteps)
-check(type(Nexus.Sync._defaultSteps)=='table' and #Nexus.Sync._defaultSteps>=13,
+check(type(Nexus.Sync._defaultSteps)=='table' and #Nexus.Sync._defaultSteps>=11,
  'the step list built at load is what an emptied one falls back to: '
  ..tostring(Nexus.Sync._defaultSteps and #Nexus.Sync._defaultSteps))
 

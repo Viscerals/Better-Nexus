@@ -37,7 +37,7 @@ local CLASS_LABEL = {
 local REJECTION_KEYS = {
     "duration", "owner_sender", "relay_authorization", "schema",
     "stale_record", "duplicate_not_better", "invalid_category",
-    "integrity", "outside_request",
+    "integrity", "outside_request", "storage",
 }
 local rejectionStats = {}
 
@@ -1266,6 +1266,22 @@ local function PairRecord(row)
     return projected
 end
 
+-- The row the pair summary reads while the identity index is built: the
+-- stored row's own fields with its Echo lists in the stored shape.
+-- CandidateEvidence.DpsSummary only reads these rows and the index keeps
+-- none of them (the summary's pair is dropped), so the row's own tables are
+-- shared, not deep-copied: one rebuild walked every stored row with a full
+-- deep copy each. A pair row handed to a caller (IndexedPairRowsForIdentity)
+-- stays a full defensive copy (PairRecord).
+local function SummaryRow(row)
+    if type(row) ~= "table" then return row end
+    local projected = {}
+    for key, value in pairs(row) do projected[key] = value end
+    projected.echoes = StoredEchoes(row, false)
+    projected.lockedEchoes = StoredEchoes(row, true) or {}
+    return projected
+end
+
 local CachedLockedRecord
 
 local function RebuildIdentityIndex()
@@ -1290,7 +1306,7 @@ local function RebuildIdentityIndex()
                 if type(fingerprint) == "string" and fingerprint ~= ""
                     and value == value and value < math.huge and value > 0 then
                     local rows = rowsByFingerprint[category][fingerprint] or {}
-                    rows[#rows + 1] = PairRecord(row)
+                    rows[#rows + 1] = SummaryRow(row)
                     rowsByFingerprint[category][fingerprint] = rows
                 end
                 indexed = indexed + 1
@@ -1531,7 +1547,7 @@ function DPS.CommunityEligibilityCursorNext(cursor)
             if type(fingerprint) == "string" and fingerprint ~= ""
                 and value == value and value < math.huge and value > 0 then
                 local rows = cursor.best[category][fingerprint] or {}
-                rows[#rows + 1] = PairRecord(row)
+                rows[#rows + 1] = SummaryRow(row)
                 cursor.best[category][fingerprint] = rows
             end
             cursor.indexed = cursor.indexed + 1

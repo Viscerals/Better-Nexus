@@ -2086,13 +2086,6 @@ local function GetCard(parent)
     end)
     card.addBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Retained for compatibility with older pooled rows; the whole card and
-    -- the explicit View button now perform the same clear action.
-    card.menuBtn = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
-    card.menuBtn:SetSize(1, 1)
-    card.menuBtn:SetPoint("BOTTOMRIGHT", -1, 1)
-    card.menuBtn:Hide()
-
     card:SetScript("OnEnter", function(self)
         if not self.buildId then return end
         pcall(function()
@@ -2121,7 +2114,7 @@ local function GetCard(parent)
         M.Refresh()
     end)
     if Nexus.Theme and Nexus.Theme.StyleVirtualRow then
-        Nexus.Theme.StyleVirtualRow(card, {card.addBtn, card.menuBtn})
+        Nexus.Theme.StyleVirtualRow(card, {card.addBtn})
     end
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.ApplyFontTree then
         Nexus.LayoutMetrics.ApplyFontTree(card,"normal")
@@ -3344,7 +3337,6 @@ function M.Refresh()
         card.addBtn:SetText("View")
         card.addBtn:SetSize(52,22)
         card.addBtn:Show()
-        card.menuBtn:Hide()
         card.record = nil
 
         yOffset = yOffset + rowHeight
@@ -3457,11 +3449,6 @@ function M.Refresh()
     -- Detail panel
     RefreshDetailPanel(SelectedId())
 
-    -- Search placeholder visibility
-    if searchBox then
-        local lbl = searchBox:GetParent() and searchBox:GetParent().searchLabel
-        -- just handle via the text directly: show placeholder if empty
-    end
     viewDiagnostic.publishedAt = ClockNow()
     viewDiagnostic.publishedPage = math.max(1, math.floor(tonumber(
         projectionSummary and projectionSummary.page) or requestedPage))

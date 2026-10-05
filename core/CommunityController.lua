@@ -2245,6 +2245,14 @@ function Controller.New(options)
             or (UnitName and UnitName("player")) or "Unknown")
         local recordOwner = VerifiedDpsOwnerKey(record)
         local recordClaim = OwnerEvidenceKey(record)
+        -- Only this client's own verified record may make this client share
+        -- a page. A received record's page belongs to the remote owner, whose
+        -- own client shares it; a receiver never broadcasts a build it does
+        -- not own (peers would refuse that summary as not the owner's). A
+        -- peer that missed the owner's share obtains the page through its own
+        -- Sync request, the established request/response path.
+        local playerIsLocal = recordOwner ~= nil
+            and recordOwner == CurrentVerifiedOwnerKey()
         local explicitId = record and (record.buildId or record.b)
         if type(explicitId) ~= "string" or explicitId == "" then explicitId = nil end
         local catalog = Catalog()
@@ -2253,7 +2261,7 @@ function Controller.New(options)
                 and type(onComplete) ~= "function" then return nil end
             return function(outcome)
                 if outcome.committed == true then
-                    if broadcastOnComplete
+                    if broadcastOnComplete and playerIsLocal
                         and Identity.VerifiedOwnerKey(build) then
                         BroadcastIfPossible(build)
                     end
@@ -2391,7 +2399,8 @@ function Controller.New(options)
                     SavedCompletion(explicitId, explicitExisting, true),
                     "saved-build update")
                 if not saved then return nil, nil, saveWhy end
-                if Identity.VerifiedOwnerKey(explicitExisting) then
+                if playerIsLocal
+                    and Identity.VerifiedOwnerKey(explicitExisting) then
                     BroadcastIfPossible(explicitExisting)
                 end
             elseif promoteOwner or presentationChanged then
@@ -2402,7 +2411,7 @@ function Controller.New(options)
                     SavedCompletion(explicitId, explicitExisting, true),
                     "saved-build update")
                 if not saved then return nil, nil, saveWhy end
-                BroadcastIfPossible(explicitExisting)
+                if playerIsLocal then BroadcastIfPossible(explicitExisting) end
             end
             return explicitId, explicitExisting
         end
@@ -2468,8 +2477,6 @@ function Controller.New(options)
         end
         -- Locked Echoes remain supplemental record evidence. They are never
         -- folded into the ordinary build pool or its fingerprint.
-        local playerIsLocal = recordOwner ~= nil
-            and recordOwner == CurrentVerifiedOwnerKey()
         local localClass
         if playerIsLocal and UnitClass then
             local _, token = UnitClass("player")
@@ -2501,7 +2508,7 @@ function Controller.New(options)
                     SavedCompletion(ownAutoId, ownAutoBuild, true),
                     "automatic saved-build capture")
                 if not saved then return nil, nil, saveWhy end
-                if Identity.VerifiedOwnerKey(ownAutoBuild) then
+                if playerIsLocal and Identity.VerifiedOwnerKey(ownAutoBuild) then
                     BroadcastIfPossible(ownAutoBuild)
                 end
             end
@@ -2546,7 +2553,9 @@ function Controller.New(options)
             SavedCompletion(id, build, true), "saved-build capture",
             playerIsLocal and "local" or (recordOwner and "received" or "unknown"))
         if not saved then return nil, nil, saveWhy end
-        if Identity.VerifiedOwnerKey(build) then BroadcastIfPossible(build) end
+        if playerIsLocal and Identity.VerifiedOwnerKey(build) then
+            BroadcastIfPossible(build)
+        end
         return id, build
     end
 

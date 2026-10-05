@@ -11,12 +11,12 @@ core/UserText.lua|8134|90e4253b|copy
 core/Performance.lua|14178|4bdf6c75|copy
 core/StutterAlertIntegration.lua|5304|4ef7e6ca|copy
 core/EchoCatalogSource.lua|6036|fb5d8f5d|tree
-logic/Model.lua|31912|5938ef93|tree
+logic/Model.lua|31912|5938ef93|copy
 logic/Strategy.lua|5223|384dfcc1|copy
 logic/Ratchet.lua|28619|a82c8c1b|tree
 logic/EchoWeaver.lua|13468|75533259|copy
 logic/OrbPolicy.lua|6535|cca27eff|tree
-logic/Policy.lua|69306|30c74a86|tree
+logic/Policy.lua|69306|30c74a86|copy
 core/Revisions.lua|2435|0df23a6d|tree
 core/Identity.lua|27428|4979f88c|copy
 core/LoadoutEvidence.lua|48460|fdae8921|copy
