@@ -162,6 +162,8 @@ NAMES += ['automation_refused_freeze','dps_build_link_index','dps_board_cursor_s
 NAMES += ['catalog_tombstone_readers','dps_capture_readonly_note','tombstone_retirement_policy','dps_build_link_bounded']
 NAMES += ['sync_received_dps_egress','hash_cache_warm_budget','summary_cursor_named_readers','sync_hot_build_expiry']
 NAMES += ['journal_association_lazy_candidates','dps_index_summary_rows']
+NAMES += ['hash_cache_collision_budget','hash_cache_identity_fail_closed','sync_hot_build_release']
+NAMES += ['hash_cache_source_refusal']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

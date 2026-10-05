@@ -209,10 +209,14 @@ function Responder.Work.ForgetHotBuild(id)
 end
 
 -- A broadcast build stays hot for HOT_WINDOW seconds after its broadcast and
--- then leaves; nothing keeps it pinned for the rest of the session. The
--- window outlives the build's own queued packets (PENDING_MAX_AGE bounds
--- them) only by design of the two constants, not by any check here: queued
--- packets are serialized bytes and read no evidence. Checked once a second.
+-- then leaves; nothing keeps it pinned for the rest of the session. The pin
+-- is not what keeps the build's queued transfer intact: AdmitBuild
+-- serializes the whole build into the queued packets before it pins the
+-- build, and Transport owns those strings until they are sent or expire
+-- (PENDING_MAX_AGE, longer than this window). The pin only reports the
+-- build's evidence reference to the evidence reference provider for the
+-- responder window; its expiry releases that reference and nothing else
+-- (tests/prototype/sync_hot_build_release.lua). Checked once a second.
 local function ExpireHotBuilds()
     local now = Now()
     if now - hotBuildCheckedAt < 1 then return 0 end

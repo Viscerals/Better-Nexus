@@ -6,29 +6,46 @@ local Cache = {}
 Nexus.BuildHashCache = Cache
 
 local BUCKETS = 8
--- Work per pump (one lifecycle update). Both bounds follow from the catalog's
--- own capacity (2048 build identities over 8 buckets: at most 256 entries of
--- a bounded length per bucket), so one pump stays small on any catalog this
--- build can open, and a 1000-row catalog is ready in tens of frames instead
--- of thousands. A summary step inspects at most the catalog's one-call row
--- bound; a hash unit is one entry byte.
+-- Work per pump (one lifecycle update), stated and counted:
+--   WARM_ROWS_PER_PUMP  cursor calls per pump during the collection walk.
+--     Each call is bounded by the catalog's own per-call limits (it inspects
+--     at most the catalog's one-call row bound and copies at most one bounded
+--     summary or one marker). The calls are what this cache bounds; the rows
+--     a call inspects are the catalog's bound, reported by the catalog.
+--   HASH_WORK_PER_PUMP  units of digest work per pump. One unit is one entry
+--     collected from a bucket, one string comparison or one element move of
+--     the incremental merge sort, or one hashed byte. A pump stops at the
+--     unit that reaches the budget, in whatever bucket, phase or entry it
+--     is; the units of every pump are counted (Stats). A collision-heavy
+--     bucket (many identities whose IDs share one bucket; removal markers
+--     count like builds) takes more pumps, never a larger one.
 local WARM_ROWS_PER_PUMP = 32
 local HASH_WORK_PER_PUMP = 2048
+local MODES = {"delta", "legacy"}
 local state = {
     initialized=false,
     deltaEntries={}, legacyEntries={}, deltaHashes={}, legacyHashes={},
     deltaDirty={}, legacyDirty={}, revisionSource=nil, observedRevision=nil,
     warmJob=nil,hashJob=nil,initializing=false,targetRevision=nil,
-    -- The catalog identity the collected rows were read from. Hashing them
-    -- for any other catalog is refused (reset), like a changed revision.
-    catalog=nil,
+    -- The source the collected rows were read from: the catalog object, the
+    -- database it serves and its binding generation. The rows are valid for
+    -- exactly that source. Any other source, or none, answers nothing (and
+    -- resets) until a new collection has completed: never old rows, never a
+    -- blend of old and new rows.
+    source=nil,
     tombstoneCounts={},
     stats={
         hits=0, collectionWalks=0, fullRebuilds=0,
         deltaBucketRebuilds=0, legacyBucketRebuilds=0,
-        targetedInvalidations=0, fullInvalidations=0,
+        targetedInvalidations=0, fullInvalidations=0, sourceInvalidations=0,
         buildRows=0,tombstoneRows=0,warmPumps=0,warmRestarts=0,
         hashPumps=0,maxHashWorkPerPump=0,maxWarmRowsPerPump=0,
+        -- Digest work units by kind: totals, per-pump maxima, last pump.
+        hashCollected=0,hashCompares=0,hashMoves=0,hashBytes=0,sortPasses=0,
+        maxCollectedPerPump=0,maxComparesPerPump=0,maxMovesPerPump=0,
+        maxBytesPerPump=0,lastPumpWork=0,lastPumpCollected=0,
+        lastPumpCompares=0,lastPumpMoves=0,lastPumpBytes=0,
+        lastPumpCursorCalls=0,
     },
 }
 
@@ -74,8 +91,9 @@ local function TombstoneEntry(id, tombstone)
 end
 
 -- The canonical digest of one bucket: its entries sorted, djb2 over their
--- bytes. The one-call path below computes it at once; the pumped path
--- computes exactly the same bytes in bounded steps (HashJobStep).
+-- bytes. The one-call path below computes it at once (at most the one-call
+-- row bound of entries); the pumped path computes exactly the same bytes in
+-- bounded steps (HashJobStep).
 local function HashEntries(entries)
     local ordered, hash = {}, 5381
     for _, value in pairs(entries or {}) do ordered[#ordered + 1] = value end
@@ -109,6 +127,62 @@ end
 
 local function Catalog()
     return Nexus and Nexus.BuildCatalog
+end
+
+------------------------------------------------------------------------
+-- Source identity
+------------------------------------------------------------------------
+
+-- A catalog this cache can read at all: the retained walk and the targeted
+-- record read both need these entry points.
+local function CatalogUsable(catalog)
+    return type(catalog) == "table"
+        and type(catalog.BeginSummaryCursor) == "function"
+        and type(catalog.SummaryCursorNext) == "function"
+        and type(catalog.TombstoneNext) == "function"
+        and type(catalog.SyncState) == "function"
+end
+
+-- The identity of the source a collection reads: the catalog object, the
+-- database it serves and its binding generation (a rebind of the same
+-- object to another root or another binding changes the latter two), and
+-- the catalog's own agreement that this root still serves for the current
+-- database and owner (ManualPreparationStatus().ownerAgrees). That agreement
+-- is the catalog's documented owner/source refusal: it is false once the
+-- saved root, one of its maps, the local owner, the binding or another
+-- admitted identity drifted from the admitted token
+-- (OWNER_OR_GENERATION_MISMATCH), including a saved root replaced underneath
+-- the catalog before any rebind was requested, while the bound database the
+-- catalog reports is still the old one. It stays true while a same-source
+-- transaction is pending (ready=false, CATALOG_COMMIT_PENDING): that root
+-- still serves and the cache keeps answering for it. The ready flag alone
+-- is therefore not the test. nil, with the refusal reason, when the source
+-- cannot be used now.
+local function SourceOf(catalog)
+    if not CatalogUsable(catalog) then return nil, "CATALOG_UNUSABLE" end
+    local database, binding
+    if type(catalog.BoundDatabase) == "function" then
+        local ok, value = pcall(catalog.BoundDatabase)
+        if not ok then return nil, "CATALOG_UNUSABLE" end
+        database = value
+    end
+    if type(catalog.ManualPreparationStatus) == "function" then
+        local ok, status = pcall(catalog.ManualPreparationStatus)
+        if not ok or type(status) ~= "table" then return nil, "CATALOG_UNUSABLE" end
+        if status.ownerAgrees ~= true then
+            return nil, tostring(status.reason or "OWNER_OR_GENERATION_MISMATCH")
+        end
+        binding = status.binding
+    end
+    return {catalog=catalog, database=database, binding=binding}
+end
+
+local function SameSource(source)
+    if type(source) ~= "table" then return false end
+    local current = SourceOf(Catalog())
+    return current ~= nil and current.catalog == source.catalog
+        and current.database == source.database
+        and current.binding == source.binding
 end
 
 local function RebuildBucket(mode, bucket)
@@ -159,6 +233,8 @@ end
 
 local function Warm()
     local catalog = Catalog()
+    local source = SourceOf(catalog)
+    if not source then return false end
     local ok, delta, legacy, tombstones = pcall(CollectRows, catalog)
     if not ok or not delta then return false end
 
@@ -193,7 +269,7 @@ local function Warm()
         RebuildBucket("delta", bucket)
         RebuildBucket("legacy", bucket)
     end
-    state.catalog = catalog
+    state.source = source
     state.initialized = true
     state.stats.fullRebuilds = state.stats.fullRebuilds + 1
     local revisions = Nexus and Nexus.Revisions
@@ -209,18 +285,28 @@ local function InvalidateAll()
     state.warmJob = nil
     state.hashJob = nil
     state.targetRevision = nil
-    state.catalog = nil
+    state.source = nil
     if wasInitialized then
         state.stats.fullInvalidations = state.stats.fullInvalidations + 1
     end
 end
 
--- One record's entries re-read from the catalog's current root into the
--- collected buckets (initialized or still hashing), its buckets marked dirty.
--- False when the catalog cannot answer for it; the caller then resets.
+-- The source the retained rows came from no longer serves, or is not the
+-- source serving now: nothing collected is kept.
+local function InvalidateSource()
+    if state.initialized or state.initializing or state.warmJob then
+        state.stats.sourceInvalidations = state.stats.sourceInvalidations + 1
+    end
+    InvalidateAll()
+end
+
+-- One record's entries re-read from the source's current root into the
+-- collected buckets (initialized or still hashing), its buckets marked
+-- dirty. False when the catalog cannot answer for it; the caller then
+-- resets. Only called once SameSource holds.
 local function ApplyRecord(id)
-    local catalog = Catalog()
-    if not (catalog and catalog.SyncState) then return false end
+    local catalog = state.source and state.source.catalog
+    if not (catalog and type(catalog.SyncState) == "function") then return false end
     local ok, record = pcall(catalog.SyncState, id)
     if not ok or type(record) ~= "table" then return false end
 
@@ -246,7 +332,8 @@ local function ApplyRecord(id)
             + (hasTombstone and 1 or 0) - (hadTombstone and 1 or 0))
     state.deltaDirty[bucket], state.legacyDirty[bucket] = true, true
     -- A hash job on another bucket keeps its place; one on this bucket
-    -- would hash stale material and starts over on the next pump.
+    -- would hash stale material (its collection iterates this very table)
+    -- and starts over on the next pump.
     if state.hashJob and state.hashJob.bucket == bucket then
         state.hashJob = nil
     end
@@ -267,7 +354,7 @@ local function AbandonWarmWalk()
     state.hashJob = nil
     state.initializing = false
     state.targetRevision = nil
-    state.catalog = nil
+    state.source = nil
     state.stats.warmRestarts = state.stats.warmRestarts + 1
 end
 
@@ -275,24 +362,28 @@ local function OnRevision(_, revision, detail)
     state.observedRevision = revision
     if state.warmJob then
         AbandonWarmWalk()
-    elseif state.initializing then
-        -- The rows are collected and being hashed. A record-scope revision
-        -- that names its record is absorbed: that record is re-read from the
-        -- current root and only its buckets are hashed again. Anything else
-        -- (an all-scope revision, an unnamed record, a catalog that no
-        -- longer is the one the rows came from, a record the catalog cannot
-        -- answer for) is unknown change and resets the preparation.
-        if type(detail) == "table" and detail.scope == "record"
-            and detail.id ~= nil and state.catalog == Catalog()
-            and ApplyRecord(detail.id) then
-            state.targetRevision = revision
-        else
+    elseif state.initializing or state.initialized then
+        -- Collected rows exist (being hashed, or ready). A record-scope
+        -- revision that names its record, from the same source the rows came
+        -- from, is absorbed: that record is re-read from the current root
+        -- and only its buckets are hashed again. Anything else (an all-scope
+        -- revision, an unnamed record, a source that is not the one the rows
+        -- came from, a record the catalog cannot answer for) is unknown
+        -- change and resets the preparation: old and new rows never mix.
+        local named = type(detail) == "table" and detail.scope == "record"
+            and detail.id ~= nil
+        if not named or not SameSource(state.source) then
             InvalidateAll()
+        elseif state.initializing then
+            if ApplyRecord(detail.id) then
+                state.targetRevision = revision
+            else
+                InvalidateAll()
+            end
+        else
+            state.hashJob = nil
+            UpdateRecord(detail.id)
         end
-    elseif type(detail) == "table" and detail.scope == "record"
-        and detail.id ~= nil then
-        state.hashJob = nil
-        UpdateRecord(detail.id)
     else
         InvalidateAll()
     end
@@ -318,9 +409,8 @@ end
 
 local function StartWarmJob()
     local catalog = Catalog()
-    if not (catalog and type(catalog.BeginSummaryCursor) == "function"
-        and type(catalog.SummaryCursorNext) == "function"
-        and type(catalog.TombstoneNext) == "function") then return false end
+    local source = SourceOf(catalog)
+    if not source then return false end
     -- Its own named slot, so the warm-up and the Community list walk never
     -- cancel each other's cursor.
     local ok, token = pcall(catalog.BeginSummaryCursor, "build-hash-cache")
@@ -328,7 +418,7 @@ local function StartWarmJob()
     local tombstoneCounts = {}
     for bucket = 1, BUCKETS do tombstoneCounts[bucket] = 0 end
     state.warmJob = {
-        catalog=catalog,phase="summary",summaryCursor=token,
+        source=source,catalog=catalog,phase="summary",summaryCursor=token,
         tombstoneCursor=nil,deltaEntries=NewBuckets(),
         legacyEntries=NewBuckets(),buildRows=0,tombstoneRows=0,
         tombstoneCounts=tombstoneCounts,revision=CurrentBuildRevision(),
@@ -344,6 +434,7 @@ local function RestartWarmJob()
     state.hashJob = nil
     state.initializing = false
     state.targetRevision = nil
+    state.source = nil
     state.stats.warmRestarts = state.stats.warmRestarts + 1
     return StartWarmJob()
 end
@@ -360,19 +451,19 @@ local function FinishWarmCollection(job)
     state.stats.tombstoneRows = job.tombstoneRows
     state.tombstoneCounts = job.tombstoneCounts
     state.targetRevision = job.revision
-    state.catalog = job.catalog
+    state.source = job.source
     state.warmJob = nil
 end
 
--- Up to WARM_ROWS_PER_PUMP cursor steps per pump. Each summary step inspects
+-- Up to WARM_ROWS_PER_PUMP cursor calls per pump. Each summary call inspects
 -- at most the catalog's one-call row bound and copies one bounded summary;
--- each tombstone step reads one marker. The walk finishes, restarts, or
+-- each tombstone call reads one marker. The walk finishes, restarts, or
 -- yields; it never hands out a partial collection.
 local function PumpWarmJob()
     local job = state.warmJob
     if not job then return false end
     state.stats.warmPumps = state.stats.warmPumps + 1
-    if job.catalog ~= Catalog() or CurrentBuildRevision() ~= job.revision then
+    if not SameSource(job.source) or CurrentBuildRevision() ~= job.revision then
         RestartWarmJob()
         return false
     end
@@ -410,6 +501,7 @@ local function PumpWarmJob()
             end
             if done or id == nil then
                 FinishWarmCollection(job)
+                state.stats.lastPumpCursorCalls = steps
                 state.stats.maxWarmRowsPerPump = math.max(
                     state.stats.maxWarmRowsPerPump, steps)
                 return false, true
@@ -425,13 +517,18 @@ local function PumpWarmJob()
             progressed = true
         end
     end
+    state.stats.lastPumpCursorCalls = steps
     state.stats.maxWarmRowsPerPump = math.max(
         state.stats.maxWarmRowsPerPump, steps)
     return false, progressed
 end
 
+------------------------------------------------------------------------
+-- Bounded digest work
+------------------------------------------------------------------------
+
 local function StartHashJob()
-    for _, mode in ipairs({"delta", "legacy"}) do
+    for _, mode in ipairs(MODES) do
         local dirty = mode == "delta" and state.deltaDirty or state.legacyDirty
         local entries = mode == "delta"
             and state.deltaEntries or state.legacyEntries
@@ -439,7 +536,7 @@ local function StartHashJob()
             if dirty[bucket] then
                 state.hashJob = {
                     mode=mode,bucket=bucket,entries=entries[bucket],
-                    phase="collect",values={},
+                    phase="collect",key=nil,values={},count=0,
                 }
                 return true
             end
@@ -453,7 +550,7 @@ local function FinishHashJob(job)
         and state.deltaHashes or state.legacyHashes
     local dirty = job.mode == "delta"
         and state.deltaDirty or state.legacyDirty
-    hashes[job.bucket] = #job.values > 0
+    hashes[job.bucket] = job.count > 0
         and string.format("%x", job.hash) or "0"
     dirty[job.bucket] = nil
     local stat = job.mode == "delta"
@@ -462,49 +559,130 @@ local function FinishHashJob(job)
     state.hashJob = nil
 end
 
--- One bounded step of one bucket's digest. The collect step gathers and
--- sorts the bucket's entries at once (at most 256 of them, the catalog's
--- capacity over 8 buckets); every later step hashes at most `budget` bytes.
--- Returns whether the bucket is finished and the work units it consumed.
-local function HashJobStep(job, budget)
-    if job.phase == "collect" then
-        local values = {}
-        for _, value in pairs(job.entries) do
-            if value ~= nil then values[#values + 1] = value end
+-- The merge of the pair of runs that starts at `left` in the current pass.
+local function StartMerge(job, left)
+    local n, width = job.count, job.width
+    job.left, job.leftEnd = left, math.min(left + width - 1, n)
+    job.right, job.rightEnd = left + width, math.min(left + 2 * width - 1, n)
+    job.out = left
+    job.take = nil
+end
+
+local function StartSort(job)
+    job.width = 1
+    job.src, job.dst = job.values, {}
+    job.sorted = false
+    StartMerge(job, 1)
+end
+
+local function StartHash(job)
+    job.phase = "hash"
+    job.hash = 5381
+    job.index, job.pos = 1, 0
+end
+
+-- One unit of the bottom-up merge sort: one string comparison (which side
+-- supplies the next element; the left side on equal strings, so the sort
+-- is stable) or one element move into the pass's output. Runs double every
+-- pass; the pass's output becomes the next pass's input. The result is the
+-- ascending order of the entry strings, the canonical order of the digest.
+-- Returns the units spent (always 1).
+local function SortUnit(job, counters)
+    local src, dst = job.src, job.dst
+    if job.take == nil then
+        if job.left > job.leftEnd then
+            job.take = "right"
+        elseif job.right > job.rightEnd then
+            job.take = "left"
+        else
+            counters.compares = counters.compares + 1
+            job.take = src[job.right] < src[job.left] and "right" or "left"
+            return 1
         end
-        table.sort(values)
-        job.phase = "hash"
-        job.values = values
-        job.hash = 5381
-        job.valueIndex = 1
-        job.characterIndex = 1
-        if #values == 0 then
-            FinishHashJob(job)
-            return true, 1
-        end
-        return false, #values
     end
-    local consumed, hash = 0, job.hash
+    if job.take == "left" then
+        dst[job.out] = src[job.left]
+        job.left = job.left + 1
+    else
+        dst[job.out] = src[job.right]
+        job.right = job.right + 1
+    end
+    job.out = job.out + 1
+    job.take = nil
+    counters.moves = counters.moves + 1
+    if job.out > job.rightEnd then
+        local nextLeft = job.rightEnd + 1
+        if nextLeft > job.count then
+            -- Pass complete: its output is the next pass's input.
+            job.src, job.dst = dst, src
+            job.width = job.width * 2
+            state.stats.sortPasses = state.stats.sortPasses + 1
+            if job.width >= job.count then
+                job.sorted = true
+                job.values = job.src
+            else
+                StartMerge(job, 1)
+            end
+        else
+            StartMerge(job, nextLeft)
+        end
+    end
+    return 1
+end
+
+-- One pump's share of one bucket's digest: at most `budget` units, each one
+-- counted in `counters`. Phases, each resumable at any unit:
+--   collect  one entry per unit, the bucket's entries in table order (a
+--            targeted update of this bucket discards the job, ApplyRecord);
+--   sort     the incremental merge sort above, one compare or move per unit;
+--   hash     one byte per unit, djb2 over the sorted entries, resumable
+--            inside an entry string.
+-- Returns the units spent and whether the bucket's digest is finished.
+local function HashJobStep(job, budget, counters)
+    local consumed = 0
     while consumed < budget do
-        local value = job.values[job.valueIndex]
-        if value == nil then
+        if job.phase == "collect" then
+            local key, value = next(job.entries, job.key)
+            if key == nil then
+                if job.count > 1 then
+                    job.phase = "sort"
+                    StartSort(job)
+                else
+                    StartHash(job)
+                end
+            else
+                job.key = key
+                if value ~= nil then
+                    job.count = job.count + 1
+                    job.values[job.count] = value
+                end
+                consumed = consumed + 1
+                counters.collected = counters.collected + 1
+            end
+        elseif job.phase == "sort" then
+            consumed = consumed + SortUnit(job, counters)
+            if job.sorted then StartHash(job) end
+        else
+            local value = job.values[job.index]
+            if value == nil then
+                FinishHashJob(job)
+                return consumed, true
+            end
+            local hash = job.hash
+            local last = math.min(#value, job.pos + (budget - consumed))
+            for i = job.pos + 1, last do
+                hash = ((hash * 33) + value:byte(i)) % 2147483648
+            end
             job.hash = hash
-            FinishHashJob(job)
-            return true, math.max(1, consumed)
-        end
-        local last = math.min(#value, job.characterIndex + (budget - consumed) - 1)
-        for i = job.characterIndex, last do
-            hash = ((hash * 33) + value:byte(i)) % 2147483648
-        end
-        consumed = consumed + (last - job.characterIndex + 1)
-        job.characterIndex = last + 1
-        if job.characterIndex > #value then
-            job.valueIndex = job.valueIndex + 1
-            job.characterIndex = 1
+            consumed = consumed + (last - job.pos)
+            counters.bytes = counters.bytes + (last - job.pos)
+            job.pos = last
+            if job.pos >= #value then
+                job.index, job.pos = job.index + 1, 0
+            end
         end
     end
-    job.hash = hash
-    return false, math.max(1, consumed)
+    return consumed, false
 end
 
 local function HashesCurrent()
@@ -516,27 +694,61 @@ local function HashesCurrent()
     return true
 end
 
+local function RecordPumpWork(work, counters)
+    local stats = state.stats
+    stats.lastPumpWork = work
+    stats.lastPumpCollected, stats.lastPumpCompares = counters.collected, counters.compares
+    stats.lastPumpMoves, stats.lastPumpBytes = counters.moves, counters.bytes
+    stats.hashCollected = stats.hashCollected + counters.collected
+    stats.hashCompares = stats.hashCompares + counters.compares
+    stats.hashMoves = stats.hashMoves + counters.moves
+    stats.hashBytes = stats.hashBytes + counters.bytes
+    stats.maxHashWorkPerPump = math.max(stats.maxHashWorkPerPump, work)
+    stats.maxCollectedPerPump = math.max(stats.maxCollectedPerPump, counters.collected)
+    stats.maxComparesPerPump = math.max(stats.maxComparesPerPump, counters.compares)
+    stats.maxMovesPerPump = math.max(stats.maxMovesPerPump, counters.moves)
+    stats.maxBytesPerPump = math.max(stats.maxBytesPerPump, counters.bytes)
+end
+
+-- Fail closed before any answer: no readable catalog, a source the catalog
+-- refuses now (owner/source/generation mismatch), or retained rows from a
+-- source that is not the one serving now, leave nothing to serve. A refused
+-- source also starts no collection: the next collection waits until the
+-- catalog agrees again (the root restored, or the requested rebind done).
+local function CheckSource()
+    local current, refusal = SourceOf(Catalog())
+    state.stats.sourceRefusal = refusal
+    if not current then
+        InvalidateSource()
+        return false
+    end
+    if (state.initialized or state.initializing) and not state.warmJob
+        and not SameSource(state.source) then
+        InvalidateSource()
+    end
+    return true
+end
+
 function Cache.Pump()
     EnsureSubscription()
+    state.stats.lastPumpWork, state.stats.lastPumpCursorCalls = 0, 0
+    state.stats.lastPumpCollected, state.stats.lastPumpCompares = 0, 0
+    state.stats.lastPumpMoves, state.stats.lastPumpBytes = 0, 0
+    if not CheckSource() then return false end
     if state.initialized and HashesCurrent() then return true end
     if not state.warmJob and not state.initializing and not state.initialized then
         if not StartWarmJob() then return false end
     end
     if state.warmJob then return PumpWarmJob() end
-    if state.initializing and state.catalog ~= Catalog() then
-        -- The collected rows belong to a catalog that no longer serves.
-        InvalidateAll()
-        return false
-    end
     local work = 0
+    local counters = {collected=0, compares=0, moves=0, bytes=0}
     state.stats.hashPumps = state.stats.hashPumps + 1
     while work < HASH_WORK_PER_PUMP do
         if not state.hashJob and not StartHashJob() then break end
-        local _, consumed = HashJobStep(state.hashJob, HASH_WORK_PER_PUMP - work)
+        local consumed = HashJobStep(state.hashJob, HASH_WORK_PER_PUMP - work, counters)
         work = work + consumed
     end
-    state.stats.maxHashWorkPerPump = math.max(
-        state.stats.maxHashWorkPerPump, work)
+    RecordPumpWork(work, counters)
     if not HashesCurrent() then return false, work > 0 end
     if state.initializing then
         if CurrentBuildRevision() ~= state.targetRevision then
@@ -564,6 +776,7 @@ end
 
 local function Get(mode)
     EnsureSubscription()
+    if not CheckSource() then return nil end
     local revisions = Nexus and Nexus.Revisions
     local current = revisions and revisions.Get
         and revisions.Get(revisions.BUILD_LIBRARY_CHANGED) or nil
@@ -601,6 +814,7 @@ function Cache.BucketHasTombstone(bucket)
     bucket = tonumber(bucket)
     if not state.initialized or not bucket or bucket < 1
         or bucket > BUCKETS then return nil end
+    if not CheckSource() or not state.initialized then return nil end
     return (tonumber(state.tombstoneCounts[bucket]) or 0) > 0
 end
 
@@ -617,6 +831,10 @@ function Cache.Stats()
     out.revision = state.observedRevision
     out.buckets = BUCKETS
     out.warmRowBudget, out.hashWorkBudget = WARM_ROWS_PER_PUMP, HASH_WORK_PER_PUMP
+    out.sourceAgrees = state.source ~= nil and SameSource(state.source)
+    -- The catalog's current refusal of its source, if any (a passive read).
+    local _, refusal = SourceOf(Catalog())
+    out.sourceRefusal = refusal
     out.dirtyBuckets = 0
     if state.initialized then
         for bucket = 1, BUCKETS do
@@ -625,6 +843,7 @@ function Cache.Stats()
             end
         end
     end
+    -- The delta digest as hashed (no computation here; nil until ready).
     out.digest = state.initialized
         and table.concat(state.deltaHashes or {}, ",") or nil
     return out
