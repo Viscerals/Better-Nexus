@@ -4048,9 +4048,18 @@ end
 -- when its source moves (into, within and out of rejection) and stays put
 -- while identical rejections repeat. Nothing takes ownership, confirmation,
 -- roles or slots from it; every reader still uses its own getter and rules.
--- A source deeper or larger than the bounds below reads "unreadable", which
--- does not track further change until the field is readable again.
-local RAW_SHAPE_DEPTH, RAW_SHAPE_PARTS = 8, 100000
+-- The reading is bounded WHILE it is made: keys are counted as they are
+-- collected (nothing over the limit is sorted), a string is measured before it
+-- is copied, and the size is checked before every append. A source deeper than
+-- RAW_SHAPE_DEPTH, with more than RAW_SHAPE_ENTRIES tables, keys and values,
+-- larger than RAW_SHAPE_BYTES, holding one string longer than
+-- RAW_SHAPE_SCALAR_BYTES, or containing a cycle reads "unreadable" as a whole.
+-- That reading does not track further change until the source is back within
+-- the limits. Supported mirrors are well inside them (a 15-row, 85-Echo slot
+-- mirror reads about 73 KB in about 13000 entries).
+local RAW_SHAPE_DEPTH, RAW_SHAPE_ENTRIES = 8, 20000
+local RAW_SHAPE_BYTES, RAW_SHAPE_SCALAR_BYTES = 262144, 1024
+local RAW_SHAPE_UNREADABLE = "unreadable"
 
 local function RawShapeKeyLess(a, b)
     local ta, tb = type(a), type(b)
@@ -4060,33 +4069,45 @@ local function RawShapeKeyLess(a, b)
 end
 
 local function RawShape(value)
-    local parts, count, open = {}, 0, {}
+    local parts, count, bytes, entries, open = {}, 0, 0, 0, {}
+    local function Over() error(RAW_SHAPE_UNREADABLE, 0) end
     local function Add(text)
+        bytes = bytes + #text
+        if bytes > RAW_SHAPE_BYTES then Over() end
         count = count + 1
-        if count > RAW_SHAPE_PARTS then error("raw shape bound", 0) end
         parts[count] = text
     end
     local function Walk(v, depth)
+        entries = entries + 1
+        if entries > RAW_SHAPE_ENTRIES then Over() end
         local kind = type(v)
         if kind == "table" then
-            if open[v] or depth > RAW_SHAPE_DEPTH then Add("~"); return end
+            if depth > RAW_SHAPE_DEPTH or open[v] then Over() end
             open[v] = true
-            local keys = {}
-            for k in pairs(v) do keys[#keys + 1] = k end
+            local keys, n = {}, 0
+            for k in next, v do
+                n = n + 1
+                if entries + n > RAW_SHAPE_ENTRIES then Over() end
+                keys[n] = k
+            end
             table.sort(keys, RawShapeKeyLess)
             Add("{")
-            for i = 1, #keys do
+            for i = 1, n do
                 Walk(keys[i], depth + 1); Add("=")
-                Walk(v[keys[i]], depth + 1); Add(";")
+                Walk(rawget(v, keys[i]), depth + 1); Add(";")
             end
             Add("}")
             open[v] = nil
-        elseif kind == "string" then Add(TextPart(v))
+        elseif kind == "string" then
+            local size = #v
+            if size > RAW_SHAPE_SCALAR_BYTES
+                or bytes + size + 12 > RAW_SHAPE_BYTES then Over() end
+            Add(TextPart(v))
         elseif kind == "number" then Add(NumberPart(v) or tostring(v))
         elseif kind == "boolean" then Add(v and "T" or "F")
         else Add(kind) end
     end
-    if not pcall(Walk, value, 0) then return "unreadable" end
+    if not pcall(Walk, value, 0) then return RAW_SHAPE_UNREADABLE end
     return table.concat(parts)
 end
 

@@ -193,9 +193,47 @@ do
  check(Key(kept.lockedEchoes)==LOCKED and kept.lockedAuthorityProven==true,'an ordinary-only answer for the same revision does not erase the known roles')
  -- A newer revision: the stored roles are what the answers for that
  -- revision state, never the old revision's record. The bridge carries every
- -- owner packet to this peer, and this peer is itself a capable requester,
- -- so both forms may arrive here; sync_locked_roles_payload 11 fixes the
- -- order (full, newer ordinary-only, newer full) with crafted packets.
+ -- owner packet to this peer, and this peer is itself a capable requester, so
+ -- the owner answers it with a FULL answer for the newer revision as well
+ -- (sync_locked_roles_payload 11 fixes that order with crafted packets).
+ -- When that full answer lands decides what the replay check below meets. It
+ -- used to land whenever the profiler-clock pacing let it: before the
+ -- snapshot (the replay then met roles already completed, which a stale
+ -- answer can never change anyway), or inside the replay window, where it
+ -- completed the same revision legitimately and failed the comparison on
+ -- timing alone (no replay is needed for that failure; review-repair evidence).
+ -- So the owner's newer FULL answers are held (P.hold: order kept, nothing
+ -- dropped, released below) until the replay has been judged. The replay then
+ -- always meets the state the revision guard protects -- the newer revision
+ -- with unknown roles -- and only the replay can reach the record meanwhile.
+ local function Pending(p,index)
+  local packet=p.H.sent[index];if not packet then return nil end
+  local text=packet.text:gsub('||','|'):gsub('^P%d+:','')
+  local f={};for field in (text..'|'):gmatch('([^|]*)|') do f[#f+1]=field end
+  if f[1]~='WLRB' then return nil end
+  local i,n=(f[5] or ''):match('^(%d+)/(%d+)$')
+  return {id=f[3],m=tonumber(f[4]),i=tonumber(i),n=tonumber(n),chunk=f[6],req=f[7]}
+ end
+ -- The owner's payload that the pending packet belongs to, once all its
+ -- chunks were sent (nil while it is still being sent).
+ local function PendingPayload(p,index)
+  local head=Pending(p,index);local got={}
+  for k=index,#p.H.sent do
+   local w=Pending(p,k)
+   if w and w.id==head.id and w.m==head.m and w.n==head.n and w.req==head.req then got[w.i]=w.chunk end
+   local complete=true;for j=1,head.n do if not got[j] then complete=false end end
+   if complete then local Codec=p.e.Nexus.Codec;return Codec.JSONDecode(Codec.Base64Decode(table.concat(got))) end
+  end
+ end
+ local holding=true
+ P.hold=function(p)
+  if p~=P.A or not holding then return false end
+  local w=Pending(p,p.cursor+1)
+  if not (w and w.id==idFour and w.m and w.m>stamp) then return false end
+  local payload=PendingPayload(p,p.cursor+1)
+  if payload==nil then return true end
+  return payload.lv==1
+ end
  local edited=P.A.e.Nexus.CommunityBuilds.EditBuild(idFour,'Locked roles four (edited)','Edited description',nil)
  check(edited,'fixture: the owner edits the build')
  P.Until(function() local r=Get(P.A,idFour);return r and r.lastModified>stamp end)
@@ -203,6 +241,37 @@ do
  Ask(P.A,'Delta-Ebonhold',idFour,false)
  local okNewer=pcall(P.Until,function() local r=Get(P.B,idFour);return r and r.lastModified==newer end,4000)
  check(okNewer,'fixture: the newer revision arrives')
+ local last=Get(P.B,idFour)
+ check(last.lastModified==newer and Unknown(last),'the newer ordinary-only revision has unknown roles, not the old rows: '..Key(last.lockedEchoes))
+ -- Out of order: the older full answer replayed afterwards is ignored. Every
+ -- replayed answer must reach the receiver and be refused as stale, and the
+ -- record must not change: the older revision does not come back and its
+ -- stated roles do not complete the newer revision.
+ local Sync=P.B.e.Nexus.Sync
+ local skipped0=Sync.Stats().duplicatesSkipped or 0
+ local replayed,answers=0,0
+ for _,t in ipairs(P.trace) do
+  if t.code=='WLRB' and t.from==P.A.name then
+   local text=t.text:gsub('||','|'):gsub('^P%d+:','')
+   local f={};for field in (text..'|'):gmatch('([^|]*)|') do f[#f+1]=field end
+   if f[3]==idFour and tonumber(f[4])==stamp then
+    P.Channel(P.B,t.text,P.A.name);replayed=replayed+1
+    local i,n=(f[5] or ''):match('^(%d+)/(%d+)$')
+    if i and i==n then answers=answers+1 end
+   end
+  end
+ end
+ check(replayed>=1 and answers>=1,'fixture: older answers were replayed: '..replayed..' packets, '..answers..' answers')
+ for _=1,200 do P.Step() end
+ local final=Get(P.B,idFour)
+ local refused=(Sync.Stats().duplicatesSkipped or 0)-skipped0
+ check(refused>=answers,'every replayed older answer reached the receiver and was refused as stale: '..refused..' of '..answers)
+ check(final.lastModified==newer and Key(final.lockedEchoes)==Key(last.lockedEchoes) and final.lockedAuthorityProven==last.lockedAuthorityProven,'an older full answer replayed later does not bring back the old rows')
+ -- Released: the owner's held packets arrive in their order, and the newer
+ -- revision is completed by its own full answer with the set it states.
+ holding=false;P.hold=nil
+ local okDone=pcall(P.Until,function() local r=Get(P.B,idFour);return r and r.lockedAuthorityProven==true end,4000)
+ check(okDone,'the newer revision is completed by its own full answer once it arrives')
  local statedSet
  for _,payload in ipairs(Payloads(P.A,idFour)) do
   if payload.m==newer and payload.lv==1 then
@@ -210,25 +279,8 @@ do
    statedSet=Key(r)
   end
  end
- local last=Get(P.B,idFour)
- if statedSet then
-  check(last.lockedAuthorityProven==true and Key(last.lockedEchoes)==statedSet,'the newer revision holds the set its own answer stated: '..Key(last.lockedEchoes))
- else
-  check(Unknown(last),'the newer ordinary-only revision has unknown roles, not the old rows: '..Key(last.lockedEchoes))
- end
- -- Out of order: the older full answer replayed afterwards is ignored.
- local replayed=0
- for _,t in ipairs(P.trace) do
-  if t.code=='WLRB' and t.from==P.A.name then
-   local text=t.text:gsub('||','|'):gsub('^P%d+:','')
-   local f={};for field in (text..'|'):gmatch('([^|]*)|') do f[#f+1]=field end
-   if f[3]==idFour and tonumber(f[4])==stamp then P.Channel(P.B,t.text,P.A.name);replayed=replayed+1 end
-  end
- end
- check(replayed>=1,'fixture: older answers were replayed: '..replayed)
- for _=1,200 do P.Step() end
- local final=Get(P.B,idFour)
- check(final.lastModified==newer and Key(final.lockedEchoes)==Key(last.lockedEchoes) and final.lockedAuthorityProven==last.lockedAuthorityProven,'an older full answer replayed later does not bring back the old rows')
+ local done=Get(P.B,idFour)
+ check(statedSet~=nil and done.lastModified==newer and Key(done.lockedEchoes)==statedSet,'the newer revision holds the set its own answer stated: '..Key(done.lockedEchoes))
 end
 
 -- 5. Sync Off: no capability advertisement (and no request) is sent.

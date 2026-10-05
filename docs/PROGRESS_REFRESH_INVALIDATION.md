@@ -19,7 +19,7 @@ Now each field is checked on its own (`CaptureEchoSnapshot`):
 | Field state | Snapshot value | Generation |
 |---|---|---|
 | accepted | the strict fingerprint, as before | moves when the fingerprint changes |
-| rejected | `rejected:<reason>` plus the raw source's shape | moves into, within and out of rejection when the source changes; not on identical repeats |
+| rejected | `rejected:<reason>` plus the raw source's shape | moves into, within (inside the reading limits below) and out of rejection when the source changes; not on identical repeats |
 
 - A rejected field is never accepted and never stands for the last accepted one. Its raw shape is
   change evidence only; no reader takes ownership, roles, slots or confirmation from it. Every reader
@@ -33,8 +33,15 @@ Now each field is checked on its own (`CaptureEchoSnapshot`):
   (`EchoActiveSlotGeneration`), as when the reconciliation failed before.
 - Legacy assignment upgrade (`docs/W3_LEGACY_ASSIGNMENT_UPGRADE.md`): absence is certified only while
   the slots field is accepted.
-- A raw source deeper than 8 levels or larger than 100000 parts reads `unreadable` and stops tracking
-  further change until it is readable again.
+- The raw reading is bounded while it is made (`RawShape`): keys are counted as they are collected
+  and nothing over the limit is sorted; a string is measured before it is copied; the size is checked
+  before every append. A source deeper than 8 table levels, with more than 20000 tables, keys and
+  values, larger than 262144 bytes, holding one string longer than 1024 bytes, or containing a
+  cycle reads `unreadable` as a whole field. Identical over-limit sources give the identical
+  reading (no generation churn); a change of an over-limit source is NOT tracked until the source is
+  back within the limits, and then it is read again (the generation moves once). Supported mirrors
+  are well inside the limits: a 15-row, 85-Echo slot mirror reads about 73 KB in about 13000
+  entries; an over-limit source is refused after at most the limit's work (`echo_raw_shape_bounds`).
 
 ## D2: an assigned-Wishlist change could be missed by the static fallback
 
@@ -58,6 +65,10 @@ missed for good; each is repaired:
 mismatch orderings; HUD against the fresh getter; overlay and Journal; no minted confirmation from a
 rejected granted mirror; no repeated work on repeated rejections or in steady state; recovery; locked
 roles fail-closed. Both fail on the code before this change.
+`tests/prototype/echo_raw_shape_bounds.lua`: wide, long-string, many-string, deep and cyclic raw
+sources against the limits above (largest sort, heap growth, reading size), over-limit idempotence and
+recovery through the real reconciliation, and no ownership change; it fails on 19ac830, whose
+first `RawShape` collected and sorted every key before its part limit applied.
 
 Not changed: ordinary and locked roles, the ownership getters and their trust rules, the strict
 fingerprints themselves, granted refresh requests (none added), and the planner.
