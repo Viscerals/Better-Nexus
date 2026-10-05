@@ -286,12 +286,6 @@ function M.DeleteBuild(id)
     return ControllerInstance().DeleteBuild(id)
 end
 
--- The browser's whole-collection read: every admitted record as a defensive
--- copy, and whether the bounded walk reached the end of the catalog.
-function M.Builds()
-    return ControllerInstance().Builds()
-end
-
 function M._PumpPendingLockIn()
     return ControllerInstance()._PumpPendingLockIn()
 end

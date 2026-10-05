@@ -921,11 +921,8 @@ function Retention.Enforce(database, reason)
         if owner and not transaction then
             return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
         end
-        -- This branch only COUNTS the DPS buckets for the summary: it reads
-        -- the durable payload in place and writes nothing. (The ranked branch
-        -- below copies the payload because it trims the copy.)
         local dpsSource = DurablePayload(database, "dpsCapture")
-        local dps = type(dpsSource) == "table" and dpsSource or nil
+        local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
         local overlaySource = DurablePayload(database, "communityBuilds")
         overlaySource = type(overlaySource) == "table" and overlaySource or {}
         local character = type(dps) == "table" and dps.characterBest or nil

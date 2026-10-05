@@ -21,7 +21,9 @@ local Store
 -- per-character state goes through StoreAuthorityOwnerV1.UpdateStateV1, the
 -- architecture's counted private mutation entry (lines 1907-1912). Read-only
 -- uses of Store.State() below are unchanged.
-local function UpdateStoreState(mutator)
+-- `readLive` (no mutator): the owner's read-only entry for the same live row,
+-- for an identity sentinel; it compares and invalidates nothing.
+local function UpdateStoreState(mutator, readLive)
     local internals = Nexus and Nexus.MainInternals
     local owner = type(internals) == "table" and internals.StoreAuthorityOwner
     -- Honour the INJECTED Store. A stub Store must never resolve the real
@@ -36,15 +38,20 @@ local function UpdateStoreState(mutator)
     local realStore = type(Store) == "table"
         and type(Store.Init) == "function"
         and type(Store.CurrentOwnerKey) == "function"
-    if realStore and type(owner) == "table"
-        and type(owner.UpdateStateV1) == "function" then
-        return owner.UpdateStateV1(mutator)
+    if realStore and type(owner) == "table" then
+        if readLive and type(owner.ReadStateV1) == "function" then
+            return owner.ReadStateV1()
+        end
+        if type(owner.UpdateStateV1) == "function" then
+            return owner.UpdateStateV1(mutator or function(row) return row end)
+        end
     end
     -- No authorized owner for THIS Store. Fall back to whatever state table the
     -- injected facade exposes, which is exactly the pre-migration behaviour for
     -- such a Store.
     local injected = Store and Store.State and Store.State()
     if type(injected) ~= "table" then return nil end
+    if readLive then return true, injected end
     return true, mutator(injected)
 end
 local callbacks
@@ -4505,8 +4512,10 @@ function A.AutomationSignature()
     -- post-expiry AutoLock evaluation.
     --
     -- The live row is what the sentinel always meant, so it is read through the
-    -- authorized entry. That read changes nothing, so it invalidates nothing.
-    local _, state = UpdateStoreState(function(row) return row end)
+    -- owner's read-only entry: it changes nothing, invalidates nothing and,
+    -- unlike a no-op mutator through UpdateStateV1, compares nothing (that
+    -- comparison walked the whole row every five seconds).
+    local _, state = UpdateStoreState(nil, true)
     if type(state) ~= "table" then state = nil end
     local settings = Store and Store.Settings and Store.Settings() or nil
     local associations = type(state) == "table" and state.loadoutWishlists or nil

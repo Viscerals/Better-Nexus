@@ -2925,13 +2925,6 @@ local function TerminalOutbound(reason, amount)
     NoteOutbound(reason, amount)
 end
 
-local function CurrentDpsRevision()
-    DB()
-    local revisions = Nexus and Nexus.Revisions
-    return revisions and type(revisions.Get) == "function"
-        and revisions.Get(revisions.DPS_CHANGED) or nil
-end
-
 local function NormalizeOutboundReason(reason)
     if reason == "duplicate" then return "duplicate_not_better" end
     if outboundStats[reason] ~= nil then return reason end
@@ -2982,7 +2975,7 @@ end
 function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
         responseContext, responseBudget)
     local localHash = tostring(DPS.GetSyncHash())
-    local localRevision = CurrentDpsRevision()
+    local _, localRevision = CurrentDpsRevision()
     progress = type(progress) == "table" and progress or {}
     local state = progress._responseState
     if peerHash and tostring(peerHash) == localHash then
@@ -3036,7 +3029,7 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
             pending=0,claimSafe=true}
         progress._responseState = state
     elseif tostring(DPS.GetSyncHash()) ~= state.localHash
-        or CurrentDpsRevision() ~= state.revision
+        or select(2, CurrentDpsRevision()) ~= state.revision
         or state.generation ~= responseGeneration then
         local pending = math.max(0, math.floor(tonumber(state.pending) or 0))
         if pending > 0 then TerminalOutbound("stale_record", pending) end
@@ -3950,11 +3943,14 @@ local function CommitSession(category)
         local setLabel = Identity and Identity.DisplaySafeText
             and Identity.DisplaySafeText(rawSetLabel, 1024, false)
             or "current Echo set"
+        -- A read-only saved root keeps this record for the session only;
+        -- the player is told so, here and in the DPS note below.
         print(string.format(
-            "|cff7fd5ffNexus:|r |cff4dff80New best for '%s' (%s): %s DPS!|r",
+            "|cff7fd5ffNexus:|r |cff4dff80New best for '%s' (%s): %s DPS!|r%s",
             tostring(setLabel), catLabel,
             dpsFloor >= 1000000 and string.format("%.2fM", dpsFloor / 1000000)
-            or string.format("%dk", math.floor(dpsFloor / 1000))))
+            or string.format("%dk", math.floor(dpsFloor / 1000)),
+            StorageReadOnly() and " |cffffc040(session only: saved data is read-only, so this record is not kept after a reload)|r" or ""))
 
         -- Global comparison is only meaningful when the exact current Echo
         -- set is already a published community build.
@@ -3971,8 +3967,9 @@ local function CommitSession(category)
         end
     end
 
-    Nexus.lastDpsNote = string.format("%s: %d DPS (%s)",
-        category, dpsFloor, build and build.title or "current Echo set")
+    Nexus.lastDpsNote = string.format("%s: %d DPS (%s)%s",
+        category, dpsFloor, build and build.title or "current Echo set",
+        StorageReadOnly() and " (session only: saved data is read-only)" or "")
     Debug("saved/retained best: " .. Nexus.lastDpsNote)
 
     RequestDataViewRefresh()
@@ -4434,36 +4431,6 @@ end
 -- reachable; ordinary callers retain the direct-owner ReceiveRecord contract.
 function DPS.ReceiveRelayedRecord(record, transportSender)
     return ReceiveRecord(record, transportSender, true)
-end
-
-function DPS.ReceiveSubmission(buildId, player, dps, level, category, ts,
-        duration)
-    dps = tonumber(dps); level = tonumber(level) or 0
-    category = (category == "lk" or category == "dummy") and category or "dummy"
-    local key = BuildKey(buildId)
-    if not (key and player and dps and dps > 0
-        and DPS.IsDurationEligible(category, duration)) then return false end
-    local bucket = CharacterBestStore()[category]
-    local characterKey = CharacterKey(player)
-    local existing = bucket[characterKey]
-    local row = {
-        dps = dps, level = level, ts = ts or 0, duration=duration,
-        player = player, buildId = buildId,
-        echoes = BuildSnapshot(CatalogGet(buildId)),
-        fingerprint = key, protocolVersion = PROTOCOL_VERSION,
-    }
-    ReferenceEvidence(row)
-    if not IsBetterPublicRecord(row, existing) then return false end
-    bucket[characterKey] = row
-    BumpDps("legacy submission received", {
-        scope="record", category=category, player=player,
-        characterKey=characterKey,
-    })
-    if Nexus.DataRetention and Nexus.DataRetention.Request then
-        Nexus.DataRetention.Request("legacy DPS record received")
-    end
-    RequestDataViewRefresh()
-    return true
 end
 
 ------------------------------------------------------------------------

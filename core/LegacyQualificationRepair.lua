@@ -220,11 +220,13 @@ local function ExistingBuild(id)
     return catalog and type(catalog.Get) == "function" and catalog.Get(id) or nil
 end
 
+-- A state question only: TombstoneState answers it without the two public
+-- record copies that SyncState makes for the visible and delta rows.
 local function Tombstoned(id)
     local catalog = Nexus.BuildCatalog
-    local state = id and catalog and type(catalog.SyncState) == "function"
-        and catalog.SyncState(id) or nil
-    return type(state) == "table" and state.tombstone ~= nil
+    local state = id and catalog and type(catalog.TombstoneState) == "function"
+        and catalog.TombstoneState(id) or nil
+    return type(state) == "table" and state.state ~= nil and state.state ~= "NONE"
 end
 
 local function HashText(value, seed)

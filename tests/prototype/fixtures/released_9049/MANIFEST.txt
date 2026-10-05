@@ -23,7 +23,7 @@ core/LoadoutEvidence.lua|48460|fdae8921|copy
 core/CandidateEvidence.lua|39893|640a6567|copy
 core/DataCompaction.lua|45727|a9070bf9|tree
 core/BuildCatalog.lua|319811|e97ac271|copy
-core/DataRetention.lua|53099|8acce751|tree
+core/DataRetention.lua|53099|8acce751|copy
 core/BuildHashCache.lua|20954|467065af|copy
 core/Store.lua|114813|39cde2bf|copy
 core/Errors.lua|6592|b8405cea|copy
@@ -76,7 +76,7 @@ ui/WishlistEditor.lua|36634|496aaea5|copy
 ui/WishlistOverlay.lua|17815|681adc48|copy
 ui/QuickStart.lua|9226|a8eca2b3|tree
 ui/CommunityRenderer.lua|141148|46c2e512|copy
-ui/CommunityBuilds.lua|16051|5b69c37b|tree
+ui/CommunityBuilds.lua|16051|5b69c37b|copy
 ui/Leaderboard.lua|63723|5b392cc8|copy
 ui/Nameplate.lua|6351|bc4a3ba0|tree
 ui/Changelog.lua|6394|b515014d|copy

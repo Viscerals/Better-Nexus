@@ -209,10 +209,15 @@ local VALID_CLASS = {
     DEATHKNIGHT=true,SHAMAN=true,MAGE=true,WARLOCK=true,DRUID=true,
 }
 
+-- true: a required field of an exact V1 removal marker. "optional": present
+-- only when the removed row carried it (MASTER-RC-016: its unknown evidence
+-- travels with the marker, see TombstoneRecord); a reloaded marker with it is
+-- still exact.
 local TOMBSTONE_V1_FIELDS = {
     schemaVersion=true, typedId=true, ownerKey=true, sourceKind=true,
     sourceIdentity=true, targetRowGeneration=true, targetRowProvenance=true,
     receiptRevision=true, receiptAtServerTime=true, remoteStampEvidence=true,
+    unknownEvidence="optional",
 }
 local BARRIER_V1_FIELDS = {
     schemaVersion=true, typedId=true, evictedCatalogGeneration=true,
@@ -1305,8 +1310,8 @@ local function ClassifyTombstone(raw, slot, work)
         for key in pairs(raw) do
             if not TOMBSTONE_V1_FIELDS[key] then exact = false; break end
         end
-        for key in pairs(TOMBSTONE_V1_FIELDS) do
-            if raw[key] == nil then exact = false end
+        for key, required in pairs(TOMBSTONE_V1_FIELDS) do
+            if required == true and raw[key] == nil then exact = false end
         end
     end
     if exact then
@@ -1628,120 +1633,6 @@ local function RemoveBucket(index, map, bucketKey, key)
         end
     end
     if bucket.count == 0 then map[bucketKey] = nil end
-end
-
-local function IndexRemove(index, rows, key)
-    local membership = index.memberships[key]
-    if not membership then return end
-    local exactBucket = membership.exact
-        and OwnBucket(index, index.exact, membership.exact) or nil
-    if exactBucket and exactBucket.ids[key] then
-        local field = membership.exactAuto and "autoCount" or "explicitCount"
-        exactBucket[field] = math.max(0, (exactBucket[field] or 0) - 1)
-    end
-    RemoveBucket(index, index.exact, membership.exact, key)
-    if exactBucket and index.exact[membership.exact] and exactBucket.winnerKey == key then
-        RecomputeExactWinner(rows, exactBucket)
-    end
-    RemoveBucket(index, index.fingerprints, membership.fingerprint, key)
-    RemoveBucket(index, index.titles, membership.title, key)
-    RemoveBucket(index, index.saved, membership.saved, key)
-    for _, spellKey in ipairs(membership.spells or {}) do
-        RemoveBucket(index, index.spells, spellKey, key)
-    end
-    local owner = membership.classOwner
-        and OwnBucket(index, index.ownerClasses, membership.classOwner) or nil
-    if owner and owner.ids[key] then
-        local class = owner.ids[key]
-        owner.ids[key] = nil
-        owner.count = owner.count - 1
-        owner.classes[class] = (owner.classes[class] or 1) - 1
-        if owner.classes[class] <= 0 then owner.classes[class] = nil end
-        if owner.count <= 0 then index.ownerClasses[membership.classOwner] = nil end
-    end
-    if membership.author then
-        local authorBucket = OwnBucket(index, index.authors, membership.author)
-        if authorBucket then
-            authorBucket[key] = nil
-            if next(authorBucket) == nil then index.authors[membership.author] = nil end
-        end
-    end
-    index.memberships[key] = nil
-end
-
-local function IndexAdd(index, rows, verdict, work)
-    local key = verdict.typedKey
-    local snapshot = verdict.snapshot
-    if not snapshot then return end
-    local membership = {}
-    local savedKind = verdict.savedKind
-    local exact = savedKind == "ordinary" and verdict.complete
-        and verdict.exactFingerprint or nil
-    local exactBucket = AddBucket(index, index.exact, exact, key, work, rows)
-    membership.exact = exact
-    membership.exactAuto = snapshot.autoDps == true
-    if exactBucket then
-        local field = membership.exactAuto and "autoCount" or "explicitCount"
-        exactBucket[field] = (exactBucket[field] or 0) + 1
-        if BetterExactCandidate(verdict.id, verdict, exactBucket.winnerId,
-            exactBucket.winnerKey and rows[exactBucket.winnerKey]) then
-            exactBucket.winnerKey, exactBucket.winnerId = key, verdict.id
-        end
-    end
-    if savedKind == "ordinary" and verdict.verifiedOwner then
-        local class = NormalizedClass(snapshot.class)
-        if class then
-            local owner = OwnBucket(index, index.ownerClasses, verdict.verifiedOwner)
-            if not owner then
-                owner = {ids={}, classes={}, count=0}
-                index.owned[owner] = true
-                index.ownerClasses[verdict.verifiedOwner] = owner
-            end
-            if owner.ids[key] == nil then
-                owner.ids[key] = class
-                owner.classes[class] = (owner.classes[class] or 0) + 1
-                owner.count = owner.count + 1
-                if work then Charge(work, "indexEdges", 1) end
-            end
-            membership.classOwner = verdict.verifiedOwner
-        end
-    end
-    local authorKey = AuthorKey(snapshot.author)
-    if authorKey then
-        local authorBucket = OwnBucket(index, index.authors, authorKey)
-        if not authorBucket then
-            authorBucket = {}
-            index.owned[authorBucket] = true
-            index.authors[authorKey] = authorBucket
-        end
-        authorBucket[key] = true
-        membership.author = authorKey
-        if work then Charge(work, "indexEdges", 1) end
-    end
-    local author = RelatedText(snapshot.author)
-    if author ~= "" then
-        if savedKind == "saved" then
-            membership.saved = RelatedKey(author, "saved")
-            AddBucket(index, index.saved, membership.saved, key, work, rows)
-        else
-            local fingerprint = verdict.relatedFingerprint
-            membership.fingerprint = RelatedKey(author, fingerprint)
-            membership.title = RelatedKey(author,
-                RelatedText(snapshot.title or snapshot.serverTitle))
-            membership.spells = {}
-            local spells = FingerprintSpells(fingerprint)
-            for _, spellId in ipairs(spells) do
-                local spellKey = RelatedKey(author, tostring(spellId))
-                if spellKey then
-                    membership.spells[#membership.spells + 1] = spellKey
-                    AddBucket(index, index.spells, spellKey, key, work, rows)
-                end
-            end
-            AddBucket(index, index.fingerprints, membership.fingerprint, key, work, rows)
-            AddBucket(index, index.titles, membership.title, key, work, rows)
-        end
-    end
-    index.memberships[key] = membership
 end
 
 ------------------------------------------------------------------------
@@ -5151,22 +5042,6 @@ function Catalog.TombstoneSnapshot()
     end, CompatTombstone)
 end
 
-function Catalog.ForEach(visitor)
-    if type(visitor) ~= "function" then return 0 end
-    local all, why = Catalog.All()
-    if not all then return 0, why end
-    local servingGeneration = ST.servingGeneration
-    local count = 0
-    for id, record in pairs(all) do
-        count = count + 1
-        visitor(id, record)
-        if ST.servingGeneration ~= servingGeneration then
-            return count, "STALE_CURSOR"
-        end
-    end
-    return count
-end
-
 function Catalog.SyncState(id)
     local root = Gate()
     local verdict = root and VerdictOf(root, id) or nil
@@ -5254,10 +5129,17 @@ function Catalog.SyncDeltaNext(cursor)
     return verdict.id, record, false
 end
 
-function Catalog.TombstoneNext(cursor)
+-- Removal-marker walk. `reader` names an independent walk slot for the two
+-- multi-frame consumers ("build-hash-cache", "sync-candidate"), so the
+-- synchronous retention sweep in the shared slot never invalidates their
+-- walk and they never invalidate each other's; any other value is the shared
+-- slot. The (id, view, done) shape is unchanged.
+function Catalog.TombstoneNext(cursor, reader)
     local root = Gate()
     if not root then return nil, nil, true end
-    local walk, guardWhy = LegacyWalkGuard("tombstone", cursor)
+    local family = (reader == "build-hash-cache" or reader == "sync-candidate")
+        and ("tombstone:" .. reader) or "tombstone"
+    local walk, guardWhy = LegacyWalkGuard(family, cursor)
     if guardWhy then return nil, guardWhy, true end
     local verdict = VectorStep(root.tombstoneKeys, walk, root)
     if not verdict then return nil, nil, true end
@@ -6519,17 +6401,6 @@ function Catalog.RemoveOverlay(id)
     return true
 end
 
-function Catalog.RemoveOverlayBatch(ids)
-    local root, why = MutationGate()
-    if not root then return 0, why end
-    if type(ids) ~= "table" then return 0, "build id list required" end
-    local removed = 0
-    for _, id in ipairs(ids) do
-        if Catalog.RemoveOverlay(id) then removed = removed + 1 end
-    end
-    return removed
-end
-
 local function TombstoneRecord(slot, existing, tombstone)
     local snapshot = existing.snapshot
     return {
@@ -7065,23 +6936,6 @@ function Catalog.CommitMaintenance(handle, bundleOverrides, publicationGuard)
     return nil, "ROOT_MUTATION_PENDING", candidate.ticket
 end
 
-function Catalog.RemoveTombstonesBatch(ids)
-    local root, why = MutationGate()
-    if not root then return 0, why end
-    if type(ids) ~= "table" then return 0, "tombstone id list required" end
-    local removed = 0
-    for _, id in ipairs(ids) do
-        local handle = Catalog.BeginCatalogMaintenance({database=ST.db, operation="retention"})
-        if handle and Catalog.MaintenanceRetireTombstone(handle, id)
-            and Catalog.CommitMaintenance(handle) then
-            removed = removed + 1
-        elseif handle then
-            Catalog.CancelMaintenance(handle)
-        end
-    end
-    return removed
-end
-
 ------------------------------------------------------------------------
 -- Cursor families: record, summary, delta, relationship, saved-mirror,
 -- diagnostic. Authority is the exact token identity in a weak registry.
@@ -7526,6 +7380,35 @@ function Catalog.FindExactFingerprint(fingerprint)
     local verdict = ExactWinner(root, fingerprint)
     if not verdict then return nil, nil, nil end
     return verdict.id, PublicRecord(verdict), verdict.source
+end
+
+-- Every admitted complete ordinary row with this exact ordinary fingerprint
+-- (the rows the exact index ranks for ExactWinner), as typed ids in a fixed
+-- order; ids only, no record copies. `limit` bounds the answer (default: the
+-- one-call collection limit): a bucket with more rows is refused as a whole
+-- with CURSOR_REQUIRED, never truncated, so a caller can only ever see the
+-- complete candidate set or an explicit refusal. Record linking reads this
+-- instead of walking the whole collection through the record cursor.
+function Catalog.ExactFingerprintIds(fingerprint, limit)
+    local root = Gate()
+    if not root then return nil, "catalog authority unavailable" end
+    ST.debugStats.exactLookups = ST.debugStats.exactLookups + 1
+    if type(fingerprint) ~= "string" or fingerprint == "" then return {} end
+    limit = math.max(1, math.floor(tonumber(limit) or BUDGET.oneCallRows))
+    local bucket = root.index.exact[fingerprint]
+    if not bucket then return {} end
+    if (tonumber(bucket.count) or #bucket.idVector) > limit then
+        return nil, "CURSOR_REQUIRED"
+    end
+    local ids = {}
+    for _, key in ipairs(bucket.idVector) do
+        local verdict = root.rows[key]
+        if verdict then ids[#ids + 1] = verdict.id end
+    end
+    table.sort(ids, function(left, right)
+        return Identity.CompareTypedIds(left, right) < 0
+    end)
+    return ids
 end
 
 function Catalog.ValidateLegacyFingerprintClaim(rawId, record)

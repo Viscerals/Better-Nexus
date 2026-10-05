@@ -65,9 +65,12 @@ end
 for slot=2,5 do legacy(slot,slot) end
 activate(1)
 
--- Store owner wrapper. Attribution is taken from the stack: the innermost of the two writers' files.
+-- Store owner wrapper. Attribution is taken from the stack: the innermost of the two writers' files. Both
+-- owner entries are wrapped: the write entry (UpdateStateV1, where bucket-map writes are attempted and can be
+-- refused or ghosted) and the read-only entry (ReadStateV1, which the automation writer uses to read the live
+-- bucket before deciding whether a move is needed); a read is a store call, never a write.
 local owner=Nexus.MainInternals.StoreAuthorityOwner
-local realUpdate=owner.UpdateStateV1
+local realUpdate,realRead=owner.UpdateStateV1,owner.ReadStateV1
 local mode
 local calls,writes={automation=0,controller=0,other=0},{automation=0,controller=0,other=0}
 local function who()
@@ -86,6 +89,12 @@ owner.UpdateStateV1=function(mutator,...)
   if mode=='ghost' then return true end
  end
  return realUpdate(mutator,...)
+end
+if type(realRead)=='function' then
+ owner.ReadStateV1=function(...)
+  local w=who();calls[w]=calls[w]+1
+  return realRead(...)
+ end
 end
 local function counters() return {a=calls.automation,c=calls.controller,wa=writes.automation,wc=writes.controller} end
 local announced=0
@@ -263,6 +272,7 @@ scenario('automation')
 scenario('editor')
 for k,v in pairs(othersBefore) do check(Buckets()[k]~=nil and Same(Buckets()[k],v),'an unrelated bucket is untouched: '..tostring(k)) end
 owner.UpdateStateV1=realUpdate
+if type(realRead)=='function' then owner.ReadStateV1=realRead end
 A.NoteLockDesignTargetsMoved=realNote
 
 -- ===== The controller writer alone (injected adapter and store), last: it re-initialises the adapter.

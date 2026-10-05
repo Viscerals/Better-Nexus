@@ -36,7 +36,9 @@ local function RunRoot()
     return type(root) == "table" and root or NexusDB
 end
 
-local function UpdateStoreState(mutator)
+-- `readLive` (no mutator): the owner's read-only entry for the same live row
+-- (the live per-slot design protocol); it compares and invalidates nothing.
+local function UpdateStoreState(mutator, readLive)
     local internals = Nexus and Nexus.MainInternals
     local owner = type(internals) == "table" and internals.StoreAuthorityOwner
     -- Honour the INJECTED Store. A stub Store must never resolve the real
@@ -52,15 +54,20 @@ local function UpdateStoreState(mutator)
     local realStore = type(Store) == "table"
         and type(Store.Init) == "function"
         and type(Store.CurrentOwnerKey) == "function"
-    if realStore and type(owner) == "table"
-        and type(owner.UpdateStateV1) == "function" then
-        return owner.UpdateStateV1(mutator)
+    if realStore and type(owner) == "table" then
+        if readLive and type(owner.ReadStateV1) == "function" then
+            return owner.ReadStateV1()
+        end
+        if type(owner.UpdateStateV1) == "function" then
+            return owner.UpdateStateV1(mutator or function(row) return row end)
+        end
     end
     -- No authorized owner for THIS Store. Fall back to whatever state table the
     -- injected facade exposes, which is exactly the pre-migration behaviour for
     -- such a Store.
     local injected = Store and Store.State and Store.State()
     if type(injected) ~= "table" then return nil end
+    if readLive then return true, injected end
     return true, mutator(injected)
 end
 
@@ -598,7 +605,7 @@ local function LockDesignTargetsFor(wishlist, knownKey)
         end
         local key = LockSlotKey(wishlist, knownKey)
         local function Bucket()
-            local ok, row = UpdateStoreState(function(live) return live end)
+            local ok, row = UpdateStoreState(nil, true)
             local map = ok and type(row) == "table"
                 and row.lockDesignTargetsBySlot or nil
             if not ok or type(row) ~= "table" then return false end
@@ -635,10 +642,10 @@ local function LockDesignTargetsFor(wishlist, knownKey)
     -- part of the live sub-tree protocol: WishlistController.LockDesignTargets
     -- hands out the live committed per-slot table (its callers only read it; a
     -- design is stored through the authorized entry), and a snapshot read here
-    -- could observe stale targets. Reading through the owner is free now that
-    -- invalidation is content-based: this reads and changes nothing, so it
-    -- invalidates nothing.
-    local ok, state = UpdateStoreState(function(row) return row end)
+    -- could observe stale targets. The owner's read-only entry hands out the
+    -- live row: it reads and changes nothing, invalidates nothing and, unlike
+    -- a no-op mutator through UpdateStateV1, compares nothing.
+    local ok, state = UpdateStoreState(nil, true)
     if not ok or type(state) ~= "table" then return nil end
     local bySlot = state.lockDesignTargetsBySlot
     local key = LockSlotKey(wishlist, knownKey)
@@ -2407,7 +2414,10 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         canFreeze = settings.autoFreeze ~= false and (level < 80
             or (type(horizon) == "number" and horizon > 1))
             and (frozeThisBoard ~= board.signature),
-        support = Model.Support(catalog, owned, level, disabledLevers, plan, DefaultProfile.params),
+        -- No draw-support list: Policy.Decide routes every ordinary board to
+        -- EchoWeaver, which never reads it; only the historical scoring path
+        -- did. Building it walked the whole Echo catalog per new board
+        -- (measured 0.5 ms at 2090 rows) for nothing.
         params = DefaultProfile.params,
         allowBanish = settings.autoBanish ~= false,
         searchRefused = {
@@ -2713,7 +2723,13 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
                 immutable.index))
         else
             intent.mutationAttempted = true
-            FinishActionIntent("rejected", err or "adapter_refused", true)
+            -- A refused Freeze does not keep the board blocked. Its loop
+            -- breaker is frozeThisBoard below: the next decision runs with
+            -- canFreeze=false and takes a needed offer. (A refused Take keeps
+            -- blocking on purpose: re-deciding would pick the same card.)
+            -- Keeping the rejected intent here left the board at "waiting:
+            -- rejected freeze" until the player acted on it.
+            FinishActionIntent("rejected", err or "adapter_refused", false)
             frozeThisBoard = board.signature   -- refused: do not retry this board
         end
     elseif immutable.type == "reroll" then

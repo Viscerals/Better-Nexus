@@ -28,6 +28,10 @@ local function StableIdHash(text)
 end
 
 local COLLISION_ATTEMPT_LIMIT = 16
+-- Record linking reads at most this many same-fingerprint candidates in one
+-- call (one public record copy each); a larger exact-index bucket is refused
+-- as a whole with CURSOR_REQUIRED, never read as "no candidate".
+local EXACT_CANDIDATE_LIMIT = 256
 
 local function CollisionCandidateId(base, token, attempt)
     if attempt == 0 then return base end
@@ -342,14 +346,19 @@ function Controller.New(options)
 
     -- Complete collections are read through the generation-bound record
     -- cursor; every page is a defensive copy and no root-owned table escapes.
+    -- Returns the map and whether the bounded walk reached the cursor's end:
+    -- the step budget can end before a large catalog does, and a prefix must
+    -- not pass as the complete collection. The browser's empty-state count is
+    -- the only consumer; record linking uses the exact-fingerprint index.
     local function Store()
         local catalog = Catalog()
         local out = {}
         if not (catalog and type(catalog.BeginRecordCursor) == "function") then
-            return out
+            return out, false
         end
         local token = catalog.BeginRecordCursor()
-        if not token then return out end
+        if not token then return out, false end
+        local complete = false
         for _ = 1, 4096 do
             local page, err = catalog.RecordCursorNext(token)
             -- MASTER-RC-018: a cursor error is NOT a clean done. Breaking on
@@ -357,13 +366,14 @@ function Controller.New(options)
             -- complete, so a mid-walk fault silently produced a short result.
             -- An error now yields the fixed empty result; only page.done ends a
             -- complete walk.
-            if err then return {} end
-            if type(page) ~= "table" or page.done then break end
+            if err then return {}, false end
+            if type(page) ~= "table" then break end
+            if page.done then complete = true; break end
             if page.id ~= nil and page.record ~= nil then
                 out[page.id] = page.record
             end
         end
-        return out
+        return out, complete
     end
 
     local function IsAdmin()
@@ -2399,12 +2409,32 @@ function Controller.New(options)
 
         local ownAutoId, ownAutoBuild
         if not explicitId then
-            for id, build in pairs(Store()) do
+            -- Every admitted complete ordinary row with this exact fingerprint
+            -- comes from the catalog's exact index (one public record copy per
+            -- candidate, at most EXACT_CANDIDATE_LIMIT of them). The former
+            -- whole-collection record walk deep-copied every row synchronously
+            -- (105 ms per record at 600 rows) and stopped at a fixed step
+            -- budget. The index answers with the complete candidate set or an
+            -- explicit refusal (the catalog is not serving, or more rows share
+            -- this loadout than the bound): a refusal is returned as such and
+            -- never read as "no candidate", so no record page is created on an
+            -- incomplete query. The record keeps no page until a later
+            -- admission asks again.
+            if not (catalog and type(catalog.ExactFingerprintIds) == "function") then
+                return nil, nil, "catalog authority unavailable"
+            end
+            local candidates, candidatesWhy = catalog.ExactFingerprintIds(key,
+                EXACT_CANDIDATE_LIMIT)
+            if type(candidates) ~= "table" then
+                return nil, nil, candidatesWhy or "catalog authority unavailable"
+            end
+            for _, id in ipairs(candidates) do
+                local build = LoadBuild(id)
                 local evidence = Nexus and Nexus.LoadoutEvidence
-                local verdict = evidence
+                local verdict = build and evidence
                     and type(evidence.OrdinaryCompleteness) == "function"
                     and evidence.OrdinaryCompleteness(build) or nil
-                if Identity.SavedMirrorKind(build) == "ordinary"
+                if build and Identity.SavedMirrorKind(build) == "ordinary"
                     and type(verdict) == "table" and verdict.complete == true
                     and verdict.fingerprint == key then
                     if not build.autoDps then

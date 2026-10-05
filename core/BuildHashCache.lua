@@ -335,8 +335,10 @@ local function PumpWarmJob()
         return false, type(summary) == "table" or done == true
             or progress == "COPY_PENDING"
     end
+    -- Its own named walk slot, so the synchronous retention sweep (the
+    -- shared slot) never invalidates this multi-frame walk.
     local id, tombstone, done =
-        job.catalog.TombstoneNext(job.tombstoneCursor)
+        job.catalog.TombstoneNext(job.tombstoneCursor, "build-hash-cache")
     if done and id == nil and tombstone ~= nil then
         RestartWarmJob()
         return false

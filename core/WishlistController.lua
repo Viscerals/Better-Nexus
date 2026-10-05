@@ -544,6 +544,7 @@ function Controller.New(options)
         if not retried and type(options.requestRecompute) == "function" then
             options.requestRecompute()
         end
+        return true
     end
 
     function M.PendingRows() return state.pending end

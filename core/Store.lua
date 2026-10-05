@@ -2676,8 +2676,11 @@ end
 -- wishlist and flag write through an asynchronous bundle replacement is exactly
 -- such a behavior change. Consolidating the write path here is the prerequisite
 -- for that later step: there is now one place to change instead of 32.
-function StoreAuthorityOwner.UpdateStateV1(mutator)
-    if type(mutator) ~= "function" then return nil end
+-- The row UpdateStateV1 hands its mutator, resolved from the current
+-- identity, database and saved format. Returns the row, whether it is the
+-- durable row (false: the transient session row), its owner key and database,
+-- and whether this call created the durable row.
+function StoreAuthorityOwner.ResolveStateRowV1()
     local ownerKey = CurrentIdentity()
     local db = NexusDB
     if not ownerKey or type(db) ~= "table" or HasFutureSettingsOwner(db)
@@ -2685,9 +2688,10 @@ function StoreAuthorityOwner.UpdateStateV1(mutator)
         -- Same fallback the read has always used: a transient, never-persisted
         -- row while identity or the store is not yet usable.
         transientState = EnsureStateShape(transientState)
-        return true, mutator(transientState)
+        return transientState, false
     end
     local state = db.chars[ownerKey]
+    local created = state == nil
     if state == nil then
         -- Known saved format 3-5: the first write creates this character's
         -- row as a copy of its own plain-name row. The original stays.
@@ -2700,11 +2704,18 @@ function StoreAuthorityOwner.UpdateStateV1(mutator)
             -- Not copied before the bounded row checks ran; never pre-empted
             -- by an empty durable row either.
             transientState = EnsureStateShape(transientState)
-            return true, mutator(transientState)
+            return transientState, false
         end
     end
     state = EnsureStateShape(state)
     db.chars[ownerKey] = state
+    return state, true, ownerKey, db, created
+end
+
+function StoreAuthorityOwner.UpdateStateV1(mutator)
+    if type(mutator) ~= "function" then return nil end
+    local state, durable, ownerKey, db = StoreAuthorityOwner.ResolveStateRowV1()
+    if not durable then return true, mutator(state) end
     -- Any authorized write invalidates the read snapshot.
     -- MASTER-RC-001. Invalidate on a real CONTENT change, not merely because
     -- the mutation route was taken. Measured: the dominant callers of this
@@ -2721,6 +2732,20 @@ function StoreAuthorityOwner.UpdateStateV1(mutator)
         InvalidateStateSnapshot()
     end
     return true, unpack(results)
+end
+
+-- Read-only counterpart of UpdateStateV1 for the readers that need the LIVE
+-- row rather than the detached snapshot Store.State() returns: the identity
+-- sentinel of GameAdapter.AutomationSignature and the live per-slot design
+-- protocol of the automation runtime. Same row resolution (and first-use
+-- creation, as those readers always had through the mutation entry), no
+-- mutator, and so no whole-row comparison: measured at 1.6 ms per read with a
+-- 128-record role history through UpdateStateV1. A row created here
+-- invalidates the snapshot once, like any other content change.
+function StoreAuthorityOwner.ReadStateV1()
+    local state, durable, _, _, created = StoreAuthorityOwner.ResolveStateRowV1()
+    if durable and created then InvalidateStateSnapshot() end
+    return true, state
 end
 
 function Store.State()

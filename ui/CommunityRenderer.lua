@@ -3354,12 +3354,23 @@ function M.Refresh()
     if #builds == 0 then
         local total = projectionSummary and projectionSummary.total or 0
         if not projectionSummary then
-            for _ in pairs(Store()) do total=total+1 end
+            -- The bounded whole-collection read says whether it is complete;
+            -- an incomplete read is not a count of zero.
+            local map, complete = Store()
+            if complete then
+                for _ in pairs(map) do total=total+1 end
+            else
+                total = nil
+            end
         end
         local msg
-        msg = total == 0
-            and "No builds yet.\n\nPost a build from your active Echo Wishlist, or press Sync Now to find builds from other players."
-            or  "No builds match the current scope, class, DPS-record, or search filters."
+        if total == nil then
+            msg = "The build library could not be read completely. Try again shortly."
+        elseif total == 0 then
+            msg = "No builds yet.\n\nPost a build from your active Echo Wishlist, or press Sync Now to find builds from other players."
+        else
+            msg = "No builds match the current scope, class, DPS-record, or search filters."
+        end
         if frame._emptyState and not frame._resultsStale then
             frame._emptyState:SetText(msg)
             frame._emptyState:Show()
