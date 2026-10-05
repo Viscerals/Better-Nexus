@@ -56,6 +56,7 @@ local function RegionMethods()
  end
  error('harness region methods not found')
 end
+G.RegionMethods=RegionMethods
 
 -- Text measurement and the runtime font size follow the model from now on.
 function G.UseFont(model)

@@ -15,6 +15,10 @@
 --  7. Log viewer: the status line stays left of Clear Log (it used to run
 --     under it), and a longer status is complete in its tooltip.
 --  8. Support report: a fixed box shows a tooltip only while its text overflows.
+--  9. On-Screen Wishlist overlay: every row box is one line tall at the row
+--     pitch, so adjacent rows never overlap; every column and the final row
+--     lie inside the overlay, below its control strip, at every overlay scale
+--     and in both lock states; a long or multi-line name keeps its one row.
 -- Real windows with synthetic data; nothing is selected, sent or spent.
 -- Geometry and text fit use the offline models of
 -- tests/prototype/layout_geometry_support.lua; native pixel fit is NOT TESTED.
@@ -227,5 +231,125 @@ do
  check(lines and lines[1]==INCIDENT,'16px face: an incident longer than its box is complete in its tooltip')
  sr:Hide()
  check(#H.actions==0,'no game action')
+end
+
+-- 9. On-Screen Wishlist overlay with a real imported plan (79 ordinary copies
+-- and 6 planned locked targets, the most a plan holds) on the Orb support boot.
+-- The overlay uses GameFontHighlightSmall, which the Nexus font scale does not
+-- size, so the 0.75 and 2.0 font-scale models do not apply to it; the default
+-- face and the 16 px replacement face (17 px lines; 16.1 px measured natively) do.
+do
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+ local H=dofile('tests/prototype/orbs_support.lua')
+ G=dofile('tests/prototype/layout_geometry_support.lua')
+ local A,W,O=H.A,Nexus.WishlistEditor,Nexus.WishlistOverlay
+ -- The harness answers these with nothing; record what the overlay asks for.
+ local methods=G.RegionMethods()
+ local createFontString=methods.CreateFontString
+ methods.CreateFontString=function(self,name,_,template)
+  local r=createFontString(self,name);r.template=template;return r
+ end
+ methods.SetWordWrap=function(self,v) self.wordWrap=v end
+ methods.EnableMouse=function(self,v) self.mouse=v and true or false end
+ H.perks.serverBuildSlots={[1]={name='Owned one',verified=true,echoes={{spellId=410001,quality=1,stacks=1}}}}
+ H.perks.serverActiveSlot=1;H.Notify();A.Poll()
+ local plan={}
+ for i=1,79 do plan[i]={spellId=200000+i,quality=i%4,stacks=1,locked=false} end
+ for i=80,85 do plan[i]={spellId=200000+i,quality=i%4,stacks=1,locked=true} end
+ W.ImportEBH1String(assert(Nexus.Codec.EncodeEBH1(plan,'MAGE','Full plan')),'Full plan')
+ local create
+ for _,f in ipairs(H.frames) do if f.kind=='Button' and f:IsVisible() and f:GetText()=='Create Wishlist' then create=f end end
+ assert(create,'Create button');create:Click();H.AcceptPopup();H.now=H.now+3.1
+ check(A.AssignedWishlist().state=='ready' and #A.AssignedWishlist().entries==85,
+  'fixture: the assigned plan holds 79 ordinary copies and 6 locked targets')
+ -- A long and a multi-line Echo name (catalog names are display text).
+ local LONG=string.rep('Synthetic very long Echo name ',5)
+ local MULTI='First line of a name\nsecond line of a name'
+ local catalog=A.Catalog().rows
+ catalog[200001].name=LONG;catalog[200002].name=MULTI
+ H.locked={{spellId=200080,stacks=1}};H.Notify();A.Poll();Nexus.RequestRecompute();H.Advance(1.5)
+ local actions,sent=#H.actions,#H.sent
+ O.Show();H.Advance(1.5)
+ local f,controls
+ for _,c in ipairs(H.frames) do
+  if c:GetName()=='NexusOverlay' then f=c elseif c:GetName()=='NexusOverlayControls' then controls=c end
+ end
+ assert(f and controls,'the overlay and its control strip exist')
+ local lines={}
+ for _,r in ipairs(f.regions) do if r.kind=='FontString' then lines[#lines+1]=r end end
+ check(#lines==90,'the overlay has its 90 rows: '..#lines)
+ local function Shown()
+  local out={}
+  for i,r in ipairs(lines) do if r:IsShown() and r:GetText()~='' then out[#out+1]=i..'='..r:GetText() end end
+  return table.concat(out,'\n'),#out
+ end
+ local before,shown=Shown()
+ check(shown==85,'the 79 ordinary rows and 6 locked target rows are shown: '..shown)
+ check(before:find('(locked target)|r (1/1)',1,true) and select(2,before:gsub('%(locked target%)|r %(0/1%)',''))==5,
+  'the owned locked target counts (1/1) and the five others (0/1)')
+ local longRow,multiRow
+ for _,r in ipairs(lines) do
+  if r:GetText():find(LONG,1,true) then longRow=r end
+  if r:GetText():find(MULTI,1,true) then multiRow=r end
+ end
+ assert(longRow and multiRow,'fixture: the long and the multi-line names are shown')
+ -- One line per row: no word wrap, the overlay's own font, and a box that
+ -- holds one whole line but not a second, for each applicable font model.
+ local wrapOff,font=0,0
+ for _,r in ipairs(lines) do
+  if r.wordWrap==false then wrapOff=wrapOff+1 end
+  if r.template=='GameFontHighlightSmall' then font=font+1 end
+ end
+ check(wrapOff==90 and font==90,'every row is one GameFontHighlightSmall line without word wrap ('..wrapOff..', '..font..')')
+ for _,m in ipairs({G.MODELS.default,G.MODELS.px16}) do
+  G.UseFont(m)
+  local bad
+  for i,r in ipairs(lines) do
+   local h=r:GetHeight()
+   if not (h>=m.line and h<2*m.line) then bad=bad or ('row '..i..' is '..h..' px') end
+  end
+  check(not bad,m.name..': every row box holds exactly one '..m.line..' px line'..(bad and (': '..bad) or ''))
+  check(G.Rows(LONG,longRow:GetWidth(),m.char)>1 and G.Rows(MULTI,multiRow:GetWidth(),m.char)>1,
+   m.name..': fixture: the long and the multi-line names would need more than one line')
+ end
+ -- Every row box inside the overlay, apart from every other row and from the
+ -- control strip; the row pitch is at least the row box height.
+ local function Geometry(label)
+  local box,strip={0,0,f:GetWidth(),f:GetHeight()},G.Rect(controls,f)
+  local rects={}
+  for i,r in ipairs(lines) do rects[i]=G.Rect(r,f) end
+  local bad
+  for i,a in ipairs(rects) do
+   if not G.Inside(a,box) then bad=bad or ('row '..i..' '..G.Text(a)..' is outside the overlay '..G.Text(box)) end
+   if not G.Apart(a,strip) then bad=bad or ('row '..i..' '..G.Text(a)..' is under the control strip '..G.Text(strip)) end
+   for j=i+1,#rects do
+    local b=rects[j]
+    if not G.Apart(a,b) then
+     bad=bad or ('rows '..i..' '..G.Text(a)..' and '..j..' '..G.Text(b)..' overlap by '..math.max(0,a[4]-b[2])..' px')
+    end
+   end
+  end
+  check(not bad,label..': every row is inside the overlay, below the control strip and apart from every other row'..(bad and (': '..bad) or ''))
+  local pitch=rects[2][2]-rects[1][2]
+  check(pitch>=lines[1]:GetHeight(),label..': the row pitch '..pitch..' px is at least the row box height '..lines[1]:GetHeight()..' px')
+  check(G.Inside(rects[30],box) and G.Inside(rects[60],box) and G.Inside(rects[90],box),
+   label..': the last row of every column and the final row are inside the overlay')
+ end
+ Geometry('scale 1, locked')
+ check(f.mouse==false and controls.mouse==true,'locked: the list is click-through and the control strip stays interactive')
+ for _,s in ipairs({{0.5,0.5},{1.6,1.6},{3,1.6},{0.1,0.5},{1,1}}) do
+  O.SetScale(s[1])
+  check(O.GetScale()==s[2] and f:GetScale()==s[2] and controls:GetScale()==s[2],
+   'overlay scale '..s[1]..' is applied as '..s[2]..' to the list and its control strip alike')
+  Geometry('scale '..s[2])
+ end
+ O.ToggleLock()
+ check(f.mouse==true and controls.mouse==true and not O.IsLocked(),'unlocked: the list takes the mouse to move')
+ Geometry('unlocked')
+ O.ToggleLock()
+ check(f.mouse==false and controls.mouse==true and O.IsLocked(),'locked again: click-through, controls interactive')
+ H.Advance(1.5)
+ check(Shown()==before,'scale and lock changes keep every row, name and count')
+ check(#H.actions==actions and #H.sent==sent,'the overlay takes no game action and sends nothing')
 end
 print('PASS text_overflow_policy checks='..checks..'; native pixel fit NOT TESTED')
