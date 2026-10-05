@@ -248,6 +248,15 @@ function M.Update(status,force)
     local localText=status.coreReady and "Wishlist tools ready; shared builds may still be loading" or "Reading your local Wishlist and Echo data"
     -- The full-width line carries the step; elapsed time never sets a percent.
     f.detail:SetText(localText.."\n"..progress)
+    -- Both lines keep their measured height (a wider face wraps the step
+    -- line); the bar and the elapsed line follow, inside the window.
+    local extra=Nexus.LayoutMetrics and (Nexus.LayoutMetrics.WrapHeight(f.detail,402,42)-42) or 0
+    if f._nexusExtra~=extra then
+        f._nexusExtra=extra
+        f.bar:ClearAllPoints();f.bar:SetPoint("TOPLEFT",12,-76-extra)
+        f.progress:ClearAllPoints();f.progress:SetPoint("TOPLEFT",12,-92-extra)
+        f:SetHeight(130+extra)
+    end
     local elapsed=math.max(0,math.floor(now-startedAt))
     f.progress:SetText(status.state=="ready" and "" or string.format("Elapsed %d:%02d",math.floor(elapsed/60),elapsed%60))
     -- Unknown size: no bar at all, rather than an empty one that looks stuck.

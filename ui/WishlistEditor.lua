@@ -501,6 +501,8 @@ function RolePicker.Ensure()
         local row={frame=rf};f.rows[n]=row
         row.label=rf:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
         row.label:SetPoint("LEFT",0,0);row.label:SetWidth(390);row.label:SetJustifyH("LEFT")
+        -- One line per row; a shortened Echo name is complete in the row tooltip.
+        if Nexus.LayoutMetrics then rf:EnableMouse(true);Nexus.LayoutMetrics.OneLineLabel(row.label,rf,28) end
         row.count=rf:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
         row.count:SetPoint("RIGHT",-32,0);row.count:SetWidth(66)
         row.minus=CreateFrame("Button","NexusWishlistRoleMinus"..n,rf,"UIPanelButtonTemplate")
@@ -523,10 +525,11 @@ function RolePicker.Ensure()
         if RolePicker.state then RolePicker.state.page=RolePicker.state.page+1;RolePicker.Render() end end)
     f.pageLabel=label("GameFontHighlightSmall",108,-401,78)
     f.owned=button("NexusWishlistRoleUseOwned","Suggest matching locked targets",318,-394,270,function() RolePicker.UseOwned(false) end)
+    -- Two lines of a 16 px face (the longest message wraps to two at 570 px).
     f.message=label("GameFontHighlightSmall",20,-430,570)
-    f.message:SetHeight(30)
-    f.confirm=button("NexusWishlistRoleConfirm","Confirm locked targets & edit",210,-470,278,RolePicker.Accept)
-    f.cancel=button("NexusWishlistRoleCancel","Cancel",498,-470,90,RolePicker.Hide)
+    f.message:SetHeight(44);f.message:SetJustifyV("TOP")
+    f.confirm=button("NexusWishlistRoleConfirm","Confirm locked targets & edit",210,-476,278,RolePicker.Accept)
+    f.cancel=button("NexusWishlistRoleCancel","Cancel",498,-476,90,RolePicker.Hide)
     f:Hide()
     return f
 end

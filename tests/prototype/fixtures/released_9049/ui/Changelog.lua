@@ -95,13 +95,6 @@ local function Create()
 Experimental: native gameplay is not verified by offline tests.
 Real-resource Orb testing requires a separate user decision.]])
 
-    -- The window is as tall as the measured note (a wider face wraps more
-    -- lines), so the last line stays above the button.
-    if Nexus.LayoutMetrics then
-        local height = Nexus.LayoutMetrics.WrapHeight(body, 464, 1)
-        frame:SetHeight(math.max(330, 52 + height + 54))
-    end
-
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(92, 24)
     close:SetPoint("BOTTOM", 0, 14)

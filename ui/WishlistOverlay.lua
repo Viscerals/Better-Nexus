@@ -151,7 +151,10 @@ local function EnsureFrame()
         local row = (i - 1) % ROWS_PER_COLUMN
         local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         fs:SetPoint("TOPLEFT", 20 + col * COLUMN_WIDTH, -26 - (row * ROW_HEIGHT))
-        fs:SetSize(COLUMN_WIDTH - 10, ROW_HEIGHT)
+        -- One line per row; the box is a full line tall also for a taller
+        -- replacement face (16.1 px measured natively), on the same row step.
+        fs:SetSize(COLUMN_WIDTH - 10, math.max(ROW_HEIGHT, 17))
+        pcall(fs.SetWordWrap, fs, false)
         fs:SetJustifyH("LEFT")
         pcall(function() fs:SetShadowColor(0, 0, 0, 1); fs:SetShadowOffset(1, -1) end)
         fs:Hide()

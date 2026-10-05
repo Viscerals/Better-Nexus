@@ -141,6 +141,131 @@ local function ConfigureSafeEditableText(box, maxBytes, allowLineBreaks)
     end)
 end
 
+-- Detail panel geometry for its current size and font line: a fixed header,
+-- the action row at the bottom (wrapping to a second row when the labels do
+-- not fit one), and between them a scrolled body whose child is exactly as
+-- tall as its flowed, measured content.
+local function LayoutDetailPanel(p)
+    local metrics = Nexus.LayoutMetrics
+    if not (p and p.body and metrics) then return end
+    local width = math.max(200, math.floor(tonumber(p:GetWidth()) or 500))
+    local height = math.max(120, math.floor(tonumber(p:GetHeight()) or 570))
+    local line = math.max(12, tonumber(p._nexusLine) or 14)
+    local gap = math.max(4, tonumber(p._nexusGap) or 6)
+    local inner = width - 20
+
+    -- Clear of the class icon on the left and the close button on the right,
+    -- each a full line also of a wider, taller face at the same font size.
+    local _, safeLine = metrics.ConservativeText(p._nexusScale or 1)
+    local titleH = math.max(20, line + 4, safeLine + 2)
+    local authorH = math.max(12, line, safeLine)
+    p.title:SetSize(math.max(80, inner - 82), titleH)
+    p.author:SetSize(math.max(80, inner - 82), authorH)
+    local headerBottom = math.max(44, 10 + titleH + 2 + authorH) + gap
+
+    local buttonH = math.max(22, line + 8)
+    for _, button in ipairs({p.lockBtn, p.retryShareBtn, p.editBtn}) do
+        button:SetHeight(buttonH)
+    end
+    metrics.FitButtonWidth(p.lockBtn, 130, inner)
+    metrics.FitButtonWidth(p.retryShareBtn, 130, inner)
+    metrics.FitButtonWidth(p.editBtn, 96, inner)
+    local primary = p.retryShareBtn:IsShown() and p.retryShareBtn or p.lockBtn
+    local left = {primary}
+    if p.editBtn:IsShown() then left[#left+1] = p.editBtn end
+    local x, rows = 8, 1
+    for _, button in ipairs(left) do
+        local w = button:GetWidth()
+        if x > 8 and x + w > width - 8 then x, rows = 8, rows + 1 end
+        button:ClearAllPoints()
+        button:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", x, 8 + (rows-1)*(buttonH+gap))
+        x = x + w + 6
+    end
+    if p.deleteBtn:IsShown() then
+        p.deleteBtn:SetHeight(buttonH)
+        local w = metrics.FitButtonWidth(p.deleteBtn, 104, inner)
+        if x + w > width - 8 then rows = rows + 1 end
+        p.deleteBtn:ClearAllPoints()
+        p.deleteBtn:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -8,
+            8 + (rows-1)*(buttonH+gap))
+    end
+    local footer = 8 + rows*buttonH + (rows-1)*gap + gap
+
+    -- The template's scroll bar sits to the right of the scroll frame.
+    local scroll, body = p.bodyScroll, p.body
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", p, "TOPLEFT", 10, -headerBottom)
+    scroll:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -30, footer)
+    local bodyW = math.max(120, width - 40)
+    body:SetWidth(bodyW)
+
+    local y = 0
+    local function Place(region, h, indent)
+        region:ClearAllPoints()
+        region:SetPoint("TOPLEFT", body, "TOPLEFT", indent or 0, -y)
+        y = y + h
+    end
+    local function Text(fontString, minimum)
+        if not fontString:IsShown() then return end
+        Place(fontString, metrics.WrapHeight(fontString, bodyW, minimum))
+        y = y + gap
+    end
+    local function Label(fontString)
+        Place(fontString, metrics.WrapHeight(fontString, bodyW, 12) + 2)
+    end
+    Text(p.desc, 50)
+    if p.linkBox:IsShown() then
+        Label(p.linkLabel)
+        local save = 0
+        if p.linkSaveBtn:IsShown() then
+            p.linkSaveBtn:SetHeight(math.max(18, line + 4))
+            save = metrics.FitButtonWidth(p.linkSaveBtn, 72, 140) + 8
+        end
+        p.linkBox:SetSize(math.max(80, bodyW - 8 - save), math.max(18, line + 4))
+        Place(p.linkBox, p.linkBox:GetHeight(), 6)
+        y = y + gap
+    end
+    local iconSize = p.echoIcons[1]:GetWidth()
+    if p.lockedLabel:IsShown() then
+        Label(p.lockedLabel)
+        for i, ic in ipairs(p.lockedIcons) do
+            ic:ClearAllPoints()
+            ic:SetPoint("TOPLEFT", body, "TOPLEFT", (i-1)*(iconSize+6), -y)
+        end
+        y = y + iconSize + 4 + gap
+    else
+        Label(p.echoLabel)
+    end
+    local columns = math.max(1, math.floor((bodyW + 2) / (iconSize + 2)))
+    local shown = 0
+    for _, ic in ipairs(p.echoIcons) do
+        if ic:IsShown() then
+            local col, row = shown % columns, math.floor(shown / columns)
+            ic:ClearAllPoints()
+            ic:SetPoint("TOPLEFT", body, "TOPLEFT", col*(iconSize+2),
+                -(y + row*(iconSize+2)))
+            shown = shown + 1
+        end
+    end
+    y = y + math.ceil(shown / columns) * (iconSize + 2) + gap
+    Text(p.missingText, 14)
+    y = y + gap
+    Text(p.recordsTitle, 12)
+    Text(p.dummyRecord, 16)
+    Text(p.lkRecord, 16)
+    Text(p.editState, 12)
+    Text(p.detailsNote, 12)
+    -- The record rows are always shown, so the last text added a trailing gap.
+    y = y - gap
+    body:SetHeight(math.max(1, y))
+
+    local viewport = math.max(0, height - headerBottom - footer)
+    local range = math.max(0, y - viewport)
+    if (tonumber(scroll:GetVerticalScroll()) or 0) > range then
+        scroll:SetVerticalScroll(range)
+    end
+end
+
 local function Measure(name, callback, ...)
     local performance = Nexus and Nexus.Performance
     if performance and type(performance.Measure) == "function" then
@@ -557,15 +682,9 @@ function Renderer.New(options)
 
         if detailPanel and boxes.detail then
             local inner = math.max(120,boxes.detail.w-20)
-            detailPanel.title:SetWidth(math.max(80,inner-46))
-            detailPanel.author:SetWidth(math.max(80,inner-46))
-            detailPanel.desc:SetWidth(inner)
-            detailPanel.linkBox:SetWidth(math.max(80,inner-88))
-            detailPanel.missingText:SetWidth(inner)
-            detailPanel.dummyRecord:SetWidth(inner)
-            detailPanel.lkRecord:SetWidth(inner)
-            detailPanel.detailsNote:SetWidth(inner)
-            detailPanel.editState:SetWidth(inner)
+            detailPanel._nexusLine, detailPanel._nexusGap = layout.normal, layout.gap
+            detailPanel._nexusScale = layout.scale
+            LayoutDetailPanel(detailPanel)
             for _, row in ipairs(detailPanel.lbDummyRows) do row:SetWidth(inner) end
             for _, row in ipairs(detailPanel.lbLKRows) do row:SetWidth(inner) end
             detailPanel.lbDummyEmpty:SetWidth(inner)
@@ -657,15 +776,18 @@ local function MakeDropdownMenu(parent, width)
     return menu
 end
 
-local function AddMenuButton(menu, text, onClick, index)
+-- owner: the menu to close when the row is in a scrolled list inside it.
+local function AddMenuButton(menu, text, onClick, index, owner)
     local b = CreateFrame("Button", nil, menu)
-    b:SetHeight(22); b:SetPoint("TOPLEFT",6,-6-(index-1)*22); b:SetPoint("TOPRIGHT",-6,0-(index-1)*22)
+    b:SetHeight(22); b:SetPoint("TOPLEFT",6,-6-(index-1)*22); b:SetPoint("TOPRIGHT",-6,-6-(index-1)*22)
     b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
     local fs = b:CreateFontString(nil,"OVERLAY",Nexus.LayoutMetrics
         and Nexus.LayoutMetrics.FontObject("normal")
         or "GameFontHighlightSmall")
     fs:SetPoint("LEFT",6,0); fs:SetPoint("RIGHT",-6,0); fs:SetJustifyH("LEFT"); fs:SetText(text)
-    b:SetScript("OnClick", function() menu:Hide(); onClick() end)
+    -- One line per row; a shortened label is complete in the row tooltip.
+    if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(fs, b, 22) end
+    b:SetScript("OnClick", function() (owner or menu):Hide(); onClick() end)
     return b
 end
 
@@ -737,21 +859,37 @@ end
 
 local function RefreshPostWishlistMenu()
     if not postWishlistMenu then return end
-    for _, child in ipairs({postWishlistMenu:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+    local menu = postWishlistMenu
+    -- The rows live in a list that scrolls with the mouse wheel inside the
+    -- menu, so more sources than fit its 300 px never spill below it.
+    if not menu._list then
+        menu._scroll = CreateFrame("ScrollFrame", nil, menu)
+        menu._scroll:SetPoint("TOPLEFT", 0, 0); menu._scroll:SetPoint("BOTTOMRIGHT", 0, 6)
+        menu._list = CreateFrame("Frame", nil, menu._scroll)
+        menu._list:SetWidth(menu:GetWidth()); menu._scroll:SetScrollChild(menu._list)
+        menu._scroll:EnableMouseWheel(true)
+        menu._scroll:SetScript("OnMouseWheel", function(self, delta)
+            local range = math.max(0, menu._list:GetHeight() - (menu:GetHeight() - 6))
+            local offset = (tonumber(self:GetVerticalScroll()) or 0) - (tonumber(delta) or 0) * 22
+            self:SetVerticalScroll(math.max(0, math.min(range, offset)))
+        end)
+    end
+    for _, child in ipairs({menu._list:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+    menu._scroll:SetVerticalScroll(0)
     local candidates = BuildWishlistCandidates()
-    local h = math.min(300, 12 + #candidates * 24)
-    postWishlistMenu:SetHeight(h)
+    menu._list:SetHeight(12 + math.max(1, #candidates) * 22)
+    postWishlistMenu:SetHeight(math.min(300, 12 + math.max(1, #candidates) * 22))
     for i, c in ipairs(candidates) do
-        AddMenuButton(postWishlistMenu, WishlistLabel(c), function()
+        AddMenuButton(menu._list, WishlistLabel(c), function()
             ControllerInstance().SetPostWishlist(c)
             SetPostRefusal(nil)                         -- another source: the refusal was about the earlier one
             postWishlistBtn:SetText("Source: "
                 .. (DisplayRemoteText(c.name, 1024, false) or "Unnamed"))
             RefreshPostPopupPreview()
-        end, i)
+        end, i, menu)
     end
     if #candidates == 0 then
-        AddMenuButton(postWishlistMenu, "No saved builds or wishlists found", function() end, 1)
+        AddMenuButton(menu._list, "No saved builds or wishlists found", function() end, 1, menu)
         postWishlistMenu:SetHeight(40)
     end
 end
@@ -1021,13 +1159,15 @@ local function EnsureEditPopup()
 
     editLockText = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     editLockText:SetPoint("TOPLEFT",18,-190)
-    editLockText:SetSize(324,30)
+    -- Up to three lines of a 16 px face, above the action row.
+    editLockText:SetSize(324,52)
     editLockText:SetJustifyH("LEFT")
     editLockText:SetJustifyV("TOP")
     p._editLockText = editLockText
 
     editEchoBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
-    editEchoBtn:SetSize(210,22)
+    -- The two actions stay 10 px apart (they used to overlap by 4 px).
+    editEchoBtn:SetSize(202,22)
     editEchoBtn:SetPoint("BOTTOMLEFT",18,16)
     editEchoBtn:SetText("Use Active Wishlist Echoes")
     p._editEchoBtn = editEchoBtn
@@ -1045,7 +1185,7 @@ local function EnsureEditPopup()
     end)
 
     local saveBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
-    saveBtn:SetSize(118,22); saveBtn:SetPoint("BOTTOMRIGHT",-18,16); saveBtn:SetText("Save Details")
+    saveBtn:SetSize(112,22); saveBtn:SetPoint("BOTTOMRIGHT",-18,16); saveBtn:SetText("Save Details")
     p._saveBtn = saveBtn
     saveBtn:SetScript("OnClick",function()
         if not ControllerInstance().UpdateEditDraft(
@@ -1134,8 +1274,36 @@ local function EnsureDetailPanel(parent)
     p.author:SetSize(350,12)
     p.author:SetJustifyH("LEFT")
 
-    p.desc = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    p.desc:SetPoint("TOPLEFT",10,-56)
+    -- The title and byline keep one line each; a shortened one is read in
+    -- full from this tooltip.
+    p.headerHit = CreateFrame("Frame", nil, p)
+    p.headerHit:SetPoint("TOPLEFT", p.title, "TOPLEFT")
+    p.headerHit:SetPoint("BOTTOMRIGHT", p.author, "BOTTOMRIGHT")
+    p.headerHit:EnableMouse(true)
+    p.headerHit:SetScript("OnEnter", function(self)
+        local title, author = p.title:GetText(), p.author:GetText()
+        local metrics = Nexus.LayoutMetrics
+        if not (metrics and (metrics.Shortened(p.title)
+            or metrics.Shortened(p.author))) then return end
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+        GameTooltip:AddLine(tostring(title or ""), 1, 0.82, 0, true)
+        GameTooltip:AddLine(tostring(author or ""), 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    p.headerHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Everything between the header and the action row scrolls in a
+    -- measured body (LayoutDetailPanel), so a short responsive panel keeps
+    -- the records and the Details! note inside it.
+    local bodyScroll = CreateFrame("ScrollFrame", "NexusCommunityDetailScroll", p,
+        "UIPanelScrollFrameTemplate")
+    bodyScroll.scrollBarHideable = 1
+    local body = CreateFrame("Frame", nil, bodyScroll)
+    body:SetSize(440, 1)
+    bodyScroll:SetScrollChild(body)
+    p.bodyScroll, p.body = bodyScroll, body
+
+    p.desc = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.desc:SetSize(350,50)
     p.desc:SetJustifyH("LEFT")
     p.desc:SetJustifyV("TOP")
@@ -1143,14 +1311,12 @@ local function EnsureDetailPanel(parent)
     -- "Build Link" — a copyable URL field. The admin (or original author)
     -- can paste a URL (EbonBuilds page, video, sim link, etc.) and viewers
     -- get a box they can copy out in one click. Field is hidden when empty.
-    local linkLabel = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    linkLabel:SetPoint("TOPLEFT",10,-108)
+    local linkLabel = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     linkLabel:SetText("|cff888888DISCORD BUILD LINK|r")
     p.linkLabel = linkLabel
 
-    local linkBox = CreateFrame("EditBox",nil,p,"InputBoxTemplate")
+    local linkBox = CreateFrame("EditBox",nil,body,"InputBoxTemplate")
     linkBox:SetSize(382,18)
-    linkBox:SetPoint("TOPLEFT",10,-122)
     linkBox:SetAutoFocus(false)
     ConfigureSafeEditableText(linkBox, 2048, true)
     linkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1169,7 +1335,7 @@ local function EnsureDetailPanel(parent)
     p.linkBox = linkBox
 
     -- Owner-only Save button for the link
-    local linkSaveBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    local linkSaveBtn = CreateFrame("Button",nil,body,"UIPanelButtonTemplate")
     linkSaveBtn:SetSize(72,18)
     linkSaveBtn:SetPoint("LEFT",linkBox,"RIGHT",8,0)
     linkSaveBtn:SetText("Save Link")
@@ -1197,58 +1363,51 @@ local function EnsureDetailPanel(parent)
     linkSaveBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     p.linkSaveBtn = linkSaveBtn
 
-    p.echoLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    p.echoLabel:SetPoint("TOPLEFT",10,-148)
+    p.echoLabel = body:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     p.echoLabel:SetText("Echoes:")
 
     -- Locked echo row (permanent baseline, up to 6)
-    p.lockedLabel = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    p.lockedLabel:SetPoint("TOPLEFT",10,-150)
+    p.lockedLabel = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     p.lockedLabel:SetText("LOCKED ECHOES")
 
     p.lockedIcons = {}
     for i = 1, 6 do
-        local ic = p:CreateTexture(nil,"ARTWORK")
+        local ic = body:CreateTexture(nil,"ARTWORK")
         ic:SetSize(ECHO_ICON_SIZE+4, ECHO_ICON_SIZE+4)
-        ic:SetPoint("TOPLEFT", 10 + (i-1)*(ECHO_ICON_SIZE+6), -164)
         ic:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         ic:Hide()
         p.lockedIcons[i] = ic
     end
 
-    -- echo icon grid: up to 80 icons, 13 per row (shifted down 48px for locked row)
+    -- echo icon grid: up to 80 icons, as many columns as the body width holds
     p.echoIcons = {}
-    local COLS = 13
     for i = 1, 80 do
-        local col = (i-1) % COLS
-        local row = math.floor((i-1) / COLS)
-        local ic = p:CreateTexture(nil,"ARTWORK")
+        local ic = body:CreateTexture(nil,"ARTWORK")
         ic:SetSize(ECHO_ICON_SIZE, ECHO_ICON_SIZE)
-        ic:SetPoint("TOPLEFT", 10 + col*(ECHO_ICON_SIZE+2), -212 - row*(ECHO_ICON_SIZE+2))
         ic:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         ic:Hide()
         p.echoIcons[i] = ic
     end
 
-    p.missingText = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    p.missingText:SetPoint("TOPLEFT",10,-378)
+    p.missingText = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.missingText:SetSize(470,14)
     p.missingText:SetJustifyH("LEFT")
+    p.missingText:SetJustifyV("TOP")
 
     -- Compact record summary. Full rankings live in the dedicated Leaderboard.
-    p.recordsTitle = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    p.recordsTitle:SetPoint("TOPLEFT",10,-402)
+    p.recordsTitle = body:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    p.recordsTitle:SetJustifyH("LEFT")
     p.recordsTitle:SetText("BEST RECORDS FOR THIS LOADOUT")
 
-    p.dummyRecord = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    p.dummyRecord:SetPoint("TOPLEFT",10,-424)
+    p.dummyRecord = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.dummyRecord:SetSize(470,16)
     p.dummyRecord:SetJustifyH("LEFT")
+    p.dummyRecord:SetJustifyV("TOP")
 
-    p.lkRecord = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    p.lkRecord:SetPoint("TOPLEFT",10,-446)
+    p.lkRecord = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.lkRecord:SetSize(470,16)
     p.lkRecord:SetJustifyH("LEFT")
+    p.lkRecord:SetJustifyV("TOP")
 
     -- Legacy row widgets are retained but hidden for saved UI compatibility.
     -- DPS section: Training Dummy
@@ -1305,14 +1464,13 @@ local function EnsureDetailPanel(parent)
     for _, row in ipairs(p.lbLKRows) do row:Hide() end
 
     -- Details! availability note (shown once at bottom if not installed)
-    p.detailsNote = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    p.detailsNote:SetPoint("TOPLEFT",10,-500)
+    p.detailsNote = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     p.detailsNote:SetSize(470,12)
     p.detailsNote:SetJustifyH("LEFT")
+    p.detailsNote:SetJustifyV("TOP")
     p.detailsNote:SetText("|cff666666Install Details! damage meter to enable DPS tracking.|r")
 
-    p.editState = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    p.editState:SetPoint("TOPLEFT",10,-470)
+    p.editState = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     p.editState:SetSize(470,26)
     p.editState:SetJustifyH("LEFT")
     p.editState:SetJustifyV("TOP")
@@ -1567,6 +1725,9 @@ local function RefreshDetailPanel(buildId, listPending)
         return
     end
     HideDetailStatus()
+    if detailPanel._nexusShownId ~= buildId and detailPanel.bodyScroll then
+        detailPanel.bodyScroll:SetVerticalScroll(0)
+    end
     detailPanel._nexusShownId = buildId
 
     local c = CLASS_COLOR[(build.class or ""):upper()] or {1,1,1}
@@ -1816,6 +1977,7 @@ local function RefreshDetailPanel(buildId, listPending)
         else detailPanel.detailsNote:Show() end
     end
 
+    LayoutDetailPanel(detailPanel)
     detailPanel:Show()
 end
 

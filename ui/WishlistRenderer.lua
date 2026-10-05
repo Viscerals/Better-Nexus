@@ -255,6 +255,8 @@ local function StyleWishlistSelector(button)
         fs:SetPoint("LEFT", button, "LEFT", 9, 0)
         fs:SetPoint("RIGHT", button, "RIGHT", -22, 0)
         fs:SetJustifyH("LEFT")
+        -- One line; the button's own tooltip adds the full text when shortened.
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(fs, nil, 22) end
     end
     local arrow = button:CreateTexture(nil, "OVERLAY")
     arrow:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow")
@@ -319,7 +321,10 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             and "removals here are local; this addon never removes a server Wishlist"
             or ("removals here are local; "
                 .. tostring(support.reason or "no deletion call"))))
-    menu:SetSize(360, 34 + visible * 24)
+    -- The header wraps to its measured height; the rows start below it.
+    local metrics = Nexus.LayoutMetrics
+    local top = 8 + (metrics and metrics.WrapHeight(menu.header, 340, 12) or 14) + 4
+    menu:SetSize(360, top + visible * 24 + 8)
     menu:ClearAllPoints()
     menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
 
@@ -328,7 +333,6 @@ function M.ShowManageWishlistsMenu(anchor, offset)
         if not row then
             row = CreateFrame("Button", nil, menu)
             row:SetSize(344, 22)
-            row:SetPoint("TOPLEFT", 8, -26 - ((i - 1) * 24))
             row:EnableMouse(true)
             row:RegisterForClicks("LeftButtonUp")
             row:SetFrameLevel(menu:GetFrameLevel() + 2)
@@ -337,9 +341,12 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             label:SetPoint("LEFT", 8, 0)
             label:SetPoint("RIGHT", row, "RIGHT", -7, 0)
             label:SetJustifyH("LEFT")
+            if metrics then metrics.OneLineLabel(label, row, 22) end
             row._label = label
             menu.rows[i] = row
         end
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 8, -top - ((i - 1) * 24))
         local plan = (i <= shown) and plans[first + i] or nil
         local undoRow = (i > shown) and undone[i - shown] or nil
         local pagerRow = paged and i == visible
@@ -538,6 +545,7 @@ local function ShowWishlistSwitchMenu(anchor, offset)
             label:SetPoint("LEFT", check, "RIGHT", 7, 0)
             label:SetPoint("RIGHT", row, "RIGHT", -7, 0)
             label:SetJustifyH("LEFT")
+            if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(label, row, 22) end
             row._check = check
             row._label = label
             wishlistSwitchMenu.rows[i] = row
@@ -723,6 +731,7 @@ local function ShowLoadoutSwitchMenu(anchor)
             label:SetPoint("LEFT", 8, 0)
             label:SetPoint("RIGHT", -8, 0)
             label:SetJustifyH("LEFT")
+            if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(label, row, 22) end
             row._label = label
             loadoutSwitchMenu.rows[i] = row
         end
@@ -964,10 +973,27 @@ local function EnsureDisplayPopup()
         RefreshScaleDisplay()
     end)
 
+    -- The two explanatory texts take their measured height (a wider face
+    -- needs more lines); the controls below them move down by the extra.
+    local function LayoutDisplayPopup()
+        local metrics = Nexus.LayoutMetrics
+        if not metrics then return end
+        local extra = metrics.WrapHeight(subtitle, 245, 28) - 28
+        displayCheck:ClearAllPoints(); displayCheck:SetPoint("TOPLEFT", 16, -68 - extra)
+        moveLabel:ClearAllPoints(); moveLabel:SetPoint("TOPLEFT", 18, -102 - extra)
+        hint:ClearAllPoints(); hint:SetPoint("TOPLEFT", 18, -128 - extra)
+        extra = extra + metrics.WrapHeight(hint, 260, 24) - 24
+        sizeLabel:ClearAllPoints(); sizeLabel:SetPoint("TOPLEFT", 18, -164 - extra)
+        scaleSlider:ClearAllPoints(); scaleSlider:SetPoint("TOPLEFT", 20, -195 - extra)
+        -- Room below the slider for its Low/High labels, clear of the border.
+        p:SetHeight(236 + extra)
+    end
+
     p:SetScript("OnShow", function(self)
         self:SetFrameStrata("TOOLTIP")
         self:SetFrameLevel(100)
         self:EnableMouse(true)
+        LayoutDisplayPopup()
         RefreshDisplayControls()
         RefreshScaleDisplay()
     end)
@@ -1078,7 +1104,11 @@ local function EnsureFrame()
             end
         end
     end)
-    frame:SetScript("OnShow", function() hideServerEchoUI() end)
+    frame:SetScript("OnShow", function(self)
+        -- 1040 px is wider than a 4:3 UI at scale 1; keep the edges on screen.
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.FitToScreen(self) end
+        hideServerEchoUI()
+    end)
     frame:SetScript("OnHide", HideEditorTransients)
     frame:Hide()
 
@@ -1186,6 +1216,9 @@ local function EnsureFrame()
     end)
     loadoutSwitchBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self:GetFontString()) then
+            GameTooltip:AddLine(self:GetText(), 1, 1, 1, true)
+        end
         GameTooltip:AddLine("Swap Saved Build", 1, 0.8, 0.3)
         GameTooltip:AddLine("Activates the selected server Saved Build and opens its assigned Wishlist. This changes the active loadout.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
@@ -1209,6 +1242,9 @@ local function EnsureFrame()
     end)
     wishlistSwitchBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self:GetFontString()) then
+            GameTooltip:AddLine(self:GetText(), 1, 1, 1, true)
+        end
         GameTooltip:AddLine("Switch wishlist", 1, 0.8, 0.3)
         GameTooltip:AddLine("Open a different saved wishlist in this editor.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
@@ -1418,6 +1454,12 @@ local function EnsureFrame()
         local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
         b:SetSize(115, 20)
         b:SetPoint("TOP", frame, "TOP", -180 + ((i - 1) * 121), -112)
+        -- A wishlist name stays inside its button; the full label is in a tooltip.
+        local label = b:GetFontString()
+        if label and Nexus.LayoutMetrics then
+            label:SetWidth(103)
+            Nexus.LayoutMetrics.OneLineLabel(label, b, 20, "ANCHOR_BOTTOM")
+        end
         b:Hide()
         candidateButtons[i] = b
     end

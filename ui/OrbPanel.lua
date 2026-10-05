@@ -303,6 +303,11 @@ local function ensure()
     frame.stop=button(frame,470,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
     frame.approval=text(frame,20,-221,580,37,"Start approves this maximum and automatic use of eligible surplus copies, including safe recycling. Ordinary Automation will turn OFF.")
     frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,440,24)
+    -- Fixed boxes; a status or refusal longer than its box is complete in a tooltip.
+    if Nexus.LayoutMetrics then
+        frame.statusHit=Nexus.LayoutMetrics.FullTextTooltip(frame.status,frame)
+        frame.noticeHit=Nexus.LayoutMetrics.FullTextTooltip(frame.notice,frame)
+    end
     -- 035: only while an unresolved action can be continued, or a check is in progress, or its result is shown.
     frame.cont=button(frame,470,-364,130,"Continue...",function()UI.ShowContinue()end)
     frame.cont:Hide()
@@ -447,6 +452,11 @@ local function refreshLog(force)
     if logSelection and not selected then logSelection=nil end
     local details=selected and history.Details(selected.entry,logResolve,run and run.startedAt) or nil
     logFrame.details:SetText(logDetailText(details,history))
+    -- The scrolled child is as tall as the measured details, so every line
+    -- of a long operation is reachable.
+    if Nexus.LayoutMetrics then
+        logFrame.detailChild:SetHeight(Nexus.LayoutMetrics.WrapHeight(logFrame.details,680,96))
+    end
     logFrame.page:SetText(history.PageLabel(total,logPage,LOG_ROWS,run and run.truncated))
     enable(logFrame.prev,logPage>1)
     enable(logFrame.next,logPage<pages)
@@ -663,6 +673,11 @@ local function ensureContinue()
     f.state=text(f,20,-40,540,20)
     f.body=text(f,20,-66,540,170)
     f.notice=text(f,20,-240,540,22)
+    -- Fixed boxes; text longer than its box is complete in a tooltip.
+    if Nexus.LayoutMetrics then
+        f.bodyHit=Nexus.LayoutMetrics.FullTextTooltip(f.body,f)
+        f.noticeHit=Nexus.LayoutMetrics.FullTextTooltip(f.notice,f)
+    end
     f.check=button(f,20,-282,150,"Check the game's state",function()
         local ok,why=Nexus.OrbRuntime.ContinueBegin()
         f.notice:SetText(ok and "" or Nexus.OrbRuntime.ContinueReason(why))

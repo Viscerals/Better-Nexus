@@ -224,6 +224,149 @@ function M.TextRows(text, width, scale)
     return rows
 end
 
+-- Text policy for flowed detail views: a FontString gets a fixed width and
+-- the height its wrapped text needs, measured by the client (height 0 at a
+-- fixed width wraps; GetStringHeight is then the wrapped height). Without a
+-- measurement the conservative model above stands in. maximum, when given,
+-- caps the height; the caller must then keep the full text reachable.
+-- Returns the height set and whether it was capped.
+function M.WrapHeight(fontString, width, minimum, maximum)
+    width = math.max(1, math.floor(tonumber(width) or 1))
+    fontString:SetWidth(width)
+    fontString:SetHeight(0)
+    local measured
+    if type(fontString.GetStringHeight) == "function" then
+        local ok, value = pcall(fontString.GetStringHeight, fontString)
+        value = ok and tonumber(value) or nil
+        if value and value > 0 and value < math.huge then measured = value end
+    end
+    if not measured then
+        local scale = RuntimeFontScale()
+        local _, line = M.ConservativeText(scale)
+        local text = type(fontString.GetText) == "function"
+            and fontString:GetText() or ""
+        measured = M.TextRows(text, width, scale) * line
+    end
+    local height = math.max(tonumber(minimum) or 1, math.ceil(measured))
+    local capped = maximum and height > maximum or false
+    if capped then height = math.max(1, math.floor(maximum)) end
+    fontString:SetHeight(height)
+    return height, capped
+end
+
+-- True when a one-line FontString's text is wider than its box, so the
+-- client shows it shortened.
+function M.Shortened(fontString)
+    if not (fontString and fontString:IsShown()) then return false end
+    local ok, width = pcall(fontString.GetStringWidth, fontString)
+    width = ok and tonumber(width) or nil
+    return width == nil or width > (tonumber(fontString:GetWidth()) or 0)
+end
+
+-- Fixed row labels keep one line at the row's height, so a long name never
+-- spills over the next row; the client shortens the rest. While shortened,
+-- the owner (the row or button) shows the complete text in a tooltip beside
+-- it. Existing OnEnter/OnLeave scripts of the owner keep running.
+function M.OneLineLabel(fontString, owner, height, anchor)
+    fontString:SetHeight(height)
+    if type(fontString.SetWordWrap) == "function" then
+        pcall(fontString.SetWordWrap, fontString, false)
+    end
+    if not owner or owner._nexusOneLine then
+        if owner then owner._nexusOneLine = fontString end
+        return
+    end
+    owner._nexusOneLine = fontString
+    owner:HookScript("OnEnter", function(self)
+        local label = self._nexusOneLine
+        if not (GameTooltip and M.Shortened(label)) then return end
+        GameTooltip:SetOwner(self, anchor or "ANCHOR_RIGHT")
+        GameTooltip:AddLine(tostring(label:GetText() or ""), 1, 1, 1, true)
+        GameTooltip:Show()
+        self._nexusOneLineTip = true
+    end)
+    owner:HookScript("OnLeave", function(self)
+        if self._nexusOneLineTip and GameTooltip then GameTooltip:Hide() end
+        self._nexusOneLineTip = nil
+    end)
+end
+
+-- True when a wrapped FontString's text needs more height than its box. The
+-- box height is restored; measure on demand (hover), not every refresh.
+function M.Overflows(fontString)
+    if not (fontString and fontString:IsShown()) then return false end
+    local text = fontString:GetText()
+    if text == nil or text == "" then return false end
+    local height = tonumber(fontString:GetHeight()) or 0
+    fontString:SetHeight(0)
+    local ok, measured = pcall(fontString.GetStringHeight, fontString)
+    fontString:SetHeight(height)
+    measured = ok and tonumber(measured) or nil
+    return measured == nil or measured > height + 0.5
+end
+
+-- A fixed multi-line text box keeps its size; while its text overflows, a
+-- hover area over it shows the complete text in a tooltip.
+function M.FullTextTooltip(fontString, parent, anchor)
+    local hit = CreateFrame("Frame", nil, parent)
+    hit:SetAllPoints(fontString)
+    hit:EnableMouse(true)
+    hit._nexusText = fontString
+    hit:SetScript("OnEnter", function(self)
+        local label = self._nexusText
+        if not (GameTooltip and M.Overflows(label)) then return end
+        GameTooltip:SetOwner(self, anchor or "ANCHOR_TOP")
+        GameTooltip:AddLine(tostring(label:GetText() or ""), 1, 1, 1, true)
+        GameTooltip:Show()
+        self._nexusTip = true
+    end)
+    hit:SetScript("OnLeave", function(self)
+        if self._nexusTip and GameTooltip then GameTooltip:Hide() end
+        self._nexusTip = nil
+    end)
+    return hit
+end
+
+-- A fixed-size window wider or taller than the visible UI (a 1024 or 960 px
+-- wide UI at scale 1 on 4:3 and 5:4 screens) is scaled down to fit with a
+-- margin, so its edges and close button stay on screen; one that fits keeps
+-- scale 1. An implausibly small reported UI size is not acted on.
+function M.FitToScreen(frame, margin)
+    margin = tonumber(margin) or 24
+    local width, height = tonumber(frame:GetWidth()), tonumber(frame:GetHeight())
+    local screenW = UIParent and tonumber(UIParent:GetWidth())
+    local screenH = UIParent and tonumber(UIParent:GetHeight())
+    if not (width and height and screenW and screenH) or width <= 0 or height <= 0
+        or screenW < 640 or screenH < 480 then return nil end
+    local scale = math.max(0.5, math.min(1, (screenW - margin) / width,
+        (screenH - margin) / height))
+    if math.abs((tonumber(frame:GetScale()) or 1) - scale) > 0.001 then
+        frame:SetScale(scale)
+    end
+    return scale
+end
+
+-- Button width for its current label: the client's text width when it
+-- reports one, otherwise the conservative character model, plus end caps.
+function M.FitButtonWidth(button, minimum, maximum)
+    local text = tostring(button:GetText() or "")
+        :gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    local width
+    if type(button.GetTextWidth) == "function" then
+        local ok, value = pcall(button.GetTextWidth, button)
+        value = ok and tonumber(value) or nil
+        if value and value > 0 and value < math.huge then width = value end
+    end
+    if not width then
+        local char = M.ConservativeText(RuntimeFontScale())
+        width = #(text:gsub("[\128-\191]", "")) * char
+    end
+    width = math.max(tonumber(minimum) or 1, math.ceil(width + 24))
+    if maximum then width = math.min(maximum, width) end
+    button:SetWidth(width)
+    return width
+end
+
 local function PanelKey(spec)
     return table.concat({
         Round(spec.width or 272,1),Round(spec.fontScale or 1,3),
@@ -489,7 +632,9 @@ function M.Community(spec)
     cursor = cursor + statusHeight + gap
 
     local bodyTop = cursor
-    local minimumBody = math.max(150,math.ceil(110 * scale))
+    -- The detail keeps its heading, a two-row action footer and at least
+    -- three lines of its scrolled body; the list needs less.
+    local minimumBody = math.max(150,math.ceil(133 * scale))
     local height = math.max(requestedHeight, bodyTop + minimumBody + 20)
     local bodyHeight = height - bodyTop - 20
     local bodyGap = math.max(16,math.ceil(20 * scale))

@@ -191,12 +191,6 @@ local function ensure()
     frame.prepared = text(frame, 20, -378, 680, 46)
 
     frame.copyNote = text(frame, 20, -428, 680, 20)
-    -- Fixed boxes; a text longer than its box is complete in a tooltip.
-    if Nexus.LayoutMetrics then
-        for _, fs in ipairs({frame.incident, frame.storage, frame.prepared, frame.copyNote}) do
-            Nexus.LayoutMetrics.FullTextTooltip(fs, frame)
-        end
-    end
     frame.copyScroll = CreateFrame("ScrollFrame", "NexusSupportCopyScroll", frame,
         "UIPanelScrollFrameTemplate")
     frame.copyScroll:SetPoint("TOPLEFT", 20, -448)

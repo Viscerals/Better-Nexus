@@ -1030,6 +1030,8 @@ local function EnsureAssociationPanel(journal)
         associationPanel.selector.text:SetPoint("LEFT", 9, 0)
         associationPanel.selector.text:SetPoint("RIGHT", -25, 0)
         associationPanel.selector.text:SetJustifyH("LEFT")
+        -- One line inside the 21 px selector; the picker lists complete names.
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(associationPanel.selector.text, nil, 21) end
         associationPanel.selector.arrow = associationPanel.selector:CreateTexture(nil, "ARTWORK")
         associationPanel.selector.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
         associationPanel.selector.arrow:SetSize(16, 16)
@@ -1189,6 +1191,8 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 row.nameButton:SetPoint("LEFT", 0, 0); row.nameButton:SetPoint("RIGHT", -28, 0); row.nameButton:SetHeight(rowH-2)
                 row.nameButton.text = row.nameButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 row.nameButton.text:SetPoint("LEFT", 6, 0); row.nameButton.text:SetPoint("RIGHT", -4, 0); row.nameButton.text:SetJustifyH("LEFT")
+                -- One line per row; a shortened name is complete in the row tooltip.
+                if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(row.nameButton.text, nil, rowH-2) end
                 row.nameButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
                 row.gear = CreateFrame("Button", nil, row)
                 row.gear:SetFrameLevel(row:GetFrameLevel() + 2)
@@ -1286,6 +1290,9 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     .82, .82, .82, true)
                 GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, .82, .25, true)
                 GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, .82, .25, true)
+                if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self.text) then
+                    GameTooltip:AddLine(self.text:GetText(), 1, 1, 1, true)
+                end
                 GameTooltip:Show()
             end)
             row.nameButton:SetScript("OnLeave", function() GameTooltip:Hide() end)

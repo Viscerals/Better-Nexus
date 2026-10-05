@@ -458,9 +458,15 @@ local function EnsureFrame()
     -- but keep the text restorable via Refresh
     scroll:SetScrollChild(editBox)
 
+    -- Bounded on the right by the bottom buttons, two lines high below the
+    -- peer controls; a longer status is complete in its tooltip.
     statusFS = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    statusFS:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 10)
+    -- Clear Log starts at x 376 of the 700 px window (export 220 + 6 + 86).
+    statusFS:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 6)
+    statusFS:SetSize(356, 26)
     statusFS:SetJustifyH("LEFT")
+    statusFS:SetJustifyV("BOTTOM")
+    if Nexus.LayoutMetrics then Nexus.LayoutMetrics.FullTextTooltip(statusFS, frame) end
 
     -- Active Peer Test age/counters repaint once per second only while this
     -- visible tab is selected. Hidden, stopped, and disabled diagnostics do
