@@ -14,6 +14,9 @@
 -- "unreadable" as a whole; identical over-limit sources give identical
 -- readings (no generation churn) and a source back within the limits is read
 -- again; a rejected field still grants nothing.
+-- Keys (review of 124cf37, sections 8-9): only primitive keys are read and they
+-- are checked before any key is stored, compared or converted, so no source
+-- metamethod runs and no over-length key reaches the sort.
 local S=dofile('tests/prototype/progress_refresh_support.lua')
 local C=S.Checker('echo_raw_shape_bounds')
 local check=C.check
@@ -177,4 +180,99 @@ do -- a 1 MiB name inside a rejected slot mirror
  check(A.EchoReconcileStats().rejected.slots==nil,'real path: recovery: the slot mirror is accepted again')
 end
 
-C.finish('wide, long-string, many-string, deep and cyclic sources are bounded while read and read unreadable; identical over-limit readings repeat; within the limits sources are read; a rejected field grants nothing')
+-- 8. Keys (review of 124cf37). A raw source may be rejected precisely because
+-- its keys are malformed, so keys are checked as they are collected, before
+-- any key is stored, compared or converted. Only primitive keys are read: a
+-- finite number, a string within the scalar limit, a boolean. Any other key
+-- (table, function, userdata, thread), an infinite number or an over-length
+-- string makes the whole field unreadable, and no source metamethod runs. The
+-- reviewed comparator called tostring on table keys (running their
+-- __tostring) and sorted 1 MiB string keys before refusing them.
+local calls=0
+local Hooked={}
+for _,name in ipairs({'__tostring','__lt','__le','__eq','__concat','__len','__index',
+ '__newindex','__call','__unm','__add','__sub','__mul','__div','__mod','__pow'}) do
+ Hooked[name]=function() calls=calls+1;if name=='__tostring' then return 'k' end;return false end
+end
+local function KeyTable(label) return setmetatable({label=label},Hooked) end
+-- How many strings longer than the scalar limit were handed to table.sort.
+local function LongSorted(value)
+ local sort,long=table.sort,0
+ table.sort=function(t,...)
+  for i=1,#t do if type(t[i])=='string' and #t[i]>SCALAR then long=long+1 end end
+  return sort(t,...)
+ end
+ local ok,result=pcall(RawShape,value)
+ table.sort=sort
+ assert(ok,result)
+ return result,long
+end
+do
+ calls=0
+ local result,sorted=Measure({[KeyTable('a')]=1,[KeyTable('b')]=2})
+ check(result=='unreadable','keys: two table keys read unreadable: '..tostring(result):sub(1,40))
+ check(calls==0,'keys: no metamethod of a table key runs (calls '..calls..')')
+ check(sorted==0,'keys: nothing is sorted ('..sorted..')')
+ calls=0
+ check(Measure({[KeyTable('only')]=1})=='unreadable' and calls==0,'keys: a single table key reads unreadable')
+ check(Measure({x={[KeyTable('nested')]=1}})=='unreadable' and calls==0,'keys: a table key at any depth reads unreadable')
+ check(Measure({[print]=1})=='unreadable','keys: a function key reads unreadable')
+ check(Measure({[coroutine.create(function() end)]=1})=='unreadable','keys: a thread key reads unreadable')
+ if newproxy then
+  local u=newproxy(true)
+  getmetatable(u).__tostring=function() calls=calls+1;return 'u' end
+  getmetatable(u).__lt=function() calls=calls+1;return false end
+  calls=0
+  check(Measure({[u]=1,[newproxy(u)]=2})=='unreadable' and calls==0,'keys: userdata keys read unreadable, no metamethod runs (calls '..calls..')')
+ else
+  print('RAW_SHAPE keys: newproxy unavailable here; userdata key case not constructible')
+ end
+ check(Measure({[math.huge]=1})=='unreadable','keys: an infinite number key reads unreadable')
+ check(Measure({[-math.huge]=1})=='unreadable','keys: a negative infinite number key reads unreadable')
+ check(not pcall(function() local t={};t[0/0]=1 end),'keys: a NaN key cannot be constructed (Lua refuses it), so none can reach a reading')
+ check(Measure({[1e300]=1,[-0.5]=2,[3]=3})~='unreadable','keys: finite number keys, large or fractional, are read')
+ -- Over-length string keys with a long common prefix never reach the sort.
+ local prefix=string.rep('x',1048576)
+ local long,reached=LongSorted({[prefix..'a']=1,[prefix..'b']=2})
+ check(long=='unreadable','keys: 1 MiB string keys read unreadable')
+ check(reached==0,'keys: and are refused before any sort ('..reached..' reached it)')
+ -- Keys at the scalar limit, sharing a 1023-byte prefix, are read in value order.
+ local near=string.rep('p',SCALAR-1)
+ local function AtLimit(order) local t={};for _,s in ipairs(order) do t[near..s]=s end;return t end
+ local ascending=Measure(AtLimit({'a','b','c'}))
+ check(ascending~='unreadable','keys: keys at the scalar limit with a long common prefix are read')
+ local ia,ib,ic=ascending:find(near..'a',1,true),ascending:find(near..'b',1,true),ascending:find(near..'c',1,true)
+ check(ia and ib and ic and ia<ib and ib<ic,'keys: and ordered by value')
+ check(Measure(AtLimit({'c','a','b'}))==ascending,'keys: whatever the insertion order')
+ check(Measure({[near..'zz']=1})=='unreadable','keys: a key one byte over the scalar limit reads unreadable')
+ -- Mixed primitive keys: booleans (false before true), then numbers, then
+ -- strings, each ascending; independent of insertion order.
+ local mixed=Measure({[true]=1,[false]=2,[2]=3,[-1.5]=4,b=5,a=6})
+ check(mixed=='{F=2;T=1;-1.5=4;2=3;1:a=6;1:b=5;}','keys: canonical primitive key order: '..tostring(mixed))
+ local reverse={};reverse.a=6;reverse.b=5;reverse[-1.5]=4;reverse[2]=3;reverse[false]=2;reverse[true]=1
+ check(Measure(reverse)==mixed,'keys: independent of insertion order')
+ check(calls==0,'keys: no metamethod ran in any key case (calls '..calls..')')
+end
+
+-- 9. The real path with malformed keys: a rejected discovery map holding table
+-- keys reads unreadable without running their metamethods; identical repeats
+-- move nothing; with primitive keys again the source is read (generation
+-- once), then accepted; ownership is untouched.
+do
+ calls=0
+ H.discovered={[KeyTable('x')]=true,[KeyTable('y')]=true,[200001]=true};H.Notify();H.Advance(1)
+ local token=Snapshot().discovery
+ check(A.EchoReconcileStats().rejected.discovery=='discovery:key','real path keys: the discovery field is rejected: '..tostring(A.EchoReconcileStats().rejected.discovery))
+ check(#token<200 and token:find('|raw:unreadable',1,true)~=nil,'real path keys: its snapshot value is unreadable ('..#token..' bytes)')
+ check(calls==0,'real path keys: no key metamethod ran (calls '..calls..')')
+ local g0=Gen();local owned0=A.Owned().total
+ H.Notify();H.Advance(1);H.Advance(6)
+ check(Gen()==g0 and calls==0,'real path keys: identical repeats move nothing and run nothing (calls '..calls..')')
+ H.discovered={[200001]=false};H.Notify();H.Advance(1)
+ check(Gen()==g0+1 and Snapshot().discovery:find('|raw:{',1,true)~=nil,'real path keys: primitive keys again: read, the generation moves once')
+ H.discovered={[200001]=true};H.Notify();H.Advance(1)
+ check(A.EchoReconcileStats().rejected.discovery==nil and Gen()==g0+2,'real path keys: valid again: accepted, the generation moves once more')
+ check(A.Owned().total==owned0 and calls==0,'real path keys: ownership untouched; no metamethod ran')
+end
+
+C.finish('wide, long-string, many-string, deep and cyclic sources and non-primitive, infinite or over-length keys are refused while read, with no source metamethod run and nothing over-length sorted; identical over-limit readings repeat; within the limits sources are read in canonical key order; a rejected field grants nothing')

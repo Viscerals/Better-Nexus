@@ -42,6 +42,13 @@ Now each field is checked on its own (`CaptureEchoSnapshot`):
   back within the limits, and then it is read again (the generation moves once). Supported mirrors
   are well inside the limits: a 15-row, 85-Echo slot mirror reads about 73 KB in about 13000
   entries; an over-limit source is refused after at most the limit's work (`echo_raw_shape_bounds`).
+- Keys of a raw source are checked as they are collected, before any key is stored, compared or
+  converted (a source may be rejected precisely because its keys are malformed). Only primitive keys
+  are read: a finite number, a string of at most 1024 bytes, a boolean. Any other key (table,
+  function, userdata, thread) or an infinite number reads `unreadable` for the whole field (Lua
+  cannot hold a NaN key). No key is ever converted with `tostring`, so no source metamethod runs;
+  keys are ordered by type (booleans, false before true; then numbers; then strings), then value,
+  independent of insertion order.
 
 ## D2: an assigned-Wishlist change could be missed by the static fallback
 
@@ -68,7 +75,10 @@ roles fail-closed. Both fail on the code before this change.
 `tests/prototype/echo_raw_shape_bounds.lua`: wide, long-string, many-string, deep and cyclic raw
 sources against the limits above (largest sort, heap growth, reading size), over-limit idempotence and
 recovery through the real reconciliation, and no ownership change; it fails on 19ac830, whose
-first `RawShape` collected and sorted every key before its part limit applied.
+first `RawShape` collected and sorted every key before its part limit applied. Its key sections
+(table, function, thread and userdata keys with counting metamethods, infinite keys, 1 MiB keys with a
+common prefix, keys at the limit, canonical mixed primitive order, and the real path) fail on 124cf37,
+whose comparator converted table keys with `tostring` and sorted over-length keys before refusing.
 
 Not changed: ordinary and locked roles, the ownership getters and their trust rules, the strict
 fingerprints themselves, granted refresh requests (none added), and the planner.

@@ -4057,15 +4057,23 @@ end
 -- That reading does not track further change until the source is back within
 -- the limits. Supported mirrors are well inside them (a 15-row, 85-Echo slot
 -- mirror reads about 73 KB in about 13000 entries).
+-- Keys: a raw source can be rejected precisely because its keys are malformed,
+-- so each key is checked as it is collected, before it is stored, compared or
+-- converted. Only primitive keys are read: a finite number, a string of at most
+-- RAW_SHAPE_SCALAR_BYTES, a boolean. Any other key (table, function, userdata,
+-- thread) or an infinite number reads "unreadable" for the whole field. No key
+-- is ever passed to tostring, so no source metamethod runs, and the comparator
+-- only orders primitives: booleans (false before true), numbers, strings.
 local RAW_SHAPE_DEPTH, RAW_SHAPE_ENTRIES = 8, 20000
 local RAW_SHAPE_BYTES, RAW_SHAPE_SCALAR_BYTES = 262144, 1024
 local RAW_SHAPE_UNREADABLE = "unreadable"
+local RAW_SHAPE_KEY_RANK = { boolean = 1, number = 2, string = 3 }
 
 local function RawShapeKeyLess(a, b)
-    local ta, tb = type(a), type(b)
-    if ta ~= tb then return ta < tb end
-    if ta == "number" or ta == "string" then return a < b end
-    return tostring(a) < tostring(b)
+    local ra, rb = RAW_SHAPE_KEY_RANK[type(a)], RAW_SHAPE_KEY_RANK[type(b)]
+    if ra ~= rb then return ra < rb end
+    if ra == 1 then return a == false and b == true end
+    return a < b
 end
 
 local function RawShape(value)
@@ -4086,6 +4094,14 @@ local function RawShape(value)
             open[v] = true
             local keys, n = {}, 0
             for k in next, v do
+                local keyKind = type(k)
+                if keyKind == "string" then
+                    if #k > RAW_SHAPE_SCALAR_BYTES then Over() end
+                elseif keyKind == "number" then
+                    if k ~= k or k == math.huge or k == -math.huge then Over() end
+                elseif keyKind ~= "boolean" then
+                    Over()
+                end
                 n = n + 1
                 if entries + n > RAW_SHAPE_ENTRIES then Over() end
                 keys[n] = k
