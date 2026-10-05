@@ -116,6 +116,9 @@ local echoNotificationPending = false
 local echoSnapshot = nil
 local echoActiveSlot = 0
 local echoVerifiedAt = nil
+-- The Echo fields the strict check rejected at the last scan: field -> reason.
+-- Current state only (never the last accepted one); see CaptureEchoSnapshot.
+local echoRejected = {}
 local echoGenerations = {
     slots=0, granted=0, locked=0, discovery=0, activeSlot=0,
 }
@@ -4038,71 +4041,177 @@ local function ServiceRead(svc, name, optional)
     return true, value
 end
 
+-- A field the strict check refused is not accepted. Its snapshot value reads
+-- "rejected", the reason, and how the raw source reads now -- never the last
+-- accepted fingerprint, so a rejected mirror is not presented as an unchanged
+-- one. That raw reading is change evidence only: the field's generation moves
+-- when its source moves (into, within and out of rejection) and stays put
+-- while identical rejections repeat. Nothing takes ownership, confirmation,
+-- roles or slots from it; every reader still uses its own getter and rules.
+-- A source deeper or larger than the bounds below reads "unreadable", which
+-- does not track further change until the field is readable again.
+local RAW_SHAPE_DEPTH, RAW_SHAPE_PARTS = 8, 100000
+
+local function RawShapeKeyLess(a, b)
+    local ta, tb = type(a), type(b)
+    if ta ~= tb then return ta < tb end
+    if ta == "number" or ta == "string" then return a < b end
+    return tostring(a) < tostring(b)
+end
+
+local function RawShape(value)
+    local parts, count, open = {}, 0, {}
+    local function Add(text)
+        count = count + 1
+        if count > RAW_SHAPE_PARTS then error("raw shape bound", 0) end
+        parts[count] = text
+    end
+    local function Walk(v, depth)
+        local kind = type(v)
+        if kind == "table" then
+            if open[v] or depth > RAW_SHAPE_DEPTH then Add("~"); return end
+            open[v] = true
+            local keys = {}
+            for k in pairs(v) do keys[#keys + 1] = k end
+            table.sort(keys, RawShapeKeyLess)
+            Add("{")
+            for i = 1, #keys do
+                Walk(keys[i], depth + 1); Add("=")
+                Walk(v[keys[i]], depth + 1); Add(";")
+            end
+            Add("}")
+            open[v] = nil
+        elseif kind == "string" then Add(TextPart(v))
+        elseif kind == "number" then Add(NumberPart(v) or tostring(v))
+        elseif kind == "boolean" then Add(v and "T" or "F")
+        else Add(kind) end
+    end
+    if not pcall(Walk, value, 0) then return "unreadable" end
+    return table.concat(parts)
+end
+
+-- What IsTomeEchoDisabled answers for every lever member, as plain text: the
+-- raw reading of a rejected lever part (change evidence only, as above).
+local function DisabledAnswers(svc, catalog)
+    local out = {}
+    if type(catalog) ~= "table" or type(catalog.levers) ~= "table"
+        or not (svc and type(svc.IsTomeEchoDisabled) == "function") then
+        return out
+    end
+    for lever, row in pairs(catalog.levers) do
+        local members = type(row) == "table" and type(row.members) == "table"
+            and row.members or {}
+        local answers = {}
+        for i = 1, #members do
+            local ok, value = pcall(svc.IsTomeEchoDisabled, members[i])
+            answers[i] = ok and tostring(value) or "error"
+        end
+        out[tostring(lever)] = answers
+    end
+    return out
+end
+
+-- Every field is checked on its own: one rejected field no longer holds back
+-- the others (it used to fail the whole capture before any generation moved,
+-- freezing every generation-keyed reader on its last accepted reading).
+-- Returns the snapshot, the active slot number (0 when unknown) and the
+-- rejected fields (field -> reason).
 local function CaptureEchoSnapshot()
     local svc = PS()
     if not svc then
         return {
             slots="unavailable", granted="unavailable", locked="unavailable",
             discovery="unavailable", activeSlot=0,
-        }, 0
+        }, 0, {}
+    end
+    local rejected = {}
+    local function Rejected(field, reason, raw)
+        reason = tostring(reason or (field .. ":malformed"))
+        rejected[field] = rejected[field] or reason
+        if type(raw) == "function" then
+            local okRaw, value = pcall(raw)
+            raw = okRaw and value or nil
+        end
+        return "rejected:" .. reason .. "|raw:" .. RawShape(raw), false
+    end
+    local function Accept(field, raw, readError, check, ...)
+        if readError then return Rejected(field, readError, raw) end
+        local okCheck, sig, why = pcall(check, ...)
+        if okCheck and type(sig) == "string" then return sig, true end
+        return Rejected(field, okCheck and why or (field .. ":error"), raw)
     end
     local okSlots, rawSlots, slotsError = ServiceRead(svc, "GetServerBuildSlots")
     local okMax, maxSlots, maxError = ServiceRead(svc, "GetServerMaxSlots", true)
-    local okActive, activeSlot, activeError = ServiceRead(svc, "GetServerActiveSlot")
+    local okActive, rawActive, activeError = ServiceRead(svc, "GetServerActiveSlot")
     local okGranted, granted, grantedError = ServiceRead(svc, "GetGrantedPerks")
     local okLocked, locked, lockedError = ServiceRead(svc, "GetLockedPerks")
     local okDiscovered, discovered, discoveredError =
         ServiceRead(svc, "GetDiscoveredEchoes")
-    if not (okSlots and okMax and okActive and okGranted and okLocked
-        and okDiscovered) then
-        return nil, nil, slotsError or maxError or activeError
-            or grantedError or lockedError or discoveredError
-    end
-    maxSlots = maxSlots == nil and 5 or tonumber(maxSlots)
-    activeSlot = activeSlot == nil and 0 or tonumber(activeSlot)
-    if not IntegerAtLeast(maxSlots, 1) or not IntegerAtLeast(activeSlot, 0) then
-        return nil, nil, "echo:scalar"
-    end
     local okCatalog, catalog = pcall(A.Catalog)
-    if not okCatalog then return nil, nil, "disabled:catalog" end
-    local slotsSig, slotsSigError = SlotsFingerprint(rawSlots, maxSlots)
-    local grantedSig, grantedSigError = GrantedFingerprint(granted, catalog)
-    local lockedSig, lockedSigError = LockedFingerprint(locked)
-    local discoveredSig, discoveredSigError =
-        DiscoveryFingerprint(discovered, catalog)
-    local disabledSig, disabledSigError = DisabledFingerprint(svc, catalog)
-    if not (slotsSig and grantedSig and lockedSig and discoveredSig
-        and disabledSig) then
-        return nil, nil, slotsSigError or grantedSigError or lockedSigError
-            or discoveredSigError or disabledSigError or "echo:malformed"
+    local catalogError = not okCatalog and "disabled:catalog" or nil
+    if not okCatalog then catalog = nil end
+
+    if okMax then
+        maxSlots = maxSlots == nil and 5 or tonumber(maxSlots)
+        if not IntegerAtLeast(maxSlots, 1) then okMax, maxError = false, "echo:scalar" end
     end
+    local slotsSig = Accept("slots", rawSlots,
+        (not okSlots and slotsError) or (not okMax and maxError) or nil,
+        SlotsFingerprint, rawSlots, maxSlots)
+
+    local activeSlot, activeField = 0, nil
+    if okActive then
+        local value = rawActive == nil and 0 or tonumber(rawActive)
+        if IntegerAtLeast(value, 0) then activeSlot, activeField = value, value end
+    end
+    if activeField == nil then
+        activeField = Rejected("activeSlot",
+            okActive and "echo:scalar" or activeError, rawActive)
+    end
+
+    local grantedSig, grantedAccepted = Accept("granted", granted,
+        (not okGranted and grantedError) or catalogError,
+        GrantedFingerprint, granted, catalog)
+    local lockedSig = Accept("locked", locked, not okLocked and lockedError or nil,
+        LockedFingerprint, locked)
+    local discoveredSig = Accept("discovery", discovered,
+        (not okDiscovered and discoveredError) or catalogError,
+        DiscoveryFingerprint, discovered, catalog)
+    local disabledSig = Accept("discovery",
+        function() return DisabledAnswers(svc, catalog) end, catalogError,
+        DisabledFingerprint, svc, catalog)
+
     -- Confirmation is semantic state too: a fresh confirmed-empty response
     -- must invalidate a cached unsynced projection even with equal contents.
+    -- Only an accepted granted mirror can confirm; a rejected one confirms
+    -- nothing here and keeps the current confirmation state as it is.
     local confirmation = ownedConfirmedGeneration == ownedGeneration
-    local distinct = 0
-    if type(granted) == "table" then
-        local seen = {}
-        for _, entries in pairs(granted) do
-            if type(entries) == "table" then
-                for i = 1, #entries do
-                    local id = type(entries[i]) == "table" and tonumber(entries[i].spellId)
-                    if id and catalog and catalog.rows[id] and not seen[id] then
-                        seen[id], distinct = true, distinct + 1
+    if grantedAccepted then
+        local distinct = 0
+        if type(granted) == "table" then
+            local seen = {}
+            for _, entries in pairs(granted) do
+                if type(entries) == "table" then
+                    for i = 1, #entries do
+                        local id = type(entries[i]) == "table" and tonumber(entries[i].spellId)
+                        if id and catalog and catalog.rows[id] and not seen[id] then
+                            seen[id], distinct = true, distinct + 1
+                        end
                     end
                 end
             end
         end
-    end
-    local fresh = ownedRequestGeneration == ownedGeneration and type(granted) == "table"
-        and (granted ~= ownedBaselineRef or GrantedSignature(granted) ~= ownedBaselineSig)
-    if not (A.Level() <= 1 and distinct >= GHOST_OWNED)
-        and (fresh or (ownedGeneration == 0 and distinct > 0)) then
-        if not confirmation then
-            ownedConfirmedGeneration = ownedGeneration
-            ownedProjectionRevision = ownedProjectionRevision + 1
-            dataDirty = true
+        local fresh = ownedRequestGeneration == ownedGeneration and type(granted) == "table"
+            and (granted ~= ownedBaselineRef or GrantedSignature(granted) ~= ownedBaselineSig)
+        if not (A.Level() <= 1 and distinct >= GHOST_OWNED)
+            and (fresh or (ownedGeneration == 0 and distinct > 0)) then
+            if not confirmation then
+                ownedConfirmedGeneration = ownedGeneration
+                ownedProjectionRevision = ownedProjectionRevision + 1
+                dataDirty = true
+            end
+            ownedSeen, confirmation = true, true
         end
-        ownedSeen, confirmation = true, true
     end
     return {
         slots=slotsSig,
@@ -4110,8 +4219,8 @@ local function CaptureEchoSnapshot()
             .. ":" .. (confirmation and "ready" or "pending"),
         locked=lockedSig,
         discovery=discoveredSig .. "|" .. disabledSig,
-        activeSlot=activeSlot,
-    }, activeSlot
+        activeSlot=activeField,
+    }, activeSlot, rejected
 end
 
 local function RefreshEchoAssociations()
@@ -4134,19 +4243,34 @@ local function ReconcileEchoState(markDirty, source)
         return true, false
     end
     echoStatus.scans = echoStatus.scans + 1
-    local ok, snapshot, activeSlot, failure = pcall(CaptureEchoSnapshot)
-    if not ok then
-        failure, snapshot = snapshot, nil
-    end
-    if type(snapshot) ~= "table" then
+    local ok, snapshot, activeSlot, rejected = pcall(CaptureEchoSnapshot)
+    if not ok or type(snapshot) ~= "table" then
+        -- An internal error of the capture itself (every field check is
+        -- protected): nothing was read, so nothing is claimed either way.
         echoStatus.failures = echoStatus.failures + 1
-        EchoReason("failure:" .. tostring(failure or "capture"))
+        EchoReason("failure:" .. tostring(ok and "capture" or snapshot))
         return false, false
+    end
+    -- The strict check's current verdict, field by field: rejected fields are
+    -- reported as such (failures counts scans that rejected any field).
+    echoRejected = {}
+    local rejectedParts = {}
+    for _, field in ipairs(ECHO_FIELDS) do
+        local reason = type(rejected) == "table" and rejected[field] or nil
+        if reason then
+            echoRejected[field] = reason
+            rejectedParts[#rejectedParts + 1] = field .. "=" .. tostring(reason)
+        end
+    end
+    local rejectedText = ""
+    if #rejectedParts > 0 then
+        echoStatus.failures = echoStatus.failures + 1
+        rejectedText = ";failure:" .. table.concat(rejectedParts, ",")
     end
     if not echoSnapshot then
         echoSnapshot, echoActiveSlot = snapshot, activeSlot or 0
         echoVerifiedAt = now
-        EchoReason(tostring(source or "baseline") .. ":baseline")
+        EchoReason(tostring(source or "baseline") .. ":baseline" .. rejectedText)
         return true, false
     end
 
@@ -4168,12 +4292,15 @@ local function ReconcileEchoState(markDirty, source)
         else
             echoStatus.equivalentFallbacks = echoStatus.equivalentFallbacks + 1
         end
-        EchoReason(tostring(source or "reconcile") .. ":equivalent")
+        EchoReason(tostring(source or "reconcile") .. ":equivalent" .. rejectedText)
         return true, false
     end
 
     echoStatus.semanticChanges = echoStatus.semanticChanges + 1
-    if markDirty then
+    -- A notification belongs to the change it announced, whichever reader
+    -- reconciles it first: a non-dirty reader (the Orb read context) that took
+    -- a pending notification keeps its dirty marking, as the poll would have.
+    if markDirty or hadPending then
         if changed.slots or changed.activeSlot then
             slotsDirty = true
             echoStatus.dirtyReasons.slots = echoStatus.dirtyReasons.slots + 1
@@ -4187,7 +4314,8 @@ local function ReconcileEchoState(markDirty, source)
         RefreshWishlistEvidenceTransitions()
         RefreshEchoAssociations()
     end
-    EchoReason(tostring(source or "reconcile") .. ":" .. table.concat(changedNames, ","))
+    EchoReason(tostring(source or "reconcile") .. ":" .. table.concat(changedNames, ",")
+        .. rejectedText)
     return true, true
 end
 
@@ -4448,10 +4576,13 @@ function A.EchoReconcileStats()
         associationRefreshes=echoStatus.associationRefreshes,
         lastReason=echoStatus.lastReason,
         generations={},fieldChanges={},dirtyReasons={},projections={},
+        -- Fields the strict check rejected at the last scan (field -> reason).
+        rejected={},
     }
     for _, field in ipairs(ECHO_FIELDS) do
         out.generations[field] = echoGenerations[field]
         out.fieldChanges[field] = echoStatus.fieldChanges[field]
+        out.rejected[field] = echoRejected[field]
     end
     out.dirtyReasons.slots = echoStatus.dirtyReasons.slots
     out.dirtyReasons.data = echoStatus.dirtyReasons.data
@@ -4533,6 +4664,9 @@ end
 function A.EchoActiveSlotGeneration()
     local echoOk = ReconcileEchoState(false, "fallback")
     if not echoOk then return nil end
+    -- An active slot the strict check rejected is unknown: no generation is
+    -- handed out for it, as when the whole reconciliation failed.
+    if echoRejected.activeSlot then return nil end
     return echoGenerations.activeSlot
 end
 
@@ -4686,12 +4820,13 @@ local function ReconcileLegacyAssignments()
             end
         end
     end
-    -- Absence is only evidence once the mirror has a valid baseline: a change
-    -- after it bumps the slots generation and changes the gate. Until then (the
-    -- echo snapshot failed, e.g. another row is malformed) the first valid
-    -- snapshot is only a baseline and bumps nothing, so a record that found no
-    -- slot is retried instead of being certified.
+    -- Absence is only evidence while the slot mirror itself is accepted by the
+    -- strict echo check: a change after that bumps the slots generation and
+    -- changes the gate. Before the first snapshot, or while the slots field is
+    -- rejected (e.g. another row is malformed), a record that found no slot is
+    -- retried after the delay instead of being certified.
     local settled = not incomplete and echoSnapshot ~= nil
+        and echoRejected.slots == nil
     if #plan == 0 then
         if settled then
             legacyAssignmentsChecked = gate

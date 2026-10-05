@@ -54,11 +54,13 @@ from `A.Poll`, beside `ReconcileTomePending`, which is the existing poll-time ow
   identity written. A later complete row, a store that became ready or a write that is allowed resolves it,
   and the retry is bounded (one attempt per 5 seconds, not per tick). Unsupported and read-only roots stay
   `unavailable` and are polled at the same slow rate.
-- The first valid echo snapshot after a failed one is only a baseline and leaves the mirror generation
-  unchanged, so the retry, not a generation change, is what brings a corrected row back. For the same
-  reason a record whose slot is absent from the mirror is certified as checked only once the mirror has
-  a valid baseline (`echoSnapshot`); before that, for instance while another row is malformed, it is
-  retried too.
+- The retry, not a generation change, is what this check relies on to bring a corrected row back. Since
+  the progress-refresh repair (`docs/PROGRESS_REFRESH_INVALIDATION.md`) a slot mirror the strict echo
+  check rejects is reported as rejected rather than freezing every generation, so a corrected mirror is a
+  change and also moves the slots generation once. A record whose slot is absent from the mirror is
+  certified as checked only while the slots field is accepted (`echoSnapshot` exists and
+  `echoRejected.slots` is nil); before the first snapshot, or while another row is malformed, it is
+  retried after the delay too (tested: the check is revisited, never certified, while rejected).
 - For a character whose saved row is still under its plain name (formats 3-5) the first write creates the
   canonical row as the owner always does and leaves the original row as it was (tested).
 

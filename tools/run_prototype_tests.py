@@ -164,6 +164,7 @@ NAMES += ['sync_received_dps_egress','hash_cache_warm_budget','summary_cursor_na
 NAMES += ['journal_association_lazy_candidates','dps_index_summary_rows']
 NAMES += ['hash_cache_collision_budget','hash_cache_identity_fail_closed','sync_hot_build_release']
 NAMES += ['hash_cache_source_refusal']
+NAMES += ['echo_snapshot_rejected_field','fallback_static_invalidation']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

@@ -427,10 +427,22 @@ do
   'and holds the content identity: '..tostring(canonical.loadoutWishlists[1]))
 end
 
+-- Counts how often the upgrade check is revisited (Store.StateWriteStatus is read only by
+-- ReconcileLegacyAssignments) while `seconds` pass. A check that certified its gate is not revisited.
+local function Revisits(seconds)
+ local calls=0
+ local rawStatus=Nexus.Store.StateWriteStatus
+ Nexus.Store.StateWriteStatus=function(...) calls=calls+1;return rawStatus(...) end
+ H.Advance(seconds)
+ Nexus.Store.StateWriteStatus=rawStatus
+ return calls
+end
+
 -- An entirely unreadable row yields NO candidate, which is not proof that the slot holds nothing: the check
--- must stay eligible for the bounded retry. The row is corrected to a complete Wishlist later; the first
--- valid echo snapshot is then only a baseline and leaves the mirror generation unchanged, so no unrelated
--- change brings the record back.
+-- must stay eligible for the bounded retry, whatever the slots generation does. The row is corrected to a
+-- complete Wishlist later. The unreadable entry also makes the strict echo check reject the slots field; a
+-- valid row is a change of that mirror and moves the slots generation once (before the progress-refresh
+-- repair the rejection froze every generation and this change went unseen).
 for _,shape in ipairs({'number','keyless table'}) do
  local label=shape..', all-unreadable row'
  boot(nil,{[1]={name='Owned one',verified=true,echoes=plan(200001)},
@@ -447,18 +459,20 @@ for _,shape in ipairs({'number','keyless table'}) do
  H.Advance(2)
  check(shape=='number' and durable()==101 or (type(durable())=='table' and durable().key==nil),label..': the record stays legacy')
  check(entered==0,label..': nothing was written: '..entered)
+ local revisits=Revisits(11)
+ check(revisits>=2,label..': the unreadable row is revisited after each delay, never certified: '..revisits)
  local generation=A.PresentationRevisions()
  H.perks.serverBuildSlots[101]=rowOf({COMPLETE[1]});H.Notify()
  H.Advance(1)
- check(A.PresentationRevisions()==generation,label..': the first valid snapshot did not change the slots generation (premise)')
+ check(A.PresentationRevisions()==generation+1,label..': the valid row moves the rejected slot mirror\'s generation once')
  H.Advance(6)
  owner().UpdateStateV1=raw
  check(upgraded(shape,durable()),label..': the corrected row is retried and its key persisted: '..tostring(type(durable())=='table' and durable().key))
 end
 
--- The slot is ABSENT, and the echo snapshot cannot be taken because ANOTHER row is malformed: absence is not
--- evidence yet, and the first valid snapshot afterwards is only a baseline (the generation stays unchanged), so
--- the record is retried rather than certified.
+-- The slot is ABSENT while ANOTHER row is malformed, so the strict echo check rejects the slots field:
+-- absence is not evidence while the slot mirror is rejected, so the record is retried after each delay rather
+-- than certified. The corrected mirror is a change and moves the slots generation once; the record is upgraded.
 for _,shape in ipairs({'number','keyless table'}) do
  local label=shape..', absent slot while another row is malformed'
  boot(nil,{[1]={name='Owned one',verified=true,echoes=plan(200001)},
@@ -467,11 +481,17 @@ for _,shape in ipairs({'number','keyless table'}) do
  seed(shape,1,101)
  H.Advance(2)
  check(shape=='number' and durable()==101 or (type(durable())=='table' and durable().key==nil),label..': the record stays legacy')
+ check(A.EchoReconcileStats().rejected.slots=='slots:verified',label..': the slot mirror is reported rejected: '
+  ..tostring(A.EchoReconcileStats().rejected.slots))
+ local revisits=Revisits(11)
+ check(revisits>=2,label..': absence is not certified while the slot mirror is rejected; revisited: '..revisits)
+ check(shape=='number' and durable()==101 or (type(durable())=='table' and durable().key==nil),label..': and the record is still legacy')
  local generation=A.PresentationRevisions()
  H.perks.serverBuildSlots[102]={name='Other',verified=false,echoes=plan(200012)}
  H.perks.serverBuildSlots[101]=rowOf({COMPLETE[1]});H.Notify()
  H.Advance(1)
- check(A.PresentationRevisions()==generation,label..': the first valid snapshot did not change the slots generation (premise)')
+ check(A.PresentationRevisions()==generation+1,label..': the corrected mirror moves the slots generation once')
+ check(A.EchoReconcileStats().rejected.slots==nil,label..': and is no longer reported rejected')
  H.Advance(6)
  check(upgraded(shape,durable()),label..': the record is retried and upgraded: '..tostring(type(durable())=='table' and durable().key))
 end

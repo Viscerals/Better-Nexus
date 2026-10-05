@@ -1619,6 +1619,17 @@ local function FallbackNeedsRepair(now)
         if ok and type(signature) == "table" then
             fallbackSignature = signature
         end
+        -- The repair rebuilds the static context when ANY mismatched component
+        -- is static, so the reported component is the first static one. Taking
+        -- only the first field let a dynamic one listed earlier (granted,
+        -- locked, discovery, tomeSafety) hide a static one listed later
+        -- (state, settings, associations, association, firstRun), and the new
+        -- baseline above then absorbed that static change for good.
+        for _, field in ipairs(mismatches or {}) do
+            if FALLBACK_STATIC_COMPONENTS[field] then
+                return true, field, signature
+            end
+        end
         return true, mismatches and mismatches[1] or nil, signature
     end
     return false, nil, signature
@@ -1642,8 +1653,12 @@ local function AdvanceFallbackDynamicBaseline(level)
         -- Reconcile performed during StaticContext may already have captured
         -- a newer generation than ConsumeDirty returned at the start of this
         -- same tick. Never roll that freshly validated fallback baseline back.
-        AdvanceFallbackGeneration("slots", projectionRevisions.slots)
-        AdvanceFallbackGeneration("activeSlot", projectionRevisions.activeSlot)
+        -- Only the dynamic generations are advanced here: this step re-read
+        -- those projections. The slots and active-slot generations are static
+        -- inputs; their baseline moves only when StaticContext rebuilt the
+        -- static context (CaptureFallbackSignature). Advancing them after a
+        -- step that did not rebuild it hid a slot change that a non-dirty
+        -- reader had already reconciled, so the plan stayed stale for good.
         AdvanceFallbackGeneration("granted", projectionRevisions.granted)
         AdvanceFallbackGeneration("locked", projectionRevisions.locked)
         AdvanceFallbackGeneration("discovery", projectionRevisions.discovery)
