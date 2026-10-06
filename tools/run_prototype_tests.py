@@ -168,6 +168,7 @@ NAMES += ['echo_snapshot_rejected_field','fallback_static_invalidation']
 NAMES += ['echo_raw_shape_bounds']
 NAMES += ['orb_panel_assignment_failure_text','orb_passive_readiness_report','orb_readiness_collection_pure']
 NAMES += ['ownership_passive_diagnostics']
+NAMES += ['locked_shape_capture','locked_shape_bounds','locked_shape_report','locked_shape_correlation']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
