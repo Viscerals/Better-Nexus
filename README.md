@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/Viscerals/Better-Nexus/releases">Downloads &amp; release notes</a> ·
-  <a href="https://viscerals.github.io/Better-Nexus/preview/">Documentation preview</a> ·
+  <a href="https://viscerals.github.io/Better-Nexus/">Documentation</a> ·
   <a href="https://github.com/Viscerals/Better-Nexus/issues/new/choose">Report a problem</a> ·
   <a href="https://ko-fi.com/valentineb">Support on Ko-fi</a>
 </p>
@@ -65,7 +65,7 @@ Wishlists, Saved Builds, and your Active Loadout serve different purposes. Start
 
 ## Documentation & commands
 
-The **[documentation website preview](https://viscerals.github.io/Better-Nexus/preview/)** is a work in progress. Its content and visuals may differ from your installed build. Use the release notes for the exact package you downloaded and `/nexus help` for the guide shipped with it.
+The **[documentation website](https://viscerals.github.io/Better-Nexus/)** covers installation, Wishlists, features, and troubleshooting. Its content may reflect updates beyond your installed build. Use the release notes for the exact package you downloaded and `/nexus help` for the guide shipped with it.
 
 | Command | Purpose |
 | --- | --- |
