@@ -1,7 +1,5 @@
-<h1 align="center">Better Nexus</h1>
-
 <p align="center">
-  <img src="docs/assets/readme-hero.webp" alt="Original Better Nexus artwork: a violet crystal suspended within orbiting rings in a vaulted hall." width="640">
+  <img src="docs/assets/readme-banner.webp" alt="Better Nexus — dedicated arcane banner with violet Echo shards and silver lettering." width="100%">
 </p>
 
 <p align="center">
