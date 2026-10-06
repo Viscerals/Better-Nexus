@@ -166,6 +166,8 @@ NAMES += ['hash_cache_collision_budget','hash_cache_identity_fail_closed','sync_
 NAMES += ['hash_cache_source_refusal']
 NAMES += ['echo_snapshot_rejected_field','fallback_static_invalidation']
 NAMES += ['echo_raw_shape_bounds']
+NAMES += ['orb_panel_assignment_failure_text','orb_passive_readiness_report','orb_readiness_collection_pure']
+NAMES += ['ownership_passive_diagnostics']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
