@@ -1,6 +1,6 @@
 site_name: Better Nexus
 site_description: An Echo build toolkit for Project Ebonhold. Install Better Nexus, plan Wishlists, explore shared builds, and find practical help.
-site_url: https://viscerals.github.io/Better-Nexus/preview/
+site_url: https://viscerals.github.io/Better-Nexus/
 repo_url: https://github.com/Viscerals/Better-Nexus
 repo_name: Better-Nexus
 edit_uri: ''
@@ -30,7 +30,7 @@ theme:
 plugins:
   - search
 extra_css:
-  - stylesheets/nexus.css?v=20261006-support
+  - stylesheets/nexus.css?v=20261006-published
 extra_javascript:
   - javascripts/accessibility.js
 extra:

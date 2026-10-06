@@ -31,15 +31,15 @@ for file, page in pages.items():
         errors.append(f'{file.relative_to(SITE)}: expected 1 h1, got {page.h1s}')
     for ref in page.refs:
         url = urlsplit(ref)
-        if url.netloc == 'viscerals.github.io' and url.path.startswith('/Better-Nexus/preview/'):
+        if url.netloc == 'viscerals.github.io' and url.path.startswith('/Better-Nexus/'):
             url = urlsplit(url.path + ('#' + url.fragment if url.fragment else ''))
         if url.scheme or url.netloc:
             if url.scheme in ('https', 'http'):
                 external.add(ref)
             continue
         path = unquote(url.path)
-        if path.startswith('/Better-Nexus/preview/'):
-            target = (SITE / path.removeprefix('/Better-Nexus/preview/')).resolve()
+        if path.startswith('/Better-Nexus/'):
+            target = (SITE / path.removeprefix('/Better-Nexus/')).resolve()
         else:
             target = (file.parent / path).resolve() if path else file
         if target.is_dir():

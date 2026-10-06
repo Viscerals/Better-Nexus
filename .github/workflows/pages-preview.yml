@@ -1,4 +1,4 @@
-name: Publish Nexus website preview
+name: Publish Nexus documentation website
 on:
   push:
     branches: ["docs/site-preview-20261006"]
@@ -21,22 +21,8 @@ jobs:
           python -m pip install -r website-preview/requirements.lock.txt
           python -m mkdocs build --strict --config-file website-preview/mkdocs.yml
           python website-preview/tools/check_site.py
-      - name: Stage preview subpath
-        run: |
-          mkdir -p pages-artifact/preview
-          cp -a website-preview/site/. pages-artifact/preview/
-          touch pages-artifact/.nojekyll
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          Path('pages-artifact/preview/deployment.json').write_text(json.dumps({
-              'kind': 'website-preview',
-              'public_addon_release': 'v1.20.0-beta.1-test.9092',
-              'commit': os.environ['GITHUB_SHA'],
-              'run_id': os.environ['GITHUB_RUN_ID'],
-              'repository': os.environ['GITHUB_REPOSITORY']
-          }, indent=2))
-          PY
+      - name: Stage canonical website and preview compatibility
+        run: python website-preview/tools/stage_site.py --output pages-artifact
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
         with:
           path: pages-artifact
@@ -48,8 +34,8 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.publish.outputs.page_url }}preview/
+      url: ${{ steps.publish.outputs.page_url }}
     steps:
-      - name: Publish static preview
+      - name: Publish documentation website
         id: publish
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128
