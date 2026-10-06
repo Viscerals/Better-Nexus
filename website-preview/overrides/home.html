@@ -1,0 +1,46 @@
+{% extends "main.html" %}
+{% block content %}
+<div class="nx-home">
+  <section class="nx-hero" aria-labelledby="hero-title">
+    <div class="nx-hero-copy">
+      <p class="nx-eyebrow"><span class="nx-dot"></span> PROJECT EBONHOLD / WOW 3.3.5a</p>
+      <h1 id="hero-title">A clearer path<br> to your <em>next build.</em></h1>
+      <p class="nx-intro">Your Echo plans, rolling decisions, and shared builds. One connected toolkit. Better Nexus brings the next chapter of Nexus to Project Ebonhold.</p>
+      <div class="nx-actions">
+        <a class="nx-button nx-button-primary" href="{{ 'releases/' | url }}">Get Better Nexus <span aria-hidden="true">↗</span></a>
+        <a class="nx-button nx-button-quiet" href="{{ 'guide/install/' | url }}">Read the install guide <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="nx-release-label"><span class="nx-pill">PUBLIC TEST</span> 1.20 beta · test.9092 <span class="nx-release-detail">Back up before updating.</span></div>
+    </div>
+    <div class="nx-orbit" aria-label="Illustration of connected Wishlist, rolling, and build-library tools">
+      <div class="nx-orbit-grid"></div><div class="nx-orbit-circle nx-ring-one"></div><div class="nx-orbit-circle nx-ring-two"></div>
+      <svg class="nx-connectors" viewBox="0 0 540 480" aria-hidden="true"><path d="M270 250L135 102M270 250L425 180M270 250L145 400"/><circle cx="270" cy="250" r="92"/></svg>
+      <div class="nx-hub"><span class="nx-hub-symbol" aria-hidden="true">N</span><span>BETTER NEXUS</span></div>
+      <div class="nx-node nx-node-plan"><span class="nx-node-index">01 / PLAN</span><strong>Your Wishlist</strong><span>Exact copies. Exact qualities.</span><div class="nx-mini-bars"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+      <div class="nx-node nx-node-roll"><span class="nx-node-index">02 / DECIDE</span><strong>Rolling tools</strong><span>Recommendations + controls</span><div class="nx-mini-tags"><span>Take</span><span>Freeze</span><span>Reroll</span></div></div>
+      <div class="nx-node nx-node-share"><span class="nx-node-index">03 / EXPLORE</span><strong>Build Library</strong><span>Shared builds + recorded DPS</span><div class="nx-mini-line" aria-hidden="true">⌁ &nbsp; ⌁ &nbsp; ⌁</div></div>
+      <span class="nx-orbit-caption">PLAN → REVIEW → PLAY</span>
+    </div>
+  </section>
+  <div class="nx-facts"><span><b>Wishlists</b> with exact targets</span><span><b>Same-realm</b> build sharing</span><span><b>In-game Help</b> when you need it</span></div>
+  <section class="nx-start" aria-labelledby="start-title">
+    <div class="nx-section-heading"><div><p class="nx-eyebrow">THE FIELD GUIDE</p><h2 id="start-title">Less guessing. More playing.</h2></div><p>Start with a safe install.<br> Then make the toolkit your own.</p></div>
+    <div class="nx-route-grid">
+      <a class="nx-route nx-route-featured" href="{{ 'guide/install/' | url }}"><span class="nx-route-number">01 <span aria-hidden="true">↗</span></span><h3>Start with a<br> clean install.</h3><p>Download the public package, keep your saved data, and check the folder names.</p><span class="nx-route-link">Install & update <span aria-hidden="true">→</span></span></a>
+      <a class="nx-route" href="{{ 'guide/first-wishlist/' | url }}"><span class="nx-route-number">02 <span aria-hidden="true">↗</span></span><h3>Give your build<br> a direction.</h3><p>Create or import a Wishlist. Review the copies and qualities, then assign your plan.</p><span class="nx-route-link">Your first Wishlist <span aria-hidden="true">→</span></span></a>
+      <a class="nx-route" href="{{ 'guide/troubleshooting/' | url }}"><span class="nx-route-number">03 <span aria-hidden="true">↗</span></span><h3>Turn a problem<br> into evidence.</h3><p>Find your exact version, capture a report, and explain what happened.</p><span class="nx-route-link">Troubleshooting <span aria-hidden="true">→</span></span></a>
+    </div>
+  </section>
+  <section class="nx-toolkit" aria-labelledby="tools-title">
+    <div class="nx-toolkit-intro"><p class="nx-eyebrow">A CONNECTED TOOLKIT</p><h2 id="tools-title">From a plan<br> to a playable build.</h2><p>Nexus keeps the desired plan, the active loadout, and shared records distinct, so you can understand what each tool is doing.</p><a class="nx-text-link" href="{{ 'guide/features/' | url }}">Explore features & commands <span aria-hidden="true">→</span></a></div>
+    <div class="nx-tool-list">
+      <div><span class="nx-tool-glyph" aria-hidden="true">◇</span><div><h3>Wishlists & assignments</h3><p>Plan rolled and permanent-slot targets separately. Import, edit, and connect a Wishlist to the intended build.</p></div></div>
+      <div><span class="nx-tool-glyph" aria-hidden="true">⇄</span><div><h3>Rolling, with your permissions</h3><p>Review recommendations before enabling automation. The experimental adaptive strategy is the public beta default.</p></div></div>
+      <div><span class="nx-tool-glyph" aria-hidden="true">⌁</span><div><h3>Builds, sharing & DPS</h3><p>Browse shared records and compare recorded Dummy and Lich King results. Sharing works within the same realm.</p></div></div>
+      <div><span class="nx-tool-glyph" aria-hidden="true">◎</span><div><h3>Orbs / Lost Memories</h3><p>Refinement has an explicit budget and Pause, Resume, and Stop controls. Review the experimental limits before use.</p></div></div>
+    </div>
+  </section>
+  <section class="nx-latest" aria-labelledby="latest-title"><div><p class="nx-eyebrow">PUBLIC RELEASE / TEST.9092</p><h2 id="latest-title">Small details.<br> Meaningful improvements.</h2><p>Refused Freeze recovery. More precise DPS-to-build linking. Clearer capture status and less repeated background work.</p><a class="nx-text-link" href="{{ 'releases/changelog/' | url }}">Read the release highlights <span aria-hidden="true">→</span></a></div><aside><span class="nx-pill nx-pill-light">EXPERIMENTAL BETA</span><h3>Know what you're installing.</h3><p>Offline validation is not proof of in-game performance. Gameplay hitching has not been established as fixed by a live frame experiment.</p><a href="{{ 'releases/' | url }}">Download details & checksums <span aria-hidden="true">↗</span></a></aside></section>
+  <section class="nx-support-note" aria-labelledby="support-title"><div><p class="nx-eyebrow">A NOTE ON SUPPORT</p><h2 id="support-title">Useful tools. Honest expectations.</h2><p>The maintainer is stepping back from development and regular support. An investigation, a fix, continued maintenance, or a timeline cannot be promised—even if a future game update breaks Nexus.</p><a class="nx-text-link" href="{{ 'support/' | url }}">Read the reporting guidance <span aria-hidden="true">→</span></a></div><div class="nx-thanks"><span aria-hidden="true">♡</span><h3>Found Nexus useful?</h3><p>An optional thank-you supports the work already done. It does not buy future development or support.</p><a href="https://ko-fi.com/valentineb">Leave a thank-you on Ko-fi ↗</a></div></section>
+</div>
+{% endblock %}
