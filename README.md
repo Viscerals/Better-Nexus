@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/readme-banner.webp" alt="Better Nexus — dedicated arcane banner with violet Echo shards and silver lettering." width="100%">
+  <img src="docs/assets/readme-banner.webp" alt="Better Nexus - metallic gold lettering in a silver frame with an icy inset and violet crystal crest." width="100%">
 </p>
 
 <p align="center">
@@ -8,6 +8,13 @@
 
 <p align="center">
   <strong>Project Ebonhold · WoW 3.3.5a · Experimental public beta</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Viscerals/Better-Nexus/releases"><img src="https://img.shields.io/github/v/release/Viscerals/Better-Nexus?include_prereleases&amp;sort=date&amp;label=Public%20beta&amp;color=8b5cf6&amp;labelColor=151821&amp;style=flat-square" alt="Latest public beta release"></a>
+  <a href="https://github.com/Viscerals/Better-Nexus/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/Viscerals/Better-Nexus/ci.yml?branch=main&amp;label=CI&amp;labelColor=151821&amp;logo=github&amp;logoColor=c4b5fd&amp;style=flat-square" alt="CI status on main"></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-Source--Available-8b5cf6?labelColor=151821&amp;style=flat-square" alt="License: Source-Available"></a>
+  <a href="https://viscerals.github.io/Better-Nexus/"><img src="https://img.shields.io/badge/WoW-3.3.5a-4f86c6?labelColor=151821&amp;style=flat-square" alt="WoW: 3.3.5a"></a>
 </p>
 
 <p align="center">
@@ -124,3 +131,7 @@ Lua 5.4 runs with compatibility shims do not replace LuaJIT validation. Packagin
 Better Nexus continues Nexus, originally attributed to **Boganic**. See [UPSTREAM.md](UPSTREAM.md) and [THIRD_PARTY.md](THIRD_PARTY.md) for provenance and dependency terms, and [LICENSE.md](LICENSE.md) for the project's source-available license. Public source access does not grant unrestricted redistribution rights.
 
 If you would like to support Valentine's work on Better Nexus, **[Ko-fi](https://ko-fi.com/valentineb)** is optional. Donations do not buy support priority or guarantee future work.
+
+<p align="center">
+  <a href="https://ko-fi.com/valentineb"><img src="docs/assets/kofi-banner.webp" alt="Support Viscerals on Ko-fi at ko-fi.com/valentineb." width="600"></a>
+</p>
