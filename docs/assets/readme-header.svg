@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280" role="img" aria-labelledby="title desc">
+  <title id="title">Better Nexus</title>
+  <desc id="desc">Plan your Echoes. Shape your build. An original text banner with a gold constellation on a dark violet background.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171320"/>
+      <stop offset="1" stop-color="#302038"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="280" rx="16" fill="url(#background)"/>
+  <path d="M48 44H1152" stroke="#d4ae73" stroke-opacity=".25"/>
+  <text x="62" y="89" fill="#d4ae73" font-family="Arial, Helvetica, sans-serif" font-size="14" letter-spacing="4">PROJECT EBONHOLD</text>
+  <text x="58" y="158" fill="#f7f2e8" font-family="Georgia, serif" font-size="62" font-weight="bold">Better Nexus</text>
+  <text x="62" y="203" fill="#cfc2d6" font-family="Arial, Helvetica, sans-serif" font-size="21">Plan your Echoes. Shape your build.</text>
+  <g fill="none" stroke="#d4ae73">
+    <circle cx="1010" cy="140" r="74" stroke-opacity=".3"/>
+    <circle cx="1010" cy="140" r="98" stroke-opacity=".12"/>
+    <path d="M945 165L985 110L1030 155L1083 107" stroke-width="2" stroke-opacity=".65"/>
+  </g>
+  <g fill="#d4ae73">
+    <circle cx="945" cy="165" r="4"/>
+    <circle cx="985" cy="110" r="5"/>
+    <circle cx="1030" cy="155" r="4"/>
+    <path d="M1083 97L1086 104L1093 107L1086 110L1083 117L1080 110L1073 107L1080 104Z"/>
+  </g>
+  <path d="M48 236H1152" stroke="#d4ae73" stroke-opacity=".25"/>
+</svg>
