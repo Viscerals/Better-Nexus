@@ -1,118 +1,137 @@
-# Better Nexus
+<p align="center">
+  <img src="docs/assets/readme-banner.webp" alt="Better Nexus - metallic gold lettering in a silver frame with an icy inset and violet crystal crest." width="100%">
+</p>
 
-Better Nexus is a public, community-maintained continuation of the deprecated
-Nexus addon for Project Ebonhold (World of Warcraft 3.3.5a, Lua 5.1).
+<p align="center">
+  <strong>Plan your Echoes. Shape your build.</strong>
+</p>
 
-The in-game addon name, folder name, slash commands, and SavedVariables remain
-`Nexus` for compatibility with existing installations and user data.
+<p align="center">
+  <strong>Project Ebonhold · WoW 3.3.5a · Experimental public beta</strong>
+</p>
 
-## Project status
+<p align="center">
+  <a href="https://github.com/Viscerals/Better-Nexus/releases"><img src="https://img.shields.io/github/v/release/Viscerals/Better-Nexus?include_prereleases&amp;sort=date&amp;label=Public%20beta&amp;color=8b5cf6&amp;labelColor=151821&amp;style=flat-square" alt="Latest public beta release"></a>
+  <a href="https://github.com/Viscerals/Better-Nexus/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/Viscerals/Better-Nexus/ci.yml?branch=main&amp;label=CI&amp;labelColor=151821&amp;logo=github&amp;logoColor=c4b5fd&amp;style=flat-square" alt="CI status on main"></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-Source--Available-8b5cf6?labelColor=151821&amp;style=flat-square" alt="License: Source-Available"></a>
+  <a href="https://viscerals.github.io/Better-Nexus/"><img src="https://img.shields.io/badge/WoW-3.3.5a-4f86c6?labelColor=151821&amp;style=flat-square" alt="WoW: 3.3.5a"></a>
+</p>
 
-- `main` is the one maintained development line. It holds the current
-  experimental 1.20 prototype source. It is **not** a stable release.
-- Stable production release: Nexus 1.19.5.
-- Current experimental beta download:
-  [Public Beta / Test 9027](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9027).
-  `main` is newer than that package. Source on `main` is not a published build.
-- All prereleases: [GitHub Releases](https://github.com/Viscerals/Better-Nexus/releases).
-  Release tags are immutable.
-- How `main` was consolidated, and where older branches and pull requests went:
-  [docs/REPOSITORY_CONSOLIDATION.md](docs/REPOSITORY_CONSOLIDATION.md).
-- Upstream author attribution is preserved in `Nexus.toc`,
-  [UPSTREAM.md](UPSTREAM.md) and [THIRD_PARTY.md](THIRD_PARTY.md).
+<p align="center">
+  <a href="https://github.com/Viscerals/Better-Nexus/releases"><img src="https://img.shields.io/badge/Downloads_%26_release_notes-8b5cf6?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Downloads &amp; release notes"></a>
+  <a href="https://viscerals.github.io/Better-Nexus/"><img src="https://img.shields.io/badge/Documentation-4f86c6?style=for-the-badge&amp;logo=readthedocs&amp;logoColor=white" alt="Documentation"></a>
+  <a href="https://github.com/Viscerals/Better-Nexus/issues/new/choose"><img src="https://img.shields.io/badge/Report_a_problem-8b5cf6?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Report a problem"></a>
+  <a href="https://ko-fi.com/valentineb"><img src="https://img.shields.io/badge/Support_on_Ko--fi-8b5cf6?style=for-the-badge&amp;logo=kofi&amp;logoColor=white" alt="Support on Ko-fi"></a>
+</p>
 
-## Known limitations of the current beta
+**Better Nexus** helps Project Ebonhold players plan Echo Wishlists, make rolling decisions, browse shared builds, and compare recorded DPS. It is a community-maintained continuation of the original Nexus addon, with upstream attribution preserved.
 
-These are tracked in the [issue list](https://github.com/Viscerals/Better-Nexus/issues).
-They are open, not fixed:
+Set the qualities and copies you want, assign your Wishlist to a Saved Build, and review recommendations before enabling the automatic actions you choose. The installed addon keeps the name **Nexus** and its existing SavedVariables for compatibility with your setup.
 
-- Two-account Sync transfer is not proven end to end. One incoming record makes
-  the local catalog rebuild its whole root, which can delay all other Sync work.
-- Remote withdrawal (Stop Sharing for records that peers already hold) is not
-  supported.
-- Sharing a build with permanent (locked) Echoes can be refused or can lose the
-  permanent roles in test.9027. A correction is in review; it is not on `main`.
-- The Nexus Advisor tab placement inside Character Progression is not verified
-  in the game client.
-- Orb / Lost Memories spending has no approved real-resource test.
+## Download & status
 
-The player guide for the prototype is [README-PROTOTYPE.md](README-PROTOTYPE.md).
+The current public download is **[1.20.0-beta.1 · test.9092](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9092)**. Choose **`Better-Nexus-test.9092-f95f68f.zip`** under that release's Assets; `SHA256SUMS.txt` is available beside it. This is an experimental prerelease.
 
-## Installation (players)
+Check [Releases](https://github.com/Viscerals/Better-Nexus/releases) for newer public tests and their specific limitations. The `main` branch is the maintained development line and may differ from a published package; a source checkout is not a player release. Download the packaged ZIP rather than GitHub's automatic source archives.
 
-1. Close WoW. Back up `Interface\AddOns\Nexus` and your `WTF` folder.
-2. Download a package from Releases and extract it.
-3. Keep the runtime addon folder named `Nexus` under `Interface\AddOns`.
-4. Confirm `Interface\AddOns\Nexus\Nexus.toc` exists (not `Nexus\Nexus\`).
+## Install or update
 
-Do not rename the installed addon folder to `Better-Nexus`. Back up `NexusDB`
-and `WishlistRealizerDB` before you test a prerelease.
+1. **Close the game.** Back up your existing `Nexus` and `NexusSupport` addon folders, if present, and the client's entire `WTF` folder somewhere outside the game directory. Keep that matching code-and-data backup before testing a beta.
+2. Download the packaged ZIP from [Releases](https://github.com/Viscerals/Better-Nexus/releases) and extract it outside the client.
+3. In your **Project Ebonhold client's** `Interface\AddOns` directory, replace the old `Nexus` and `NexusSupport` folders with **both folders from the same package**. Replace the addon folders completely so old files do not remain. Keep the names exactly as shipped; do not rename `Nexus` to `Better-Nexus`.
+4. **Leave `WTF` and SavedVariables in place.** Preserve `NexusDB`, `WishlistRealizerDB`, and any `NexusSupportDB` report data. Updating addon code does not require deleting or resetting your saved data.
+5. Start the game, enable Nexus in the AddOns list, then use **`/nexus help`**. Keep Automation off while checking your existing Wishlists, assignments, and settings. Disable competing Echo pickers before enabling Nexus automation.
 
-## Development quick start
+The resulting layout should be:
 
-Requirements: Git, Python 3.9 or newer, and a `luajit` executable on `PATH`
-(LuaJIT 2.1; on Debian/Ubuntu `sudo apt-get install luajit`). No game client,
-network access or account data is needed for the offline checks.
-
+```text
+Interface/
+└── AddOns/
+    ├── Nexus/
+    │   └── Nexus.toc
+    └── NexusSupport/
+        └── NexusSupport.toc
 ```
+
+Avoid an extra `Nexus\Nexus` nesting level. `NexusSupport` stores prepared support reports and loads when needed; it does not need to appear as an always-loaded gameplay addon.
+
+To roll back, close the game and restore the matching old addon folders **and** their saved-data backup together. A local backup cannot undo server-side actions, spent resources, or builds already shared with other players. Do not roll back during an unresolved Orb offer.
+
+## What you can do
+
+| Area | Tools in the public beta |
+| --- | --- |
+| **Wishlists & Saved Builds** | Create or import plans with exact qualities and copy counts, distinguish rolled copies from permanent-slot targets, and assign a plan to the intended Saved Build. |
+| **Rolling** | Review Take, Freeze, Banish, and Reroll recommendations, then choose which automatic actions to permit. The experimental adaptive strategy is the current public default; the previous strategy remains selectable. |
+| **Build Library & sharing** | Browse locally known builds and exchange build records through same-realm Sync. Pending, incomplete, refused, and unavailable results have distinct states. |
+| **DPS & Leaderboards** | Capture and inspect Dummy and Lich King DPS records, browse rankings, and compare the recorded build context. Recorded DPS is evidence of that capture, not a guarantee of future results. |
+| **Help & troubleshooting** | Reopen the in-game guide, inspect status and diagnostic logs, or prepare a support report with `/nexus report`. |
+| **Orbs / Lost Memories** | An experimental Wishlist refinement workspace with explicit Start, a run cap, and Pause/Stop controls. Check the release notes and in-game capability/status messages before use; native resource-spending behavior is not established by offline tests. |
+
+Wishlists, Saved Builds, and your Active Loadout serve different purposes. Start with the in-game guide to understand the workflow and action permissions.
+
+## Documentation & commands
+
+The **[documentation website](https://viscerals.github.io/Better-Nexus/)** covers installation, Wishlists, features, and troubleshooting. Its content may reflect updates beyond your installed build. Use the release notes for the exact package you downloaded and `/nexus help` for the guide shipped with it.
+
+| Command | Purpose |
+| --- | --- |
+| `/nexus help` | Open the in-game guide. |
+| `/nexus editor` | Open the Wishlist editor. |
+| `/nexus builds` | Browse Community Builds / Build Library. |
+| `/nexus leaderboard` | Open the DPS Leaderboard. |
+| `/nexus status` | Show the loaded build and current build/loadout state. |
+| `/nexus panel` | Show or hide the HUD. |
+| `/nexus auto` | Toggle the master Automation permission. |
+| `/nexus orbs` | Open Orbs / Lost Memories; opening the window does not start a run. |
+| `/nexus log` | Open diagnostic logs. |
+| `/nexus report` | Open the support-report window in public test.9092. |
+
+The source repository also contains the [experimental player guide](README-PROTOTYPE.md) and [update-notice documentation](docs/UPDATE_NOTICES.md). Source documentation may describe a different development snapshot.
+
+## Beta limitations & support
+
+Better Nexus is unfinished software. Same-realm sharing still needs broader native testing, and **Stop Sharing cannot withdraw copies already held by other players**. Orb capabilities, resource spending, and UI behavior depend on the actual client/server. Offline tests do not prove native safety or performance, and the project does not claim that gameplay stutter is resolved. Consult the [release notes](https://github.com/Viscerals/Better-Nexus/releases) and [tracked issues](https://github.com/Viscerals/Better-Nexus/issues) for the build you use.
+
+Support is limited and provided as time allows. There is no guaranteed response time, fix, future update, or continued compatibility. Feature suggestions can be recorded through the issue forms; new feature work remains secondary to prerelease stabilization.
+
+### Troubleshooting
+
+If the addon is missing, check the two folder paths above and confirm that you installed the release asset. If a feature stalls or behaves unexpectedly, stop the affected automation and preserve your saved data instead of resetting it.
+
+1. Search [existing issues](https://github.com/Viscerals/Better-Nexus/issues) and choose the appropriate [Bug, Performance / Stutter, or Sync / Multiplayer form](https://github.com/Viscerals/Better-Nexus/issues/new/choose).
+2. Include the **exact version and build label** from `/nexus status` or the ZIP filename, for example `1.20.0-beta.1 · test.9092-f95f68f`. “Latest” alone is not enough.
+3. Describe the smallest reproduction, **what you observed versus what you expected**, whether it recurs after a reload, and relevant addons or existing-data upgrades. Include the complete Lua error if one appeared.
+4. Open **`/nexus report`**. Use **Copy summary** and review the text before putting it in a public issue. **Prepare report file** stores a report for WoW to write at the next reload or logout; the window provides the file path and status. Preparing it does not prove the file is already on disk.
+
+Keep full reports, SavedVariables, account data, and private logs **private**. Share those only through a verified private route agreed with the maintainer; do not attach them to public issues. Report vulnerabilities through [private vulnerability reporting](https://github.com/Viscerals/Better-Nexus/security/advisories/new), following [SECURITY.md](SECURITY.md). Further reporting guidance is in [SUPPORT.md](SUPPORT.md).
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing changes. Preserve the `Nexus` runtime identity, Lua 5.1 / WoW 3.3.5a compatibility, and player data. Keep source changes on a focused branch and distinguish offline evidence from native testing.
+
+<details>
+<summary><strong>Development checks</strong> — Python 3.9+ and LuaJIT 2.1 on PATH</summary>
+
+```sh
 git clone https://github.com/Viscerals/Better-Nexus.git
 cd Better-Nexus
-python tools/ci_check.py                      # inventory check + complete offline suite
-python tools/ci_check.py --only parse,boot    # a bounded shard (reported as PARTIAL)
-python tools/build_package.py --check         # package content and TOC checks
-python tools/build_package.py --label test.9999-abcdef0   # writes dist/Nexus-<label>.zip
+python tools/ci_check.py
+python tools/build_package.py --check
 ```
 
-- The test list lives in `tools/run_prototype_tests.py`. A test file that is not
-  listed there fails the inventory check. No test count is fixed anywhere.
-- Two tests (`planner_reference`, `orbs_policy`) compare against a third-party
-  LoadoutPilot archive that this repository may not redistribute. Without it
-  they are reported as **NOT RUN**, never as passed. If you hold the exact
-  archive named in [THIRD_PARTY.md](THIRD_PARTY.md),
-  `python tools/prepare_pilot_reference.py <archive> <dir>` extracts the two
-  modules that `planner_reference` needs; pass `--reference <dir>`. That tool
-  does not extract `Memory/MemoryMode.lua`, which `orbs_policy` needs, so
-  `orbs_policy` stays NOT RUN and `--require-reference` fails until the tool is
-  corrected (tracked as a follow-up).
-- Without `luajit`, `tools/run_prototype_tests.py --runtime lua54` can run the
-  suite on Lua 5.4 with compatibility shims (needs `liblua5.4`). That result is
-  labelled as such. It does not replace the LuaJIT run.
-- Update notices and the one release identity (label, tag, asset, announced version) are described in [docs/UPDATE_NOTICES.md](docs/UPDATE_NOTICES.md). `python tools/release_selftest.py` proves that the release checks fail where they must.
-- `tools/build_package.py` never publishes. A public release is a separate,
-  human-authorized step ([RELEASE_SECURITY.md](RELEASE_SECURITY.md)).
-- Offline tests use a synthetic harness. They do not prove behavior in the game
-  client. State the native-testing status in every pull request.
+`ci_check.py` checks the test inventory and runs the offline suite. A bounded run such as `--only parse,boot` is reported as PARTIAL. Reference-dependent tests are **NOT RUN** without the authorized third-party archive described in [THIRD_PARTY.md](THIRD_PARTY.md); they are not counted as passes. The current extraction helper supplies the planner modules only, so the Orb reference also needs its required module before a complete reference-required run can pass.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
+Lua 5.4 runs with compatibility shims do not replace LuaJIT validation. Packaging checks never publish a release; publishing is a separate human-authorized step under [RELEASE_SECURITY.md](RELEASE_SECURITY.md). Include the exact native-testing status in every PR.
 
-## Reporting problems
+</details>
 
-Use the [structured issue
-forms](https://github.com/Viscerals/Better-Nexus/issues/new/choose) to report a
-bug, performance or stutter problem, or multiplayer Sync problem. Include the
-exact build label and the diagnostics requested by the selected form. Report
-vulnerabilities privately ([SECURITY.md](SECURITY.md)).
+## Credits, license & optional support
 
-## Commands
+Better Nexus continues Nexus, originally attributed to **Boganic**. See [UPSTREAM.md](UPSTREAM.md) and [THIRD_PARTY.md](THIRD_PARTY.md) for provenance and dependency terms, and [LICENSE.md](LICENSE.md) for the project's source-available license. Public source access does not grant unrestricted redistribution rights.
 
-- `/nexus` — show commands
-- `/nexus help` — open the read-only guide
-- `/nexus builds` — open Community Builds
-- `/nexus leaderboard` — open the DPS Leaderboard
-- `/nexus editor` — open the Wishlist Editor
-- `/nexus sync` — request builds and records
-- `/nexus auto` — toggle automation
-- `/nexus panel` — toggle the HUD
-- `/nexus log` — open the diagnostic log
-- `/nexus status` — show current build and loadout state
+If you would like to support Valentine's work on Better Nexus, **[Ko-fi](https://ko-fi.com/valentineb)** is optional. Donations do not buy support priority or guarantee future work.
 
-## Development rules
-
-- Preserve Lua 5.1 and WoW 3.3.5a compatibility.
-- Preserve `NexusDB` and `WishlistRealizerDB` migrations and user data.
-- Do not include tests, tools, backups, local logs, or development artifacts in
-  player release archives.
-- Validate changes offline and in game before claiming a live issue fixed.
-
-See [CHANGELOG.md](CHANGELOG.md) for inherited release history and
-[UPSTREAM.md](UPSTREAM.md) for provenance and redistribution notes.
+<p align="center">
+  <a href="https://ko-fi.com/valentineb"><img src="docs/assets/kofi-banner.webp" alt="Support Viscerals on Ko-fi at ko-fi.com/valentineb." width="600"></a>
+</p>
