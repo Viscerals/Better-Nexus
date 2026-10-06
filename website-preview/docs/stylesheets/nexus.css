@@ -177,3 +177,14 @@ body { font-family: var(--md-text-font); }
   html { scroll-behavior: auto; }
   *, *:before, *:after { transition: none !important; animation: none !important; }
 }
+
+/* Original illustrative artwork; reserved dimensions prevent layout shifts. */
+.nx-hero-art { margin: 0; align-self: center; width: 100%; max-width: 30rem; justify-self: center; }
+.nx-hero-art img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; border-radius: .9rem; border: 1px solid #cbb6ff25; box-shadow: 0 1rem 3rem #0003; }
+.nx-hero-art figcaption { display: flex; justify-content: space-between; gap: .6rem; margin-top: .7rem; font-size: .43rem; font-weight: 650; letter-spacing: .13em; color: #bfb0d3; }
+.nx-route-art { display: block; width: calc(100% + 2.6rem); max-width: none !important; height: auto; aspect-ratio: 3 / 2; object-fit: cover; object-position: center 52%; margin: -1.3rem -1.3rem 1.2rem; border-radius: .6rem .6rem 0 0; background: #191627; }
+@media (max-width: 1150px) {
+  .nx-hero-art { max-width: 26rem; margin-top: 1.2rem; }
+  .nx-route-art { width: calc(100% + 2.2rem); height: auto; margin: -1.1rem -1.1rem 1rem; }
+}
+@media (max-width: 380px) { .nx-hero-art figcaption { font-size: .39rem; letter-spacing: .08em; } }
