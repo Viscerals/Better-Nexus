@@ -18,10 +18,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Viscerals/Better-Nexus/releases">Downloads &amp; release notes</a> ·
-  <a href="https://viscerals.github.io/Better-Nexus/">Documentation</a> ·
-  <a href="https://github.com/Viscerals/Better-Nexus/issues/new/choose">Report a problem</a> ·
-  <a href="https://ko-fi.com/valentineb">Support on Ko-fi</a>
+  <a href="https://github.com/Viscerals/Better-Nexus/releases"><img src="https://img.shields.io/badge/Downloads_%26_release_notes-8b5cf6?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Downloads &amp; release notes"></a>
+  <a href="https://viscerals.github.io/Better-Nexus/"><img src="https://img.shields.io/badge/Documentation-4f86c6?style=for-the-badge&amp;logo=readthedocs&amp;logoColor=white" alt="Documentation"></a>
+  <a href="https://github.com/Viscerals/Better-Nexus/issues/new/choose"><img src="https://img.shields.io/badge/Report_a_problem-8b5cf6?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Report a problem"></a>
+  <a href="https://ko-fi.com/valentineb"><img src="https://img.shields.io/badge/Support_on_Ko--fi-8b5cf6?style=for-the-badge&amp;logo=kofi&amp;logoColor=white" alt="Support on Ko-fi"></a>
 </p>
 
 **Better Nexus** helps Project Ebonhold players plan Echo Wishlists, make rolling decisions, browse shared builds, and compare recorded DPS. It is a community-maintained continuation of the original Nexus addon, with upstream attribution preserved.
