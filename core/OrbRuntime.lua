@@ -474,11 +474,12 @@ function M.SuggestSources()
     local proposed={};for _,r in ipairs(P.Sources(targets,s,config.excluded)) do proposed[r.key]=r.excess end
     local before=copy(config);config.sources=proposed;return changedConfig(before)
 end
+-- A refusal also returns the stage code of its site (readiness diagnostics only).
 local function inspect()
     local assignment=assigned()
-    if assignment.state~="ready" then return nil,assignment.note or "Assign a Wishlist before starting Orb mode.",assignment end
-    local targets,err=P.Normalize(config.entries);if not targets then return nil,err,assignment end
-    local s,e=B.Read();if not s then return nil,e,assignment end
+    if assignment.state~="ready" then return nil,assignment.note or "Assign a Wishlist before starting Orb mode.",assignment,"assignment" end
+    local targets,err=P.Normalize(config.entries);if not targets then return nil,err,assignment,"targets" end
+    local s,e,stage=B.Read();if not s then return nil,e,assignment,stage end
     local prog=P.Progress(targets,s)
     local sources=P.Sources(targets,s,config.excluded)
     return {targets=targets,s=s,progress=prog,sources=sources,assignment=assignment}
@@ -2191,11 +2192,83 @@ function M.BlocksOrdinary()
     end
     return run and (run.running or run.pending~=nil or (run.state=="PAUSED" or run.state=="LIMIT")) or false
 end
+-- The last normal Orb window read (M.Status), for the support report: one
+-- bounded snapshot of fixed codes, whole numbers and booleans, each checked as
+-- it is recorded. Memory only: never saved, nothing reads the game for it and
+-- nothing decides from it.
+local readiness=nil
+local READINESS_CODES={
+    stage={ok=true,assignment=true,targets=true,capability=true,state=true,balance_loading=true,
+        balance_invalid=true,catalog=true,trust_owned=true,trust_locked=true,trust_both=true,call=true,
+        granted_unavailable=true,granted_shape=true,granted_verify=true,locked_unavailable=true,
+        locked_shape=true,locked_verify=true,limits=true,choice=true,auto_accept=true,host=true},
+    assignment={ready=true,unassigned=true,restoring=true,loading=true,unavailable=true},
+    rejection={none=true,absent=true,not_table=true,unreadable=true,invalid_value=true,
+        conflicting_alias=true,cycle=true,depth=true,over_cap=true,scalar_leaf=true},
+}
+local function observeReadiness(stage,a,progress)
+    local codes=READINESS_CODES
+    local function flag(v) if type(v)=="boolean" then return v end return nil end
+    local function count(v) if integer(v,0) then return v end return nil end
+    local t=now()
+    local o={at=type(t)=="number" and t==t and t>-math.huge and t<math.huge and t or nil,
+        stage=type(stage)=="string" and codes.stage[stage] and stage or "unknown",
+        assignment="unknown",roles="unknown",progress=progress and "available" or "unavailable"}
+    -- Recorded first: this read happened, whatever below cannot be recorded.
+    readiness=o
+    if type(progress)=="table" then
+        o.rolledMissing=count(progress.rolledMissing);o.permanentMissing=count(progress.permanentMissing)
+    end
+    local state=type(a)=="table" and a.state
+    if type(state)=="string" and codes.assignment[state] then
+        o.assignment=state
+        if state~="ready" then o.roles="none"
+        else
+            -- The role rule of logic/Strategy.lua, on the Wishlist's own rows.
+            local entries=type(a.wishlist)=="table" and a.wishlist.entries
+            if type(entries)=="table" then
+                o.roles="untyped"
+                for _,e in ipairs(entries) do
+                    if type(e)=="table" and not e.designTarget and (type(e.locked)=="boolean"
+                        or e.sourceRole=="ordinary" or e.sourceRole=="locked") then o.roles="explicit";break end
+                end
+            end
+        end
+    end
+    -- The ownership trust facts at this read, from the adapter's passive view.
+    local ok,trust=pcall(function()
+        local adapter=Nexus.GameAdapter
+        local view=adapter and type(adapter.OwnershipTrustView)=="function" and adapter.OwnershipTrustView() or nil
+        if type(view)~="table" then return nil end
+        local why=view.lockedRejection
+        return {ownedSynced=flag(view.ownedSynced),ownedConfirmed=flag(view.ownedConfirmed),
+            ownedArmed=flag(view.ownedArmed),ownedFresh=flag(view.ownedFresh),ownedGhost=flag(view.ownedGhost),
+            ownedGeneration=count(view.ownedGeneration),ownedTotal=count(view.ownedTotal),
+            lockedSynced=flag(view.lockedSynced),lockedCopies=count(view.lockedCopies),
+            lockedRejection=type(why)=="string" and codes.rejection[why] and why or nil}
+    end)
+    if ok and type(trust)=="table" then for k,v in pairs(trust) do o[k]=v end end
+end
+-- Read-only copy of that snapshot for the support report: a new table on each
+-- call. It reads nothing, initializes nothing and authorizes nothing. `age` is
+-- the whole seconds since that read; every other fact is as it was then.
+function M.ReadinessView()
+    local o=readiness
+    if not o then return {observed=false} end
+    local v={observed=true}
+    for k,x in pairs(o) do v[k]=x end
+    -- GetTime() counts milliseconds; half of one keeps float noise in the
+    -- subtraction from costing a whole second.
+    local t=now()
+    local age=type(t)=="number" and type(o.at)=="number" and math.floor(t-o.at+0.0005) or nil
+    v.age=integer(age,0) and age or nil
+    return v
+end
 -- Display snapshot. One adapter read per call (plus passive balance reads for
 -- the balance line and the maximum draft); it authorizes nothing (every
 -- action reads again). detail=true adds the source list for Advanced.
 function M.Status(detail)
-    init();local m,err,failed=inspect();local a=m and m.assignment or failed or assigned()
+    init();local m,err,failed,stage=inspect();local a=m and m.assignment or failed or assigned()
     local r={state=run.state,reason=run.reason,error=err,running=run.running,pending=run.pending~=nil,
         spent=run.spent,reserved=run.reserved,limit=run.limit,config=copy(config),recent=copy(run.recent),
         assignment=copy(a),targetChanged=run.targetChanged,operationName=run.name,
@@ -2222,6 +2295,9 @@ function M.Status(detail)
     r.canStart=not run.running and not run.pending and run.state~="PAUSED" and run.state~="LIMIT" and can~=nil
     r.startReason=why
     r.canResume=run.state=="PAUSED" and not (run.pending and (run.targetChanged or run.pending.restored or run.pending.selectionAttempted))
+    -- Memory-only bookkeeping of this read; a failure in it changes nothing
+    -- shown or allowed.
+    pcall(observeReadiness,m and "ok" or stage,a,r.progress)
     return r
 end
 function M.CompactStatus()

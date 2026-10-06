@@ -65,6 +65,18 @@ This file has two parts.
   never automatic. A passive observer of the game's own addon-message prefix
   feeds its strict check; it registers no handler, replaces nothing and sends
   nothing.
+- **Passive readiness diagnostics.** `GameAdapter.OwnershipTrustView()` and
+  `OrbRuntime.ReadinessView()` return a new table of scalars and fixed codes.
+  The first holds the current generation facts and, separately, what the last
+  normal `Owned()` and `LockedOwned()` evaluations sampled (each with its own
+  time). The second holds what the last Orb window read (`OrbRuntime.Status`)
+  observed. Only those normal reads record them, in memory. The accessors read
+  no game state and send, save or change nothing. `OrbAdapter.Read()` may
+  return a third value, the stage code of its refusal, for that observation
+  only. No decision, gate or count reads any of this. The support report shows
+  it as bounded `key=value` blocks with ages. An age is the time of a read, not
+  proof of a fresh server response. A locked rejection code labels the evidence
+  and does not mean that an Echo was removed.
 - **Version.** The release identity lives in `data/Release.lua` and `Nexus.toc`,
   not in this file.
 - **Tests.** The maintained offline suite is `tools/run_prototype_tests.py` with

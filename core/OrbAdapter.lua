@@ -52,8 +52,10 @@ local function signature(counts)
     local out={};for _,k in ipairs(keys) do out[#out+1]=k.."="..counts[k] end
     return table.concat(out,",")
 end
+-- A refusal returns nil, its text, nil and a fixed code (unavailable, shape or
+-- verify) that names the refusal for the readiness diagnostics only.
 local function readCounts(raw,cat)
-    if type(raw)~="table" or getmetatable(raw) then return nil,"Echo ownership is unavailable." end
+    if type(raw)~="table" or getmetatable(raw) then return nil,"Echo ownership is unavailable.",nil,"unavailable" end
     local counts,rows,total={},0,0
     local function record(e)
         rows=rows+1;if rows>MAX_ROWS or type(e)~="table" or getmetatable(e) then return false end
@@ -68,11 +70,11 @@ local function readCounts(raw,cat)
     end
     local keys=0
     for _,v in pairs(raw) do
-        keys=keys+1;if keys>MAX_ROWS or type(v)~="table" then return nil,"Echo ownership has an unsupported shape." end
+        keys=keys+1;if keys>MAX_ROWS or type(v)~="table" then return nil,"Echo ownership has an unsupported shape.",nil,"shape" end
         if v.spellId~=nil then
-            if not record(v) then return nil,"Echo ownership could not be verified." end
+            if not record(v) then return nil,"Echo ownership could not be verified.",nil,"verify" end
         else
-            for _,e in pairs(v) do if not record(e) then return nil,"Echo ownership could not be verified." end end
+            for _,e in pairs(v) do if not record(e) then return nil,"Echo ownership could not be verified.",nil,"verify" end end
         end
     end
     return counts,nil,total
@@ -138,55 +140,60 @@ function O.Balance()
     if not read or not integer(n,0) then return nil,"unknown","Orb balance is unavailable or invalid." end
     return n,"confirmed"
 end
+-- A refusal returns nil, its text and a fixed stage code naming the refusal
+-- site. The stage is diagnostics only (OrbRuntime's readiness observation);
+-- callers that act on the read use the first two values, as before.
 function O.Read()
     local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService;local orb=pe and pe.OrbService
     for _,name in ipairs({"IsStateKnown","GetCharges","IsOfferPending","ConfirmSpend","RequestCharges"}) do
         if type(orb)~="table" or type(orb[name])~="function" then
-            return nil,"Orb mode is unavailable: the client does not expose OrbService."..name.."."
+            return nil,"Orb mode is unavailable: the client does not expose OrbService."..name..".","capability"
         end
     end
     for _,name in ipairs({"GetGrantedPerks","GetLockedPerks","GetCurrentChoice","SelectPerk","RequestGrantedPerks"}) do
         if type(svc)~="table" or type(svc[name])~="function" then
-            return nil,"Orb mode is unavailable: the client does not expose PerkService."..name.."."
+            return nil,"Orb mode is unavailable: the client does not expose PerkService."..name..".","capability"
         end
     end
     local okK,known=call(orb,"IsStateKnown");local okC,charges=call(orb,"GetCharges")
     local okP,pending=call(orb,"IsOfferPending")
     if not okK or not okC or not okP or type(known)~="boolean" or type(pending)~="boolean" then
-        return nil,"The game's Orb state could not be read. No Orb will be spent."
+        return nil,"The game's Orb state could not be read. No Orb will be spent.","state"
     end
-    if not known then return nil,"Waiting for the server's Orb balance. Use Recheck once it is available." end
-    if not integer(charges,0) then return nil,"The server's Orb balance is invalid." end
-    local cat=A.Catalog and A.Catalog();if not cat or type(cat.rows)~="table" then return nil,"The local Echo catalog is not ready." end
+    if not known then return nil,"Waiting for the server's Orb balance. Use Recheck once it is available.","balance_loading" end
+    if not integer(charges,0) then return nil,"The server's Orb balance is invalid.","balance_invalid" end
+    local cat=A.Catalog and A.Catalog();if not cat or type(cat.rows)~="table" then return nil,"The local Echo catalog is not ready.","catalog" end
     local trusted=A.Owned and A.Owned();local locked=A.LockedOwned and A.LockedOwned()
     if not trusted or not trusted.synced or not locked or not locked.synced then
-        return nil,"Waiting for current rolled and locked Echo data from the server."
+        local rolled=trusted and trusted.synced;local permanent=locked and locked.synced
+        return nil,"Waiting for current rolled and locked Echo data from the server.",
+            not rolled and (permanent and "trust_owned" or "trust_both") or "trust_locked"
     end
     local okG,rawG=call(svc,"GetGrantedPerks");local okL,rawL=call(svc,"GetLockedPerks")
-    if not okG or not okL then return nil,"Echo ownership could not be read." end
-    local granted,err,totalG=readCounts(rawG,cat);if not granted then return nil,err end
-    local locks,errL,totalL=readCounts(rawL,cat);if not locks then return nil,errL end
-    if totalG>79 or totalL>6 then return nil,"The current rolled/locked Echo counts exceed the supported limits." end
+    if not okG or not okL then return nil,"Echo ownership could not be read.","call" end
+    local granted,err,totalG,whyG=readCounts(rawG,cat);if not granted then return nil,err,"granted_"..whyG end
+    local locks,errL,totalL,whyL=readCounts(rawL,cat);if not locks then return nil,errL,"locked_"..whyL end
+    if totalG>79 or totalL>6 then return nil,"The current rolled/locked Echo counts exceed the supported limits.","limits" end
     local sig=signature(granted)
     if observations.grantedRef~=rawG or observations.grantedSig~=sig then
         observations.serial=observations.serial+1;observations.grantedRef=rawG;observations.grantedSig=sig
     end
     local okB,rawB=call(svc,"GetCurrentChoice")
-    if not okB or (rawB~=nil and type(rawB)~="table") then return nil,"The current Echo choices are unavailable." end
+    if not okB or (rawB~=nil and type(rawB)~="table") then return nil,"The current Echo choices are unavailable.","choice" end
     local board,parts={},{}
     for i,c in ipairs(rawB or {}) do
-        if i>3 or type(c)~="table" or not integer(c.spellId,1) then return nil,"The current Echo offer is invalid." end
+        if i>3 or type(c)~="table" or not integer(c.spellId,1) then return nil,"The current Echo offer is invalid.","choice" end
         local row=cat.rows[c.spellId];local q=c.quality or (row and row.quality)
-        if not row or not integer(q,0) then return nil,"The current Echo offer has unknown quality." end
+        if not row or not integer(q,0) then return nil,"The current Echo offer has unknown quality.","choice" end
         board[i]={spellId=c.spellId,quality=q,index=i,selectable=c.selectable~=false}
         parts[i]=c.spellId..":"..q..":"..tostring(c.selectable~=false)
     end
-    if #board~=0 and #board~=3 then return nil,"Waiting for the complete three-choice offer." end
+    if #board~=0 and #board~=3 then return nil,"Waiting for the complete three-choice offer.","choice" end
     local opts=_G.ProjectEbonholdOptionsService
-    if type(opts)~="table" or type(opts.GetSetting)~="function" then return nil,"Cannot verify the game's automatic Echo-choice setting." end
+    if type(opts)~="table" or type(opts.GetSetting)~="function" then return nil,"Cannot verify the game's automatic Echo-choice setting.","auto_accept" end
     local okAuto,auto=pcall(opts.GetSetting,opts,"autoAcceptLoadoutEchoes")
-    if not okAuto or type(auto)~="boolean" then return nil,"Cannot verify the game's automatic Echo-choice setting." end
-    local host=hostPending(pe);if host==nil then return nil,"Cannot verify pending game actions." end
+    if not okAuto or type(auto)~="boolean" then return nil,"Cannot verify the game's automatic Echo-choice setting.","auto_accept" end
+    local host=hostPending(pe);if host==nil then return nil,"Cannot verify pending game actions.","host" end
     -- Use the existing Nexus / supplied integration discovery boundary.
     -- Missing optional availability information is unknown, never permission.
     local okD,discovered=call(svc,"GetDiscoveredEchoes")

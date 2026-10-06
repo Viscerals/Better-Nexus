@@ -919,6 +919,160 @@ function M.Summary(selection)
 end
 
 ------------------------------------------------------------------------
+-- Passive readiness diagnostics: the last normal Orb window read and the last
+-- normal ownership reads, as their owners recorded them in memory. Each block
+-- reads one accessor, looked up now, inside its own protection, and shows
+-- only key=value facts: a known code, yes/no, or a whole number of at most
+-- seven digits. Anything else is "unknown"; nothing is guessed or refreshed.
+------------------------------------------------------------------------
+
+local function codeSet(list)
+    local set = {}
+    for _, code in ipairs(list) do set[code] = true end
+    return set
+end
+-- The codes of core/OrbAdapter.lua (stage), core/OrbRuntime.lua (assignment
+-- state, role mode) and core/GameAdapter.lua (locked rejection, raw type).
+local READINESS_STAGES = codeSet({"ok", "assignment", "targets", "capability",
+    "state", "balance_loading", "balance_invalid", "catalog", "trust_owned",
+    "trust_locked", "trust_both", "call", "granted_unavailable", "granted_shape",
+    "granted_verify", "locked_unavailable", "locked_shape", "locked_verify",
+    "limits", "choice", "auto_accept", "host", "unknown"})
+local ASSIGNMENT_STATES = codeSet({"ready", "unassigned", "restoring", "loading",
+    "unavailable", "unknown"})
+local ROLE_MODES = codeSet({"explicit", "untyped", "none", "unknown"})
+local PROGRESS_STATES = codeSet({"available", "unavailable"})
+local LOCKED_REJECTIONS = codeSet({"none", "absent", "not_table", "unreadable",
+    "invalid_value", "conflicting_alias", "cycle", "depth", "over_cap", "scalar_leaf"})
+local RAW_TYPES = codeSet({"nil", "boolean", "number", "string", "table",
+    "function", "userdata", "thread", "unknown"})
+local READINESS_KEYS = {"observed", "age", "stage", "assignment", "roles",
+    "progress", "rolledMissing", "permanentMissing", "ownedSynced",
+    "ownedConfirmed", "ownedArmed", "ownedFresh", "ownedGhost", "ownedGeneration",
+    "ownedTotal", "lockedSynced", "lockedCopies", "lockedRejection"}
+local OWNERSHIP_KEYS = {"ownedObserved", "ownedAge", "ownedSampledGeneration",
+    "ownedSampledConfirmed", "ownedSynced", "ownedFresh", "ownedGhost",
+    "ownedDistinct", "ownedTotal", "ownedGeneration", "ownedConfirmed",
+    "ownedArmed", "ownedRetries", "lockedObserved", "lockedAge", "lockedSynced",
+    "lockedCopies", "lockedRejection", "lockedRawType"}
+
+-- Type checks only: no value is converted before it passed its check.
+local function factCode(value, set)
+    if type(value) == "string" and set[value] then return value end
+    return "unknown"
+end
+local function factFlag(value)
+    if value == true then return "yes" end
+    if value == false then return "no" end
+    return "unknown"
+end
+local function factCount(value)
+    if type(value) == "number" and value == math.floor(value)
+        and value >= 0 and value <= 9999999 then
+        return string.format("%d", value)
+    end
+    return "unknown"
+end
+local function factAge(value)
+    local count = factCount(value)
+    return count == "unknown" and count or (count .. "s")
+end
+
+-- A copy of the named fields of one accessor's answer, or nil when the
+-- accessor is missing, raises, or answers anything but a table.
+local function accessorFacts(owner, accessor, keys)
+    local ok, copied = pcall(function()
+        local module = Nexus[owner]
+        local fn = type(module) == "table" and module[accessor] or nil
+        if type(fn) ~= "function" then return nil end
+        local raw = fn()
+        if type(raw) ~= "table" then return nil end
+        local out = {}
+        for _, key in ipairs(keys) do out[key] = raw[key] end
+        return out
+    end)
+    if ok and type(copied) == "table" then return copied end
+    return nil
+end
+
+-- The last normal Orb window read (OrbRuntime.ReadinessView). Its facts are
+-- those of that read, not current ones; its age is shown.
+local function readinessLines()
+    local view = accessorFacts("OrbRuntime", "ReadinessView", READINESS_KEYS)
+    if not view or type(view.observed) ~= "boolean" then
+        return {"Orb readiness: observed=unavailable (the Orb owner did not answer)"}
+    end
+    if not view.observed then
+        return {"Orb readiness: observed=no (no Orb window read since this load)"}
+    end
+    local available = view.progress == "available"
+    return {
+        "Orb readiness (the last Orb window read, as it was then): observed=yes"
+            .. " age=" .. factAge(view.age)
+            .. " stage=" .. factCode(view.stage, READINESS_STAGES)
+            .. " progress=" .. factCode(view.progress, PROGRESS_STATES)
+            .. (available and (" progress.rolled=" .. factCount(view.rolledMissing)
+                .. " progress.permanent=" .. factCount(view.permanentMissing)) or ""),
+        "Orb readiness assignment: assignment.state="
+            .. factCode(view.assignment, ASSIGNMENT_STATES)
+            .. " assignment.roles=" .. factCode(view.roles, ROLE_MODES),
+        "Orb readiness rolled: owned.synced=" .. factFlag(view.ownedSynced)
+            .. " owned.confirmed=" .. factFlag(view.ownedConfirmed)
+            .. " owned.armed=" .. factFlag(view.ownedArmed)
+            .. " owned.fresh=" .. factFlag(view.ownedFresh)
+            .. " owned.ghost=" .. factFlag(view.ownedGhost)
+            .. " owned.generation=" .. factCount(view.ownedGeneration)
+            .. " owned.total=" .. factCount(view.ownedTotal),
+        "Orb readiness locked: locked.synced=" .. factFlag(view.lockedSynced)
+            .. " locked.copies=" .. factCount(view.lockedCopies)
+            .. " locked.rejection=" .. factCode(view.lockedRejection, LOCKED_REJECTIONS),
+    }
+end
+
+-- The last normal Owned() and LockedOwned() samples
+-- (GameAdapter.OwnershipTrustView), each with its own age, kept apart from
+-- the current generation. A sample's age is when that read ran, not proof of
+-- a fresh server reply. A component that was not observed shows no facts.
+local function ownershipLines()
+    local view = accessorFacts("GameAdapter", "OwnershipTrustView", OWNERSHIP_KEYS)
+    if not view then
+        return {"Ownership sample: ordinary.observed=unavailable locked.observed=unavailable"
+            .. " (the ownership owner did not answer)"}
+    end
+    local out = {"Ownership sample (the last normal read of each; an age is not proof of a fresh server reply):"
+        .. " current.generation=" .. factCount(view.ownedGeneration)
+        .. " current.confirmed=" .. factFlag(view.ownedConfirmed)
+        .. " current.armed=" .. factFlag(view.ownedArmed)
+        .. " current.retries=" .. factCount(view.ownedRetries)}
+    if view.ownedObserved == true then
+        out[#out + 1] = "Ownership sample ordinary: ordinary.observed=yes"
+            .. " ordinary.age=" .. factAge(view.ownedAge)
+            .. " ordinary.generation=" .. factCount(view.ownedSampledGeneration)
+            .. " ordinary.confirmed=" .. factFlag(view.ownedSampledConfirmed)
+            .. " ordinary.synced=" .. factFlag(view.ownedSynced)
+            .. " ordinary.fresh=" .. factFlag(view.ownedFresh)
+            .. " ordinary.ghost=" .. factFlag(view.ownedGhost)
+            .. " ordinary.distinct=" .. factCount(view.ownedDistinct)
+            .. " ordinary.total=" .. factCount(view.ownedTotal)
+    else
+        out[#out + 1] = "Ownership sample ordinary: ordinary.observed="
+            .. (view.ownedObserved == false and "no" or "unknown")
+    end
+    if view.lockedObserved == true then
+        out[#out + 1] = "Ownership sample locked: locked.observed=yes"
+            .. " locked.age=" .. factAge(view.lockedAge)
+            .. " locked.synced=" .. factFlag(view.lockedSynced)
+            .. " locked.copies=" .. factCount(view.lockedCopies)
+            .. " locked.rejection=" .. factCode(view.lockedRejection, LOCKED_REJECTIONS)
+            .. " locked.raw=" .. factCode(view.lockedRawType, RAW_TYPES)
+    else
+        out[#out + 1] = "Ownership sample locked: locked.observed="
+            .. (view.lockedObserved == false and "no" or "unknown")
+    end
+    return out
+end
+
+------------------------------------------------------------------------
 -- Detached preparation for the file route
 ------------------------------------------------------------------------
 
@@ -1154,6 +1308,19 @@ function M.Step(job)
                             .. " [" .. safeText(row.result.label, 64) .. "]"
                     end
                 end
+                return out
+            end},
+            -- Two passive blocks, each its own section so that neither one
+            -- (nor the Orb history above) can take the other away. Neither
+            -- reads the game: each copies one memory-only accessor.
+            {name = "orb readiness", build = function()
+                local out = {"-- Orb readiness (memory only; facts as observed, not refreshed) --"}
+                for _, line in ipairs(readinessLines()) do out[#out + 1] = line end
+                return out
+            end},
+            {name = "ownership samples", build = function()
+                local out = {"-- ownership samples (memory only; facts as observed, not refreshed) --"}
+                for _, line in ipairs(ownershipLines()) do out[#out + 1] = line end
                 return out
             end},
         }

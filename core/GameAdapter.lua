@@ -92,6 +92,11 @@ local ownedRequestGeneration = -1
 local ownedBaselineRef, ownedBaselineSig = nil, nil
 local boundaryAt = 0     -- time of last run boundary / PEW (owned-sync settle)
 local GHOST_OWNED = 25   -- level-1 owned count at/above which we suspect a dead-run ghost
+-- Diagnostics only (A.OwnershipTrustView): the facts the last normal Owned()
+-- and the last normal LockedOwned() evaluation saw, each with the time of its
+-- own read. Memory only; written in place by those two reads and nothing else.
+-- No decision reads them.
+local ownedSample, lockedSample = {}, {}
 local pewDone = false
 local externalActionSeen = false
 local uiHooksInstalled = {
@@ -188,6 +193,15 @@ local function SafeCall(fn, ...)
     if type(fn) ~= "function" then return nil end
     local ok, res = pcall(fn, ...)
     if ok then return res end
+    return nil
+end
+
+-- The time of a diagnostic sample. Never raises, so the bookkeeping cannot
+-- change the read that records it.
+local function DiagnosticTime()
+    if type(GetTime) ~= "function" then return nil end
+    local ok, now = pcall(GetTime)
+    if ok and type(now) == "number" and now == now then return now end
     return nil
 end
 
@@ -524,11 +538,20 @@ end
 -- defensively since the exact shape of the missing entry isn't confirmed
 -- yet; A.DumpLockedPerksRaw below exists to get a definitive answer instead
 -- of guessing again.
+-- The third return is diagnostics only: the first defect found, as a fixed
+-- code (absent, not_table, depth, cycle, invalid_value, conflicting_alias,
+-- over_cap, scalar_leaf), or nil when the view is valid.
 local function ReadLockedPerks(raw)
     local bySpell = {}
     local seenTables = {}
     local malformed = false
+    local rejection = nil
     local totalCopies = 0
+
+    local function Reject(code)
+        malformed = true
+        rejection = rejection or code
+    end
 
     local function RecognizedInteger(value, names)
         local found, selected = false, nil
@@ -538,9 +561,11 @@ local function ReadLockedPerks(raw)
                 local number = tonumber(rawValue)
                 if type(number) ~= "number" or number ~= number
                     or number <= 0 or number >= math.huge
-                    or number ~= math.floor(number)
-                    or (found and number ~= selected) then
-                    return nil, false, true
+                    or number ~= math.floor(number) then
+                    return nil, false, true, "invalid_value"
+                end
+                if found and number ~= selected then
+                    return nil, false, true, "conflicting_alias"
                 end
                 found, selected = true, number
             end
@@ -549,23 +574,26 @@ local function ReadLockedPerks(raw)
     end
 
     local function Walk(value, depth)
-        if type(value) ~= "table" then malformed = true; return end
-        if depth > 8 or seenTables[value] then malformed = true; return end
+        if type(value) ~= "table" then
+            Reject(value == nil and "absent" or "not_table"); return
+        end
+        if depth > 8 then Reject("depth"); return end
+        if seenTables[value] then Reject("cycle"); return end
         seenTables[value] = true
 
-        local id, idValid, hasId = RecognizedInteger(value, {
+        local id, idValid, hasId, idWhy = RecognizedInteger(value, {
             "spellId", "spellID", "id", "perkId", "perkID", "entryId",
             "entryID", "echoId", "echoID", "spell", "perk",
         })
-        local count, countValid, hasCount = RecognizedInteger(value, {
+        local count, countValid, hasCount, countWhy = RecognizedInteger(value, {
             "stack", "stacks", "count", "amount", "qty",
         })
-        if not idValid or not countValid then malformed = true end
+        if not idValid or not countValid then Reject(idWhy or countWhy) end
         if hasId and idValid and countValid then
             local n = hasCount and count or 1
             bySpell[id] = (bySpell[id] or 0) + n
             totalCopies = totalCopies + n
-            if totalCopies > 6 then malformed = true end
+            if totalCopies > 6 then Reject("over_cap") end
             -- Do not `return` here -- if this table ALSO nests further locked
             -- entries as children (an id field alongside a child array, rather
             -- than instead of one), those must still be walked, not skipped.
@@ -581,13 +609,18 @@ local function ReadLockedPerks(raw)
             end
         end
         if not hasId and childTables == 0 and scalarLeaves > 0 then
-            malformed = true
+            Reject("scalar_leaf")
         end
     end
 
     Walk(raw, 0)
-    return bySpell, not malformed
+    return bySpell, not malformed, rejection
 end
+
+-- The only raw type classes a locked sample reports (Lua type names).
+local LOCKED_RAW_TYPES = { ["nil"] = true, boolean = true, number = true,
+    string = true, table = true, ["function"] = true, userdata = true,
+    thread = true }
 
 -- Diagnostic-only: the exact, unfiltered GetLockedPerks() return, serialized
 -- via Codec.JSONEncode. Never used by decision logic -- exists solely so a
@@ -607,18 +640,37 @@ end
 function A.LockedOwned()
     projectionStatus.locked.calls = projectionStatus.locked.calls + 1
     local svc = PS()
-    local locked = svc and SafeCall(svc.GetLockedPerks)
-    local bySpell, valid = ReadLockedPerks(locked)
-    local byFamily = {}
+    -- SafeCall written out, so that the diagnostic sample can tell a getter
+    -- that raised (or is missing) from one that answered nil.
+    local getter = svc and svc.GetLockedPerks
+    local readable, locked = type(getter) == "function", nil
+    if readable then
+        readable, locked = pcall(getter)
+        if not readable then locked = nil end
+    end
+    local bySpell, valid, rejection = ReadLockedPerks(locked)
+    local byFamily, copies = {}, 0
     for id, n in pairs(bySpell) do
         projectionStatus.locked.spells = projectionStatus.locked.spells + 1
         projectionStatus.locked.copies = projectionStatus.locked.copies
             + (tonumber(n) or 0)
         local fam = FamilyOf(id) or id
         byFamily[fam] = (byFamily[fam] or 0) + n
+        copies = copies + n
     end
-    return { bySpell = bySpell, byFamily = byFamily,
-        synced = type(locked) == "table" and valid == true }
+    local synced = type(locked) == "table" and valid == true
+    -- The diagnostic sample of this read. The parsed copies stay beside the
+    -- trust answer, as in the result; a rejection is a fixed code and the raw
+    -- value is reduced to its type name. Nothing here changes the result.
+    lockedSample.observed = true
+    lockedSample.at = DiagnosticTime()
+    lockedSample.synced = synced
+    lockedSample.copies = copies < math.huge and copies or nil
+    lockedSample.rejection = not readable and "unreadable"
+        or (synced and "none" or rejection)
+    lockedSample.rawType = readable and LOCKED_RAW_TYPES[type(locked)]
+        and type(locked) or "unknown"
+    return { bySpell = bySpell, byFamily = byFamily, synced = synced }
 end
 
 -- Confirmed live via /nexus sniff, 2026-08-01: the server exposes the real
@@ -739,6 +791,20 @@ function A.Owned()
     ownedSeen = ownedConfirmedGeneration == ownedGeneration
     local synced = ownedSeen and not ghost
     projectionStatus.owned.distinct = projectionStatus.owned.distinct + distinct
+    -- The diagnostic sample of this evaluation. `fresh` compares the mirror
+    -- with the armed request baseline only; nil when none is armed.
+    ownedSample.observed = true
+    ownedSample.at = DiagnosticTime()
+    ownedSample.generation = ownedGeneration
+    ownedSample.confirmed = ownedSeen
+    ownedSample.synced = synced
+    ownedSample.fresh = nil
+    if ownedRequestGeneration == ownedGeneration then
+        ownedSample.fresh = currentResponse == true
+    end
+    ownedSample.ghost = ghost
+    ownedSample.distinct = distinct
+    ownedSample.total = total
     return { bySpell = bySpell, byFamily = byFamily,
              synced = synced, ghostSuspect = ghost,
              distinct = distinct, total = total,
@@ -3808,6 +3874,53 @@ end
 
 function A.OwnedSyncInfo()
     return { requestedAt = ownedRequestAt, retries = ownedRetries }
+end
+
+-- Read-only diagnostics for the support report: a new table of scalars on
+-- each call. ownedGeneration/ownedConfirmed/ownedArmed/ownedRetries are the
+-- CURRENT generation facts. Every other key is a SAMPLE: the last normal
+-- Owned() (owned*) or LockedOwned() (locked*) evaluation, each with its own
+-- observed flag, time and age. This reads module locals and GetTime() only: no
+-- getter, request, counter, revision, confirmation or dirty flag. A sample's
+-- age is the time of that read, not proof of a fresh server response.
+function A.OwnershipTrustView()
+    local now = DiagnosticTime()
+    local function age(at)
+        if not now or type(at) ~= "number" then return nil end
+        -- GetTime() counts milliseconds; half of one keeps float noise in the
+        -- subtraction from costing a whole second.
+        local seconds = math.floor(now - at + 0.0005)
+        if seconds ~= seconds or seconds < 0 or seconds >= math.huge then return nil end
+        return seconds
+    end
+    local view = {
+        ownedGeneration = ownedGeneration,
+        ownedConfirmed = ownedConfirmedGeneration == ownedGeneration,
+        ownedArmed = ownedRequestGeneration == ownedGeneration,
+        ownedRetries = ownedRetries,
+        ownedObserved = ownedSample.observed == true,
+        lockedObserved = lockedSample.observed == true,
+    }
+    if view.ownedObserved then
+        view.ownedAt = ownedSample.at
+        view.ownedAge = age(ownedSample.at)
+        view.ownedSampledGeneration = ownedSample.generation
+        view.ownedSampledConfirmed = ownedSample.confirmed
+        view.ownedSynced = ownedSample.synced
+        view.ownedFresh = ownedSample.fresh
+        view.ownedGhost = ownedSample.ghost
+        view.ownedDistinct = ownedSample.distinct
+        view.ownedTotal = ownedSample.total
+    end
+    if view.lockedObserved then
+        view.lockedAt = lockedSample.at
+        view.lockedAge = age(lockedSample.at)
+        view.lockedSynced = lockedSample.synced
+        view.lockedCopies = lockedSample.copies
+        view.lockedRejection = lockedSample.rejection
+        view.lockedRawType = lockedSample.rawType
+    end
+    return view
 end
 
 function A.UnlockedSlots()

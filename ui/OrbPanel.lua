@@ -143,8 +143,13 @@ local function refresh()
     local s=Nexus.OrbRuntime.Status(advanced);frame.snapshot=s
     local a=s.assignment or {};local busy=s.running or s.pending or s.state=="PAUSED" or s.state=="LIMIT"
     frame.plan:SetText(a.state=="restoring" and "Restoring assigned Wishlist..." or ("Assigned Wishlist: "..name(a.name or "none")))
-    frame.targets:SetText(s.progress and (s.progress.rolledMissing.." rolled target copies still missing")
-        or a.note or "Assign a Wishlist through My Builds to begin.")
+    -- A ready assignment whose read was refused is still assigned: its progress
+    -- is unavailable (the reason is in the status line), not unassigned.
+    local targets
+    if s.progress then targets=s.progress.rolledMissing.." rolled target copies still missing"
+    elseif a.state=="ready" then targets="Target progress unavailable"..(a.note and (": "..tostring(a.note)) or ".")
+    else targets=a.note or "Assign a Wishlist through My Builds to begin." end
+    frame.targets:SetText(targets)
     local permanent=s.progress and s.progress.permanentMissing
     frame.permanent:SetText(permanent and permanent>0 and (permanent.." locked target copies remain. Orbs cannot change locked Echo slots.")or "")
     local d=s.limitDraft or {}
