@@ -1,5 +1,11 @@
+<h1 align="center">Better Nexus</h1>
+
 <p align="center">
-  <img src="docs/assets/readme-header.svg" alt="Better Nexus — Plan your Echoes. Shape your build." width="100%">
+  <img src="docs/assets/readme-hero.webp" alt="Original Better Nexus artwork: a violet crystal suspended within orbiting rings in a vaulted hall." width="640">
+</p>
+
+<p align="center">
+  <strong>Plan your Echoes. Shape your build.</strong>
 </p>
 
 <p align="center">
