@@ -1,0 +1,66 @@
+site_name: Better Nexus
+site_description: An Echo build toolkit for Project Ebonhold. Install Better Nexus, plan Wishlists, explore shared builds, and find practical help.
+site_url: https://viscerals.github.io/Better-Nexus/preview/
+repo_url: https://github.com/Viscerals/Better-Nexus
+repo_name: Better-Nexus
+edit_uri: ''
+docs_dir: docs
+site_dir: site
+use_directory_urls: true
+hooks:
+  - tools/build_hooks.py
+theme:
+  name: material
+  custom_dir: overrides
+  logo: assets/nexus-mark.svg
+  favicon: assets/nexus-mark.svg
+  font: false
+  palette:
+    scheme: default
+    primary: custom
+    accent: custom
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+plugins:
+  - search
+extra_css:
+  - stylesheets/nexus.css
+extra_javascript:
+  - javascripts/accessibility.js
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Viscerals/Better-Nexus
+      name: Public source repository
+    - icon: material/coffee-outline
+      link: https://ko-fi.com/valentineb
+      name: Optional thank-you on Ko-fi
+copyright: Better Nexus · An independent community addon for Project Ebonhold.
+nav:
+  - Home: index.md
+  - Player guide:
+    - guide/index.md
+    - Install & update: guide/install.md
+    - Your first Wishlist: guide/first-wishlist.md
+    - Features & commands: guide/features.md
+    - Troubleshooting: guide/troubleshooting.md
+  - Releases:
+    - releases/index.md
+    - Changelog: releases/changelog.md
+  - Support: support.md
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
