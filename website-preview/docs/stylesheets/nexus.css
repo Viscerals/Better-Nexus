@@ -188,3 +188,26 @@ body { font-family: var(--md-text-font); }
   .nx-route-art { width: calc(100% + 2.2rem); height: auto; margin: -1.1rem -1.1rem 1rem; }
 }
 @media (max-width: 380px) { .nx-hero-art figcaption { font-size: .39rem; letter-spacing: .08em; } }
+
+/* Support-page illustration and optional community thank-you. */
+.nx-support-panel { display: grid; grid-template-columns: .95fr 1.05fr; margin: 1.6rem 0 2rem; overflow: hidden; border-radius: .8rem; background: #191627; border: 1px solid #3b304d; }
+.nx-support-visual { min-width: 0; background: #231b32; }
+.md-typeset .nx-support-visual img { display: block; width: 100%; height: 100%; min-height: 18rem; object-fit: cover; object-position: 40% center; margin: 0; }
+.nx-support-message { padding: 1.4rem; min-width: 0; color: #d8cfe5; font-size: .73rem; line-height: 1.75; }
+.nx-support-eyebrow { color: #c7b0eb; font-size: .49rem; letter-spacing: .12em; font-weight: 750; }
+.md-typeset .nx-support-message h2 { color: #fbf7ff; font-size: 1.35rem; line-height: 1.22; margin: .65rem 0 .9rem; }
+.md-typeset .nx-support-message .headerlink { color: #cbb6ff; }
+.md-typeset .nx-kofi-button { background: #cbb6ff; border-color: #cbb6ff; color: #21182f; font-size: .67rem; padding: .7em 1em; }
+.md-typeset .nx-kofi-button:hover { background: #deceff; border-color: #deceff; color: #21182f; }
+.nx-support-boundary { border-top: 1px solid #ffffff22; margin-top: 1rem; padding-top: .55rem; font-size: .61rem; color: #bdb0cf; line-height: 1.65; }
+.nx-support-boundary p { margin-bottom: 0; }
+.nx-contribute-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; margin: 1rem 0 2.2rem; }
+.nx-contribute-grid > div { background: #fff; padding: 1rem; border: 1px solid #e2dcec; border-radius: .6rem; font-size: .68rem; line-height: 1.7; }
+.md-typeset .nx-contribute-grid h3 { margin: 0 0 .6rem; font-size: .82rem; }
+.nx-contribute-grid a { font-size: .61rem; font-weight: 700; }
+@media (max-width: 800px) {
+  .nx-support-panel { grid-template-columns: 1fr; }
+  .md-typeset .nx-support-visual img { height: auto; min-height: 0; aspect-ratio: 3 / 2; object-fit: cover; }
+  .nx-support-message { padding: 1.3rem; }
+  .nx-contribute-grid { grid-template-columns: 1fr; }
+}
