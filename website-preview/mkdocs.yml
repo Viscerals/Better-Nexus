@@ -30,7 +30,7 @@ theme:
 plugins:
   - search
 extra_css:
-  - stylesheets/nexus.css
+  - stylesheets/nexus.css?v=20261006-support
 extra_javascript:
   - javascripts/accessibility.js
 extra:
