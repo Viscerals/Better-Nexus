@@ -2245,7 +2245,9 @@ local function observeReadiness(stage,a,progress)
             ownedArmed=flag(view.ownedArmed),ownedFresh=flag(view.ownedFresh),ownedGhost=flag(view.ownedGhost),
             ownedGeneration=count(view.ownedGeneration),ownedTotal=count(view.ownedTotal),
             lockedSynced=flag(view.lockedSynced),lockedCopies=count(view.lockedCopies),
-            lockedRejection=type(why)=="string" and codes.rejection[why] and why or nil}
+            lockedRejection=type(why)=="string" and codes.rejection[why] and why or nil,
+            -- The serial of the locked read this observation saw (GameAdapter.LockedShapeView).
+            lockedSerial=integer(view.lockedSerial,1,9999999) and view.lockedSerial or nil}
     end)
     if ok and type(trust)=="table" then for k,v in pairs(trust) do o[k]=v end end
 end

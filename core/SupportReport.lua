@@ -949,7 +949,7 @@ local RAW_TYPES = codeSet({"nil", "boolean", "number", "string", "table",
 local READINESS_KEYS = {"observed", "age", "stage", "assignment", "roles",
     "progress", "rolledMissing", "permanentMissing", "ownedSynced",
     "ownedConfirmed", "ownedArmed", "ownedFresh", "ownedGhost", "ownedGeneration",
-    "ownedTotal", "lockedSynced", "lockedCopies", "lockedRejection"}
+    "ownedTotal", "lockedSynced", "lockedCopies", "lockedRejection", "lockedSerial"}
 local OWNERSHIP_KEYS = {"ownedObserved", "ownedAge", "ownedSampledGeneration",
     "ownedSampledConfirmed", "ownedSynced", "ownedFresh", "ownedGhost",
     "ownedDistinct", "ownedTotal", "ownedGeneration", "ownedConfirmed",
@@ -976,6 +976,11 @@ end
 local function factAge(value)
     local count = factCount(value)
     return count == "unknown" and count or (count .. "s")
+end
+-- A locked read serial (GameAdapter's own locked read count) starts at 1.
+local function factSerial(value)
+    if value == 0 then return "unknown" end
+    return factCount(value)
 end
 
 -- A copy of the named fields of one accessor's answer, or nil when the
@@ -1025,7 +1030,8 @@ local function readinessLines()
             .. " owned.total=" .. factCount(view.ownedTotal),
         "Orb readiness locked: locked.synced=" .. factFlag(view.lockedSynced)
             .. " locked.copies=" .. factCount(view.lockedCopies)
-            .. " locked.rejection=" .. factCode(view.lockedRejection, LOCKED_REJECTIONS),
+            .. " locked.rejection=" .. factCode(view.lockedRejection, LOCKED_REJECTIONS)
+            .. " locked.serial=" .. factSerial(view.lockedSerial),
     }
 end
 
@@ -1068,6 +1074,108 @@ local function ownershipLines()
     else
         out[#out + 1] = "Ownership sample locked: locked.observed="
             .. (view.lockedObserved == false and "no" or "unknown")
+    end
+    return out
+end
+
+-- The last refused locked table read (GameAdapter.LockedShapeView): its
+-- anonymous structure, one checked token per row, with that read's serial and
+-- age. Structure only: a repeated ID class, a count or a nesting is not a
+-- native meaning. At most 64 rows in 14 lines and SHAPE_BYTES bytes.
+local SHAPE_KEYS = {"observed", "serial", "age", "current", "laterReads",
+    "sampledGeneration", "currentGeneration", "first", "copies", "ids",
+    "status", "rows", "row"}
+local SHAPE_REJECTIONS = codeSet({"invalid_value", "conflicting_alias", "cycle",
+    "depth", "over_cap", "scalar_leaf"})
+local SHAPE_STATUSES = codeSet({"captured", "truncated", "failed", "mismatch"})
+local SHAPE_KEY_CLASSES = codeSet({"i", "s", "o", "-"})
+local SHAPE_LEGEND = {
+    "Locked shape legend: r<row> is p.k.c.n.im.cm.e: p parent row (0 the root),"
+        .. " k key class (i whole number, s string, o other, - the root),"
+        .. " c ID class by first appearance (0 none, x invalid or conflicting), n copies added",
+    "Locked shape legend: im bits spellId 1 spellID 2 id 4 perkId 8 perkID 16"
+        .. " entryId 32 entryID 64 echoId 128 echoID 256 spell 512 perk 1024;"
+        .. " cm bits stack 1 stacks 2 count 4 amount 8 qty 16",
+    "Locked shape legend: e bits depth 1 cycle 2 invalid_value 4 conflicting_alias 8"
+        .. " over_cap 16 scalar_leaf 32; ? a value that failed its check",
+}
+local SHAPE_BYTES = 4096
+
+-- One row component: a whole number from 0 to `maximum`, otherwise "?".
+local function shapePart(value, maximum)
+    if type(value) == "number" and value == math.floor(value)
+        and value >= 0 and value <= maximum then
+        return string.format("%d", value)
+    end
+    return "?"
+end
+
+-- One row token. Each component is checked on its own; a row that is not a
+-- table, or that raises when read, is unknown as a whole.
+local function shapeRow(list, index)
+    local ok, text = pcall(function()
+        local row = list[index]
+        if type(row) ~= "table" then return "unknown" end
+        local k, c = row.k, row.c
+        return shapePart(row.p, 63)
+            .. "." .. (type(k) == "string" and SHAPE_KEY_CLASSES[k] and k or "?")
+            .. "." .. (c == "x" and "x" or shapePart(c, 64))
+            .. "." .. shapePart(row.n, 9999999)
+            .. "." .. shapePart(row.im, 2047)
+            .. "." .. shapePart(row.cm, 31)
+            .. "." .. shapePart(row.e, 63)
+    end)
+    return ok and text or "unknown"
+end
+
+local function lockedShapeLines()
+    local view = accessorFacts("GameAdapter", "LockedShapeView", SHAPE_KEYS)
+    if not view or type(view.observed) ~= "boolean" then
+        return {"Locked shape: observed=unavailable (the shape owner did not answer)"}
+    end
+    if not view.observed then
+        return {"Locked shape: observed=no (no refused locked table read since this load)"}
+    end
+    local rows = view.rows
+    if not (type(rows) == "number" and rows == math.floor(rows)
+        and rows >= 0 and rows <= 64) then
+        rows = nil
+    end
+    local out = {
+        "Locked shape (the last refused locked table read, as it was then;"
+            .. " a later read is no proof of a change): observed=yes"
+            .. " serial=" .. factSerial(view.serial)
+            .. " age=" .. factAge(view.age)
+            .. " current=" .. factFlag(view.current)
+            .. " later.reads=" .. factCount(view.laterReads),
+        "Locked shape facts (structure only; a generation is context, not a rule for"
+            .. " locked ownership): sampled.generation=" .. factCount(view.sampledGeneration)
+            .. " current.generation=" .. factCount(view.currentGeneration)
+            .. " first=" .. factCode(view.first, SHAPE_REJECTIONS)
+            .. " copies=" .. factCount(view.copies)
+            .. " ids=" .. factCount(view.ids)
+            .. " status=" .. factCode(view.status, SHAPE_STATUSES)
+            .. " rows=" .. (rows and string.format("%d", rows) or "unknown"),
+    }
+    for _, line in ipairs(SHAPE_LEGEND) do out[#out + 1] = line end
+    local used = 0
+    for _, line in ipairs(out) do used = used + #line + 1 end
+    -- Eight rows a line. 64 rows of the widest valid tokens stay well inside
+    -- SHAPE_BYTES; were they not to, whole rows are left out and declared.
+    local shown = 0
+    for first = 1, rows or 0, 8 do
+        local tokens = {}
+        for index = first, math.min(rows, first + 7) do
+            tokens[#tokens + 1] = "r" .. index .. "=" .. shapeRow(view.row, index)
+        end
+        local line = "Locked shape rows: " .. table.concat(tokens, " ")
+        if used + #line + 1 > SHAPE_BYTES - 64 then break end
+        out[#out + 1] = line
+        used = used + #line + 1
+        shown = first + #tokens - 1
+    end
+    if rows and shown < rows then
+        out[#out + 1] = "Locked shape rows: omitted=" .. (rows - shown)
     end
     return out
 end
@@ -1310,9 +1418,9 @@ function M.Step(job)
                 end
                 return out
             end},
-            -- Two passive blocks, each its own section so that neither one
-            -- (nor the Orb history above) can take the other away. Neither
-            -- reads the game: each copies one memory-only accessor.
+            -- Three passive blocks, each its own section so that none of them
+            -- (nor the Orb history above) can take another away. None reads
+            -- the game: each copies one memory-only accessor.
             {name = "orb readiness", build = function()
                 local out = {"-- Orb readiness (memory only; facts as observed, not refreshed) --"}
                 for _, line in ipairs(readinessLines()) do out[#out + 1] = line end
@@ -1321,6 +1429,11 @@ function M.Step(job)
             {name = "ownership samples", build = function()
                 local out = {"-- ownership samples (memory only; facts as observed, not refreshed) --"}
                 for _, line in ipairs(ownershipLines()) do out[#out + 1] = line end
+                return out
+            end},
+            {name = "locked shape", build = function()
+                local out = {"-- locked shape (memory only; structure as observed, not refreshed) --"}
+                for _, line in ipairs(lockedShapeLines()) do out[#out + 1] = line end
                 return out
             end},
         }

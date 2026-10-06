@@ -77,6 +77,26 @@ This file has two parts.
   it as bounded `key=value` blocks with ages. An age is the time of a read, not
   proof of a fresh server response. A locked rejection code labels the evidence
   and does not mean that an Echo was removed.
+- **Locked shape capture.** `GameAdapter.LockedShapeView()` returns a new table
+  for the last normal `LockedOwned()` read that refused a table, or
+  `observed=false` since load. Protected hooks inside that read's own parse
+  record it (`ReadLockedPerks(raw, sink)`; `LockedFingerprint` passes no
+  collector): no second walk, no second getter call, memory only. A failing
+  hook ends the capture as `status=failed` and never changes the parse. The
+  header holds `serial` (the existing `projectionStatus.locked.calls` of that
+  read), `at`, `age`, `sampledGeneration`, `currentGeneration`, `first`,
+  `copies`, `ids` (that read's `bySpell` keys), `status` (`captured`,
+  `truncated` past 64 tables, `failed`) and `rows`. `current` and `laterReads`
+  compare `serial` with `OwnershipTrustView().lockedSerial`, which the Orb
+  observation copies as `lockedSerial` (its report block prints
+  `locked.serial`). Each row, at most 64 in pre-order, holds
+  seven integers or fixed codes: parent row `p`, key class `k`, anonymous ID
+  class `c`, copies added `n`, the ID and count alias bits the parser read
+  (`im`, `cm`) and defect bits `e`. No key, ID, name, value or table reference
+  is kept. The prepared file report shows it as the bounded `Locked shape`
+  block; the copied summary does not. A repeated ID class, a count or a nesting
+  is structure, not a native meaning; a later read or a newer generation is
+  context, not proof of a change. No decision, gate or count reads any of this.
 - **Version.** The release identity lives in `data/Release.lua` and `Nexus.toc`,
   not in this file.
 - **Tests.** The maintained offline suite is `tools/run_prototype_tests.py` with

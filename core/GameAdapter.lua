@@ -526,6 +526,65 @@ end
 -- Owned (current-run granted ∪ recorded picks; trust model)
 ------------------------------------------------------------------------
 
+-- Diagnostics only (A.LockedShapeView): the anonymous structure of the last
+-- normal LockedOwned() read that refused a table. Hooks inside that read's own
+-- parse record it, each under pcall: a failing hook ends the collection, never
+-- the parse, and there is no second walk. Per entered table, in pre-order,
+-- seven integers or fixed codes, flat: parent row, key class, ID class (by
+-- first appearance; the IDs are dropped with the read), copies added, the ID
+-- and count alias bits the parser read, the defect bits raised there. No key,
+-- ID, name, value or table reference is kept. Memory only; replaced by the
+-- next such read and by nothing else. No decision reads it.
+local LockedShape = {
+    MAX_ROWS = 64,
+    DEFECT_BITS = { depth = 1, cycle = 2, invalid_value = 4,
+        conflicting_alias = 8, over_cap = 16, scalar_leaf = 32 },
+    last = nil,
+}
+
+function LockedShape.New()
+    return { entered = 0, classes = {}, classCount = 0 }
+end
+
+-- One table the parser entered. `id` is the one valid ID it read (nil: none;
+-- false: an invalid or conflicting alias); `why` the defect it raised. Returns
+-- the row, or false past the row bound, which ends the collection.
+function LockedShape.Row(s, key, parent, id, added, why, idBits, countBits)
+    local row = s.entered + 1
+    s.entered = row
+    if row > LockedShape.MAX_ROWS then return false end
+    local keyClass, class = "-", 0
+    if row > 1 then
+        -- The key's type and number only; its text is never read.
+        local kind = type(key)
+        keyClass = kind == "string" and "s"
+            or (kind == "number" and key >= 1 and key < math.huge
+                and key == math.floor(key) and "i" or "o")
+    end
+    if id == false then
+        class = "x"
+    elseif id ~= nil then
+        class = s.classes[id]
+        if not class then
+            class = s.classCount + 1
+            s.classCount, s.classes[id] = class, class
+        end
+    end
+    local base = (row - 1) * 7
+    s[base + 1], s[base + 2], s[base + 3], s[base + 4] =
+        row > 1 and parent or 0, keyClass, class, added
+    s[base + 5], s[base + 6], s[base + 7] =
+        idBits or 0, countBits or 0, LockedShape.DEFECT_BITS[why] or 0
+    return row
+end
+
+-- A defect raised at a recorded row after its children (scalar_leaf).
+function LockedShape.Defect(s, row, why)
+    local at = row * 7
+    s[at] = s[at] + LockedShape.DEFECT_BITS[why]
+    return row
+end
+
 -- GetLockedPerks has appeared in more than one server-side shape: a flat
 -- numeric array, a name-keyed table of arrays, and entries using spellId/id
 -- plus stack/stacks/count. Locked perks may also sit outside the normal roll
@@ -541,7 +600,9 @@ end
 -- The third return is diagnostics only: the first defect found, as a fixed
 -- code (absent, not_table, depth, cycle, invalid_value, conflicting_alias,
 -- over_cap, scalar_leaf), or nil when the view is valid.
-local function ReadLockedPerks(raw)
+-- `sink` (diagnostics only): a LockedShape collector. Only LockedOwned() passes
+-- one; without it the parse is the same.
+local function ReadLockedPerks(raw, sink)
     local bySpell = {}
     local seenTables = {}
     local malformed = false
@@ -553,63 +614,87 @@ local function ReadLockedPerks(raw)
         rejection = rejection or code
     end
 
+    -- One protected collector step. A failure, or the row bound, ends the
+    -- collection for this read; the parse goes on unchanged.
+    local function Collect(hook, ...)
+        local ok, row = pcall(hook, sink, ...)
+        if ok and row then return row end
+        if not ok then sink.failed = true end
+        sink = nil
+    end
+
     local function RecognizedInteger(value, names)
-        local found, selected = false, nil
+        local found, selected, bits = false, nil, 0
         for i = 1, #names do
             local rawValue = rawget(value, names[i])
             if rawValue ~= nil then
+                -- Diagnostics only: the aliases read as present, in list order.
+                if sink then bits = bits + 2 ^ (i - 1) end
                 local number = tonumber(rawValue)
                 if type(number) ~= "number" or number ~= number
                     or number <= 0 or number >= math.huge
                     or number ~= math.floor(number) then
-                    return nil, false, true, "invalid_value"
+                    return nil, false, true, "invalid_value", bits
                 end
                 if found and number ~= selected then
-                    return nil, false, true, "conflicting_alias"
+                    return nil, false, true, "conflicting_alias", bits
                 end
                 found, selected = true, number
             end
         end
-        return selected, true, found
+        return selected, true, found, nil, bits
     end
 
-    local function Walk(value, depth)
+    local function Walk(value, depth, key, parent)
         if type(value) ~= "table" then
             Reject(value == nil and "absent" or "not_table"); return
         end
-        if depth > 8 then Reject("depth"); return end
-        if seenTables[value] then Reject("cycle"); return end
+        if depth > 8 then
+            Reject("depth")
+            if sink then Collect(LockedShape.Row, key, parent, nil, 0, "depth") end
+            return
+        end
+        if seenTables[value] then
+            Reject("cycle")
+            if sink then Collect(LockedShape.Row, key, parent, nil, 0, "cycle") end
+            return
+        end
         seenTables[value] = true
 
-        local id, idValid, hasId, idWhy = RecognizedInteger(value, {
+        local id, idValid, hasId, idWhy, idBits = RecognizedInteger(value, {
             "spellId", "spellID", "id", "perkId", "perkID", "entryId",
             "entryID", "echoId", "echoID", "spell", "perk",
         })
-        local count, countValid, hasCount, countWhy = RecognizedInteger(value, {
+        local count, countValid, hasCount, countWhy, countBits = RecognizedInteger(value, {
             "stack", "stacks", "count", "amount", "qty",
         })
-        if not idValid or not countValid then Reject(idWhy or countWhy) end
+        -- `why` and `n` are this table's defect and copies, for the collector.
+        local why, n = nil, 0
+        if not idValid or not countValid then why = idWhy or countWhy; Reject(why) end
         if hasId and idValid and countValid then
-            local n = hasCount and count or 1
+            n = hasCount and count or 1
             bySpell[id] = (bySpell[id] or 0) + n
             totalCopies = totalCopies + n
-            if totalCopies > 6 then Reject("over_cap") end
+            if totalCopies > 6 then why = "over_cap"; Reject(why) end
             -- Do not `return` here -- if this table ALSO nests further locked
             -- entries as children (an id field alongside a child array, rather
             -- than instead of one), those must still be walked, not skipped.
         end
+        local row = sink and Collect(LockedShape.Row, key, parent,
+            idValid and id, n, why, idBits, countBits)
 
         local childTables, scalarLeaves = 0, 0
-        for _, child in pairs(value) do
+        for childKey, child in pairs(value) do
             if type(child) == "table" then
                 childTables = childTables + 1
-                Walk(child, depth + 1)
+                Walk(child, depth + 1, childKey, row)
             else
                 scalarLeaves = scalarLeaves + 1
             end
         end
         if not hasId and childTables == 0 and scalarLeaves > 0 then
             Reject("scalar_leaf")
+            if sink and row then Collect(LockedShape.Defect, row, "scalar_leaf") end
         end
     end
 
@@ -639,6 +724,8 @@ end
 
 function A.LockedOwned()
     projectionStatus.locked.calls = projectionStatus.locked.calls + 1
+    -- This read's serial (diagnostics only): the counter as it left it.
+    local serial = projectionStatus.locked.calls
     local svc = PS()
     -- SafeCall written out, so that the diagnostic sample can tell a getter
     -- that raised (or is missing) from one that answered nil.
@@ -648,8 +735,13 @@ function A.LockedOwned()
         readable, locked = pcall(getter)
         if not readable then locked = nil end
     end
-    local bySpell, valid, rejection = ReadLockedPerks(locked)
-    local byFamily, copies = {}, 0
+    -- The shape collector of this read (diagnostics only), made under
+    -- protection; a table it cannot make is recorded as failed.
+    local madeShape, shape = false, nil
+    if type(locked) == "table" then madeShape, shape = pcall(LockedShape.New) end
+    if not madeShape then shape = nil end
+    local bySpell, valid, rejection = ReadLockedPerks(locked, shape)
+    local byFamily, copies, ids = {}, 0, 0
     for id, n in pairs(bySpell) do
         projectionStatus.locked.spells = projectionStatus.locked.spells + 1
         projectionStatus.locked.copies = projectionStatus.locked.copies
@@ -657,6 +749,7 @@ function A.LockedOwned()
         local fam = FamilyOf(id) or id
         byFamily[fam] = (byFamily[fam] or 0) + n
         copies = copies + n
+        ids = ids + 1
     end
     local synced = type(locked) == "table" and valid == true
     -- The diagnostic sample of this read. The parsed copies stay beside the
@@ -670,6 +763,23 @@ function A.LockedOwned()
         or (synced and "none" or rejection)
     lockedSample.rawType = readable and LOCKED_RAW_TYPES[type(locked)]
         and type(locked) or "unknown"
+    lockedSample.serial = serial
+    -- A refused table replaces the shape record, from this read's own values.
+    -- A collector that failed keeps no row; past the row bound the rows are
+    -- the first ones the parse entered. The ID classes are dropped here.
+    if type(locked) == "table" and not synced then
+        local kept = shape and not shape.failed and shape or nil
+        local entered = kept and kept.entered or 0
+        if kept then kept.classes = nil end
+        LockedShape.last = {
+            serial = serial, at = lockedSample.at, generation = ownedGeneration,
+            first = rejection, copies = lockedSample.copies, ids = ids,
+            status = not kept and "failed"
+                or (entered > LockedShape.MAX_ROWS and "truncated" or "captured"),
+            rows = entered > LockedShape.MAX_ROWS and LockedShape.MAX_ROWS or entered,
+            row = kept,
+        }
+    end
     return { bySpell = bySpell, byFamily = byFamily, synced = synced }
 end
 
@@ -3919,7 +4029,44 @@ function A.OwnershipTrustView()
         view.lockedCopies = lockedSample.copies
         view.lockedRejection = lockedSample.rejection
         view.lockedRawType = lockedSample.rawType
+        view.lockedSerial = lockedSample.serial
     end
+    return view
+end
+
+-- Read-only diagnostics for the support report: the shape record of the last
+-- normal LockedOwned() read that refused a table (LockedShape), as a new
+-- table on each call whose row list and rows are new tables too. This reads
+-- module locals and GetTime() only, like OwnershipTrustView. `current` and
+-- `laterReads` compare that read's serial with the last locked sample's: a
+-- later read is no proof that the source changed, and a generation is
+-- context, never a rule for locked ownership.
+function A.LockedShapeView()
+    local view = { observed = false, currentGeneration = ownedGeneration }
+    local last = LockedShape.last
+    if not last then return view end
+    view.observed = true
+    view.serial, view.at, view.sampledGeneration = last.serial, last.at, last.generation
+    view.first, view.copies, view.ids = last.first, last.copies, last.ids
+    view.status, view.rows = last.status, last.rows
+    local now = DiagnosticTime()
+    if now and type(last.at) == "number" then
+        -- As in OwnershipTrustView: half a millisecond absorbs float noise.
+        local seconds = math.floor(now - last.at + 0.0005)
+        if seconds >= 0 and seconds < math.huge then view.age = seconds end
+    end
+    if type(lockedSample.serial) == "number" then
+        view.laterReads = lockedSample.serial - last.serial
+        view.current = view.laterReads == 0
+    end
+    local rows, flat = {}, last.row
+    for i = 1, last.rows do
+        local base = (i - 1) * 7
+        rows[i] = { p = flat[base + 1], k = flat[base + 2], c = flat[base + 3],
+            n = flat[base + 4], im = flat[base + 5], cm = flat[base + 6],
+            e = flat[base + 7] }
+    end
+    view.row = rows
     return view
 end
 
