@@ -395,8 +395,8 @@ Nexus.Panel.Show();H.Advance(.4)
 check(stock:IsShown()==false,'and showing it again changes nothing for the stock widget')
 
 -- 10. Dialogs: one, then two, then none.
--- A first-run session really does open the quick-start window, and Panel
--- correctly treats it as an open menu. The player closes it, as they would.
+-- A first-run session really does open the quick-start window. It is not an
+-- attached menu: it never hides the panel. The player closes it, as they would.
 if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then
  _G.NexusQuickStart:Hide();H.Advance(.4)
 end

@@ -3504,13 +3504,50 @@ function DPS.GetCharacterBest(category, playerName, expectedOwnerKey,
     return DPS.MaterializeRecord(row)
 end
 
+-- The unit tooltip ranks a character on the board the Leaderboard presents:
+-- the board cursor's entries (one per public identity, with the board's own
+-- eligibility, and an unverified row hidden behind a verified namesake).
+-- Only their scores and identities are kept, per category, while the state
+-- the board reads is unchanged (the HUD projection's key, below); a board
+-- that cannot be read, or whose state moved during the read, is not kept.
+identityIndex.presented = {}
+
+local function PresentedBoardScores(category)
+    local hud = identityIndex.hud
+    local key = hud.ReadKey(nil)
+    local cached = identityIndex.presented[category]
+    if cached and key and hud.SameKey(key, cached.key) then
+        return cached.scores
+    end
+    identityIndex.presented[category] = nil
+    local ok, scores = pcall(function()
+        local cursor = DPS.BeginDpsBoardCursor(category)
+        if type(cursor) ~= "table" then return nil end
+        local done, err = false, nil
+        while not done do
+            done, err = DPS.DpsBoardCursorNext(cursor)
+            if err then return nil end
+        end
+        local out = {}
+        for _, entry in ipairs(DPS.DpsBoardCursorResult(cursor) or {}) do
+            out[#out + 1] = {dps=entry.dps, key=entry.publicIdentityKey}
+        end
+        return out
+    end)
+    if not ok or type(scores) ~= "table" then return nil end
+    if key and hud.SameKey(key, hud.ReadKey(nil)) then
+        identityIndex.presented[category] = {key=key, scores=scores}
+    end
+    return scores
+end
+
 function DPS.GetPlayerInfo(playerName)
     if not playerName or playerName == "" then return nil end
     MigrateLocalLockedBaseline()
     MigrateLegacyLeaderboard()
     local pk = PlayerKey(playerName)
     local qualified = CurrentCharacterKey(playerName)
-    local best
+    local best, bestRow
     for _, category in ipairs({"dummy", "lk"}) do
         local rows = CharacterBestStore()[category]
         local row = rows[qualified] or rows[pk]
@@ -3520,19 +3557,33 @@ function DPS.GetPlayerInfo(playerName)
             if not best or (tonumber(row.dps) or 0) > (tonumber(best.dps) or 0) then
                 best = { dps = tonumber(row.dps), category = category,
                          buildId = row.buildId, fingerprint = row.fingerprint }
+                bestRow = row
             end
         end
     end
     if not best then return nil end
-    -- Compute rank: how many players have a higher DPS in the same category
+    -- Rank on the presented board: one more than the presented entries of
+    -- other public identities with a higher board score, so tied scores share
+    -- a rank. Without a readable board, the stored rows are counted as before.
     local category = best.category
     local rank = 1
-    local bucket = CharacterBestStore()[category]
-    if bucket[qualified] then pk = qualified end
-    for opk, row in pairs(bucket) do
-        if opk ~= pk and (tonumber(row.dps) or 0) > best.dps
-            and DPS.IsDurationEligible(category, row.duration) then
-            rank = rank + 1
+    local scores = PresentedBoardScores(category)
+    if scores then
+        local okOwn, own = pcall(DpsBoardEntry, bestRow, category, true)
+        local ownKey = okOwn and type(own) == "table"
+            and Identity.PublicRecordKey(own, "player") or nil
+        local score = math.floor(best.dps)
+        for _, entry in ipairs(scores) do
+            if entry.dps > score and entry.key ~= ownKey then rank = rank + 1 end
+        end
+    else
+        local bucket = CharacterBestStore()[category]
+        if bucket[qualified] then pk = qualified end
+        for opk, row in pairs(bucket) do
+            if opk ~= pk and (tonumber(row.dps) or 0) > best.dps
+                and DPS.IsDurationEligible(category, row.duration) then
+                rank = rank + 1
+            end
         end
     end
     -- Resolve build title

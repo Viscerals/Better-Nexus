@@ -85,6 +85,20 @@ If the game stops before the saved data is written, the file still holds the ref
 
 Evidence limit: the offline tests round-trip synthetic data through serialized saved text. They are not a native game save and reload. Two assumptions need the game and are not tested: that WoW leaves a nil global out of the saved file, and that the serialized text used in the tests equals what WoW reloads.
 
+## Older DPS records (settings formats 0 to 2)
+
+A profile of an older release can hold DPS records in the older per-build map (`dpsCapture.leaderboard[fingerprint][category][player]`) or rows without a class. Start-up converts them once; the receipt is `legacyDataMigration` (storage version 2). In `b704660` that start-up had already moved the profile into the catalog bundle (`authorityBundle`), but the converter wrote its result only to the older location `NexusDB.dpsCapture`. After that move the Leaderboard and the other DPS readers read the bundle's DPS data, so the converted records were not shown.
+
+| Case | Behavior |
+|---|---|
+| First start-up of such a profile | The converter reads the bundle's DPS data and publishes its result there through the catalog's maintenance commit. The commit is refused if that data changed meanwhile (a received record, compaction, another publication); the converter then starts a new pass. The receipt says complete only after the catalog serves the committed result. Unknown keys, unknown categories and unknown row fields stay. What the converter cannot convert (for example a score that is not positive) stays in the bundle's DPS data at its key, unless a converted record now uses that key; the older map keeps only such rows and the parts the converter does not read. The converter neither creates nor writes the older location `NexusDB.dpsCapture`, which keeps the input as it was before the upgrade. |
+| A first start-up that ended before completion | The next start-up converts again from the bundle's DPS data as it is then. The receipt's partial staging is not reused. After 8 refused commits in one session the conversion stops without changing the DPS data and starts again at the next start-up. Until the receipt is complete, Nexus makes no other account-ledger writes. |
+| A profile converted by `b704660` | Applies when the receipt is complete, the bundle's DPS data still holds the older map, and the older location holds the converter's result (no older map, a `characterBest` table). Start-up merges the converted records of the older location into the bundle's DPS data once, through the same commit. A converted record is merged only when it is the same record (same score, time, loadout, player and build) as a row of the bundle's older map, read the way the converter reads it, or as that row's personal best. It is merged only where the bundle holds no stronger record, and always as a copy. A row of the older map leaves it when such a record, or a stronger converted record of the same character, accounts for it; every other row stays. When nothing is accounted for, nothing is written, so later start-ups change nothing. A changed source or a refused commit starts a new scan; after 8 attempts in one session the recovery stops without a write. The receipt and the older location are not written. |
+| No bundle, or a bundle whose DPS data is not a table | The conversion keeps its earlier behavior on the older location. |
+| Read-only saved data, or a receipt from a newer build | Nothing is converted, recovered or written. |
+
+A converted record is shown with the same checks as any other record. An older record without owner proof stays unverified: the conversion never marks a record verified.
+
 ## Character rows
 
 Formats 3 to 5 keep each character's row under the plain character name (`chars["Name"]`). This build uses `chars["name@realm"]`. The first write for a character copies the plain-name row to `name@realm` only when ownership is established:

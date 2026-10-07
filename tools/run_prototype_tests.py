@@ -172,6 +172,11 @@ NAMES += ['locked_shape_capture','locked_shape_bounds','locked_shape_report','lo
 NAMES += ['legacy_dps_conversion_served','legacy_dps_conversion_recovery','legacy_dps_conversion_refusals']
 NAMES += ['orb_count_refusal_truthful','orb_count_refusal_fallbacks']
 NAMES += ['legacy_dps_conversion_interrupted','legacy_dps_conversion_unsupported']
+NAMES += ['community_pending_marker_counts','saved_mirror_assigned_description','tooltip_rank_presented_board']
+NAMES += ['leaderboard_selection_publication','leaderboard_empty_detail_text','leaderboard_class_menu_close','community_link_draft_refresh']
+NAMES += ['tooltip_marker_name_guild','wishlist_selector_truthful_context','wishlist_manage_menu_close','hud_quickstart_restore']
+NAMES += ['peer_log_page_keep']
+NAMES += ['saved_mirror_owner_description_reimport']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

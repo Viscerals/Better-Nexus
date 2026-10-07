@@ -1031,6 +1031,13 @@ local function HideEditorTransients()
     HideDisplayPopup()
     HideWishlistSwitchMenu()
     HideLoadoutSwitchMenu()
+    -- The Manage list, and a removal confirmation opened from it, state the
+    -- facts read when the list was drawn. They close with the editor, so a
+    -- reopened editor needs a new Manage click and shows current facts.
+    M.HideManageWishlistsMenu()
+    if type(StaticPopup_Hide) == "function" then
+        StaticPopup_Hide("NEXUS_FORGET_WISHLIST")
+    end
 end
 
 local function EnsureFrame()
@@ -1201,7 +1208,7 @@ local function EnsureFrame()
     loadoutSwitchBtn = CreateFrame("Button", nil, frame)
     loadoutSwitchBtn:SetSize(230, 22)
     loadoutSwitchBtn:SetPoint("TOPLEFT", 34, -66)
-    loadoutSwitchBtn:SetText("Active Loadout: choose Saved Build")
+    loadoutSwitchBtn:SetText("Saved Build: choose one")
     StyleWishlistSelector(loadoutSwitchBtn)
     loadoutSwitchBtn:Enable()
     local loadoutFont = loadoutSwitchBtn:GetFontString()
@@ -1219,8 +1226,8 @@ local function EnsureFrame()
         if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self:GetFontString()) then
             GameTooltip:AddLine(self:GetText(), 1, 1, 1, true)
         end
-        GameTooltip:AddLine("Swap Saved Build", 1, 0.8, 0.3)
-        GameTooltip:AddLine("Activates the selected server Saved Build and opens its assigned Wishlist. This changes the active loadout.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Saved Build to edit", 1, 0.8, 0.3)
+        GameTooltip:AddLine("Choose which Saved Build's assigned Wishlist this editor shows and edits. Choosing one does not activate it or change your active loadout; the list shows your active Saved Build in gold.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     loadoutSwitchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2056,17 +2063,25 @@ local function RefreshView(catalogRevision)
 
     if loadoutSwitchBtn and not pendingLoadoutOpen then
         local slots = View and View.Slots and View.Slots()
+        local active = slots and tonumber(slots.activeSlot)
         local selected = editingContext and tonumber(editingContext.loadoutSlot)
             or (createTargetContext and tonumber(createTargetContext.loadoutSlot))
-            or (slots and tonumber(slots.activeSlot))
+            or active
         local selectedRow = selected and slots and slots.bySlot and slots.bySlot[selected]
         local selectedName = selectedRow
             and (DisplayUntrusted(selectedRow.name, 1024, false) or "") or ""
+        -- The selector picks whose assigned Wishlist is edited and activates
+        -- nothing, so the label names that Saved Build and says whether it is
+        -- the server's active one.
         if selected and selected > 0 then
             if selectedName == "" then selectedName = "Saved Build " .. tostring(selected) end
-            loadoutSwitchBtn:SetText("Active Loadout: " .. selectedName)
+            local state = ""
+            if active and active > 0 then
+                state = active == selected and " (active)" or " (not active)"
+            end
+            loadoutSwitchBtn:SetText("Saved Build: " .. selectedName .. state)
         else
-            loadoutSwitchBtn:SetText("Active Loadout: choose Saved Build")
+            loadoutSwitchBtn:SetText("Saved Build: choose one")
         end
     end
 

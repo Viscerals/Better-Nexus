@@ -156,9 +156,10 @@ local function DurationText(v)
     return string.format("%d:%02d", math.floor(v / 60), math.floor(v % 60))
 end
 
-local function TypedIdentity(value)
-    return type(value) .. ":" .. tostring(value or "")
-end
+-- The projection indexes its published rows (rowByKey) with this encoding.
+-- The selection key must use the same one, or no publication finds the
+-- selected row.
+local TypedIdentity = Identity.TypedIdentity
 
 local function EvidenceIdentityKey(row)
     if type(row) ~= "table" then return "invalid" end
@@ -1222,6 +1223,9 @@ local function EnsureFrame()
     listScroll:SetScript("OnMouseDown",function() classMenu:Hide() end)
     EnsureDetail(frame)
     frame:SetScript("OnMouseDown",function(self) if classMenu:IsShown() then classMenu:Hide() end end)
+    -- The class list is a separate UIParent frame. The close button, Escape
+    -- and another Nexus window hide only this frame, so its hide closes it.
+    frame:HookScript("OnHide",function() if classMenu then classMenu:Hide() end end)
     frame:SetScript("OnUpdate",function(self,elapsed)
         if not self:IsShown() then return end
         local receiving = Nexus.Sync and Nexus.Sync.IsReceiving
@@ -1342,6 +1346,9 @@ function M.RefreshData()
         detail.empty:SetText(category=="combined" and "No builds have both Training Dummy and Lich King records yet.\n\nBoth-record builds are ordered by their highest valid single DPS result. The displayed average does not determine this rank." or ("No "..label.." records are known yet.\n\nLeaderboard data syncs on login; Sync Now checks again."))
         if Nexus.LayoutMetrics then Nexus.LayoutMetrics.WrapHeight(detail.empty,280,70,math.max(70,detail:GetHeight()-40)) end
     else
+        -- Rows are listed: an earlier category's "no records" instruction no
+        -- longer applies, so the unselected pane is blank, as on first open.
+        detail.empty:SetText("")
         RenderDetail(selected)
     end
     virtualStats.dataRefreshes=virtualStats.dataRefreshes+1

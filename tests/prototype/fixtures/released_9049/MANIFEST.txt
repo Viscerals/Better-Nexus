@@ -78,7 +78,7 @@ ui/QuickStart.lua|9226|a8eca2b3|tree
 ui/CommunityRenderer.lua|141148|46c2e512|copy
 ui/CommunityBuilds.lua|16051|5b69c37b|copy
 ui/Leaderboard.lua|63723|5b392cc8|copy
-ui/Nameplate.lua|6351|bc4a3ba0|tree
+ui/Nameplate.lua|6351|bc4a3ba0|copy
 ui/Changelog.lua|6394|b515014d|copy
 core/AutomationRuntime.lua|175336|3803ef25|copy
 core/MainLifecycle.lua|67677|9629052b|copy

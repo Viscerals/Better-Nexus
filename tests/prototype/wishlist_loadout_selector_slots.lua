@@ -42,7 +42,7 @@ local function Six()
 end
 local function selectorButton()
  for _,f in ipairs(H.frames) do
-  if f.kind=='Button' and f:IsVisible() and tostring(f:GetText() or ''):find('Active Loadout',1,true) then return f end
+  if f.kind=='Button' and f:IsVisible() and tostring(f:GetText() or ''):find('Saved Build: ',1,true) then return f end
  end
  error('selector button absent')
 end

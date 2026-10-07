@@ -482,10 +482,14 @@ local function CloseOtherNexusWindows(exceptName)
     if _G.DropDownList2 and _G.DropDownList2.Hide then pcall(_G.DropDownList2.Hide, _G.DropDownList2) end
 end
 
+-- The windows that hold the HUD's menu suppression: the attached ones
+-- (AttachMenuFrame), whose hide retries the restore. QuickStart is not
+-- attached and never hides the HUD, so it does not hold it hidden either:
+-- its hide retries nothing, and a restore it blocked would never come.
 local function AnyNexusMenuShown()
     local names = {
         "NexusCommunityBuildsFrame", "NexusLeaderboardFrame", "NexusEditorFrame",
-        "NexusLogViewer", "NexusQuickStart", "NexusChangelogPopup", "NexusSharedStartupFrame",
+        "NexusLogViewer", "NexusChangelogPopup", "NexusSharedStartupFrame",
     }
     for i = 1, #names do
         local f = _G[names[i]]

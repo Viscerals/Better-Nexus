@@ -1762,10 +1762,22 @@ local function RefreshDetailPanel(buildId, listPending)
     end
     if detailPanel.linkBox then
         if hasLink or ownThis then
+            local linkBox = detailPanel.linkBox
+            local stored = build.link or ""
+            -- An unsaved owner edit of this same build's link survives a
+            -- refresh: the field still holds neither the link it was last
+            -- given nor the stored link. Another build, or a build this
+            -- character may no longer edit, gets the stored link.
+            local current = linkBox._nexusBoundBuildId == build.id
+                and linkBox:_NexusRawText() or nil
+            local draft = ownThis and current ~= nil
+                and current ~= linkBox._nexusSeededLink and current ~= stored
             detailPanel.linkLabel:Show()
-            detailPanel.linkBox:Show()
-            detailPanel.linkBox._nexusBoundBuildId = build.id
-            detailPanel.linkBox:_NexusSetRawText(build.link or "")
+            linkBox:Show()
+            linkBox._nexusBoundBuildId = build.id
+            if not draft then
+                linkBox._nexusSeededLink = linkBox:_NexusSetRawText(stored) or ""
+            end
             if ownThis then
                 detailPanel.linkSaveBtn:Show()
             else

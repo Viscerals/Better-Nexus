@@ -1325,6 +1325,25 @@ function Controller.New(options)
         }
     end
 
+    -- An owner edit (EditBuild) marks a Saved Build mirror with userTitle and
+    -- writes its description. userDescription is not a catalog V1 field, so
+    -- no read serves it; the served description of a marked mirror is the
+    -- owner's text and is kept. Any other mirror describes the assignment
+    -- this import read for its slot.
+    local function SavedMirrorDescription(old, current)
+        if old and type(old.userTitle) == "string" and old.userTitle ~= ""
+            and type(old.description) == "string" then
+            return old.description
+        end
+        if current.destinationName then
+            return string.format(
+                "Assigned Wishlist: %s - target progress (%d/%d).",
+                tostring(current.destinationName), current.progress,
+                current.destinationTotal)
+        end
+        return "No Wishlist assigned yet."
+    end
+
     local function FinalizeSavedSlot(job, current, related)
         savedImportStats.finalizations = savedImportStats.finalizations + 1
         local slot, live, old = current.slot, current.live, current.old
@@ -1381,9 +1400,7 @@ function Controller.New(options)
                         id=current.id, title=current.title,
                         serverTitle=current.serverTitle,
                         userTitle=old and old.userTitle or nil,
-                        description=(old and old.userDescription) or (destinationName
-                            and string.format("Assigned Wishlist: %s - target progress (%d/%d).", destinationName, progress, destinationTotal)
-                            or "No Wishlist assigned yet."),
+                        description=SavedMirrorDescription(old, current),
                         userDescription=old and old.userDescription or nil,
                         publishedBuildId=desiredPublishedId,
                         lastPublishedAt=published and (

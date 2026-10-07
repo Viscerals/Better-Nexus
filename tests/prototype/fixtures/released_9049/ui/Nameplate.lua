@@ -39,10 +39,6 @@ local function OrdinalSuffix(n)
     else return tostring(n) .. "th" end
 end
 
--- Nexus's own badge line begins with this text. It is also the duplicate
--- marker: a name or guild line that merely contains "Nexus" is not it.
-local BADGE = "|cff7fd5ffNexus user|r"
-
 local function IsCommunityAuthor(name)
     if not name or name == "" then return false end
     local catalog = Nexus and Nexus.BuildCatalog
@@ -79,20 +75,18 @@ local function AugmentUnitTooltip(tooltip)
 
     if not info and not isAuthor and not peerInfo then return end
 
-    -- Avoid duplicate augmentation if another tooltip event fires for the same
-    -- unit: only the tooltip's current lines count, and only the badge marks
-    -- them, so a cleared and reused tooltip keeps nothing from its last unit.
+    -- Avoid duplicate augmentation if another tooltip event fires for the same unit.
+    local marker = "Nexus"
     for i = 1, (tooltip.NumLines and tooltip:NumLines() or 0) do
         local fs = _G[(tooltip:GetName() or "GameTooltip") .. "TextLeft" .. i]
-        local text = fs and tostring(fs:GetText() or "") or ""
-        if text:sub(1, #BADGE) == BADGE then return end
+        if fs and tostring(fs:GetText() or ""):find(marker, 1, true) then return end
     end
 
     -- Badge line
     if peerInfo and peerInfo.version and peerInfo.version ~= "?" then
-        tooltip:AddLine(BADGE .. "  |cff888888v" .. tostring(peerInfo.version) .. "|r")
+        tooltip:AddLine("|cff7fd5ffNexus user|r  |cff888888v" .. tostring(peerInfo.version) .. "|r")
     else
-        tooltip:AddLine(BADGE)
+        tooltip:AddLine("|cff7fd5ffNexus user|r")
     end
 
     -- Rank / DPS line

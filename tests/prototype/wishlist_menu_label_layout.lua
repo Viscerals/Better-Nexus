@@ -120,7 +120,7 @@ for _,m in ipairs({G.MODELS.default,G.MODELS.px16}) do
  -- The Saved Build selector rows.
  local selector
  for _,f in ipairs(H.frames) do
-  if f.kind=='Button' and f:IsVisible() and tostring(f:GetText() or ''):find('Active Loadout',1,true) then selector=f end
+  if f.kind=='Button' and f:IsVisible() and tostring(f:GetText() or ''):find('Saved Build: ',1,true) then selector=f end
  end
  if selector then
   selector:Click()

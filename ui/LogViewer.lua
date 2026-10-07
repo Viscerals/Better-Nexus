@@ -58,7 +58,10 @@ local function RenderCopyPage()
     if statusFS then statusFS:SetText(string.format("Page %d/%d | %d total bytes | copy pages in order (no inserted separators)",copyPage,copyPages,#copyText)) end
 end
 
-local function SetCopyText(text)
+-- keepPage: the same report repainted in place keeps the reader's page,
+-- clamped to the new page count; any other text starts at page 1.
+local function SetCopyText(text, keepPage)
+    local page=keepPage and copyPage or 1
     copyText=tostring(text or "")
     copyPage,copyRanges=1,{}
     local first=1
@@ -77,6 +80,7 @@ local function SetCopyText(text)
     end
     if #copyRanges==0 then copyRanges={{1,0}} end
     copyPages=#copyRanges
+    copyPage=math.max(1,math.min(tonumber(page) or 1,copyPages))
     RenderCopyPage()
 end
 
@@ -110,7 +114,8 @@ local function UpdatePeerControls()
     end
 end
 
-local function Repaint()
+-- keepPage: only the periodic repaint of the active Peer Test passes it.
+local function Repaint(keepPage)
     repaintPending = false
     if not (frame and editBox and frame:IsShown()) then return end
     local text = "no data provider"
@@ -120,7 +125,7 @@ local function Repaint()
     end
     -- Preserve the complete diagnostic. The visible EditBox is paged; no
     -- silent truncation and no hundreds-of-kilobytes SetText/focus operation.
-    SetCopyText(text)
+    SetCopyText(text, keepPage)
     for _, b in ipairs(tabButtons or {}) do
         if b.tabKey == activeTab then b:LockHighlight() else b:UnlockHighlight() end
     end
@@ -483,7 +488,10 @@ local function EnsureFrame()
         local debugOwner = Nexus and Nexus.PeerDebug
         local ok, active = pcall(debugOwner.IsEnabled)
         if not ok or active ~= true then peerRefreshActive = false end
-        Repaint()
+        -- The same report, repainted for its live age/counters: the reader
+        -- keeps the page they chose (explicit tab, open and button repaints
+        -- start at page 1).
+        Repaint(true)
     end)
 
     frame:Hide()

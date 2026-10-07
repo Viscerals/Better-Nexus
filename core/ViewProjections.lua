@@ -762,11 +762,16 @@ local function PumpBuildJob(job, unit)
                 job.sortSource, job.sortTarget, job.merge = job.rows, {}, nil
                 break
             end
-            if job.countProvenance and fromBaseline then
-                job.summary.bundledCount = job.summary.bundledCount + 1
-            end
-            if job.countProvenance and fromOverlay then
-                job.summary.overlayCount = job.summary.overlayCount + 1
+            -- Provenance belongs to a returned row only. A "scan pending" step
+            -- returns no row and its COPY_PENDING marker in the baseline
+            -- position, which is not a shipped copy.
+            if job.countProvenance and type(build) == "table" then
+                if fromBaseline == true then
+                    job.summary.bundledCount = job.summary.bundledCount + 1
+                end
+                if fromOverlay == true then
+                    job.summary.overlayCount = job.summary.overlayCount + 1
+                end
             end
             if type(build) == "table" and IsLoaded(build) then
                 local indexed = Identity.IndexPublicRecord(
