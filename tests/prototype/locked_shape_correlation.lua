@@ -20,7 +20,10 @@ local expect,guard,printable=T.expect,T.guard,T.printable
 
 H.now=math.floor(H.now)+100
 local BASE_GRANTED=H.Clone(H.granted)
-local TRUST='Waiting for current rolled and locked Echo data from the server.'
+-- The trust-gate refusal of an over-cap view: the shared wait (TRUST of the
+-- other locked-shape tests) or the truthful count refusal that
+-- orb_count_refusal_truthful pins; the gate guards here accept either.
+local COUNT_REFUSAL=dofile('tests/prototype/orb_count_refusal_support.lua')
 local PLAN='ZQ plan alpha'
 local function trusted()
  H.holdGrantedResponse=nil;O.known=true;H.playerLevel=40
@@ -202,7 +205,7 @@ T.scenario('Q7 the Orb window read and the capture',function()
  H.now=H.now+5
  H.locked=sixPlus()
  local snap=observe()
- guard(type(snap)=='table' and snap.error==TRUST and snap.progress==nil,'Q7: fixture: the window read waits at the trust gate',
+ guard(type(snap)=='table' and COUNT_REFUSAL.TrustRefusal(snap.error) and snap.progress==nil,'Q7: fixture: the window read is refused at the trust gate',
   snap and snap.error)
  local r=T.readiness() or {}
  guard(r.observed==true and r.stage=='trust_locked' and r.lockedRejection=='over_cap',
@@ -246,7 +249,7 @@ T.scenario('Q8 gates',function()
  H.now=H.now+5
  H.locked=sixPlus()
  local ok,snap,why,stage=T.realPcall(A.Orbs.Read)
- guard(ok and snap==nil and why==TRUST and stage=='trust_locked','Q8: the Orb read waits at its trust gate',
+ guard(ok and snap==nil and COUNT_REFUSAL.TrustRefusal(why) and stage=='trust_locked','Q8: the Orb read refuses at its trust gate',
   ok and (printable(why)..' / '..printable(stage)) or snap)
  local w=T.shape() or {}
  expect(w.observed==true and w.current==true and w.first=='over_cap' and w.copies==7,

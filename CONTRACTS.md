@@ -76,7 +76,17 @@ This file has two parts.
   only. No decision, gate or count reads any of this. The support report shows
   it as bounded `key=value` blocks with ages. An age is the time of a read, not
   proof of a fresh server response. A locked rejection code labels the evidence
-  and does not mean that an Echo was removed.
+  and does not mean that an Echo was removed. One exception concerns wording
+  only: at the trust gate with rolled ownership trusted (stage `trust_locked`),
+  `OrbAdapter.Read()` compares the `diagnosticSerial` of the
+  `GameAdapter.LockedOwned()` read it just made (a diagnostics-only scalar:
+  that read's serial) with `OwnershipTrustView().lockedSerial`. Only when they
+  are equal and that sample's `lockedRejection` is `over_cap` does the refusal
+  text say that Nexus rejected the locked Echo data because it lists more than
+  6 locked copies. A missing serial and a stale, mismatched, failing or
+  unreadable sample keep the shared wait text. The refusal, its stage and every
+  gate are the same either way; nothing is read from the game, requested or
+  saved for the text.
 - **Locked shape capture.** `GameAdapter.LockedShapeView()` returns a new table
   for the last normal `LockedOwned()` read that refused a table, or
   `observed=false` since load. Protected hooks inside that read's own parse

@@ -86,6 +86,27 @@ local function hostPending(pe)
         or p.pendingFreezeIndex~=nil or p.pendingReroll==true
         or p.pendingLockSpellId~=nil or p.pendingUnlockSpellId~=nil
 end
+-- The text of the trust refusal when rolled ownership is trusted and the
+-- normal locked read just made was refused (stage trust_locked). Only when the
+-- passive sample of exactly that read (the same diagnostic serial) says its
+-- count passed the six-copy limit (over_cap) does the text name Nexus's count
+-- rejection. A missing serial and a stale, mismatched, failing or unreadable
+-- sample keep the shared wait. The text is all this decides: the refusal, its
+-- stage and every gate are the same either way, and nothing is read from the
+-- game, requested, saved or changed for it.
+local function lockedTrustRefusal(locked)
+    local ok,overCap=pcall(function()
+        local serial=locked.diagnosticSerial
+        if not integer(serial,1) then return false end
+        local view=A.OwnershipTrustView()
+        return type(view)=="table" and view.lockedSerial==serial
+            and view.lockedSynced==false and view.lockedRejection=="over_cap"
+    end)
+    if ok and overCap==true then
+        return "Nexus rejected the current locked Echo data: it lists more than 6 locked copies, above the limit Nexus supports."
+    end
+    return "Waiting for current rolled and locked Echo data from the server."
+end
 -- Single owner of the OrbService known/pending classification for callers that
 -- are not Orb mode (the ordinary-board gate). Read-only. Returns
 -- capability, status, reason:
@@ -166,8 +187,9 @@ function O.Read()
     local trusted=A.Owned and A.Owned();local locked=A.LockedOwned and A.LockedOwned()
     if not trusted or not trusted.synced or not locked or not locked.synced then
         local rolled=trusted and trusted.synced;local permanent=locked and locked.synced
+        if rolled then return nil,lockedTrustRefusal(locked),"trust_locked" end
         return nil,"Waiting for current rolled and locked Echo data from the server.",
-            not rolled and (permanent and "trust_owned" or "trust_both") or "trust_locked"
+            permanent and "trust_owned" or "trust_both"
     end
     local okG,rawG=call(svc,"GetGrantedPerks");local okL,rawL=call(svc,"GetLockedPerks")
     if not okG or not okL then return nil,"Echo ownership could not be read.","call" end

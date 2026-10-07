@@ -36,6 +36,9 @@ local function scenario(name,fn)
 end
 
 local TRUST='Waiting for current rolled and locked Echo data from the server.'
+-- The text of an over-cap refusal is pinned by orb_count_refusal_truthful; R7
+-- accepts either honest text (orb_count_refusal_support).
+local COUNT_REFUSAL=dofile('tests/prototype/orb_count_refusal_support.lua')
 local VERIFY='Echo ownership could not be verified.'
 local PLAN,PLAN2='ZQ plan alpha','ZQ plan beta'
 local BASE_GRANTED=H.Clone(H.granted)
@@ -343,8 +346,8 @@ scenario('R7 locked copies over the limit',function()
  local locked=A.LockedOwned()
  expect(locked.synced==false and locked.bySpell[410007]==7,'R7: fixture: the getter keeps the parsed count and reports false trust')
  local s=observe()
- expect(s.error==TRUST,'R7: fixture: trust gate',s.error)
- local t=checkBlock('R7',prepared(),{TRUST})
+ expect(COUNT_REFUSAL.TrustRefusal(s.error),'R7: fixture: trust gate',s.error)
+ local t=checkBlock('R7',prepared(),{TRUST,type(s.error)=='string' and s.error~='' and s.error or TRUST})
  if t then
   is('R7',t,'stage','trust_locked')
   is('R7',t,'locked.synced','no');is('R7',t,'locked.copies','7');is('R7',t,'locked.rejection','over_cap')

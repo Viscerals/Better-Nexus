@@ -25,6 +25,9 @@ local expect,guard,printable=T.expect,T.guard,T.printable
 H.now=math.floor(H.now)+100
 local BASE_GRANTED=H.Clone(H.granted)
 local TRUST='Waiting for current rolled and locked Echo data from the server.'
+-- The text of an over-cap refusal is pinned by orb_count_refusal_truthful; the
+-- gate guards here accept either honest text (orb_count_refusal_support).
+local COUNT_REFUSAL=dofile('tests/prototype/orb_count_refusal_support.lua')
 local WAIT_LOCKED='waiting for locked Echo state'
 local ROOT='0.-.0.0.0.0.0'
 local function trusted()
@@ -325,7 +328,7 @@ T.scenario('C4 gates',function()
  local refused=REFUSED[2]
  H.locked=refused.build()
  local ok,snap,why,stage=pcall(A.Orbs.Read)
- guard(ok and snap==nil and why==TRUST and stage=='trust_locked','C4: the Orb read waits at its trust gate for the refused view',
+ guard(ok and snap==nil and COUNT_REFUSAL.TrustRefusal(why) and stage=='trust_locked','C4: the Orb read refuses at its trust gate for the refused view',
   ok and (printable(why)..' / '..printable(stage)) or snap)
  H.locked=six()
  local okV,snapV,whyV,stageV=pcall(A.Orbs.Read)

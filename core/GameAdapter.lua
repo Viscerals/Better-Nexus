@@ -780,7 +780,12 @@ function A.LockedOwned()
             row = kept,
         }
     end
-    return { bySpell = bySpell, byFamily = byFamily, synced = synced }
+    -- diagnosticSerial is diagnostics only: this read's serial, so that a
+    -- caller can tell whether the passive sample (OwnershipTrustView) belongs
+    -- to exactly this read. It selects refusal wording (OrbAdapter.Read) and
+    -- nothing else; no decision, gate or count reads it.
+    return { bySpell = bySpell, byFamily = byFamily, synced = synced,
+        diagnosticSerial = serial }
 end
 
 -- Confirmed live via /nexus sniff, 2026-08-01: the server exposes the real
