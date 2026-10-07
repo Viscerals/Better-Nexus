@@ -177,6 +177,11 @@ local FIELD = {
     lockedFingerprint={kind="string", max=4096},
     lockedEvidenceSource={kind="string", max=64},
     userTitle={kind="string", max=1024},
+    -- Optional: the exact generated description of a Saved Build mirror and
+    -- the userTitle it was written under (CommunityController). Provenance
+    -- only; not a summary or wire field, and it grants nothing. Its writer
+    -- (SavedDescriptionWitness) uses the same 2048 and writes at most 1181.
+    generatedDescriptionWitness={kind="string", max=2048},
     buildId={kind="id"}, recordBuildId={kind="id"}, publishedBuildId={kind="id"},
     sourceSavedBuildId={kind="id"},
     sourceIdentity={kind="string", max=256}, provenanceIdentity={kind="string", max=256},

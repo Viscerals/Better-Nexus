@@ -2064,9 +2064,15 @@ local function RefreshView(catalogRevision)
     if loadoutSwitchBtn and not pendingLoadoutOpen then
         local slots = View and View.Slots and View.Slots()
         local active = slots and tonumber(slots.activeSlot)
-        local selected = editingContext and tonumber(editingContext.loadoutSlot)
-            or (createTargetContext and tonumber(createTargetContext.loadoutSlot))
-            or active
+        -- The Saved Build of the Wishlist being edited, else the one a new
+        -- Wishlist is created for; the active one only with neither. An
+        -- edited Wishlist that no Saved Build has selects none.
+        local selected = active
+        if editingContext then
+            selected = tonumber(editingContext.loadoutSlot)
+        elseif createTargetContext then
+            selected = tonumber(createTargetContext.loadoutSlot)
+        end
         local selectedRow = selected and slots and slots.bySlot and slots.bySlot[selected]
         local selectedName = selectedRow
             and (DisplayUntrusted(selectedRow.name, 1024, false) or "") or ""
@@ -2080,6 +2086,9 @@ local function RefreshView(catalogRevision)
                 state = active == selected and " (active)" or " (not active)"
             end
             loadoutSwitchBtn:SetText("Saved Build: " .. selectedName .. state)
+        elseif editingContext then
+            -- As the context line and the switch list say: none.
+            loadoutSwitchBtn:SetText("Saved Build: None")
         else
             loadoutSwitchBtn:SetText("Saved Build: choose one")
         end

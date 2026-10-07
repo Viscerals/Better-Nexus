@@ -41,6 +41,37 @@ Earlier builds (test.9033 and older, and up to the change above) wrote a catalog
 
 Details: `docs/ADAPTIVE_ROLLING.md`.
 
+## Saved Build mirror description provenance (`generatedDescriptionWitness`)
+
+The Build Library mirror of a server Saved Build gets a generated description of its assigned Wishlist and progress. An owner edit marks the mirror (`userTitle`), and the Saved import then keeps the mirror's text. A mirror row can now carry one optional field, `generatedDescriptionWitness`: the exact description this build generated (or kept as generated), together with the `userTitle` the mirror carried when it was written.
+
+| Case | Behavior |
+|---|---|
+| New or unmarked mirror | The import writes the generated description and a witness. As before, the description follows the assignment. |
+| Title-only edit (Edit Build, description untouched) | The title is the owner's. When the description is known to be generated (an unmarked mirror, or a witness that matches), the witness is written again under the new title, so later imports keep describing the current progress. |
+| Save Link | Changes no text and leaves the witness as it is. |
+| Description edit | The owner's text is kept through later imports. The witness is removed; a later title-only edit does not bring it back. |
+| A mirror an earlier build marked (no witness, or one that no longer matches its title and description) | Its title and description are kept exactly, as before. A title-only edit adds no witness: its text is not guessed to be generated. |
+| An older build | The field is unknown to it: it keeps the field unchanged and never updates it. A description or an owner title (`userTitle`) that it changes or adds no longer matches the witness, so this build keeps that text as the owner's. |
+
+The field is an optional catalog V1 field: a string of at most 2048 bytes. A record with any other value is malformed, as for every V1 string field. Absent means that no provenance was recorded. The field is local: it is not in record summaries, Sync messages or any peer action, it is not part of the import's change signature, and it grants no ownership, verification, publication or permission. No catalog, schema, storage or protocol version changed.
+
+Every witness this build writes fits in the field. A witness is the title's length in decimal, `:`, the title (empty for an unmarked mirror) and a generated description. Only Edit Build records a witness under a new title. The import records one only under an empty title or under a title whose witness still matches. So the title is empty or an Edit Build title.
+
+| Part | At most (bytes) | Limit |
+|---|---|---|
+| Title length | 2 | Edit Build refuses a title over 80 bytes. |
+| `:` | 1 | |
+| Title | 80 | Edit Build. |
+| Fixed description text | 42 | `Assigned Wishlist: <name> - target progress (<progress>/<total>).` without the name and the two numbers. The other generated text, `No Wishlist assigned yet.`, is 25 bytes. |
+| Wishlist name | 1024 | The catalog limit of `destinationWishlistName`, which the same record carries. |
+| Progress and total | 16 + 16 | `destinationProgress` and `destinationTotal` are catalog integers of at most 2^53 - 1. |
+| Total | 1181 | |
+
+The writer also checks the 2048-byte limit, so it never writes a malformed record. A witness within these bounds never reaches that limit.
+
+Limits: a description edit still keeps the title the edit saved, as before. A description that the owner retyped to exactly the generated text counts as unchanged. Only offline synthetic tests cover this (`saved_mirror_title_only_description`, `saved_mirror_description_provenance`); there is no native save and reload evidence.
+
 ## Upgrading from a build that kept the data read-only
 
 test.9033 and earlier kept formats 3 to 5 read-only. In that state the Store built no Store-data wrapper. The catalog still saved its data bundle, with an empty Store-data placeholder in it. test.9034 and test.9035 then refused that placeholder: start-up failed with `STORE_INVALID`, and the displayed reason had no further detail. This is reproduced on the exact sources: synthetic format-5 data started on test.9033 (`487eaa9`), then on test.9035 (`753e384`).

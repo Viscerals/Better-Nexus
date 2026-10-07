@@ -1325,25 +1325,58 @@ function Controller.New(options)
         }
     end
 
+    -- The owner-edit marker of a Saved Build mirror (userTitle), or nil.
+    local function SavedMirrorMarker(build)
+        local marker = build and build.userTitle
+        return type(marker) == "string" and marker ~= "" and marker or nil
+    end
+
+    -- generatedDescriptionWitness records that this build generated (or
+    -- kept as generated) exactly this description while the mirror carried
+    -- exactly this marker: the marker's length, the marker, the description.
+    -- The catalog field holds 2048 bytes. A witness written here is at most
+    -- 1181: length 2 + ":" 1 + an EditBuild title 80 + a generated
+    -- description 1098 (42 fixed + a catalog Wishlist name 1024 + two
+    -- catalog integers of at most 16 digits). One over 2048 is not recorded.
+    local function SavedDescriptionWitness(marker, description)
+        if type(description) ~= "string" then return nil end
+        marker = marker or ""
+        local witness = tostring(#marker) .. ":" .. marker .. description
+        return #witness <= 2048 and witness or nil
+    end
+
+    -- Whether the mirror's description is one this build recorded as
+    -- generated under the marker it carries now. Another build keeps the
+    -- witness as unknown data but does not update it: a description or
+    -- marker it changed no longer matches.
+    local function SavedDescriptionGenerated(build)
+        local witness = build and build.generatedDescriptionWitness
+        return type(witness) == "string" and witness == SavedDescriptionWitness(
+            SavedMirrorMarker(build), build.description)
+    end
+
     -- An owner edit that changes the text (EditBuild) marks a Saved Build
-    -- mirror with userTitle and writes its description; a link-only save
-    -- marks nothing. userDescription is not a catalog V1 field, so no read
-    -- serves it; the served description of a marked mirror is the owner's
-    -- text and is kept. Any other mirror describes the assignment this import
-    -- read for its slot. A mirror an earlier build marked on a link-only save
-    -- cannot be told from an owner edit, so it stays marked.
+    -- mirror with userTitle; a link-only save marks nothing. userDescription
+    -- is not a catalog V1 field, so no read serves it; the served description
+    -- of a marked mirror is the owner's text and is kept, unless its witness
+    -- holds (the owner changed only the title). Any other mirror describes
+    -- the assignment this import read for its slot, with a new witness. A
+    -- mirror an earlier build marked (on a link-only save too) has no witness
+    -- that holds: it cannot be told from an owner edit and keeps its text.
     local function SavedMirrorDescription(old, current)
-        if old and type(old.userTitle) == "string" and old.userTitle ~= ""
-            and type(old.description) == "string" then
-            return old.description
+        local marker = SavedMirrorMarker(old)
+        if marker and type(old.description) == "string"
+            and not SavedDescriptionGenerated(old) then
+            return old.description, nil
         end
+        local description = "No Wishlist assigned yet."
         if current.destinationName then
-            return string.format(
+            description = string.format(
                 "Assigned Wishlist: %s - target progress (%d/%d).",
                 tostring(current.destinationName), current.progress,
                 current.destinationTotal)
         end
-        return "No Wishlist assigned yet."
+        return description, SavedDescriptionWitness(marker, description)
     end
 
     local function FinalizeSavedSlot(job, current, related)
@@ -1398,11 +1431,14 @@ function Controller.New(options)
             or old.publishedBuildId ~= desiredPublishedId then
             local stamp = NextStamp(old and old.lastModified or 0)
             local localOwner = CurrentVerifiedOwnerKey()
+            local description, witness = SavedMirrorDescription(old, current)
             local record = {
                         id=current.id, title=current.title,
                         serverTitle=current.serverTitle,
                         userTitle=old and old.userTitle or nil,
-                        description=SavedMirrorDescription(old, current),
+                        description=description,
+                        -- Provenance only: not in the signature above.
+                        generatedDescriptionWitness=witness,
                         userDescription=old and old.userDescription or nil,
                         -- The link the owner saved (Save Link) is not server
                         -- data: a rewrite keeps it as the catalog holds it.
@@ -3408,8 +3444,14 @@ function Controller.New(options)
 
         -- Only text the owner changes is owner-written: a save that re-submits
         -- the served title and description (Save Link) changes no text.
-        local textChanged = nextTitle ~= SavedTitle(b.title)
-            or nextDescription ~= tostring(b.description or "")
+        local descriptionChanged = nextDescription ~= tostring(b.description or "")
+        local textChanged = nextTitle ~= SavedTitle(b.title) or descriptionChanged
+        -- An unchanged description stays generated when this build knows it
+        -- is: an unmarked mirror's description is the import's, and a marked
+        -- one needs a witness that still holds. An earlier build's marker
+        -- gains none.
+        local generated = not descriptionChanged
+            and (SavedMirrorMarker(b) == nil or SavedDescriptionGenerated(b))
 
         b.title = nextTitle
         b.description = nextDescription
@@ -3417,10 +3459,14 @@ function Controller.New(options)
         local savedKind = Identity.SavedMirrorKind(b)
         -- userTitle marks a Saved Build mirror whose text its owner wrote; the
         -- Saved import keeps that text. Without a text change the generated
-        -- title and description stay the import's to rewrite.
+        -- title and description stay the import's to rewrite. A title-only
+        -- edit keeps a generated description generated: its witness is
+        -- recorded again under the new marker. A description edit clears it.
         if savedKind == "saved" and textChanged then
             b.userTitle = nextTitle
-            b.userDescription = nextDescription
+            if descriptionChanged then b.userDescription = nextDescription end
+            b.generatedDescriptionWitness = generated
+                and SavedDescriptionWitness(nextTitle, nextDescription) or nil
         end
         b.lastModified = NextStamp(b.lastModified or b.postedAt)
         local outcome = {id=b.id,localSaved=false,localPending=false,queueAdmitted=false,
