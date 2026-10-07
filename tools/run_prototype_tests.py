@@ -181,6 +181,8 @@ NAMES += ['legacy_dps_recovery_nonbest_personal','saved_mirror_link_only_descrip
 NAMES += ['saved_mirror_title_only_description','wishlist_unassigned_selector_context']
 NAMES += ['saved_mirror_description_provenance']
 NAMES += ['long_description_boundary_probe']
+NAMES += ['saved_mirror_pipe_resubmit']
+NAMES += ['saved_mirror_pipe_controls']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

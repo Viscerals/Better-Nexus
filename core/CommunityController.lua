@@ -3421,12 +3421,23 @@ function Controller.New(options)
         local nextTitle = SavedTitle(title)
         local nextDescription = description ~= nil
             and tostring(description) or tostring(b.description or "")
+        -- Only text the owner changes is owner-written: a save that re-submits
+        -- the served title and description (Save Link) changes no text.
+        local descriptionChanged = nextDescription ~= tostring(b.description or "")
         if #nextTitle > 80 then return false, "title is too long" end
         if #nextDescription > 2000 then return false, "description is too long" end
         if not Identity.ValidDisplayText(nextTitle, 80, false) then
             return false, "title contains unsafe text"
         end
-        if not Identity.ValidDisplayText(nextDescription, 2000, true, true) then
+        -- The display rule governs description text the owner writes. The
+        -- stored description re-submitted unchanged stays as stored: a
+        -- generated one names the assigned server Wishlist, whose name may
+        -- hold a literal "|" (durable text keeps it; Identity.DisplaySafeText
+        -- doubles it for display). It must still pass the wire rule, which
+        -- differs from the display rule only by allowing "|".
+        local descriptionRule = descriptionChanged
+            and Identity.ValidDisplayText or Identity.ValidWireText
+        if not descriptionRule(nextDescription, 2000, true, true) then
             return false, "description contains unsafe text"
         end
         local nextLink = b.link
@@ -3442,9 +3453,6 @@ function Controller.New(options)
             end
         end
 
-        -- Only text the owner changes is owner-written: a save that re-submits
-        -- the served title and description (Save Link) changes no text.
-        local descriptionChanged = nextDescription ~= tostring(b.description or "")
         local textChanged = nextTitle ~= SavedTitle(b.title) or descriptionChanged
         -- An unchanged description stays generated when this build knows it
         -- is: an unmarked mirror's description is the import's, and a marked

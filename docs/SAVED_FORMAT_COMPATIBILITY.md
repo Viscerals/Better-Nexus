@@ -70,6 +70,8 @@ Every witness this build writes fits in the field. A witness is the title's leng
 
 The writer also checks the 2048-byte limit, so it never writes a malformed record. A witness within these bounds never reaches that limit.
 
+A server Wishlist name can contain a literal `|`, and the generated description repeats that name. Edit Build applies the display-text rule (no literal `|`) only to a description the owner changed. A description re-submitted unchanged (Save Link, or a title-only edit) is kept exactly as stored. It must still pass the wire-text rule, which differs from the display-text rule only by allowing `|`. Displays double the `|`. A changed description that contains `|` is still refused, and the record is left unchanged. The title rule is unchanged: a server Saved Build name that contains `|` or is longer than 80 bytes still makes Edit Build and Save Link refuse. Only offline synthetic tests cover this (`saved_mirror_pipe_resubmit`, `saved_mirror_pipe_controls`).
+
 Limits: a description edit still keeps the title the edit saved, as before. A description that the owner retyped to exactly the generated text counts as unchanged. Only offline synthetic tests cover this (`saved_mirror_title_only_description`, `saved_mirror_description_provenance`); there is no native save and reload evidence.
 
 ## Upgrading from a build that kept the data read-only
