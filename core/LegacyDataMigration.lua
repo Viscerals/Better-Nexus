@@ -301,12 +301,20 @@ local function PutPersonal(staging, category, row)
     return false
 end
 
-local function IsLocalRow(row)
-    local current = CurrentOwnerKey()
+-- The canonical owner of a row that claims verified ownership, else nil. The
+-- converter promotes such a row as a personal best when that owner is the
+-- character logged in (IsLocalRow); the served-payload recovery, which cannot
+-- know who that was, applies the same test without the login.
+local function VerifiedOwner(row)
     local owner = type(row) == "table"
         and Identity.CanonicalOwnerKey(row.ownerKey) or nil
-    return current ~= nil and owner ~= nil
-        and row.ownerVerified == true and current == owner
+    return owner ~= nil and row.ownerVerified == true and owner or nil
+end
+
+local function IsLocalRow(row)
+    local current = CurrentOwnerKey()
+    local owner = VerifiedOwner(row)
+    return current ~= nil and owner ~= nil and current == owner
 end
 
 local function MergeAccount(target, incoming)
@@ -1158,11 +1166,12 @@ end
 -- form of a row of the served older map (or that row's promoted personal
 -- best), only where the served payload has no stronger row, and always as a
 -- copy. Nothing is converted again, no record is made for a row the legacy
--- location does not hold, and every row nothing accounts for stays in the
--- older map. The receipt and the legacy location are not written. The trigger
--- is the served content itself, so the recovery is idempotent: afterwards the
--- older map holds only rows no converted row accounts for, and a later
--- start-up scans those and publishes nothing.
+-- location does not hold, and a row stays in the older map unless the
+-- converted maps account for all the converter made of it (Served.Account).
+-- The receipt and the legacy location are not written. The trigger is the
+-- served content itself, so the recovery is idempotent: afterwards the older
+-- map holds only rows that stay, whose merged rows are served already, and a
+-- later start-up scans those and publishes nothing.
 ------------------------------------------------------------------------
 
 function Served.RecoveryInput(database)
@@ -1189,7 +1198,10 @@ function Served.NewRecovery(database, restarts)
         source={leaderboard=rawget(live, "leaderboard"),
             characterBest=rawget(live, "characterBest"),
             personalBest=rawget(live, "personalBest")},
-        merge={dummy={}, lk={}}, personal={}, residual={}, accounted=0}
+        -- accounted: older-map rows that leave the map; gains: merged rows
+        -- that rank above the served row at their place.
+        merge={dummy={}, lk={}}, personal={}, residual={}, accounted=0,
+        gains=0}
 end
 
 function Served.RecoveryChanged(job)
@@ -1205,7 +1217,25 @@ function Served.SameRecord(left, right)
     return not BetterRow(left, right) and not BetterRow(right, left)
 end
 
--- One item of the served older map, read the way the converter read it.
+-- A merged row that ranks above the served row at map[outer][inner] changes
+-- the served payload (Served.Recovered makes the same comparison).
+function Served.Gain(job, map, outer, inner, row)
+    local rows = type(map) == "table" and map[outer] or nil
+    local current = type(rows) == "table" and rows[inner] or nil
+    if BetterRow(row, type(current) == "table" and current or nil) then
+        job.gains = job.gains + 1
+    end
+end
+
+-- One item of the served older map, read the way the converter read it. The
+-- converter made a character best of every row and, of a row with verified
+-- ownership, the personal best of its loadout when its owner was the
+-- character logged in (ProcessLeaderboard). That character is not recorded,
+-- so a row leaves the older map only when the converted maps account for its
+-- character best (the same record, or a stronger converted row of that
+-- character) and, for a row with verified ownership, for its personal best
+-- (the same record), whichever row the converter kept as the character best.
+-- Every other row stays; what is merged for it is still merged.
 function Served.Account(job, item)
     if item.keep then
         Served.KeepLegacy(job.residual, item.fingerprint, item.category, nil,
@@ -1218,10 +1248,18 @@ function Served.Account(job, item)
     converted = row and type(converted) == "table" and converted[item.category]
     converted = type(converted) == "table" and converted[key] or nil
     if type(converted) ~= "table" then converted = nil end
+    local accounted = false
     if converted and Served.SameRecord(row, converted) then
-        job.accounted = job.accounted + 1
+        accounted = true
         local merge = job.merge[item.category]
         if BetterRow(converted, merge[key]) then merge[key] = converted end
+        Served.Gain(job, job.source.characterBest, item.category, key,
+            converted)
+    elseif converted and BetterRow(converted, row) then
+        -- The converter kept a stronger row of this character instead.
+        accounted = true
+    end
+    if accounted then
         local personal = rawget(job.raw, "personalBest")
         local entry = type(personal) == "table" and row.fingerprint ~= nil
             and personal[row.fingerprint] or nil
@@ -1229,9 +1267,15 @@ function Served.Account(job, item)
         if type(best) == "table" and Served.SameRecord(row, best) then
             job.personal[row.fingerprint] = job.personal[row.fingerprint] or {}
             job.personal[row.fingerprint][item.category] = best
+            Served.Gain(job, job.source.personalBest, row.fingerprint,
+                item.category, best)
+        elseif row.fingerprint ~= nil and VerifiedOwner(row) then
+            -- Nothing accounts for the personal best the converter can have
+            -- promoted from this row: it stays rather than being consumed.
+            accounted = false
         end
-    elseif converted and BetterRow(converted, row) then
-        -- The converter kept a stronger row of this character instead.
+    end
+    if accounted then
         job.accounted = job.accounted + 1
     else
         Served.KeepLegacy(job.residual, item.fingerprint, item.category,
@@ -1241,7 +1285,7 @@ end
 
 -- The recovery's replacement payload: the live top level as it is, each
 -- merged row copied into a copy of its map where the served payload has no
--- stronger row, and the older map reduced to the rows nothing accounts for.
+-- stronger row, and the older map reduced to the rows that stay.
 -- nil when a map the merge needs is not a table: that payload stays as it is.
 function Served.Recovered(job, top)
     local function Merge(target, rows)
@@ -1346,9 +1390,12 @@ function Served.PumpRecovery(limit)
             job.index, work = job.index + 1, work + 1
         end
         if job.phase == "scan" then return false end
-        -- No converted row accounts for any row: nothing is proven, and
-        -- nothing is written.
-        if job.accounted == 0 then return Served.RecoveryDone(false) end
+        -- No row leaves the older map and no merged row ranks above the
+        -- served one: nothing changes, and nothing is written. Rows that stay
+        -- therefore start no publication at a later start-up.
+        if job.accounted == 0 and job.gains == 0 then
+            return Served.RecoveryDone(false)
+        end
     end
     if not Served.Writable(job.database) then return Served.RecoveryDone(false) end
     local catalog, handle = Served.Maintenance(job.database)

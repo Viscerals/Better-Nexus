@@ -29,3 +29,6 @@ node_modules/
 # Python caches
 __pycache__/
 *.pyc
+
+# Local versioned WoW exports and private contract reference; never committed or packaged
+/.native-reference/

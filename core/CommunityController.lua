@@ -1325,11 +1325,13 @@ function Controller.New(options)
         }
     end
 
-    -- An owner edit (EditBuild) marks a Saved Build mirror with userTitle and
-    -- writes its description. userDescription is not a catalog V1 field, so
-    -- no read serves it; the served description of a marked mirror is the
-    -- owner's text and is kept. Any other mirror describes the assignment
-    -- this import read for its slot.
+    -- An owner edit that changes the text (EditBuild) marks a Saved Build
+    -- mirror with userTitle and writes its description; a link-only save
+    -- marks nothing. userDescription is not a catalog V1 field, so no read
+    -- serves it; the served description of a marked mirror is the owner's
+    -- text and is kept. Any other mirror describes the assignment this import
+    -- read for its slot. A mirror an earlier build marked on a link-only save
+    -- cannot be told from an owner edit, so it stays marked.
     local function SavedMirrorDescription(old, current)
         if old and type(old.userTitle) == "string" and old.userTitle ~= ""
             and type(old.description) == "string" then
@@ -1402,6 +1404,9 @@ function Controller.New(options)
                         userTitle=old and old.userTitle or nil,
                         description=SavedMirrorDescription(old, current),
                         userDescription=old and old.userDescription or nil,
+                        -- The link the owner saved (Save Link) is not server
+                        -- data: a rewrite keeps it as the catalog holds it.
+                        link=old and old.link or nil,
                         publishedBuildId=desiredPublishedId,
                         lastPublishedAt=published and (
                             (old and old.lastPublishedAt)
@@ -3371,10 +3376,15 @@ function Controller.New(options)
         local binding = preparation and preparation.binding
 
         -- Validate every candidate field before mutating any part of the record.
-        local nextTitle = tostring(title or ""):gsub("^%s+",""):gsub("%s+$","")
+        -- The title a save stores for `value`: trimmed, else the current one.
+        local function SavedTitle(value)
+            local text = tostring(value or ""):gsub("^%s+",""):gsub("%s+$","")
+            if text == "" then text = tostring(b.title or "Untitled") end
+            return text
+        end
+        local nextTitle = SavedTitle(title)
         local nextDescription = description ~= nil
             and tostring(description) or tostring(b.description or "")
-        if nextTitle == "" then nextTitle = tostring(b.title or "Untitled") end
         if #nextTitle > 80 then return false, "title is too long" end
         if #nextDescription > 2000 then return false, "description is too long" end
         if not Identity.ValidDisplayText(nextTitle, 80, false) then
@@ -3396,11 +3406,19 @@ function Controller.New(options)
             end
         end
 
+        -- Only text the owner changes is owner-written: a save that re-submits
+        -- the served title and description (Save Link) changes no text.
+        local textChanged = nextTitle ~= SavedTitle(b.title)
+            or nextDescription ~= tostring(b.description or "")
+
         b.title = nextTitle
         b.description = nextDescription
         b.link = nextLink
         local savedKind = Identity.SavedMirrorKind(b)
-        if savedKind == "saved" then
+        -- userTitle marks a Saved Build mirror whose text its owner wrote; the
+        -- Saved import keeps that text. Without a text change the generated
+        -- title and description stay the import's to rewrite.
+        if savedKind == "saved" and textChanged then
             b.userTitle = nextTitle
             b.userDescription = nextDescription
         end

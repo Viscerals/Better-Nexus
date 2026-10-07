@@ -177,6 +177,7 @@ NAMES += ['leaderboard_selection_publication','leaderboard_empty_detail_text','l
 NAMES += ['tooltip_marker_name_guild','wishlist_selector_truthful_context','wishlist_manage_menu_close','hud_quickstart_restore']
 NAMES += ['peer_log_page_keep']
 NAMES += ['saved_mirror_owner_description_reimport']
+NAMES += ['legacy_dps_recovery_nonbest_personal','saved_mirror_link_only_description']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
